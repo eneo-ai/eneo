@@ -110,6 +110,13 @@ async def test_stale_terminal_update_rechecks_revision_heartbeat_and_delivery() 
         is None
     )
 
+    assert session.scalar.await_count == 2
+    lock = session.scalar.await_args_list[0].args[0]
+    lock_sql = str(lock.compile(dialect=postgresql.dialect()))
+    assert lock.is_select
+    assert "FOR UPDATE" in lock_sql
+    assert "flow_runs.tenant_id =" in lock_sql
+    assert "EXISTS" not in lock_sql
     statement = session.scalar.await_args.args[0]
     sql = str(statement.compile(dialect=postgresql.dialect()))
     assert "flow_runs.revision =" in sql

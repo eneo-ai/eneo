@@ -1166,6 +1166,15 @@ class FlowRunRepository:
         if target_status not in TERMINAL_FLOW_RUN_STATUSES:
             raise ValueError("target_status must be terminal")
 
+        if stale_running_revision is not None:
+            # A new statement after the lock wait sees delivery intents committed
+            # by the preceding parent-lock owner under READ COMMITTED.
+            await self.session.scalar(
+                sa.select(FlowRuns.id)
+                .where(FlowRuns.id == run_id, FlowRuns.tenant_id == tenant_id)
+                .with_for_update()
+            )
+
         values: dict[str, Any] = {
             "status": target_status.value,
             "error_json": dump_flow_run_error(error),

@@ -29,6 +29,7 @@ from eneo.flows.runtime.docx_template_runtime import (
     extract_docx_text,
     render_docx_template,
 )
+from eneo.flows.runtime.output_runtime import save_generated_flow_file
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.exceptions import (
     BadRequestException,
@@ -212,7 +213,9 @@ async def complete_template_fill_step(
 
     try:
         output_checksum = hashlib.sha256(blob).hexdigest()
-        stored_file = await deps.file_service.save_generated_file(
+        stored_file = await save_generated_flow_file(
+            file_service=deps.file_service,
+            run=run,
             payload=blob,
             name=filename,
             mimetype=mimetype,

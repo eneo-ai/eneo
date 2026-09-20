@@ -1449,3 +1449,56 @@ async def test_execute_template_fill_step_preserves_long_summary_in_persisted_te
 
     assert "## summary" in output.persisted_text
     assert "L" * 10000 in output.persisted_text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ownership_lost", [False, True])
+async def test_template_publication_rechecks_ownership_after_activation(
+    monkeypatch, ownership_lost
+):
+    from contextlib import nullcontext
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+    from eneo.flows.runtime.execution_heartbeat import (
+        FlowExecutionHeartbeats,
+        FlowExecutionOwnershipLost,
+    )
+
+    run = _run()
+    session = AsyncMock(spec=AsyncSession)
+    session.in_transaction.return_value = False
+    session.scalar.side_effect = [run.id, None if ownership_lost else run.id]
+    deps = _runtime_deps(
+        template_file=SimpleNamespace(
+            id=uuid4(),
+            name="template.docx",
+            checksum="checksum",
+            blob=_build_template_bytes(),
+        ),
+    )
+    deps.file_service.repo.session = session
+    activate = AsyncMock()
+    handler = TemplateFillStepHandler(deps=deps, activate_resolved_input_edges=activate)
+    manager = FlowExecutionHeartbeats(max_active=1)
+    monkeypatch.setattr(manager, "start", lambda: None)
+    with pytest.raises(FlowExecutionOwnershipLost) if ownership_lost else nullcontext():
+        async with manager.track(
+            FlowRunExecutionOwner(run.id, run.tenant_id, run.revision)
+        ):
+            await handler.execute(
+                step=_step(),
+                run=run,
+                state=_state(result=_completed_result(run=run)),
+                version_metadata=None,
+                attempt_no=1,
+            )
+    activate.assert_awaited_once()
+    session.begin.assert_called_once()
+    if ownership_lost:
+        session.rollback.assert_awaited_once()
+        deps.file_service.save_generated_file.assert_not_awaited()
+    else:
+        session.rollback.assert_not_awaited()
+        deps.file_service.save_generated_file.assert_awaited_once()

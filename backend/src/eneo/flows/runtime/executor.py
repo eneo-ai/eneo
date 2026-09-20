@@ -161,6 +161,7 @@ from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper, IPAddress
 from eneo.flows.runtime.output_runtime import (
     OutputRuntimeDeps,
     TypedOutputProcessingResult,
+    save_generated_flow_file,
 )
 from eneo.flows.runtime.output_runtime import (
     process_typed_output as process_typed_output_runtime,
@@ -2807,7 +2808,9 @@ class FlowRunExecutor:
         if len(encoded) <= self.max_inline_text_bytes:
             return text, []
 
-        file_row = await self.file_service.save_generated_file(
+        file_row = await save_generated_flow_file(
+            file_service=self.file_service,
+            run=run,
             payload=encoded,
             name=f"flow-{run.id}-step-{step.step_order}-output.txt",
             mimetype="text/plain",

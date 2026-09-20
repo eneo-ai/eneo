@@ -19,27 +19,59 @@ def upgrade() -> None:
     op.add_column(
         "flow_runs",
         sa.Column("execution_heartbeat_at", sa.DateTime(timezone=True), nullable=True),
+        if_not_exists=True,
     )
-    op.create_check_constraint(
-        "ck_flow_runs_running_execution_heartbeat",
-        "flow_runs",
-        "status <> 'running' OR execution_heartbeat_at IS NOT NULL",
-        postgresql_not_valid=True,
+    op.execute(
+        """
+        DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conrelid = 'flow_runs'::regclass
+                  AND conname = 'ck_flow_runs_running_execution_heartbeat'
+            ) THEN
+                ALTER TABLE flow_runs
+                    ADD CONSTRAINT ck_flow_runs_running_execution_heartbeat
+                    CHECK (status <> 'running' OR execution_heartbeat_at IS NOT NULL)
+                    NOT VALID;
+            END IF;
+            IF EXISTS (
+                SELECT 1 FROM pg_index
+                WHERE indexrelid = to_regclass('ix_flow_runs_running_execution_heartbeat')
+                  AND NOT indisvalid
+            ) THEN
+                DROP INDEX ix_flow_runs_running_execution_heartbeat;
+            END IF;
+        END $$
+        """
     )
     with op.get_context().autocommit_block():
         op.execute("SET lock_timeout = '5s'")
         try:
             op.execute(
-                "UPDATE flow_runs SET execution_heartbeat_at = updated_at WHERE status = 'running'"
+                "UPDATE flow_runs SET execution_heartbeat_at = updated_at "
+                "WHERE status = 'running' AND execution_heartbeat_at IS NULL"
             )
             op.execute(
-                "ALTER TABLE flow_runs VALIDATE CONSTRAINT ck_flow_runs_running_execution_heartbeat"
+                """
+                DO $$ BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conrelid = 'flow_runs'::regclass
+                          AND conname = 'ck_flow_runs_running_execution_heartbeat'
+                          AND NOT convalidated
+                    ) THEN
+                        ALTER TABLE flow_runs
+                            VALIDATE CONSTRAINT ck_flow_runs_running_execution_heartbeat;
+                    END IF;
+                END $$
+                """
             )
             op.create_index(
                 "ix_flow_runs_running_execution_heartbeat",
                 "flow_runs",
                 ["execution_heartbeat_at", "id"],
                 postgresql_include=["tenant_id", "revision"],
+                if_not_exists=True,
                 postgresql_where=sa.text("status = 'running'"),
                 postgresql_concurrently=True,
             )
@@ -47,6 +79,7 @@ def upgrade() -> None:
                 "ix_flow_runs_running_updated_at",
                 table_name="flow_runs",
                 postgresql_concurrently=True,
+                if_exists=True,
             )
         finally:
             op.execute("RESET lock_timeout")

@@ -1120,14 +1120,24 @@ async def test_renewal_and_two_recoveries_have_one_terminal_owner(
 @pytest.mark.asyncio
 @pytest.mark.integration
 @pytest.mark.migration_isolation
+@pytest.mark.parametrize("failure_phase", ["backfill", "index", "stamp"])
 async def test_heartbeat_migration_cutover_preserves_existing_running_history(
-    db_container, completion_model_factory, space_factory, assistant_factory, admin_user
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    test_settings,
+    failure_phase,
 ):
-    import importlib.util
     from pathlib import Path
 
-    from alembic.migration import MigrationContext
-    from alembic.operations import Operations
+    import psycopg2
+    from sqlalchemy.engine import Engine
+    from sqlalchemy.exc import DBAPIError
+
+    from alembic import command
+    from alembic.config import Config
 
     async with db_container() as container:
         session = container.session()
@@ -1140,33 +1150,111 @@ async def test_heartbeat_migration_cutover_preserves_existing_running_history(
             start_attempt=False,
         )
         existing = await repo.get(run_id=run.id, tenant_id=run.tenant_id)
-        engine = session.bind
-    assert engine is not None
-    path = (
-        Path(__file__).parents[3]
-        / "alembic/versions/202609202000_flow_execution_heartbeat.py"
-    )
-    spec = importlib.util.spec_from_file_location("heartbeat_migration", path)
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
+    backend = Path(__file__).parents[3]
+    config = Config(str(backend / "alembic.ini"))
+    config.set_main_option("script_location", str(backend / "alembic"))
+    config.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
+    await asyncio.to_thread(command.downgrade, config, "202609201000")
+    failed = False
 
-    def cycle(connection):
-        context = MigrationContext.configure(connection)
-        with context.begin_transaction(), Operations.context(context):
-            migration.downgrade()
-            assert "execution_heartbeat_at" not in {
-                column["name"]
-                for column in sa.inspect(connection).get_columns("flow_runs")
-            }
-            migration.upgrade()
+    def fail_committed_phase(conn, cursor, statement, parameters, context, executemany):
+        nonlocal failed
+        matches = {
+            "backfill": "UPDATE flow_runs SET execution_heartbeat_at" in statement,
+            "index": "CREATE INDEX CONCURRENTLY" in statement,
+            "stamp": "UPDATE alembic_version" in statement,
+        }
+        if failed or not matches[failure_phase]:
+            return
+        failed = True
+        if failure_phase == "index":
+            # A failed concurrent build leaves an INVALID index with the target name.
+            cursor.execute(
+                "CREATE INDEX CONCURRENTLY ix_flow_runs_running_execution_heartbeat "
+                "ON flow_runs ((1 / (revision - revision)))"
+            )
+        else:
+            cursor.execute(
+                "DO $$ BEGIN RAISE EXCEPTION 'injected lock timeout' "
+                "USING ERRCODE = '55P03'; END $$"
+            )
 
-    async with engine.connect() as connection:
-        await connection.run_sync(cycle)
+    sa.event.listen(Engine, "before_cursor_execute", fail_committed_phase)
+    try:
+        with pytest.raises((DBAPIError, psycopg2.Error)):
+            await asyncio.to_thread(command.upgrade, config, "202609202000")
+        assert failed
+    finally:
+        sa.event.remove(Engine, "before_cursor_execute", fail_committed_phase)
     async with sessionmanager.session() as session, session.begin():
+        assert (
+            await session.scalar(sa.text("SELECT version_num FROM alembic_version"))
+            == "202609201000"
+        )
+        assert (
+            await session.scalar(
+                sa.text(
+                    "SELECT count(*) FROM pg_attribute WHERE attrelid = 'flow_runs'::regclass "
+                    "AND attname = 'execution_heartbeat_at' AND NOT attisdropped"
+                )
+            )
+            == 1
+        )
+        if failure_phase == "index":
+            assert (
+                await session.scalar(
+                    sa.text(
+                        "SELECT indisvalid FROM pg_index WHERE indexrelid = "
+                        "'ix_flow_runs_running_execution_heartbeat'::regclass"
+                    )
+                )
+                is False
+            )
+        heartbeat = existing.updated_at
+        if failure_phase != "backfill":
+            heartbeat = await session.scalar(
+                sa.update(FlowRuns)
+                .where(FlowRuns.id == run.id)
+                .values(
+                    execution_heartbeat_at=sa.func.clock_timestamp(),
+                    updated_at=FlowRuns.updated_at,
+                )
+                .returning(FlowRuns.execution_heartbeat_at)
+            )
+    await asyncio.to_thread(command.upgrade, config, "202609202000")
+    async with sessionmanager.session() as session, session.begin():
+        assert (
+            await session.scalar(sa.text("SELECT version_num FROM alembic_version"))
+            == "202609202000"
+        )
+        assert (
+            await session.scalar(
+                sa.text(
+                    "SELECT convalidated FROM pg_constraint WHERE conrelid = 'flow_runs'::regclass "
+                    "AND conname = 'ck_flow_runs_running_execution_heartbeat'"
+                )
+            )
+            is True
+        )
+        assert (
+            await session.scalar(
+                sa.text(
+                    "SELECT indisvalid FROM pg_index WHERE indexrelid = "
+                    "'ix_flow_runs_running_execution_heartbeat'::regclass"
+                )
+            )
+            is True
+        )
+        assert (
+            await session.scalar(
+                sa.text("SELECT to_regclass('ix_flow_runs_running_updated_at')")
+            )
+            is None
+        )
         restored = await FlowRunRepository(session=session).get(
             run_id=run.id, tenant_id=run.tenant_id
         )
-        assert restored.execution_heartbeat_at == existing.updated_at
+        assert restored.execution_heartbeat_at == heartbeat
         assert restored.updated_at == existing.updated_at
         assert restored.revision == existing.revision
         assert restored.status == existing.status == FlowRunStatus.RUNNING
@@ -1325,6 +1413,275 @@ async def test_paused_provider_publication_cannot_change_recovered_run(
             await asyncio.wait_for(invocation, timeout=2)
         assert await snapshot() == before
         provider.assert_awaited_once()
+    finally:
+        await manager.stop()
+        if not invocation.done():
+            invocation.cancel()
+        await asyncio.gather(invocation, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_recovery_waits_for_pending_delivery_publication_before_eligibility(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+):
+    from eneo.database.tables.flow_tables import FlowRunWebhookDeliveries
+    from eneo.flows.infrastructure import flow_run_staleness
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+    from eneo.flows.runtime.execution_heartbeat import FlowExecutionHeartbeats
+
+    async with sessionmanager.session() as session, session.begin():
+        run, flow, _ = await _create_running_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+    manager = FlowExecutionHeartbeats(max_active=1)
+    monkeypatch.setattr(manager, "start", lambda: None)
+    recovery_pid = asyncio.get_running_loop().create_future()
+
+    async def recover():
+        async with sessionmanager.session() as session, session.begin():
+            recovery_pid.set_result(
+                await session.scalar(sa.select(sa.func.pg_backend_pid()))
+            )
+            return await _flow_run_terminalizer(
+                FlowRunRepository(session=session)
+            ).terminalize_stale_running_run(
+                run_id=run.id,
+                tenant_id=run.tenant_id,
+                expected_revision=run.revision,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
+                    code=FlowApiErrorCode.RUN_WORKER_STALLED,
+                    message="Execution heartbeat expired.",
+                ),
+            )
+
+    recovery = None
+    try:
+        async with sessionmanager.session() as writer, writer.begin():
+            async with manager.track(
+                FlowRunExecutionOwner(run.id, run.tenant_id, run.revision)
+            ):
+                await FlowRunWebhookDeliveryRepository(
+                    session=writer
+                ).insert_pending_delivery(
+                    flow_id=flow.id,
+                    tenant_id=run.tenant_id,
+                    intent=WebhookDeliveryIntent(
+                        flow_run_id=run.id,
+                        step_id=flow.steps[0].id,
+                        step_order=1,
+                        attempt_no=1,
+                        idempotency_key=str(uuid4()),
+                        payload=WebhookPayloadRef("output"),
+                    ),
+                )
+            # Advance expiry after admission without waiting the three-minute lease.
+            monkeypatch.setattr(
+                flow_run_staleness, "FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS", 0
+            )
+            recovery = asyncio.create_task(recover())
+            async with asyncio.timeout(5):
+                pid = await recovery_pid
+                async with sessionmanager.session() as observer, observer.begin():
+                    while not await observer.scalar(
+                        sa.select(
+                            sa.func.cardinality(sa.func.pg_blocking_pids(pid)) > 0
+                        )
+                    ):
+                        assert not recovery.done()
+                        await asyncio.sleep(0.01)
+            assert not recovery.done()
+        result = await asyncio.wait_for(recovery, timeout=5)
+        assert not result.did_transition
+        assert result.run.status == FlowRunStatus.RUNNING
+        async with sessionmanager.session() as session, session.begin():
+            assert (
+                await session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(FlowRunWebhookDeliveries)
+                    .where(FlowRunWebhookDeliveries.flow_run_id == run.id)
+                )
+                == 1
+            )
+            assert (
+                await session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(FlowRunAuditOutbox)
+                    .where(FlowRunAuditOutbox.flow_run_id == run.id)
+                )
+                == 0
+            )
+    finally:
+        await manager.stop()
+        if recovery is not None:
+            if not recovery.done():
+                recovery.cancel()
+            await asyncio.gather(recovery, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_template_resumed_after_recovery_cannot_publish_file_content(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+):
+    from eneo.database.tables.files_table import Files
+    from eneo.database.tables.object_content_table import (
+        FileContentReferences,
+        InlineContentPayloads,
+        ObjectContents,
+    )
+    from eneo.flows.domain.runtime import RuntimeStep
+    from eneo.flows.flow_run_provenance import FlowResolvedInputEdges
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+    from eneo.flows.runtime.execution_heartbeat import (
+        FlowExecutionHeartbeats,
+        FlowExecutionOwnershipLost,
+    )
+    from eneo.flows.runtime.template_fill_runtime import (
+        PreparedTemplateFillStep,
+        TemplateFillRuntimeDeps,
+        complete_template_fill_step,
+    )
+    from eneo.flows.variable_resolver import FlowVariableResolver
+    from tests.docx_template_fixtures import control_template_bytes
+
+    async with db_container() as container:
+        run, flow, _ = await _create_running_run(
+            session=container.session(),
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+    prepared = PreparedTemplateFillStep(
+        template_asset_id=uuid4(),
+        template_checksum=None,
+        template_name="Template",
+        template_file_id=uuid4(),
+        template_file_name="template.docx",
+        template_blob=control_template_bytes(text=["title"]),
+        placeholders=("title",),
+        resolved_bindings={"title": "Late output"},
+        persisted_text="Late output",
+        resolved_input_edges=(),
+    )
+    step = RuntimeStep(
+        step_id=flow.steps[0].id,
+        step_order=1,
+        assistant_id=flow.steps[0].assistant_id,
+        user_description=None,
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="template_fill",
+        output_config=None,
+        output_type="docx",
+    )
+    activated = asyncio.Event()
+    resume = asyncio.Event()
+    manager = FlowExecutionHeartbeats(max_active=1)
+    monkeypatch.setattr(manager, "start", lambda: None)
+
+    async def invoke():
+        async with manager.track(
+            FlowRunExecutionOwner(run.id, run.tenant_id, run.revision)
+        ):
+            async with db_container() as container:
+                assert (
+                    await container.flow_run_repo().activate_step_attempt(
+                        run_id=run.id,
+                        tenant_id=run.tenant_id,
+                        step_id=step.step_id,
+                        attempt_no=1,
+                        attempt_input=None,
+                        resolved_input_edges=FlowResolvedInputEdges(
+                            schema_version=1, edges=()
+                        ),
+                    )
+                    is not None
+                )
+            activated.set()
+            await resume.wait()
+            async with db_container() as container:
+                await complete_template_fill_step(
+                    step=step,
+                    run=run,
+                    prepared=prepared,
+                    deps=TemplateFillRuntimeDeps(
+                        variable_resolver=FlowVariableResolver(),
+                        file_repo=container.file_repo(),
+                        file_content_loader=container.file_content_loader(),
+                        file_service=container.file_service(),
+                        template_asset_repo=container.flow_template_asset_repo(),
+                        logger=logging.getLogger(__name__),
+                    ),
+                )
+
+    async def content_snapshot():
+        async with sessionmanager.session() as session, session.begin():
+            return [
+                (
+                    await session.execute(
+                        sa.select(table.__table__).order_by(
+                            *table.__table__.primary_key.columns
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+                for table in (
+                    Files,
+                    ObjectContents,
+                    FileContentReferences,
+                    InlineContentPayloads,
+                )
+            ]
+
+    invocation = asyncio.create_task(invoke())
+    try:
+        await asyncio.wait_for(activated.wait(), timeout=5)
+        async with sessionmanager.session() as session, session.begin():
+            await session.execute(
+                sa.update(FlowRuns)
+                .where(FlowRuns.id == run.id)
+                .values(
+                    execution_heartbeat_at=sa.func.clock_timestamp()
+                    - timedelta(seconds=181)
+                )
+            )
+            result = await _flow_run_terminalizer(
+                FlowRunRepository(session=session)
+            ).terminalize_stale_running_run(
+                run_id=run.id,
+                tenant_id=run.tenant_id,
+                expected_revision=run.revision,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
+                    code=FlowApiErrorCode.RUN_WORKER_STALLED,
+                    message="Execution heartbeat expired.",
+                ),
+            )
+            assert result.did_transition
+        before = await content_snapshot()
+        resume.set()
+        with pytest.raises(FlowExecutionOwnershipLost):
+            await asyncio.wait_for(invocation, timeout=5)
+        assert await content_snapshot() == before
     finally:
         await manager.stop()
         if not invocation.done():

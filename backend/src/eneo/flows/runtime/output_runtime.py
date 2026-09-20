@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 from uuid import UUID
 
 from eneo.files.file_models import FileInfo, FileType
+from eneo.files.file_repo import FileRepository
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.runtime import StepDiagnostic
 from eneo.flows.enums import FlowStepPhase
+from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunRepository,
+    flow_run_execution_owner,
+)
 from eneo.flows.output_processing import StructuredOutputValue
 from eneo.flows.runtime.document_rendering.limits import (
     DEFAULT_DOCUMENT_RENDER_LIMITS,
@@ -40,10 +46,16 @@ class RuntimeOutputStep(Protocol):
 
 class RuntimeOutputRun(Protocol):
     @property
+    def id(self) -> UUID: ...
+
+    @property
     def tenant_id(self) -> UUID: ...
 
 
 class RuntimeOutputFileService(Protocol):
+    @property
+    def repo(self) -> FileRepository: ...
+
     async def save_generated_file(
         self,
         *,
@@ -52,6 +64,34 @@ class RuntimeOutputFileService(Protocol):
         mimetype: str,
         file_type: FileType,
     ) -> FileInfo: ...
+
+
+async def save_generated_flow_file(
+    *,
+    file_service: RuntimeOutputFileService,
+    run: RuntimeOutputRun,
+    payload: bytes,
+    name: str,
+    mimetype: str,
+    file_type: FileType,
+) -> FileInfo:
+    session = (
+        file_service.repo.session
+        if flow_run_execution_owner.get() is not None
+        else None
+    )
+    async with (
+        session.begin()
+        if session is not None and not session.in_transaction()
+        else nullcontext()
+    ):
+        if session is not None:
+            await FlowRunRepository(session=session).lock_execution_ownership(
+                run_id=run.id, tenant_id=run.tenant_id
+            )
+        return await file_service.save_generated_file(
+            payload=payload, name=name, mimetype=mimetype, file_type=file_type
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +161,9 @@ async def _persist_rendered_artifact(
     deps: OutputRuntimeDeps,
 ) -> list[dict[str, str | int]]:
     checksum = hashlib.sha256(artifact.blob).hexdigest()
-    file_record = await deps.file_service.save_generated_file(
+    file_record = await save_generated_flow_file(
+        file_service=deps.file_service,
+        run=run,
         payload=artifact.blob,
         name=artifact.filename,
         mimetype=artifact.mimetype,
