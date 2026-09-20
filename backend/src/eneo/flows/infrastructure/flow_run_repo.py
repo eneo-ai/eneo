@@ -387,12 +387,13 @@ class FlowStepResultIdentity:
     step_order: int
     status: FlowStepResultStatus
     current_attempt_no: int | None
+    imported_review_established: bool | None
 
 
 @dataclass(frozen=True, slots=True)
 class FlowRunPrefixMeasurement:
     step_count: int
-    output_bytes: int
+    logical_bytes: int
 
 
 def _current_step_attempt_pairs_by_result_id(
@@ -566,6 +567,7 @@ class FlowRunRepository:
                 source_step_id=source.step_id,
                 source_attempt_no=source.current_attempt_no,
                 request_hash=seed.provenance["request_hash"],
+                review_established=source.step_id in seed.review_established_step_ids,
             ).to_payload()
             values = dict(
                 status=FlowStepResultStatus.COMPLETED.value,
@@ -1264,6 +1266,22 @@ class FlowRunRepository:
                     FlowStepResults.step_order,
                     FlowStepResults.status,
                     FlowStepResults.current_attempt_no,
+                    FlowStepAttempts.provenance_json["kind"].astext.label(
+                        "import_kind"
+                    ),
+                    FlowStepAttempts.provenance_json["review_established"].label(
+                        "review_established"
+                    ),
+                )
+                .outerjoin(
+                    FlowStepAttempts,
+                    sa.and_(
+                        FlowStepAttempts.tenant_id == FlowStepResults.tenant_id,
+                        FlowStepAttempts.flow_run_id == FlowStepResults.flow_run_id,
+                        FlowStepAttempts.step_id == FlowStepResults.step_id,
+                        FlowStepAttempts.attempt_no
+                        == FlowStepResults.current_attempt_no,
+                    ),
                 )
                 .where(
                     FlowStepResults.flow_run_id == run_id,
@@ -1279,11 +1297,16 @@ class FlowRunRepository:
                 step_order=row.step_order,
                 status=FlowStepResultStatus(row.status),
                 current_attempt_no=row.current_attempt_no,
+                imported_review_established=(
+                    row.review_established is True
+                    if row.import_kind is not None
+                    else None
+                ),
             )
             for row in rows
         ]
 
-    async def measure_prefix_outputs(
+    async def measure_prefix_results(
         self, *, run_id: UUID, tenant_id: UUID, step_orders: Sequence[int]
     ) -> FlowRunPrefixMeasurement:
         row = (
@@ -1291,11 +1314,7 @@ class FlowRunRepository:
                 sa.select(
                     sa.func.count(),
                     sa.func.coalesce(
-                        sa.func.sum(
-                            sa.func.octet_length(
-                                sa.cast(FlowStepResults.output_payload_json, sa.Text)
-                            )
-                        ),
+                        sa.func.sum(_step_result_evidence_logical_bytes()),
                         0,
                     ),
                 ).where(
@@ -1306,7 +1325,7 @@ class FlowRunRepository:
             )
         ).one()
         return FlowRunPrefixMeasurement(
-            step_count=int(row[0]), output_bytes=int(row[1])
+            step_count=int(row[0]), logical_bytes=int(row[1])
         )
 
     async def list_step_results(

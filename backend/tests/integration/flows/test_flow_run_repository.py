@@ -327,8 +327,9 @@ async def attempt_provenance_context(
 @pytest.mark.asyncio
 @pytest.mark.integration
 @pytest.mark.parametrize("kind", ["reused_prefix", "reviewed_transcript_snapshot"])
+@pytest.mark.parametrize("review_established", [False, True])
 async def test_seed_validated_prefix_copies_results_without_provider_usage(
-    attempt_provenance_context, admin_user, db_container, kind
+    attempt_provenance_context, admin_user, db_container, kind, review_established
 ):
     from eneo.database.tables.files_table import Files
     from eneo.database.tables.flow_tables import (
@@ -422,6 +423,9 @@ async def test_seed_validated_prefix_copies_results_without_provider_usage(
                 results=(source,),
                 provenance={"source_run_id": str(context.run_id), "request_hash": "r"},
                 kind=kind,
+                review_established_step_ids=(
+                    frozenset({source.step_id}) if review_established else frozenset()
+                ),
             ),
         )
         results = await repo.list_step_results(
@@ -459,12 +463,35 @@ async def test_seed_validated_prefix_copies_results_without_provider_usage(
             "source_step_id": str(source.step_id),
             "source_attempt_no": 3,
             "request_hash": "r",
+            "review_established": review_established,
         }
         exported, exported_provenance = _dump_attempt_record(
             attempt, resolved_inputs=parse_resolved_input_edges(None)
         )
         assert exported_provenance.status == "tracked"
         assert exported["provenance_json"] == attempt.provenance_json
+        bind = session.sync_session.bind
+        assert bind is not None
+        with _capture_queries(bind) as queries:
+            identities = await repo.list_step_result_identities(
+                run_id=child.id, tenant_id=context.tenant_id
+            )
+        assert len(queries) == 1
+        assert identities[0].imported_review_established is review_established
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == child.id)
+            .values(current_attempt_no=2)
+        )
+        later_attempt = await repo.list_step_result_identities(
+            run_id=child.id, tenant_id=context.tenant_id
+        )
+        assert later_attempt[0].imported_review_established is None
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == child.id)
+            .values(current_attempt_no=1)
+        )
         provider_repo = FlowProviderCallRepository(session=session)
         assert (
             await provider_repo.measure_evidence_row_count(
@@ -4907,13 +4934,21 @@ async def test_retry_prefix_measurement_and_identities_do_not_hydrate_payloads(
 ):
     context = attempt_provenance_context
     payload = {"text": "å" * 50}
+    captured_input = {"text": "input" * 20}
+    parameters = {"model": "captured model"}
+    prompt = "Captured prompt"
     async with db_container() as container:
         session = container.session()
         await session.execute(
             sa.update(FlowStepResults)
             .where(FlowStepResults.flow_run_id == context.run_id)
             .values(
-                output_payload_json=payload, status="completed", current_attempt_no=3
+                output_payload_json=payload,
+                input_payload_json=captured_input,
+                effective_prompt=prompt,
+                model_parameters_json=parameters,
+                status="completed",
+                current_attempt_no=3,
             )
         )
         repo = FlowRunRepository(session=session)
@@ -4924,14 +4959,15 @@ async def test_retry_prefix_measurement_and_identities_do_not_hydrate_payloads(
         assert identities[0].current_attempt_no == 3
         assert identities[0].status == FlowStepResultStatus.COMPLETED
         assert not hasattr(identities[0], "output_payload_json")
-        measured = await repo.measure_prefix_outputs(
+        measured = await repo.measure_prefix_results(
             run_id=context.run_id, tenant_id=context.tenant_id, step_orders=(1,)
         )
         assert measured.step_count == 1
-        assert measured.output_bytes == len(
-            json.dumps(payload, ensure_ascii=False).encode()
+        assert measured.logical_bytes == sum(
+            len(json.dumps(value, ensure_ascii=False).encode())
+            for value in (payload, captured_input, parameters, prompt)
         )
-        empty = await repo.measure_prefix_outputs(
+        empty = await repo.measure_prefix_results(
             run_id=context.run_id, tenant_id=uuid4(), step_orders=(1,)
         )
-        assert empty.step_count == empty.output_bytes == 0
+        assert empty.step_count == empty.logical_bytes == 0

@@ -223,7 +223,17 @@ async def _create_published_flow(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", [None, "audit", "capacity"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        None,
+        "audit",
+        "capacity",
+        "input_payload_json",
+        "effective_prompt",
+        "model_parameters_json",
+    ],
+)
 async def test_retry_failed_run_reuses_prefix_and_replays_after_commit(
     client, admin_token, admin_user, db_container, monkeypatch, failure
 ):
@@ -301,6 +311,45 @@ async def test_retry_failed_run_reuses_prefix_and_replays_after_commit(
         monkeypatch.setattr(
             FlowRunRepository, "count_active_runs", AsyncMock(return_value=4)
         )
+    elif failure in {"input_payload_json", "effective_prompt", "model_parameters_json"}:
+        from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+        from eneo.main.config import get_settings
+
+        oversized = "x" * (get_settings().flow_max_inline_text_bytes + 1)
+        async with db_container() as container:
+            await container.session().execute(
+                sa.update(FlowStepResults)
+                .where(
+                    FlowStepResults.flow_run_id == UUID(source_id),
+                    FlowStepResults.step_order == 1,
+                )
+                .values(
+                    **{
+                        failure: oversized
+                        if failure == "effective_prompt"
+                        else {"text": oversized}
+                    }
+                )
+            )
+        payload_reader = AsyncMock(
+            side_effect=AssertionError("Oversized prefix payload reader invoked")
+        )
+        monkeypatch.setattr(
+            FlowRunRepository, "list_step_results_by_orders", payload_reader
+        )
+        refused = await client.post(url, headers=retry_headers)
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["context"] == {
+            "step_order": 1,
+            "reason": "prefix_too_large",
+        }
+        payload_reader.assert_not_awaited()
+        assert (
+            await _flow_run_first_page_count(client, flow_id=flow_id, token=admin_token)
+            == 1
+        )
+        assert dispatched == []
+        return
     response = await client.post(url, headers=retry_headers)
     if failure is not None:
         assert response.status_code == (503 if failure == "audit" else 429), (
@@ -3284,6 +3333,43 @@ async def test_retry_requires_durable_review_of_current_attempt(
     async with db_container() as container:
         results = await container.flow_run_repo().list_step_results(
             run_id=UUID(retried.json()["run"]["id"]),
+            tenant_id=admin_user.tenant_id,
+        )
+        assert results[0].output_payload_json == edited.json()["current_payload_json"]
+
+    child_id = retried.json()["run"]["id"]
+    async with db_container() as container:
+        from eneo.flows.infrastructure.flow_run_history_purge_repo import (
+            FlowRunHistoryPurgeRepository,
+        )
+
+        await container.flow_run_terminalizer().terminalize_run(
+            run_id=UUID(child_id),
+            tenant_id=admin_user.tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
+            error=FlowRunError(
+                code=FlowApiErrorCode.STEP_EXECUTION_FAILED,
+                message="Downstream failure in child",
+            ),
+        )
+        delivery = await container.flow_run_audit_outbox_delivery_service().deliver_due(
+            now=datetime.now(timezone.utc)
+        )
+        assert delivery.retry_scheduled_count == delivery.dead_lettered_count == 0
+        purged = await FlowRunHistoryPurgeRepository(
+            session=container.session()
+        ).purge_run_history([UUID(run["id"])])
+        assert purged.counts.flow_runs_purged == 1
+    retried_child = await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/{child_id}/retry/",
+        headers={**headers, "Idempotency-Key": "retry-child-reviewed-prefix"},
+    )
+    assert retried_child.status_code == 201, retried_child.text
+    assert retried_child.json()["reused_step_orders"] == [1]
+    async with db_container() as container:
+        results = await container.flow_run_repo().list_step_results(
+            run_id=UUID(retried_child.json()["run"]["id"]),
             tenant_id=admin_user.tenant_id,
         )
         assert results[0].output_payload_json == edited.json()["current_payload_json"]

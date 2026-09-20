@@ -316,6 +316,11 @@ class FlowTranscriptRegenerationService:
                 transcript=reviewed,
                 provenance=provenance,
                 results=tuple(prefix),
+                review_established_step_ids=frozenset(
+                    step.step_id
+                    for step in prefix_steps
+                    if step.review_policy is not None
+                ),
             ),
         )
         if not created.created:

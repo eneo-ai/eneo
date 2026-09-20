@@ -53,6 +53,7 @@ def context():
         SimpleNamespace(
             step_id=step_id,
             step_order=i + 1,
+            review_policy=None,
             input_type="text",
             output_mode="speaker_mapping" if i == 1 else "pass_through",
         )
@@ -294,3 +295,15 @@ async def test_regeneration_replays_accepted_prefix_after_source_changes(context
     assert replay.created is False
     context.service.run_service.create_run.assert_not_awaited()
     context.service.audit_service.log.assert_not_awaited()
+
+
+@pytest.mark.parametrize("review_required", [False, True])
+async def test_regeneration_records_approval_from_reviewed_snapshot(
+    context, review_required
+):
+    context.steps[1].review_policy = object() if review_required else None
+    await context.service.regenerate(**context.request)
+    seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    assert seed.review_established_step_ids == (
+        frozenset({context.steps[1].step_id}) if review_required else frozenset()
+    )

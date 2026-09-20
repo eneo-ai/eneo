@@ -502,6 +502,7 @@ class FlowImportedAttemptProvenance(FlowAttemptProvenance):
     source_step_id: UUID
     source_attempt_no: int = Field(ge=1)
     request_hash: str = Field(min_length=1)
+    review_established: bool = Field(strict=True)
 
 
 class FlowAttemptProvenanceCorruptionMarker(BaseModel):

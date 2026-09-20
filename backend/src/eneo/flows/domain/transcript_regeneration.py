@@ -15,4 +15,5 @@ class FlowRunPrefixSeed:
     results: tuple[FlowStepResult, ...]
     provenance: dict[str, Any]
     kind: Literal["reviewed_transcript_snapshot", "reused_prefix"]
+    review_established_step_ids: frozenset[UUID] = frozenset()
     transcript: str | None = None

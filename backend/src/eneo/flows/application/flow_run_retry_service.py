@@ -195,6 +195,7 @@ class FlowRunRetryService:
             (checkpoint.step_id, checkpoint.attempt_no): checkpoint.state
             for checkpoint in checkpoints
         }
+        review_established_step_ids: set[UUID] = set()
         for step in prefix:
             if step.step_order in file_orders:
                 _unsupported(
@@ -203,14 +204,21 @@ class FlowRunRetryService:
             if step.current_attempt_no is None:
                 _unsupported(step_order=step.step_order, reason="prefix_changed")
             state = checkpoint_states.get((step.step_id, step.current_attempt_no))
-            if (step.step_id in review_required or state is not None) and state not in (
-                FlowRunReviewCheckpointState.APPROVED,
-                FlowRunReviewCheckpointState.RESUMED,
-            ):
+            review_established = step.imported_review_established
+            if review_established is None:
+                review_established = state in (
+                    FlowRunReviewCheckpointState.APPROVED,
+                    FlowRunReviewCheckpointState.RESUMED,
+                )
+            if (
+                step.step_id in review_required or state is not None
+            ) and not review_established:
                 _unsupported(
                     step_order=step.step_order, reason="review_not_established"
                 )
-        measurement = await self.run_repo.measure_prefix_outputs(
+            if step.step_id in review_required and review_established:
+                review_established_step_ids.add(step.step_id)
+        measurement = await self.run_repo.measure_prefix_results(
             run_id=source.id,
             tenant_id=self.user.tenant_id,
             step_orders=reused_step_orders,
@@ -219,7 +227,7 @@ class FlowRunRetryService:
             _unsupported(
                 step_order=prefix[0].step_order, reason="non_contiguous_prefix"
             )
-        if measurement.output_bytes > get_settings().flow_max_inline_text_bytes:
+        if measurement.logical_bytes > get_settings().flow_max_inline_text_bytes:
             _unsupported(step_order=prefix[0].step_order, reason="prefix_too_large")
         results = await self.run_repo.list_step_results_by_orders(
             run_id=source.id,
@@ -284,6 +292,7 @@ class FlowRunRetryService:
                 results=tuple(results),
                 provenance=provenance,
                 kind="reused_prefix",
+                review_established_step_ids=frozenset(review_established_step_ids),
                 transcript=transcript if isinstance(transcript, str) else None,
             ),
         )

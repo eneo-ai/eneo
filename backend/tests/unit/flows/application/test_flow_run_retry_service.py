@@ -55,10 +55,21 @@ def context(monkeypatch):
     run_repo = AsyncMock()
     run_repo.get_idempotent_run.return_value = None
     run_repo.list_step_results.return_value = results
-    run_repo.list_step_result_identities.return_value = results
+    review_flags = {}
+    run_repo.list_step_result_identities.side_effect = lambda **kwargs: [
+        SimpleNamespace(
+            id=result.id,
+            step_id=result.step_id,
+            step_order=result.step_order,
+            status=result.status,
+            current_attempt_no=result.current_attempt_no,
+            imported_review_established=review_flags.get(result.step_id),
+        )
+        for result in results
+    ]
     run_repo.list_step_results_by_orders.return_value = results[:2]
-    run_repo.measure_prefix_outputs.return_value = SimpleNamespace(
-        step_count=2, output_bytes=42
+    run_repo.measure_prefix_results.return_value = SimpleNamespace(
+        step_count=2, logical_bytes=42
     )
     run_repo.list_step_orders_with_result_files.return_value = set()
     run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = files
@@ -97,6 +108,7 @@ def context(monkeypatch):
         source=source,
         results=results,
         runtime_steps=runtime_steps,
+        review_flags=review_flags,
         files=files,
         child=child,
         request=dict(flow_id=flow_id, run_id=run_id, idempotency_key=" retry-1 "),
@@ -109,6 +121,7 @@ async def test_reuses_completed_prefix_and_preserves_creation_inputs(context):
     seed = args["prefix_seed"]
     assert seed.kind == "reused_prefix"
     assert seed.source_run_id == context.source.id
+    assert seed.review_established_step_ids == frozenset()
     assert seed.results == tuple(context.results[:2])
     assert result.run_result.run is context.child
     assert result.run_result.created is True
@@ -208,6 +221,7 @@ async def test_approved_prefix_uses_effective_reviewed_payload(context):
     await context.service.retry_from_failed_step(**context.request)
     seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
     assert seed.results[0].output_payload_json == {"text": "Approved correction"}
+    assert seed.review_established_step_ids == frozenset({context.results[0].step_id})
 
 
 async def test_retry_preserves_transcription_input_from_completed_prefix(context):
@@ -301,12 +315,13 @@ async def test_resumed_review_reuses_approved_payload(context):
     await context.service.retry_from_failed_step(**context.request)
     seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
     assert seed.results[0].output_payload_json == {"text": "Approved correction"}
+    assert seed.review_established_step_ids == frozenset({context.results[0].step_id})
 
 
 async def test_prefix_byte_admission_precedes_payload_reads_and_creation_lock(context):
     from eneo.main.config import get_settings
 
-    context.service.run_repo.measure_prefix_outputs.return_value.output_bytes = (
+    context.service.run_repo.measure_prefix_results.return_value.logical_bytes = (
         get_settings().flow_max_inline_text_bytes + 1
     )
     with pytest.raises(ConflictException) as exc:
@@ -325,7 +340,7 @@ async def test_only_admitted_prefix_is_hydrated_before_creation_lock(context):
 
     async def load_prefix(**kwargs):
         repo.acquire_tenant_run_creation_lock.assert_not_awaited()
-        repo.measure_prefix_outputs.assert_awaited_once_with(
+        repo.measure_prefix_results.assert_awaited_once_with(
             run_id=context.source.id,
             tenant_id=context.source.tenant_id,
             step_orders=(1, 2),
@@ -368,3 +383,25 @@ async def test_concurrent_acceptance_is_replayed_under_creation_lock(context):
     assert replay.run_result.created is False
     context.service.run_service.create_run.assert_not_awaited()
     context.service.audit_service.log.assert_not_awaited()
+
+
+@pytest.mark.parametrize("established", [False, True])
+async def test_imported_review_fact_controls_required_review(context, established):
+    context.runtime_steps[0].review_policy = object()
+    context.review_flags[context.results[0].step_id] = established
+    if not established:
+        _set_checkpoints(context, FlowRunReviewCheckpointState.APPROVED)
+        with pytest.raises(ConflictException) as exc:
+            await context.service.retry_from_failed_step(**context.request)
+        assert exc.value.context == {
+            "step_order": 1,
+            "reason": "review_not_established",
+        }
+        context.service.run_service.create_run.assert_not_awaited()
+        return
+    await context.service.retry_from_failed_step(**context.request)
+    seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    assert seed.review_established_step_ids == frozenset({context.results[0].step_id})
+    context.service.access_policy.load_run.assert_awaited_once_with(
+        flow_id=context.source.flow_id, run_id=context.source.id, access_kind="content"
+    )
