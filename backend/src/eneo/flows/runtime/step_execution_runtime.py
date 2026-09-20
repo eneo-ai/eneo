@@ -71,6 +71,7 @@ from eneo.flows.runtime.run_cancellation import (
     FlowStepCancelledError,
     run_cancel_probe_scope,
 )
+from eneo.flows.runtime.step_deadline import StepDeadline
 from eneo.flows.runtime.step_input_resolution import (
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
     enforce_inline_input_cap,
@@ -332,6 +333,10 @@ class StepExecutionRuntimeDeps:
     max_inline_text_bytes: int
     logger: logging.Logger | None = None
     llm_request_timeout_seconds: float = 600
+    # The attempt's shared budget, started by the executor. None only for
+    # direct runtime use outside an attempt, where each provider wait
+    # starts its own budget from llm_request_timeout_seconds.
+    deadline: StepDeadline | None = None
     run_cancelled: RunCancelledFn | None = None
     run_cancel_poll_interval_seconds: float = 2.0
     llm_task_cancellation_grace_seconds: float = LLM_TASK_CANCELLATION_GRACE_SECONDS
@@ -560,32 +565,28 @@ async def call_assistant_with_timeout(
     prompt_override: str,
     version: int,
     provider_call_reason: ProviderCallReason,
-    step_deadline_monotonic: float | None = None,
+    deadline: StepDeadline | None = None,
 ) -> Any:
-    # When a step deadline is supplied, the json-mode rejection retry shares
-    # the same wall-clock budget as the initial call. Without this, a step
-    # that consumes most of its timeout on the first attempt is granted a
-    # fresh per-call budget for the fallback retry, silently doubling the
-    # bound the executor's outer asyncio.wait_for is supposed to enforce.
-    loop = asyncio.get_event_loop()
-    if step_deadline_monotonic is None:
-        timeout = deps.llm_request_timeout_seconds
-    else:
-        timeout = max(0.0, step_deadline_monotonic - loop.time())
+    # The request spends from the attempt's shared budget: the json-mode
+    # fallback retry, every mapped item and the phases before and after the
+    # call all count against the same deadline. A caller without one (direct
+    # runtime use) gets a budget for this wait only.
+    if deadline is None:
+        deadline = StepDeadline.start(deps.llm_request_timeout_seconds)
 
-    if timeout <= 0:
+    if deadline.expired():
         if deps.logger is not None:
             deps.logger.warning(
-                "flow_executor.llm_timeout run_id=%s step_order=%d timeout=%s",
+                "flow_executor.step_timeout run_id=%s step_order=%d budget=%s "
+                "phase=provider_request_not_sent",
                 run.id,
                 step.step_order,
-                deps.llm_request_timeout_seconds,
+                deadline.budget_seconds,
             )
         raise attach_typed_failure_context(
-            TypedIOValidationException(
-                f"Step {step.step_order}: LLM request exceeded "
-                f"{deps.llm_request_timeout_seconds:g}s timeout.",
-                code=FlowApiErrorCode.LLM_REQUEST_TIMEOUT.value,
+            deadline.timeout_error(
+                step_order=step.step_order,
+                phase="provider request (not sent)",
             ),
             input_payload_for_result=prepared.input_payload_for_result,
             effective_prompt=prompt_override,
@@ -709,24 +710,22 @@ async def call_assistant_with_timeout(
     )
     try:
         while True:
-            if step_deadline_monotonic is None:
-                wait_timeout = timeout
-            else:
-                wait_timeout = max(0.0, step_deadline_monotonic - loop.time())
+            wait_timeout = deadline.remaining()
             if wait_timeout <= 0:
                 await _cancel_llm_task_with_grace()
                 if deps.logger is not None:
                     deps.logger.warning(
-                        "flow_executor.llm_timeout run_id=%s step_order=%d timeout=%s",
+                        "flow_executor.step_timeout run_id=%s step_order=%d budget=%s "
+                        "phase=provider_request",
                         run.id,
                         step.step_order,
-                        deps.llm_request_timeout_seconds,
+                        deadline.budget_seconds,
                     )
                 raise attach_typed_failure_context(
-                    TypedIOValidationException(
-                        f"Step {step.step_order}: LLM request exceeded "
-                        f"{deps.llm_request_timeout_seconds:g}s timeout.",
-                        code=FlowApiErrorCode.LLM_REQUEST_TIMEOUT.value,
+                    deadline.timeout_error(
+                        step_order=step.step_order,
+                        phase="provider request",
+                        provider_request_in_flight=True,
                     ),
                     input_payload_for_result=prepared.input_payload_for_result,
                     effective_prompt=prompt_override,
@@ -744,16 +743,17 @@ async def call_assistant_with_timeout(
                 await _cancel_llm_task_with_grace()
                 if deps.logger is not None:
                     deps.logger.warning(
-                        "flow_executor.llm_timeout run_id=%s step_order=%d timeout=%s",
+                        "flow_executor.step_timeout run_id=%s step_order=%d budget=%s "
+                        "phase=provider_request",
                         run.id,
                         step.step_order,
-                        deps.llm_request_timeout_seconds,
+                        deadline.budget_seconds,
                     )
                 raise attach_typed_failure_context(
-                    TypedIOValidationException(
-                        f"Step {step.step_order}: LLM request exceeded "
-                        f"{deps.llm_request_timeout_seconds:g}s timeout.",
-                        code=FlowApiErrorCode.LLM_REQUEST_TIMEOUT.value,
+                    deadline.timeout_error(
+                        step_order=step.step_order,
+                        phase="provider request",
+                        provider_request_in_flight=True,
                     ),
                     input_payload_for_result=prepared.input_payload_for_result,
                     effective_prompt=prompt_override,
@@ -1636,8 +1636,11 @@ async def _complete_step_execution(
             native_json_format_attempted,
         )
     actual_model_parameters = selected_model_parameters
-    step_deadline_monotonic = (
-        asyncio.get_event_loop().time() + deps.llm_request_timeout_seconds
+    # One budget for this call and its capability fallback: the attempt's
+    # deadline when the executor started one, else a budget for this step
+    # execution only.
+    step_deadline = deps.deadline or StepDeadline.start(
+        deps.llm_request_timeout_seconds
     )
     try:
         response = await call_assistant_with_timeout(
@@ -1654,7 +1657,7 @@ async def _complete_step_execution(
             provider_call_reason=(
                 "capability_fallback" if use_capability_fallback else "initial"
             ),
-            step_deadline_monotonic=step_deadline_monotonic,
+            deadline=step_deadline,
         )
     except ProviderCapabilityRejectedException as model_exc:
         if (
@@ -1693,7 +1696,7 @@ async def _complete_step_execution(
                 prompt_override=actual_prompt,
                 version=completion_call.assistant_context_version,
                 provider_call_reason="capability_fallback",
-                step_deadline_monotonic=step_deadline_monotonic,
+                deadline=step_deadline,
             )
         else:
             raise

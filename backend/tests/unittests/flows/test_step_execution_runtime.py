@@ -1559,7 +1559,11 @@ async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
         )
 
     assert getattr(exc_info.value, "rejected_output", None) is None
-    assert exc_info.value.code == "flow_llm_request_timeout"
+    assert exc_info.value.code == "flow_step_timeout"
+    # The request was in flight when the budget ran out, so the refusal says
+    # the provider may still complete and bill it.
+    assert "provider request" in str(exc_info.value)
+    assert "may still complete" in str(exc_info.value)
     assert assistant.get_response.await_count == 2
 
 
@@ -1575,7 +1579,7 @@ async def test_complete_step_execution_fast_fails_when_deadline_already_exhauste
     with `timeout <= 0`. Dispatching to `assistant.get_response` in
     that state would either block on a still-pending HTTP call or get
     cancelled with an ambiguous TimeoutError. Raise the typed
-    `flow_llm_request_timeout` directly so the executor's failure
+    `flow_step_timeout` directly so the executor's failure
     handler treats this exactly like the original timeout.
     """
     monkeypatch.setattr(
@@ -1641,7 +1645,7 @@ async def test_complete_step_execution_fast_fails_when_deadline_already_exhauste
         )
 
     assert getattr(exc_info.value, "rejected_output", None) is None
-    assert exc_info.value.code == "flow_llm_request_timeout"
+    assert exc_info.value.code == "flow_step_timeout"
     assert assistant.get_response.await_count == 1, (
         "Retry must not dispatch a second LLM call when the deadline "
         "is already exhausted; doing so blocks on HTTP that the budget "
@@ -1704,7 +1708,7 @@ async def test_complete_step_execution_times_out_llm_request():
         )
 
     assert getattr(exc_info.value, "rejected_output", None) is None
-    assert exc_info.value.code == "flow_llm_request_timeout"
+    assert exc_info.value.code == "flow_step_timeout"
     assert getattr(exc_info.value, "effective_prompt") == "Prompt"
     failed_input_payload = getattr(exc_info.value, "input_payload_json")
     assert failed_input_payload["input_source"] == "all_previous_steps"

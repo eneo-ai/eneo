@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
+
+import pytest
 
 from eneo.transcription_models.infrastructure.adapters import litellm_transcription
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
@@ -106,6 +109,45 @@ async def test_segments_are_the_measured_chunk_windows(monkeypatch, tmp_path) ->
         TranscriptSegment("du", 300.7, 420.7),
     )
     assert result.text.startswith("### 0:00 - 5:00\n\n hej ")
+
+
+async def test_chunk_headings_follow_the_measured_offsets(
+    monkeypatch, tmp_path
+) -> None:
+    """The splitter emits whole blocks, so chunks overrun their nominal five
+    minutes; the transcript headings must place each chunk where its
+    segment says it is, not at the nominal marker."""
+    texts = iter(["a", "b", "c"])
+
+    async def fake(**kwargs):
+        return SimpleNamespace(text=next(texts))
+
+    monkeypatch.setattr(TRANSPORT, AsyncMock(side_effect=fake))
+    audio = _audio(tmp_path, [300.7, 300.7, 60.0], monkeypatch)
+
+    result = await _adapter().get_text_from_file(audio)  # type: ignore[arg-type]
+
+    assert result.text == (
+        "### 0:00 - 5:00\n\na\n\n### 5:00 - 10:01\n\nb\n\n### 10:01 - 11:01\n\nc"
+    )
+    assert result.segments == (
+        TranscriptSegment("a", 0.0, 300.7),
+        TranscriptSegment("b", 300.7, 601.4),
+        TranscriptSegment("c", 601.4, 661.4),
+    )
+
+
+async def test_cancelled_chunk_request_is_not_retried(monkeypatch, tmp_path) -> None:
+    """A cancellation (the step's budget ran out) must propagate without the
+    retry policy sending another request."""
+    transport = AsyncMock(side_effect=asyncio.CancelledError())
+    monkeypatch.setattr(TRANSPORT, transport)
+    audio = _audio(tmp_path, [300.0, 300.0], monkeypatch)
+
+    with pytest.raises(asyncio.CancelledError):
+        await _adapter().get_text_from_file(audio)  # type: ignore[arg-type]
+
+    assert transport.await_count == 1
 
 
 async def test_silent_chunks_keep_their_place_but_emit_no_segment(

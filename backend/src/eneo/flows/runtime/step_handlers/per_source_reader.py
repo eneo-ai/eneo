@@ -28,6 +28,7 @@ from eneo.flows.flow_run_provenance import (
     MappedProviderCallProvenance,
     sum_complete_token_counts,
 )
+from eneo.flows.runtime.step_deadline import require_step_budget
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
@@ -199,6 +200,14 @@ async def execute_per_source_reader(
         for source_number, (file_id, prepared_step) in enumerate(
             prepared_sources, start=1
         ):
+            require_step_budget(
+                prepared_step.deps.deadline,
+                step_order=step.step_order,
+                phase=f"source {source_number} of {len(prepared_sources)}",
+                completed=(
+                    f"{len(per_source_calls)} of {len(prepared_sources)} sources completed"
+                ),
+            )
             source_call = await _execute_one_source(
                 source_number=source_number,
                 file_id=file_id,
@@ -221,9 +230,10 @@ async def execute_per_source_reader(
                 mapped_rag_metadata=mapped_evidence.payload(),
             )
         )
-    except Exception as exc:
+    except BaseException as exc:
         # The calls that completed really did retrieve; publish them as a
-        # partial envelope so the failed attempt records what it read.
+        # partial envelope so the failed attempt records what it read, also
+        # under the executor's backstop cancellation.
         mapped_evidence.admit(getattr(exc, "rag_metadata", None))
         partial = mapped_evidence.partial_payload()
         if partial is not None:

@@ -576,7 +576,14 @@ class FlowStepCreateRequest(BaseModel):
     timeout_seconds: int | None = Field(
         default=None,
         ge=1,
-        description="Optional per-step LLM timeout override in seconds.",
+        description=(
+            "Optional per-step execution budget in seconds: one wall-clock "
+            "deadline for the whole step execution, covering input resolution "
+            "(including transcription), retrieval, every provider request of the "
+            "step and finalization. Defaults to the deployment step timeout; a "
+            "value above the deployment ceiling is refused. Exhaustion fails the "
+            "run with `flow_step_timeout`."
+        ),
     )
     user_description: str | None = None
     input_source: FlowInputSource

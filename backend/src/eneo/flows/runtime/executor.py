@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from copy import deepcopy
@@ -115,6 +116,7 @@ from eneo.flows.published_definition import (
     PublishedDefinitionChecksumMismatchError,
     parse_verified_published_definition,
 )
+from eneo.flows.runtime import step_deadline as step_deadline_module
 from eneo.flows.runtime.claim_resolution import resolve_step_claim
 from eneo.flows.runtime.document_rendering import DocumentRenderService
 from eneo.flows.runtime.document_rendering.limits import (
@@ -159,6 +161,7 @@ from eneo.flows.runtime.step_attempt_runtime import (
     build_typed_failure_plan,
     build_typed_failure_run_error_message,
 )
+from eneo.flows.runtime.step_deadline import StepDeadline
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     FlowStepCancelledError,
@@ -563,6 +566,10 @@ class FlowRunExecutor:
         self.runtime_policy = resolved_config.runtime_policy
         self.mapped_execution_policy = resolved_config.mapped_execution_policy
         self._step_deadline_seconds = resolved_config.step_deadline_seconds
+        # The budget of the attempt currently executing; every dependency
+        # built while it is set shares it (mapped previews rebuild deps per
+        # item and must not restart the clock).
+        self._active_step_deadline: StepDeadline | None = None
         self.rag_retrieval_timeout_seconds = (
             resolved_config.rag_retrieval_timeout_seconds
         )
@@ -1155,27 +1162,66 @@ class FlowRunExecutor:
         )
 
         handler = self._build_step_handler(resolve_handler_mode(step.output_mode))
-        with trace_flow_step(
-            run_id=run.id,
-            run_trace_id=run.trace_id,
-            flow_id=run.flow_id,
-            tenant_id=run.tenant_id,
-            step_id=step.step_id,
-            step_order=step.step_order,
-            attempt_no=attempt_no,
-            input_type=step.input_type,
-            output_type=step.output_type,
-            output_mode=step.output_mode,
-        ) as step_span:
-            result = await handler.execute(
-                step=step,
-                run=run,
-                state=state,
-                version_metadata=version_metadata,
+        deadline = self._start_step_deadline(step)
+        self._active_step_deadline = deadline
+        try:
+            with trace_flow_step(
+                run_id=run.id,
+                run_trace_id=run.trace_id,
+                flow_id=run.flow_id,
+                tenant_id=run.tenant_id,
+                step_id=step.step_id,
+                step_order=step.step_order,
                 attempt_no=attempt_no,
-            )
-            step_span.set_result(status="completed")
-            return result
+                input_type=step.input_type,
+                output_type=step.output_type,
+                output_mode=step.output_mode,
+            ) as step_span:
+                try:
+                    # Backstop for phases that cannot check the budget
+                    # themselves (decoding, extraction, a stalled retrieval).
+                    # Phases that can (mapped items, provider waits) refuse
+                    # earlier with a more precise message.
+                    async with asyncio.timeout(
+                        deadline.remaining()
+                        + step_deadline_module.STEP_DEADLINE_BACKSTOP_GRACE_SECONDS
+                    ):
+                        result = await handler.execute(
+                            step=step,
+                            run=run,
+                            state=state,
+                            version_metadata=version_metadata,
+                            attempt_no=attempt_no,
+                        )
+                except TimeoutError as exc:
+                    if not deadline.expired():
+                        # Some inner wait timed out on its own; only the
+                        # backstop's expiry is the step's budget running out.
+                        raise
+                    typed = deadline.timeout_error(
+                        step_order=step.step_order, phase="step execution"
+                    )
+                    # asyncio.timeout chains the cancellation it converted; a
+                    # mapped handler hangs its completed-call evidence on it.
+                    partial_evidence = getattr(exc.__cause__, "rag_metadata", None)
+                    if partial_evidence is not None:
+                        setattr(typed, "rag_metadata", partial_evidence)
+                    raise typed from exc
+                step_span.set_result(status="completed")
+                return result
+        finally:
+            self._active_step_deadline = None
+
+    def _start_step_deadline(self, step: RuntimeStep) -> StepDeadline:
+        try:
+            budget_seconds = self._step_deadline_seconds(step)
+        except BadRequestException as exc:
+            raise TypedIOValidationException(
+                str(exc),
+                code=exc.code,
+                context=exc.context,
+            ) from exc
+        return StepDeadline.start(budget_seconds)
 
     def _build_step_handler(self, mode: FlowOutputMode) -> StepHandler:
         match mode:
@@ -1253,14 +1299,7 @@ class FlowRunExecutor:
         run: FlowRun,
         attempt_no: int,
     ) -> StepExecutionRuntimeDeps:
-        try:
-            llm_timeout_seconds = self._step_deadline_seconds(step)
-        except BadRequestException as exc:
-            raise TypedIOValidationException(
-                str(exc),
-                code=exc.code,
-                context=exc.context,
-            ) from exc
+        deadline = self._active_step_deadline or self._start_step_deadline(step)
 
         return StepExecutionRuntimeDeps(
             variable_resolver=self.variable_resolver,
@@ -1272,7 +1311,8 @@ class FlowRunExecutor:
             apply_output_cap=self._apply_output_cap,
             max_inline_text_bytes=self.max_inline_text_bytes,
             logger=logger,
-            llm_request_timeout_seconds=llm_timeout_seconds,
+            llm_request_timeout_seconds=deadline.budget_seconds,
+            deadline=deadline,
             rag_retrieval_timeout_seconds=self.rag_retrieval_timeout_seconds,
             run_cancelled=self._run_is_cancelled,
             build_provider_call_observer=lambda mapped_call,

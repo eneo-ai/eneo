@@ -5335,6 +5335,7 @@
   "flow_error_flow_model_capacity_undeclared": "Den valda modellen saknar en tokengräns för indata eller utdata. Be en administratör att ange båda gränserna innan du startar en ny körning.",
   "flow_error_flow_llm_output_truncated": "Modellen nådde sin utdatagräns innan svaret var färdigt. Minska indata eller den begärda utdatan, eller be en administratör att se över modellens tokengränser innan du startar en ny körning.",
   "flow_error_flow_llm_request_timeout": "Modellanropet tog för lång tid, men leverantörsarbetet kan ändå ha slutförts. Kontrollera körningen innan du försöker igen eftersom det kan medföra dubbelt arbete och dubbla kostnader.",
+  "flow_error_flow_step_timeout": "Steget hann inte klart inom sin tidsbudget. Kontrollera körningen innan du försöker igen: om steget anropade en modell kan leverantören ändå ha slutfört arbetet. Höj stegets tidsbudget eller minska underlaget.",
   "flow_error_flow_provider_rate_limited": "AI-leverantören begränsar tillfälligt antalet anrop. Vänta innan du startar en ny körning.",
   "flow_error_flow_provider_unavailable": "AI-leverantören blev otillgänglig. Kontrollera körningen innan du startar en ny eftersom ett AI-anrop kan ha hunnit genomföras.",
   "flow_error_flow_provider_call_evidence_persistence_failed": "Evidensen för provider-anropet kunde inte sparas tillförlitligt. Försök inte igen automatiskt; kontrollera körningen eftersom provider-arbete kan ha utförts.",

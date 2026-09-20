@@ -88,6 +88,7 @@ class FlowApiErrorCode(str, Enum):
     MODEL_CAPACITY_UNDECLARED = "flow_model_capacity_undeclared"
     LLM_OUTPUT_TRUNCATED = "flow_llm_output_truncated"
     LLM_REQUEST_TIMEOUT = "flow_llm_request_timeout"
+    STEP_TIMEOUT = "flow_step_timeout"
     RUNTIME_INPUT_NOT_CONSUMED = "flow_runtime_input_not_consumed"
     MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED = "flow_mapped_provider_call_limit_exceeded"
     UNSUPPORTED_OUTPUT_MODE = "flow_unsupported_output_mode"
@@ -200,6 +201,7 @@ FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.MODEL_CAPACITY_UNDECLARED,
         FlowApiErrorCode.LLM_OUTPUT_TRUNCATED,
         FlowApiErrorCode.LLM_REQUEST_TIMEOUT,
+        FlowApiErrorCode.STEP_TIMEOUT,
         FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED,
         FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED,
         FlowApiErrorCode.UNSUPPORTED_OUTPUT_MODE,

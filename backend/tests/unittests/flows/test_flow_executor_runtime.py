@@ -76,6 +76,7 @@ from eneo.flows.infrastructure.flow_provider_call_recorder import (
 )
 from eneo.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from eneo.flows.runtime import executor as executor_module
+from eneo.flows.runtime import step_deadline as step_deadline_module
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.flows.runtime.executor import (
     FlowRunExecutor,
@@ -4594,6 +4595,79 @@ async def test_execute_step_records_flow_step_span(user, captured_flow_spans):
     assert span.attributes["flow.step.order"] == 2
     assert span.attributes["flow.step.attempt_no"] == 3
     assert span.attributes["flow.step.result.status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_execute_step_shares_one_deadline_with_every_dependency(user):
+    """Dependencies built during an attempt (also the per-item ones a mapped
+    handler builds) carry the attempt's single budget, and the budget is
+    released when the attempt ends."""
+    executor, _, _, _ = _build_executor(user)
+    executor._step_deadline_seconds = lambda step: 42.0
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step()
+    seen: list[object] = []
+
+    class _Handler:
+        async def execute(self, **kwargs):
+            for _ in range(2):
+                deps = executor._build_step_execution_runtime_deps(
+                    step=step, run=run, attempt_no=kwargs["attempt_no"]
+                )
+                seen.append((deps.deadline, deps.llm_request_timeout_seconds))
+            assert executor._active_step_deadline is not None
+            return _step_result(_minimal_step_execution_output())
+
+    executor._build_step_handler = MagicMock(return_value=_Handler())
+
+    await executor._execute_step(
+        step=step, run=run, state=_empty_execution_state(), attempt_no=1
+    )
+
+    assert len(seen) == 2
+    assert seen[0][0] is seen[1][0]
+    assert seen[0][0] is not None and seen[0][0].budget_seconds == 42.0
+    assert seen[0][1] == 42.0
+    assert executor._active_step_deadline is None
+
+
+@pytest.mark.asyncio
+async def test_execute_step_backstop_fails_typed_with_completed_call_evidence(
+    user, monkeypatch
+):
+    """Work that cannot check the budget itself is stopped by the executor's
+    backstop, fails with the typed step timeout, and keeps the evidence a
+    mapped handler hung on the cancellation."""
+    monkeypatch.setattr(
+        step_deadline_module, "STEP_DEADLINE_BACKSTOP_GRACE_SECONDS", 0.0
+    )
+    executor, _, _, _ = _build_executor(user)
+    executor._step_deadline_seconds = lambda step: 0.05
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step(step_order=3)
+
+    class _Handler:
+        async def execute(self, **_kwargs):
+            try:
+                await asyncio.sleep(5)
+            except asyncio.CancelledError as exc:
+                setattr(exc, "rag_metadata", {"status": "partial", "calls": 1})
+                raise
+            raise AssertionError("the backstop must cancel the handler")
+
+    executor._build_step_handler = MagicMock(return_value=_Handler())
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(
+            step=step, run=run, state=_empty_execution_state(), attempt_no=1
+        )
+
+    assert exc_info.value.code == "flow_step_timeout"
+    assert "Step 3: execution budget of 0.05s exhausted during step execution" in str(
+        exc_info.value
+    )
+    assert getattr(exc_info.value, "rag_metadata") == {"status": "partial", "calls": 1}
+    assert executor._active_step_deadline is None
 
 
 @pytest.mark.asyncio

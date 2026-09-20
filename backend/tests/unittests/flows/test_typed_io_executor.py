@@ -3549,6 +3549,97 @@ async def test_per_item_map_derives_input_array_and_echoes_runtime_source_identi
 
 
 @pytest.mark.asyncio
+async def test_per_item_map_refuses_the_next_item_once_the_step_budget_is_spent(
+    user, monkeypatch
+):
+    """Mapped items spend from the attempt's one budget: the item that would
+    start after it ran out is never sent, and the refusal says how many
+    completed. A fake clock advances one second per provider call so the
+    boundary, not a provider wait, is what fires."""
+    from eneo.flows.runtime import step_deadline as step_deadline_module
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    executor, _, _, _ = _build_executor(user)
+    executor._step_deadline_seconds = lambda step: 1.5
+    documents = [
+        {
+            "title": f"Document {index}",
+            "summary": f"document-{index:02d}",
+            "source_label": f"source-{index:02d}.pdf",
+            "source_file_id": f"file-{index:02d}",
+        }
+        for index in range(1, 4)
+    ]
+    assistant = _mock_assistant_for_execute_step()
+
+    async def _respond(**_kwargs):
+        clock["now"] += 1.0
+        return SimpleNamespace(
+            completion='{"sections":[{"heading":"h","body":"b"}]}',
+            total_token_count=3,
+        )
+
+    assistant.get_response = AsyncMock(side_effect=_respond)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"documents":[]}',
+        structured={"documents": documents},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "heading": {"type": "string"},
+                            "body": {"type": "string"},
+                        },
+                        "required": ["heading", "body"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["sections"],
+            "additionalProperties": False,
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 40}},
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert exc_info.value.code == "flow_step_timeout"
+    assert assistant.get_response.await_count == 2
+    assert "mapped item 3 of 3" in str(exc_info.value)
+    assert "2 of 3 items completed" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_per_item_map_executes_one_model_call_per_previous_document_at_scale(
     user,
 ):

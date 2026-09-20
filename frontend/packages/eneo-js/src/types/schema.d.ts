@@ -16623,6 +16623,7 @@ export interface components {
       | "flow_model_capacity_undeclared"
       | "flow_llm_output_truncated"
       | "flow_llm_request_timeout"
+      | "flow_step_timeout"
       | "flow_runtime_input_not_consumed"
       | "flow_mapped_provider_call_limit_exceeded"
       | "flow_unsupported_output_mode"
@@ -19705,6 +19706,7 @@ export interface components {
         | "flow_step_attempt_start_failed"
         | "flow_step_execution_failed"
         | "flow_step_missing"
+        | "flow_step_timeout"
         | "flow_task_failure"
         | "flow_task_timeout"
         | "flow_unsupported_output_mode"
@@ -22193,6 +22195,7 @@ export interface components {
             | "flow_step_attempt_start_failed"
             | "flow_step_execution_failed"
             | "flow_step_missing"
+            | "flow_step_timeout"
             | "flow_task_failure"
             | "flow_task_timeout"
             | "flow_unsupported_output_mode"
@@ -23281,6 +23284,7 @@ export interface components {
             | "flow_step_attempt_start_failed"
             | "flow_step_execution_failed"
             | "flow_step_missing"
+            | "flow_step_timeout"
             | "flow_task_failure"
             | "flow_task_timeout"
             | "flow_unsupported_output_mode"
@@ -23469,7 +23473,7 @@ export interface components {
       step_order: number;
       /**
        * Timeout Seconds
-       * @description Optional per-step LLM timeout override in seconds.
+       * @description Optional per-step execution budget in seconds: one wall-clock deadline for the whole step execution, covering input resolution (including transcription), retrieval, every provider request of the step and finalization. Defaults to the deployment step timeout; a value above the deployment ceiling is refused. Exhaustion fails the run with `flow_step_timeout`.
        */
       timeout_seconds?: number | null;
       /** User Description */
@@ -23658,7 +23662,7 @@ export interface components {
       step_order: number;
       /**
        * Timeout Seconds
-       * @description Optional per-step LLM timeout override in seconds.
+       * @description Optional per-step execution budget in seconds: one wall-clock deadline for the whole step execution, covering input resolution (including transcription), retrieval, every provider request of the step and finalization. Defaults to the deployment step timeout; a value above the deployment ceiling is refused. Exhaustion fails the run with `flow_step_timeout`.
        */
       timeout_seconds?: number | null;
       /** User Description */

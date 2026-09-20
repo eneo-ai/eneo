@@ -30,6 +30,7 @@ from eneo.flows.flow_run_provenance import (
     sum_complete_token_counts,
 )
 from eneo.flows.input_binding_contract_rules import has_explicit_underlag
+from eneo.flows.runtime.step_deadline import require_step_budget
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
@@ -201,6 +202,14 @@ async def execute_per_item_map(
     item_calls: list[PerItemMapCall] = []
     try:
         for item_number, input_item, prepared_step in prepared_items:
+            # The next item is external work: refuse it, with what completed,
+            # once the attempt's budget is spent.
+            require_step_budget(
+                prepared_step.deps.deadline,
+                step_order=step.step_order,
+                phase=f"mapped item {item_number} of {len(prepared_items)}",
+                completed=f"{len(item_calls)} of {len(prepared_items)} items completed",
+            )
             item_call = await _execute_one_item(
                 item_number=item_number,
                 input_array_key=input_array_key,
@@ -225,9 +234,11 @@ async def execute_per_item_map(
                 mapped_rag_metadata=mapped_evidence.payload(),
             )
         )
-    except Exception as exc:
+    except BaseException as exc:
         # The calls that completed really did retrieve; publish them as a
-        # partial envelope so the failed attempt records what it read.
+        # partial envelope so the failed attempt records what it read. Also
+        # for the executor's backstop cancellation, which carries the
+        # cancellation as the cause of its typed timeout.
         mapped_evidence.admit(getattr(exc, "rag_metadata", None))
         partial = mapped_evidence.partial_payload()
         if partial is not None:

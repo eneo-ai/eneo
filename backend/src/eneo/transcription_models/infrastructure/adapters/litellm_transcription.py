@@ -15,7 +15,10 @@ from tenacity import (
 )
 
 from eneo.files.audio import AudioFile
-from eneo.main.exceptions import ProviderRejectedRequestException
+from eneo.main.exceptions import (
+    ProviderRejectedRequestException,
+    TypedIOValidationException,
+)
 from eneo.main.logging import get_logger
 from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.domain.provider_call_observer import (
@@ -149,28 +152,17 @@ class LiteLLMTranscriptionAdapter:
         Transcribe an audio file, splitting into 5-minute chunks with timestamps.
 
         Each chunk's measured length is accumulated so the returned segments
-        place every chunk's text in its absolute window of the whole file.
+        and the transcript's chunk headings place every chunk's text in its
+        absolute window of the whole file: the splitter emits whole blocks, so
+        a chunk can be longer than its nominal five minutes.
         """
         text = ""
         five_minutes = 60 * 5
-        chunk_index = 0
-        total_duration_seconds = int(audio_file.duration)
         segments: list[TranscriptSegment] = []
         offset_seconds = 0.0
 
         async with audio_file.asplit_file(seconds=five_minutes) as files:
-            total_chunks = len(files)
-
-            for i, path in enumerate(files):
-                start_time = chunk_index * five_minutes
-                chunk_end = (
-                    total_duration_seconds
-                    if i == total_chunks - 1
-                    else (chunk_index + 1) * five_minutes
-                )
-                # The timestamps below are nominal five-minute markers; the
-                # splitter emits whole blocks, so what this request actually
-                # sends has to be measured from the file itself.
+            for chunk_index, path in enumerate(files):
                 measured_seconds = await asyncio.to_thread(_measure_seconds, path)
                 block_text = await self._transcribe_chunk(
                     path,
@@ -178,29 +170,24 @@ class LiteLLMTranscriptionAdapter:
                     observer=observer,
                     audio_seconds=measured_seconds,
                 )
+                chunk_start = offset_seconds
+                offset_seconds += measured_seconds
                 chunk_text = block_text.strip()
                 if chunk_text:
                     segments.append(
                         TranscriptSegment(
                             text=chunk_text,
-                            start=offset_seconds,
-                            end=offset_seconds + measured_seconds,
+                            start=chunk_start,
+                            end=offset_seconds,
                         )
                     )
-                offset_seconds += measured_seconds
 
-                end_time = chunk_end
-
-                start_time_formatted = f"{start_time // 60}:{start_time % 60:02d}"
-                end_time_formatted = f"{end_time // 60}:{end_time % 60:02d}"
-
-                # Add markdown formatting with timestamp
                 if chunk_index > 0:
                     text += "\n\n"
                 text += (
-                    f"### {start_time_formatted} - {end_time_formatted}\n\n{block_text}"
+                    f"### {_clock(chunk_start)} - {_clock(offset_seconds)}\n\n"
+                    f"{block_text}"
                 )
-                chunk_index += 1
 
         return AdapterTranscription(text=text, segments=tuple(segments))
 
@@ -210,9 +197,15 @@ class LiteLLMTranscriptionAdapter:
         retry=retry_if_not_exception_type(
             # A failure to record what a request did must never send that request
             # again: the provider already did the work and may already have
-            # charged for it.
+            # charged for it. Neither may a cancelled attempt (the step's budget
+            # ran out) or a typed refusal: retrying would send a request the
+            # runtime has already decided not to send.
             litellm_transport.NON_RETRYABLE_PROVIDER_ERRORS
-            + (ProviderCallObserverError,)
+            + (
+                ProviderCallObserverError,
+                asyncio.CancelledError,
+                TypedIOValidationException,
+            )
         ),
         reraise=True,
     )
@@ -309,6 +302,12 @@ class LiteLLMTranscriptionAdapter:
                 ),
             )
         return cast(str, response.text)  # type: ignore[reportUnknownMemberType]
+
+
+def _clock(seconds: float) -> str:
+    """M:SS from a measured offset, floored like the segment windows."""
+    whole = int(seconds)
+    return f"{whole // 60}:{whole % 60:02d}"
 
 
 def _measure_seconds(file_path: Path) -> float:

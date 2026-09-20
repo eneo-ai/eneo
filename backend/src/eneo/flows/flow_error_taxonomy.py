@@ -720,6 +720,24 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "spend."
         ),
     ),
+    FlowApiErrorCode.STEP_TIMEOUT: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause=(
+            "The step's execution budget (timeout_seconds or the deployment default) "
+            "ran out in the phase the message names, possibly with a provider "
+            "request still in flight."
+        ),
+        consumer_action=(
+            "Do not auto-retry because an in-flight provider request may still "
+            "complete and bill; inspect the run, then raise the step's "
+            "timeout_seconds or reduce the input before a new run."
+        ),
+        user_action=(
+            "Check the run before retrying and ask the flow author to raise the "
+            "step's time budget or reduce the input."
+        ),
+    ),
     FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
