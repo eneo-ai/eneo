@@ -16606,6 +16606,7 @@ export interface components {
       | "flow_definition_flow_id_invalid"
       | "flow_definition_steps_invalid"
       | "flow_definition_no_executable_steps"
+      | "flow_assistant_model_provider_required"
       | "flow_assistant_snapshot_republish_required"
       | "flow_assistant_snapshot_drift"
       | "flow_input_contract_inapplicable"

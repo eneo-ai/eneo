@@ -34,6 +34,7 @@ from eneo.flows.published_definition import (
     published_definition_checksum,
 )
 from eneo.main.exceptions import BadRequestException
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 def _flow_repo() -> AsyncMock:
@@ -146,6 +147,7 @@ def _version(user, flow: Flow) -> FlowVersion:
                 "step_id": str(step.id),
                 "step_order": step.step_order,
                 "assistant_id": str(step.assistant_id),
+                "assistant_snapshot": assistant_snapshot(step.assistant_id),
                 "input_source": step.input_source,
                 "input_type": step.input_type,
                 "input_config": step.input_config,

@@ -111,6 +111,7 @@ from eneo.main.exceptions import (
     ValidationException,
 )
 from eneo.roles.permissions import Permission
+from tests.flow_snapshot_fixtures import assistant_snapshot
 from tests.unit.api_key_test_utils import make_api_key
 
 # Preflight sizing double: zero everywhere means the evidence view never
@@ -588,6 +589,7 @@ def _published_runtime_step(step: FlowStep) -> dict[str, object]:
     return {
         "step_id": str(step.id),
         "assistant_id": str(step.assistant_id),
+        "assistant_snapshot": assistant_snapshot(step.assistant_id),
         "step_order": step.step_order,
         "user_description": step.user_description,
         "input_source": enum_or_string(step.input_source),
@@ -1772,6 +1774,7 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
                     "step_id": str(runtime_step.id),
                     "step_order": 1,
                     "assistant_id": str(runtime_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(runtime_step.assistant_id),
                     "input_source": "flow_input",
                     "input_type": "text",
                     "input_config": runtime_step.input_config,
@@ -1782,6 +1785,9 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
                     "step_id": str(flow.steps[1].id),
                     "step_order": 2,
                     "assistant_id": str(flow.steps[1].assistant_id),
+                    "assistant_snapshot": assistant_snapshot(
+                        flow.steps[1].assistant_id
+                    ),
                     "input_source": "previous_step",
                     "input_type": "text",
                     "output_mode": "pass_through",
@@ -1880,6 +1886,7 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
                     "step_id": str(runtime_step.id),
                     "step_order": 1,
                     "assistant_id": str(runtime_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(runtime_step.assistant_id),
                     "input_source": "flow_input",
                     "input_type": "text",
                     "input_config": runtime_step.input_config,
@@ -1954,6 +1961,7 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
                     "step_id": str(runtime_step.id),
                     "step_order": 1,
                     "assistant_id": str(runtime_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(runtime_step.assistant_id),
                     "input_source": "flow_input",
                     "input_type": "text",
                     "input_config": runtime_step.input_config,
@@ -3482,6 +3490,49 @@ async def test_create_run_rejects_invalid_published_snapshot(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("snapshot_kind", ["absent", "null", "v1", "unknown"])
+async def test_create_run_requires_v2_snapshot_before_persistence(user, snapshot_kind):
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    flow_version_repo = AsyncMock()
+    review_repo = AsyncMock()
+    upload_repo = _runtime_upload_repo()
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=review_repo,
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=upload_repo,
+        max_concurrent_runs=5,
+    )
+    flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
+    version = _runtime_version(user=user, flow=flow)
+    step = version.definition_json["steps"][0]
+    step.pop("assistant_snapshot", None)
+    if snapshot_kind != "absent":
+        step["assistant_snapshot"] = (
+            None
+            if snapshot_kind == "null"
+            else {"schema_version": 1 if snapshot_kind == "v1" else 999}
+        )
+    version.definition_checksum = published_definition_checksum(version.definition_json)
+    flow_version_repo.get.return_value = version
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_run_repo.create.return_value = _run(user, flow.id)
+
+    with pytest.raises(BadRequestException) as caught:
+        await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
+
+    assert caught.value.code == "flow_assistant_snapshot_republish_required"
+    assert "Republish" in str(caught.value)
+    assert flow_run_repo.method_calls == []
+    assert review_repo.method_calls == []
+    assert upload_repo.method_calls == []
+
+
+@pytest.mark.asyncio
 async def test_create_run_rejects_checksum_drift_before_creation_work(user) -> None:
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()
@@ -3823,6 +3874,7 @@ async def test_create_run_rejects_missing_snapshot_identifiers_even_when_draft_c
             "step_order": step.step_order,
             "step_id": str(step.id),
             "assistant_id": str(step.assistant_id),
+            "assistant_snapshot": assistant_snapshot(step.assistant_id),
         }
         for step in flow.steps
     ]

@@ -84,6 +84,7 @@ from eneo.main.exceptions import (
     NotFoundException,
 )
 from eneo.roles.permissions import Permission
+from tests.flow_snapshot_fixtures import assistant_snapshot
 from tests.unittests.flows.test_flow_router import (
     _enable_explicit_transaction,
     _enable_space_access,
@@ -111,6 +112,7 @@ class _CommitFailureTransaction:
 async def test_get_flow_graph_keeps_run_version_snapshot_visible_after_unpublish(
     principal_kind: str,
 ):
+    snapshot_assistant_id = uuid4()
     container = MagicMock()
     flow_service = AsyncMock()
     flow_run_service = AsyncMock()
@@ -138,7 +140,8 @@ async def test_get_flow_graph_keeps_run_version_snapshot_visible_after_unpublish
             {
                 "step_id": str(snapshot_step_id),
                 "step_order": 1,
-                "assistant_id": str(uuid4()),
+                "assistant_id": str(snapshot_assistant_id),
+                "assistant_snapshot": assistant_snapshot(snapshot_assistant_id),
                 "user_description": "Snapshot step",
                 "input_source": "flow_input",
                 "input_type": "text",
@@ -225,6 +228,7 @@ async def test_get_flow_graph_rejects_run_snapshot_without_executable_steps():
 
 @pytest.mark.asyncio
 async def test_get_flow_graph_uses_published_snapshot_when_run_id_missing():
+    snapshot_assistant_id = uuid4()
     container = MagicMock()
     flow_service = AsyncMock()
     flow_version_repo = AsyncMock()
@@ -243,7 +247,8 @@ async def test_get_flow_graph_uses_published_snapshot_when_run_id_missing():
             {
                 "step_id": str(snapshot_step_id),
                 "step_order": 1,
-                "assistant_id": str(uuid4()),
+                "assistant_id": str(snapshot_assistant_id),
+                "assistant_snapshot": assistant_snapshot(snapshot_assistant_id),
                 "user_description": "Published snapshot step",
                 "input_source": "flow_input",
                 "input_type": "text",

@@ -569,15 +569,14 @@ def _parse_optional_fields(
     plan_step_ref = _non_empty_string(item.get("plan_step_ref"))
     existing_step_ref = _non_empty_string(item.get("existing_step_ref"))
     raw_assistant_snapshot = item.get("assistant_snapshot")
-    if raw_assistant_snapshot is None:
-        assistant_snapshot = None
-    elif not isinstance(raw_assistant_snapshot, dict):
+    if raw_assistant_snapshot is not None and not isinstance(
+        raw_assistant_snapshot, dict
+    ):
         raise BadRequestException("Assistant snapshot must be an object.")
-    else:
-        assistant_snapshot = validate_assistant_execution_snapshot(
-            snapshot=cast(dict[str, object], raw_assistant_snapshot),
-            assistant_id=assistant_id,
-        )
+    assistant_snapshot = validate_assistant_execution_snapshot(
+        snapshot=cast(dict[str, object] | None, raw_assistant_snapshot),
+        assistant_id=assistant_id,
+    )
     return _StepOptionalFields(
         plan_step_ref=plan_step_ref,
         existing_step_ref=existing_step_ref,

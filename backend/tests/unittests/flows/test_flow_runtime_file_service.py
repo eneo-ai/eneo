@@ -31,6 +31,7 @@ from eneo.main.exceptions import (
     FileTooLargeException,
     NotFoundException,
 )
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 RUNTIME_ATTACHMENT_CONSTRAINTS = (
     "flow_run_step_input_files_file_id_fkey",
@@ -152,6 +153,7 @@ def _definition_json(flow: Flow, step: FlowStep) -> dict[str, object]:
                 "step_id": str(step.id),
                 "step_order": step.step_order,
                 "assistant_id": str(step.assistant_id),
+                "assistant_snapshot": assistant_snapshot(step.assistant_id),
                 "input_source": step.input_source,
                 "input_type": step.input_type,
                 "input_config": step.input_config,
@@ -1301,6 +1303,7 @@ async def test_upload_runtime_file_for_step_rejects_unknown_step_id() -> None:
                 "step_id": str(runtime_step.id),
                 "step_order": 1,
                 "assistant_id": str(runtime_step.assistant_id),
+                "assistant_snapshot": assistant_snapshot(runtime_step.assistant_id),
                 "input_source": "flow_input",
                 "input_type": "text",
                 "input_config": runtime_step.input_config,

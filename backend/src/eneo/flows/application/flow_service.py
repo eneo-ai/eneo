@@ -928,6 +928,13 @@ class FlowService:
             raise BadRequestException(
                 f"Step {step.step_order}: Flow MCP is unsupported. Remove MCP servers and tools from the step assistant before publishing."
             )
+        model = assistant.completion_model
+        if model is not None and (model.provider_id is None or not model.provider_type):
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: Select a provider-backed model before publishing the flow.",
+                step_order=step.step_order,
+                code=FlowApiErrorCode.ASSISTANT_MODEL_PROVIDER_REQUIRED.value,
+            )
         assistant_snapshot = build_assistant_execution_snapshot(
             assistant=assistant,
         )

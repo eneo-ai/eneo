@@ -32,13 +32,16 @@ from eneo.flows.published_definition import (
     published_definition_checksum,
 )
 from eneo.main.exceptions import BadRequestException
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 def _step(*, order: object = 1):
+    assistant_id = uuid4()
     return {
         "step_id": str(uuid4()),
         "step_order": order,
-        "assistant_id": str(uuid4()),
+        "assistant_id": str(assistant_id),
+        "assistant_snapshot": assistant_snapshot(assistant_id),
         "input_source": "flow_input",
         "input_type": "text",
         "output_type": "text",
@@ -81,6 +84,7 @@ def test_parser_round_trips_definition_and_runtime_steps() -> None:
                 **_step(order=1),
                 "step_id": str(step_id),
                 "assistant_id": str(assistant_id),
+                "assistant_snapshot": assistant_snapshot(assistant_id),
             }
         ],
     )

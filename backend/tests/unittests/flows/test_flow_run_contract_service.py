@@ -30,6 +30,7 @@ from eneo.flows.published_definition import (
     published_definition_checksum,
 )
 from eneo.main.exceptions import BadRequestException, NotFoundException
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 def _flow(*, step: FlowStep) -> Flow:
@@ -156,6 +157,7 @@ async def test_get_run_contract_rejects_checksum_drift_before_limits() -> None:
                 "step_id": str(step.id),
                 "step_order": step.step_order,
                 "assistant_id": str(step.assistant_id),
+                "assistant_snapshot": assistant_snapshot(step.assistant_id),
                 "input_source": step.input_source,
                 "input_type": step.input_type,
                 "output_mode": step.output_mode,
@@ -266,6 +268,7 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
                     "step_id": str(runtime_step.id),
                     "step_order": 1,
                     "assistant_id": str(runtime_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(runtime_step.assistant_id),
                     "input_source": "flow_input",
                     "input_type": "text",
                     "input_config": runtime_step.input_config,
@@ -276,6 +279,9 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
                     "step_id": str(template_step.id),
                     "step_order": 2,
                     "assistant_id": str(template_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(
+                        template_step.assistant_id
+                    ),
                     "input_source": "previous_step",
                     "input_type": "text",
                     "output_mode": "template_fill",
@@ -377,6 +383,9 @@ async def test_get_run_contract_marks_template_checksum_drift_needs_action(
                     "step_id": str(template_step.id),
                     "step_order": 1,
                     "assistant_id": str(template_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(
+                        template_step.assistant_id
+                    ),
                     "input_source": "flow_input",
                     "input_type": "text",
                     "output_mode": "template_fill",
@@ -436,6 +445,7 @@ async def test_get_run_contract_normalizes_and_sorts_published_form_fields() -> 
                     "step_id": str(step.id),
                     "step_order": 1,
                     "assistant_id": str(step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step.assistant_id),
                     "input_source": "flow_input",
                     "input_type": "text",
                     "output_mode": "pass_through",
@@ -478,6 +488,7 @@ async def test_get_run_contract_preserves_invalid_form_schema_error_code() -> No
                     "step_id": str(step.id),
                     "step_order": 1,
                     "assistant_id": str(step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step.assistant_id),
                     "input_source": "flow_input",
                     "input_type": "text",
                     "output_mode": "pass_through",
@@ -562,6 +573,7 @@ async def test_get_run_contract_caps_step_file_count_by_tenant_limit() -> None:
                     "step_id": str(runtime_step.id),
                     "step_order": 1,
                     "assistant_id": str(runtime_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(runtime_step.assistant_id),
                     "input_source": "flow_input",
                     "input_type": "text",
                     "input_config": runtime_step.input_config,
@@ -602,6 +614,7 @@ async def test_get_run_contract_returns_zero_aggregate_when_no_runtime_inputs() 
                     "step_id": str(step.id),
                     "step_order": 1,
                     "assistant_id": str(step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step.assistant_id),
                     "input_source": "flow_input",
                     "input_type": "text",
                     "output_mode": "pass_through",
@@ -659,6 +672,7 @@ async def test_get_run_contract_returns_unbounded_aggregate_when_step_is_unbound
                     "step_id": str(runtime_step.id),
                     "step_order": 1,
                     "assistant_id": str(runtime_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(runtime_step.assistant_id),
                     "input_source": "flow_input",
                     "input_type": "text",
                     "input_config": runtime_step.input_config,
@@ -713,6 +727,7 @@ async def test_get_run_contract_returns_review_steps() -> None:
                     "step_id": str(review_step.id),
                     "step_order": 1,
                     "assistant_id": str(review_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(review_step.assistant_id),
                     "user_description": review_step.user_description,
                     "input_source": "flow_input",
                     "input_type": "text",
@@ -780,6 +795,7 @@ async def test_get_run_contract_uses_terminal_step_after_review_step() -> None:
                     "step_id": str(review_step.id),
                     "step_order": 1,
                     "assistant_id": str(review_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(review_step.assistant_id),
                     "user_description": review_step.user_description,
                     "input_source": "flow_input",
                     "input_type": "text",
@@ -792,6 +808,7 @@ async def test_get_run_contract_uses_terminal_step_after_review_step() -> None:
                     "step_id": str(final_step.id),
                     "step_order": 2,
                     "assistant_id": str(final_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(final_step.assistant_id),
                     "user_description": final_step.user_description,
                     "input_source": "previous_step",
                     "input_type": "json",
@@ -853,6 +870,9 @@ async def test_get_run_contract_marks_missing_template_assets_unavailable() -> N
                     "step_id": str(template_step.id),
                     "step_order": 1,
                     "assistant_id": str(template_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(
+                        template_step.assistant_id
+                    ),
                     "input_source": "flow_input",
                     "input_type": "text",
                     "output_mode": "template_fill",

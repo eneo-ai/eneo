@@ -35,6 +35,7 @@ from eneo.flows.domain.flow import FlowRunStatusSnapshot
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.enums import FlowRunStatus
 from eneo.users.user import UserInDB
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 def _step(order: int, **overrides) -> RuntimeStep:
@@ -328,6 +329,7 @@ def _snapshot(*, flow_id, tenant_id, status, level, created_at):
 
 
 def _published(flow_id: UUID):
+    snapshot_assistant_id = uuid4()
     return SimpleNamespace(
         definition_checksum="sum-1",
         definition_json={
@@ -338,7 +340,8 @@ def _published(flow_id: UUID):
                 {
                     "step_id": str(uuid4()),
                     "step_order": 1,
-                    "assistant_id": str(uuid4()),
+                    "assistant_id": str(snapshot_assistant_id),
+                    "assistant_snapshot": assistant_snapshot(snapshot_assistant_id),
                     "user_description": "Sammanfatta",
                     "input_source": "flow_input",
                     "output_mode": "pass_through",

@@ -546,6 +546,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Restore the pinned resource or republish the flow before starting another run.",
         user_action="Restore the resource or republish the flow and start a new run.",
     ),
+    FlowApiErrorCode.ASSISTANT_MODEL_PROVIDER_REQUIRED: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause="The step assistant uses a model without a provider binding.",
+        consumer_action="Select a provider-backed model for the step assistant before publishing.",
+        user_action="Select a model connected to a provider before publishing the flow.",
+    ),
     FlowApiErrorCode.ASSISTANT_SNAPSHOT_REPUBLISH_REQUIRED: _entry(
         category="Published definition",
         surfaced_through="API response and run error payload",

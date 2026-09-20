@@ -71,6 +71,7 @@ from eneo.flows.published_definition import (
     published_definition_checksum,
 )
 from eneo.main.config import get_settings
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 def build_evidence_bundle(**kwargs: Any):
@@ -105,6 +106,7 @@ def _raw_export_context() -> EvidenceExportContext:
 
 
 def _evidence_run_and_version() -> tuple[FlowRun, FlowVersion]:
+    snapshot_assistant_id = uuid4()
     now = datetime.now(timezone.utc)
     run = FlowRun(
         id=uuid4(),
@@ -126,7 +128,8 @@ def _evidence_run_and_version() -> tuple[FlowRun, FlowVersion]:
         {
             "step_id": str(uuid4()),
             "step_order": 1,
-            "assistant_id": str(uuid4()),
+            "assistant_id": str(snapshot_assistant_id),
+            "assistant_snapshot": assistant_snapshot(snapshot_assistant_id),
             "input_source": "flow_input",
             "input_type": "text",
             "output_mode": "pass_through",

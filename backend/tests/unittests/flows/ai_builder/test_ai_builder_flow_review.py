@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -72,6 +73,7 @@ from eneo.flows.infrastructure.flow_run_repo import (
     FlowStepResultMetrics,
 )
 from eneo.main.exceptions import UnauthorizedException
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 _T0 = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
 
@@ -477,6 +479,7 @@ def _service(
 
 
 def _published(flow_id: UUID, *, version: int):
+    snapshot_assistant_id = uuid4()
     step_id = uuid4()
     return SimpleNamespace(
         definition_checksum=f"sum-{version}",
@@ -488,7 +491,8 @@ def _published(flow_id: UUID, *, version: int):
                 {
                     "step_id": str(step_id),
                     "step_order": 1,
-                    "assistant_id": str(uuid4()),
+                    "assistant_id": str(snapshot_assistant_id),
+                    "assistant_snapshot": assistant_snapshot(snapshot_assistant_id),
                     "user_description": "Sammanfatta",
                     "input_source": "flow_input",
                     "output_mode": "pass_through",
@@ -2719,6 +2723,7 @@ def _failure_review_service(
     from pydantic import TypeAdapter
 
     step = _step(1)
+    step = replace(step, assistant_snapshot=assistant_snapshot(step.assistant_id))
     version = FlowVersion(
         flow_id=flow.id,
         version=1,

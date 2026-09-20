@@ -28,6 +28,7 @@ from eneo.flows.published_runtime import (
 )
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import GeneralError
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 def _step(*, input_type: str = "document", max_files: int | None = 3) -> FlowStep:
@@ -80,6 +81,7 @@ def _definition_json(*, flow: Flow, step: FlowStep) -> dict[str, object]:
                 "step_id": str(step.id),
                 "step_order": step.step_order,
                 "assistant_id": str(step.assistant_id),
+                "assistant_snapshot": assistant_snapshot(step.assistant_id),
                 "input_source": step.input_source,
                 "input_type": step.input_type,
                 "input_config": step.input_config,

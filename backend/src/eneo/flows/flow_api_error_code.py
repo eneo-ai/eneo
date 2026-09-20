@@ -69,6 +69,7 @@ class FlowApiErrorCode(str, Enum):
     DEFINITION_FLOW_ID_INVALID = "flow_definition_flow_id_invalid"
     DEFINITION_STEPS_INVALID = "flow_definition_steps_invalid"
     DEFINITION_NO_EXECUTABLE_STEPS = "flow_definition_no_executable_steps"
+    ASSISTANT_MODEL_PROVIDER_REQUIRED = "flow_assistant_model_provider_required"
     ASSISTANT_SNAPSHOT_REPUBLISH_REQUIRED = "flow_assistant_snapshot_republish_required"
     ASSISTANT_SNAPSHOT_DRIFT = "flow_assistant_snapshot_drift"
     INPUT_CONTRACT_INAPPLICABLE = "flow_input_contract_inapplicable"

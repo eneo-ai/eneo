@@ -119,6 +119,7 @@ from eneo.flows.input_binding_contract_rules import (
 )
 from eneo.flows.runtime.step_definition_parser import parse_runtime_steps
 from eneo.json_types import JsonObject
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 def _question(input_bindings: dict[str, object] | None) -> str:
@@ -7521,6 +7522,7 @@ def test_requested_section_labels_with_braces_compile_for_every_disposition(
 
 
 def test_mapped_reader_canonicalizes_authored_identity_fields_for_runtime() -> None:
+    snapshot_assistant_id = uuid4()
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Mapped source reader",
@@ -7584,7 +7586,8 @@ def test_mapped_reader_canonicalizes_authored_identity_fields_for_runtime() -> N
                 {
                     "step_id": str(uuid4()),
                     "step_order": 1,
-                    "assistant_id": str(uuid4()),
+                    "assistant_id": str(snapshot_assistant_id),
+                    "assistant_snapshot": assistant_snapshot(snapshot_assistant_id),
                     "input_source": reader.input_source.value,
                     "input_type": reader.input_type.value,
                     "output_type": reader.output_type.value,

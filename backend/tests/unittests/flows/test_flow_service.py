@@ -19,6 +19,7 @@ from eneo.flows.domain.flow_invariant_exceptions import (
     FlowPersistedIdMissingError,
     FlowPublishedDefinitionInvalidError,
 )
+from eneo.flows.domain.flow_step_validation import FlowStepValidationError
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
@@ -455,6 +456,71 @@ async def test_publish_flow_creates_version_and_updates_published_version(user):
     version_repo.create.assert_awaited_once()
     flow_repo.update.assert_awaited_once()
     assert flow_repo.update.await_args.kwargs["expected_revision"] == 7
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "binding", ["missing", "missing_id", "missing_type", "provider_backed"]
+)
+async def test_publish_flow_requires_provider_binding(user, binding):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    step = _step()
+    flow = Flow(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Publishable flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[step],
+    )
+    flow_repo.get.return_value = flow
+    flow_repo.allocate_next_version.return_value = 1
+    flow_repo.update.return_value = flow.model_copy(update={"published_version": 1})
+    assistant, _ = await service.assistant_service.get_assistant(step.assistant_id)
+    assistant.completion_model = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=None,
+        can_access=True,
+        provider_id=uuid4() if binding in {"missing_type", "provider_backed"} else None,
+        provider_type="openai"
+        if binding in {"missing_id", "provider_backed"}
+        else None,
+        get_model_route=lambda: "openai/model-a",
+        security_classification=None,
+    )
+    service.assistant_service.get_assistant.side_effect = None
+    service.assistant_service.get_assistant.return_value = (assistant, [])
+
+    if binding == "provider_backed":
+        result = await service.publish_flow(flow_id=flow.id)
+        assert result.published_version == 1
+        version_repo.create.assert_awaited_once()
+        snapshot = version_repo.create.await_args.kwargs["definition_json"]["steps"][0][
+            "assistant_snapshot"
+        ]
+        assert snapshot["schema_version"] == 2
+        assert snapshot["completion_model"]["provider_id"] == str(
+            assistant.completion_model.provider_id
+        )
+    else:
+        with pytest.raises(FlowStepValidationError) as caught:
+            await service.publish_flow(flow_id=flow.id)
+        assert caught.value.code == "flow_assistant_model_provider_required"
+        assert caught.value.step_order == step.step_order
+        assert "Select a provider-backed model" in str(caught.value)
+        version_repo.create.assert_not_awaited()
+        flow_repo.lock_publication_pointer.assert_not_awaited()
+        flow_repo.allocate_next_version.assert_not_awaited()
+        flow_repo.update.assert_not_awaited()
 
 
 @pytest.mark.asyncio

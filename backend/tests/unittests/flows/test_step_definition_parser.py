@@ -20,6 +20,9 @@ def _step_snapshot(**overrides: object) -> dict[str, object]:
         "output_mode": "pass_through",
     }
     snapshot.update(overrides)
+    snapshot.setdefault(
+        "assistant_snapshot", _assistant_snapshot(snapshot["assistant_id"])
+    )
     return snapshot
 
 
@@ -749,10 +752,14 @@ def test_parse_runtime_steps_rejects_snapshot_for_another_assistant() -> None:
         )
 
 
-def test_parse_runtime_steps_preserves_legacy_definition_without_snapshot() -> None:
-    steps = parse_runtime_steps(_definition(_step_snapshot()))
+def test_parse_runtime_steps_requires_assistant_snapshot() -> None:
+    step = _step_snapshot()
+    step.pop("assistant_snapshot")
 
-    assert steps[0].assistant_snapshot is None
+    with pytest.raises(BadRequestException) as caught:
+        parse_runtime_steps(_definition(step))
+
+    assert caught.value.code == "flow_assistant_snapshot_republish_required"
 
 
 def test_parse_runtime_steps_defaults_typed_fields():

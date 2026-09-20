@@ -38,6 +38,7 @@ from eneo.flows.runtime.step_input_resolution import (
 )
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.exceptions import TypedIOValidationException
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 def _result(
@@ -213,13 +214,15 @@ def _depth_four_runtime_steps(
     assert isinstance(properties, dict)
     documents_contract = properties["documents"]
     assert isinstance(documents_contract, dict)
+    assistant_id = uuid4()
     return parse_runtime_steps(
         {
             "steps": [
                 {
                     "step_id": str(uuid4()),
                     "step_order": 1,
-                    "assistant_id": str(uuid4()),
+                    "assistant_id": str(assistant_id),
+                    "assistant_snapshot": assistant_snapshot(assistant_id),
                     "plan_step_ref": "step_1",
                     "input_source": "flow_input",
                     "input_type": "text",
@@ -230,7 +233,8 @@ def _depth_four_runtime_steps(
                 {
                     "step_id": str(uuid4()),
                     "step_order": 2,
-                    "assistant_id": str(uuid4()),
+                    "assistant_id": str(assistant_id),
+                    "assistant_snapshot": assistant_snapshot(assistant_id),
                     "input_source": "previous_step",
                     "input_type": "json",
                     "input_bindings": {
@@ -254,7 +258,8 @@ def _depth_four_runtime_steps(
                 {
                     "step_id": str(uuid4()),
                     "step_order": 3,
-                    "assistant_id": str(uuid4()),
+                    "assistant_id": str(assistant_id),
+                    "assistant_snapshot": assistant_snapshot(assistant_id),
                     "input_source": "previous_step",
                     "input_type": "text",
                     "input_bindings": {
