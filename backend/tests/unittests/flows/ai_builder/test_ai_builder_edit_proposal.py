@@ -4538,6 +4538,56 @@ def _saved_step_consumer_fixture(consumer_kind):
 
 
 @pytest.mark.asyncio
+async def test_saved_terminal_step_can_replace_nested_contract_without_consumers():
+    flow, snapshots, catalog, context, prior = _saved_step_consumer_fixture(
+        "projection"
+    )
+    assert prior is not None
+    flow.steps = flow.steps[:1]
+    prior = prior.model_copy(update={"steps": prior.steps[:1]})
+    before = prior.model_dump(mode="json")
+    assert context.preserve_output_contract is False
+
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Return the summary directly.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Result summary",
+                            "required": True,
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    contract = result.compiled.content.spec.steps[0].output_contract
+    assert contract is not None
+    assert contract["properties"] == {
+        "summary": {
+            "type": "string",
+            "title": "Summary",
+            "description": "Result summary",
+        }
+    }
+    assert contract["required"] == ["summary"]
+    assert prior.model_dump(mode="json") == before
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("consumer_kind", "target_patch", "feedback_fragment"),
     [
@@ -4552,7 +4602,7 @@ def _saved_step_consumer_fixture(consumer_kind):
                     }
                 ]
             },
-            "saved nested",
+            "report.summary",
         ),
         (
             "projection",
@@ -4585,7 +4635,7 @@ def _saved_step_consumer_fixture(consumer_kind):
                     }
                 ]
             },
-            "saved nested",
+            "object",
         ),
         (
             "array",
@@ -4621,7 +4671,7 @@ def _saved_step_consumer_fixture(consumer_kind):
                     }
                 ]
             },
-            "saved nested",
+            "report",
         ),
         (
             "output_config",
@@ -4634,7 +4684,7 @@ def _saved_step_consumer_fixture(consumer_kind):
                     }
                 ]
             },
-            "saved nested",
+            "report",
         ),
     ],
 )

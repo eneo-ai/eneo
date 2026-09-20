@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
@@ -41,9 +41,6 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     review_edit_changes_of_the_model,
     validate_review_edit_effect,
     validate_review_edit_proposal,
-)
-from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
-    resolve_schema_properties,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
@@ -161,6 +158,7 @@ async def process_edit_arguments(
     plan_edit_context: ResolvedAIBuilderEditContext | None = None,
     prior_spec_for_revision: FlowDraftSpecCore | None = None,
     compile_context: CreateCompileContext | None = None,
+    baseline_validation: SpecValidationResult | None = None,
 ) -> PreparationOutcome:
     review_scope = review_edit_scope_for_turn(conversation)
     # Everything below reads the conversation to check the model's proposal
@@ -363,6 +361,7 @@ async def process_edit_arguments(
             target_ref=plan_edit_context.target_existing_step_ref,
             prior_spec=prior_spec_for_revision,
             proposed_spec=compiled_spec,
+            baseline_validation=baseline_validation,
         )
         if consumer_failure is not None:
             return consumer_failure
@@ -550,6 +549,7 @@ def _validate_saved_step_consumers(
     target_ref: str | None,
     prior_spec: FlowDraftSpecCore,
     proposed_spec: FlowDraftSpecCore,
+    baseline_validation: SpecValidationResult | None,
 ) -> CorrectableFailure | None:
     if not any(
         step.kind == "modify"
@@ -564,36 +564,6 @@ def _validate_saved_step_consumers(
     )
     if proposed_target is None:
         return None
-    prior_target = next(
-        step for step in prior_spec.steps if step.existing_step_ref == target_ref
-    )
-    if (
-        prior_target.output_contract is not None
-        and proposed_target.output_contract != prior_target.output_contract
-        and any(
-            step.kind == "modify"
-            and step.existing_step_ref == target_ref
-            and step.output_fields
-            and all(
-                not field.fields and not field.item_fields
-                for field in step.output_fields
-            )
-            for step in proposal.steps
-        )
-        and any(
-            _contains_object_properties(child)
-            for child in resolve_schema_properties(
-                prior_target.output_contract
-            ).values()
-        )
-    ):
-        return CorrectableFailure(
-            feedback=f"Step `{target_ref}` ({prior_target.name}) has a saved nested "
-            "output contract that these output_fields do not preserve. Omit "
-            "output_fields to keep the saved contract.",
-            kind="validation",
-            codes=frozenset({"output_contract_changed"}),
-        )
     # Keep entries carry no model contribution. Validate the target against the
     # prior consumers without attributing compiler housekeeping to the model.
     target_effect = prior_spec.model_copy(
@@ -604,7 +574,9 @@ def _validate_saved_step_consumers(
             ],
         }
     )
-    prior_errors = set(validate_spec(prior_spec).errors)
+    if baseline_validation is None:
+        baseline_validation = validate_spec(prior_spec)
+    prior_errors = set(baseline_validation.errors)
     errors = [
         error
         for error in validate_spec(target_effect).errors
@@ -617,6 +589,9 @@ def _validate_saved_step_consumers(
             kind="validation",
             codes=frozenset(error.code for error in errors),
         )
+    prior_target = next(
+        step for step in prior_spec.steps if step.existing_step_ref == target_ref
+    )
     if (
         prior_target.output_contract is None
         or proposed_target.output_contract is not None
@@ -652,12 +627,3 @@ def _validate_saved_step_consumers(
                 codes=frozenset({"consumer_requires_output_contract"}),
             )
     return None
-
-
-def _contains_object_properties(schema: object) -> bool:
-    if not isinstance(schema, dict):
-        return False
-    node = cast(dict[str, Any], schema)
-    return bool(resolve_schema_properties(node)) or _contains_object_properties(
-        node.get("items")
-    )

@@ -4515,6 +4515,8 @@
   "ai_builder_published_flow_title": "Flow is published",
   "ai_builder_published_flow_unpublish": "Unpublish and apply",
   "ai_builder_quality_warnings": "Quality checks",
+  "ai_builder_flow_notes": "Good to know",
+  "ai_builder_flow_note_json_output_no_contract": "This step has had no output contract since before this change; it does not affect the change.",
   "ai_builder_reference_material": "Reference material",
   "ai_builder_reference_material_desc": "Files attached to this AI Builder session that may influence the current plan.",
   "ai_builder_question_confirm": "Confirm answer",

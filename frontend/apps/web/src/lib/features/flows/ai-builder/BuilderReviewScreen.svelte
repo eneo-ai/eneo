@@ -10,6 +10,7 @@
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import IconChevronDown from "@lucide/svelte/icons/chevron-down";
   import IconAlertTriangle from "@lucide/svelte/icons/triangle-alert";
+  import IconInfo from "@lucide/svelte/icons/info";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import BuilderApproveDialog, { type ApprovePhase } from "./BuilderApproveDialog.svelte";
   import BuilderChangeRequest from "./BuilderChangeRequest.svelte";
@@ -555,7 +556,19 @@
     }
     return entries;
   });
-  const planLintWarnings = $derived(plan?.proposal.lint_warnings ?? []);
+  // The critic's warnings ask for a change; INFO entries are facts about the
+  // flow as it already was (a pre-existing gap on a step this edit did not
+  // touch) and must read as information, never as work to do.
+  const planLintWarnings = $derived(
+    (plan?.proposal.lint_warnings ?? []).filter((warning) => warning.severity !== "info")
+  );
+  const planFlowNotes = $derived(
+    (plan?.proposal.lint_warnings ?? []).filter((warning) => warning.severity === "info")
+  );
+  const flowNoteText = (note: { code: string; message: string }): string =>
+    note.code === "json_output_no_contract"
+      ? m.ai_builder_flow_note_json_output_no_contract()
+      : note.message;
 
   // ---- Errors, conflicts, prerequisites ------------------------------------
 
@@ -1342,6 +1355,28 @@
                       <span class="text-warning-stronger/60 mx-1" aria-hidden="true">·</span>
                     {/if}
                     {warning.message}
+                  </li>
+                {/each}
+              </ul>
+            </section>
+          {/if}
+
+          {#if planFlowNotes.length > 0}
+            <section class="border-dimmer border-t px-[1.375rem] py-4 max-sm:px-3.5">
+              <h3 class="text-secondary flex items-center gap-1.5 text-[0.84375rem] font-bold">
+                <IconInfo class="size-3.5" aria-hidden="true" />
+                {m.ai_builder_flow_notes()}
+              </h3>
+              <ul class="mt-2 flex list-none flex-col gap-1.5 p-0">
+                {#each planFlowNotes as note (`${note.step_ref ?? "flow"}-${note.code}-${note.message}`)}
+                  <li class="text-secondary rounded-md px-3 py-2 text-[0.8125rem] leading-relaxed">
+                    {#if note.step_ref}
+                      <span class="text-primary font-semibold"
+                        >{executionStepLabel(note.step_ref)}</span
+                      >
+                      <span class="text-secondary/60 mx-1" aria-hidden="true">·</span>
+                    {/if}
+                    {flowNoteText(note)}
                   </li>
                 {/each}
               </ul>

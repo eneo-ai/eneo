@@ -90,6 +90,7 @@ from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolSchema,
     build_propose_flow_tool_schema,
 )
+from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     CheckpointIntent,
@@ -194,9 +195,19 @@ async def test_scoped_instruction_edit_keeps_unrelated_saved_quality_warning(
         )
 
     store = AsyncMock(side_effect=store_candidate)
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
-        new=store,
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+            new=store,
+        ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_edit_proposal.validate_spec",
+            wraps=validate_spec,
+        ) as validate,
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.validate_spec",
+            new=validate,
+        ),
     ):
         result = await config.process_tool_invocation(
             _make_retry_invocation(
@@ -207,6 +218,7 @@ async def test_scoped_instruction_edit_keeps_unrelated_saved_quality_warning(
         )
 
     assert isinstance(result, ProposalCompleted), result
+    assert sum(call.args[0] is prior for call in validate.call_args_list) == 1
     store.assert_awaited_once()
     compiled = store.await_args.kwargs["compiled"]
     assert any(

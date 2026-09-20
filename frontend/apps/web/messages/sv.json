@@ -4515,6 +4515,8 @@
   "ai_builder_published_flow_title": "Flödet är publicerat",
   "ai_builder_published_flow_unpublish": "Avpublicera och tillämpa",
   "ai_builder_quality_warnings": "Kvalitetskontroll",
+  "ai_builder_flow_notes": "Att känna till",
+  "ai_builder_flow_note_json_output_no_contract": "Steget har inget utdatakontrakt sedan tidigare. Det påverkar inte den här ändringen.",
   "ai_builder_question_confirm": "Bekräfta svaret",
   "ai_builder_question_field_add": "Lägg till fält",
   "ai_builder_question_field_label": "Rubrik",

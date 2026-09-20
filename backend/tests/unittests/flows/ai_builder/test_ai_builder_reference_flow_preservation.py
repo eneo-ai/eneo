@@ -306,52 +306,6 @@ async def test_two_sequential_focused_edits_keep_the_other_fifteen_steps_byte_fo
     assert _bytes(prior) == original
 
 
-async def test_flat_output_fields_cannot_replace_a_saved_nested_contract():
-    prior = _saved_spec()
-    flow = _flow(prior)
-    original = _bytes(prior)
-    result = await _propose(
-        flow=flow,
-        context=_saved_step_context(flow, 3),
-        prior=prior,
-        steps=[
-            {
-                "kind": "modify",
-                "existing_step_ref": "existing_step_3",
-                "assistant_spec": {
-                    "instructions": prior.steps[2].assistant_spec.instructions
-                    + " Ange källhänvisning per uppgift i fältet kallstod."
-                },
-                "output_fields": [
-                    {
-                        "description": description,
-                        "field_type": field_type,
-                        "name": name,
-                        "required": True,
-                    }
-                    for name, field_type, description in (
-                        ("gemensamt", "array", "Gemensamma villkor för genomförandet"),
-                        ("underlag", "object", "Sakuppgifter per livsområde"),
-                        ("oklarheter", "array", "Frågor att klargöra"),
-                        ("utanfor_mallen", "array", "Behov utanför de åtta rubrikerna"),
-                        (
-                            "grunduppgifter_kallstod",
-                            "array",
-                            "Sakuppgifter till grunduppgifter",
-                        ),
-                    )
-                ],
-            }
-        ],
-    )
-
-    assert isinstance(result, CorrectableFailure)
-    assert result.codes == frozenset({"output_contract_changed"})
-    assert "existing_step_3" in result.feedback
-    assert "nested" in result.feedback
-    assert _bytes(prior) == original
-
-
 @pytest.mark.parametrize("violation", ["remove", "add", "outside_scope"])
 async def test_a_step_scoped_proposal_may_not_remove_add_or_touch_other_steps(
     violation,

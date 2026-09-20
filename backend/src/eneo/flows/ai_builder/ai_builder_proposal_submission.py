@@ -473,6 +473,13 @@ class ProposalSubmissionOwner:
             )
         if admitted_arguments is not invocation.arguments:
             invocation = replace(invocation, arguments=admitted_arguments)
+        baseline_validation = (
+            validate_spec(prior_spec_for_revision)
+            if prior_spec_for_revision is not None
+            and plan_edit_context is not None
+            and plan_edit_context.scope == "step"
+            else None
+        )
         if target_kind == TargetKind.CREATE:
             if planning_state.architecture_commit is None:
                 return architecture_failure_outcome(
@@ -513,6 +520,7 @@ class ProposalSubmissionOwner:
                 plan_edit_context=plan_edit_context,
                 prior_spec_for_revision=prior_spec_for_revision,
                 compile_context=compile_context,
+                baseline_validation=baseline_validation,
             )
         if isinstance(result, ProposalAnswer):
             return await self._persist_invocation_answer(
@@ -534,13 +542,7 @@ class ProposalSubmissionOwner:
             planning_state=planning_state,
             compile_context=compile_context,
             plan_edit_context=plan_edit_context,
-            baseline_validation=(
-                validate_spec(prior_spec_for_revision)
-                if prior_spec_for_revision is not None
-                and plan_edit_context is not None
-                and plan_edit_context.scope == "step"
-                else None
-            ),
+            baseline_validation=baseline_validation,
         )
 
     async def _persist_invocation_answer(

@@ -366,6 +366,69 @@ describe("BuilderReviewScreen plan document", () => {
     expect(screen.getByText(m.ai_builder_review_checkpoint_note({ count: 1 }))).toBeTruthy();
   });
 
+  it("presents informational lint as notes, not as quality warnings to fix", () => {
+    // A pre-existing gap on a step this edit did not touch is a fact about
+    // the flow; it must not count as a quality warning or ask for work.
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        ...makeCreateState(),
+        currentPlan: makePlan({
+          proposal: makeProposal({
+            lint_warnings: [
+              {
+                step_ref: "step_a",
+                code: "json_output_no_contract",
+                message: "Step has output_type 'json' but no output_contract. Set output_fields.",
+                field_name: null,
+                severity: "info"
+              }
+            ]
+          })
+        })
+      }
+    });
+
+    expect(screen.queryByText(m.ai_builder_quality_warnings())).toBeNull();
+    expect(screen.getByText(m.ai_builder_flow_notes())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_flow_note_json_output_no_contract())).toBeTruthy();
+    expect(screen.queryByText(/Set output_fields/)).toBeNull();
+  });
+
+  it("counts only actionable warnings in the quality section", () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        ...makeCreateState(),
+        currentPlan: makePlan({
+          proposal: makeProposal({
+            lint_warnings: [
+              {
+                step_ref: "step_a",
+                code: "citations_disabled",
+                message: "Källhänvisningar inaktiverades.",
+                field_name: null,
+                severity: "warning"
+              },
+              {
+                step_ref: "step_a",
+                code: "json_output_no_contract",
+                message: "Set output_fields.",
+                field_name: null,
+                severity: "info"
+              }
+            ]
+          })
+        })
+      }
+    });
+
+    expect(screen.getByText(m.ai_builder_quality_warnings())).toBeTruthy();
+    expect(screen.getByText("Källhänvisningar inaktiverades.")).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_flow_notes())).toBeTruthy();
+    expect(screen.queryByText("Set output_fields.")).toBeNull();
+  });
+
   it("names the step a quality warning is about by its number and name", () => {
     // The critic refers to steps by their plan reference; the reader knows
     // them by the numbered names on the diagram. An unknown reference still
