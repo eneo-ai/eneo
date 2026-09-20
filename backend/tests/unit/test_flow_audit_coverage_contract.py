@@ -382,6 +382,18 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             ),
         }.items()
     },
+    "approve_and_continue_flow_run_review_checkpoint": _required_transaction(
+        (
+            ActionType.FLOW_RUN_REVIEW_CHECKPOINT_APPROVED,
+            ActionType.FLOW_RUN_REVIEW_CHECKPOINT_RESUMED,
+        ),
+        owner="FlowRunReviewCheckpointRepository.approve_and_resume_review_checkpoint",
+        metadata_keys=(*_RUN_METADATA, "checkpoint_id", "step_id", "source"),
+        idempotency=(
+            "the resume idempotency key replays the accepted continuation; "
+            "a folded correction set also audits FLOW_RUN_TRANSCRIPT_CORRECTIONS_APPLIED"
+        ),
+    ),
     "generate_flow_run_artifact_signed_url": _required_read(
         ActionType.FILE_SIGNED_URL_MINTED,
         owner="flow_run_steps_router.generate_flow_run_artifact_signed_url",
@@ -409,6 +421,16 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
         metadata_keys=("flow_id", "run_id", "evidence_detail"),
     ),
     "list_flow_run_transcript_corrections": _required_read(
+        ActionType.FLOW_EVIDENCE_VIEWED,
+        owner="flow_trace_audit.log_flow_trace_audit_or_raise",
+        metadata_keys=("flow_id", "run_id", "evidence_detail"),
+    ),
+    "list_flow_run_transcript_correction_revisions": _required_read(
+        ActionType.FLOW_EVIDENCE_VIEWED,
+        owner="flow_trace_audit.log_flow_trace_audit_or_raise",
+        metadata_keys=("flow_id", "run_id", "evidence_detail"),
+    ),
+    "list_flow_run_review_checkpoint_edits": _required_read(
         ActionType.FLOW_EVIDENCE_VIEWED,
         owner="flow_trace_audit.log_flow_trace_audit_or_raise",
         metadata_keys=("flow_id", "run_id", "evidence_detail"),
