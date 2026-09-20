@@ -350,6 +350,7 @@ async def test_text_download_prefers_exact_legacy_text_over_object_original() ->
         media_type="application/pdf",
         access_class=ContentAccessClass.PRIVATE_RESOURCE,
         state=ContentState.AVAILABLE,
+        storage_kind=StorageKind.POSTGRES_INLINE,
     )
 
     class Session:

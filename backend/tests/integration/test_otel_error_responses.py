@@ -1,4 +1,4 @@
-"""Integration tests for X-Trace-Id and CORS exposure on error / non-200 responses.
+"""Integration tests for trace headers and CORS on successful and error responses.
 
 Spec acceptance criteria this covers:
     "X-Trace-Id is included in HTTP responses and exposed via
@@ -21,6 +21,16 @@ from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import GeneralError
 
 
+@pytest.fixture
+async def allowed_origin(db_container, admin_user):
+    origin = "http://example.com"
+    async with db_container() as container:
+        await container.allowed_origin_repo().add_origin(
+            origin=origin, tenant_id=admin_user.tenant_id
+        )
+    return origin
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_x_trace_id_present_on_404(client):
@@ -37,18 +47,20 @@ async def test_x_trace_id_present_on_404(client):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_cors_exposes_both_trace_headers(client, admin_user_api_key):
+async def test_cors_exposes_both_trace_headers(
+    client, admin_user_api_key, allowed_origin
+):
     """Access-Control-Expose-Headers must list both X-Trace-Id and the legacy
     X-Correlation-ID alias so browser-side JS can read them on every response."""
     response = await client.get(
         "/api/v1/users/me/",
         headers={
             "X-API-Key": admin_user_api_key.key,
-            # CORSMiddleware only emits CORS headers when an Origin is present.
-            "Origin": "http://example.com",
+            "Origin": allowed_origin,
         },
     )
     assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == allowed_origin
 
     expose = response.headers.get("access-control-expose-headers", "").lower()
     assert "x-trace-id" in expose, (
@@ -84,7 +96,8 @@ async def test_cors_exposes_positive_package_omission_header(app):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_500_exposes_trace_headers(app):
+@pytest.mark.parametrize("same_origin", [False, True])
+async def test_500_exposes_trace_headers(app, allowed_origin, same_origin):
     """An unhandled 500 retains the typed platform envelope, trace headers,
     support identity, and manual CORS behavior from ``server.main``.
 
@@ -100,13 +113,15 @@ async def test_500_exposes_trace_headers(app):
         raise RuntimeError("forced error for integration test")
 
     transport = ASGITransport(app=app, raise_app_exceptions=False)
+    request_origin = "http://test.local" if same_origin else allowed_origin
     async with AsyncClient(transport=transport, base_url="http://test.local") as client:
         response = await client.get(
             "/api/v1/_test_force_500",
-            headers={"Origin": "http://example.com"},
+            headers={"Origin": request_origin},
         )
 
     assert response.status_code == 500
+    assert response.headers["access-control-allow-origin"] == request_origin
     error = GeneralError.model_validate(response.json())
     assert error.code == "internal_error"
     assert error.eneo_error_code is ErrorCodes.INTERNAL_SERVER_ERROR

@@ -345,6 +345,30 @@ async def _force_gc_before_loop_closes():
     gc.collect()
 
 
+@pytest.fixture(autouse=True)
+def settings_singleton_restored(override_settings_for_session):
+    """Fail the test that leaves a replaced Settings object installed.
+
+    Tests may swap the singleton with set_settings(model_copy(...)) as long as
+    they reinstall the original object afterwards. Leaving a copy behind makes
+    every later test in this worker that mutates ``test_settings`` silently
+    ineffective, which surfaced as an order-dependent federation failure.
+
+    ``override_settings_for_session`` yields the object it installed. Isolated
+    migration modules override that fixture with a no-op that yields nothing,
+    so the check does not apply to them.
+    """
+    from eneo.main.config import get_settings
+
+    installed = override_settings_for_session
+    yield
+    if installed is not None:
+        assert get_settings() is installed, (
+            "This test replaced the settings singleton and did not reinstall the "
+            "original object; restore it with set_settings(<original>)."
+        )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def override_settings_for_session(test_settings: Settings):
     """
@@ -385,7 +409,7 @@ def override_settings_for_session(test_settings: Settings):
     print(f"  - Testing mode: {test_settings.testing}")
     print(f"  - API prefix: {test_settings.api_prefix}")
 
-    yield
+    yield test_settings
 
     # Cleanup after all tests
     reset_settings()
@@ -426,7 +450,7 @@ async def setup_database(test_settings: Settings):
         quota_limit=1000000,
         user_name="test_user",
         user_email="test@example.com",
-        user_password="test_password",
+        user_password="IntegrationPass123!",
     )
 
     # Create required feature flags for initial setup
@@ -552,7 +576,7 @@ async def cleanup_database(
         quota_limit=1000000,
         user_name="test_user",
         user_email="test@example.com",
-        user_password="password",
+        user_password="IntegrationPass123!",
     )
 
     # Add using_templates feature flag (not handled by add_tenant_user)
@@ -978,7 +1002,11 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
                 datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
             ),
         )
-        jwt_creds = JWTCreds(sub=user.email, username=user.username)
+        jwt_creds = JWTCreds(
+            sub=user.email,
+            username=user.username,
+            credential_version=getattr(user, "credential_version", 0),
+        )
         payload = {
             **JWTPayload(
                 **jwt_meta.model_dump(), **jwt_creds.model_dump()

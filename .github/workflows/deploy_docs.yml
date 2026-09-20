@@ -1,64 +1,126 @@
 name: Deploy Docs to GitHub Pages
 
+# Publication is owned by develop. workflow_run and schedule read this workflow
+# from the default branch, including for release lines with older workflows.
 on:
   push:
-    branches:
-      - develop
+    branches: [develop]
     paths:
-      - 'frontend/apps/docs-site/**'
-      - '.github/workflows/deploy_docs.yml'
+      - "frontend/apps/docs-site/**"
+      - "frontend/packages/whats-new/**"
+      - "frontend/bun.lock"
+      - "frontend/package.json"
+      - ".github/workflows/deploy_docs.yml"
   pull_request:
     paths:
-      - 'frontend/apps/docs-site/**'
-      - '.github/workflows/deploy_docs.yml'
+      - "frontend/apps/docs-site/**"
+      - "frontend/packages/whats-new/**"
+      - "frontend/bun.lock"
+      - "frontend/package.json"
+      - ".github/workflows/deploy_docs.yml"
+  workflow_run:
+    workflows: ["CI", "Build and Push Docker Images"]
+    types: [completed]
+  # Reconcile tags/direct pushes even if their old workflows did not run.
+  # Unchanged inputs skip dependency installation and builds.
+  schedule:
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('docs-pr-{0}', github.event.number) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOCS_ARCHIVED_LINES: 3
 
 jobs:
   build:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.plan.outputs.changed }}
     steps:
-      - name: Checkout repository
+      - name: Checkout trusted publication code (PR checks use their merge commit)
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || 'develop' }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test version resolution and isolated publication
+        working-directory: frontend/apps/docs-site
+        run: node --test --test-concurrency=1 scripts/version-publication.test.mjs
+
+      - name: Compare publication inputs
+        id: plan
+        working-directory: frontend/apps/docs-site
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          node scripts/resolve-versions.mjs --out "$RUNNER_TEMP/docs-plan.json"
+          changed=true
+          if [[ "$EVENT_NAME" != pull_request && "$EVENT_NAME" != workflow_dispatch ]]; then
+            # Failure to read the old manifest causes a rebuild, never a false skip.
+            if curl --fail --silent --show-error --max-time 20 --output "$RUNNER_TEMP/docs-published.json" https://docs.eneo.ai/versions.json; then
+              if node --input-type=module - "$RUNNER_TEMP/docs-plan.json" "$RUNNER_TEMP/docs-published.json" <<'JS'
+          import fs from 'node:fs';
+          const [plan, published] = process.argv.slice(2).map(p => JSON.parse(fs.readFileSync(p, 'utf8')));
+          process.exit(plan.sourceDigest && plan.sourceDigest === published.sourceDigest ? 0 : 1);
+          JS
+              then changed=false; fi
+            fi
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
       - name: Setup Bun
+        if: steps.plan.outputs.changed == 'true'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - name: Install dependencies
-        working-directory: ./frontend
+        if: steps.plan.outputs.changed == 'true'
+        working-directory: frontend
         run: bun install --frozen-lockfile
 
       # The published guides carry copy-pasteable client listings, and the build
       # writes the Markdown mirror those listings must survive. Prove both before
       # the site ships.
       - name: Test docs-site build scripts
-        working-directory: ./frontend/apps/docs-site
+        if: steps.plan.outputs.changed == 'true'
+        working-directory: frontend/apps/docs-site
         run: bun run test
 
-      - name: Build docs site
-        working-directory: ./frontend/apps/docs-site
-        run: bun run build
+      - name: Build complete versioned documentation
+        if: steps.plan.outputs.changed == 'true'
+        working-directory: frontend/apps/docs-site
+        run: node scripts/build-versions.mjs
 
       - name: Setup Pages
-        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        if: github.event_name != 'pull_request' && steps.plan.outputs.changed == 'true'
         uses: actions/configure-pages@v5
 
-      - name: Upload artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+      - name: Upload complete artifact
+        if: github.event_name != 'pull_request' && steps.plan.outputs.changed == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./frontend/apps/docs-site/out
+          path: frontend/apps/docs-site/site
 
   deploy:
-    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    if: github.event_name != 'pull_request' && needs.build.outputs.changed == 'true'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

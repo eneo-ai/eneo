@@ -42,7 +42,7 @@ therefore had to be coordinated in several places.
 
 Current code gives each concern one owner. File and Icon keep the product
 meaning and usage. Object content owns durable bytes, SHA-256 integrity, exact
-size, lifecycle, and physical location. **Admin > Storage** owns the shared
+size, lifecycle, and physical location. **Admin > File storage** owns the shared
 upload limits and placement choice, so administrators can change them without
 editing scattered environment settings and restarting Eneo.
 
@@ -524,7 +524,7 @@ object storage is normal; the status command and worker log explain those states
 
 </Steps>
 
-For `waiting_for_object_store`, select **PostgreSQL inline** in **Admin > Storage**.
+For `waiting_for_object_store`, select **PostgreSQL inline** in **Admin > File storage**.
 Selecting inline also changes the
 target for eligible new uploads and may lead to the capacity decision above.
 Keep inline selected until the campaign is `complete`; changing the target

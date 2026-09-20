@@ -8,7 +8,7 @@
 
 ## When to Use This Guide
 
-This guide applies when `FEDERATION_ENABLED=true`. Use this mode if:
+This guide applies when `FEDERATION_ENABLED=true` (`FEDERATION_PER_TENANT_ENABLED` is a deprecated alias). Use this mode if:
 - **Multi-tenant:** Each tenant needs their own IdP (Entra ID, Okta, Auth0, etc.)
 - **Single-tenant with API management:** You want to manage OIDC via API instead of environment variables (changes take effect without restart)
 
@@ -50,7 +50,7 @@ Terminology
    ```
 
 2. **Register redirect URI with the IdP** (must match `canonical_public_origin`):  
-   `https://examplea.eneo.local/auth/callback`
+   `https://examplea.eneo.local/login/callback`
 
 3. **Smoke test** the configuration (dry run; no user interaction):
    ```bash

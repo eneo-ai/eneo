@@ -4,7 +4,7 @@ import hmac
 import json
 import re
 import time
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
@@ -247,6 +247,34 @@ def parse_file_reference_url(url: str) -> tuple[UUID, str] | None:
     except ValueError:
         return None
     return file_id, tokens[0]
+
+
+_REFERENCE_TOKEN = re.compile(
+    r"(?P<prefix>/original/download/?\?(?:[^\s\"'<>]*?&)?token=)"
+    r"[A-Za-z0-9_\-=.]+"
+)
+REDACTED_TOKEN = "REDACTED"
+
+
+def redact_reference_tokens(value: object) -> object:
+    """Replace the signed token in every reference URL found in ``value``.
+
+    Strings are scanned for original-download links; dicts and lists are
+    walked; other values pass through untouched. Applied to tool-call
+    arguments and results before they are persisted or shown, so the
+    bearer credential lives only in the request that used it. The URL keeps
+    its shape (a placeholder token remains) so later readers can still tell
+    a reference apart from a web link.
+    """
+    if isinstance(value, str):
+        return _REFERENCE_TOKEN.sub(rf"\g<prefix>{REDACTED_TOKEN}", value)
+    if isinstance(value, dict):
+        mapping = cast(dict[object, object], value)
+        return {key: redact_reference_tokens(item) for key, item in mapping.items()}
+    if isinstance(value, list):
+        entries = cast(list[object], value)
+        return [redact_reference_tokens(item) for item in entries]
+    return value
 
 
 def looks_like_reference_url(url: str) -> bool:

@@ -391,17 +391,14 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
     filepath.parent.mkdir(parents=True, exist_ok=True)
     filepath.write_bytes(b"replacement")
 
-    phase_started_at: datetime | None = None
-    phase_finished = asyncio.Event()
-    allow_task_to_finish = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    phase_started = asyncio.Event()
+    allow_sync_phase_to_finish = threading.Event()
     allow_embedding_to_finish = asyncio.Event()
 
     def stall_sync_phase() -> None:
-        nonlocal phase_started_at
-        phase_started_at = datetime.now(timezone.utc)
-        release = threading.Event()
-        threading.Timer(0.25, release.set).start()
-        assert release.wait(timeout=2)
+        loop.call_soon_threadsafe(phase_started.set)
+        assert allow_sync_phase_to_finish.wait(timeout=10)
 
     class PhaseExtractor:
         def extract(
@@ -422,10 +419,8 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
 
     class Embeddings:
         async def get_embeddings(self, *, model, chunks):
-            nonlocal phase_started_at
             if stalled_phase == "embedding":
-                phase_started_at = datetime.now(timezone.utc)
-                phase_finished.set()
+                phase_started.set()
                 await allow_embedding_to_finish.wait()
             result = ChunkEmbeddingList()
             result.add(chunks, [[0.1, 0.2, 0.3] for _ in chunks])
@@ -453,8 +448,6 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
             ),
             embedding_model=object(),
         )
-        phase_finished.set()
-        await allow_task_to_finish.wait()
         return SimpleNamespace(id=uuid4())
 
     container = _worker_container(user=user, tenant=tenant)
@@ -494,15 +487,18 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
         )
     )
     try:
-        await asyncio.wait_for(phase_finished.wait(), timeout=5)
-        assert phase_started_at is not None
-        if stalled_phase == "embedding":
-            await asyncio.sleep(0.15)
-        assert await _job_updated_at(job_id) > phase_started_at
+        await asyncio.wait_for(phase_started.wait(), timeout=5)
+        # Keep the selected phase active until a committed heartbeat is visible.
+        # Compare database timestamps instead of assuming runner clock alignment
+        # or that a heartbeat can finish within a fixed sleep under CI load.
+        async with asyncio.timeout(5):
+            initial_updated_at = await _job_updated_at(job_id)
+            while await _job_updated_at(job_id) <= initial_updated_at:
+                await asyncio.sleep(0.02)
     finally:
+        allow_sync_phase_to_finish.set()
         allow_embedding_to_finish.set()
-        allow_task_to_finish.set()
-        await task
+        await asyncio.wait_for(task, timeout=5)
 
 
 async def test_heartbeat_recovers_after_one_failed_database_update(

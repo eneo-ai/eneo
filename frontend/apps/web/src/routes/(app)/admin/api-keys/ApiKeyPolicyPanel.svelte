@@ -13,6 +13,7 @@
   import Calendar from "lucide-svelte/icons/calendar";
   import Clock from "lucide-svelte/icons/clock";
   import Gauge from "lucide-svelte/icons/gauge";
+  import Globe2 from "lucide-svelte/icons/globe-2";
   import Layers from "lucide-svelte/icons/layers";
   import Link from "lucide-svelte/icons/link";
   import AlertCircle from "lucide-svelte/icons/alert-circle";
@@ -36,6 +37,7 @@
   let rotationGraceHours = $state<number | null>(24);
   let requireExpiration = $state(false);
   let revocationCascadeEnabled = $state(false);
+  let requireTenantAllowedOrigin = $state(true);
 
   function syncFromPolicy(policy: ApiKeyPolicy) {
     maxDelegationDepth = policy.max_delegation_depth ?? null;
@@ -45,6 +47,7 @@
     rotationGraceHours = policy.rotation_grace_hours ?? 24;
     requireExpiration = policy.require_expiration ?? false;
     revocationCascadeEnabled = policy.revocation_cascade_enabled ?? false;
+    requireTenantAllowedOrigin = policy.require_tenant_allowed_origin ?? true;
   }
 
   function snapshot() {
@@ -55,7 +58,8 @@
       max_rate_limit_override: maxRateLimitOverride,
       rotation_grace_hours: rotationGraceHours,
       require_expiration: requireExpiration,
-      revocation_cascade_enabled: revocationCascadeEnabled
+      revocation_cascade_enabled: revocationCascadeEnabled,
+      require_tenant_allowed_origin: requireTenantAllowedOrigin
     };
   }
 
@@ -67,7 +71,8 @@
       max_rate_limit_override: originalPolicy.max_rate_limit_override ?? null,
       rotation_grace_hours: originalPolicy.rotation_grace_hours ?? 24,
       require_expiration: originalPolicy.require_expiration ?? false,
-      revocation_cascade_enabled: originalPolicy.revocation_cascade_enabled ?? false
+      revocation_cascade_enabled: originalPolicy.revocation_cascade_enabled ?? false,
+      require_tenant_allowed_origin: originalPolicy.require_tenant_allowed_origin ?? true
     };
   }
 
@@ -116,6 +121,9 @@
     if (current.revocation_cascade_enabled !== original.revocation_cascade_enabled) {
       updates.revocation_cascade_enabled = current.revocation_cascade_enabled;
     }
+    if (current.require_tenant_allowed_origin !== original.require_tenant_allowed_origin) {
+      updates.require_tenant_allowed_origin = current.require_tenant_allowed_origin;
+    }
 
     saving = true;
     try {
@@ -144,6 +152,13 @@
 
   // Policy items configuration
   const policyItems = $derived([
+    {
+      id: "requireTenantAllowedOrigin",
+      title: m.api_keys_admin_policy_require_tenant_origin(),
+      description: m.api_keys_admin_policy_require_tenant_origin_desc(),
+      icon: Globe2,
+      type: "toggle" as const
+    },
     {
       id: "requireExpiration",
       title: m.api_keys_admin_policy_require_expiration(),
@@ -275,6 +290,12 @@
                   <Switch
                     checked={revocationCascadeEnabled}
                     onCheckedChange={(next) => (revocationCascadeEnabled = next)}
+                    aria-label={item.title}
+                  />
+                {:else if item.id === "requireTenantAllowedOrigin"}
+                  <Switch
+                    checked={requireTenantAllowedOrigin}
+                    onCheckedChange={(next) => (requireTenantAllowedOrigin = next)}
                     aria-label={item.title}
                   />
                 {/if}

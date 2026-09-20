@@ -150,10 +150,14 @@ CATEGORY_MAPPINGS = {
     ActionType.MODULE_AUTH_TICKET_ISSUED.value: "security_events",
     ActionType.MODULE_AUTH_TOKEN_EXCHANGED.value: "security_events",
     ActionType.MODULE_AUTH_TOKEN_REFRESHED.value: "security_events",
+    ActionType.PASSWORD_CHANGED.value: "security_events",
+    ActionType.PASSWORD_CHANGE_FAILED.value: "security_events",
+    ActionType.SESSIONS_INVALIDATED.value: "security_events",
     # File Operations
     ActionType.FILE_UPLOADED.value: "file_operations",
     ActionType.FILE_DELETED.value: "file_operations",
     ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
+    ActionType.FILE_ORIGINAL_DOWNLOADED.value: "file_operations",
     ActionType.FILE_SIGNED_URL_MINTED.value: "file_operations",
     ActionType.INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
     # Integration Events

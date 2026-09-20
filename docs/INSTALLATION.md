@@ -66,7 +66,7 @@ uv run python init_db.py
 ```
 
 > **Important**: The `init_db.py` script:
-> - Creates an example tenant and user (`user@example.com` / `Password1!`)
+> - Creates an example tenant and user (`user@example.com` / `ChangeMePassword1!`)
 > - Runs all database migrations automatically
 > - Can be re-run after code updates to apply new migrations
 
@@ -115,11 +115,11 @@ long Flow runs cannot starve recovery, expiry, audit, or webhook work.
 
 2. **Login with Default Credentials**
    - Email: `user@example.com`
-   - Password: `Password1!`
+   - Password: `ChangeMePassword1!`
 
 3. **Change the Default Password** (Important!)
-   - Click user menu (top-right corner)
-   - Select "Change Password"
+   - Click the user menu (top-right corner) and open **Account**
+   - Under **Password**, select **Change password**
 
 ## Essential Configuration
 
@@ -164,7 +164,7 @@ with the `modules` permission. No separate module-management environment key is
 required.
 
 Administrators with the Storage permission set upload limits and choose storage
-for eligible new File and Icon writes in **Admin > Storage**. Changes take effect
+for eligible new File and Icon writes in **Admin > File storage**. Changes take effect
 without restarting the backend or worker. Operators keep
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` as a PostgreSQL, WAL, backup, and process
 safety ceiling; it is not the upload policy.
@@ -188,7 +188,7 @@ Then restart the backend.
 ### File Upload Errors (Large PDFs)
 
 Ask an administrator with the Storage permission to review the configured and
-effective limits in **Admin > Storage**. For PostgreSQL-inline session uploads,
+effective limits in **Admin > File storage**. For PostgreSQL-inline session uploads,
 the effective limit is the smaller of the admin policy and the operator's
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` ceiling. For object-store session uploads,
 the effective limit is the smaller of the admin policy and the configured

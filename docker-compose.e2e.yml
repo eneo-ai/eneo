@@ -35,7 +35,7 @@ x-e2e-backend-environment: &e2e-backend-environment
   # Deterministic identity for the seeded login user.
   DEFAULT_TENANT_NAME: E2ETenant
   DEFAULT_USER_EMAIL: e2e@example.com
-  DEFAULT_USER_PASSWORD: E2ePassword1!
+  DEFAULT_USER_PASSWORD: E2ePassword123!
 
 x-e2e-backend-volumes: &e2e-backend-volumes
   # When Compose is invoked from inside the devcontainer, `.` resolves to the

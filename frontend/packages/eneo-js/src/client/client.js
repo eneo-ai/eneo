@@ -110,7 +110,7 @@ export function createClient(args) {
         const parsed = await parseResponse(response);
         return parsed;
       } catch (error) {
-        EneoError.throw(error, { endpoint: requestEndpoint, payload });
+        EneoError.throw(error, { endpoint: requestEndpoint });
         throw error;
       }
     },
@@ -137,7 +137,7 @@ export function createClient(args) {
         });
         return await parseBinaryResponse(response);
       } catch (error) {
-        EneoError.throw(error, { endpoint: requestEndpoint, payload });
+        EneoError.throw(error, { endpoint: requestEndpoint });
         throw error;
       }
     },
@@ -171,7 +171,7 @@ export function createClient(args) {
           onMessage
         });
       } catch (error) {
-        EneoError.throw(error, { endpoint: requestEndpoint, payload });
+        EneoError.throw(error, { endpoint: requestEndpoint });
       }
     },
 
@@ -200,7 +200,7 @@ export function createClient(args) {
         const parsed = await parseResponse(response);
         return parsed;
       } catch (error) {
-        EneoError.throw(error, { endpoint: requestEndpoint, payload });
+        EneoError.throw(error, { endpoint: requestEndpoint });
       }
     },
 
@@ -466,7 +466,7 @@ export class EneoError extends Error {
    * @param {number} status HTTP status
    * @param {import("../types/resources").EneoErrorCode | 0} code The backend will return an error code in most cases that can give additional info
    * @param {Object} [response] Parsed json response from server
-   * @param {{endpoint: string; payload?: object;}} request
+   * @param {{endpoint: string;}} request
    * @param {Headers} [headers] Response headers
    */
   constructor(message, stage, status, code, response, request = { endpoint: "" }, headers) {
@@ -479,8 +479,9 @@ export class EneoError extends Error {
     this.code = code;
     /** @type {any | undefined} Server response parsed as JSON object. */
     this.response = response;
-    /** @type {{endpoint: string; payload?: object;}} Info about the request during which the error occured. */
-    this.request = request;
+    /** @type {{endpoint: string;}} Info about the request during which the error occured. */
+    // Keep request bodies and credentials out of errors and diagnostic logs.
+    this.request = { endpoint: request.endpoint };
     /** @type {Headers | undefined} */
     this.headers = headers;
   }
@@ -521,7 +522,7 @@ export class EneoError extends Error {
   /**
    * Rethrow an error as an EneoError
    * @param {unknown} error
-   * @param {{endpoint: string; payload?: object;}} requestInfo
+   * @param {{endpoint: string;}} requestInfo
    */
   static throw(error, requestInfo) {
     if (error instanceof PartialError) {

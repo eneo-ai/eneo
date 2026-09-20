@@ -219,7 +219,7 @@ async def test_federation_config_drift_rejected_with_zero_grace(
         super_admin_token,
         tenant["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     monkeypatch.setattr(
@@ -343,7 +343,7 @@ async def test_federation_grace_period_allows_recent_config_change(
         super_admin_token,
         tenant["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     monkeypatch.setattr(
@@ -569,7 +569,7 @@ async def test_tenant_deleted_during_oidc_flow_returns_404(
         super_admin_token,
         tenant["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     monkeypatch.setattr(
@@ -680,7 +680,7 @@ async def test_state_token_tampering_rejected(
         super_admin_token,
         tenant_a["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     monkeypatch.setattr(
@@ -788,7 +788,7 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
         super_admin_token,
         tenant["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     monkeypatch.setattr(

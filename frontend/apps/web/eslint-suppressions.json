@@ -229,19 +229,9 @@
       "count": 18
     }
   },
-  "src/routes/(app)/admin/usage/users/UserTokenSummary.svelte": {
-    "eneo/no-raw-color": {
-      "count": 3
-    }
-  },
   "src/routes/(app)/admin/usage/users/[userId]/+page.svelte": {
     "eneo/no-raw-color": {
       "count": 3
-    }
-  },
-  "src/routes/(app)/admin/users/+page.svelte": {
-    "eneo/no-raw-color": {
-      "count": 2
     }
   },
   "src/routes/(app)/dashboard/+page.svelte": {
@@ -292,21 +282,6 @@
   "src/routes/(app)/spaces/[spaceId]/settings/SelectMCPServers.svelte": {
     "eneo/no-raw-color": {
       "count": 6
-    }
-  },
-  "src/routes/(public)/login/+page.svelte": {
-    "eneo/no-raw-color": {
-      "count": 28
-    }
-  },
-  "src/routes/(public)/login/failed/+page.svelte": {
-    "eneo/no-raw-color": {
-      "count": 2
-    }
-  },
-  "src/routes/(public)/logout/+page.svelte": {
-    "eneo/no-raw-color": {
-      "count": 2
     }
   },
   "src/routes/integrations/callback/token/+page.svelte": {

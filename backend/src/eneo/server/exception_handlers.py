@@ -72,6 +72,12 @@ from eneo.skills.domain.skill import (
     SkillRuntimePolicyChangedError,
     SkillSlugConflictError,
 )
+from eneo.users.password import (
+    CurrentPasswordIncorrectError,
+    LocalPasswordChangeUnavailableError,
+    PasswordPolicyViolationError,
+    PasswordReuseError,
+)
 
 # Partial unique indexes that guard active model display names, per
 # 20260602_unique_model_display_names. Their names all end in this suffix.
@@ -166,6 +172,13 @@ def _validation_error_entry(error: Mapping[str, object]) -> dict[str, object]:
     return entry
 
 
+_PUBLIC_VALIDATION_MESSAGES: dict[str, str] = {
+    "missing": "Field required",
+    "string_type": "Input should be a valid string",
+    "json_invalid": "Invalid JSON",
+}
+
+
 def validation_error_details(detail: object) -> dict[str, object]:
     errors: list[dict[str, object]] = []
     if _is_validation_error_sequence(detail):
@@ -230,6 +243,23 @@ logger = logging.getLogger(__name__)
 DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] = {
     UnknownModelCapacityError: (400, None, ErrorCodes.UNKNOWN_MODEL_CAPACITY),
     ContextWindowExceededError: (413, None, ErrorCodes.BAD_REQUEST),
+    # --- Local user credentials ---
+    CurrentPasswordIncorrectError: (
+        400,
+        None,
+        ErrorCodes.CURRENT_PASSWORD_INCORRECT,
+    ),
+    PasswordReuseError: (400, None, ErrorCodes.PASSWORD_REUSE),
+    PasswordPolicyViolationError: (
+        400,
+        None,
+        ErrorCodes.PASSWORD_POLICY_VIOLATION,
+    ),
+    LocalPasswordChangeUnavailableError: (
+        409,
+        None,
+        ErrorCodes.LOCAL_PASSWORD_CHANGE_UNAVAILABLE,
+    ),
     # --- Object content and files ---
     ObjectContentUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
     ObjectContentIntegrityError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
@@ -417,7 +447,19 @@ def add_exception_handlers(app: FastAPI):
         if not isinstance(exc, RequestValidationError):
             raise exc
 
-        errors = exc.errors()
+        # Never serialize raw input, validation context or validator-generated
+        # messages. Even SecretStr cannot redact input when a required sibling
+        # is missing, and a custom validator may embed a secret in its message.
+        errors: list[dict[str, object]] = [
+            {
+                "loc": error["loc"],
+                "type": error["type"],
+                "msg": _PUBLIC_VALIDATION_MESSAGES.get(
+                    str(error["type"]), "Invalid value"
+                ),
+            }
+            for error in exc.errors()
+        ]
         details = validation_error_details(errors)
         logger.warning(
             "%s %s → 422: %s",

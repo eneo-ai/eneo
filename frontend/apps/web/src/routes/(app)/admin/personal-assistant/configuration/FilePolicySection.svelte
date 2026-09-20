@@ -5,32 +5,23 @@
 -->
 
 <script lang="ts">
-  import { resolve } from "$app/paths";
-  import * as Alert from "$lib/components/ui/alert/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
-  import Info from "lucide-svelte/icons/info";
   import Paperclip from "lucide-svelte/icons/paperclip";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
   import OpenFilesHelp from "$lib/features/assistants/components/OpenFilesHelp.svelte";
 
   type Props = {
     /** "On" lets assistants read large attachments with a tool instead of
-        inlining their whole text (backend: inline_file_text = false). */
+        inlining their whole text (backend: inline_file_text = false). The
+        originals are served from whichever store holds them (PostgreSQL or
+        object storage), so the switch needs no storage prerequisite. */
     openFilesEnabled: boolean;
     summary: string;
-    /** Reading files with a tool needs the original files in object storage. */
-    objectStoreConfigured: boolean;
-    canConfigureStorage: boolean;
   };
 
-  let {
-    openFilesEnabled = $bindable(),
-    summary,
-    objectStoreConfigured,
-    canConfigureStorage
-  }: Props = $props();
+  let { openFilesEnabled = $bindable(), summary }: Props = $props();
 </script>
 
 <PolicySection
@@ -49,28 +40,6 @@
       <Label for="files-large">{m.attachments_open_files_label()}</Label>
       <OpenFilesHelp id="files-large-help" />
     </div>
-    <Switch
-      id="files-large"
-      bind:checked={openFilesEnabled}
-      disabled={!objectStoreConfigured}
-      aria-describedby="files-large-help"
-    />
+    <Switch id="files-large" bind:checked={openFilesEnabled} aria-describedby="files-large-help" />
   </div>
-
-  {#if !objectStoreConfigured}
-    <Alert.Root class="border-caution/35 bg-caution/8">
-      <Info class="text-caution" />
-      <Alert.Description class="text-secondary">
-        {m.attachments_open_files_storage_hint()}
-        {#if canConfigureStorage}
-          <a
-            class="text-accent-default mt-1 inline-block underline"
-            href={resolve("/admin/storage")}
-          >
-            {m.configure_object_storage()}
-          </a>
-        {/if}
-      </Alert.Description>
-    </Alert.Root>
-  {/if}
 </PolicySection>

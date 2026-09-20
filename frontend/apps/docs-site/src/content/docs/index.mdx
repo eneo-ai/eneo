@@ -16,20 +16,12 @@ application's OpenAPI schema for details that change with a release.
 
 ## Product and operational references
 
-- [Eneo Flows](/docs/flows) and [Flows for Developers](/docs/flows-for-developers)
-  describe Flow authoring and runtime contracts.
-- [Knowledge Retrieval and MCP Interoperability](/docs/knowledge-retrieval-and-mcp)
-  explains injected retrieval, built-in MCP servers, and external tool boundaries.
-- [Object Content Architecture](/docs/object-content-architecture) describes
-  durable file-byte storage, integrity, retention, and recovery.
-- [Audit Logging](/docs/audit-logging) describes compliance-relevant event
-  recording and retention.
-- [API Key Management](/docs/api-key-management) explains API-key lifecycle and
-  access scope.
-- [Release SBOMs](/docs/release-sboms) explains released-image provenance and
-  software-bill-of-material artifacts.
+Set up a development instance and find your way around:
 
-## Identity and access
+- DevContainer setup (recommended) and manual setup with uv and Bun
+- Starting the backend, frontend, and worker
+- Default login and where each service listens
+- Common issues and where to get help
 
 - [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant) explains
   tenant-specific identity-provider configuration.
@@ -40,8 +32,121 @@ application's OpenAPI schema for details that change with a release.
 
 ## Contributing
 
-- [Contributing](/contributing) explains repository contribution paths.
-- [Security for Contributors](/contributing/security) explains how to report and
-  handle security issues.
-- The [GitHub repository](https://github.com/eneo-ai/eneo) is the source for
-  release history and issues.
+Understand how Eneo is built:
+
+- System architecture overview
+- Technology stack (FastAPI, SvelteKit, PostgreSQL with pgvector, Redis)
+- Database schema and migrations
+- Authentication and authorization
+- Real-time communication (SSE, WebSockets)
+
+### [Eneo Flows](/docs/flows)
+
+Multi-step AI pipelines built inside a space:
+
+- Drafting, publishing, and running a Flow against an immutable published version
+- [AI Builder](/docs/ai-builder) for drafting a Flow conversationally
+- [Flows for Developers](/docs/flows-for-developers): where Flows sits in Eneo, the run lifecycle, data schema, and failure handling
+- The [Eneo Flows API consumer guide](/guides/flows) for building on published Flows
+
+### [Authentication Architecture](/docs/authentication-architecture)
+
+Technical reference for the OIDC authentication system:
+
+- OIDC protocol flow, step by step
+- State tokens, Redis state cache, and redirect URI handling
+- Token auth method selection and tenant state validation
+
+### [Module Authentication](/docs/module-authentication)
+
+How optional module applications reuse the Eneo session:
+
+- The module auth broker and its trust boundaries
+- Login handoff through one-time tickets
+- Credential lifetimes, refresh, and failure modes
+- Registration and binding model
+
+### [Knowledge Retrieval and MCP Interoperability](/docs/knowledge-retrieval-and-mcp)
+
+Understand how knowledge and tools reach a model:
+
+- Injected retrieval and model-directed tool retrieval
+- Built-in loopback knowledge and attachment MCP servers
+- Internal and external MCP interoperability through one proxy
+- Authentication, approval, session, citation, and failure boundaries
+
+### [Object Content Architecture](/docs/object-content-architecture)
+
+Understand how Eneo stores and protects durable file bytes:
+
+- PostgreSQL control plane with bounded inline or optional object-store bytes
+- Integrity, lifecycle, retention, and reconciliation
+- Database/bucket binding and failure behavior
+- SeaweedFS image build, provenance, and SBOM attestations
+
+### [Audit Logging](/docs/audit-logging)
+
+Audit trails for compliance and security:
+
+- How audit logs are created and stored
+- Retention policies and conversation retention hierarchy
+- Viewing, exporting, and configuring audit logs
+- Adding audit logging to new features
+
+### [API Key Management](/docs/api-key-management)
+
+Programmatic access with scoped keys:
+
+- User and service key ownership models
+- Scope levels (tenant, space, assistant, app) and permission tiers
+- Authentication flow, rate limiting, and guardrails
+- Key lifecycle: creation and rotation
+
+### [Token Counting](/docs/token-counting)
+
+How Eneo tracks token usage for LLM requests:
+
+- Accurate counts from major providers
+- Estimation for self-hosted models
+- How token data flows to Insights dashboards
+
+### [Release SBOMs](/docs/release-sboms)
+
+Downloadable SBOMs and attestations for released artifacts:
+
+- CycloneDX and SPDX files for security tooling
+- Frontend source dependency inventory from the release lockfile
+- Human-readable package lists for quick review
+- Image digests, checksums, and provenance verification
+
+### [API Reference](/docs/api)
+
+API documentation for developers:
+
+- Interactive OpenAPI documentation
+- Authentication with API keys and session JWTs
+- Common endpoints (users, spaces, assistants, conversations, documents, web crawling)
+- SDK examples, rate limits, and error handling
+
+## Core Concepts
+
+- **Assistants**: AI agents with customizable system prompts and provider configurations
+- **Spaces**: Collaborative workspaces within organizations
+- **Knowledge**: Document collections for RAG (Retrieval-Augmented Generation)
+- **Organizations**: Multi-tenant structure with role-based access control
+
+## Development
+
+For development setup and contributing guidelines, visit:
+
+- [GitHub Repository](https://github.com/eneo-ai/eneo)
+- [Contributing overview](/contributing) and [Security for Contributors](/contributing/security)
+- [Contributing Guide](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md)
+- [Installation Guide](https://github.com/eneo-ai/eneo/blob/develop/docs/INSTALLATION.md)
+
+## Need Help?
+
+- **Guides**: Check out our [practical guides](/guides) for specific use cases
+- **Forum**: Join discussions at [forum.eneo.ai](https://forum.eneo.ai)
+- **Issues**: Report bugs on [GitHub](https://github.com/eneo-ai/eneo/issues)
+- **Contact**: digitalisering@sundsvall.se (for public sector organizations)

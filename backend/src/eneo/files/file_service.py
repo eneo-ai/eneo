@@ -40,6 +40,7 @@ from eneo.files.file_repo import (
     original_download_variants,
     primary_file_variants,
     project_file_info,
+    readable_original_reference,
     select_file_content_variant,
     select_primary_file_content,
 )
@@ -70,6 +71,8 @@ from eneo.users.user import UserInDB
 
 @dataclass(frozen=True, slots=True)
 class FileDownload:
+    file_id: UUID
+    tenant_id: UUID
     chunks: AsyncGenerator[bytes]
     content_length: int
     media_type: str
@@ -349,6 +352,7 @@ class FileService:
                     metadata.id,
                     entry,
                     content_id=stored.id,
+                    storage_kind=stored.storage_kind,
                 )
             )
         return _PersistedCapturedFile(
@@ -397,6 +401,7 @@ class FileService:
                 file_metadata.id,
                 entry,
                 content_id=content.id,
+                storage_kind=content.storage_kind,
             )
             if file_metadata.id == root_metadata.id:
                 root_references.append(reference)
@@ -450,6 +455,7 @@ class FileService:
         entry: _CapturedPendingContent,
         *,
         content_id: UUID,
+        storage_kind: StorageKind,
     ) -> FileContentReferenceRecord:
         pending = entry.pending
         captured = entry.captured
@@ -477,6 +483,7 @@ class FileService:
             media_type=captured.verified_media_type,
             access_class=ContentAccessClass.PRIVATE_RESOURCE,
             state=ContentState.AVAILABLE,
+            storage_kind=storage_kind,
         )
 
     @staticmethod
@@ -940,6 +947,8 @@ class FileService:
         )
 
         return FileDownload(
+            file_id=metadata.id,
+            tenant_id=metadata.tenant_id,
             chunks=opened.chunks,
             content_length=opened.content_length,
             media_type=opened.media_type,
@@ -966,6 +975,8 @@ class FileService:
             return None
 
         return FileDownload(
+            file_id=metadata.id,
+            tenant_id=metadata.tenant_id,
             chunks=stream(),
             content_length=content.size_bytes,
             media_type=content.media_type,
@@ -1023,6 +1034,8 @@ class FileService:
             return None
 
         return FileDownload(
+            file_id=metadata.id,
+            tenant_id=metadata.tenant_id,
             chunks=stream(),
             content_length=len(content.payload),
             media_type=content.media_type,
@@ -1139,12 +1152,18 @@ class FileService:
                 FilePublic(
                     **info.model_dump(),
                     transcription=transcription,
+                    # Same readability rule as the loader's
+                    # ``original_available``: a stored original counts only
+                    # while this deployment can serve its bytes.
                     has_download_reference=(
                         file.file_type is FileType.TEXT
                         and (
-                            self._first_reference(
+                            readable_original_reference(
+                                file.file_type,
                                 file_references,
-                                FileContentVariant.ORIGINAL,
+                                object_store_configured=(
+                                    self._object_content.object_store_configured
+                                ),
                             )
                             is not None
                             or (

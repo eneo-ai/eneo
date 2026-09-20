@@ -8,6 +8,8 @@ import psycopg2
 from psycopg2 import sql
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from eneo.users.password import validate_new_local_password
+
 
 # Configuration
 class Settings(BaseSettings):
@@ -67,6 +69,7 @@ def run_alembic_migrations():
 
 # Password hashing
 def create_salt_and_hashed_password(plaintext_password: str):
+    validate_new_local_password(plaintext_password)
     pwd_bytes = plaintext_password.encode("utf-8")
     salt = bcrypt.gensalt()
     hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)

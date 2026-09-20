@@ -91,12 +91,15 @@ Before attaching that Skill:
 4. Test an allowed request, a denied request, an approval-required call, an
    unavailable server, and a request outside the Skill's scope.
 
-An Assistant cannot currently use knowledge and MCP at the same time. Eneo
-includes every stored, enabled and approved MCP tool schema available to the
-Assistant—not a user-specific subset—when it validates whether a saved on-demand
-Skill can fit. The check reserves the same question headroom used for attachments
-instead of letting saved Skill context fill the model window. Live discovery,
-user permissions, approvals, and tool availability can still change later, so
+An Assistant can use attached knowledge and MCP servers in the same request;
+both travel through one tool catalogue at runtime. When Eneo validates whether
+a saved on-demand Skill can fit, it includes every stored, enabled and approved
+external MCP tool schema available to the Assistant—not a user-specific
+subset—for Assistants without attached knowledge. For an Assistant that has
+knowledge, the saved external MCP schemas are not counted in that fit check.
+The check reserves the same question headroom used for attachments instead of
+letting saved Skill context fill the model window. Live discovery, user
+permissions, approvals, and tool availability can still change later, so
 runtime remains the source of truth and fails closed.
 
 Eneo repeats that validation when a save changes Skill bindings, the selected

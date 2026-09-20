@@ -1,49 +1,30 @@
 <script lang="ts">
-  import { Button } from "@eneo/ui";
-  import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
+  import { Button } from "$lib/components/ui/button";
+  import AuthPageShell from "$lib/features/auth/components/AuthPageShell.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import type { PageData } from "./$types";
 
-  export let data;
+  let { data }: { data: PageData } = $props();
 </script>
 
 <svelte:head>
   <title>Eneo.ai – {m.login_failed()}</title>
 </svelte:head>
 
-<div class="relative flex h-[100vh] w-[100vw] items-center justify-center">
-  <div class="box w-[400px] justify-center">
-    <h1 class="flex justify-center">
-      <EneoWordMark class="text-brand-eneo h-16 w-20"></EneoWordMark>
-      <span class="hidden">{m.eneo()}</span>
-    </h1>
-
-    <div aria-live="polite">
-      <div class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg">
-        <strong>{m.failed_to_login()}</strong>
-        <div class="mt-2">
-          {data.message || m.authentication_error_occurred()}
-        </div>
-        {#if data.details}
-          <div class="mt-2 text-sm opacity-80">
-            {m.details()}: {data.details}
-          </div>
-        {/if}
-      </div>
+<AuthPageShell
+  tone="error"
+  title={m.login_failed()}
+  description={data.message || m.authentication_error_occurred()}
+>
+  {#if data.details}
+    <div class="bg-secondary rounded-lg p-3 text-xs">
+      <p class="text-muted mb-1">{m.details()}</p>
+      <code class="font-mono break-all select-all">{data.details}</code>
     </div>
+  {/if}
 
-    <div class="shadowed border-default bg-primary flex flex-col gap-3 p-4">
-      <Button href={localizeHref(data.retryUrl)} variant="primary">
-        {m.try_logging_in_again()}
-      </Button>
-    </div>
-  </div>
-</div>
-
-<style lang="postcss">
-  @reference "@eneo/ui/styles";
-  .shadowed {
-    box-shadow: 0px 8px 20px 4px rgba(0, 0, 0, 0.1);
-    border: 0.5px solid rgba(54, 54, 54, 0.3);
-  }
-</style>
+  <Button href={localizeHref(data.retryUrl)} size="lg" class="w-full">
+    {m.try_logging_in_again()}
+  </Button>
+</AuthPageShell>

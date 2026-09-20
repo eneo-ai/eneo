@@ -6,6 +6,9 @@
     "dev": "next dev --turbopack --port=3001",
     "build": "bun run build:skill && next build && node scripts/build-llm-text.mjs && pagefind --site out --output-path out/_pagefind",
     "build:skill": "python3 scripts/package-agent-skill.py",
+    "build:versions": "node scripts/build-versions.mjs",
+    "versions": "node scripts/resolve-versions.mjs",
+    "preview": "bunx serve site",
     "start": "next start",
     "test": "bun test scripts",
     "lint": "next lint"

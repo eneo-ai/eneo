@@ -42,6 +42,9 @@ class ActionType(str, Enum):
     MODULE_AUTH_TICKET_ISSUED = "module_auth_ticket_issued"
     MODULE_AUTH_TOKEN_EXCHANGED = "module_auth_token_exchanged"
     MODULE_AUTH_TOKEN_REFRESHED = "module_auth_token_refreshed"
+    PASSWORD_CHANGED = "password_changed"
+    PASSWORD_CHANGE_FAILED = "password_change_failed"
+    SESSIONS_INVALIDATED = "sessions_invalidated"
 
     # User Actions (Priority 2)
     ASSISTANT_CREATED = "assistant_created"
@@ -74,6 +77,7 @@ class ActionType(str, Enum):
     FILE_UPLOADED = "file_uploaded"
     FILE_DELETED = "file_deleted"
     FILE_ORIGINAL_DOWNLOAD_LINK_CREATED = "file_original_download_link_created"
+    FILE_ORIGINAL_DOWNLOADED = "file_original_downloaded"
     FILE_SIGNED_URL_MINTED = "file_signed_url_minted"
     INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED = (
         "info_blob_original_download_link_created"

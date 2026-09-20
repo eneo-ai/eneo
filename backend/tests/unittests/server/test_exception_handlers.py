@@ -1,8 +1,9 @@
 import logging
 
+import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 
 from eneo.files.file_models import FileOriginalNotFoundError
@@ -19,6 +20,155 @@ from eneo.server.exception_handlers import (
     is_active_display_name_violation,
 )
 from eneo.server.main import get_application
+from eneo.users.user import PasswordChangeRequest
+
+
+@pytest.fixture
+def password_validation_client() -> TestClient:
+    # Exercise the production handler registration without starting a server,
+    # database or application lifespan. No credential mutation is performed.
+    app = get_application()
+
+    @app.post("/_test-password-validation", status_code=204)
+    async def validate_password_request(payload: PasswordChangeRequest):
+        return None
+
+    return TestClient(app)
+
+
+@pytest.mark.parametrize(
+    ("payload", "location", "error_type"),
+    [
+        (
+            {"current_password": "current-secret-sentinel"},
+            ["body", "new_password"],
+            "missing",
+        ),
+        (
+            {"new_password": "new-secret-sentinel"},
+            ["body", "current_password"],
+            "missing",
+        ),
+        (
+            {
+                "current_password": {"value": "current-secret-sentinel"},
+                "new_password": "new-secret-sentinel",
+            },
+            ["body", "current_password"],
+            "string_type",
+        ),
+        (
+            {
+                "current_password": "current-secret-sentinel",
+                "new_password": ["new-secret-sentinel"],
+            },
+            ["body", "new_password"],
+            "string_type",
+        ),
+        ("current-secret-sentinel", ["body"], "model_attributes_type"),
+    ],
+)
+def test_password_validation_does_not_echo_input(
+    password_validation_client: TestClient,
+    payload: object,
+    location: list[str],
+    error_type: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    response = password_validation_client.post(
+        "/_test-password-validation", json=payload
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert "detail" not in body
+    error = body["details"]["errors"][0]
+    assert error["location"] == location
+    assert error["type"] == error_type
+    assert set(error) == {"location", "type", "message"}
+    assert "secret-sentinel" not in response.text
+    assert "secret-sentinel" not in caplog.text
+
+
+def test_malformed_password_json_does_not_echo_input(
+    password_validation_client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    response = password_validation_client.post(
+        "/_test-password-validation",
+        content='{"current_password":"current-secret-sentinel", "new_password":',
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    error = response.json()["details"]["errors"][0]
+    assert error["type"] == "json_invalid"
+    assert set(error) == {"location", "type", "message"}
+    assert "secret-sentinel" not in response.text
+    assert "secret-sentinel" not in caplog.text
+
+
+def test_validation_does_not_echo_custom_validator_messages() -> None:
+    class SensitiveInput(BaseModel):
+        password: str
+
+        @field_validator("password")
+        @classmethod
+        def reject_password(cls, value: str) -> str:
+            raise ValueError(f"Rejected password: {value}")
+
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.post("/validate")
+    async def validate_input(payload: SensitiveInput):
+        return None
+
+    response = TestClient(app).post("/validate", json={"password": "secret-sentinel"})
+
+    assert response.status_code == 422
+    assert response.json()["details"]["errors"] == [
+        {
+            "location": ["body", "password"],
+            "message": "Invalid value",
+            "type": "value_error",
+        }
+    ]
+    assert "secret-sentinel" not in response.text
+
+
+def test_valid_password_request_reaches_endpoint_without_echoing_secrets(
+    password_validation_client: TestClient,
+) -> None:
+    response = password_validation_client.post(
+        "/_test-password-validation",
+        json={
+            "current_password": "current-secret-sentinel",
+            "new_password": "new-secret-sentinel",
+        },
+    )
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+def test_query_validation_preserves_public_field_and_error_type() -> None:
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.get("/items")
+    async def items(limit: int):
+        return []
+
+    response = TestClient(app).get("/items", params={"limit": "invalid-limit"})
+
+    assert response.status_code == 422
+    assert response.json()["details"]["errors"] == [
+        {
+            "location": ["query", "limit"],
+            "message": "Invalid value",
+            "type": "int_parsing",
+        }
+    ]
 
 
 class _FakeOrig:
@@ -222,7 +372,8 @@ def test_main_app_request_validation_error_uses_general_error_for_non_flow_route
     assert "not-bool" not in response.text
 
 
-async def _allow_test_origin(_origin: str) -> bool:
+async def _allow_test_origin(_origin: str, *_args: object, **_kwargs: object) -> bool:
+    # Matches get_origin's (origin, headers, is_preflight, request_url) call.
     return True
 
 

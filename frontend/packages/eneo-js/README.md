@@ -61,7 +61,7 @@ See the [Flow integration guide](https://docs.eneo.ai/guides/flows/integrating-f
 
 ### Errors
 
-All Eneo functions can throw an `EneoError`. In addition to `message`, it identifies the failing `stage` (`"JSON"` or `"HTTP"`) and includes the request endpoint and optional payload.
+All Eneo functions can throw an `EneoError`, providing a `stage: "CONNECTION" | "SERVER" | "RESPONSE" | "UNKNOWN"` and a `request: { endpoint: string; }` identifying the failed request, alongside the error's `message`. Request bodies are excluded so that passwords and other submitted data are not retained in diagnostic errors.
 
 ## Advanced usage
 

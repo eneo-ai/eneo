@@ -13,7 +13,11 @@ from eneo.files.file_repo import (
     LegacyFileContentRecord,
     LegacyFileInfoRecord,
 )
-from eneo.object_content.content import ContentAccessClass, ContentState
+from eneo.object_content.content import (
+    ContentAccessClass,
+    ContentState,
+    StorageKind,
+)
 
 
 @pytest.mark.asyncio
@@ -118,6 +122,7 @@ async def test_loader_prefers_object_content_over_legacy_for_same_variant() -> N
         media_type="image/png",
         access_class=ContentAccessClass.PRIVATE_RESOURCE,
         state=ContentState.AVAILABLE,
+        storage_kind=StorageKind.POSTGRES_INLINE,
     )
     repository = AsyncMock()
     repository.get_content_references.return_value = [reference]
@@ -170,6 +175,7 @@ async def test_loader_resolves_each_variant_independently_during_backfill() -> N
             media_type="application/pdf",
             access_class=ContentAccessClass.PRIVATE_RESOURCE,
             state=ContentState.AVAILABLE,
+            storage_kind=StorageKind.POSTGRES_INLINE,
         )
     ]
     repository.get_legacy_infos.return_value = [

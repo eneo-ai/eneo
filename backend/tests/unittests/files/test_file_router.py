@@ -37,6 +37,7 @@ from eneo.object_content.content import (
     ContentRead,
     ContentState,
     ObjectContentUnavailableError,
+    StorageKind,
 )
 from eneo.server.exception_handlers import add_exception_handlers
 from tests.fixtures import TEST_USER
@@ -508,6 +509,142 @@ async def test_unsatisfiable_original_range_uses_known_size_without_reopening(
     )
 
 
+async def test_original_download_audits_the_redemption(monkeypatch):
+    """A redeemed signed link is audited as a bearer (system) action against
+    the file's tenant, so a leaked link leaves a trail even though no user is
+    signed in. The bytes are served whatever the audit outcome."""
+    file_id, tenant_id = uuid4(), uuid4()
+    monkeypatch.setattr(
+        file_router,
+        "verify_file_original_download_token",
+        lambda _token, **_kwargs: {
+            "file_id": str(file_id),
+            "tenant_id": str(tenant_id),
+            "content_disposition": "attachment",
+        },
+    )
+
+    async def chunks() -> AsyncGenerator[bytes]:
+        yield b"bytes"
+
+    service = AsyncMock()
+    service.get_original_download_no_auth.return_value = FileDownload(
+        file_id=file_id,
+        tenant_id=tenant_id,
+        chunks=chunks(),
+        content_length=5,
+        media_type="application/pdf",
+        filename="source.pdf",
+        sha256=b"x" * 32,
+        content_range=None,
+        range_supported=False,
+        _close=AsyncMock(),
+    )
+    audit_service = AsyncMock()
+
+    class Session:
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    class Container:
+        @staticmethod
+        def file_service(*, user):
+            assert user is None
+            return service
+
+        @staticmethod
+        def session():
+            return Session()
+
+        @staticmethod
+        def audit_service():
+            return audit_service
+
+    response = await file_router.download_original_file_signed(
+        id=file_id,
+        token="token",
+        range=None,
+        container=Container(),
+    )
+
+    assert response.status_code == 200
+    audit_service.log_async.assert_awaited_once()
+    audit = audit_service.log_async.await_args.kwargs
+    assert audit["action"].value == "file_original_downloaded"
+    assert audit["tenant_id"] == tenant_id
+    assert audit["entity_id"] == file_id
+    assert audit["actor_type"].value == "system"
+    assert "user" not in audit
+    assert audit["metadata"]["target"] == {"id": str(file_id), "name": "source.pdf"}
+    assert audit["metadata"]["extra"] == {
+        "content_disposition": "attachment",
+        "ranged": False,
+        "tenant_claim_present": True,
+        "content_length": 5,
+    }
+
+
+async def test_original_download_is_served_when_audit_storage_fails(monkeypatch):
+    file_id, tenant_id = uuid4(), uuid4()
+    monkeypatch.setattr(
+        file_router,
+        "verify_file_original_download_token",
+        lambda _token, **_kwargs: {
+            "file_id": str(file_id),
+            "tenant_id": str(tenant_id),
+            "content_disposition": "inline",
+        },
+    )
+
+    async def chunks() -> AsyncGenerator[bytes]:
+        yield b"bytes"
+
+    service = AsyncMock()
+    service.get_original_download_no_auth.return_value = FileDownload(
+        file_id=file_id,
+        tenant_id=tenant_id,
+        chunks=chunks(),
+        content_length=5,
+        media_type="application/pdf",
+        filename="source.pdf",
+        sha256=b"x" * 32,
+        content_range=None,
+        range_supported=False,
+        _close=AsyncMock(),
+    )
+    audit_service = AsyncMock()
+    audit_service.log_async.side_effect = SQLAlchemyError("audit down")
+
+    class Session:
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    class Container:
+        @staticmethod
+        def file_service(*, user):
+            return service
+
+        @staticmethod
+        def session():
+            return Session()
+
+        @staticmethod
+        def audit_service():
+            return audit_service
+
+    response = await file_router.download_original_file_signed(
+        id=file_id,
+        token="token",
+        range=None,
+        container=Container(),
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].startswith("inline")
+
+
 async def test_legacy_unsatisfiable_range_preserves_empty_response(monkeypatch):
     file_id = uuid4()
     tenant_id = uuid4()
@@ -608,6 +745,7 @@ async def test_interrupted_download_closes_content_context_once(
         media_type="application/pdf",
         access_class=ContentAccessClass.PRIVATE_RESOURCE,
         state=ContentState.AVAILABLE,
+        storage_kind=StorageKind.POSTGRES_INLINE,
     )
 
     async def chunks() -> AsyncGenerator[bytes]:
@@ -685,6 +823,8 @@ async def test_download_response_preserves_safe_ascii_filename_and_closes_once()
 
     response = file_router._download_response(
         FileDownload(
+            file_id=uuid4(),
+            tenant_id=uuid4(),
             chunks=chunks(),
             content_length=7,
             media_type="application/pdf",
@@ -725,6 +865,8 @@ async def test_download_response_safely_encodes_untrusted_filename(filename: str
 
     response = file_router._download_response(
         FileDownload(
+            file_id=uuid4(),
+            tenant_id=uuid4(),
             chunks=chunks(),
             content_length=7,
             media_type="application/pdf",
@@ -754,6 +896,8 @@ async def test_audio_download_advertises_range_support():
 
     response = file_router._download_response(
         FileDownload(
+            file_id=uuid4(),
+            tenant_id=uuid4(),
             chunks=chunks(),
             content_length=5,
             media_type="audio/mpeg",
