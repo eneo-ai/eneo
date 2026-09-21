@@ -89,7 +89,7 @@ def build_rejected_output_payload(
 
 def sample_rejected_output(
     text: str | None, *, max_inline_bytes: int
-) -> RejectedOutput:
+) -> RejectedOutput | None:
     encoded = text.encode("utf-8") if text is not None else b""
     observed_bytes = len(encoded) if text is not None else None
     digest = hashlib.sha256(encoded).hexdigest() if text is not None else None
@@ -134,20 +134,7 @@ def sample_rejected_output(
             lower = budget + 1
         else:
             upper = budget - 1
-    if retained is not None:
-        return retained
-    # A ceiling smaller than the metadata must not replace the typed failure.
-    return RejectedOutput(
-        text="",
-        truncated_by_runtime=bool(encoded),
-        evidence=RejectedOutputEvidence(
-            tail="",
-            observed_bytes=observed_bytes,
-            sha256=digest,
-            sampling_status="unavailable",
-            redaction_applied=redaction_applied,
-        ),
-    )
+    return retained
 
 
 def interpret_rejected_output(

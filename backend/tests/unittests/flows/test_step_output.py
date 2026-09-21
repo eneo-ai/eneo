@@ -65,6 +65,7 @@ def test_interpret_step_text_accepts_complete_inline_text() -> None:
 def test_rejection_samples_bound_utf8_and_json_escaping(unit: str) -> None:
     text = unit * 16384
     output = sample_rejected_output(text, max_inline_bytes=1024)
+    assert output is not None
     payload = output.to_payload()
     assert len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) <= 1024
     assert output.evidence is not None

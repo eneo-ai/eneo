@@ -4047,14 +4047,6 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
         if inline_ceiling == 1_000_000:
             assert rejected_completion.output.text == text
             assert rejected_completion.output.evidence.sampling_status == "complete"
-        else:
-            assert rejected_completion.output.text == ""
-            assert rejected_completion.output.evidence.tail == ""
-            assert rejected_completion.output.evidence.sampling_status == "unavailable"
-            assert rejected_completion.output.evidence.observed_bytes == len(
-                text.encode("utf-8")
-            )
-            assert rejected_completion.output.evidence.sha256 is not None
         assert getattr(error, "rejected_output", None) is None
         process_output.assert_not_awaited()
         apply_cap.assert_not_awaited()
@@ -4070,10 +4062,19 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
         assert failure.failed_result.status == FlowStepResultStatus.FAILED
         assert failure.failed_result.error_code == "flow_llm_output_truncated"
         assert "length" in failure.failed_result.error_message
-        assert (
-            failure.failed_result.output_payload_json
-            == rejected_completion.output.to_payload()
+        payload = failure.failed_result.output_payload_json
+        payload_bytes = (
+            len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            if payload is not None
+            else 0
         )
+        assert payload_bytes <= inline_ceiling
+        if inline_ceiling == 1_000_000:
+            assert payload == rejected_completion.output.to_payload()
+        else:
+            assert rejected_completion.output is None
+            assert payload is None
+            assert "rejection_evidence" not in (payload or {})
     else:
         output = await complete_step_execution(
             step=step, run=run, state=_state(), prepared=prepared, deps=deps

@@ -3145,6 +3145,7 @@ def test_truncated_failure_samples_survive_review_budget(budget, inline_ceiling)
     output = sample_rejected_output(
         "HEAD å " + " answer" * 16384 + " TAIL ö", max_inline_bytes=inline_ceiling
     )
+    assert output is not None
     evidence = FlowReviewEvidence(
         flow_version=1,
         definition_checksum="sum",
@@ -3189,7 +3190,7 @@ def test_truncated_failure_samples_survive_review_budget(budget, inline_ceiling)
 @pytest.mark.parametrize(
     ("text", "inline_ceiling"),
     [(None, 1024), ("short", 1024), (" answer" * 16384, 1024), ("Partial", 1)],
-    ids=["unavailable", "complete", "sampled", "metadata-only"],
+    ids=["unavailable", "complete", "sampled", "not-retained"],
 )
 async def test_captured_truncation_keeps_attempt_usage_in_review(
     user, text, inline_ceiling
@@ -3206,9 +3207,10 @@ async def test_captured_truncation_keeps_attempt_usage_in_review(
         num_tokens_output=16384,
     )
     bundle = reader.get_redacted_evidence_bundle.return_value
-    bundle.step_attempts[0]["output_payload_json"] = sample_rejected_output(
-        text, max_inline_bytes=inline_ceiling
-    ).to_payload()
+    output = sample_rejected_output(text, max_inline_bytes=inline_ceiling)
+    bundle.step_attempts[0]["output_payload_json"] = (
+        output.to_payload() if output is not None else None
+    )
     evidence = await service.resolve_failure_evidence(
         flow_id=flow.id,
         space_id=flow.space_id,

@@ -1052,14 +1052,18 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
 
 
 @pytest.mark.parametrize(
-    "text",
+    ("text", "inline_ceiling"),
     [
-        "start å " + " answer" * 16384 + " end ö",
-        "short å",
-        "",
-        None,
-        "api_key=secret-head " + " answer" * 16384 + " password=secret-tail",
-        "start å " + " answer" * 16384 + " password=" + "boundary-credential" * 100,
+        ("start å " + " answer" * 16384 + " end ö", 1024),
+        ("short å", 1024),
+        ("", 1024),
+        (None, 1024),
+        ("api_key=secret-head " + " answer" * 16384 + " password=secret-tail", 1024),
+        (
+            "start å " + " answer" * 16384 + " password=" + "boundary-credential" * 100,
+            1024,
+        ),
+        ("Partial", 128),
     ],
     ids=[
         "sampled",
@@ -1068,6 +1072,7 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
         "unavailable",
         "redacted",
         "credential-boundary",
+        "ceiling-128",
     ],
 )
 async def test_truncated_completion_retains_bounded_evidence_for_fresh_sessions(
@@ -1078,6 +1083,7 @@ async def test_truncated_completion_retains_bounded_evidence_for_fresh_sessions(
     space_factory,
     assistant_factory,
     text,
+    inline_ceiling,
 ):
     completion_service = SimpleNamespace(
         get_response=AsyncMock(
@@ -1099,7 +1105,7 @@ async def test_truncated_completion_retains_bounded_evidence_for_fresh_sessions(
             assistant_factory=assistant_factory,
             completion_service=completion_service,
         )
-        context.executor.max_inline_text_bytes = 1024
+        context.executor.max_inline_text_bytes = inline_ceiling
         result = await context.executor.execute(
             run_id=context.run_id,
             flow_id=context.flow_id,
@@ -1119,9 +1125,21 @@ async def test_truncated_completion_retains_bounded_evidence_for_fresh_sessions(
     assert attempt.finish_reason == "length"
     assert step_result is not None
     payload = attempt.output_payload_json
-    assert payload is not None
     assert payload == step_result.output_payload_json
-    assert len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) <= 1024
+    payload_bytes = (
+        len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        if payload is not None
+        else 0
+    )
+    assert payload_bytes <= inline_ceiling
+    if inline_ceiling < 1024:
+        assert step_result.error_code == "flow_llm_output_truncated"
+        assert attempt.provider_response_id == "cut-off"
+        assert payload is None
+        assert "rejection_evidence" not in (payload or {})
+        completion_service.get_response.assert_awaited_once()
+        return
+    assert payload is not None
     evidence = payload["rejection_evidence"]
     if text is None:
         assert evidence == {
