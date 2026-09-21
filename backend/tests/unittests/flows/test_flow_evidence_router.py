@@ -1202,6 +1202,9 @@ async def test_list_flow_run_steps_projects_typed_diagnostics_and_logs_drops(
         ),
     )
     container.flow_run_service.return_value = run_service
+    container.flow_transcript_source_service.return_value = AsyncMock(
+        get_references_for_step_results=AsyncMock(return_value={})
+    )
     user = SimpleNamespace(
         id=uuid4(), tenant_id=tenant_id, username="tester", email="t@e.com"
     )
@@ -1329,6 +1332,9 @@ async def test_list_flow_run_steps_handles_non_list_diagnostics(monkeypatch):
         ),
     )
     container.flow_run_service.return_value = run_service
+    container.flow_transcript_source_service.return_value = AsyncMock(
+        get_references_for_step_results=AsyncMock(return_value={})
+    )
     container.user.return_value = SimpleNamespace(
         id=uuid4(),
         tenant_id=run.tenant_id,
@@ -1374,6 +1380,9 @@ async def test_list_flow_run_steps_fails_closed_when_required_audit_is_unavailab
     run_service.get_run.return_value = run
     run_service.list_step_results_with_files.return_value = ()
     container.flow_run_service.return_value = run_service
+    container.flow_transcript_source_service.return_value = AsyncMock(
+        get_references_for_step_results=AsyncMock(return_value={})
+    )
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_service.return_value = flow_service

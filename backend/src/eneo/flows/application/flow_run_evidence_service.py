@@ -43,6 +43,9 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
     evidence_export_actor_from_principal,
 )
 from eneo.flows.application.flow_run_export_json import render_evidence_json_export
+from eneo.flows.application.flow_transcript_source_service import (
+    FlowTranscriptSourceService,
+)
 from eneo.flows.domain.canonical_json_hash import (
     canonical_json_bytes,
 )
@@ -170,6 +173,7 @@ class FlowRunEvidenceService:
         flow_version_repo: FlowVersionRepository,
         file_repo: FileRepository,
         webhook_delivery_repo: FlowRunWebhookDeliveryRepository,
+        transcript_source_service: FlowTranscriptSourceService,
         access_policy: FlowRunAccessPolicy | None = None,
         transcript_corrections_repo: FlowTranscriptCorrectionsRepository | None = None,
     ):
@@ -184,6 +188,7 @@ class FlowRunEvidenceService:
         self.flow_version_repo = flow_version_repo
         self.file_repo = file_repo
         self.webhook_delivery_repo = webhook_delivery_repo
+        self.transcript_source_service = transcript_source_service
         self.access_policy = access_policy or FlowRunAccessPolicy(
             user=user,
             flow_repo=flow_repo,
@@ -727,6 +732,20 @@ class FlowRunEvidenceService:
                 logical_json_bytes=provider_call_measurement.logical_json_bytes,
             ),
         )
+        if access_kind != "evidence_view":
+            source_measurement = (
+                await self.transcript_source_service.measure_for_export(
+                    run_id=resolved_run.id, candidate_limit=measurement_candidate_limit
+                )
+            )
+            section_usages += (
+                _EvidenceSectionUsage(
+                    section="transcript_sources",
+                    row_count=source_measurement.row_count,
+                    stored_json_bytes=source_measurement.stored_json_bytes,
+                    logical_json_bytes=source_measurement.logical_json_bytes,
+                ),
+            )
         attempt_limit: int | None = None
         logical_byte_budget: int | None = None
         passage_byte_budget: int | None = None
@@ -977,6 +996,15 @@ class FlowRunEvidenceService:
             review_checkpoints=review_checkpoints,
             review_checkpoint_edits=review_checkpoint_edits,
             transcript_correction_revisions=correction_revisions,
+            transcript_sources=(
+                await self.transcript_source_service.get_for_export(
+                    run_id=resolved_run.id,
+                    limit=EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING,
+                    attempts=attempt_page.attempts,
+                )
+                if not is_view
+                else ()
+            ),
             webhook_deliveries=webhook_deliveries,
             provider_calls=provider_calls,
             token_usage=run_usage.token_usage if run_usage is not None else None,
@@ -1006,6 +1034,13 @@ class FlowRunEvidenceService:
             ceiling=ceiling,
         )
         counts: tuple[tuple[EvidenceSectionIdentifier, int, int], ...] = (
+            (
+                "transcript_sources",
+                await self.transcript_source_service.count_for_export(
+                    run_id=run_id, ceiling=ceiling
+                ),
+                ceiling,
+            ),
             (
                 "review_checkpoint_edits",
                 await self.flow_run_review_checkpoint_repo.measure_edit_evidence_row_count(

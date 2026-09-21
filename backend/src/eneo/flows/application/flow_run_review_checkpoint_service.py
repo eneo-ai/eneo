@@ -13,15 +13,14 @@ from eneo.flows.application.flow_transcript_corrections_propagation import (
     build_folded_transcript,
     skip_folded_transcript,
 )
-from eneo.flows.application.flow_transcript_corrections_service import (
-    extract_transcription_segments,
+from eneo.flows.application.flow_transcript_source_service import (
+    FlowTranscriptSourceService,
 )
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
     FlowRunReviewCheckpoint,
     FlowRunStatus,
-    FlowStepResult,
 )
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
 from eneo.flows.domain.flow_run_recovery_policy import (
@@ -54,6 +53,7 @@ from eneo.flows.domain.step_output import (
     interpret_step_text,
 )
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionSet
+from eneo.flows.domain.transcript_source import TranscriptSourceState
 from eneo.flows.domain.transcript_words import LocatedWord, locate_words
 from eneo.flows.enums import FlowOutputType, FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -556,6 +556,7 @@ class FlowRunReviewCheckpointService:
         flow_run_repo: FlowRunRepository | None = None,
         transcript_corrections_repo: FlowTranscriptCorrectionsRepository | None = None,
         transcript_words_repo: FlowTranscriptWordsRepository | None = None,
+        transcript_source_service: FlowTranscriptSourceService | None = None,
     ):
         self.user = user
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
@@ -570,6 +571,7 @@ class FlowRunReviewCheckpointService:
         # Word timings only refine the timestamps of a folded split line;
         # without the repository the segment's window is reused.
         self.transcript_words_repo = transcript_words_repo
+        self.transcript_source_service = transcript_source_service
 
     def _principal(self) -> FlowPrincipal:
         return FlowPrincipal.from_user(self.user)
@@ -953,10 +955,22 @@ class FlowRunReviewCheckpointService:
             and not correction_set.speaker_edits_json
         ):
             return None
+        transcript_source = (
+            await self.transcript_source_service.get_for_attempt(
+                flow_id=run.flow_id,
+                run_id=run.id,
+                step_id=source_step_id,
+                attempt_no=step_result.current_attempt_no,
+            )
+            if self.transcript_source_service is not None
+            and step_result is not None
+            and step_result.current_attempt_no is not None
+            else None
+        )
         words_by_segment = await self._fold_words(
             run=run,
             step_id=source_step_id,
-            step_result=step_result,
+            transcript_source=transcript_source,
             segments_hash=correction_set.segments_hash,
         )
         if extension is None:
@@ -964,6 +978,7 @@ class FlowRunReviewCheckpointService:
                 checkpoint=checkpoint,
                 step_result=step_result,
                 correction_set=correction_set,
+                transcript_source=transcript_source,
                 words_by_segment=words_by_segment,
             )
         source_text = _inline_step_text(
@@ -990,6 +1005,7 @@ class FlowRunReviewCheckpointService:
             checkpoint=checkpoint,
             step_result=step_result,
             correction_set=correction_set,
+            transcript_source=transcript_source,
             source_text=source_text,
             expected_attempt_no=expected_attempt
             if isinstance(expected_attempt, int)
@@ -1003,21 +1019,25 @@ class FlowRunReviewCheckpointService:
         *,
         run: FlowRun,
         step_id: UUID,
-        step_result: FlowStepResult | None,
+        transcript_source: TranscriptSourceState | None,
         segments_hash: str,
     ) -> dict[int, list[LocatedWord]] | None:
         """The step's stored words located in its segments, when they still
         anchor to the same segment array as the correction set."""
-        if self.transcript_words_repo is None or step_result is None:
+        if (
+            self.transcript_words_repo is None
+            or transcript_source is None
+            or transcript_source.status != "present"
+            or transcript_source.source.source_hash != segments_hash
+            or transcript_source.source.segments is None
+        ):
             return None
         words = await self.transcript_words_repo.get_for_step(
             run_id=run.id, step_id=step_id, tenant_id=run.tenant_id
         )
         if words is None or words.segments_hash != segments_hash:
             return None
-        segments = extract_transcription_segments(step_result.input_payload_json)
-        if segments is None:
-            return None
+        segments = transcript_source.source.segments
         located: dict[int, list[LocatedWord]] = {}
         for entry in words.words_json:
             index = entry.get("segment_index")

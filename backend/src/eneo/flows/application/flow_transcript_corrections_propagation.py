@@ -22,9 +22,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
-from eneo.flows.application.flow_transcript_corrections_service import (
-    extract_transcription_segments,
-)
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRunReviewCheckpoint,
@@ -38,8 +35,8 @@ from eneo.flows.domain.step_output import (
 from eneo.flows.domain.transcript_corrections import (
     FlowTranscriptCorrectionSet,
     apply_to_rendered_transcript,
-    segments_content_hash,
 )
+from eneo.flows.domain.transcript_source import TranscriptSourceState
 from eneo.flows.domain.transcript_words import LocatedWord
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.main.exceptions import TypedIOValidationException
@@ -88,6 +85,7 @@ def build_folded_transcript(
     checkpoint: FlowRunReviewCheckpoint,
     step_result: FlowStepResult | None,
     correction_set: FlowTranscriptCorrectionSet,
+    transcript_source: TranscriptSourceState | None,
     source_text: str | None = None,
     expected_attempt_no: int | None = None,
     rebuild_payload: RebuildFoldedPayload | None = None,
@@ -135,12 +133,16 @@ def build_folded_transcript(
         and step_result.current_attempt_no != expected_attempt
     ):
         return skip_folded_transcript(correction_set, "attempt_mismatch", previous_text)
-    segments = extract_transcription_segments(step_result.input_payload_json)
-    if segments is None:
+    if (
+        transcript_source is None
+        or transcript_source.status != "present"
+        or transcript_source.source.segments is None
+    ):
         return skip_folded_transcript(
             correction_set, "segments_unavailable", previous_text
         )
-    if segments_content_hash(segments) != correction_set.segments_hash:
+    segments = transcript_source.source.segments
+    if transcript_source.source.source_hash != correction_set.segments_hash:
         return skip_folded_transcript(
             correction_set, "stale_corrections", previous_text
         )

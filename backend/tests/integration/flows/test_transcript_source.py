@@ -46,6 +46,7 @@ async def source_scenario(
             space_factory=space_factory,
             assistant_factory=assistant_factory,
             admin_user=admin_user,
+            store_source=False,
         )
         yield session, scenario, admin_user
 
@@ -105,12 +106,175 @@ async def _read(session, scenario, user, attempt_no=1):
     )
 
 
+async def test_detail_route_pages_absolute_indexes_and_whole_source_hash(
+    source_scenario, client, db_container, patch_auth_service_jwt, monkeypatch
+):
+    from eneo.database.tables.flow_tables import FlowStepResults
+    from eneo.database.tables.spaces_table import SpacesUsers
+    from eneo.spaces.api.space_models import SpaceRoleValue
+
+    session, scenario, user = source_scenario
+    segments = [
+        {**SEGMENTS[0], "text": f"{index}: " + "å" * 800} for index in range(201)
+    ]
+    review = {"files": [{"file_index": 0, "overlaps": [{"text": "å" * 150_000}]}]}
+    source = transcription.capture_transcript_source(
+        segments=segments, speaker_review=review, words=[], words_omitted_reason=None
+    )
+    reference = _reference(scenario, source)
+    await _attempt(session, scenario, reference)
+    await FlowTranscriptSourceRepository(session=session).insert(
+        tenant_id=user.tenant_id,
+        flow_id=scenario.flow_id,
+        reference=reference,
+        source=source,
+    )
+    await session.execute(
+        sa.update(FlowStepResults)
+        .where(
+            FlowStepResults.flow_run_id == scenario.flow_run_id,
+            FlowStepResults.step_id == scenario.transcription_step_id,
+        )
+        .values(current_attempt_no=1, input_payload_json={"transcription": {}})
+    )
+    flow = await FlowRepository(session=session).get(scenario.flow_id, user.tenant_id)
+    session.add(
+        SpacesUsers(space_id=flow.space_id, user_id=user.id, role=SpaceRoleValue.EDITOR)
+    )
+    await session.commit()
+    async with db_container() as container:
+        token = container.auth_service().create_access_token_for_user(user)
+    path = (
+        f"/api/v1/flows/{scenario.flow_id}/runs/{scenario.flow_run_id}"
+        f"/steps/{scenario.transcription_step_id}/attempts/1/transcript-source/"
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    first = await client.get(path, headers=headers)
+    assert first.status_code == 200, first.text
+    page = first.json()
+    assert page["status"] == "present"
+    assert page["run_id"] == str(scenario.flow_run_id)
+    assert page["step_id"] == str(scenario.transcription_step_id)
+    assert page["attempt_no"] == 1
+    assert page["source_hash"] == source.source_hash
+    assert page["bounds"] == source.bounds.model_dump(mode="json")
+    assert page["component_omissions"] == {"detail": None, "words": None}
+    assert page["speaker_review"] == review
+    assert page["page_size"] == 200
+    assert page["max_response_bytes"] == 16 * 1024 * 1024
+    assert len(first.content) <= page["max_response_bytes"]
+    assert page["start_segment_index"] == 0
+    assert page["next_segment_index"] == 200
+    assert page["segments"] == [
+        {**segment, "segment_index": index}
+        for index, segment in enumerate(segments[:200])
+    ]
+    second = await client.get(
+        path,
+        headers=headers,
+        params={"start_segment_index": page["next_segment_index"]},
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["segments"] == [{**segments[200], "segment_index": 200}]
+    assert second.json()["next_segment_index"] is None
+    assert second.json()["source_hash"] == page["source_hash"]
+    assert "speaker_review" not in second.json()
+    listing = await client.get(
+        f"/api/v1/flows/{scenario.flow_id}/runs/{scenario.flow_run_id}/steps/",
+        headers=headers,
+    )
+    assert listing.status_code == 200, listing.text
+    assert len(listing.content) < 10_000
+    metadata = listing.json()[0]["input_payload_json"]["transcription"]
+    assert "segments" not in metadata
+    assert "speaker_review" not in metadata
+    assert metadata["segments_hash"] == page["source_hash"]
+    corrections_path = (
+        f"/api/v1/flows/{scenario.flow_id}/runs/{scenario.flow_run_id}"
+        f"/steps/{scenario.transcription_step_id}/transcript-corrections/"
+    )
+    missing_hash = await client.patch(
+        corrections_path, headers=headers, json={"schema_version": 2, "occurrences": []}
+    )
+    assert missing_hash.status_code == 422, missing_hash.text
+
+    from eneo.flows.api import flow_transcript_source_router
+
+    monkeypatch.setattr(
+        flow_transcript_source_router, "RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES", 1000
+    )
+    oversized = await client.get(path, headers=headers)
+    assert oversized.status_code == 413, oversized.text
+    assert "segments" not in oversized.json()
+
+
+@pytest.mark.parametrize(
+    "state", ["pre_row", "omitted", "missing_attempt", "audit_failure"]
+)
+async def test_detail_route_preserves_unavailability_and_audit_contract(
+    source_scenario, client, db_container, patch_auth_service_jwt, monkeypatch, state
+):
+    from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+    from eneo.database.tables.spaces_table import SpacesUsers
+    from eneo.spaces.api.space_models import SpaceRoleValue
+
+    session, scenario, user = source_scenario
+    if state == "omitted":
+        source = transcription.capture_transcript_source(
+            segments=[], speaker_review=None, words=[], words_omitted_reason=None
+        )
+        reference = _reference(scenario, source)
+        await _attempt(session, scenario, reference)
+        await FlowTranscriptSourceRepository(session=session).insert(
+            tenant_id=user.tenant_id,
+            flow_id=scenario.flow_id,
+            reference=reference,
+            source=source,
+        )
+    elif state != "missing_attempt":
+        await _attempt(session, scenario, None)
+    flow = await FlowRepository(session=session).get(scenario.flow_id, user.tenant_id)
+    session.add(
+        SpacesUsers(space_id=flow.space_id, user_id=user.id, role=SpaceRoleValue.EDITOR)
+    )
+    await session.commit()
+    async with db_container() as container:
+        token = container.auth_service().create_access_token_for_user(user)
+    if state == "audit_failure":
+
+        async def unavailable(self, audit_log):
+            raise RuntimeError("audit storage unavailable")
+
+        monkeypatch.setattr(AuditLogRepositoryImpl, "create", unavailable)
+    response = await client.get(
+        f"/api/v1/flows/{scenario.flow_id}/runs/{scenario.flow_run_id}"
+        f"/steps/{scenario.transcription_step_id}/attempts/1/transcript-source/",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    if state == "missing_attempt":
+        assert response.status_code == 404, response.text
+    elif state == "audit_failure":
+        assert response.status_code == 503, response.text
+    else:
+        assert response.status_code == 200, response.text
+        expected = {
+            "status": "omitted" if state == "omitted" else "unavailable_pre_row",
+            "run_id": str(scenario.flow_run_id),
+            "step_id": str(scenario.transcription_step_id),
+            "attempt_no": 1,
+        }
+        if state == "omitted":
+            expected.update(reason=2, bounds=source.bounds.model_dump(mode="json"))
+        assert response.json() == expected
+
+
 async def test_source_is_immutable_and_retry_has_its_own_row(source_scenario):
     session, scenario, user = source_scenario
     repo = FlowTranscriptSourceRepository(session=session)
     source = transcription.capture_transcript_source(
         segments=SEGMENTS, speaker_review=None, words=[], words_omitted_reason=None
     )
+
     first = _reference(scenario, source)
     await _attempt(session, scenario, first)
     await repo.insert(
@@ -143,6 +307,55 @@ async def test_source_is_immutable_and_retry_has_its_own_row(source_scenario):
         )
         is None
     )
+
+
+async def test_corrections_use_canonical_attempt_and_require_its_hash(source_scenario):
+    from eneo.database.tables.flow_tables import FlowStepResults
+    from eneo.flows.flow_api_error_code import FlowApiErrorCode
+    from eneo.flows.flow_api_exceptions import FlowBadRequestException
+    from tests.integration.flows.test_transcript_corrections import (
+        _service as corrections_service,
+    )
+
+    session, scenario, user = source_scenario
+    source = transcription.capture_transcript_source(
+        segments=SEGMENTS, speaker_review=None, words=[], words_omitted_reason=None
+    )
+    reference = _reference(scenario, source)
+    await _attempt(session, scenario, reference)
+    await FlowTranscriptSourceRepository(session=session).insert(
+        tenant_id=user.tenant_id,
+        flow_id=scenario.flow_id,
+        reference=reference,
+        source=source,
+    )
+    await session.execute(
+        sa.update(FlowStepResults)
+        .where(
+            FlowStepResults.flow_run_id == scenario.flow_run_id,
+            FlowStepResults.step_id == scenario.transcription_step_id,
+        )
+        .values(current_attempt_no=1, input_payload_json={})
+    )
+    service = corrections_service(session=session, admin_user=user)
+    args = dict(
+        flow_id=scenario.flow_id,
+        run_id=scenario.flow_run_id,
+        step_id=scenario.transcription_step_id,
+        occurrences=[],
+    )
+    saved = await service.save(
+        **args, expected_revision=None, expected_segments_hash=source.source_hash
+    )
+    assert saved.corrections.segments_hash == source.source_hash
+    assert saved.stale is False
+    for invalid_hash in (None, "0" * 64):
+        with pytest.raises(FlowBadRequestException) as exc:
+            await service.save(
+                **args, expected_revision=1, expected_segments_hash=invalid_hash
+            )
+        assert exc.value.code == FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_STALE_REVISION
+        assert exc.value.context["reason"] == "stale_segments"
 
 
 @pytest.mark.parametrize("component", ["segments", "detail", "words", "no_segments"])
@@ -198,6 +411,21 @@ async def test_marker_without_row_raises_typed_integrity_failure(source_scenario
     await _attempt(session, scenario, _reference(scenario, source))
     with pytest.raises(MissingTranscriptSourceError):
         await _read(session, scenario, user)
+
+
+async def test_export_rejects_missing_referenced_source(source_scenario):
+    session, scenario, user = source_scenario
+    source = transcription.capture_transcript_source(
+        segments=SEGMENTS, speaker_review=None, words=[], words_omitted_reason=None
+    )
+    await _attempt(session, scenario, _reference(scenario, source))
+    attempts = await FlowRunRepository(session=session).list_step_attempts(
+        run_id=scenario.flow_run_id, tenant_id=user.tenant_id
+    )
+    with pytest.raises(MissingTranscriptSourceError):
+        await _service(session, user).get_for_export(
+            run_id=scenario.flow_run_id, limit=10_000, attempts=attempts.attempts
+        )
 
 
 @pytest.mark.parametrize("reference_on_result", [False, True])
@@ -292,6 +520,9 @@ async def _publication_case(session, scenario, user, preparation=None):
     from dataclasses import replace
 
     from eneo.database.tables.flow_tables import FlowRuns, FlowStepResults
+    from eneo.flows.infrastructure.flow_transcript_words_repo import (
+        FlowTranscriptWordsRepository,
+    )
     from tests.unittests.flows.test_typed_io_executor import (
         _build_executor,
         _runtime_step,
@@ -335,6 +566,18 @@ async def _publication_case(session, scenario, user, preparation=None):
         .where(FlowStepResults.id == result.id)
         .values(status="running", current_attempt_no=1)
     )
+    words_repo = FlowTranscriptWordsRepository(session=session)
+    await words_repo.upsert(
+        tenant_id=run.tenant_id,
+        flow_id=run.flow_id,
+        run_id=run.id,
+        step_id=step.step_id,
+        segments_hash="a" * 64,
+        alignment="forced",
+        words_json=[
+            {"segment_index": 0, "words": [{"word": "Prior", "start": 0, "end": 1}]}
+        ],
+    )
     await session.commit()
     result = await runs.get_step_result(
         run_id=run.id, step_id=step.step_id, tenant_id=run.tenant_id
@@ -343,6 +586,7 @@ async def _publication_case(session, scenario, user, preparation=None):
     executor, _, _, _ = _build_executor(user, max_inline_text_bytes=2048)
     executor.session = session
     executor.flow_run_repo = runs
+    executor.transcript_words_repo = words_repo
     preparation = preparation or transcription.TranscriptSourcePreparation(
         files_count=1,
         segments=SEGMENTS,
@@ -407,6 +651,9 @@ async def test_publication_rolls_back_to_prior_committed_state(
 ):
     from eneo.database.database import sessionmanager
     from eneo.flows.domain.transcript_source import transcript_source_reference
+    from eneo.flows.infrastructure.flow_transcript_words_repo import (
+        FlowTranscriptWordsRepository,
+    )
 
     session, scenario, user = source_scenario
     executor, run, step, result, source = await _publication_case(
@@ -445,6 +692,10 @@ async def test_publication_rolls_back_to_prior_committed_state(
         assert prior.status.value == "running"
         assert attempt.status.value == "started"
         assert transcript_source_reference(attempt.input_payload_json) is None
+        words = await FlowTranscriptWordsRepository(session=fresh).get_for_step(
+            run_id=run.id, tenant_id=run.tenant_id, step_id=step.step_id
+        )
+        assert words.segments_hash == "a" * 64
         assert (
             await FlowTranscriptSourceRepository(session=fresh).get_for_attempt(
                 tenant_id=run.tenant_id,
@@ -463,6 +714,9 @@ async def test_publication_commits_reference_and_row_together(
     source_scenario, boundary
 ):
     from eneo.database.database import sessionmanager
+    from eneo.flows.infrastructure.flow_transcript_words_repo import (
+        FlowTranscriptWordsRepository,
+    )
 
     session, scenario, user = source_scenario
     executor, run, step, result, source = await _publication_case(
@@ -473,6 +727,12 @@ async def test_publication_commits_reference_and_row_together(
         state = await _read(fresh, scenario, user)
         assert state.status == "present"
         assert state.source == source
+        assert (
+            await FlowTranscriptWordsRepository(session=fresh).get_for_step(
+                run_id=run.id, tenant_id=run.tenant_id, step_id=step.step_id
+            )
+            is None
+        )
 
 
 @pytest.mark.parametrize("limited_component", [None, "segments", "detail", "words"])
@@ -483,6 +743,9 @@ async def test_multiple_preparations_publish_one_bounded_source(
 
     from eneo.database.database import sessionmanager
     from eneo.flows.domain.transcript_corrections import segments_content_hash
+    from eneo.flows.infrastructure.flow_transcript_words_repo import (
+        FlowTranscriptWordsRepository,
+    )
 
     parts = [
         dict(
@@ -532,6 +795,7 @@ async def test_multiple_preparations_publish_one_bounded_source(
     executor, run, step, result, _ = await _publication_case(
         session, scenario, user, preparation
     )
+    executor.transcript_words_repo = FlowTranscriptWordsRepository(session=session)
     preparation.append(**parts[1])
     executor._stage_transcript_source(
         _reference(scenario, preparation.source), preparation
@@ -570,8 +834,20 @@ async def test_multiple_preparations_publish_one_bounded_source(
             assert state.component_omissions.words == (
                 TranscriptSourceOmissionReason.TOO_LARGE
                 if limited_component == "words"
-                else TranscriptSourceOmissionReason.SEGMENTS_UNAVAILABLE
+                else None
             )
+        words = await FlowTranscriptWordsRepository(session=fresh).get_for_step(
+            run_id=run.id, step_id=step.step_id, tenant_id=run.tenant_id
+        )
+        if limited_component in ("segments", "words"):
+            assert words is None
+        else:
+            assert words is not None
+            assert words.segments_hash == source.source_hash
+            assert words.words_json == [
+                {**part["words"][0], "segment_index": index}
+                for index, part in enumerate(parts)
+            ]
 
 
 async def test_fenced_out_publication_writes_neither_row_nor_reference(source_scenario):
@@ -581,6 +857,9 @@ async def test_fenced_out_publication_writes_neither_row_nor_reference(source_sc
     from eneo.flows.infrastructure.flow_run_repo import (
         FlowRunExecutionOwner,
         flow_run_execution_owner,
+    )
+    from eneo.flows.infrastructure.flow_transcript_words_repo import (
+        FlowTranscriptWordsRepository,
     )
     from eneo.flows.runtime.execution_heartbeat import FlowExecutionOwnershipLost
 
@@ -607,6 +886,10 @@ async def test_fenced_out_publication_writes_neither_row_nor_reference(source_sc
             run_id=run.id, step_id=step.step_id, tenant_id=run.tenant_id, attempt_no=1
         )
         assert transcript_source_reference(attempt.input_payload_json) is None
+        words = await FlowTranscriptWordsRepository(session=fresh).get_for_step(
+            run_id=run.id, tenant_id=run.tenant_id, step_id=step.step_id
+        )
+        assert words.segments_hash == "a" * 64
         assert (
             await FlowTranscriptSourceRepository(session=fresh).get_for_attempt(
                 tenant_id=run.tenant_id,
@@ -627,7 +910,6 @@ async def test_large_producer_source_survives_publication(
     from eneo.flows.infrastructure.flow_transcript_words_repo import (
         FlowTranscriptWordsRepository,
     )
-    from eneo.flows.runtime.transcription_runtime import persist_transcript_words
     from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
         TranscriptSegment,
         TranscriptWord,
@@ -663,18 +945,13 @@ async def test_large_producer_source_survives_publication(
             )
         ),
     )
-    assert transcribed.segments is None
-    assert transcribed.segments_omitted_reason == "too_large"
+    assert "segments" not in transcribed.to_metadata()
+    assert "speaker_review" not in transcribed.to_metadata()
     session, scenario, user = source_scenario
     executor, run, step, result, source = await _publication_case(
         session, scenario, user, transcribed.source_preparation
     )
-    await persist_transcript_words(
-        transcript_words_repo=FlowTranscriptWordsRepository(session=session),
-        run=run,
-        step_id=step.step_id,
-        result=transcribed,
-    )
+    executor.transcript_words_repo = FlowTranscriptWordsRepository(session=session)
     result = result.model_copy(
         update={"input_payload_json": {"transcription": transcribed.to_metadata()}}
     )
@@ -684,16 +961,13 @@ async def test_large_producer_source_survives_publication(
         assert state.source == transcribed.source
         assert state.source.segments[0]["text"] == text
         assert state.source.bounds.words_count == 1
-        assert (
-            state.component_omissions.words
-            == TranscriptSourceOmissionReason.SEGMENTS_UNAVAILABLE
+        assert state.component_omissions.words is None
+        words = await FlowTranscriptWordsRepository(session=fresh).get_for_step(
+            run_id=run.id, step_id=step.step_id, tenant_id=run.tenant_id
         )
-        assert (
-            await FlowTranscriptWordsRepository(session=fresh).get_for_step(
-                run_id=run.id, step_id=step.step_id, tenant_id=run.tenant_id
-            )
-            is None
-        )
+        assert words is not None
+        assert words.segments_hash == state.source.source_hash
+        assert words.words_json[0]["segment_index"] == 0
         attempt = await FlowRunRepository(session=fresh).get_step_attempt(
             run_id=run.id, tenant_id=run.tenant_id, step_id=step.step_id, attempt_no=1
         )
@@ -701,3 +975,63 @@ async def test_large_producer_source_survives_publication(
         assert {
             key: value for key, value in payload.items() if key != "source"
         } == transcribed.to_metadata()
+
+
+@pytest.mark.parametrize("published", [False, True])
+async def test_worker_cancellation_preserves_committed_transcript_source(
+    source_scenario, published
+):
+    from eneo.database.database import sessionmanager
+
+    session, scenario, user = source_scenario
+    executor, run, step, result, source = await _publication_case(
+        session, scenario, user
+    )
+    if published:
+        await _publish(executor, run, step, result, "activation")
+    await executor._handle_cancelled_step(
+        run_id=run.id, tenant_id=run.tenant_id, step=step, attempt_no=1, state=None
+    )
+    async with sessionmanager.session() as fresh, fresh.begin():
+        state = await _read(fresh, scenario, user)
+        if published:
+            assert state.status == "present"
+            assert state.source == source
+        else:
+            assert state.status == "unavailable_pre_row"
+
+
+async def test_word_write_rollback_preserves_prior_words_and_source(
+    source_scenario, monkeypatch
+):
+    from eneo.database.database import sessionmanager
+    from eneo.flows.infrastructure.flow_transcript_words_repo import (
+        FlowTranscriptWordsRepository,
+    )
+
+    preparation = transcription.TranscriptSourcePreparation(
+        files_count=1,
+        segments=SEGMENTS,
+        words=[{"segment_index": 0, "words": [{"word": "Vi", "start": 0, "end": 1}]}],
+    )
+    session, scenario, user = source_scenario
+    executor, run, step, result, _ = await _publication_case(
+        session, scenario, user, preparation
+    )
+    original = FlowTranscriptWordsRepository.upsert
+
+    async def interrupted(self, **kwargs):
+        await original(self, **kwargs)
+        raise RuntimeError("word publication interrupted")
+
+    monkeypatch.setattr(FlowTranscriptWordsRepository, "upsert", interrupted)
+    with pytest.raises(RuntimeError, match="word publication interrupted"):
+        await _publish(executor, run, step, result, "activation")
+    await session.rollback()
+    async with sessionmanager.session() as fresh, fresh.begin():
+        assert (await _read(fresh, scenario, user)).status == "unavailable_pre_row"
+        words = await FlowTranscriptWordsRepository(session=fresh).get_for_step(
+            run_id=run.id, tenant_id=run.tenant_id, step_id=step.step_id
+        )
+        assert words.segments_hash == "a" * 64
+        assert words.words_json[0]["words"][0]["word"] == "Prior"

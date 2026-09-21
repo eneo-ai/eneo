@@ -17,6 +17,7 @@ from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.transcript_corrections import (
     TranscriptCorrectionOccurrence,
     TranscriptSpeakerEdit,
+    segments_content_hash,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -137,6 +138,7 @@ async def _create_scenario(
     assistant_factory,
     admin_user,
     runtime_definition: bool = False,
+    store_source: bool = True,
 ) -> TranscriptCorrectionsScenario:
     model = await completion_model_factory(session, "gpt-4o-mini")
     space = await space_factory(
@@ -286,6 +288,7 @@ async def _create_scenario(
         run_id=run.id,
         step_id=_require_uuid(first_step.id),
         segments=SEGMENTS,
+        store_source=store_source,
     )
     return TranscriptCorrectionsScenario(
         tenant_id=admin_user.tenant_id,
@@ -303,21 +306,87 @@ async def _store_segments(
     run_id: UUID,
     step_id: UUID,
     segments: list[dict],
+    store_source: bool = True,
 ) -> None:
-    await session.execute(
-        sa.update(FlowStepResults)
-        .where(FlowStepResults.flow_run_id == run_id)
-        .where(FlowStepResults.step_id == step_id)
-        .values(input_payload_json={"transcription": {"segments": segments}})
+    from eneo.database.tables.flow_tables import FlowStepAttempts
+    from eneo.flows.domain.transcript_source import TranscriptSourceReference
+    from eneo.flows.infrastructure.flow_transcript_source_repo import (
+        FlowTranscriptSourceRepository,
+    )
+    from eneo.flows.runtime.transcription import capture_transcript_source
+
+    result = await session.scalar(
+        sa.select(FlowStepResults).where(
+            FlowStepResults.flow_run_id == run_id, FlowStepResults.step_id == step_id
+        )
+    )
+    if not store_source:
+        result.input_payload_json = {"transcription": {"segments": segments}}
+        await session.flush()
+        return
+    source = capture_transcript_source(
+        segments=segments, speaker_review=None, words=[], words_omitted_reason=None
+    )
+    attempt_no = (result.current_attempt_no or 0) + 1
+    reference = TranscriptSourceReference(
+        run_id=run_id,
+        step_id=step_id,
+        attempt_no=attempt_no,
+        source_hash=source.source_hash,
+        bounds=source.bounds,
+    )
+    payload = {"transcription": {"source": reference.model_dump(mode="json")}}
+    result.input_payload_json = payload
+    result.current_attempt_no = attempt_no
+    session.add(
+        FlowStepAttempts(
+            flow_run_id=run_id,
+            flow_id=result.flow_id,
+            tenant_id=result.tenant_id,
+            step_id=step_id,
+            step_order=result.step_order,
+            attempt_no=attempt_no,
+            status="completed",
+            started_at=sa.func.now(),
+            finished_at=sa.func.now(),
+            input_payload_json={
+                "schema_version": "flow-step-attempt-input.v1",
+                "resolved_input": payload,
+            },
+        )
+    )
+    await session.flush()
+    await FlowTranscriptSourceRepository(session=session).insert(
+        tenant_id=result.tenant_id,
+        flow_id=result.flow_id,
+        reference=reference,
+        source=source,
     )
 
 
 def _service(*, session, admin_user) -> FlowTranscriptCorrectionsService:
     from eneo.audit.application.audit_service import AuditService
     from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+    from eneo.flows.application.flow_transcript_source_service import (
+        FlowTranscriptSourceService,
+    )
+    from eneo.flows.infrastructure.flow_transcript_source_repo import (
+        FlowTranscriptSourceRepository,
+    )
 
     flow_run_repo = FlowRunRepository(session=session)
+    access_policy = FlowRunAccessPolicy(
+        user=admin_user,
+        flow_repo=FlowRepository(session=session),
+        flow_run_repo=flow_run_repo,
+    )
     return FlowTranscriptCorrectionsService(
+        transcript_source_service=FlowTranscriptSourceService(
+            user=admin_user,
+            access_policy=access_policy,
+            flow_run_repo=flow_run_repo,
+            transcript_source_repo=FlowTranscriptSourceRepository(session=session),
+        ),
         audit_service=AuditService(AuditLogRepositoryImpl(session)),
         user=admin_user,
         transcript_corrections_repo=FlowTranscriptCorrectionsRepository(
@@ -387,6 +456,7 @@ async def test_save_and_list_round_trip(
         service = _service(session=session, admin_user=admin_user)
 
         saved = await service.save(
+            expected_segments_hash=segments_content_hash(SEGMENTS),
             flow_id=scenario.flow_id,
             run_id=scenario.flow_run_id,
             step_id=scenario.transcription_step_id,
@@ -611,6 +681,7 @@ async def test_revision_compare_and_swap(
         )
         service = _service(session=session, admin_user=admin_user)
         saved = await service.save(
+            expected_segments_hash=segments_content_hash(SEGMENTS),
             flow_id=scenario.flow_id,
             run_id=scenario.flow_run_id,
             step_id=scenario.transcription_step_id,
@@ -621,6 +692,7 @@ async def test_revision_compare_and_swap(
         # Creating again without a revision conflicts with the existing row.
         with pytest.raises(FlowBadRequestException) as create_conflict:
             await service.save(
+                expected_segments_hash=segments_content_hash(SEGMENTS),
                 flow_id=scenario.flow_id,
                 run_id=scenario.flow_run_id,
                 step_id=scenario.transcription_step_id,
@@ -635,6 +707,7 @@ async def test_revision_compare_and_swap(
         # A wrong revision is rejected and reports the current one.
         with pytest.raises(FlowBadRequestException) as stale:
             await service.save(
+                expected_segments_hash=segments_content_hash(SEGMENTS),
                 flow_id=scenario.flow_id,
                 run_id=scenario.flow_run_id,
                 step_id=scenario.transcription_step_id,
@@ -647,6 +720,7 @@ async def test_revision_compare_and_swap(
 
         # The correct revision replaces the list; an empty list clears it.
         cleared = await service.save(
+            expected_segments_hash=segments_content_hash(SEGMENTS),
             flow_id=scenario.flow_id,
             run_id=scenario.flow_run_id,
             step_id=scenario.transcription_step_id,
@@ -677,6 +751,7 @@ async def test_save_rejects_mismatched_anchor(
 
         with pytest.raises(FlowBadRequestException) as excinfo:
             await service.save(
+                expected_segments_hash=segments_content_hash(SEGMENTS),
                 flow_id=scenario.flow_id,
                 run_id=scenario.flow_run_id,
                 step_id=scenario.transcription_step_id,
@@ -704,10 +779,27 @@ async def test_save_rejects_step_without_segments(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
+        from eneo.database.tables.flow_tables import FlowStepAttempts
+
+        session.add(
+            FlowStepAttempts(
+                flow_run_id=scenario.flow_run_id,
+                flow_id=scenario.flow_id,
+                tenant_id=scenario.tenant_id,
+                step_id=scenario.plain_step_id,
+                step_order=2,
+                attempt_no=1,
+                status="completed",
+                started_at=sa.func.now(),
+                input_payload_json={},
+            )
+        )
+        await session.flush()
         service = _service(session=session, admin_user=admin_user)
 
         with pytest.raises(FlowBadRequestException) as excinfo:
             await service.save(
+                expected_segments_hash=segments_content_hash(SEGMENTS),
                 flow_id=scenario.flow_id,
                 run_id=scenario.flow_run_id,
                 step_id=scenario.plain_step_id,
@@ -737,6 +829,7 @@ async def test_list_flags_stale_after_segments_change(
         )
         service = _service(session=session, admin_user=admin_user)
         await service.save(
+            expected_segments_hash=segments_content_hash(SEGMENTS),
             flow_id=scenario.flow_id,
             run_id=scenario.flow_run_id,
             step_id=scenario.transcription_step_id,
@@ -778,6 +871,7 @@ async def test_repo_filters_by_tenant(
         )
         service = _service(session=session, admin_user=admin_user)
         await service.save(
+            expected_segments_hash=segments_content_hash(SEGMENTS),
             flow_id=scenario.flow_id,
             run_id=scenario.flow_run_id,
             step_id=scenario.transcription_step_id,
@@ -827,6 +921,7 @@ async def test_save_and_list_round_trip_with_speaker_edits(
         service = _service(session=session, admin_user=admin_user)
 
         saved = await service.save(
+            expected_segments_hash=segments_content_hash(SEGMENTS),
             flow_id=scenario.flow_id,
             run_id=scenario.flow_run_id,
             step_id=scenario.transcription_step_id,
@@ -885,6 +980,7 @@ async def test_save_rejects_invalid_speaker_edit(
 
         with pytest.raises(FlowBadRequestException) as excinfo:
             await service.save(
+                expected_segments_hash=segments_content_hash(SEGMENTS),
                 flow_id=scenario.flow_id,
                 run_id=scenario.flow_run_id,
                 step_id=scenario.transcription_step_id,
@@ -916,6 +1012,7 @@ async def test_speaker_change_in_segments_flags_stale(
         )
         service = _service(session=session, admin_user=admin_user)
         await service.save(
+            expected_segments_hash=segments_content_hash(SEGMENTS),
             flow_id=scenario.flow_id,
             run_id=scenario.flow_run_id,
             step_id=scenario.transcription_step_id,
@@ -959,6 +1056,7 @@ async def test_revision_cas_replaces_speaker_edits(
         )
         service = _service(session=session, admin_user=admin_user)
         saved = await service.save(
+            expected_segments_hash=segments_content_hash(SEGMENTS),
             flow_id=scenario.flow_id,
             run_id=scenario.flow_run_id,
             step_id=scenario.transcription_step_id,
@@ -969,6 +1067,7 @@ async def test_revision_cas_replaces_speaker_edits(
         assert saved.corrections.speaker_edits_json != []
 
         cleared = await service.save(
+            expected_segments_hash=segments_content_hash(SEGMENTS),
             flow_id=scenario.flow_id,
             run_id=scenario.flow_run_id,
             step_id=scenario.transcription_step_id,
@@ -1106,7 +1205,12 @@ async def test_v3_decisions_reload_guard_old_writes_and_stale_base(
         ]
         assert reloaded[0].corrections.edited_by_user_id == admin_user.id
         with pytest.raises(FlowBadRequestException):
-            await service.save(**args, expected_revision=1, schema_version=2)
+            await service.save(
+                expected_segments_hash=segments_content_hash(SEGMENTS),
+                **args,
+                expected_revision=1,
+                schema_version=2,
+            )
         with pytest.raises(FlowBadRequestException):
             await service.save(
                 **args,
@@ -1405,7 +1509,18 @@ async def test_regeneration_snapshots_saved_review_and_keeps_original_output(
             run_id=child_id, tenant_id=admin_user.tenant_id
         )
         assert [step.status.value for step in results] == ["completed", "pending"]
-        assert results[0].input_payload_json["transcription"]["segments"] == segments
+        from tests.integration.flows.test_transcript_source import (
+            _service as source_service,
+        )
+
+        child_source = await source_service(session, admin_user).get_for_attempt(
+            flow_id=scenario.flow_id,
+            run_id=child_id,
+            step_id=scenario.transcription_step_id,
+            attempt_no=1,
+        )
+        assert child_source.source.segments == segments
+        assert "segments" not in results[0].input_payload_json["transcription"]
         assert (
             results[0].output_payload_json["text"]
             == child.input_payload_json["transkribering"]
@@ -1558,3 +1673,194 @@ async def test_regeneration_snapshots_saved_review_and_keeps_original_output(
             )
             == 1
         )
+
+
+async def test_large_source_is_reviewed_and_regenerated_through_api(
+    client,
+    monkeypatch,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    import json
+    from unittest.mock import AsyncMock
+
+    from eneo.database.tables.flow_tables import FlowRuns, FlowStepTranscriptSources
+    from eneo.database.tables.spaces_table import SpacesUsers
+    from eneo.flows.api import flow_transcript_regeneration_router
+    from eneo.flows.application.flow_transcript_regeneration_service import (
+        render_original_segments,
+    )
+    from eneo.flows.enums import FlowOutputType
+    from eneo.flows.flow_review_policy import FlowStepReviewMode
+    from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
+    from eneo.spaces.api.space_models import SpaceRoleValue
+
+    monkeypatch.setattr(
+        flow_transcript_regeneration_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        AsyncMock(),
+    )
+    segments = [
+        *SEGMENTS,
+        *[
+            {
+                **SEGMENTS[0],
+                "start": index + 8.0,
+                "end": index + 9.0,
+                "text": "Fortsättning.",
+                "speaker_attribution": "assigned",
+                "overlap_ids": [f"file:overlap_{index:04d}"],
+            }
+            for index in range(1800)
+        ],
+    ]
+    assert len(json.dumps(segments).encode()) > 256 * 1024
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+            runtime_definition=True,
+        )
+        flow = await FlowRepository(session=session).get(
+            scenario.flow_id, admin_user.tenant_id
+        )
+        session.add(
+            SpacesUsers(
+                space_id=flow.space_id,
+                user_id=admin_user.id,
+                role=SpaceRoleValue.EDITOR,
+            )
+        )
+        await _store_segments(
+            session=session,
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            segments=segments,
+        )
+        assert await FlowRunRepository(session=session).mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=admin_user.tenant_id,
+            expected_revision=1,
+        )
+        result = await session.scalar(
+            sa.select(FlowStepResults).where(
+                FlowStepResults.flow_run_id == scenario.flow_run_id,
+                FlowStepResults.step_id == scenario.transcription_step_id,
+            )
+        )
+        await FlowRunRepository(session=session).update_input_payload(
+            run_id=scenario.flow_run_id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_patch=FlowRunInputEnvelopePatch.transcription(
+                transcript=render_original_segments(segments)
+            ),
+        )
+        result.status = "completed"
+        result.output_payload_json = {"text": render_original_segments(segments)}
+        await session.flush()
+        opened = await container.flow_run_review_checkpoint_repo().open_review_checkpoint_for_completed_step(
+            tenant_id=admin_user.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            step_order=1,
+            attempt_no=result.current_attempt_no,
+            requester_principal=FlowPrincipal.from_user(admin_user),
+            next_step_ids=[scenario.plain_step_id],
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.TEXT,
+        )
+        attempt_no = result.current_attempt_no
+        checkpoint = opened.checkpoint
+        token = container.auth_service().create_access_token_for_user(admin_user)
+    headers = {"Authorization": f"Bearer {token}"}
+    run_path = f"/api/v1/flows/{scenario.flow_id}/runs/{scenario.flow_run_id}"
+    step_path = f"{run_path}/steps/{scenario.transcription_step_id}"
+    detail = await client.get(
+        f"{step_path}/attempts/{attempt_no}/transcript-source/", headers=headers
+    )
+    assert detail.status_code == 200, detail.text
+    source_hash = detail.json()["source_hash"]
+    assert detail.json()["segments"][0] == {**segments[0], "segment_index": 0}
+    listing = await client.get(f"{run_path}/steps/", headers=headers)
+    assert listing.status_code == 200, listing.text
+    assert len(listing.content) < 128 * 1024
+    assert "segments" not in listing.json()[0]["input_payload_json"]["transcription"]
+    corrected = await client.patch(
+        f"{step_path}/transcript-corrections/",
+        headers=headers,
+        json={
+            "schema_version": 3,
+            "segments_hash": source_hash,
+            "expected_revision": None,
+            "occurrences": [
+                {
+                    "segment_index": 0,
+                    "char_start": 11,
+                    "char_end": 17,
+                    "original": "sugary",
+                    "corrected": "Çagri",
+                }
+            ],
+        },
+    )
+    assert corrected.status_code == 200, corrected.text
+    assert len(corrected.content) < 10_000
+    approved = await client.post(
+        f"{run_path}/review-checkpoints/{checkpoint.id}/approve/",
+        headers=headers,
+        json={"expected_checkpoint_revision": checkpoint.revision},
+    )
+    assert approved.status_code == 200, approved.text
+    assert (
+        "Vi frågade Çagri om planen." in approved.json()["current_payload_json"]["text"]
+    )
+    async with db_container() as container:
+        session = container.session()
+        run = await session.scalar(
+            sa.select(FlowRuns).where(FlowRuns.id == scenario.flow_run_id)
+        )
+        run.status = "completed"
+        run.finished_at = sa.func.now()
+        run_revision = run.revision
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(
+                FlowStepResults.flow_run_id == scenario.flow_run_id,
+                FlowStepResults.step_id == scenario.plain_step_id,
+            )
+            .values(status="completed", output_payload_json={"text": "Summary."})
+        )
+    regenerated = await client.post(
+        f"{step_path}/transcript-regenerations/",
+        headers={**headers, "Idempotency-Key": "large-transcript-review"},
+        json={
+            "expected_run_revision": run_revision,
+            "expected_correction_revision": corrected.json()["revision"],
+            "segments_hash": source_hash,
+        },
+    )
+    assert regenerated.status_code == 201, regenerated.text
+    child_id = UUID(regenerated.json()["run"]["id"])
+    async with db_container() as container:
+        await container.session().execute(
+            sa.delete(FlowStepTranscriptSources).where(
+                FlowStepTranscriptSources.flow_run_id == scenario.flow_run_id
+            )
+        )
+    child = await client.get(
+        f"/api/v1/flows/{scenario.flow_id}/runs/{child_id}/steps/"
+        f"{scenario.transcription_step_id}/attempts/1/transcript-source/",
+        headers=headers,
+    )
+    assert child.status_code == 200, child.text
+    assert child.json()["source_hash"] == source_hash
+    assert child.json()["segments"] == detail.json()["segments"]

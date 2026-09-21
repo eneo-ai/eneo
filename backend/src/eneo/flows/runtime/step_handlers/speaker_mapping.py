@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
-from eneo.flows.domain.flow import FlowRun
+from eneo.flows.domain.flow import FlowRun, FlowStepResult
 from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
@@ -28,6 +28,7 @@ from eneo.flows.domain.speaker_mapping_config import (
     speaker_mapping_infer_names,
     speaker_mapping_participants_field,
 )
+from eneo.flows.domain.transcript_source import TranscriptSourceReference
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
@@ -56,6 +57,9 @@ from eneo.flows.runtime.step_handlers.base import (
 from eneo.main.exceptions import TypedIOValidationException
 
 PersistTranscriptFn = Callable[[FlowRun, str], Awaitable[None]]
+TranscriptSourceForStepFn = Callable[
+    [FlowRun, FlowStepResult], Awaitable[TranscriptSourceReference | None]
+]
 ActivateResolvedInputEdgesFn = Callable[
     [FlowRun, RuntimeStep, RunExecutionState, int, tuple[FlowResolvedInputEdge, ...]],
     Awaitable[None],
@@ -80,6 +84,7 @@ class SpeakerMappingStepHandler:
     activate_prepared_assistant_steps: ActivatePreparedAssistantStepsFn
     activate_resolved_input_edges: ActivateResolvedInputEdgesFn
     persist_transcript: PersistTranscriptFn
+    transcript_source_for_step: TranscriptSourceForStepFn
     output_mode: FlowOutputMode = FlowOutputMode.SPEAKER_MAPPING
 
     async def execute(
@@ -120,6 +125,12 @@ class SpeakerMappingStepHandler:
         source_text = prepared.step_input.text
         inventory = build_speaker_inventory(source_text)
         previous = state.completed_by_order.get(step.step_order - 1)
+        reference = (
+            await self.transcript_source_for_step(run, previous)
+            if previous is not None
+            else None
+        )
+        has_review = reference is not None and reference.bounds.detail_bytes > 0
         raw_metadata: object = (
             (previous.input_payload_json or {}).get("transcription")
             if previous
@@ -140,9 +151,7 @@ class SpeakerMappingStepHandler:
                         {**entry, "samples": [], "clean_example_available": False}
                     )
             # Provisional lines cannot become name-mapping samples.
-        if not inventory and (
-            _upstream_diarization_skipped(step, state) or metadata.get("speaker_review")
-        ):
+        if not inventory and (_upstream_diarization_skipped(step, state) or has_review):
             # An entirely unresolved transcript still carries readable words.
             # No labels need names; keep the uncertainty markers downstream.
             return await self._pass_through(
@@ -151,7 +160,7 @@ class SpeakerMappingStepHandler:
                 state=state,
                 attempt_no=attempt_no,
                 preview=preview,
-                unresolved=bool(metadata.get("speaker_review")),
+                unresolved=has_review,
             )
         if not inventory:
             raise attach_typed_failure_context(

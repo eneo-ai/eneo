@@ -139,7 +139,6 @@ class StepInputResolutionDeps:
     input_limits: FlowInputLimits | None = None
     transcription_call_observer: "ProviderCallObserver | None" = None
     max_speakers_hint: int | None = None
-    transcript_words_repo: Any | None = None
     transcript_source_preparation: TranscriptSourcePreparation | None = None
 
 
@@ -309,7 +308,6 @@ async def resolve_step_input(
                 actor=deps.actor,
                 open_audio_download=deps.file_service.get_audio_download,
                 transcription_call_observer=deps.transcription_call_observer,
-                transcript_words_repo=deps.transcript_words_repo,
                 stage_transcript_source=deps.stage_transcript_source,
             )
             record_step_phase(FlowStepPhase.TRANSCRIPTION)

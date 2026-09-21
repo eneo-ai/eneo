@@ -1408,8 +1408,32 @@ class FlowRunExecutor:
                     ),
                     activate_resolved_input_edges=self._activate_resolved_input_edges,
                     persist_transcript=self._persist_run_transcript,
+                    transcript_source_for_step=self._transcript_source_for_step,
                 )
         assert_never(mode)
+
+    async def _transcript_source_for_step(
+        self, run: FlowRun, result: FlowStepResult
+    ) -> TranscriptSourceReference | None:
+        from eneo.flows.application.flow_transcript_source_service import (
+            resolve_transcript_source_reference,
+        )
+        from eneo.main.exceptions import NotFoundException
+
+        if result.current_attempt_no is None:
+            return None
+        attempt = await self.flow_run_repo.get_step_attempt(
+            run_id=run.id,
+            tenant_id=run.tenant_id,
+            step_id=result.step_id,
+            attempt_no=result.current_attempt_no,
+        )
+        if attempt is None:
+            raise NotFoundException("Flow run step attempt not found.")
+        return await resolve_transcript_source_reference(
+            attempt=attempt,
+            transcript_source_repo=FlowTranscriptSourceRepository(session=self.session),
+        )
 
     async def _persist_run_transcript(self, run: FlowRun, transcript: str) -> None:
         await persist_transcription_on_run_input(
@@ -2502,7 +2526,6 @@ class FlowRunExecutor:
             logger=logger,
             transcription_call_observer=transcription_call_observer,
             max_speakers_hint=self.max_speakers_hint,
-            transcript_words_repo=self.transcript_words_repo,
             stage_transcript_source=self._stage_transcript_source,
             transcript_source_preparation=transcript_source_preparation,
         )
@@ -2538,6 +2561,8 @@ class FlowRunExecutor:
         tenant_id: UUID,
         flow_id: UUID,
     ) -> None:
+        from eneo.flows.runtime.transcription_runtime import persist_transcript_words
+
         pending = self._pending_transcript_sources.get((run_id, step_id, attempt_no))
         if pending is not None:
             reference, source = pending
@@ -2546,6 +2571,14 @@ class FlowRunExecutor:
                 flow_id=flow_id,
                 reference=reference,
                 source=source.source,
+            )
+            await persist_transcript_words(
+                transcript_words_repo=self.transcript_words_repo,
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+                step_id=step_id,
+                preparation=source,
             )
 
     async def _resolve_step_input(

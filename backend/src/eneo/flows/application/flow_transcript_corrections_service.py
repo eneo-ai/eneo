@@ -1,16 +1,8 @@
-"""Application service for flow transcript corrections.
-
-Corrections anchor to the structured transcript lines a transcription step
-stored (``input_payload_json["transcription"]["segments"]``). The service
-validates anchors against the current segment array at save time, stamps the
-set with the array's content hash, and reports a set as stale when the stored
-segments have since changed (in-run retry, re-transcription).
-"""
+"""Validate correction anchors against the immutable source of the current attempt."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
 from uuid import UUID
 
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -18,6 +10,9 @@ from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
+from eneo.flows.application.flow_transcript_source_service import (
+    FlowTranscriptSourceService,
+)
 from eneo.flows.domain.transcript_corrections import (
     FlowTranscriptCorrectionSet,
     FlowTranscriptCorrectionsStaleRevisionError,
@@ -25,7 +20,6 @@ from eneo.flows.domain.transcript_corrections import (
     TranscriptCorrectionOccurrence,
     TranscriptSpeakerEdit,
     TranscriptSpeakerEditInvalidError,
-    segments_content_hash,
     sort_occurrences,
     sort_speaker_edits,
     validate_correction_partitions,
@@ -49,30 +43,6 @@ class FlowTranscriptCorrectionsView:
     stale: bool
 
 
-def extract_transcription_segments(
-    input_payload_json: dict[str, Any] | None,
-) -> list[dict[str, Any]] | None:
-    """The structured transcript lines a transcription step stored, or None.
-
-    None covers every reader-fallback case: no transcription metadata, the
-    engine produced no segments, or the array was omitted for size.
-    """
-    if not isinstance(input_payload_json, dict):
-        return None
-    transcription = input_payload_json.get("transcription")
-    if not isinstance(transcription, dict):
-        return None
-    raw_segments = cast("dict[str, Any]", transcription).get("segments")
-    if not isinstance(raw_segments, list) or not raw_segments:
-        return None
-    segments: list[dict[str, Any]] = []
-    for segment in cast("list[Any]", raw_segments):
-        if not isinstance(segment, dict):
-            return None
-        segments.append(cast("dict[str, Any]", segment))
-    return segments
-
-
 class FlowTranscriptCorrectionsService:
     def __init__(
         self,
@@ -82,12 +52,14 @@ class FlowTranscriptCorrectionsService:
         access_policy: FlowRunAccessPolicy,
         flow_run_repo: FlowRunRepository,
         audit_service: AuditService,
+        transcript_source_service: FlowTranscriptSourceService,
     ):
         self.user = user
         self.transcript_corrections_repo = transcript_corrections_repo
         self.access_policy = access_policy
         self.flow_run_repo = flow_run_repo
         self.audit_service = audit_service
+        self.transcript_source_service = transcript_source_service
 
     async def list_for_run(
         self,
@@ -111,10 +83,24 @@ class FlowTranscriptCorrectionsService:
             tenant_id=self.user.tenant_id,
         )
         current_hash_by_step: dict[UUID, str | None] = {}
+        corrected_steps = {item.step_id for item in correction_sets}
         for step_result in step_results:
-            segments = extract_transcription_segments(step_result.input_payload_json)
+            if step_result.step_id not in corrected_steps:
+                continue
+            source = (
+                await self.transcript_source_service.get_reference_for_attempt(
+                    flow_id=flow_id,
+                    run_id=run.id,
+                    step_id=step_result.step_id,
+                    attempt_no=step_result.current_attempt_no,
+                )
+                if step_result.current_attempt_no is not None
+                else None
+            )
             current_hash_by_step[step_result.step_id] = (
-                segments_content_hash(segments) if segments is not None else None
+                source.source_hash
+                if source is not None and source.bounds.segments_omitted_reason is None
+                else None
             )
         return [
             FlowTranscriptCorrectionsView(
@@ -137,7 +123,7 @@ class FlowTranscriptCorrectionsService:
         occurrences: list[TranscriptCorrectionOccurrence],
         speaker_edits: list[TranscriptSpeakerEdit] | None = None,
         schema_version: int = 2,
-        expected_segments_hash: str | None = None,
+        expected_segments_hash: str,
     ) -> FlowTranscriptCorrectionsView:
         if schema_version not in (2, 3):
             raise FlowBadRequestException(
@@ -159,18 +145,29 @@ class FlowTranscriptCorrectionsService:
         )
         if step_result is None:
             raise NotFoundException("Flow run step result not found.")
-        segments = extract_transcription_segments(step_result.input_payload_json)
-        if segments is None:
+        source = (
+            await self.transcript_source_service.get_for_attempt(
+                flow_id=flow_id,
+                run_id=run.id,
+                step_id=step_id,
+                attempt_no=step_result.current_attempt_no,
+            )
+            if step_result.current_attempt_no is not None
+            else None
+        )
+        if (
+            source is None
+            or source.status != "present"
+            or source.source.segments is None
+        ):
             raise FlowBadRequestException(
                 "The step has no structured transcript lines to anchor corrections to.",
                 code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_SEGMENTS_UNAVAILABLE,
                 context={"step_id": str(step_id)},
             )
-        current_hash = segments_content_hash(segments)
-        if (schema_version >= 3 and expected_segments_hash != current_hash) or (
-            expected_segments_hash is not None
-            and expected_segments_hash != current_hash
-        ):
+        segments = source.source.segments
+        current_hash = source.source.source_hash
+        if current_hash is None or expected_segments_hash != current_hash:
             raise FlowBadRequestException(
                 "The source transcript changed. Reload before reviewing.",
                 code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_STALE_REVISION,
@@ -232,7 +229,7 @@ class FlowTranscriptCorrectionsService:
                 step_id=step_id,
                 occurrences_json=[occurrence.as_json() for occurrence in canonical],
                 speaker_edits_json=[edit.as_json() for edit in canonical_speaker_edits],
-                segments_hash=segments_content_hash(segments),
+                segments_hash=current_hash,
                 expected_revision=expected_revision,
                 schema_version=schema_version,
                 principal=FlowPrincipal.from_user(self.user),

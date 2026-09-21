@@ -86,6 +86,18 @@ from eneo.main.exceptions import (
 )
 
 
+def _transcript_source_service():
+    from eneo.flows.infrastructure.flow_transcript_source_repo import (
+        TranscriptSourceExportMeasurement,
+    )
+
+    service = AsyncMock()
+    service.count_for_export.return_value = 0
+    service.measure_for_export.return_value = TranscriptSourceExportMeasurement(0, 0, 0)
+    service.get_for_export.return_value = []
+    return service
+
+
 def _seed_flow_repo(flow_repo, flow) -> None:
     """Answer both flow reads the access policy makes with the real flow.
 
@@ -217,6 +229,7 @@ def _service_for_empty_run(
     resolved_access_policy = access_policy or _access_policy_double()
     resolved_access_policy.load_run.return_value = run
     service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
         transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=flow_repo,
@@ -544,6 +557,7 @@ async def test_evidence_exports_identical_safe_webhook_delivery_metadata(user):
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     webhook_delivery_repo.list_run_delivery_statuses.return_value = [delivery]
     service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
         transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=flow_repo,
@@ -607,6 +621,7 @@ async def test_get_evidence_loads_run_through_access_policy(user):
     flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
         transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=flow_repo,
@@ -649,6 +664,7 @@ async def test_get_evidence_preserves_corrupt_snapshot_with_integrity_status(use
     flow_run_repo.list_result_files.return_value = []
     flow_version_repo.get.return_value = version
     service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
         transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=flow_repo,
@@ -721,6 +737,7 @@ async def test_get_evidence_populates_runtime_input_file_metadata_from_repo(user
     }
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
         transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=flow_repo,
@@ -766,6 +783,7 @@ async def test_get_evidence_populates_runtime_input_file_metadata_from_repo(user
 @pytest.mark.asyncio
 async def test_export_evidence_json_rejects_injected_run_id_mismatch(user):
     service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
         transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=_flow_repo(),
@@ -819,6 +837,7 @@ async def test_preloaded_run_is_revalidated_before_evidence_is_returned(
     flow_run_repo.list_result_files.return_value = []
     flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
     service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
         transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=flow_repo,
@@ -910,6 +929,7 @@ def _service_with_attempts(*, user, attempts_bytes: list[int], access_kind_run=N
     access_policy = _access_policy_double()
     access_policy.load_run.return_value = run
     service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
         transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=flow_repo,
@@ -1538,6 +1558,7 @@ def _input_file_service(
     access_policy = AsyncMock()
     access_policy.load_run = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
     service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
         transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=AsyncMock(),

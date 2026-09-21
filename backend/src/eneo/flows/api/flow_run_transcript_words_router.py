@@ -40,9 +40,8 @@ router = APIRouter()
 _FLOW_RUN_TRANSCRIPT_WORDS_DESCRIPTION = """
 Word timings behind one transcription step's structured transcript lines.
 
-Each entry addresses a segment by its index in `transcription.segments` (from the
-step's `input_payload_json` in the steps listing) and lists that segment's words in
-order with `start`/`end` seconds relative to the segment's audio file. `probability`
+Each entry addresses a segment by its absolute index in the attempt's transcript
+source and lists that segment's words in order with `start`/`end` seconds relative to the segment's audio file. `probability`
 is the service's placement confidence; its meaning follows `alignment`: on the
 `forced` rung a word scored exactly `0.0` was interpolated over its window rather
 than found in the audio and should be shown as uncertain.

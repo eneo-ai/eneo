@@ -283,7 +283,12 @@ def _flow_run_evidence_service(
         FlowRunWebhookDeliveryEvidenceMeasurement.empty()
     )
     webhook_delivery_repo.measure_evidence_row_count.return_value = 0
+    from tests.unittests.flows.test_flow_run_evidence_service import (
+        _transcript_source_service,
+    )
+
     return FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
         transcript_corrections_repo=correction_repo,
         user=user,
         flow_repo=flow_repo,

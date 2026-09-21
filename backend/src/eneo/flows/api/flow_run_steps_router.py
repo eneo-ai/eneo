@@ -198,11 +198,17 @@ async def list_flow_run_steps(
                 flow_id=id,
             )
             assembler = FlowAssembler()
+            transcript_sources = await container.flow_transcript_source_service().get_references_for_step_results(
+                flow_id=id,
+                run_id=run_id,
+                step_results=[view.step_result for view in step_result_views],
+            )
             response = [
                 assembler.to_step_public(
                     view.step_result,
                     runtime_input_file_ids=view.runtime_input_file_ids,
                     result_files=view.result_files,
+                    transcript_source=transcript_sources.get(view.step_result.step_id),
                 )
                 for view in step_result_views
             ]

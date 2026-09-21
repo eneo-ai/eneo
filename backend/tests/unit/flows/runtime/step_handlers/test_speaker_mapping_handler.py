@@ -134,6 +134,8 @@ def harness(monkeypatch):
 
 
 def _handler(activate, prepared_text: str = SOURCE, deps=None):
+    from eneo.flows.domain.transcript_source import transcript_source_reference
+
     preview = AsyncMock(
         return_value=PreparedAssistantStep(
             prepared=_prepared(prepared_text), deps=deps or _deps()
@@ -146,6 +148,11 @@ def _handler(activate, prepared_text: str = SOURCE, deps=None):
             activate_prepared_assistant_steps=activate,
             activate_resolved_input_edges=AsyncMock(),
             persist_transcript=persist,
+            transcript_source_for_step=AsyncMock(
+                side_effect=lambda run, previous: transcript_source_reference(
+                    previous.input_payload_json
+                )
+            ),
         ),
         persist,
     )
@@ -506,9 +513,26 @@ async def test_unknown_review_speaker_passes_readable_words_without_naming(harne
     source = "[00:00:00 - 00:00:01] [Överlappande tal – osäker talare]: Hej."
     handler, _ = _handler(activate, prepared_text=source)
     state, previous = _state()
-    previous.input_payload_json["transcription"]["speaker_review"] = {
-        "files": [{"overlap_detection": "unavailable"}]
-    }
+    from eneo.flows.domain.transcript_source import (
+        TranscriptSourceBounds,
+        TranscriptSourceOmissionReason,
+        TranscriptSourceReference,
+    )
+
+    previous.input_payload_json["transcription"]["source"] = TranscriptSourceReference(
+        run_id=uuid4(),
+        step_id=previous.step_id,
+        attempt_no=1,
+        source_hash="a" * 64,
+        bounds=TranscriptSourceBounds(
+            segments_bytes=100,
+            detail_bytes=3_000_000,
+            words_bytes=0,
+            segments_count=1,
+            words_count=0,
+            detail_omitted_reason=TranscriptSourceOmissionReason.TOO_LARGE,
+        ),
+    ).model_dump(mode="json")
     result = await handler.execute(
         step=_step(),
         run=SimpleNamespace(id=uuid4(), input_payload_json={}),

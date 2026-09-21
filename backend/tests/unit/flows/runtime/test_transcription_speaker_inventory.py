@@ -194,8 +194,14 @@ async def test_preparations_share_speaker_normalization_with_bounded_state(
     from eneo.flows.domain.transcript_corrections import segments_content_hash
 
     expected = [
-        {**result.segments[0], "file_index": index}
-        for index, result in enumerate(results)
+        {
+            "file_index": index,
+            "start": 0,
+            "end": 1,
+            "speaker": f"SPEAKER_{index:02d}",
+            "text": "Hello.",
+        }
+        for index in range(2)
     ]
     assert preparation.source_hash == segments_content_hash(expected)
     assert preparation.source.segments == (None if omit_segments else expected)
@@ -281,7 +287,7 @@ async def test_segments_follow_the_text_labels_per_file(spool_contract) -> None:
 
     result = await _run(spool_contract, files, transcriber)
 
-    segments = result.to_metadata()["segments"]
+    segments = result.source.segments
     assert [segment["speaker"] for segment in segments] == [
         "SPEAKER_00",
         "SPEAKER_01",
@@ -297,7 +303,7 @@ async def test_segments_follow_the_text_labels_per_file(spool_contract) -> None:
         "speaker": "SPEAKER_02",
         "text": "Hej.",
     }
-    assert result.to_metadata()["segments_omitted_reason"] is None
+    assert result.source.bounds.segments_omitted_reason is None
 
 
 async def test_segments_are_all_or_nothing_across_files(spool_contract) -> None:
@@ -310,29 +316,16 @@ async def test_segments_are_all_or_nothing_across_files(spool_contract) -> None:
 
     result = await _run(spool_contract, [_file("a.mp3"), _file("b.mp3")], transcriber)
 
-    assert result.segments is None
-    assert result.to_metadata()["segments"] is None
-
-
-async def test_oversized_segments_are_omitted_with_a_reason(
-    spool_contract,
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(transcription, "MAX_EMBEDDED_SEGMENTS_BYTES", 10)
-    transcriber = _transcriber(
-        TranscribedAudio(
-            FILE_TEXT, 10.0, diarization="external", transcript_segments=FILE_SEGMENTS
-        ),
+    assert result.source.segments is None
+    assert (
+        result.source.bounds.segments_omitted_reason
+        == TranscriptSourceOmissionReason.NO_SEGMENTS
     )
 
-    result = await _run(spool_contract, [_file("a.mp3")], transcriber)
 
-    assert result.segments is None
-    assert result.to_metadata()["segments_omitted_reason"] == "too_large"
-
-
-async def test_source_preserves_segments_above_embedded_cap(spool_contract) -> None:
-    assert transcription.MAX_EMBEDDED_SEGMENTS_BYTES == 256 * 1024
+async def test_source_preserves_large_segments_without_embedding(
+    spool_contract,
+) -> None:
     text = "å" * 150_000
     result = await _run(
         spool_contract,
@@ -346,12 +339,12 @@ async def test_source_preserves_segments_above_embedded_cap(spool_contract) -> N
         ),
     )
 
-    assert result.segments is None
-    assert result.segments_omitted_reason == "too_large"
     assert result.source.segments[0]["text"] == text
     assert result.source.bounds.segments_bytes > 256 * 1024
     assert result.source.bounds.segments_omitted_reason is None
     assert "source" not in result.to_metadata()
+    assert "segments" not in result.to_metadata()
+    assert "speaker_review" not in result.to_metadata()
 
 
 async def test_source_preserves_large_review_detail_independently(spool_contract):
@@ -367,9 +360,6 @@ async def test_source_preserves_large_review_detail_independently(spool_contract
             )
         ),
     )
-    assert result.segments is None
-    assert result.speaker_review["details_omitted_reason"] == "too_large"
-    assert "overlaps" not in result.speaker_review["files"][0]
     assert result.source.segments is not None
     assert (
         result.source.speaker_review["files"][0]["overlaps"][0]["text"] == "å" * 150_000
@@ -377,7 +367,7 @@ async def test_source_preserves_large_review_detail_independently(spool_contract
     assert result.source.bounds.detail_bytes == len(
         json.dumps(result.source.speaker_review, ensure_ascii=False).encode("utf-8")
     )
-    assert result.source.bounds.detail_bytes > transcription.MAX_EMBEDDED_SEGMENTS_BYTES
+    assert result.source.bounds.detail_bytes > 256 * 1024
     assert result.source.bounds.detail_omitted_reason is None
 
 
@@ -413,7 +403,7 @@ async def test_words_are_keyed_to_the_stored_segment_index_across_files(
 
     # The second file's first segment has no words, so index 2 is skipped and
     # index 3 (its second segment) keeps its per-file timestamps.
-    assert result.words == [
+    assert result.source_preparation.words == [
         {
             "segment_index": 0,
             "words": [{"word": "Hej.", "start": 0.1, "end": 0.42, "probability": 0.95}],
@@ -427,16 +417,16 @@ async def test_words_are_keyed_to_the_stored_segment_index_across_files(
             "words": [{"word": "Hallå.", "start": 5.2, "end": 5.8, "probability": 0.0}],
         },
     ]
-    assert result.words_omitted_reason is None
+    assert result.source.bounds.words_omitted_reason is None
     assert "words" not in result.to_metadata()
-    assert result.to_metadata()["words_omitted_reason"] is None
+    assert "words_omitted_reason" not in result.to_metadata()
 
 
 async def test_words_are_dropped_with_the_segments_they_anchor_to(
     spool_contract,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(transcription, "MAX_EMBEDDED_SEGMENTS_BYTES", 10)
+    monkeypatch.setattr(transcription, "MAX_SEGMENTS_BYTES", 10)
     transcriber = _transcriber(
         TranscribedAudio(
             FILE_TEXT, 10.0, diarization="external", transcript_segments=TIMED_SEGMENTS
@@ -445,9 +435,12 @@ async def test_words_are_dropped_with_the_segments_they_anchor_to(
 
     result = await _run(spool_contract, [_file("a.mp3")], transcriber)
 
-    assert result.segments is None
-    assert result.words is None
-    assert result.to_metadata()["words_omitted_reason"] == "segments_unavailable"
+    assert result.source.segments is None
+    assert result.source_preparation.words is None
+    assert (
+        result.source.bounds.words_omitted_reason
+        == TranscriptSourceOmissionReason.SEGMENTS_UNAVAILABLE
+    )
     assert (
         result.source.bounds.words_omitted_reason
         == TranscriptSourceOmissionReason.SEGMENTS_UNAVAILABLE
@@ -466,9 +459,12 @@ async def test_oversized_words_are_omitted_but_segments_kept(
 
     result = await _run(spool_contract, [_file("a.mp3")], transcriber)
 
-    assert result.segments is not None
-    assert result.words is None
-    assert result.to_metadata()["words_omitted_reason"] == "too_large"
+    assert result.source.segments is not None
+    assert result.source_preparation.words is None
+    assert (
+        result.source.bounds.words_omitted_reason
+        == TranscriptSourceOmissionReason.TOO_LARGE
+    )
     assert (
         result.source.bounds.words_omitted_reason
         == TranscriptSourceOmissionReason.TOO_LARGE
@@ -496,7 +492,7 @@ async def test_shared_vemsa_case_adapter_checkpoint_correction_render(
     )
     result = await _run(spool_contract, [_file("a.mp3")], _transcriber(source))
     assert result.text == wire["text"]
-    segments = result.segments
+    segments = result.source.segments
     assert segments
     assert [s.get("speaker_attribution") for s in segments] == [
         s["speaker_attribution"] for s in wire["segments"]
@@ -537,16 +533,18 @@ async def test_two_files_namespace_overlap_ids_and_keep_unknown_speakers_in_inve
     )
     files = [_file("a.mp3"), _file("b.mp3")]
     result = await _run(spool_contract, files, _transcriber(source, source))
-    assert result.segments[1]["overlap_ids"] == [f"{files[0].id}:overlap_0000"]
-    assert result.segments[4]["overlap_ids"] == [f"{files[1].id}:overlap_0000"]
+    assert result.source.segments[1]["overlap_ids"] == [f"{files[0].id}:overlap_0000"]
+    assert result.source.segments[4]["overlap_ids"] == [f"{files[1].id}:overlap_0000"]
     assert (
-        result.speaker_review["files"][1]["overlaps"][0]["id"]
-        == result.segments[4]["overlap_ids"][0]
+        result.source.speaker_review["files"][1]["overlaps"][0]["id"]
+        == result.source.segments[4]["overlap_ids"][0]
     )
-    assert [s["speaker"] for s in result.segments] == ["SPEAKER_00"] * 3 + [
+    assert [s["speaker"] for s in result.source.segments] == ["SPEAKER_00"] * 3 + [
         "SPEAKER_01"
     ] * 3
-    assert [entry["segment_index"] for entry in result.words] == list(range(6))
+    assert [
+        entry["segment_index"] for entry in result.source_preparation.words
+    ] == list(range(6))
     assert all("ses" not in entry["samples"] for entry in result.speakers)
 
 
@@ -559,11 +557,14 @@ async def test_review_size_fallback_retains_uncertainty(spool_contract, monkeypa
         transcript_segments=_parse_result_segments(wire["segments"]),
         speaker_review=wire["speaker_review"],
     )
-    monkeypatch.setattr(transcription, "MAX_EMBEDDED_SEGMENTS_BYTES", 1)
+    monkeypatch.setattr(transcription, "MAX_SEGMENTS_BYTES", 1)
     result = await _run(spool_contract, [_file("a.mp3")], _transcriber(source))
-    assert result.segments is None
-    assert result.words is None
-    assert result.segments_omitted_reason == "too_large"
+    assert result.source.segments is None
+    assert result.source_preparation.words is None
+    assert (
+        result.source.bounds.segments_omitted_reason
+        == TranscriptSourceOmissionReason.TOO_LARGE
+    )
     assert "[Överlappande tal – osäker talare]: ses" in result.text
     assert "SPEAKER_00: ses" not in result.text
 
@@ -607,10 +608,10 @@ async def test_final_segment_order_remaps_words_and_keeps_overlap_precision(
         },
     )
     result = await _run(spool_contract, [_file("a.mp3")], _transcriber(source))
-    assert result.segments[0]["text"] == "Först"
-    assert result.words[0]["segment_index"] == 0
-    assert result.words[0]["words"][0]["start"] == 0.1234567
-    assert result.speaker_review["files"][0]["overlaps"][0]["end"] == 0.1234568
+    assert result.source.segments[0]["text"] == "Först"
+    assert result.source_preparation.words[0]["segment_index"] == 0
+    assert result.source_preparation.words[0]["words"][0]["start"] == 0.1234567
+    assert result.source.speaker_review["files"][0]["overlaps"][0]["end"] == 0.1234568
 
 
 async def test_empty_first_file_preserves_review_file_identity(spool_contract):
@@ -628,4 +629,4 @@ async def test_empty_first_file_preserves_review_file_identity(spool_contract):
         _transcriber(TranscribedAudio("", 0, diarization="external"), source),
     )
     assert result.text.startswith("## Del 2\n")
-    assert all(segment["file_index"] == 1 for segment in result.segments)
+    assert all(segment["file_index"] == 1 for segment in result.source.segments)

@@ -165,6 +165,21 @@ def test_plain_json_checkpoints_are_unchanged() -> None:
     assert payload == {"text": '{"a": 2}', "structured": {"a": 2}}
 
 
+def _source_state(segments):
+    from eneo.flows.domain.transcript_source import (
+        PresentTranscriptSource,
+        TranscriptComponentOmissions,
+    )
+    from eneo.flows.runtime.transcription import capture_transcript_source
+
+    return PresentTranscriptSource(
+        source=capture_transcript_source(
+            segments=segments, speaker_review=None, words=[], words_omitted_reason=None
+        ),
+        component_omissions=TranscriptComponentOmissions(detail=None, words=None),
+    )
+
+
 def _service(checkpoint: FlowRunReviewCheckpoint, run, flow_run_repo):
     user = SimpleNamespace(id=uuid4(), tenant_id=checkpoint.tenant_id)
     checkpoint_repo = AsyncMock()
@@ -182,6 +197,9 @@ def _service(checkpoint: FlowRunReviewCheckpoint, run, flow_run_repo):
         access_policy=access_policy,
         flow_run_terminalizer=AsyncMock(),
         flow_run_repo=flow_run_repo,
+        transcript_source_service=AsyncMock(
+            get_for_attempt=AsyncMock(return_value=_source_state(SOURCE_SEGMENTS))
+        ),
     )
 
 
@@ -360,7 +378,7 @@ async def test_approval_folds_source_step_corrections_under_the_names() -> None:
         input_payload_json={"transkribering": mapped},
     )
     source = _source_result(checkpoint, SOURCE).model_copy(
-        update={"input_payload_json": {"transcription": {"segments": SOURCE_SEGMENTS}}}
+        update={"input_payload_json": {}}
     )
     flow_run_repo = AsyncMock()
     flow_run_repo.get_step_result = AsyncMock(return_value=source)
@@ -368,6 +386,24 @@ async def test_approval_folds_source_step_corrections_under_the_names() -> None:
     corrections_repo = AsyncMock()
     corrections_repo.get_for_step = AsyncMock(return_value=_correction_set(checkpoint))
     service = _service(checkpoint, run, flow_run_repo)
+    from eneo.flows.domain.transcript_source import (
+        PresentTranscriptSource,
+        TranscriptComponentOmissions,
+    )
+    from eneo.flows.runtime.transcription import capture_transcript_source
+
+    service.transcript_source_service = AsyncMock()
+    service.transcript_source_service.get_for_attempt.return_value = (
+        PresentTranscriptSource(
+            source=capture_transcript_source(
+                segments=SOURCE_SEGMENTS,
+                speaker_review=None,
+                words=[],
+                words_omitted_reason=None,
+            ),
+            component_omissions=TranscriptComponentOmissions(detail=None, words=None),
+        )
+    )
     service.transcript_corrections_repo = corrections_repo
     service.flow_run_review_checkpoint_repo.approve_review_checkpoint = AsyncMock(
         side_effect=lambda **kwargs: checkpoint.model_copy(
@@ -422,6 +458,9 @@ async def test_approval_skips_a_stale_source_set_but_still_approves() -> None:
     corrections_repo = AsyncMock()
     corrections_repo.get_for_step = AsyncMock(return_value=_correction_set(checkpoint))
     service = _service(checkpoint, run, flow_run_repo)
+    service.transcript_source_service.get_for_attempt.return_value = _source_state(
+        SOURCE_SEGMENTS[:1]
+    )
     service.transcript_corrections_repo = corrections_repo
     service.flow_run_review_checkpoint_repo.approve_review_checkpoint = AsyncMock(
         return_value=checkpoint

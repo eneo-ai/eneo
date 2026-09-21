@@ -711,6 +711,9 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     run_service.get_run_status.return_value = run
     run_service.get_run.return_value = run
     container.flow_run_service.return_value = run_service
+    container.flow_transcript_source_service.return_value = AsyncMock(
+        get_references_for_step_results=AsyncMock(return_value={})
+    )
     user = SimpleNamespace(
         id=uuid4(),
         tenant_id=run.tenant_id,

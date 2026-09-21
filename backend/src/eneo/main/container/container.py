@@ -127,6 +127,9 @@ from eneo.flows.application.flow_transcript_corrections_service import (
 from eneo.flows.application.flow_transcript_regeneration_service import (
     FlowTranscriptRegenerationService,
 )
+from eneo.flows.application.flow_transcript_source_service import (
+    FlowTranscriptSourceService,
+)
 from eneo.flows.application.flow_transcript_words_service import (
     FlowTranscriptWordsService,
 )
@@ -152,6 +155,9 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
 )
 from eneo.flows.infrastructure.flow_transcript_corrections_repo import (
     FlowTranscriptCorrectionsRepository,
+)
+from eneo.flows.infrastructure.flow_transcript_source_repo import (
+    FlowTranscriptSourceRepository,
 )
 from eneo.flows.infrastructure.flow_transcript_words_repo import (
     FlowTranscriptWordsRepository,
@@ -917,6 +923,10 @@ class Container(containers.DeclarativeContainer):
         FlowTranscriptWordsRepository,
         session=session,
     )
+    flow_transcript_source_repo = providers.Factory(
+        FlowTranscriptSourceRepository,
+        session=session,
+    )
     flow_run_terminalizer = providers.Factory(
         FlowRunTerminalizer,
         flow_run_repo=flow_run_repo,
@@ -1547,6 +1557,13 @@ class Container(containers.DeclarativeContainer):
         access_policy=flow_run_access_policy,
         webhook_delivery_repo=flow_run_webhook_delivery_repo,
     )
+    flow_transcript_source_service = providers.Factory(
+        FlowTranscriptSourceService,
+        user=user,
+        access_policy=flow_run_access_policy,
+        flow_run_repo=flow_run_repo,
+        transcript_source_repo=flow_transcript_source_repo,
+    )
     flow_run_evidence_service = providers.Factory(
         FlowRunEvidenceService,
         user=user,
@@ -1558,6 +1575,7 @@ class Container(containers.DeclarativeContainer):
         file_repo=file_repo,
         access_policy=flow_run_access_policy,
         webhook_delivery_repo=flow_run_webhook_delivery_repo,
+        transcript_source_service=flow_transcript_source_service,
     )
     flow_run_review_checkpoint_service = providers.Factory(
         FlowRunReviewCheckpointService,
@@ -1568,6 +1586,7 @@ class Container(containers.DeclarativeContainer):
         flow_run_repo=flow_run_repo,
         transcript_corrections_repo=flow_transcript_corrections_repo,
         transcript_words_repo=flow_transcript_words_repo,
+        transcript_source_service=flow_transcript_source_service,
     )
     flow_transcript_corrections_service = providers.Factory(
         FlowTranscriptCorrectionsService,
@@ -1576,6 +1595,7 @@ class Container(containers.DeclarativeContainer):
         audit_service=audit_service,
         access_policy=flow_run_access_policy,
         flow_run_repo=flow_run_repo,
+        transcript_source_service=flow_transcript_source_service,
     )
     flow_transcript_regeneration_service = providers.Factory(
         FlowTranscriptRegenerationService,
@@ -1586,6 +1606,7 @@ class Container(containers.DeclarativeContainer):
         corrections_repo=flow_transcript_corrections_repo,
         words_repo=flow_transcript_words_repo,
         audit_service=audit_service,
+        transcript_source_service=flow_transcript_source_service,
     )
     flow_transcript_words_service = providers.Factory(
         FlowTranscriptWordsService,
@@ -1593,6 +1614,7 @@ class Container(containers.DeclarativeContainer):
         transcript_words_repo=flow_transcript_words_repo,
         access_policy=flow_run_access_policy,
         flow_run_repo=flow_run_repo,
+        transcript_source_service=flow_transcript_source_service,
     )
     flow_runtime_file_service = providers.Factory(
         FlowRuntimeFileService,

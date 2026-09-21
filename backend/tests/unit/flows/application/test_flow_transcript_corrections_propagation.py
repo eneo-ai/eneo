@@ -126,15 +126,31 @@ def _correction_set(
     )
 
 
-def _step_result(*, segments=SEGMENTS, attempt_no: int = 1):
+def _source_state(segments):
+    from eneo.flows.domain.transcript_source import (
+        PresentTranscriptSource,
+        TranscriptComponentOmissions,
+    )
+    from eneo.flows.runtime.transcription import capture_transcript_source
+
+    return PresentTranscriptSource(
+        source=capture_transcript_source(
+            segments=segments, speaker_review=None, words=[], words_omitted_reason=None
+        ),
+        component_omissions=TranscriptComponentOmissions(detail=None, words=None),
+    )
+
+
+def _step_result(*, attempt_no: int = 1):
     return SimpleNamespace(
         current_attempt_no=attempt_no,
-        input_payload_json={"transcription": {"segments": segments}},
+        input_payload_json={},
     )
 
 
 def test_folds_corrections_and_speaker_edits_into_aligned_text() -> None:
     outcome = build_folded_transcript(
+        transcript_source=_source_state(SEGMENTS),
         checkpoint=_checkpoint({"text": RENDERED, "provider": "kept"}),
         step_result=_step_result(),
         correction_set=_correction_set(
@@ -165,6 +181,7 @@ def test_file_backed_transcript_corrections_are_not_folded() -> None:
     }
     checkpoint = _checkpoint(payload)
     outcome = build_folded_transcript(
+        transcript_source=_source_state(SEGMENTS),
         checkpoint=checkpoint,
         step_result=_step_result(),
         correction_set=_correction_set(occurrences_json=[OCCURRENCE]),
@@ -179,6 +196,7 @@ def test_file_backed_transcript_corrections_are_not_folded() -> None:
 
 def test_skips_when_the_set_is_stale() -> None:
     outcome = build_folded_transcript(
+        transcript_source=_source_state(SEGMENTS),
         checkpoint=_checkpoint({"text": RENDERED}),
         step_result=_step_result(),
         correction_set=_correction_set(
@@ -192,6 +210,7 @@ def test_skips_when_the_set_is_stale() -> None:
 
 def test_skips_when_the_text_was_hand_edited() -> None:
     outcome = build_folded_transcript(
+        transcript_source=_source_state(SEGMENTS),
         checkpoint=_checkpoint({"text": RENDERED.replace("svarade", "sa")}),
         step_result=_step_result(),
         correction_set=_correction_set(occurrences_json=[OCCURRENCE]),
@@ -203,6 +222,7 @@ def test_skips_when_the_text_was_hand_edited() -> None:
 
 def test_skips_when_the_step_was_retried_after_the_checkpoint() -> None:
     outcome = build_folded_transcript(
+        transcript_source=_source_state(SEGMENTS),
         checkpoint=_checkpoint({"text": RENDERED}),
         step_result=_step_result(attempt_no=2),
         correction_set=_correction_set(occurrences_json=[OCCURRENCE]),
@@ -214,6 +234,7 @@ def test_skips_when_the_step_was_retried_after_the_checkpoint() -> None:
 
 def test_skips_when_the_step_stored_no_segments() -> None:
     outcome = build_folded_transcript(
+        transcript_source=None,
         checkpoint=_checkpoint({"text": RENDERED}),
         step_result=SimpleNamespace(current_attempt_no=1, input_payload_json={}),
         correction_set=_correction_set(occurrences_json=[OCCURRENCE]),
@@ -225,6 +246,7 @@ def test_skips_when_the_step_stored_no_segments() -> None:
 
 def test_skips_when_the_checkpoint_has_no_payload() -> None:
     outcome = build_folded_transcript(
+        transcript_source=_source_state(SEGMENTS),
         checkpoint=_checkpoint(None),
         step_result=_step_result(),
         correction_set=_correction_set(occurrences_json=[OCCURRENCE]),
@@ -253,6 +275,7 @@ def _rename(folded_source: str) -> dict[str, object]:
 
 def test_folds_into_the_source_text_and_rebuilds_the_payload() -> None:
     outcome = build_folded_transcript(
+        transcript_source=_source_state(SEGMENTS),
         checkpoint=_checkpoint({"text": MAPPING_TEXT, "structured": {}}),
         step_result=_step_result(),
         correction_set=_correction_set(
@@ -282,6 +305,7 @@ def test_source_fold_checks_the_source_step_attempt_not_the_checkpoints() -> Non
     assert checkpoint.attempt_no == 1
 
     outcome = build_folded_transcript(
+        transcript_source=_source_state(SEGMENTS),
         checkpoint=checkpoint,
         step_result=_step_result(attempt_no=3),
         correction_set=_correction_set(occurrences_json=[OCCURRENCE]),
@@ -298,6 +322,7 @@ def test_skips_when_the_rebuilt_payload_is_rejected() -> None:
         raise TypedIOValidationException("bad mapping", code="typed_io_failed")
 
     outcome = build_folded_transcript(
+        transcript_source=_source_state(SEGMENTS),
         checkpoint=_checkpoint({"text": MAPPING_TEXT, "structured": {}}),
         step_result=_step_result(),
         correction_set=_correction_set(occurrences_json=[OCCURRENCE]),
@@ -333,6 +358,7 @@ def test_folds_split_lines_with_word_windows_when_words_are_given() -> None:
     }
 
     outcome = build_folded_transcript(
+        transcript_source=_source_state(SEGMENTS),
         checkpoint=_checkpoint({"text": RENDERED}),
         step_result=_step_result(),
         correction_set=_correction_set(speaker_edits_json=[edit]),

@@ -18,6 +18,21 @@ from eneo.flows.domain.transcript_corrections import (
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 
 
+def _source_state(segments):
+    from eneo.flows.domain.transcript_source import (
+        PresentTranscriptSource,
+        TranscriptComponentOmissions,
+    )
+    from eneo.flows.runtime.transcription import capture_transcript_source
+
+    return PresentTranscriptSource(
+        source=capture_transcript_source(
+            segments=segments, speaker_review=None, words=[], words_omitted_reason=None
+        ),
+        component_omissions=TranscriptComponentOmissions(detail=None, words=None),
+    )
+
+
 @pytest.fixture
 def context():
     tenant_id, user_id, flow_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
@@ -70,9 +85,7 @@ def context():
             step_order=i + 1,
             current_attempt_no=3,
             status=FlowStepResultStatus.COMPLETED,
-            input_payload_json={"transcription": {"segments": segments}}
-            if i == 0
-            else {},
+            input_payload_json={},
             output_payload_json={"text": "Stale summary"},
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -128,6 +141,9 @@ def context():
         corrections_repo=corrections_repo,
         words_repo=words_repo,
         audit_service=AsyncMock(),
+        transcript_source_service=AsyncMock(
+            get_for_attempt=AsyncMock(return_value=_source_state(segments))
+        ),
     )
     request = dict(
         flow_id=flow_id,

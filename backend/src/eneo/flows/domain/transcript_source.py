@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import IntEnum
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -54,6 +55,16 @@ class TranscriptSourceReference(BaseModel):
     attempt_no: int = Field(ge=1)
     source_hash: str | None = Field(min_length=64, max_length=64)
     bounds: TranscriptSourceBounds
+
+
+class TranscriptSourceExportRow(TranscriptSource):
+    id: UUID
+    tenant_id: UUID
+    flow_id: UUID
+    run_id: UUID
+    step_id: UUID
+    attempt_no: int
+    created_at: datetime
 
 
 class TranscriptComponentOmissions(BaseModel):

@@ -16,6 +16,9 @@ from eneo.flows.api.flow_run_transcript_words_router import (
 from eneo.flows.api.flow_transcript_regeneration_router import (
     router as regeneration_router,
 )
+from eneo.flows.api.flow_transcript_source_router import (
+    router as transcript_source_router,
+)
 
 router = APIRouter()
 router.include_router(lifecycle_router)
@@ -24,6 +27,7 @@ router.include_router(evidence_router)
 router.include_router(steps_router)
 router.include_router(transcript_corrections_router)
 router.include_router(transcript_words_router)
+router.include_router(transcript_source_router)
 router.include_router(regeneration_router)
 router.include_router(retry_router)
 

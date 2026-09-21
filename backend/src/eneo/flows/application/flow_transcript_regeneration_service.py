@@ -17,8 +17,8 @@ from eneo.flows.application.flow_run_service import (
     FlowRunService,
     find_prefix_seed_replay,
 )
-from eneo.flows.application.flow_transcript_corrections_service import (
-    extract_transcription_segments,
+from eneo.flows.application.flow_transcript_source_service import (
+    FlowTranscriptSourceService,
 )
 from eneo.flows.domain.flow import FlowRunStatus, FlowStepResult, FlowStepResultStatus
 from eneo.flows.domain.speaker_labels import apply_speaker_names, render_line_prefix
@@ -33,7 +33,6 @@ from eneo.flows.domain.transcript_corrections import (
     TranscriptCorrectionInvalidOccurrenceError,
     TranscriptSpeakerEditInvalidError,
     apply_to_rendered_transcript,
-    segments_content_hash,
     validate_correction_partitions,
     validate_occurrences,
     validate_speaker_edits,
@@ -102,6 +101,7 @@ class FlowTranscriptRegenerationService:
         corrections_repo: FlowTranscriptCorrectionsRepository,
         words_repo: FlowTranscriptWordsRepository,
         audit_service: AuditService,
+        transcript_source_service: FlowTranscriptSourceService,
     ):
         self.user = user
         self.run_service = run_service
@@ -110,6 +110,7 @@ class FlowTranscriptRegenerationService:
         self.corrections_repo = corrections_repo
         self.words_repo = words_repo
         self.audit_service = audit_service
+        self.transcript_source_service = transcript_source_service
 
     async def regenerate(
         self,
@@ -163,9 +164,24 @@ class FlowTranscriptRegenerationService:
         )
         if result is None:
             raise NotFoundException("Flow run transcription step not found.")
-        segments = extract_transcription_segments(result.input_payload_json)
-        if not segments or segments_content_hash(segments) != segments_hash:
+        transcript = (
+            await self.transcript_source_service.get_for_attempt(
+                flow_id=flow_id,
+                run_id=run_id,
+                step_id=step_id,
+                attempt_no=result.current_attempt_no,
+            )
+            if result.current_attempt_no is not None
+            else None
+        )
+        if (
+            transcript is None
+            or transcript.status != "present"
+            or transcript.source.source_hash != segments_hash
+            or transcript.source.segments is None
+        ):
             _invalid("stale_segments", conflict=True)
+        segments = transcript.source.segments
         corrections = await self.corrections_repo.get_for_step(
             run_id=run_id,
             step_id=step_id,

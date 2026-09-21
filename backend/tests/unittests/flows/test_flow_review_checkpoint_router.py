@@ -660,6 +660,7 @@ def _history_context(monkeypatch, *, corrections=False):
     corrections_repo.get_revision_for_step.side_effect = read_revision
     reader.side_effect = list_rows
     service = FlowRunEvidenceService(
+        transcript_source_service=AsyncMock(),
         user=container.user(),
         flow_repo=AsyncMock(),
         flow_run_repo=AsyncMock(),

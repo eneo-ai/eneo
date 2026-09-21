@@ -210,6 +210,216 @@ async def _admin_token(*, db_container, patch_auth_service_jwt, admin_user) -> s
         return container.auth_service().create_access_token_for_user(user)
 
 
+@pytest.mark.parametrize("detail", ["raw", "redacted"])
+@pytest.mark.parametrize("omitted", [False, True])
+async def test_exports_include_retained_transcript_rows(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    setup_database,
+    space_factory,
+    admin_user,
+    monkeypatch,
+    detail,
+    omitted,
+):
+    import hashlib
+    import json
+
+    from eneo.flows.domain.transcript_source import TranscriptSourceReference
+    from eneo.flows.infrastructure.flow_transcript_source_repo import (
+        FlowTranscriptSourceRepository,
+    )
+    from eneo.flows.runtime import transcription
+
+    if omitted:
+        monkeypatch.setattr(transcription, "MAX_SEGMENTS_BYTES", 1)
+    source = transcription.capture_transcript_source(
+        segments=[
+            {
+                "file_index": 0,
+                "start": 0,
+                "end": 1,
+                "speaker": None,
+                "text": "x" * 150_000 if omitted else "Hello.",
+            }
+        ],
+        speaker_review={"files": [{"file_index": 0, "api_key": "source-secret"}]},
+        words=[],
+        words_omitted_reason=None,
+    )
+    async with sessionmanager.session() as session, session.begin():
+        seed = await _seed_snapshot_run(
+            session=session, space_factory=space_factory, admin_user=admin_user
+        )
+        session.add(_attempt(seed, attempt_no=2))
+        for attempt_no in (1, 2):
+            reference = TranscriptSourceReference(
+                run_id=seed.run_id,
+                step_id=seed.step_id,
+                attempt_no=attempt_no,
+                source_hash=source.source_hash,
+                bounds=source.bounds,
+            )
+            await FlowTranscriptSourceRepository(session=session).insert(
+                tenant_id=seed.tenant_id,
+                flow_id=seed.flow_id,
+                reference=reference,
+                source=source,
+            )
+            await session.execute(
+                sa.update(FlowStepAttempts)
+                .where(
+                    FlowStepAttempts.flow_run_id == seed.run_id,
+                    FlowStepAttempts.attempt_no == attempt_no,
+                )
+                .values(
+                    input_payload_json={
+                        "transcription": {"source": reference.model_dump(mode="json")}
+                    }
+                )
+            )
+    monkeypatch.setattr(
+        flow_run_evidence_service,
+        "EVIDENCE_EXPORT_MAX_AGGREGATE_LOGICAL_JSON_BYTES",
+        100_000,
+    )
+    token = await _admin_token(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        admin_user=admin_user,
+    )
+    response = await client.get(
+        f"/api/v1/flows/{seed.flow_id}/runs/{seed.run_id}/evidence/export",
+        params={"detail": detail, "reason": "source-test"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    export = response.json()
+    rows = export["bundle"]["transcript_sources"]
+    assert [row["attempt_no"] for row in rows] == [1, 2]
+    for row in rows:
+        assert row["run_id"] == str(seed.run_id)
+        assert row["step_id"] == str(seed.step_id)
+        assert row["source_hash"] == source.source_hash
+        assert row["segments"] == source.segments
+        assert row["bounds"] == source.bounds.model_dump(mode="json")
+        assert row["speaker_review"] is not None
+    if detail == "raw":
+        assert rows[0]["speaker_review"] == source.speaker_review
+    else:
+        assert "source-secret" not in response.text
+        assert any(
+            "transcript_sources" in path for path in export["redaction"]["masked_paths"]
+        )
+    assert (
+        export["content_hash"]
+        == hashlib.sha256(
+            json.dumps(
+                export["bundle"],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+    )
+
+
+@pytest.mark.parametrize("detail", ["raw", "redacted"])
+@pytest.mark.parametrize("limit_kind", ["logical", "rows"])
+async def test_export_source_admission_precedes_hydration(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    setup_database,
+    space_factory,
+    admin_user,
+    monkeypatch,
+    detail,
+    limit_kind,
+):
+    from eneo.flows.domain.transcript_source import TranscriptSourceReference
+    from eneo.flows.infrastructure.flow_transcript_source_repo import (
+        FlowTranscriptSourceRepository,
+    )
+    from eneo.flows.runtime.transcription import capture_transcript_source
+
+    source = capture_transcript_source(
+        segments=[
+            {
+                "file_index": 0,
+                "start": 0,
+                "end": 1,
+                "speaker": None,
+                "text": "x" * 150_000,
+            }
+        ],
+        speaker_review=None,
+        words=[],
+        words_omitted_reason=None,
+    )
+    async with sessionmanager.session() as session, session.begin():
+        seed = await _seed_snapshot_run(
+            session=session, space_factory=space_factory, admin_user=admin_user
+        )
+        repo = FlowTranscriptSourceRepository(session=session)
+        for attempt_no in (1, 2):
+            await repo.insert(
+                tenant_id=seed.tenant_id,
+                flow_id=seed.flow_id,
+                source=source,
+                reference=TranscriptSourceReference(
+                    run_id=seed.run_id,
+                    step_id=seed.step_id,
+                    attempt_no=attempt_no,
+                    source_hash=source.source_hash,
+                    bounds=source.bounds,
+                ),
+            )
+        measurement = await repo.measure_for_export(
+            tenant_id=seed.tenant_id, run_id=seed.run_id, candidate_limit=3
+        )
+        assert measurement.stored_json_bytes < 10_000
+        assert measurement.logical_json_bytes > 300_000
+    monkeypatch.setattr(
+        flow_run_evidence_service,
+        "EVIDENCE_EXPORT_MAX_AGGREGATE_LOGICAL_JSON_BYTES",
+        250_000,
+    )
+    if limit_kind == "rows":
+        monkeypatch.setattr(
+            flow_run_evidence_service, "EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING", 1
+        )
+
+    async def forbidden_hydration(*args, **kwargs):
+        pytest.fail("Transcript rows were hydrated before export admission.")
+
+    monkeypatch.setattr(
+        FlowTranscriptSourceRepository, "list_for_export", forbidden_hydration
+    )
+    if limit_kind == "rows":
+        monkeypatch.setattr(
+            FlowTranscriptSourceRepository, "measure_for_export", forbidden_hydration
+        )
+    token = await _admin_token(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        admin_user=admin_user,
+    )
+    response = await client.get(
+        f"/api/v1/flows/{seed.flow_id}/runs/{seed.run_id}/evidence/export",
+        params={"detail": detail, "reason": "source-limit-test"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 413, response.text
+    assert response.json()["context"]["section"] == (
+        "whole_bundle" if limit_kind == "logical" else "transcript_sources"
+    )
+    assert response.json()["context"]["limit"] == (
+        "aggregate_logical_json_bytes" if limit_kind == "logical" else "section_rows"
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_evidence_view_route_uses_one_repeatable_read_snapshot(

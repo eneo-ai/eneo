@@ -35,6 +35,7 @@ from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.step_output import FileBackedStepText, utf8_prefix
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
+from eneo.flows.domain.transcript_source import TranscriptSourceExportRow
 from eneo.flows.enums import FlowRunReviewCheckpointState
 from eneo.flows.flow_run_contract_service import build_final_output_contract
 from eneo.flows.flow_run_provenance import (
@@ -99,6 +100,7 @@ class EvidenceBundle:
     knowledge_traces: tuple[StepKnowledgeTrace, ...] = ()
     review_checkpoint_edits: Sequence[FlowRunReviewCheckpointEdit] = ()
     transcript_correction_revisions: Sequence[FlowTranscriptCorrectionRevision] = ()
+    transcript_sources: Sequence[TranscriptSourceExportRow] = ()
 
     def to_export_payload(self) -> EvidenceBundlePayload:
         step_attempts: list[dict[str, Any]] = []
@@ -135,6 +137,9 @@ class EvidenceBundle:
                     for item in self.step_results
                 ],
                 "step_attempts": step_attempts,
+                "transcript_sources": [
+                    item.model_dump(mode="json") for item in self.transcript_sources
+                ],
                 "result_files": [
                     item.model_dump(mode="json") for item in self.result_files
                 ],
@@ -182,6 +187,7 @@ class RedactedEvidenceBundle:
     knowledge_traces: tuple[StepKnowledgeTrace, ...] = ()
     provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...] = ()
     transcript_correction_revisions: tuple[dict[str, Any], ...] = ()
+    transcript_sources: tuple[dict[str, Any], ...] = ()
 
     def to_export_payload(self) -> EvidenceBundlePayload:
         return EvidenceBundlePayload(
@@ -191,6 +197,7 @@ class RedactedEvidenceBundle:
                 "definition_snapshot": dict(self.definition_snapshot),
                 "step_results": [dict(item) for item in self.step_results],
                 "step_attempts": [dict(item) for item in self.step_attempts],
+                "transcript_sources": [dict(item) for item in self.transcript_sources],
                 "result_files": [dict(item) for item in self.result_files],
                 "review_checkpoints": [dict(item) for item in self.review_checkpoints],
                 "transcript_correction_revisions": [
@@ -223,6 +230,7 @@ def build_evidence_bundle(
     review_checkpoints: Sequence[FlowRunReviewCheckpoint] = (),
     review_checkpoint_edits: Sequence[FlowRunReviewCheckpointEdit] = (),
     transcript_correction_revisions: Sequence[FlowTranscriptCorrectionRevision] = (),
+    transcript_sources: Sequence[TranscriptSourceExportRow] = (),
     webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = (),
     provider_calls: ProviderCallEvidencePage | None = None,
     token_usage: FlowRunTokenUsage | None = None,
@@ -288,6 +296,7 @@ def build_evidence_bundle(
         review_checkpoints=tuple(review_checkpoints),
         review_checkpoint_edits=tuple(review_checkpoint_edits),
         transcript_correction_revisions=tuple(transcript_correction_revisions),
+        transcript_sources=tuple(transcript_sources),
         webhook_deliveries=tuple(webhook_deliveries),
         provider_calls=provider_calls
         or ProviderCallEvidencePage(
@@ -403,6 +412,13 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
     masked_paths.extend(corrections_section.masked_paths)
     masked_fields.extend(corrections_section.masked_fields)
 
+    source_section = _redact_record_payloads(
+        section_path="bundle.transcript_sources",
+        payloads=[item.model_dump(mode="json") for item in bundle.transcript_sources],
+    )
+    masked_paths.extend(source_section.masked_paths)
+    masked_fields.extend(source_section.masked_fields)
+
     debug_result = redact_payload_with_manifest(
         bundle.debug_export, path="bundle.debug_export"
     )
@@ -437,6 +453,7 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         result_files=result_file_section.records,
         review_checkpoints=review_checkpoint_section.records,
         transcript_correction_revisions=corrections_section.records,
+        transcript_sources=source_section.records,
         webhook_deliveries=tuple(
             _dump_webhook_delivery(item) for item in bundle.webhook_deliveries
         ),

@@ -16,7 +16,6 @@ from eneo.flows.domain.step_output import (
     ResolvedStepMaterial,
     build_step_material_aliases,
 )
-from eneo.flows.domain.transcript_corrections import segments_content_hash
 from eneo.flows.domain.transcript_source import (
     TranscriptSourceReference,
 )
@@ -30,7 +29,6 @@ from .audio_spool import OpenAudioDownload
 from .transcription import (
     REDUCED_PRECISION_ALIGNMENTS,
     FlowStepTranscriber,
-    FlowTranscriptionResult,
     TranscriptSourcePreparation,
     resolve_and_transcribe_audio_for_step,
 )
@@ -93,8 +91,6 @@ class AudioRuntimeDeps:
         [TranscriptSourceReference, TranscriptSourcePreparation], None
     ]
     transcription_call_observer: "ProviderCallObserver | None" = None
-    # Stores the step's word timings; None leaves word-level data unpersisted.
-    transcript_words_repo: "FlowTranscriptWordsRepository | None" = None
 
 
 def apply_transcription_to_context(
@@ -130,9 +126,11 @@ async def persist_transcription_on_run_input(
 async def persist_transcript_words(
     *,
     transcript_words_repo: "FlowTranscriptWordsRepository | None",
-    run: "FlowRun",
+    run_id: UUID,
+    tenant_id: UUID,
+    flow_id: UUID,
     step_id: UUID,
-    result: FlowTranscriptionResult,
+    preparation: TranscriptSourcePreparation,
 ) -> None:
     """Store the step's word timings beside its segments, or clear them.
 
@@ -142,19 +140,21 @@ async def persist_transcript_words(
     """
     if transcript_words_repo is None:
         return
-    if result.words is None or result.segments is None:
+    words = preparation.words
+    source_hash = preparation.source_hash
+    if words is None or source_hash is None:
         await transcript_words_repo.delete_for_step(
-            run_id=run.id, step_id=step_id, tenant_id=run.tenant_id
+            run_id=run_id, step_id=step_id, tenant_id=tenant_id
         )
         return
     await transcript_words_repo.upsert(
-        tenant_id=run.tenant_id,
-        flow_id=run.flow_id,
-        run_id=run.id,
+        tenant_id=tenant_id,
+        flow_id=flow_id,
+        run_id=run_id,
         step_id=step_id,
-        segments_hash=segments_content_hash(result.segments),
-        alignment=result.alignment,
-        words_json=result.words,
+        segments_hash=source_hash,
+        alignment=preparation.alignment,
+        words_json=words,
     )
 
 
@@ -276,12 +276,6 @@ async def resolve_transcribe_and_attach_audio_input(
     if text_reference is not None:
         # Later input validation may roll back before attempt activation.
         await deps.commit()
-    await persist_transcript_words(
-        transcript_words_repo=deps.transcript_words_repo,
-        run=request.run,
-        step_id=request.step.step_id,
-        result=transcription_result,
-    )
     apply_transcription_to_context(
         context=request.context, transcript=text_reference or transcription_result.text
     )

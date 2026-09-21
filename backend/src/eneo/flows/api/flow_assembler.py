@@ -53,6 +53,7 @@ from eneo.flows.domain.step_output import (
     StepOutputMetadataError,
     interpret_step_text,
 )
+from eneo.flows.domain.transcript_source import TranscriptSourceReference
 from eneo.flows.enums import FlowOutputType, FlowRunStatus
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
@@ -206,20 +207,16 @@ class FlowAssembler:
         *,
         runtime_input_file_ids: Sequence[UUID] = (),
         result_files: Sequence[FlowRunStepResultFile] = (),
+        transcript_source: "TranscriptSourceReference | None" = None,
     ) -> FlowRunStepPublic:
-        from eneo.flows.application.flow_transcript_corrections_service import (
-            extract_transcription_segments,
-        )
-        from eneo.flows.domain.transcript_corrections import segments_content_hash
-
         input_payload = result.input_payload_json
-        segments = extract_transcription_segments(input_payload)
-        if segments is not None and input_payload is not None:
+        if transcript_source is not None:
+            input_payload = input_payload or {}
             input_payload = {
                 **input_payload,
                 "transcription": {
-                    **input_payload["transcription"],
-                    "segments_hash": segments_content_hash(segments),
+                    **input_payload.get("transcription", {}),
+                    "segments_hash": transcript_source.source_hash,
                 },
             }
         return FlowRunStepPublic.model_validate(result).model_copy(

@@ -20,7 +20,6 @@ from eneo.flows.domain.speaker_labels import (
 )
 from eneo.flows.domain.transcript_corrections import (
     SegmentsContentHash,
-    segments_content_hash,
 )
 from eneo.flows.domain.transcript_source import (
     TranscriptSource,
@@ -232,19 +231,13 @@ def _empty_speakers() -> list[dict[str, Any]]:
     return []
 
 
-# Segments are evidence for a reader, not input to any step, so a transcript
-# whose structured view would bloat the step's stored payload keeps only its
-# text; the reader falls back to parsing the timestamped lines.
-MAX_EMBEDDED_SEGMENTS_BYTES = 256 * 1024
 # A five-hour diarized transcript is about 0.5 MB before review detail.
 MAX_SEGMENTS_BYTES = 2 * 1024 * 1024
 MAX_DETAIL_BYTES = MAX_SEGMENTS_BYTES
-SEGMENTS_OMITTED_TOO_LARGE = "too_large"
 # Word timings live in their own row (see ``FlowStepTranscriptWords``) and
 # anchor to the stored segments by index, so they exist only when the
 # segments do. An hour of speech is a few megabytes of words.
 MAX_WORDS_BYTES = 8 * 1024 * 1024
-WORDS_OMITTED_NO_SEGMENTS = "segments_unavailable"
 
 
 def serialize_segments(
@@ -320,7 +313,7 @@ def serialize_segment_words(
 
 
 class TranscriptSourcePreparation:
-    """Bounded attempt evidence; word payloads remain with the legacy words writer."""
+    """Bounded transcript evidence accumulated across one attempt."""
 
     def __init__(
         self,
@@ -333,15 +326,15 @@ class TranscriptSourcePreparation:
     ) -> None:
         self.files_count = 0
         self.speakers_count = 0
-        self._preparations_count = 0
+        self.alignment: str | None = None
         self._segments: list[dict[str, Any]] | None = []
+        self._words: list[dict[str, Any]] | None = []
         self._review_files: list[dict[str, Any]] | None = []
         self._segments_complete = True
         self._segments_count = 0
         self._segments_bytes = 0
         self._detail_count = 0
         self._detail_bytes = 0
-        self._word_entries_count = 0
         self._words_count = 0
         self._words_bytes = 0
         self._words_omitted_reason: TranscriptSourceOmissionReason | None = None
@@ -364,7 +357,11 @@ class TranscriptSourcePreparation:
         words: Sequence[dict[str, Any]],
         words_omitted_reason: str | None,
         speakers_count: int = 0,
+        alignment: str | None = None,
     ) -> None:
+        self.alignment = _coarsest_alignment(
+            [value for value in (self.alignment, alignment) if value is not None]
+        )
         segment_offset = self._segments_count
         # Default JSON brackets/separators contribute two bytes per array item.
         for segment in segments:
@@ -407,27 +404,23 @@ class TranscriptSourcePreparation:
                 elif self._review_files is not None:
                     self._review_files.append(review)
         for entry in words:
+            entry = {**entry, "segment_index": entry["segment_index"] + segment_offset}
             self._words_count += len(entry["words"])
-            self._word_entries_count += 1
             self._words_bytes += (
                 len(json.dumps(entry, ensure_ascii=False).encode("utf-8")) + 2
             )
-            # Only the index's digit width changes in the combined word array.
-            self._words_bytes += len(
-                str(entry["segment_index"] + segment_offset)
-            ) - len(str(entry["segment_index"]))
-        self._preparations_count += 1
+            if self._words_bytes > MAX_WORDS_BYTES:
+                self._words = None
+                self._words_omitted_reason = TranscriptSourceOmissionReason.TOO_LARGE
+            elif self._words is not None:
+                self._words.append(entry)
         self.files_count += files_count
         self.speakers_count += speakers_count
-        self._words_omitted_reason = (
-            TranscriptSourceOmissionReason.TOO_LARGE
-            if self._preparations_count > 1 and self._words_bytes > MAX_WORDS_BYTES
-            else TranscriptSourceOmissionReason.SEGMENTS_UNAVAILABLE
-            if self._preparations_count > 1 and self._word_entries_count
-            else TranscriptSourceOmissionReason[words_omitted_reason.upper()]
-            if words_omitted_reason is not None
-            else None
-        )
+        if words_omitted_reason is not None:
+            self._words = None
+            self._words_omitted_reason = TranscriptSourceOmissionReason[
+                words_omitted_reason.upper()
+            ]
 
     @property
     def source_hash(self) -> str | None:
@@ -457,8 +450,18 @@ class TranscriptSourcePreparation:
                 if self._review_files is None
                 else None
             ),
-            words_omitted_reason=self._words_omitted_reason,
+            words_omitted_reason=(
+                TranscriptSourceOmissionReason.SEGMENTS_UNAVAILABLE
+                if self._words_count and not self._segments
+                else self._words_omitted_reason
+            ),
         )
+
+    @property
+    def words(self) -> list[dict[str, Any]] | None:
+        if self.bounds.words_omitted_reason is not None:
+            return None
+        return self._words or None
 
     @property
     def source(self) -> TranscriptSource:
@@ -497,15 +500,6 @@ class FlowTranscriptionResult:
     max_speakers: int | None = None
     # Coarsest word-timestamp source across files, as reported by the service.
     alignment: str | None = None
-    # Structured transcript lines across all files (see ``serialize_segments``),
-    # or None when the engine produced none or they exceeded the size cap.
-    segments: list[dict[str, Any]] | None = None
-    segments_omitted_reason: str | None = None
-    # Word timings per stored segment (see ``serialize_segment_words``), kept
-    # out of the metadata: they are persisted in their own row.
-    words: list[dict[str, Any]] | None = None
-    words_omitted_reason: str | None = None
-    speaker_review: dict[str, Any] | None = None
 
     @property
     def source(self) -> TranscriptSource:
@@ -530,13 +524,6 @@ class FlowTranscriptionResult:
             "speakers": self.speakers,
             "max_speakers": self.max_speakers,
             "alignment": self.alignment,
-            "speaker_review": self.speaker_review,
-            "segments": self.segments,
-            "segments_hash": segments_content_hash(self.segments)
-            if self.segments
-            else None,
-            "segments_omitted_reason": self.segments_omitted_reason,
-            "words_omitted_reason": self.words_omitted_reason,
         }
 
 
@@ -793,42 +780,14 @@ async def transcribe_audio_input(
     near_inline_limit = transcript_bytes >= threshold
     estimated_tokens = count_tokens(combined)
     elapsed_ms = int((time.monotonic() - transcription_started) * 1000)
-    kept_segments, segments_omitted_reason = _cap_segments(
-        segments if every_file_segmented else []
-    )
-    review_metadata = {"files": review_files} if review_files else None
-    if (
-        len(
-            json.dumps(
-                {"segments": kept_segments, "speaker_review": review_metadata},
-                ensure_ascii=False,
-            ).encode("utf-8")
-        )
-        > MAX_EMBEDDED_SEGMENTS_BYTES
-    ):
-        kept_segments = None
-        segments_omitted_reason = SEGMENTS_OMITTED_TOO_LARGE
-        review_metadata = (
-            {
-                "files": [
-                    {key: value for key, value in review.items() if key != "overlaps"}
-                    for review in review_files
-                ],
-                "details_omitted_reason": SEGMENTS_OMITTED_TOO_LARGE,
-            }
-            if review_files
-            else None
-        )
-    kept_words, words_omitted_reason = _cap_words(
-        words, segments_kept=kept_segments is not None
-    )
     source_preparation.append(
         files_count=len(files),
         segments=segments if every_file_segmented else [],
         speaker_review={"files": review_files} if review_files else None,
         words=words,
-        words_omitted_reason=words_omitted_reason,
+        words_omitted_reason=None,
         speakers_count=label_offset - source_preparation.speakers_count,
+        alignment=_coarsest_alignment(alignments),
     )
 
     return FlowTranscriptionResult(
@@ -851,11 +810,6 @@ async def transcribe_audio_input(
         speakers=speakers,
         max_speakers=max_speakers if diarize else None,
         alignment=_coarsest_alignment(alignments),
-        segments=kept_segments,
-        segments_omitted_reason=segments_omitted_reason,
-        words=kept_words,
-        words_omitted_reason=words_omitted_reason,
-        speaker_review=review_metadata,
     )
 
 
@@ -873,30 +827,6 @@ def capture_transcript_source(
         words=words,
         words_omitted_reason=words_omitted_reason,
     ).source
-
-
-def _cap_words(
-    words: list[dict[str, Any]], *, segments_kept: bool
-) -> tuple[list[dict[str, Any]] | None, str | None]:
-    if not words:
-        return None, None
-    if not segments_kept:
-        return None, WORDS_OMITTED_NO_SEGMENTS
-    size = len(json.dumps(words, ensure_ascii=False).encode("utf-8"))
-    if size > MAX_WORDS_BYTES:
-        return None, SEGMENTS_OMITTED_TOO_LARGE
-    return words, None
-
-
-def _cap_segments(
-    segments: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]] | None, str | None]:
-    if not segments:
-        return None, None
-    size = len(json.dumps(segments, ensure_ascii=False).encode("utf-8"))
-    if size > MAX_EMBEDDED_SEGMENTS_BYTES:
-        return None, SEGMENTS_OMITTED_TOO_LARGE
-    return segments, None
 
 
 # Alignment values the service reports when it could not force-align the text

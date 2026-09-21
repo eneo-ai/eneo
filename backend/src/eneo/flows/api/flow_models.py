@@ -2775,6 +2775,7 @@ FLOW_TRANSCRIPT_CORRECTIONS_PUBLIC_EXAMPLE: dict[str, Any] = {
 }
 
 FLOW_TRANSCRIPT_CORRECTIONS_EDIT_REQUEST_EXAMPLE: dict[str, Any] = {
+    "segments_hash": "a" * 64,
     "expected_revision": 1,
     "occurrences": [FLOW_TRANSCRIPT_CORRECTION_OCCURRENCE_EXAMPLE],
     "speaker_edits": [FLOW_TRANSCRIPT_SPEAKER_EDIT_EXAMPLE],
@@ -2942,12 +2943,10 @@ class FlowTranscriptCorrectionsEditRequest(BaseModel):
     )
 
     schema_version: Literal[2, 3] = 2
-    segments_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    segments_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def validate_version(self) -> Self:
-        if self.schema_version == 3 and self.segments_hash is None:
-            raise ValueError("v3 writes require the original segments_hash")
         if self.schema_version < 3 and any(
             edit.decision != "confirmed"
             or edit.speaker == edit.original_speaker

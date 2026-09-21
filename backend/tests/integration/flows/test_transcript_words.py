@@ -33,6 +33,10 @@ WORDS = [
 
 
 def _service(*, session, user) -> FlowTranscriptWordsService:
+    from tests.integration.flows.test_transcript_source import (
+        _service as source_service,
+    )
+
     flow_run_repo = FlowRunRepository(session=session)
     return FlowTranscriptWordsService(
         user=user,
@@ -43,6 +47,7 @@ def _service(*, session, user) -> FlowTranscriptWordsService:
             flow_run_repo=flow_run_repo,
         ),
         flow_run_repo=flow_run_repo,
+        transcript_source_service=source_service(session, user),
     )
 
 

@@ -756,7 +756,7 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         storage_category=FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT,
         schema_version_policy="The insert-only attempt snapshot retains normalized segment and speaker-review shapes.",
         corruption_behavior="The typed reader rejects a missing referenced row or a reference that differs from the snapshot.",
-        rationale="Independently bounded transcription evidence survives the embedded payload cap for the run's lifetime.",
+        rationale="Independently bounded transcription evidence is retained for the run's lifetime.",
     ),
     _owner(
         "flow_step_transcript_sources",
@@ -767,7 +767,7 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         storage_category=FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT,
         schema_version_policy="The insert-only attempt snapshot retains normalized segment and speaker-review shapes.",
         corruption_behavior="The typed reader rejects a missing referenced row or a reference that differs from the snapshot.",
-        rationale="Independently bounded transcription evidence survives the embedded payload cap for the run's lifetime.",
+        rationale="Independently bounded transcription evidence is retained for the run's lifetime.",
     ),
     _owner(
         "flow_step_transcript_words",
@@ -776,13 +776,13 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         envelope_name="FlowStepTranscriptWords",
         owner_symbols=(
             "serialize_segment_words",
-            "_cap_words",
+            "TranscriptSourcePreparation.append",
         ),
         storage_category=FlowJsonbStorageCategory.DERIVED_INDEX,
         schema_version_policy=(
             "No persisted schema version: the stored shape is Eneo's own "
             "serialization of normalized provider words with a segment_index per "
-            "entry, bounded by _cap_words before persistence."
+            "entry, bounded across the complete attempt before persistence."
         ),
         corruption_behavior=(
             "No corruption detection on read: hydration keeps list[dict] as "
