@@ -8,6 +8,7 @@
   import { untrack } from "svelte";
   import { isHttpUrl } from "../urls";
   import SuggestedQuestionsEditor from "./SuggestedQuestionsEditor.svelte";
+  import type { LockedTextField } from "./templateLocks";
 
   type Props = {
     texts: WidgetTexts;
@@ -15,11 +16,24 @@
     /** Suggested questions belong to a widget, not to a template. */
     showSuggestions?: boolean;
     idPrefix?: string;
+    /** Fields a template governs: shown read-only with `lockHint` as their reason. */
+    lockedFields?: ReadonlySet<LockedTextField>;
+    lockHint?: string;
   };
 
-  let { texts, onChange, showSuggestions = true, idPrefix = "widget" }: Props = $props();
+  let {
+    texts,
+    onChange,
+    showSuggestions = true,
+    idPrefix = "widget",
+    lockedFields = new Set<LockedTextField>(),
+    lockHint = ""
+  }: Props = $props();
 
   const id = (name: string) => `${idPrefix}-${name}`;
+  const locked = (field: LockedTextField) => lockedFields.has(field);
+  const describedBy = (field: LockedTextField, help: string) =>
+    locked(field) ? `${id(help)} ${id("lock-hint")}` : id(help);
 
   // The footer link is committed when the field is left, never per keystroke.
   let linkDraft = $state(untrack(() => texts.footer_link_url ?? ""));
@@ -46,13 +60,17 @@
 </script>
 
 <Field.Group class="grid gap-6">
+  {#if lockedFields.size > 0}
+    <p id={id("lock-hint")} class="text-secondary text-sm">{lockHint}</p>
+  {/if}
   <Field.Field>
     <Field.Label for={id("title")}>{m.widget_admin_text_title()}</Field.Label>
     <Input
       id={id("title")}
       maxlength={80}
       value={texts.title ?? ""}
-      aria-describedby={id("title-help")}
+      disabled={locked("title")}
+      aria-describedby={describedBy("title", "title-help")}
       oninput={(event) => onChange({ title: event.currentTarget.value })}
     />
     <Field.Description id={id("title-help")}
@@ -67,7 +85,8 @@
       maxlength={500}
       rows={3}
       value={texts.welcome ?? ""}
-      aria-describedby={id("welcome-help")}
+      disabled={locked("welcome")}
+      aria-describedby={describedBy("welcome", "welcome-help")}
       oninput={(event) => onChange({ welcome: event.currentTarget.value })}
     />
     <Field.Description id={id("welcome-help")}
@@ -93,7 +112,8 @@
       id={id("placeholder")}
       maxlength={120}
       value={texts.placeholder ?? ""}
-      aria-describedby={id("placeholder-help")}
+      disabled={locked("placeholder")}
+      aria-describedby={describedBy("placeholder", "placeholder-help")}
       oninput={(event) => onChange({ placeholder: event.currentTarget.value })}
     />
     <Field.Description id={id("placeholder-help")}
@@ -113,7 +133,8 @@
       aria-required="true"
       aria-invalid={!(texts.subtitle ?? "").trim()}
       value={texts.subtitle ?? ""}
-      aria-describedby={id("subtitle-help")}
+      disabled={locked("subtitle")}
+      aria-describedby={describedBy("subtitle", "subtitle-help")}
       oninput={(event) => onChange({ subtitle: event.currentTarget.value })}
     />
     <Field.Description id={id("subtitle-help")}
@@ -128,7 +149,8 @@
       maxlength={300}
       rows={2}
       value={texts.footer_text ?? ""}
-      aria-describedby={id("footer-help")}
+      disabled={locked("footer_text")}
+      aria-describedby={describedBy("footer_text", "footer-help")}
       oninput={(event) => onChange({ footer_text: event.currentTarget.value })}
     />
     <Field.Description id={id("footer-help")}
@@ -144,7 +166,8 @@
         type="url"
         maxlength={500}
         aria-invalid={linkInvalid}
-        aria-describedby={id("footer-link-help")}
+        disabled={locked("footer_link_url")}
+        aria-describedby={describedBy("footer_link_url", "footer-link-help")}
         bind:value={linkDraft}
         onchange={commitLink}
         onkeydown={(event) => {
@@ -170,7 +193,8 @@
         id={id("footer-link-label")}
         maxlength={80}
         value={texts.footer_link_label ?? ""}
-        aria-describedby={id("footer-link-label-help")}
+        disabled={locked("footer_link_label")}
+        aria-describedby={describedBy("footer_link_label", "footer-link-label-help")}
         oninput={(event) => onChange({ footer_link_label: event.currentTarget.value })}
       />
       <Field.Description id={id("footer-link-label-help")}

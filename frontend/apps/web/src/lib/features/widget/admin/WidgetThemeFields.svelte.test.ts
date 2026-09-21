@@ -58,3 +58,20 @@ describe("WidgetThemeFields colours", () => {
     expect(sent.every((colour) => /^#[0-9A-F]{6}$/.test(colour ?? ""))).toBe(true);
   });
 });
+
+describe("WidgetThemeFields locks", () => {
+  test("a template-governed appearance freezes every control and says why", async () => {
+    const onChange = vi.fn();
+    render(WidgetThemeFields, {
+      theme: { primary_color: "#1F4E79", radius: 12 } as WidgetTheme,
+      onChange,
+      locked: true,
+      lockHint: "Styrs av mallen Kommunblå"
+    });
+    await expect.element(primary()).toBeDisabled();
+    await expect.element(page.getByLabelText("widget_admin_radius")).toBeDisabled();
+    await expect.element(page.getByText("Styrs av mallen Kommunblå")).toBeVisible();
+    expect(document.querySelector<HTMLInputElement>("input[type=color]")?.disabled).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});

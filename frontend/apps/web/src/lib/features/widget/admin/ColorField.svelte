@@ -29,6 +29,8 @@
     checkContrast?: boolean;
     /** The surface behind the colour: the white page or the dark panel. */
     surface?: "light" | "dark";
+    /** Read-only, e.g. when a template governs the appearance. */
+    disabled?: boolean;
   };
 
   let {
@@ -39,7 +41,8 @@
     onChange,
     clearable = false,
     checkContrast = false,
-    surface = "light"
+    surface = "light",
+    disabled = false
   }: Props = $props();
 
   // What is typed stays local until it is a complete hex colour; the server
@@ -117,6 +120,7 @@
         ]}
         aria-label={m.widget_admin_primary_color_picker()}
         value={pickerValue}
+        {disabled}
         oninput={(event) => typed(event.currentTarget.value)}
       />
     </span>
@@ -124,6 +128,7 @@
       {id}
       class="max-w-40 font-mono"
       maxlength={7}
+      {disabled}
       placeholder={clearable ? m.widget_admin_header_color_none() : DEFAULT_PRIMARY_COLOR}
       aria-invalid={invalid}
       aria-describedby={`${id}-description`}
@@ -131,7 +136,7 @@
       oninput={(event) => typed(event.currentTarget.value)}
       onblur={settle}
     />
-    {#if clearable && current}
+    {#if clearable && current && !disabled}
       <Button
         variant="ghost"
         size="sm"

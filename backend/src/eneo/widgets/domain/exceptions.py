@@ -104,3 +104,30 @@ class WidgetProtectionUnavailableError(WidgetPublicError):
             "Widget protection is temporarily unavailable.",
             headers={"Retry-After": "30"},
         )
+
+
+class WidgetFieldLockedError(WidgetPublicError):
+    """An update touched a part of the widget its template governs."""
+
+    status_code = 400
+    code = "field_locked_by_template"
+
+    def __init__(self, fields: list[str]) -> None:
+        super().__init__(
+            "These parts are governed by the widget's template: "
+            + ", ".join(fields)
+            + ". Detach the template to change them."
+        )
+        self.fields = fields
+
+
+class WidgetTemplateInUseError(WidgetPublicError):
+    status_code = 409
+    code = "template_in_use"
+
+    def __init__(self, linked_widgets: int) -> None:
+        super().__init__(
+            f"The template is followed by {linked_widgets} widget(s)."
+            " Detach them before deleting it."
+        )
+        self.linked_widgets = linked_widgets

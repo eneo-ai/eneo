@@ -1219,13 +1219,17 @@ class Container(containers.DeclarativeContainer):
         WidgetService,
         user=user,
         repo=widget_repo,
+        template_repo=widget_template_repo,
         space_service=space_service,
         actor_manager=actor_manager,
         tenant_service=tenant_service,
         token_service=widget_visitor_token_service,
     )
     widget_template_service = providers.Factory(
-        WidgetTemplateService, user=user, repo=widget_template_repo
+        WidgetTemplateService,
+        user=user,
+        repo=widget_template_repo,
+        widget_repo=widget_repo,
     )
     assistant_template_service = providers.Factory(
         AssistantTemplateService,

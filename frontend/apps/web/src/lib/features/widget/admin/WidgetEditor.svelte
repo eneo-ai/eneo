@@ -18,11 +18,13 @@
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import { FileText, Palette, Rocket, SlidersHorizontal } from "lucide-svelte";
+  import { localizeHref } from "$lib/paraglide/runtime";
+  import { ExternalLink, FileText, Palette, Rocket, SlidersHorizontal } from "lucide-svelte";
   import { untrack } from "svelte";
   import { blockerLabel } from "./blockers";
   import { urlTab } from "./tabState.svelte";
   import type { LoaderRelease } from "./snippet";
+  import { isGroupLocked, lockedTextFields } from "./templateLocks";
   import TemplatePicker from "./TemplatePicker.svelte";
   import { WidgetAutosave } from "./widgetAutosave.svelte";
   import WidgetLiveTest from "./WidgetLiveTest.svelte";
@@ -69,32 +71,73 @@
     autosave.replace(await action({ id: widget.id }));
   };
 
-  // Applying a template overwrites texts and appearance, so it asks first.
+  // Linking a template overwrites texts and appearance, so it asks first;
+  // detaching hands every part back to the editor, so it asks too.
   let templateChoice = $state("");
   let confirmTemplate = $state(false);
+  let confirmDetach = $state(false);
   let applying = $state(false);
   const chosenTemplate = $derived(templates.find((t) => t.id === templateChoice) ?? null);
 
-  async function applyTemplate() {
-    if (!chosenTemplate) return;
+  // The template the widget follows and what it freezes in this editor. The
+  // server refuses locked changes too; the UI just stops them being attempted.
+  const link = $derived(current.template ?? null);
+  const lockedTexts = $derived(lockedTextFields(link));
+  const languageLocked = $derived(isGroupLocked(link, "language"));
+  const appearanceLocked = $derived(isGroupLocked(link, "appearance"));
+  const lockHint = $derived(link ? m.widget_admin_template_locked_hint({ name: link.name }) : "");
+  const groupLabels = $derived<Record<string, string>>({
+    appearance: m.widget_admin_template_lock_appearance(),
+    language: m.widget_admin_template_lock_language(),
+    legal_texts: m.widget_admin_template_lock_legal_texts(),
+    wording: m.widget_admin_template_lock_wording()
+  });
+  const lockedParts = $derived(
+    (link?.locked_groups ?? []).map((group) => groupLabels[group] ?? group).join(", ")
+  );
+
+  async function withTemplate(
+    action: () => Promise<Widget>,
+    failure: () => string
+  ): Promise<boolean> {
     applying = true;
     try {
       await autosave.flush();
-      if (autosave.hasPending) return;
-      autosave.replace(
-        await eneo.widgets.applyTemplate({
-          widget: { id: widget.id },
-          templateId: chosenTemplate.id,
-          revision: current.revision
-        })
-      );
-      confirmTemplate = false;
-      templateChoice = "";
+      if (autosave.hasPending) return false;
+      autosave.replace(await action());
+      return true;
     } catch (error) {
-      toastError(error, m.widget_admin_template_could_not_apply());
+      toastError(error, failure());
+      return false;
     } finally {
       applying = false;
     }
+  }
+
+  async function linkTemplate() {
+    if (!chosenTemplate) return;
+    const templateId = chosenTemplate.id;
+    const done = await withTemplate(
+      () =>
+        eneo.widgets.linkTemplate({
+          widget: { id: widget.id },
+          templateId,
+          revision: current.revision
+        }),
+      () => m.widget_admin_template_could_not_apply()
+    );
+    if (done) {
+      confirmTemplate = false;
+      templateChoice = "";
+    }
+  }
+
+  async function detachTemplate() {
+    const done = await withTemplate(
+      () => eneo.widgets.detachTemplate({ widget: { id: widget.id }, revision: current.revision }),
+      () => m.widget_admin_template_could_not_detach()
+    );
+    if (done) confirmDetach = false;
   }
 
   const languageLabels = $derived({
@@ -170,13 +213,16 @@
                   <Select.Root
                     type="single"
                     value={current.language ?? "auto"}
+                    disabled={languageLocked}
                     onValueChange={(value) =>
                       autosave.patch({ language: value as NonNullable<Widget["language"]> })}
                   >
                     <Select.Trigger
                       id="widget-language"
                       class="w-full"
-                      aria-describedby="widget-language-help"
+                      aria-describedby={languageLocked
+                        ? "widget-language-help widget-language-lock"
+                        : "widget-language-help"}
                     >
                       <span data-slot="select-value"
                         >{languageLabels[current.language ?? "auto"]}</span
@@ -191,6 +237,9 @@
                   <Field.Description id="widget-language-help"
                     >{m.widget_admin_language_description()}</Field.Description
                   >
+                  {#if languageLocked}
+                    <Field.Description id="widget-language-lock">{lockHint}</Field.Description>
+                  {/if}
                 </Field.Field>
               </Field.Group>
             </Card.Content>
@@ -204,6 +253,8 @@
             <Card.Content>
               <WidgetTextsFields
                 texts={current.texts}
+                lockedFields={lockedTexts}
+                {lockHint}
                 onChange={(change) => autosave.patch({ texts: { ...current.texts, ...change } })}
               />
             </Card.Content>
@@ -211,7 +262,40 @@
         </Tabs.Content>
 
         <Tabs.Content value="appearance" class="flex flex-col gap-6">
-          {#if templates.length > 0 && current.status !== "archived"}
+          {#if link}
+            <Card.Root>
+              <Card.Header>
+                <Card.Title>{m.widget_admin_template_linked_title({ name: link.name })}</Card.Title>
+                <Card.Description>{m.widget_admin_template_linked_description()}</Card.Description>
+              </Card.Header>
+              <Card.Content class="flex flex-col gap-4">
+                <p class="text-sm">
+                  {lockedParts
+                    ? m.widget_admin_template_locked_parts({ parts: lockedParts })
+                    : m.widget_admin_template_linked_none()}
+                </p>
+                <div class="flex flex-wrap items-center gap-2">
+                  {#if isAdmin}
+                    <!-- eslint-disable svelte/no-navigation-without-resolve -- localized href built from a typed route segment -->
+                    <Button
+                      variant="link"
+                      class="h-auto px-0"
+                      href={localizeHref(`/admin/widgets/templates/${link.id}`)}
+                    >
+                      {m.widget_admin_template_open()}
+                      <ExternalLink data-icon="inline-end" aria-hidden="true" />
+                    </Button>
+                    <!-- eslint-enable svelte/no-navigation-without-resolve -->
+                  {/if}
+                  {#if current.status !== "archived"}
+                    <Button variant="outline" onclick={() => (confirmDetach = true)}>
+                      {m.widget_admin_template_detach()}
+                    </Button>
+                  {/if}
+                </div>
+              </Card.Content>
+            </Card.Root>
+          {:else if templates.length > 0 && current.status !== "archived"}
             <Card.Root>
               <Card.Header>
                 <Card.Title>{m.widget_admin_template_pick_title()}</Card.Title>
@@ -245,6 +329,8 @@
             <Card.Content>
               <WidgetThemeFields
                 theme={current.theme}
+                locked={appearanceLocked}
+                {lockHint}
                 onChange={(change) => autosave.patch({ theme: { ...current.theme, ...change } })}
               />
             </Card.Content>
@@ -310,8 +396,29 @@
         disabled={applying}
         onclick={(event) => {
           event.preventDefault();
-          void applyTemplate();
+          void linkTemplate();
         }}>{m.widget_admin_template_apply()}</AlertDialog.Action
+      >
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
+
+<AlertDialog.Root bind:open={confirmDetach}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.widget_admin_template_detach_confirm_title()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.widget_admin_template_detach_confirm_description({ name: link?.name ?? "" })}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel disabled={applying}>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action
+        disabled={applying}
+        onclick={(event) => {
+          event.preventDefault();
+          void detachTemplate();
+        }}>{m.widget_admin_template_detach()}</AlertDialog.Action
       >
     </AlertDialog.Footer>
   </AlertDialog.Content>

@@ -144,16 +144,32 @@ export function initWidgets(client) {
     },
 
     /**
-     * Copy a template's texts, appearance and language onto the widget (a snapshot).
+     * Make the widget follow a template: its texts, appearance and language are
+     * copied now and the template's locked groups stay in step afterwards.
      * @param {{widget: {id: string}; templateId: string; revision: number}} params
      * @returns {Promise<Widget>}
      * @throws {EneoError}
      */
-    applyTemplate: async ({ widget, templateId, revision }) => {
-      const res = await client.fetch("/api/v1/widgets/{id}/apply-template/", {
+    linkTemplate: async ({ widget, templateId, revision }) => {
+      const res = await client.fetch("/api/v1/widgets/{id}/link-template/", {
         method: "post",
         params: { path: { id: widget.id } },
         requestBody: { "application/json": { template_id: templateId, revision } }
+      });
+      return res;
+    },
+
+    /**
+     * Stop following the template; the widget keeps its current values.
+     * @param {{widget: {id: string}; revision: number}} params
+     * @returns {Promise<Widget>}
+     * @throws {EneoError}
+     */
+    detachTemplate: async ({ widget, revision }) => {
+      const res = await client.fetch("/api/v1/widgets/{id}/detach-template/", {
+        method: "post",
+        params: { path: { id: widget.id } },
+        requestBody: { "application/json": { revision } }
       });
       return res;
     },

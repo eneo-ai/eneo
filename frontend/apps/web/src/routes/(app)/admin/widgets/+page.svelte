@@ -352,6 +352,15 @@
                           {#if template.is_default}
                             <Badge>{m.widget_admin_template_default()}</Badge>
                           {/if}
+                          {#if template.linked_widgets > 0}
+                            <Badge variant="secondary">
+                              {template.linked_widgets === 1
+                                ? m.widget_admin_template_linked_count_one()
+                                : m.widget_admin_template_linked_count({
+                                    count: number.format(template.linked_widgets)
+                                  })}
+                            </Badge>
+                          {/if}
                           <span class="text-secondary text-xs"
                             >{languageLabel(template.language)}</span
                           >

@@ -17,7 +17,10 @@ from eneo.main.exceptions import (
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.users.user import UserInDB
 from eneo.widgets.application.visitor_token_service import VisitorTokenService
-from eneo.widgets.domain.exceptions import WidgetRevisionConflictError
+from eneo.widgets.domain.exceptions import (
+    WidgetFieldLockedError,
+    WidgetRevisionConflictError,
+)
 from eneo.widgets.domain.widget import (
     Widget,
     WidgetLanguage,
@@ -26,7 +29,8 @@ from eneo.widgets.domain.widget import (
 )
 from eneo.widgets.domain.widget_policy import WidgetPolicy
 from eneo.widgets.domain.widget_repo import WidgetRepo
-from eneo.widgets.domain.widget_template import WidgetTemplate
+from eneo.widgets.domain.widget_template import ALL_LOCK_GROUPS, WidgetTemplate
+from eneo.widgets.domain.widget_template_repo import WidgetTemplateRepo
 
 if TYPE_CHECKING:
     from eneo.actors.actor_manager import ActorManager
@@ -39,6 +43,9 @@ if TYPE_CHECKING:
 class WidgetView:
     widget: Widget
     activation_blockers: list[str]
+    # The template the widget follows, when any; carries the lock groups the
+    # editor must show as read-only.
+    template: Optional[WidgetTemplate] = None
 
 
 class WidgetService:
@@ -46,6 +53,7 @@ class WidgetService:
         self,
         user: UserInDB,
         repo: WidgetRepo,
+        template_repo: WidgetTemplateRepo,
         space_service: "SpaceService",
         actor_manager: "ActorManager",
         tenant_service: "TenantService",
@@ -53,6 +61,7 @@ class WidgetService:
     ) -> None:
         self.user = user
         self.repo = repo
+        self.template_repo = template_repo
         self.space_service = space_service
         self.actor_manager = actor_manager
         self.tenant_service = tenant_service
@@ -115,24 +124,46 @@ class WidgetService:
         except NotFoundException:
             return False
 
-    def _view(self, space: "Space", widget: Widget) -> WidgetView:
+    def _view(
+        self,
+        space: "Space",
+        widget: Widget,
+        template: Optional[WidgetTemplate] = None,
+    ) -> WidgetView:
         blockers = widget.activation_blockers(
             target_published=self._target_published(space, widget)
         )
         blockers.extend(self.get_policy().violations(widget))
-        return WidgetView(widget=widget, activation_blockers=blockers)
+        return WidgetView(
+            widget=widget, activation_blockers=blockers, template=template
+        )
+
+    async def _template_of(self, widget: Widget) -> Optional[WidgetTemplate]:
+        if widget.template_id is None:
+            return None
+        return await self.template_repo.get(widget.template_id)
+
+    async def _view_with_template(self, space: "Space", widget: Widget) -> WidgetView:
+        return self._view(space, widget, await self._template_of(widget))
 
     # --- queries ----------------------------------------------------------
 
     async def list_widgets(self, space_id: UUID) -> list[WidgetView]:
         space = await self.space_service.get_space(space_id)
         widgets = await self.repo.list_by_space(space_id)
-        return [self._view(space, widget) for widget in widgets]
+        templates = {
+            template.id: template
+            for template in await self.template_repo.list_by_tenant(self.user.tenant_id)
+        }
+        return [
+            self._view(space, widget, templates.get(widget.template_id))
+            for widget in widgets
+        ]
 
     async def get_widget(self, widget_id: UUID) -> WidgetView:
         widget = await self._owned_widget(widget_id)
         space = await self.space_service.get_space(widget.space_id)
-        return self._view(space, widget)
+        return await self._view_with_template(space, widget)
 
     # --- commands ---------------------------------------------------------
 
@@ -158,37 +189,48 @@ class WidgetService:
             created_by_user_id=self.user.id,
         )
         if template is not None:
-            self._copy_template(widget, template)
+            self._link(widget, template)
         widget = await self.repo.add(widget)
-        return self._view(space, widget)
+        return self._view(space, widget, template)
 
     @staticmethod
-    def _copy_template(widget: Widget, template: WidgetTemplate) -> None:
-        """A snapshot: later template edits never touch existing widgets.
+    def _link(widget: Widget, template: WidgetTemplate) -> None:
+        """Make the widget follow the template.
 
-        Suggested questions are per widget (they depend on the assistant),
-        so the widget keeps its own.
+        Every templated group is copied now; from here on the template's
+        locked groups are kept in step on each template save and the editor
+        cannot change them. Suggested questions stay the widget's own.
         """
-        widget.texts = template.texts.model_copy(
-            deep=True,
-            update={"suggested_questions": list(widget.texts.suggested_questions)},
-        )
-        widget.theme = template.theme.model_copy(deep=True)
-        widget.language = template.language
+        widget.template_id = template.id
+        template.project_onto(widget, ALL_LOCK_GROUPS)
 
-    async def apply_template(
-        self, widget_id: UUID, template: WidgetTemplate, *, revision: int
-    ) -> WidgetView:
-        validate_permission(self.user, Permission.WIDGETS)
+    async def _widget_for_change(
+        self, widget_id: UUID, revision: int
+    ) -> tuple[Widget, "Space"]:
         widget = await self._owned_widget(widget_id)
         space = await self._space_for_edit(widget.space_id)
         if widget.revision != revision:
             raise WidgetRevisionConflictError()
         if widget.status == WidgetStatus.ARCHIVED:
             raise BadRequestException("Archived widgets cannot be changed.")
-        self._copy_template(widget, template)
+        return widget, space
+
+    async def link_template(
+        self, widget_id: UUID, template: WidgetTemplate, *, revision: int
+    ) -> WidgetView:
+        validate_permission(self.user, Permission.WIDGETS)
+        widget, space = await self._widget_for_change(widget_id, revision)
+        self._link(widget, template)
         widget = await self.repo.update(widget)
-        return self._view(space, widget)
+        return self._view(space, widget, template)
+
+    async def detach_template(self, widget_id: UUID, *, revision: int) -> WidgetView:
+        """Stop following the template; the widget keeps its current values."""
+        validate_permission(self.user, Permission.WIDGETS)
+        widget, space = await self._widget_for_change(widget_id, revision)
+        widget.template_id = None
+        widget = await self.repo.update(widget)
+        return await self._view_with_template(space, widget)
 
     async def update_widget(
         self, widget_id: UUID, changes: dict[str, Any]
@@ -199,6 +241,11 @@ class WidgetService:
         changes = dict(changes)
         if changes.pop("revision") != widget.revision:
             raise WidgetRevisionConflictError()
+        template = await self._template_of(widget)
+        if template is not None:
+            locked = template.locked_changes(widget, changes)
+            if locked:
+                raise WidgetFieldLockedError(locked)
         widget.apply_update(changes)
         violations = self.get_policy().violations(widget)
         if violations:
@@ -206,7 +253,7 @@ class WidgetService:
                 "Widget configuration violates tenant policy: " + ", ".join(violations)
             )
         widget = await self.repo.update(widget)
-        return self._view(space, widget)
+        return self._view(space, widget, template)
 
     async def activate_widget(self, widget_id: UUID) -> WidgetView:
         validate_permission(self.user, Permission.ADMIN)
@@ -220,7 +267,7 @@ class WidgetService:
             )
         widget.activate(by=self.user.id)
         widget = await self.repo.update(widget)
-        return self._view(space, widget)
+        return await self._view_with_template(space, widget)
 
     async def preview_token(self, widget_id: UUID) -> tuple[str, int]:
         """A visitor token for the editor's live preview.
@@ -247,7 +294,7 @@ class WidgetService:
             space = await self._space_for_edit(widget.space_id)
         widget.pause()
         widget = await self.repo.update(widget)
-        return self._view(space, widget)
+        return await self._view_with_template(space, widget)
 
     async def archive_widget(self, widget_id: UUID) -> WidgetView:
         validate_permission(self.user, Permission.ADMIN)
@@ -255,4 +302,4 @@ class WidgetService:
         space = await self._space_as_admin(widget.space_id)
         widget.archive()
         widget = await self.repo.update(widget)
-        return self._view(space, widget)
+        return await self._view_with_template(space, widget)

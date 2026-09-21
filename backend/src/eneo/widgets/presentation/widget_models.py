@@ -20,6 +20,7 @@ from eneo.widgets.domain.widget import (
     WidgetTheme,
     normalize_allowed_origins,
 )
+from eneo.widgets.domain.widget_template import TemplateLockGroup
 
 
 class WidgetCreate(BaseModel):
@@ -30,13 +31,39 @@ class WidgetCreate(BaseModel):
     language: WidgetLanguage = WidgetLanguage.AUTO
     template_id: Optional[UUID] = Field(
         default=None,
-        description="Template whose texts, theme and language are copied onto the new widget.",
+        description=(
+            "Template the new widget follows: its texts, theme and language are"
+            " copied now and its locked groups stay in step with the template."
+        ),
     )
 
 
-class WidgetApplyTemplate(BaseModel):
+class WidgetLinkTemplate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     template_id: UUID
     revision: int = Field(ge=0)
+
+
+class WidgetDetachTemplate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int = Field(ge=0)
+
+
+class WidgetTemplateLinkPublic(BaseModel):
+    """The template a widget follows and which parts it governs."""
+
+    id: UUID
+    name: str
+    locked_groups: list[TemplateLockGroup] = Field(
+        description=(
+            "Parts of the widget that follow the template and cannot be"
+            " edited on the widget: appearance, language, legal_texts"
+            " (disclosure and footer) and/or wording (title, welcome,"
+            " placeholder)."
+        )
+    )
 
 
 class WidgetConflictDetail(BaseModel):
@@ -46,6 +73,15 @@ class WidgetConflictDetail(BaseModel):
 
 class WidgetConflictResponse(BaseModel):
     detail: WidgetConflictDetail
+
+
+class WidgetTemplateInUseDetail(BaseModel):
+    code: Literal["template_in_use"]
+    message: str
+
+
+class WidgetTemplateInUseResponse(BaseModel):
+    detail: WidgetTemplateInUseDetail
 
 
 class WidgetUpdate(BaseModel):
@@ -88,6 +124,10 @@ class WidgetPublic(BaseModel):
     activation_blockers: list[str] = Field(
         description="Empty when the widget can be activated as configured."
     )
+    template: Optional[WidgetTemplateLinkPublic] = Field(
+        default=None,
+        description="Set when the widget follows a template.",
+    )
     created_by_user_id: Optional[UUID] = None
     activated_by_user_id: Optional[UUID] = None
     activated_at: Optional[datetime] = None
@@ -113,6 +153,13 @@ class WidgetTemplateUpdate(BaseModel):
     theme: Optional[WidgetTheme] = None
     language: Optional[WidgetLanguage] = None
     is_default: Optional[bool] = None
+    locked_groups: Optional[list[TemplateLockGroup]] = Field(
+        default=None,
+        description=(
+            "Parts every linked widget follows. Adding a group writes the"
+            " template's values onto the linked widgets at once."
+        ),
+    )
 
 
 class WidgetTemplatePublic(BaseModel):
@@ -123,6 +170,10 @@ class WidgetTemplatePublic(BaseModel):
     theme: WidgetTheme
     language: WidgetLanguage
     is_default: bool
+    locked_groups: list[TemplateLockGroup]
+    linked_widgets: int = Field(
+        description="Widgets that follow this template right now."
+    )
     created_by_user_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime

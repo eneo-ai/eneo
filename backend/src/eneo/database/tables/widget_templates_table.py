@@ -26,6 +26,10 @@ class WidgetTemplates(BasePublic):
     )
     language: Mapped[str] = mapped_column(server_default="auto")
     is_default: Mapped[bool] = mapped_column(server_default=sa.false())
+    # TemplateLockGroup values the linked widgets follow.
+    locked_groups: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")
+    )
     created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
     )

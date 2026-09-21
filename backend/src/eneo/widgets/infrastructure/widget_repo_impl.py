@@ -44,6 +44,7 @@ def _to_entity(row: Widgets) -> Widget:
         language=WidgetLanguage(row.language),
         allowed_origins=list(row.allowed_origins or []),
         bot_protection=BotProtection(row.bot_protection),
+        template_id=row.template_id,
         created_by_user_id=row.created_by_user_id,
         activated_by_user_id=row.activated_by_user_id,
         activated_at=row.activated_at,
@@ -70,6 +71,7 @@ def _to_values(widget: Widget) -> dict[str, Any]:
         "language": widget.language.value,
         "allowed_origins": list(widget.allowed_origins),
         "bot_protection": widget.bot_protection.value,
+        "template_id": widget.template_id,
         "created_by_user_id": widget.created_by_user_id,
         "activated_by_user_id": widget.activated_by_user_id,
         "activated_at": widget.activated_at,
@@ -106,6 +108,25 @@ class WidgetRepoImpl:
             .order_by(Widgets.created_at.desc())
         )
         return [_to_entity(row) for row in rows]
+
+    async def list_by_template(self, template_id: UUID) -> list[Widget]:
+        """The followers, locked for the rest of the transaction: a template
+        save writes onto them and must not race a concurrent editor."""
+        rows = await self.session.scalars(
+            sa.select(Widgets)
+            .where(Widgets.template_id == template_id)
+            .order_by(Widgets.created_at.asc())
+            .with_for_update()
+        )
+        return [_to_entity(row) for row in rows]
+
+    async def count_by_template(self, tenant_id: UUID) -> dict[UUID, int]:
+        rows = await self.session.execute(
+            sa.select(Widgets.template_id, sa.func.count())
+            .where(Widgets.tenant_id == tenant_id, Widgets.template_id.is_not(None))
+            .group_by(Widgets.template_id)
+        )
+        return {template_id: int(count) for template_id, count in rows.all()}
 
     async def update(self, widget: Widget) -> Widget:
         if widget.id is None:

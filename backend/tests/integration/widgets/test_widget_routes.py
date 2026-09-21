@@ -328,7 +328,8 @@ async def test_widget_templates(
     assert resp.status_code == 200
     assert [t["name"] for t in resp.json()["items"]] == ["Kommunblå"]
 
-    # Create from template copies texts/theme; the template can change afterwards.
+    # A widget created from a template follows it: appearance and language are
+    # locked by default, wording and legal texts are copied once.
     resp = await client.post(
         f"/api/v1/spaces/{space_id}/widgets/",
         json={
@@ -342,33 +343,100 @@ async def test_widget_templates(
     widget = resp.json()
     assert widget["theme"]["primary_color"] == "#123456"
     assert widget["texts"]["title"] == "Fråga oss"
+    assert widget["template"] == {
+        "id": template["id"],
+        "name": "Kommunblå",
+        "locked_groups": ["appearance", "language"],
+    }
 
+    async def revision(widget_id: str) -> int:
+        current = await client.get(
+            f"/api/v1/widgets/{widget_id}/", headers=_auth(admin_token)
+        )
+        return current.json()["revision"]
+
+    # A template save is written onto the follower in the same request.
     resp = await client.patch(
         f"/api/v1/admin/widget-templates/{template['id']}/",
         json={"theme": {**template["theme"], "primary_color": "#654321"}},
         headers=_auth(admin_token),
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["linked_widgets"] == 1
     resp = await client.get(
         f"/api/v1/widgets/{widget['id']}/", headers=_auth(admin_token)
     )
-    assert resp.json()["theme"]["primary_color"] == "#123456"
+    assert resp.json()["theme"]["primary_color"] == "#654321"
 
-    resp = await client.post(
-        f"/api/v1/widgets/{widget['id']}/apply-template/",
+    # Locked parts are refused on the widget, unlocked parts still save.
+    resp = await client.patch(
+        f"/api/v1/widgets/{widget['id']}/",
         json={
-            "revision": (
-                await client.get(
-                    f"/api/v1/widgets/{widget['id']}/", headers=_auth(admin_token)
-                )
-            ).json()["revision"],
-            "template_id": template["id"],
+            "revision": await revision(widget["id"]),
+            "theme": {**widget["theme"], "primary_color": "#000000"},
+        },
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["code"] == "field_locked_by_template"
+    resp = await client.patch(
+        f"/api/v1/widgets/{widget['id']}/",
+        json={
+            "revision": await revision(widget["id"]),
+            "texts": {**widget["texts"], "title": "Egen titel"},
         },
         headers=_auth(admin_token),
     )
     assert resp.status_code == 200, resp.text
+    assert resp.json()["texts"]["title"] == "Egen titel"
     assert resp.json()["theme"]["primary_color"] == "#654321"
 
+    # The list shows how many widgets follow each template.
+    resp = await client.get("/api/v1/widget-templates/", headers=_auth(admin_token))
+    assert resp.json()["items"][0]["linked_widgets"] == 1
+
+    # A followed template cannot be deleted.
+    resp = await client.delete(
+        f"/api/v1/admin/widget-templates/{template['id']}/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "template_in_use"
+
+    # Detaching keeps the values and frees every part.
+    resp = await client.post(
+        f"/api/v1/widgets/{widget['id']}/detach-template/",
+        json={"revision": await revision(widget["id"])},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["template"] is None
+    assert resp.json()["theme"]["primary_color"] == "#654321"
+    resp = await client.patch(
+        f"/api/v1/widgets/{widget['id']}/",
+        json={
+            "revision": await revision(widget["id"]),
+            "theme": {**widget["theme"], "primary_color": "#000000"},
+        },
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Linking again takes the template's values back.
+    resp = await client.post(
+        f"/api/v1/widgets/{widget['id']}/link-template/",
+        json={"revision": await revision(widget["id"]), "template_id": template["id"]},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["theme"]["primary_color"] == "#654321"
+    assert resp.json()["template"]["id"] == template["id"]
+
+    resp = await client.post(
+        f"/api/v1/widgets/{widget['id']}/detach-template/",
+        json={"revision": await revision(widget["id"])},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
     resp = await client.delete(
         f"/api/v1/admin/widget-templates/{template['id']}/", headers=_auth(admin_token)
     )
@@ -378,15 +446,8 @@ async def test_widget_templates(
     )
     assert resp.status_code == 200
     resp = await client.post(
-        f"/api/v1/widgets/{widget['id']}/apply-template/",
-        json={
-            "revision": (
-                await client.get(
-                    f"/api/v1/widgets/{widget['id']}/", headers=_auth(admin_token)
-                )
-            ).json()["revision"],
-            "template_id": template["id"],
-        },
+        f"/api/v1/widgets/{widget['id']}/link-template/",
+        json={"revision": await revision(widget["id"]), "template_id": template["id"]},
         headers=_auth(admin_token),
     )
     assert resp.status_code == 404

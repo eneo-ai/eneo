@@ -3,6 +3,7 @@
 # Licensed under the MIT License.
 
 
+from collections.abc import Mapping
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -21,9 +22,10 @@ from eneo.widgets.application.widget_service import WidgetView
 from eneo.widgets.domain.widget import WidgetStatus
 from eneo.widgets.domain.widget_template import WidgetTemplate
 from eneo.widgets.presentation.widget_models import (
-    WidgetApplyTemplate,
     WidgetConflictResponse,
     WidgetCreate,
+    WidgetDetachTemplate,
+    WidgetLinkTemplate,
     WidgetOverviewItem,
     WidgetOverviewPublic,
     WidgetOverviewTotals,
@@ -32,6 +34,7 @@ from eneo.widgets.presentation.widget_models import (
     WidgetPreviewToken,
     WidgetPublic,
     WidgetTemplateCreate,
+    WidgetTemplateInUseResponse,
     WidgetTemplatePublic,
     WidgetTemplateUpdate,
     WidgetUpdate,
@@ -149,26 +152,52 @@ async def create_space_widget(
 
 
 @router.post(
-    "/{id}/apply-template/",
+    "/{id}/link-template/",
     response_model=WidgetPublic,
     description=(
-        "Copy a template's texts, appearance and language onto the widget."
-        " A snapshot: later template edits do not affect the widget."
+        "Make the widget follow a template. Its texts, appearance and language"
+        " are copied now; the template's locked groups then stay in step with"
+        " every template save and cannot be edited on the widget."
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
-async def apply_widget_template(
-    id: UUID, body: WidgetApplyTemplate, container: _ContainerWithUser
+async def link_widget_template(
+    id: UUID, body: WidgetLinkTemplate, container: _ContainerWithUser
 ):
     service = container.widget_service()
     assembler = container.widget_assembler()
     template = await container.widget_template_service().get_template(body.template_id)
-    view = await service.apply_template(id, template, revision=body.revision)
+    view = await service.link_template(id, template, revision=body.revision)
     await _audit(
         container,
         action=ActionType.WIDGET_UPDATED,
         view=view,
-        description=f"Applied template '{template.name}' to widget '{view.widget.name}'",
+        description=f"Linked widget '{view.widget.name}' to template '{template.name}'",
+        changes={"new": _widget_snapshot(view)},
+    )
+    return assembler.from_view(view)
+
+
+@router.post(
+    "/{id}/detach-template/",
+    response_model=WidgetPublic,
+    description=(
+        "Stop following the template. The widget keeps its current texts,"
+        " appearance and language and every part becomes editable again."
+    ),
+    responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
+)
+async def detach_widget_template(
+    id: UUID, body: WidgetDetachTemplate, container: _ContainerWithUser
+):
+    service = container.widget_service()
+    assembler = container.widget_assembler()
+    view = await service.detach_template(id, revision=body.revision)
+    await _audit(
+        container,
+        action=ActionType.WIDGET_UPDATED,
+        view=view,
+        description=f"Detached widget '{view.widget.name}' from its template",
         changes={"new": _widget_snapshot(view)},
     )
     return assembler.from_view(view)
@@ -444,9 +473,12 @@ async def get_widget_overview(container: _ContainerWithUser):
 # --- templates -------------------------------------------------------------
 
 
-def _template_public(template: WidgetTemplate) -> WidgetTemplatePublic:
+def _template_public(
+    template: WidgetTemplate, linked: Mapping[UUID, int] | None = None
+) -> WidgetTemplatePublic:
     assert template.id is not None
     assert template.created_at is not None and template.updated_at is not None
+    linked_widgets = (linked or {}).get(template.id, 0)
     return WidgetTemplatePublic(
         id=template.id,
         name=template.name,
@@ -455,6 +487,8 @@ def _template_public(template: WidgetTemplate) -> WidgetTemplatePublic:
         theme=template.theme,
         language=template.language,
         is_default=template.is_default,
+        locked_groups=list(template.locked_groups),
+        linked_widgets=linked_widgets,
         created_by_user_id=template.created_by_user_id,
         created_at=template.created_at,
         updated_at=template.updated_at,
@@ -466,6 +500,7 @@ def _template_snapshot(template: WidgetTemplate) -> dict[str, Any]:
         "name": template.name,
         "language": template.language.value,
         "is_default": template.is_default,
+        "locked_groups": [group.value for group in template.locked_groups],
         "texts": template.texts.model_dump(mode="json"),
         "theme": template.theme.model_dump(mode="json"),
     }
@@ -502,8 +537,12 @@ async def _audit_template(
     responses=responses.get_responses([403]),
 )
 async def list_widget_templates(container: _ContainerWithUser):
-    templates = await container.widget_template_service().list_templates()
-    return protocol.to_paginated_response([_template_public(t) for t in templates])
+    service = container.widget_template_service()
+    templates = await service.list_templates()
+    linked = await service.linked_widget_counts()
+    return protocol.to_paginated_response(
+        [_template_public(t, linked) for t in templates]
+    )
 
 
 @admin_templates_router.post(
@@ -536,8 +575,10 @@ async def create_widget_template(
     responses=responses.get_responses([403, 404]),
 )
 async def get_widget_template(id: UUID, container: _ContainerWithUser):
-    template = await container.widget_template_service().get_template(id)
-    return _template_public(template)
+    service = container.widget_template_service()
+    template = await service.get_template(id)
+    linked = await service.linked_widget_counts()
+    return _template_public(template, linked)
 
 
 @admin_templates_router.patch(
@@ -545,7 +586,8 @@ async def get_widget_template(id: UUID, container: _ContainerWithUser):
     response_model=WidgetTemplatePublic,
     description=(
         "Update a widget template. Setting `is_default` clears the previous"
-        " default. Existing widgets are never changed."
+        " default. The template's locked groups are written onto every widget"
+        " that follows it, in the same transaction."
     ),
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -554,7 +596,8 @@ async def update_widget_template(
 ):
     service = container.widget_template_service()
     before = await service.get_template(id)
-    template = await service.update_template(id, body.model_dump(exclude_unset=True))
+    result = await service.update_template(id, body.model_dump(exclude_unset=True))
+    template = result.template
     await _audit_template(
         container,
         action=ActionType.WIDGET_TEMPLATE_UPDATED,
@@ -563,17 +606,38 @@ async def update_widget_template(
         changes={
             "old": _template_snapshot(before),
             "new": _template_snapshot(template),
+            "synced_widget_ids": [str(w.id) for w in result.synced_widgets],
         },
     )
-    return _template_public(template)
+    # Each followed widget gets its own trail entry: its editors ask "who
+    # changed my widget?", not "what happened to the template?".
+    for widget in result.synced_widgets:
+        await _audit(
+            container,
+            action=ActionType.WIDGET_UPDATED,
+            view=WidgetView(widget=widget, activation_blockers=[], template=template),
+            description=(f"Template '{template.name}' updated widget '{widget.name}'"),
+            changes={"template_id": str(template.id)},
+        )
+    linked = await service.linked_widget_counts()
+    return _template_public(template, linked)
 
 
 @admin_templates_router.delete(
     "/{id}/",
     status_code=204,
     response_model=None,
-    description="Delete a widget template. Widgets created from it are kept.",
-    responses=responses.get_responses([403, 404]),
+    description=(
+        "Delete a widget template. Refused while widgets still follow it;"
+        " detach them first. Detached widgets keep their values."
+    ),
+    responses={
+        **responses.get_responses([403, 404]),
+        409: {
+            "model": WidgetTemplateInUseResponse,
+            "description": "Widgets still follow the template.",
+        },
+    },
 )
 async def delete_widget_template(id: UUID, container: _ContainerWithUser) -> None:
     template = await container.widget_template_service().delete_template(id)

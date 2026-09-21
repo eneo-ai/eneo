@@ -286,6 +286,9 @@ class Widget(BaseModel):
     language: WidgetLanguage = WidgetLanguage.AUTO
     allowed_origins: list[str] = Field(default_factory=list)
     bot_protection: BotProtection = BotProtection.ALTCHA
+    # The template this widget follows; None for a stand-alone widget. Only
+    # the link/detach commands change it, never a plain update.
+    template_id: Optional[UUID] = None
     created_by_user_id: Optional[UUID] = None
     activated_by_user_id: Optional[UUID] = None
     activated_at: Optional[datetime] = None

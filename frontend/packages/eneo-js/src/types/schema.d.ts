@@ -3183,7 +3183,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/widgets/{id}/apply-template/": {
+  "/api/v1/widgets/{id}/link-template/": {
     parameters: {
       query?: never;
       header?: never;
@@ -3193,10 +3193,30 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Apply Widget Template
-     * @description Copy a template's texts, appearance and language onto the widget. A snapshot: later template edits do not affect the widget.
+     * Link Widget Template
+     * @description Make the widget follow a template. Its texts, appearance and language are copied now; the template's locked groups then stay in step with every template save and cannot be edited on the widget.
      */
-    post: operations["apply_widget_template_api_v1_widgets__id__apply_template__post"];
+    post: operations["link_widget_template_api_v1_widgets__id__link_template__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/widgets/{id}/detach-template/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Detach Widget Template
+     * @description Stop following the template. The widget keeps its current texts, appearance and language and every part becomes editable again.
+     */
+    post: operations["detach_widget_template_api_v1_widgets__id__detach_template__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -3547,14 +3567,14 @@ export interface paths {
     post?: never;
     /**
      * Delete Widget Template
-     * @description Delete a widget template. Widgets created from it are kept.
+     * @description Delete a widget template. Refused while widgets still follow it; detach them first. Detached widgets keep their values.
      */
     delete: operations["delete_widget_template_api_v1_admin_widget_templates__id___delete"];
     options?: never;
     head?: never;
     /**
      * Update Widget Template
-     * @description Update a widget template. Setting `is_default` clears the previous default. Existing widgets are never changed.
+     * @description Update a widget template. Setting `is_default` clears the previous default. The template's locked groups are written onto every widget that follows it, in the same transaction.
      */
     patch: operations["update_widget_template_api_v1_admin_widget_templates__id___patch"];
     trace?: never;
@@ -19788,6 +19808,17 @@ export interface components {
       /** Count */
       readonly count: number;
     };
+    /**
+     * TemplateLockGroup
+     * @description The parts of a widget a template can govern.
+     *
+     *     Groups, not fields: they match how the editor lays the settings out and
+     *     keep the lock configuration small enough to reason about. Suggested
+     *     questions are never templated; they depend on the assistant behind the
+     *     widget.
+     * @enum {string}
+     */
+    TemplateLockGroup: "appearance" | "language" | "legal_texts" | "wording";
     /** TemplateWizard */
     TemplateWizard: {
       /**
@@ -22132,16 +22163,6 @@ export interface components {
        */
       http_auth_password?: string | null;
     };
-    /** WidgetApplyTemplate */
-    WidgetApplyTemplate: {
-      /**
-       * Template Id
-       * Format: uuid
-       */
-      template_id: string;
-      /** Revision */
-      revision: number;
-    };
     /** WidgetAsk */
     WidgetAsk: {
       /** Question */
@@ -22199,9 +22220,14 @@ export interface components {
       language?: components["schemas"]["WidgetLanguage"];
       /**
        * Template Id
-       * @description Template whose texts, theme and language are copied onto the new widget.
+       * @description Template the new widget follows: its texts, theme and language are copied now and its locked groups stay in step with the template.
        */
       template_id?: string | null;
+    };
+    /** WidgetDetachTemplate */
+    WidgetDetachTemplate: {
+      /** Revision */
+      revision: number;
     };
     /**
      * WidgetLanguage
@@ -22240,6 +22266,16 @@ export interface components {
        * @default 30
        */
       max_session_turns?: number;
+    };
+    /** WidgetLinkTemplate */
+    WidgetLinkTemplate: {
+      /**
+       * Template Id
+       * Format: uuid
+       */
+      template_id: string;
+      /** Revision */
+      revision: number;
     };
     /**
      * WidgetOverviewItem
@@ -22431,6 +22467,8 @@ export interface components {
        * @description Empty when the widget can be activated as configured.
        */
       activation_blockers: string[];
+      /** @description Set when the widget follows a template. */
+      template?: components["schemas"]["WidgetTemplateLinkPublic"] | null;
       /** Created By User Id */
       created_by_user_id?: string | null;
       /** Activated By User Id */
@@ -22501,6 +22539,38 @@ export interface components {
        */
       is_default?: boolean;
     };
+    /** WidgetTemplateInUseDetail */
+    WidgetTemplateInUseDetail: {
+      /**
+       * Code
+       * @constant
+       */
+      code: "template_in_use";
+      /** Message */
+      message: string;
+    };
+    /** WidgetTemplateInUseResponse */
+    WidgetTemplateInUseResponse: {
+      detail: components["schemas"]["WidgetTemplateInUseDetail"];
+    };
+    /**
+     * WidgetTemplateLinkPublic
+     * @description The template a widget follows and which parts it governs.
+     */
+    WidgetTemplateLinkPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /**
+       * Locked Groups
+       * @description Parts of the widget that follow the template and cannot be edited on the widget: appearance, language, legal_texts (disclosure and footer) and/or wording (title, welcome, placeholder).
+       */
+      locked_groups: components["schemas"]["TemplateLockGroup"][];
+    };
     /** WidgetTemplatePublic */
     WidgetTemplatePublic: {
       /**
@@ -22517,6 +22587,13 @@ export interface components {
       language: components["schemas"]["WidgetLanguage"];
       /** Is Default */
       is_default: boolean;
+      /** Locked Groups */
+      locked_groups: components["schemas"]["TemplateLockGroup"][];
+      /**
+       * Linked Widgets
+       * @description Widgets that follow this template right now.
+       */
+      linked_widgets: number;
       /** Created By User Id */
       created_by_user_id?: string | null;
       /**
@@ -22541,6 +22618,11 @@ export interface components {
       language?: components["schemas"]["WidgetLanguage"] | null;
       /** Is Default */
       is_default?: boolean | null;
+      /**
+       * Locked Groups
+       * @description Parts every linked widget follows. Adding a group writes the template's values onto the linked widgets at once.
+       */
+      locked_groups?: components["schemas"]["TemplateLockGroup"][] | null;
     };
     /** WidgetTexts */
     WidgetTexts: {
@@ -35279,7 +35361,7 @@ export interface operations {
       };
     };
   };
-  apply_widget_template_api_v1_widgets__id__apply_template__post: {
+  link_widget_template_api_v1_widgets__id__link_template__post: {
     parameters: {
       query?: never;
       header?: never;
@@ -35290,7 +35372,78 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["WidgetApplyTemplate"];
+        "application/json": components["schemas"]["WidgetLinkTemplate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Widget changed since it was read. Reload before saving. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetConflictResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  detach_widget_template_api_v1_widgets__id__detach_template__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WidgetDetachTemplate"];
       };
     };
     responses: {
@@ -36712,6 +36865,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Widgets still follow the template. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetTemplateInUseResponse"];
         };
       };
       /** @description Validation Error */

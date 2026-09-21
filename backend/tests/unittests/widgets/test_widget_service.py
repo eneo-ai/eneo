@@ -32,9 +32,45 @@ class _InMemoryRepo:
     async def list_by_space(self, space_id):
         return [w for w in self.rows.values() if w.space_id == space_id]
 
+    async def list_by_template(self, template_id):
+        return [w for w in self.rows.values() if w.template_id == template_id]
+
+    async def count_by_template(self, tenant_id):
+        counts: dict = {}
+        for w in self.rows.values():
+            if w.tenant_id == tenant_id and w.template_id is not None:
+                counts[w.template_id] = counts.get(w.template_id, 0) + 1
+        return counts
+
     async def update(self, widget: Widget) -> Widget:
         self.rows[widget.id] = widget
         return widget
+
+
+class _InMemoryTemplateRepo:
+    def __init__(self) -> None:
+        self.rows: dict = {}
+
+    async def add(self, template):
+        template = template.model_copy(update={"id": uuid4()})
+        self.rows[template.id] = template
+        return template
+
+    async def get(self, template_id):
+        return self.rows.get(template_id)
+
+    async def list_by_tenant(self, tenant_id):
+        return [t for t in self.rows.values() if t.tenant_id == tenant_id]
+
+    async def update(self, template):
+        self.rows[template.id] = template
+        return template
+
+    async def delete(self, template_id):
+        self.rows.pop(template_id, None)
+
+    async def clear_default(self, tenant_id):
+        return None
 
 
 def _user(*permissions: Permission, widget_policy=None):
@@ -57,7 +93,7 @@ def _space(space_id, assistant, *, can_edit=True):
     return space, can_edit
 
 
-def _service(user, space, can_edit=True, repo=None):
+def _service(user, space, can_edit=True, repo=None, template_repo=None):
     space_service = MagicMock()
     space_service.get_space = AsyncMock(return_value=space)
     space_service.repo.one = AsyncMock(return_value=space)
@@ -72,6 +108,7 @@ def _service(user, space, can_edit=True, repo=None):
     return WidgetService(
         user=user,
         repo=repo or _InMemoryRepo(),
+        template_repo=template_repo or _InMemoryTemplateRepo(),
         space_service=space_service,
         actor_manager=actor_manager,
         tenant_service=tenant_service,
@@ -257,3 +294,109 @@ async def test_policy_update_merges_and_validates(assistant):
 
     with pytest.raises(UnauthorizedException):
         await _service(_user(Permission.WIDGETS), space).update_policy({})
+
+
+async def _linked_setup(assistant):
+    from eneo.widgets.domain.widget import WidgetTheme
+    from eneo.widgets.domain.widget_template import TemplateLockGroup, WidgetTemplate
+
+    user = _user(Permission.WIDGETS)
+    space, _ = _space(uuid4(), assistant)
+    template_repo = _InMemoryTemplateRepo()
+    template = WidgetTemplate.create(tenant_id=user.tenant_id, name="Kommunblå")
+    template.theme = WidgetTheme(primary_color="#123456", radius=4)
+    template.texts = template.texts.model_copy(
+        update={"title": "Fråga oss", "footer_text": "Personuppgifter hanteras…"}
+    )
+    template.locked_groups = [
+        TemplateLockGroup.APPEARANCE,
+        TemplateLockGroup.LEGAL_TEXTS,
+    ]
+    template = await template_repo.add(template)
+    service = _service(user, space, template_repo=template_repo)
+    view = await service.create_widget(
+        space_id=space.id, target_id=assistant.id, name="w", template=template
+    )
+    return service, view, template
+
+
+async def test_linked_widget_copies_the_template_and_reports_the_link(assistant):
+    service, view, template = await _linked_setup(assistant)
+    widget = view.widget
+    assert widget.template_id == template.id
+    assert widget.theme.primary_color == "#123456"
+    assert widget.texts.title == "Fråga oss"  # unlocked groups are copied once
+    assert widget.texts.footer_text == "Personuppgifter hanteras…"
+    assert view.template is not None and view.template.locked_groups == [
+        "appearance",
+        "legal_texts",
+    ]
+    fetched = await service.get_widget(widget.id)
+    assert fetched.template is not None and fetched.template.id == template.id
+    listed = await service.list_widgets(widget.space_id)
+    assert listed[0].template is not None and listed[0].template.id == template.id
+
+
+async def test_update_rejects_locked_parts_and_accepts_the_rest(assistant):
+    from eneo.widgets.domain.exceptions import WidgetFieldLockedError
+
+    service, view, template = await _linked_setup(assistant)
+    widget = view.widget
+    texts = widget.texts.model_dump()
+
+    with pytest.raises(WidgetFieldLockedError) as locked:
+        await service.update_widget(
+            widget.id,
+            {
+                "revision": widget.revision,
+                "theme": {**widget.theme.model_dump(), "primary_color": "#000000"},
+            },
+        )
+    assert locked.value.fields == ["theme"]
+    assert locked.value.code == "field_locked_by_template"
+
+    with pytest.raises(WidgetFieldLockedError) as locked:
+        await service.update_widget(
+            widget.id,
+            {"revision": widget.revision, "texts": {**texts, "footer_text": "Egen"}},
+        )
+    assert locked.value.fields == ["texts.footer_text"]
+
+    # The texts group is sent whole: unchanged locked values pass and the
+    # unlocked title (wording) is editable.
+    updated = await service.update_widget(
+        widget.id,
+        {
+            "revision": widget.revision,
+            "texts": {**texts, "title": "Egen titel"},
+            "theme": widget.theme.model_dump(),
+            "language": widget.language.value,
+        },
+    )
+    assert updated.widget.texts.title == "Egen titel"
+    assert updated.widget.texts.footer_text == "Personuppgifter hanteras…"
+
+
+async def test_detaching_keeps_values_and_frees_every_part(assistant):
+    service, view, template = await _linked_setup(assistant)
+    widget = view.widget
+
+    detached = await service.detach_template(widget.id, revision=widget.revision)
+    assert detached.widget.template_id is None
+    assert detached.template is None
+    assert detached.widget.theme.primary_color == "#123456"
+
+    updated = await service.update_widget(
+        detached.widget.id,
+        {
+            "revision": detached.widget.revision,
+            "theme": {**widget.theme.model_dump(), "primary_color": "#000000"},
+        },
+    )
+    assert updated.widget.theme.primary_color == "#000000"
+
+    relinked = await service.link_template(
+        updated.widget.id, template, revision=updated.widget.revision
+    )
+    assert relinked.widget.template_id == template.id
+    assert relinked.widget.theme.primary_color == "#123456"

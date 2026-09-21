@@ -79,6 +79,7 @@ export type WidgetTemplate = components["schemas"]["WidgetTemplatePublic"];
 export type WidgetOverview = components["schemas"]["WidgetOverviewPublic"];
 export type WidgetOverviewItem = components["schemas"]["WidgetOverviewItem"];
 export type WidgetTemplateUpdate = components["schemas"]["WidgetTemplateUpdate"];
+export type WidgetTemplateLockGroup = components["schemas"]["TemplateLockGroup"];
 export type EmbeddingModel = components["schemas"]["EmbeddingModelPublic"];
 export type TranscriptionModel = components["schemas"]["TranscriptionModelPublic"];
 export type ImageModel = components["schemas"]["ImageModelPublic"];

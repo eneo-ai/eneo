@@ -5,7 +5,11 @@
 
 from eneo.widgets.application.widget_service import WidgetView
 from eneo.widgets.domain.widget_policy import WidgetPolicy
-from eneo.widgets.presentation.widget_models import WidgetPolicyPublic, WidgetPublic
+from eneo.widgets.presentation.widget_models import (
+    WidgetPolicyPublic,
+    WidgetPublic,
+    WidgetTemplateLinkPublic,
+)
 
 
 class WidgetAssembler:
@@ -14,6 +18,13 @@ class WidgetAssembler:
         widget = view.widget
         assert widget.id is not None
         assert widget.created_at is not None and widget.updated_at is not None
+        template = None
+        if view.template is not None and view.template.id is not None:
+            template = WidgetTemplateLinkPublic(
+                id=view.template.id,
+                name=view.template.name,
+                locked_groups=list(view.template.locked_groups),
+            )
         return WidgetPublic(
             id=widget.id,
             public_id=widget.public_id,
@@ -32,6 +43,7 @@ class WidgetAssembler:
             allowed_origins=list(widget.allowed_origins),
             bot_protection=widget.bot_protection,
             activation_blockers=list(view.activation_blockers),
+            template=template,
             created_by_user_id=widget.created_by_user_id,
             activated_by_user_id=widget.activated_by_user_id,
             activated_at=widget.activated_at,

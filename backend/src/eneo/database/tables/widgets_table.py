@@ -11,6 +11,7 @@ from eneo.database.tables.base_class import BasePublic
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
+from eneo.database.tables.widget_templates_table import WidgetTemplates
 
 
 class Widgets(BasePublic):
@@ -50,6 +51,11 @@ class Widgets(BasePublic):
     )
     bot_protection: Mapped[str] = mapped_column(server_default="altcha")
 
+    # The template the widget follows. The service refuses to delete a
+    # template that is still followed; SET NULL is the safety net.
+    template_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(WidgetTemplates.id, ondelete="SET NULL"), nullable=True
+    )
     created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
     )
@@ -67,5 +73,6 @@ class Widgets(BasePublic):
         UniqueConstraint("public_id", name="uq_widgets_public_id"),
         Index("ix_widgets_tenant_status", "tenant_id", "status"),
         Index("ix_widgets_space_id", "space_id"),
+        Index("ix_widgets_template_id", "template_id"),
         Index("ix_widgets_target", "target_type", "target_id"),
     )

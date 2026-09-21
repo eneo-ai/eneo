@@ -6,6 +6,8 @@
   import { beforeNavigate } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { Page } from "$lib/components/layout";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -18,6 +20,7 @@
   import WidgetMockPreview from "$lib/features/widget/admin/WidgetMockPreview.svelte";
   import WidgetTextsFields from "$lib/features/widget/admin/WidgetTextsFields.svelte";
   import WidgetThemeFields from "$lib/features/widget/admin/WidgetThemeFields.svelte";
+  import { LOCK_GROUPS } from "$lib/features/widget/admin/templateLocks";
   import { m } from "$lib/paraglide/messages";
   import { FileText, Palette } from "lucide-svelte";
   import { untrack } from "svelte";
@@ -60,6 +63,54 @@
     sv: m.widget_admin_language_sv(),
     en: m.widget_admin_language_en()
   });
+
+  const lockLabels = $derived({
+    appearance: {
+      label: m.widget_admin_template_lock_appearance(),
+      description: m.widget_admin_template_lock_appearance_description()
+    },
+    language: {
+      label: m.widget_admin_template_lock_language(),
+      description: m.widget_admin_template_lock_language_description()
+    },
+    legal_texts: {
+      label: m.widget_admin_template_lock_legal_texts(),
+      description: m.widget_admin_template_lock_legal_texts_description()
+    },
+    wording: {
+      label: m.widget_admin_template_lock_wording(),
+      description: m.widget_admin_template_lock_wording_description()
+    }
+  });
+  const linkedLabel = $derived(
+    template.linked_widgets === 0
+      ? m.widget_admin_template_linked_none()
+      : template.linked_widgets === 1
+        ? m.widget_admin_template_linked_count_one()
+        : m.widget_admin_template_linked_count({ count: String(template.linked_widgets) })
+  );
+
+  function setLock(group: (typeof LOCK_GROUPS)[number], locked: boolean) {
+    autosave.patch({
+      locked_groups: LOCK_GROUPS.filter((candidate) =>
+        candidate === group ? locked : template.locked_groups.includes(candidate)
+      )
+    });
+  }
+
+  // Locking a part writes the template's values onto every follower at once,
+  // replacing what editors set there; with followers that deserves a question.
+  let lockToConfirm = $state<(typeof LOCK_GROUPS)[number] | null>(null);
+
+  function requestLock(group: (typeof LOCK_GROUPS)[number], locked: boolean) {
+    if (locked && template.linked_widgets > 0) lockToConfirm = group;
+    else setLock(group, locked);
+  }
+
+  function confirmLock() {
+    if (lockToConfirm) setLock(lockToConfirm, true);
+    lockToConfirm = null;
+  }
 </script>
 
 <svelte:head>
@@ -90,6 +141,11 @@
           <Card.Header>
             <Card.Title>{m.widget_admin_template_details()}</Card.Title>
             <Card.Description>{m.widget_admin_template_name_description()}</Card.Description>
+            <Card.Action>
+              <Badge variant={template.linked_widgets > 0 ? "default" : "secondary"}>
+                {linkedLabel}
+              </Badge>
+            </Card.Action>
           </Card.Header>
           <Card.Content>
             <Field.Group class="grid gap-6 sm:grid-cols-2">
@@ -155,6 +211,35 @@
           </Card.Content>
         </Card.Root>
 
+        <Card.Root>
+          <Card.Header>
+            <Card.Title>{m.widget_admin_template_locks()}</Card.Title>
+            <Card.Description>{m.widget_admin_template_locks_description()}</Card.Description>
+          </Card.Header>
+          <Card.Content>
+            <Field.Group class="grid gap-4">
+              {#each LOCK_GROUPS as group (group)}
+                <Field.Field orientation="horizontal">
+                  <Field.Content>
+                    <Field.Label for={`template-lock-${group}`}
+                      >{lockLabels[group].label}</Field.Label
+                    >
+                    <Field.Description id={`template-lock-${group}-help`}
+                      >{lockLabels[group].description}</Field.Description
+                    >
+                  </Field.Content>
+                  <Switch
+                    id={`template-lock-${group}`}
+                    checked={template.locked_groups.includes(group)}
+                    aria-describedby={`template-lock-${group}-help`}
+                    onCheckedChange={(checked) => requestLock(group, checked)}
+                  />
+                </Field.Field>
+              {/each}
+            </Field.Group>
+          </Card.Content>
+        </Card.Root>
+
         <Tabs.Root value="content" class="gap-6">
           <Tabs.List
             class="h-auto w-full flex-wrap gap-1 p-1 sm:w-auto"
@@ -208,3 +293,31 @@
     </div>
   </Page.Main>
 </Page.Root>
+
+<AlertDialog.Root
+  open={lockToConfirm !== null}
+  onOpenChange={(open) => {
+    if (!open) lockToConfirm = null;
+  }}
+>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>
+        {m.widget_admin_template_lock_confirm_title({
+          part: lockToConfirm ? lockLabels[lockToConfirm].label : ""
+        })}
+      </AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.widget_admin_template_lock_confirm_description({
+          count: String(template.linked_widgets)
+        })}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action onclick={confirmLock}>
+        {m.widget_admin_template_lock_confirm_action()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
