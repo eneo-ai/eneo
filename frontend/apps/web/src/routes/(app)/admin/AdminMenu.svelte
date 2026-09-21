@@ -96,7 +96,7 @@
       items: [
         navItem("/admin/users", UserRound, m.users()),
         navItem("/admin/legacy/user-groups", UsersRound, m.user_groups()),
-        navItem("/admin/legacy/roles", Fingerprint, m.roles()),
+        navItem("/admin/roles", Fingerprint, m.roles()),
         navItem("/admin/api-keys", KeyRound, m.api_keys())
       ]
     }
