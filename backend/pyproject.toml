@@ -63,6 +63,7 @@ dependencies = [
 [project.scripts]
 start = "eneo.server.main:start"
 worker = "eneo.worker.cli:start"
+run-cron = "eneo.worker.run_cron:main"
 
 [dependency-groups]
 dev = [
