@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@9316ed924c89
+translationSource: guides/embed-widget.mdx@1f6dacd3bbcd
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -35,7 +35,7 @@ Du behöver behörigheten för webbwidgetar och rätt att redigera assistenten.
 2. Öppna **Webbwidget** på samma sida och skapa en widget, eventuellt från en
    organisationsmall.
 3. Anpassa innehållet. Ändringar sparas automatiskt. Under **Innehåll** finns
-   namn, språk, titel, välkomsttext, upp till fem föreslagna frågor,
+   namn, språk, titel, välkomsttext, upp till fyra föreslagna frågor,
    beskrivningen under titeln och en sidfot med valfri länk. Beskrivningen är
    obligatorisk och informerar som standard om att besökaren möter AI.
 4. Under **Utseende** väljer du färger, logotyp, färgschema, placering och
@@ -44,7 +44,8 @@ Du behöver behörigheten för webbwidgetar och rätt att redigera assistenten.
    tomma värden återanvänder färgerna för ljust läge.
 5. Under **Regler** anger du tillåtna webbplatser, gränser, lagringstid och
    botskydd. Minst en tillåten origin krävs, exempelvis `https://www.kommun.se`.
-   Lagringstid `0` innebär att konversationen tas bort efter svaret.
+   Lagringstid `0` innebär att inget sparas efter svaret; chatten besvarar då
+   en fråga i taget, utan följdfrågor eller återkoppling.
 6. Under **Publicera** finns aktiveringskontroll, installationskod, test och
    användningsstatistik. Prova förhandsvisningen och **Testa i Eneo**, som visar
    den riktiga knappen och chatten på administrationssidan.
@@ -73,13 +74,13 @@ och är permanent.
 
 ### Attribut och API [#optional-attributes-and-api]
 
-| Attribut                                   | Funktion                                                      |
-| ------------------------------------------ | ------------------------------------------------------------- |
-| `data-lang="sv"` eller `"en"`              | Fast gränssnittsspråk; annars används sidans språk            |
-| `data-position="bottom-left"`              | Visa knappen till vänster                                     |
-| `data-color-scheme="light"` eller `"dark"` | Fast färgschema; annars följs webbplatsen                     |
-| `data-launcher="none"`                     | Dölj knappen och öppna chatten med webbplatsens egen kontroll |
-| `data-auto-open="true"`                    | Öppna chatten när sidan laddas                                |
+| Attribut                                   | Funktion                                                                                            |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `data-lang="sv"` eller `"en"`              | Fast gränssnittsspråk; annars används sidans språk                                                  |
+| `data-position="bottom-left"`              | Visa knappen till vänster; den kopierade installationskoden bär placeringen som valts i redigeraren |
+| `data-color-scheme="light"` eller `"dark"` | Fast färgschema; annars följs webbplatsen                                                           |
+| `data-launcher="none"`                     | Dölj knappen och öppna chatten med webbplatsens egen kontroll                                       |
+| `data-auto-open="true"`                    | Öppna chatten när sidan laddas                                                                      |
 
 Skriptet exponerar `window.Eneo` med kommandona `open`, `close`, `toggle`,
 `on(event, listener)` och `off(event, listener)`. Anrop kan köas innan skriptet
@@ -172,8 +173,10 @@ Anpassa exempelvis följande information till er faktiska konfiguration:
 
 Workern tar bort utgångna konversationer dagligen klockan 03:30 UTC, inklusive
 frågor, källreferenser och frågornas modelloggar. Kunskapskällor och
-revisionsloggar har egna livscykler. Med lagringstid `0` tas nya konversationer
-bort i slutet av varje svar; tidigare samtal blir möjliga att rensa vid nästa
+revisionsloggar har egna livscykler. Med lagringstid `0` sparas inget medan
+svaret tas fram, och konversationen tas bort i slutet av svaret, även om
+budgetavräkningen misslyckas; besökaren erbjuds en ny fråga i stället för
+följdfråga eller återkoppling. Tidigare samtal blir möjliga att rensa vid nästa
 schemalagda körning. Daglig statistik innehåller varken samtalstext eller
 besökaridentitet. Budgetkvitton löper ut efter sju dagar.
 
