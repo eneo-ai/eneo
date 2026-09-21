@@ -16089,6 +16089,8 @@ export interface components {
       final_output: components["schemas"]["EvidenceFinalOutputSummary"];
       /** Models Used */
       models_used: string[];
+      /** Not Run Steps */
+      not_run_steps: number;
       /** Rag Source Display Names */
       rag_source_display_names: string[];
       /** Rag Source Names */
@@ -19272,6 +19274,7 @@ export interface components {
      *           "models_used": [
      *             "gpt-4.1-mini"
      *           ],
+     *           "not_run_steps": 0,
      *           "steps_count": 1
      *         },
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
@@ -19658,6 +19661,8 @@ export interface components {
       knowledge_evidence_view?: components["schemas"]["FlowRunDebugKnowledgeEvidenceView"] | null;
       /** Models Used */
       models_used?: string[];
+      /** Not Run Steps */
+      not_run_steps: number;
       /**
        * Omissions
        * @description Sections narrowed in this interactive response, including how many rows remain retained and whether the row or logical-byte bound applied.
@@ -19696,6 +19701,8 @@ export interface components {
       io_types: components["schemas"]["FlowRunDebugIoTypes"];
       output: components["schemas"]["FlowRunDebugOutput"];
       rag?: components["schemas"]["DebugRagSummary"] | null;
+      /** Status */
+      status?: string | null;
       /** Step Id */
       step_id?: string | null;
       /** Step Order */
@@ -20180,6 +20187,7 @@ export interface components {
      *               "models_used": [
      *                 "gpt-4.1-mini"
      *               ],
+     *               "not_run_steps": 0,
      *               "steps_count": 1
      *             },
      *             "trace_id": "00000000-0000-0000-0000-000000000302"
@@ -20444,7 +20452,7 @@ export interface components {
      *           }
      *         ]
      *       },
-     *       "content_hash": "cfaa0ed0fa2dbeabba04329209f05abddb718dff0366da67fc078f382021ed73",
+     *       "content_hash": "e66736c443a4e643e6c96219794d20973c17376047c8754bf57b7bd48e255cb7",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "actor": {
@@ -20480,7 +20488,7 @@ export interface components {
      *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
-     *         "content_hash": "cfaa0ed0fa2dbeabba04329209f05abddb718dff0366da67fc078f382021ed73",
+     *         "content_hash": "e66736c443a4e643e6c96219794d20973c17376047c8754bf57b7bd48e255cb7",
      *         "content_hash_input": "redacted",
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
@@ -20611,6 +20619,7 @@ export interface components {
      *         "models_used": [
      *           "gpt-4.1-mini"
      *         ],
+     *         "not_run_steps": 0,
      *         "rag_source_display_names": [
      *           "Municipality policy guide"
      *         ],
@@ -20894,6 +20903,7 @@ export interface components {
      *             "models_used": [
      *               "gpt-4.1-mini"
      *             ],
+     *             "not_run_steps": 0,
      *             "steps_count": 1
      *           },
      *           "trace_id": "00000000-0000-0000-0000-000000000302"
