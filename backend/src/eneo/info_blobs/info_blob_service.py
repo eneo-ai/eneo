@@ -4,8 +4,9 @@ from hashlib import sha256
 from typing import TYPE_CHECKING, Optional, TypeVar
 from uuid import UUID
 
-from eneo.actors import SpaceAction
+from eneo.actors import SpaceAction, SpaceResourceType
 from eneo.admin.quota_service import QuotaService, enforce_quota_on_commit
+from eneo.authentication.auth_models import ApiKeyScopeType
 from eneo.groups_legacy.group_service import GroupService
 from eneo.info_blobs.info_blob import (
     CapturedKnowledgeOriginal,
@@ -45,6 +46,7 @@ from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager
+    from eneo.actors.actors.space_actor import SpaceActor
     from eneo.embedding_models.domain.embedding_model import EmbeddingModel
     from eneo.embedding_models.infrastructure.datastore import Datastore
     from eneo.spaces.space_repo import SpaceRepository
@@ -111,6 +113,23 @@ async def open_info_blob_original_download(
         sha256=reference.sha256,
         _close=opened.aclose,
     )
+
+
+def _can_read_source_in(actor: "SpaceActor", info_blob: InfoBlobInDB) -> bool:
+    """A space grants a fallback read only if the tenant permission for the
+    blob's source type allows reading it, so a permission an administrator
+    removed (``collections``) is not bypassed by reading a document by id.
+    The space role is already covered by ``can_read_info_blobs``; website and
+    integration reads need no tenant permission by existing design."""
+    if info_blob.group_id is not None:
+        resource_type = SpaceResourceType.COLLECTION
+    elif info_blob.website_id is not None:
+        resource_type = SpaceResourceType.WEBSITE
+    elif info_blob.integration_knowledge_id is not None:
+        resource_type = SpaceResourceType.INTEGRATION_KNOWLEDGE
+    else:
+        return False
+    return actor.tenant_permits(action=SpaceAction.READ, resource_type=resource_type)
 
 
 class InfoBlobService:
@@ -355,8 +374,23 @@ class InfoBlobService:
         actor = await self._get_actor(info_blob=info_blob, group_id=group_id)
         match action:
             case SpaceAction.READ:
-                if not actor.can_read_info_blobs():
-                    raise UnauthorizedException()
+                if actor.can_read_info_blobs():
+                    return
+                # Match UserService._enforce_api_key_scope: scoped blob requests
+                # are bound to the source's owning space.
+                key = self.user.active_api_key
+                if info_blob is not None and (
+                    key is None or key.scope_type == ApiKeyScopeType.TENANT
+                ):
+                    for access in await self.space_repo.get_info_blob_read_access(
+                        info_blob
+                    ):
+                        candidate = self.actor_manager.get_space_actor(access)
+                        if candidate.can_read_info_blobs() and _can_read_source_in(
+                            candidate, info_blob
+                        ):
+                            return
+                raise UnauthorizedException()
             case SpaceAction.CREATE:
                 if not actor.can_create_info_blobs():
                     raise UnauthorizedException()

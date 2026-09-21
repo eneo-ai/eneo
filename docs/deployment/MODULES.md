@@ -50,7 +50,7 @@ or resource authorization works.
 3. Copy the secret immediately to the module's secret store. It is shown only
    once. Do not put it in browser code, source control or the general Eneo web
    environment.
-4. Open **Administration → Modules**.
+4. Open **Admin → Modules**.
 5. Enter the module key, one exact callback URL per line and select the service
    key. To install without allowing ticket exchange, explicitly select **No
    service key**. Choose **Install module**.
@@ -199,7 +199,7 @@ detect a resource route that forgot its authorization dependency.
 2. Replace the secret in the module runtime and recreate the module container.
 3. Run the full login and protected-resource smoke test while the current
    binding and key rotation grace allow it.
-4. In **Administration → Modules**, edit the module, select the successor key
+4. In **Admin → Modules**, edit the module, select the successor key
    and save the complete configuration.
 5. Verify login again, then allow the old key's grace period to end or revoke
    it according to the incident/runbook policy.
@@ -209,7 +209,7 @@ would immediately lose ticket-exchange access.
 
 ## Uninstall a module
 
-1. In **Administration → Modules**, choose **Remove** and confirm. Ticket
+1. In **Admin → Modules**, choose **Remove** and confirm. Ticket
    issuance stops and the callback/key binding is deleted atomically.
 2. Stop the module container.
 3. Revoke its service key in **Administration → API keys**. Key revocation is a

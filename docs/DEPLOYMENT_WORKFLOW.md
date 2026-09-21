@@ -1,6 +1,6 @@
-# Contributing to This Project
+# Deployment Workflow
 
-Welcome! This document describes our Git workflow and deployment process. Please read it carefully before contributing.
+This document describes our Git workflow and deployment process. Please read it carefully before contributing.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -15,6 +15,7 @@ Welcome! This document describes our Git workflow and deployment process. Please
 - [Backflow: Release to Develop](#backflow-release-to-develop)
 - [Support / Maintenance Policy](#support--maintenance-policy)
 - [Docker Images](#docker-images)
+- [Documentation Versions](#documentation-versions)
 - [FAQ](#faq)
 
 ## Overview
@@ -387,6 +388,19 @@ ghcr.io/eneo-ai/eneo-frontend:v1.8.0-rc.1  # RC for testing
 ghcr.io/eneo-ai/eneo-frontend:v1.8.0       # Specific release
 ghcr.io/eneo-ai/eneo-frontend:latest       # Highest stable release
 ```
+
+## Documentation Versions
+
+[docs.eneo.ai](https://docs.eneo.ai) publishes stable, archived and development
+documentation. Every release line has a `/vX.Y/` URL; `/dev/` follows develop,
+and unversioned URLs redirect to the latest stable equivalent.
+
+[The documentation authoring guide](../frontend/apps/docs-site/AUTHORING.md)
+owns the rules for choosing a branch, page and release-note entry. Read it
+before adding documentation or describing unreleased behaviour.
+[The site README](../frontend/apps/docs-site/README.md) describes publication,
+central triggers, retention and recovery. There is no manual version-folder
+move at release time.
 
 ## FAQ
 

@@ -645,6 +645,69 @@ class TenantModelAdapter(CompletionModelAdapter):
                 code="invalid_tool_call",
             ) from error
 
+    @staticmethod
+    def _skill_activation_metadata(
+        activation: SkillToolCallApplication | None,
+    ) -> list[ToolCallMetadata]:
+        """Surface Skill activations to the chat as steps on the built-in
+        ``skills`` server, so the UI can show them the way it shows other
+        internal tool calls and persist them with the turn."""
+        if activation is None:
+            return []
+        metadata: list[ToolCallMetadata] = []
+        for outcome in activation.outcomes:
+            rejected = outcome.status == "rejected"
+            arguments: dict[str, object] = {
+                "skill_key": outcome.activation_key,
+                "mode": "on_demand",
+            }
+            if rejected and outcome.reason is not None:
+                arguments["reason"] = outcome.reason.value
+            metadata.append(
+                ToolCallMetadata(
+                    server_name="skills",
+                    tool_name=outcome.activation_key or "unknown",
+                    title=outcome.display_name,
+                    arguments=arguments,
+                    tool_call_id=outcome.call_id,
+                    approved=True,
+                    result_status="failed" if rejected else "completed",
+                    result=json.dumps(
+                        {
+                            "activated": not rejected,
+                            "already_active": outcome.status == "already_active",
+                            "reason": outcome.reason.value if outcome.reason else None,
+                        }
+                    ),
+                    mcp_tool_name=SKILL_ACTIVATION_TOOL_NAME,
+                )
+            )
+        return metadata
+
+    @staticmethod
+    def _always_active_skill_metadata(
+        runtime: SkillActivationRuntime | None,
+    ) -> list[ToolCallMetadata]:
+        """Skills in context from turn start ("Alltid") never go through the
+        activation tool, so surface them as steps up front: the chat shows
+        which Skills shaped the reply either way."""
+        if runtime is None:
+            return []
+        return [
+            ToolCallMetadata(
+                server_name="skills",
+                tool_name=key,
+                title=display_name,
+                arguments={"skill_key": key, "mode": "always"},
+                tool_call_id=f"skill-always-{key}",
+                approved=True,
+                result_status="completed",
+                result=json.dumps({"activated": True, "mode": "always"}),
+                mcp_tool_name=SKILL_ACTIVATION_TOOL_NAME,
+            )
+            for key, display_name in runtime.initially_active_skills()
+        ]
+
     def _extract_usage(self, response: _LiteLLMHasUsage) -> TokenUsage | None:
         """Extract token usage from a LiteLLM response."""
         usage = getattr(response, "usage", None)
@@ -1174,7 +1237,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                 seen_prefixes: set[str] = set()
                 captured_refs: list[McpToolReference] = []
                 captured_images: list[GeneratedImage] = []
-                collected_tool_metadata: list[ToolCallMetadata] = []
+                collected_tool_metadata: list[ToolCallMetadata] = (
+                    self._always_active_skill_metadata(skill_runtime)
+                )
                 result_budget = _ToolResultBudget(
                     token_limit=self.model.token_limit,
                     litellm_model=self.litellm_model,
@@ -1286,6 +1351,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                         ),
                         assistant_content=msg.content,
                     )
+                    collected_tool_metadata.extend(
+                        self._skill_activation_metadata(activation)
+                    )
                     external_calls = (
                         activation.external_calls
                         if activation is not None
@@ -1393,6 +1461,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 result_status=result_status,
                                 result=display_text,
                                 mcp_tool_name=call.name,
+                                purpose=mcp_proxy.get_tool_purpose(call.name),
                                 meta=result.get("meta") or None,
                             )
                         )
@@ -1582,6 +1651,12 @@ class TenantModelAdapter(CompletionModelAdapter):
             activation_available = (
                 skill_runtime is not None and skill_runtime.tool_definition is not None
             )
+            always_active_metadata = self._always_active_skill_metadata(skill_runtime)
+            if always_active_metadata:
+                yield Completion(
+                    response_type=ResponseType.TOOL_CALL,
+                    tool_calls_metadata=always_active_metadata,
+                )
             mcp_tools_active = bool(mcp_proxy and prepared and prepared.has_tools)
             pending_allowed_tools: set[str] = (
                 mcp_proxy.get_allowed_tool_names()
@@ -1597,6 +1672,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     server_name, tool_name = name.split("__", 1)
                     return server_name, tool_name, None
                 return "", name, None
+
+            def _tool_purpose(name: str) -> str | None:
+                return mcp_proxy.get_tool_purpose(name) if mcp_proxy else None
 
             # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
@@ -1653,8 +1731,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                     )
 
                 async for chunk in s:
-                    logger.debug(f"[DEBUG] Raw chunk: {chunk}")
-
                     # Capture usage from final chunk (when stream_options include_usage is set)
                     chunk_usage_obj = getattr(chunk, "usage", None)
                     if chunk_usage_obj:
@@ -1679,7 +1755,6 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     delta = chunk.choices[0].delta
                     finish_reason = chunk.choices[0].finish_reason
-                    logger.debug(f"[DEBUG] Delta: {delta}")
 
                     # Forward provider reasoning/thinking deltas (e.g. Anthropic
                     # extended thinking surfaced by LiteLLM as reasoning_content)
@@ -1748,6 +1823,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                             tool_call_id=call_id,
                                             result_status="pending",
                                             mcp_tool_name=name,
+                                            purpose=_tool_purpose(name),
                                         )
                                     ],
                                 )
@@ -1909,6 +1985,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                         for tool_call in tool_calls
                         if tool_call["id"] in external_call_ids
                     ]
+                    activation_metadata = self._skill_activation_metadata(activation)
+                    if activation_metadata:
+                        yield Completion(
+                            response_type=ResponseType.TOOL_CALL,
+                            tool_calls_metadata=activation_metadata,
+                        )
                     if tool_calls and mcp_proxy is None:
                         break
 
@@ -1926,6 +2008,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         title=title,
                                         tool_call_id=call.call_id,
                                         result_status="deferred",
+                                        purpose=_tool_purpose(call.name),
                                         result=json.dumps(
                                             {
                                                 "deferred": True,
@@ -1999,6 +2082,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 arguments=args,
                                 tool_call_id=tc["id"],
                                 mcp_tool_name=name,
+                                purpose=mcp_proxy.get_tool_purpose(name),
                             )
                         )
                     tool_args_by_call_id: dict[str, dict[str, Any] | None] = {}
@@ -2081,6 +2165,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         approved=False,
                                         result_status="timeout_denied",
                                         mcp_tool_name=tm.mcp_tool_name,
+                                        purpose=tm.purpose,
                                     )
                                     for tm in approval_metadata
                                 ],
@@ -2108,6 +2193,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         )
                                     ),
                                     mcp_tool_name=tm.mcp_tool_name,
+                                    purpose=tm.purpose,
                                 )
                                 for tm in tool_metadata
                             ],
@@ -2136,6 +2222,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     approved=tm.approved,
                                     result_status="approved",
                                     mcp_tool_name=tm.mcp_tool_name,
+                                    purpose=tm.purpose,
                                 )
                                 for tm in tool_metadata
                             ],
@@ -2240,6 +2327,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     result_status=result_status,
                                     result=display_text,
                                     mcp_tool_name=tc["function"]["name"],
+                                    purpose=mcp_proxy.get_tool_purpose(
+                                        tc["function"]["name"]
+                                    ),
                                     meta=result_data.get("meta") or None,
                                 )
                             )
@@ -2296,6 +2386,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 ),
                                 result=json.dumps(denial_payload),
                                 mcp_tool_name=tc["function"]["name"],
+                                purpose=mcp_proxy.get_tool_purpose(
+                                    tc["function"]["name"]
+                                ),
                             )
                         )
 
@@ -2392,6 +2485,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     result_status="failed",
                                     result=refusal_payload,
                                     mcp_tool_name=name,
+                                    purpose=_tool_purpose(name),
                                 )
                             )
                         yield Completion(

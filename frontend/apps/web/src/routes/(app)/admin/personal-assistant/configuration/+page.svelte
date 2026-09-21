@@ -11,6 +11,7 @@
     loadSkillBindingPreview
   } from "$lib/features/skills/skillBindingCatalog";
   import { m } from "$lib/paraglide/messages";
+  import FilePolicySection from "./FilePolicySection.svelte";
   import McpRestrictionSection from "./McpRestrictionSection.svelte";
   import ModelRestrictionSection from "./ModelRestrictionSection.svelte";
   import PolicyConfirmDialog from "./PolicyConfirmDialog.svelte";
@@ -30,6 +31,12 @@
   $effect(() => {
     draft.sync(data);
   });
+
+  // Same gate as the assistant editor: the file policy only exists where
+  // signed file references are configured. Which store holds the originals
+  // does not matter; the download surface serves PostgreSQL and object
+  // storage alike.
+  const showFilePolicy = $derived(data.settings.file_references_enabled === true);
 </script>
 
 <svelte:head>
@@ -86,6 +93,12 @@
         promptSummary={draft.promptSummary}
         badgeVariant={draft.badgeVariant}
       />
+      {#if showFilePolicy}
+        <FilePolicySection
+          bind:openFilesEnabled={draft.openFilesEnabled}
+          summary={draft.filesSummary}
+        />
+      {/if}
       <SkillsPolicySection
         bind:skillBindings={draft.skillBindings}
         initialCatalogPage={draft.skillCatalogPage}

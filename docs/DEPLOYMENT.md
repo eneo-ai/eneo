@@ -176,9 +176,9 @@ After deployment, you **must** secure the default account.
 
 1. Log in with the default credentials:
    - **Email**: `user@example.com`
-   - **Password**: `Password1!`
+   - **Password**: `ChangeMePassword1!`
 
-2. **Immediately** navigate to the user menu in the top-right corner and change your password.
+2. **Immediately** open **Account** from the user menu, then change your password under **Password**.
 
 **Congratulations!** Your Eneo instance is now deployed and secured. 🎉
 
@@ -292,7 +292,7 @@ docker compose exec backend python -c "import eneo; print(eneo.__version__)"
 
 ```bash
 # Back up your database
-docker compose exec db pg_dump -U eneo eneo_db > backup_$(date +%Y%m%d).sql
+docker compose exec db pg_dump -U postgres eneo > backup_$(date +%Y%m%d).sql
 
 # Back up your volumes
 docker compose down
@@ -334,7 +334,7 @@ The safest approach is to start fresh:
 
 ```bash
 # 1. Back up your data (if needed)
-docker compose exec db pg_dump -U eneo eneo_db > backup.sql
+docker compose exec db pg_dump -U postgres eneo > backup.sql
 
 # 2. Stop all containers
 docker compose down
@@ -347,7 +347,7 @@ docker volume rm eneo_eneo_postgres_data eneo_eneo_redis_data eneo_eneo_backend_
 docker compose up -d
 
 # 5. Restore data if needed (advanced)
-# docker compose exec -T db psql -U eneo eneo_db < backup.sql
+# docker compose exec -T db psql -U postgres eneo < backup.sql
 ```
 
 > **Note:** If you need to preserve your data across major migrations, use `pg_dump` to export, then restore to the fresh database. This may require manual schema adjustments depending on the changes between versions.
@@ -472,14 +472,14 @@ If you encounter issues, here are some common problems and their solutions.
 - See the [Upgrading Your Eneo Instance](#upgrading-your-eneo-instance) section for guidance on starting fresh
 
 ### Default User Not Created (Can't Login)
-If the database tables exist but you can't login with `user@example.com` / `Password1!`:
+If the database tables exist but you can't login with `user@example.com` / `ChangeMePassword1!`:
 - Check that the `DEFAULT_*` variables are set (not commented out) in `env_backend.env`:
   ```bash
   DEFAULT_TENANT_NAME=ExampleTenant
   DEFAULT_TENANT_QUOTA_LIMIT=10737418240
   DEFAULT_USER_NAME=ExampleUser
   DEFAULT_USER_EMAIL=user@example.com
-  DEFAULT_USER_PASSWORD=Password1!
+  DEFAULT_USER_PASSWORD=ChangeMePassword1!
   ```
 - Re-run the database initialization:
   ```bash
@@ -527,7 +527,7 @@ If you see `middleware "redirect-to-https@docker" does not exist` in Traefik log
 
 ### Errors when uploading large files (e.g., PDFs)
 - Ask an administrator with the Storage permission to review configured and
-  effective limits in **Admin > Storage**. Policy updates apply without
+  effective limits in **Admin > File storage**. Policy updates apply without
   restarting backend or worker.
 - For PostgreSQL-inline session uploads, the effective limit is the smaller of
   the admin policy and the operator-owned

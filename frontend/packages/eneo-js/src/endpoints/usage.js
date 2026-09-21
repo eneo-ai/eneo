@@ -26,7 +26,7 @@ export function initUsage(client) {
 
       /**
        * List token usage status aggregated by users for current tenant
-       * @param {{startDate: string, endDate: string, page: number, perPage: number, sortBy: import("../types/resources").UserSortBy, sortOrder: string}} [params] Define start and end date for data; Expects UTC time string.
+       * @param {{startDate: string, endDate: string, page: number, perPage: number, sortBy: import("../types/resources").UserSortBy, sortOrder: "asc" | "desc", search?: string}} [params] Define start and end date for data; Expects UTC time string.
        * @throws {EneoError}
        * */
       getUsersSummary: async (params) => {
@@ -39,7 +39,8 @@ export function initUsage(client) {
               page: params?.page,
               per_page: params?.perPage,
               sort_by: params?.sortBy,
-              sort_order: params?.sortOrder
+              sort_order: params?.sortOrder,
+              search: params?.search
             }
           }
         });

@@ -330,7 +330,7 @@ async def register_user(
 
     Optional fields:
     - username: Unique identifier (if not provided, will use email prefix)
-    - password: User password (minimum 7 characters, maximum 100)
+    - password: Local password (see GET /api/v1/users/password-policy/)
     - quota_limit: Storage limit in bytes (minimum 1000 bytes = 1KB)
     - roles: List of role IDs to assign (empty list by default)
 
@@ -483,7 +483,7 @@ async def update_user(
 
     Optional fields (only provided fields are updated):
     - email: New email address (must be unique within your tenant)
-    - password: New password (minimum 7 characters, maximum 100)
+    - password: New local password (see GET /api/v1/users/password-policy/)
     - quota_limit: New storage limit in bytes (minimum 1000 bytes = 1KB)
     - state: User state (invited/active/inactive/deleted)
     - roles: List of role IDs (replaces existing roles)
@@ -1103,6 +1103,7 @@ async def _enrich_api_keys_with_user_snapshots(
                         "auto_expire_unused_days": 180,
                         "max_delegation_depth": 3,
                         "revocation_cascade_enabled": True,
+                        "require_tenant_allowed_origin": True,
                         "max_rate_limit_override": 10000,
                     }
                 }
@@ -1138,6 +1139,7 @@ async def get_api_key_policy(
                 "application/json": {
                     "example": {
                         "require_expiration": True,
+                        "require_tenant_allowed_origin": True,
                         "max_expiration_days": 90,
                         "auto_expire_unused_days": 180,
                     }
@@ -1155,6 +1157,7 @@ async def update_api_key_policy(
             examples=[
                 {
                     "require_expiration": True,
+                    "require_tenant_allowed_origin": True,
                     "max_expiration_days": 90,
                     "max_delegation_depth": 3,
                     "revocation_cascade_enabled": True,

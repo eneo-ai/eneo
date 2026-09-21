@@ -34,12 +34,12 @@ silently after a failure.
 
 | Owner         | Responsibility                                                                                                                                                                     |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Administrator | Connect an S3-compatible destination, change or roll back that destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
+| Administrator | Connect an S3-compatible destination, change or roll back that destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > File storage** |
 | Operator      | Run PostgreSQL and any optional compatible endpoint; own TLS, certificates, capacity, backups, network reachability, and process safety tuning                                     |
 
 Storage administration uses the same administrator authority as API keys and
 models. Deployment-wide content inventory spans tenants, so it is part of that
-same administrative view. **Admin > Storage** leads with the active target,
+same administrative view. **Admin > File storage** leads with the active target,
 object-store health, recorded file-content distribution, and migration state.
 Changing the target, editing upload limits, and moving existing content remain
 separate actions; detailed limits and PostgreSQL allocation stay available in
@@ -60,11 +60,11 @@ or provider-specific product branch.
 
 File and Icon are the first adopted product owners. Existing legacy bytes stay
 readable while a staged, resumable backfill creates and verifies concrete typed
-references. The old columns remain the recovery source until a later contract
-release passes both the campaign-completion and locked live-reference checks
+references. The old columns remain the recovery source until the optional cleanup command passes the campaign-completion and locked
+live-reference checks
 defined in [Close the recovery window and reclaim
 disk](#close-the-recovery-window-and-reclaim-disk). Eligible new File and Icon
-writes use the target selected in **Admin > Storage**. InfoBlob generations and
+writes use the target selected in **Admin > File storage**. InfoBlob generations and
 Flow artifacts remain separate follow-up work. A target change affects new
 writes only; moving existing content remains a separate migration workflow.
 
@@ -72,7 +72,7 @@ writes only; moving existing content remains a separate migration workflow.
 
 For a new installation, the operator sets Eneo's root encryption key. A platform
 admin can then enter the endpoint, bucket, signing region, and access keys in
-**Admin > Storage**. Eneo tests the destination before encrypting and saving the
+**Admin > File storage**. Eneo tests the destination before encrypting and saving the
 credentials. Saving the connection does not select it for new writes or move
 existing content.
 
@@ -228,7 +228,7 @@ curl -fsS https://eneo.example.eu/api/readyz \
 ```
 
 After readiness reports `ready`, an administrator can select **Object store**
-in **Admin > Storage**. Selection fails clearly if the endpoint is unavailable
+in **Admin > File storage**. Selection fails clearly if the endpoint is unavailable
 or incompatible. The policy update takes effect without restarting backend or
 worker.
 
@@ -267,7 +267,7 @@ the optional service receives the matching credentials. There is deliberately
 no usable mutable-tag default.
 
 When readiness reports `ready`, an administrator can select **Object store** in
-**Admin > Storage**. The same deployment-wide policy applies to bundled and
+**Admin > File storage**. The same deployment-wide policy applies to bundled and
 external endpoints; there is no provider or vendor product branch.
 
 Remote-only settings are all-or-nothing. Do not model “off” with blank values:
@@ -305,7 +305,7 @@ Inline capacity and common reconciliation tuning live in `env_backend.env`.
 bounds PostgreSQL row, WAL, backup, and process memory exposure; it is not a
 business limit. Lowering it affects new inline writes, not reads of existing
 rows. For PostgreSQL-inline session uploads, the effective limit is the smaller
-of the admin policy and this ceiling. **Admin > Storage** shows the configured
+of the admin policy and this ceiling. **Admin > File storage** shows the configured
 limit, effective limit, and constraining source. Object-store session uploads
 use the same rule with the portable multipart envelope derived from configured
 transport settings. FastAPI/Starlette multipart parsing happens before route
@@ -343,7 +343,7 @@ Object content has these explicit runtime outcomes:
 | Complete settings; endpoint temporarily unavailable       | Stays live                           | Overall readiness remains 200/degraded; object-store operations return typed 503, inline operations continue |
 | Reachable bucket not paired with this PostgreSQL database | Startup fails                        | `configuration_required`; reconciliation does not mutate rows or objects                                     |
 
-Selecting **Object store** in **Admin > Storage** fails clearly while the
+Selecting **Object store** in **Admin > File storage** fails clearly while the
 endpoint is unavailable or incompatible; the previous committed policy remains
 active. If the endpoint fails after selection, eligible new remote-target writes
 fail. Eneo does not fall back to PostgreSQL inline or dual-write. Existing remote
@@ -418,7 +418,7 @@ the scheduling/registration adapter, not S3 or lifecycle logic.
 
 PostgreSQL inline remains a complete deployment without an object-store
 service or configuration. When compatible object storage is configured and
-ready, an administrator can use **Admin > Storage** to queue an explicit
+ready, an administrator can use **Admin > File storage** to queue an explicit
 move in either direction. Selecting the default target for new writes never
 moves existing content.
 
@@ -445,7 +445,7 @@ configured orphan grace has elapsed and two complete inventory observations
 have allowed bounded deletion. Object-store configuration remains required
 while any remote authority, staged move key, orphan candidate, or multipart
 cleanup record exists. To retire an endpoint, first move all eligible content
-inline, confirm **Admin > Storage** reports no active object-store content or
+inline, confirm **Admin > File storage** reports no active object-store content or
 nonterminal moves, then allow those cleanup observations to finish before
 removing configuration.
 
@@ -462,7 +462,7 @@ readable immediately.
    does not hold the write fence the switch relies on.
 1. Create an empty private bucket and a bucket-scoped application identity on
    the new service, and back up the current bucket.
-2. Select `postgres_inline` for new writes in **Admin > Storage**, let queued
+2. Select `postgres_inline` for new writes in **Admin > File storage**, let queued
    moves and in-flight uploads finish, then select **Pause moves**. Both are
    required: an empty queue does not by itself stop a new move from starting
    mid-copy. New uploads above `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` fail
@@ -479,7 +479,7 @@ readable immediately.
    differences. `--download` reads and compares the actual bytes;
    `--checksum` falls back to size-only comparison when a hash is
    unavailable — the multipart-uploaded S3 case — and is not proof.
-5. Use **Change destination** in **Admin > Storage**. Eneo probes the
+5. Use **Change destination** in **Admin > File storage**. Eneo probes the
    candidate, refuses a bucket paired with another Eneo installation, verifies
    the presence, size, and media type of every object the deployment still
    serves (byte equality is what step 4's `--download` comparison proves, and
@@ -548,7 +548,7 @@ is captured per object, so later multipart tuning cannot invalidate existing
 content. A range proves the chunks it covers; a full read still checks the
 canonical full-object SHA-256 and can detect corruption elsewhere.
 
-**Admin > Storage** reports two related measurements, not remaining capacity.
+**Admin > File storage** reports two related measurements, not remaining capacity.
 The file-content total is the sum of Eneo's recorded content sizes, excluding
 content whose deletion has completed (`tombstoned`). Its PostgreSQL and
 object-storage figures are parts of that total. **PostgreSQL on disk** comes
@@ -658,7 +658,7 @@ The organizational sequence is:
 4. Monitor status, disk, WAL and request latency. Verify old/new content and a
    restore of the new release after adoption completes.
 5. Optionally select S3-compatible storage and queue verified moves. Preserve the
-   old columns until the separate contract release; space reclamation is separate.
+   old columns until optional cleanup; space reclamation is separate.
 
 Before an Eneo or object-store upgrade, take a paired backup and retain the old
 image digests. Upgrade the byte plane without changing endpoint semantics,
@@ -715,7 +715,7 @@ is missing.
 
 PostgreSQL inline remains the complete destination when no S3-compatible store
 is configured. Choosing inline still needs capacity for the second verified
-copy until the later contract and table rewrite reclaim the legacy storage, but
+copy until optional cleanup and a table rewrite reclaim the legacy storage, but
 the work no longer blocks `db-init`. This release has no adapter that adopts
 legacy bytes directly into object storage. Choosing object storage before a
 campaign starts leaves adoption waiting; it does not avoid the inline copy. A
@@ -855,8 +855,9 @@ increments the recovery revision, or rewrites ledger state. Use the recovery
 procedure below for a halted campaign. Stop the worker as well if its ongoing
 work must be interrupted.
 
-The command and pause field are temporary upgrade tooling and leave with the
-File/Icon ledger in the later contract release.
+The commands, settings, fallback readers, and ledger remain in 2.2, including
+after optional cleanup. A later release can retire this upgrade tooling once
+the supported upgrade path no longer needs it.
 
 ### Bound throughput and recover a halted campaign
 
@@ -1091,17 +1092,63 @@ with any object-store authority need a matching PostgreSQL and object-store
 backup pair. Retain the pre-upgrade recovery point until that restore succeeds
 and the deployment's retention rules allow its removal.
 
-Install the later contract release only after the campaign is `complete` and
-the ledger has no `pending`, `ready`, `leased`, or `failed` row. Its migration
-must treat that as a necessary but insufficient precondition. In the same
-transaction that drops legacy columns, it must lock and recheck that every
-surviving ledger key has its matching File or Icon reference and that the
-referenced object content is still `available`. A missing or failed reference
-must abort before any legacy column is dropped. Do not drop the columns
-manually. Installing that release closes direct rollback to the old image;
-recovery remains forward or through the retained coordinated backup.
+Version 2.2 includes an explicit cleanup command. Normal `db-init` only adds the
+nullable cleanup timestamp in revision `202609081400`; it does not remove legacy
+columns or require adoption to have finished. Keep using this same image before,
+during, and after cleanup.
 
-After the contract release, measure the remaining relations before deciding
+When the verification period and backup restore test are complete:
+
+1. Check `status`: the campaign must be `complete`, admission unpaused, and no
+   ledger item may be pending, ready, leased, or failed. Keep the configured
+   capacity and migration controls for installations still adopting.
+2. Stop every backend and worker replica (in split deployments, the
+   maintenance worker too) and keep PostgreSQL running. Run the command from
+   the **same 2.2 image** with the deployment's Compose files, profile, and
+   settings:
+
+   ```bash
+   docker compose stop backend worker
+   docker compose run --rm --no-deps -T --entrypoint python worker \
+     -m eneo.object_content.file_icon_migration cleanup
+   ```
+
+3. Check the JSON result and exit status. Success prints `legacy_cleaned: true`
+   and `changed: true`; a repeat prints `changed: false`. Exit 2 means a
+   prerequisite failed and nothing was changed. Exit 3 means the database was
+   unreachable, the settings were invalid, or a lock could not be taken within
+   five seconds; nothing was changed in the usual case, but if the connection
+   dropped while PostgreSQL confirmed the commit the cleanup is complete without
+   a printed result. After exit 3, an interrupted command, or missing output,
+   run `status` with the same `docker compose run` form: `legacy_cleaned: true`
+   means it committed. Running cleanup again is always safe. Do not drop
+   columns manually.
+4. Start the same image again with `docker compose start backend worker`. Check
+   `status` (`legacy_cleaned: true`), representative old downloads, and a new
+   upload. `preflight` reports schema state `cleaned` and no remaining legacy
+   adoption capacity; the worker stops claiming legacy adoption work.
+
+The command requires READ COMMITTED isolation and waits at most five seconds to
+acquire each required lock. It fences owner, reference, content, and migration
+writers, then verifies actual live sources and exact surviving ledger references
+in the transaction that removes all eight legacy columns. It compares source
+size and SHA-256, including empty values, and hashes inline authoritative bytes.
+For remote authority it checks recorded verification metadata; it does not
+contact the object store under the database fence. Verify remote availability
+and the coordinated backup before the maintenance window. Source verification
+reads and hashes every retained legacy payload and its inline authoritative
+copy, so its duration is not the adoption throughput; measure it on a
+representative restored database and size the maintenance window from that.
+
+Cleanup also removes the legacy-write freeze triggers, while retaining the
+ledger, migration controls, and owner-deletion triggers for this release. The
+transaction records cleanup alongside the column removals. Afterward the same
+application uses object-content references, and backend failures cannot reopen
+legacy repair against columns that no longer exist. Recover failed content
+forward or restore the coordinated pre-cleanup backup; an Alembic downgrade
+cannot recreate discarded bytes. Restoring a backup discards later writes.
+
+After cleanup, measure the remaining relations before deciding
 whether filesystem reclamation is worth the operational cost:
 
 ```sql
@@ -1112,14 +1159,18 @@ SELECT pg_size_pretty(pg_total_relation_size('files')) AS files_total,
 Use one tested maintenance method:
 
 - Prefer [`pg_repack`](https://github.com/reorg/pg_repack/blob/master/doc/pg_repack.rst)
-  when minimizing blocking matters. It requires the extension and client,
-  temporary free disk of roughly twice the target tables and indexes, and a
-  short final lock. Validate its version and exact command against a restored
-  production-size database first.
-- For the simpler offline option, stop APIs and workers and run
-  `VACUUM (FULL, ANALYZE) files;` followed by
-  `VACUUM (FULL, ANALYZE) icons;`. Each command rewrites and exclusively locks
-  its table and requires temporary space.
+  when minimizing blocking matters. It keeps the table readable and writable
+  during most of the rewrite but takes an exclusive lock at the start and at
+  the end, and by default it cancels queries that hold up those locks and
+  eventually terminates their connections. Run it with `--no-kill-backend` and
+  a tested `--wait-timeout` if Eneo must stay up, or stop Eneo for the run. It
+  requires the extension on the server and the client, and temporary free disk
+  of roughly twice the target tables and indexes. Validate its version and
+  exact command against a restored production-size database first.
+- For the simpler offline option, stop backend and worker and run
+  `VACUUM (FULL, ANALYZE) files;` and then `VACUUM (FULL, ANALYZE) icons;`, one
+  at a time and outside a transaction block. Each command rewrites and
+  exclusively locks its table and requires temporary space.
 
 Ordinary `VACUUM` generally makes dead space reusable inside PostgreSQL but does
 not return this table storage to the filesystem. Physical reclamation therefore
@@ -1136,7 +1187,7 @@ that trips this guard.
 
 Policy rollback does not move bytes. To stop new remote placement while keeping
 the current version, select
-`postgres_inline` in **Admin > Storage**. Existing remote content still needs
+`postgres_inline` in **Admin > File storage**. Existing remote content still needs
 the endpoint, credentials, certificates, and paired backup. Selection never
 migrates it implicitly.
 

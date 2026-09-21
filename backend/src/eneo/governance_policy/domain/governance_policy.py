@@ -76,6 +76,10 @@ class GovernancePolicy:
     reasoning_policy_configured: bool = False
     default_reasoning_effort: str | None = None
     allow_user_reasoning_effort: bool = False
+    # None = not governed (each personal assistant's own flag applies).
+    # True inlines attachment text; False sends signed URLs the model reads
+    # with the files tool, keeping large uploads out of the context window.
+    inline_file_text: bool | None = None
 
     updated_at: datetime | None = None
     updated_by_user_id: UUID | None = None
@@ -152,3 +156,6 @@ class GovernancePolicy:
         self.reasoning_policy_configured = True
         self.default_reasoning_effort = default_effort
         self.allow_user_reasoning_effort = allow_user_override
+
+    def set_file_policy(self, *, inline_file_text: bool) -> None:
+        self.inline_file_text = inline_file_text

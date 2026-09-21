@@ -24,8 +24,6 @@
 
   let showAllItems = false;
 
-  $: visibleItems = showAllItems ? models : models.slice(0, 10);
-
   function estimateCostText(modelId: string, inputTokens: number, outputTokens: number): string {
     const rates = costRates.get(modelId);
     if (!rates) return "–";
@@ -33,7 +31,7 @@
     return formatCostUSD(cost);
   }
 
-  const table = Table.createWithResource(visibleItems);
+  const table = Table.createWithResource(models, 10);
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
@@ -94,7 +92,8 @@
     })
   ]);
 
-  $: table.update(visibleItems);
+  $: table.update(models);
+  $: viewModel.pluginStates.page.pageSize.set(showAllItems ? Math.max(models.length, 10) : 10);
 </script>
 
 <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list"></Table.Root>

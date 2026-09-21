@@ -1,13 +1,14 @@
 """Operator controls for the temporary File/Icon migration.
 
 Run inside the maintenance worker environment:
-    python -m eneo.object_content.file_icon_migration preflight|status|pause|resume
+    python -m eneo.object_content.file_icon_migration preflight|status|pause|resume|cleanup
 """
 
 import argparse
 import asyncio
 import json
 import sys
+import traceback
 from contextlib import redirect_stdout
 from dataclasses import asdict
 
@@ -57,7 +58,24 @@ async def _run(command: str) -> str:
     database = DatabaseSessionManager()
     database.init(get_settings().database_url)
     try:
-        if command == "status":
+        if command == "cleanup":
+            from eneo.object_content.file_icon_cleanup import (
+                cleanup_file_icon_legacy_storage,
+            )
+
+            async with database.connect() as connection:
+                cleaned = await connection.run_sync(cleanup_file_icon_legacy_storage)
+            return json.dumps(
+                {
+                    "legacy_cleaned": True,
+                    "changed": cleaned,
+                    "detail": "Legacy columns removed"
+                    if cleaned
+                    else "Legacy columns were already cleaned",
+                },
+                indent=2,
+            )
+        elif command == "status":
             settings = FileIconBackfillSettings()
             async with database.session() as session, session.begin():
                 await session.execute(
@@ -92,7 +110,9 @@ async def _run(command: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("preflight", "status", "pause", "resume"))
+    parser.add_argument(
+        "command", choices=("preflight", "status", "pause", "resume", "cleanup")
+    )
     parser.add_argument(
         "--timeout-seconds",
         type=int,
@@ -107,6 +127,41 @@ def main() -> None:
     with redirect_stdout(sys.stderr):
         if arguments.command == "preflight":
             result, exit_code = asyncio.run(_preflight(arguments.timeout_seconds))
+        elif arguments.command == "cleanup":
+            from eneo.object_content.file_icon_cleanup import FileIconCleanupRefused
+
+            try:
+                result = asyncio.run(_run(arguments.command))
+                exit_code = 0
+            except FileIconCleanupRefused as error:
+                result = json.dumps(
+                    {"outcome": "blocked", "detail": str(error)}, indent=2
+                )
+                exit_code = 2
+            except (ValidationError, ValueError):
+                result = json.dumps(
+                    {
+                        "outcome": "incomplete",
+                        "detail": "Cleanup configuration is invalid. Check the worker's database and OBJECT_CONTENT settings; values are omitted to protect credentials.",
+                    },
+                    indent=2,
+                )
+                exit_code = 3
+            except Exception:
+                # CLI boundary: stdout carries one JSON result, stderr the
+                # cause. Connection refusals, bad credentials, timeouts and
+                # lock failures all end here; the operator must check status
+                # because a lost connection during commit leaves the outcome
+                # unknown.
+                traceback.print_exc()
+                result = json.dumps(
+                    {
+                        "outcome": "incomplete",
+                        "detail": "Cleanup could not finish. Check database connectivity, credentials, permissions and locks, then run status before retrying: it reports legacy_cleaned if the transaction committed. No automatic retry was attempted.",
+                    },
+                    indent=2,
+                )
+                exit_code = 3
         else:
             result = asyncio.run(_run(arguments.command))
             exit_code = 0

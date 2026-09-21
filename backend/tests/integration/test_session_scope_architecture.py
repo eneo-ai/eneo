@@ -350,13 +350,17 @@ class TestSessionScopePoolExhaustion:
             "OLD pattern should exhaust pool with 5 tasks on pool_size=3"
         )
 
-        # Reset for new pattern test
+        # Reset for new pattern test. The property under test is that short
+        # holds let five tasks share three connections, not how fast a cold
+        # pool opens them: on a loaded runner the first handshakes alone can
+        # exceed the 0.3s that makes the OLD pattern fail, so give the waiters
+        # a generous checkout budget here.
         await tiny_engine.dispose()
         tiny_engine = create_async_engine(
             test_settings.database_url,
             pool_size=3,
             max_overflow=0,
-            pool_timeout=0.3,
+            pool_timeout=10.0,
         )
 
         # Test NEW pattern - should all succeed

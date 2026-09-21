@@ -34,6 +34,10 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9005: () => m.eneo_error_9005(), // AUTHENTICATION_ERROR
   9019: () => m.eneo_error_9019(), // USER_INACTIVE
   9025: () => m.eneo_error_9025(), // TENANT_SUSPENDED
+  9061: () => m.eneo_error_9061(), // CURRENT_PASSWORD_INCORRECT
+  9058: () => m.eneo_error_9058(), // PASSWORD_REUSE
+  9059: () => m.eneo_error_9059(), // PASSWORD_POLICY_VIOLATION
+  9060: () => m.eneo_error_9060(), // LOCAL_PASSWORD_CHANGE_UNAVAILABLE
 
   // --- Model & provider issues ---
   9002: () => m.eneo_error_9002(), // UNSUPPORTED_MODEL
@@ -62,8 +66,8 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9057: () => m.eneo_error_9057(), // INFO_BLOB_ORIGINAL_UNAVAILABLE
 
   // --- Website crawl lifecycle ---
-  9058: () => m.eneo_error_9058(), // WEBSITE_CRAWL_ACTIVE
-  9059: () => m.eneo_error_9059(), // WEBSITE_CRAWL_CLEANUP_PENDING
+  9062: () => m.eneo_error_9062(), // WEBSITE_CRAWL_ACTIVE
+  9063: () => m.eneo_error_9063(), // WEBSITE_CRAWL_CLEANUP_PENDING
 
   // --- Model lifecycle ---
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE

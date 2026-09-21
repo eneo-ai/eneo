@@ -25,7 +25,7 @@ Eneo routes all AI requests through **LiteLLM**, a unified API layer that suppor
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
 
-![LiteLLM Architecture Overview showing Service Layer (CompletionService, EmbeddingService) connecting through Adapter Layer (LiteLLMModelAdapter, LiteLLMEmbeddingAdapter) to LiteLLM Core with unified API supporting 60+ providers. Shows AI Providers categorized as Cloud (OpenAI, Azure, Anthropic, Gemini, Mistral) and Self-hosted (vLLM). Provider Registry handles provider detection and Credential Resolver manages multi-tenant credentials.](/diagrams/litellm-overview.svg)
+![LiteLLM Architecture Overview showing Service Layer (CompletionService, CreateEmbeddingsService) connecting through Adapter Layer (TenantModelAdapter, LiteLLMEmbeddingAdapter) to LiteLLM Core with unified API supporting 60+ providers. Shows AI Providers categorized as Cloud (OpenAI, Azure, Anthropic, Gemini, Mistral) and Self-hosted (vLLM). Provider Registry handles provider detection and Credential Resolver manages multi-tenant credentials.](/diagrams/litellm-overview.svg)
 
 </div>
 
@@ -37,15 +37,16 @@ Eneo routes all AI requests through **LiteLLM**, a unified API layer that suppor
 
 </div>
 
-The routing system uses model name prefixes to determine the target provider:
+Every model belongs to a provider record, and Eneo always builds the LiteLLM route as `<provider type>/<model name>` from that record. The prefix is never typed by hand and there is no unprefixed default route:
 
 | Prefix | Provider | Example |
 |--------|----------|---------|
-| `azure/` | Azure OpenAI | `azure/gpt-4o` |
+| `azure/` | Azure OpenAI | `azure/my-gpt-4o-deployment` |
 | `openai/` | OpenAI Direct | `openai/gpt-4o` |
 | `anthropic/` | Anthropic | `anthropic/claude-3-5-sonnet` |
 | `hosted_vllm/` | Self-hosted (OpenAI-compatible) | `hosted_vllm/meta-llama/Llama-2-7b` |
-| (no prefix) | Default provider | `gpt-4o-mini` |
+
+For Azure OpenAI the model name in the route is the **deployment name**, not the underlying model, so name Azure models after their deployments.
 
 ---
 
@@ -115,6 +116,10 @@ When adding a custom provider in the Admin UI (e.g., using `hosted_vllm`, `opena
 
 The system will query your server's `/v1/models` endpoint to discover available models automatically.
 
+<Callout type="info">
+  Only `hosted_vllm` treats the API key as optional. Every other provider type without its own field definition — including `openai` and `ollama` — requires an API key and treats the endpoint as optional. For an unauthenticated server, either use `hosted_vllm` or enter a placeholder key.
+</Callout>
+
 ### Hardware Requirements
 
 | Model Size | VRAM Required | Recommended GPU |
@@ -142,7 +147,7 @@ Use the Admin UI provider wizard to add, update, or remove provider credentials.
 
 ### Sysadmin API
 
-For automation or bulk operations, use the sysadmin credential API:
+For automation or bulk operations, use the sysadmin credential API. It is only mounted when `TENANT_CREDENTIALS_ENABLED=true` (otherwise it answers `404`), and `{provider}` must be one of `openai`, `anthropic`, `azure`, `mistral`, `ovhcloud`, `gemini`, or `cohere`. The body accepts `api_key` (required) plus `endpoint`, `api_version`, and `deployment_name` for Azure:
 
 ```bash
 # Set provider credentials for a tenant
@@ -151,7 +156,7 @@ curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/cre
   -H "Content-Type: application/json" \
   -d '{
     "api_key": "your-provider-api-key",
-    "api_base": "https://api.provider.com/v1"
+    "endpoint": "https://api.provider.com/v1"
   }'
 
 # List tenant credentials (masked)
@@ -163,14 +168,11 @@ curl -X DELETE "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/
   -H "X-API-Key: your-super-admin-api-key"
 ```
 
-### Shared vs Strict Mode
+### Where runtime credentials come from
 
-| Mode | When to use | Config |
-|------|-------------|--------|
-| **Shared** (default) | All tenants share the same API keys | Global keys in `.env` |
-| **Strict** (`TENANT_CREDENTIALS_ENABLED=true`) | Each tenant must configure their own credentials | Per-tenant via UI or API |
+Runtime LLM calls resolve their credentials exclusively from the tenant's provider records (the providers created in **Admin → Models**). A model without a provider is rejected, and the provider's credentials are never substituted with global ones. Provider API keys in `.env` (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and so on) are not read for completions or embeddings; they only seeded the one-time migration that created the first tenant providers from global models, together with any credentials that had been stored through the sysadmin credential API.
 
-In strict mode, tenants without configured credentials cannot use AI features. This ensures isolated billing and compliance.
+`TENANT_CREDENTIALS_ENABLED` still exists, but it does not select between a shared and a strict credential mode at runtime. Today it gates the sysadmin credential API above and makes an `ENCRYPTION_KEY` mandatory at startup. Credentials stored through that API are kept on the tenant record, separate from the provider records that runtime calls use.
 
 ### Encryption Details
 
@@ -193,6 +195,10 @@ uv run python -m eneo.cli.generate_encryption_key
 ---
 
 ## Cost Management
+
+### Model Pricing in Eneo
+
+Each completion model can carry an indicative input and output price. Admins enter it per million tokens in the model wizard; Eneo stores it per token on the model record and leaves it empty when the price is unknown. Admins always see prices. Regular users see them (for example in the model selector) only while the organization-level **Show model pricing** toggle on the Admin overview page is on; it is on by default.
 
 ### Set Budget Alerts
 

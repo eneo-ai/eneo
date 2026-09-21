@@ -27,12 +27,14 @@ from uuid import UUID, uuid4
 
 import psycopg2
 import pytest
+from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from testcontainers.postgres import PostgresContainer
 
 from alembic import command
+from alembic.script import ScriptDirectory
 from eneo.database.database import DatabaseSessionManager, sessionmanager
-from eneo.main.config import set_settings
+from eneo.main.config import get_settings, set_settings
 from eneo.object_content.configuration import ObjectContentCoreSettings
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.file_icon_backfill import (
@@ -54,7 +56,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 _MIB = 1024 * 1024
 _RELEASED_REVISION = "3eb6a34b6733"
-_BRIDGE_REVISION = "202609071000"
+_BRIDGE_REVISION = "202609081400"
 _BARRIER = 793_202_609
 _PROFILE = os.environ.get("ENEO_FILE_ICON_REHEARSAL_PROFILE", "smoke")
 assert _PROFILE in {"smoke", "capacity"}
@@ -330,6 +332,7 @@ async def setup_database(test_settings, postgres_container, database_measurement
         "postgres_memory_limit_bytes": 2 * 1024 * _MIB,
         "source_revision": _RELEASED_REVISION,
         "bridge_revision": _BRIDGE_REVISION,
+        "application_revision": ScriptDirectory.from_config(config).get_current_head(),
         "preflight_seconds": time.perf_counter() - preflight_started,
         "preflight": asdict(preflight),
         "replicas": "not deployed in this isolated profile",
@@ -348,6 +351,14 @@ async def setup_database(test_settings, postgres_container, database_measurement
         upgrade_started = time.perf_counter()
         command.upgrade(config, _BRIDGE_REVISION)
         report["expand_inventory_seconds"] = time.perf_counter() - upgrade_started
+        assert _source_facts(url) == expected_sources
+        # The historical bridge is tested above; current ORM models and API
+        # routes require the complete schema shipped with this application.
+        application_upgrade_started = time.perf_counter()
+        command.upgrade(config, "head")
+        report["application_upgrade_seconds"] = (
+            time.perf_counter() - application_upgrade_started
+        )
         assert _source_facts(url) == expected_sources
         sessionmanager.init(test_settings.database_url)
         try:
@@ -417,6 +428,9 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
     report = state["report"]
     path = state["path"]
     killed = worker = None
+    # The restore steps below install copies pointing at restored databases;
+    # reinstall the session's settings object once the application is done.
+    original_settings = get_settings()
     try:
         with _connect(url) as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -527,6 +541,75 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
                     client, headers, UUID(file_id), original=True
                 )
                 assert response.status_code == 200 and response.content == expected
+        # The same installed build must work after an operator chooses cleanup.
+        # Stop pools/runtime just as the maintenance procedure requires.
+        from eneo.object_content.file_icon_backfill import (
+            read_file_icon_backfill_status,
+        )
+        from eneo.object_content.file_icon_cleanup import (
+            cleanup_file_icon_legacy_storage,
+        )
+
+        await object_content_runtime.stop()
+        await sessionmanager.close()
+        engine = create_engine(after_url)
+        try:
+            with engine.begin() as connection:
+                assert cleanup_file_icon_legacy_storage(connection)
+            with engine.begin() as connection:
+                assert not cleanup_file_icon_legacy_storage(connection)
+        finally:
+            engine.dispose()
+        preflight = await run_file_icon_preflight(after_url)
+        assert preflight.outcome == "ready" and preflight.schema_state == "cleaned"
+        await startup()
+        async with sessionmanager.session() as session, session.begin():
+            status = await read_file_icon_backfill_status(
+                session, FileIconBackfillSettings()
+            )
+            assert (
+                status.legacy_cleaned and status.state is FileIconBackfillState.COMPLETE
+            )
+        async with db_container():
+            icon = await client.get(f"/api/v1/icons/{state['icon_id']}/")
+            assert icon.status_code == 200 and icon.content == b"icon bytes"
+            for file_id, expected in state["files"][:4]:
+                response = await _signed_download(
+                    client, headers, UUID(file_id), original=False
+                )
+                assert response.status_code == 200 and response.content == expected
+            payload = b"upload after optional cleanup\n"
+            upload = await client.post(
+                "/api/v1/files/",
+                headers=headers,
+                files={"upload_file": ("after.txt", payload, "text/plain")},
+            )
+            assert upload.status_code == 200, upload.text
+            cleaned_upload_id = UUID(upload.json()["id"])
+            response = await _signed_download(
+                client, headers, cleaned_upload_id, original=True
+            )
+            assert response.status_code == 200 and response.content == payload
+        await object_content_runtime.stop()
+        await sessionmanager.close()
+        _dump(postgres_container, "after_restore", path / "cleaned.dump")
+        _restore(postgres_container, path / "cleaned.dump", "cleaned_restore")
+        set_settings(
+            test_settings.model_copy(update={"postgres_db": "cleaned_restore"})
+        )
+        await startup()
+        async with db_container():
+            response = await _signed_download(
+                client, headers, cleaned_upload_id, original=True
+            )
+            assert response.status_code == 200 and response.content == payload
+            icon = await client.get(f"/api/v1/icons/{state['icon_id']}/")
+            assert icon.status_code == 200 and icon.content == b"icon bytes"
+        report["optional_cleanup"] = {
+            "same_build_reads_and_uploads": True,
+            "repeat_cleanup": "no change",
+            "cleaned_backup_restore": True,
+        }
         ordered = sorted(durations)
         report["foreground_api"] = {
             "transport": "authenticated File and public Icon production routes through ASGI",
@@ -557,7 +640,7 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
             Path(output).write_text(json.dumps(report, indent=2) + "\n")
         backup_output = os.getenv("ENEO_FILE_ICON_REHEARSAL_BACKUP")
         if backup_output:
-            # Preserve synthetic bridge state for the separate contraction image.
+            # Optionally retain the synthetic adopted backup for recovery inspection.
             # Exclusive creation prevents replacing an existing recovery artifact.
             with (
                 Path(backup_output).open("xb") as destination,
@@ -570,6 +653,7 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
                 if process.poll() is None:
                     process.kill()
                 process.communicate(timeout=5)
+        set_settings(original_settings)
 
 
 async def _worker_main():

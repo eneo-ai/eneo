@@ -3,105 +3,34 @@
   import { setAdminUserCtx } from "./ctx";
   import UserEditor from "./editor/UserEditor.svelte";
   import UserTable from "./UserTable.svelte";
+  import UserFilters from "./UserFilters.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { goto } from "$app/navigation";
-  import { page } from "$app/stores";
-  import ServerPagination from "$lib/components/ServerPagination.svelte";
-  import { SvelteURLSearchParams } from "svelte/reactivity";
-  import { untrack } from "svelte";
+  import { resolve } from "$app/paths";
+  import { navigating, page } from "$app/state";
+  import { Button } from "$lib/components/ui/button";
+  import { userQueryString } from "./user-query";
 
-  // Svelte 5 runes mode: use $props() instead of export let
   let { data } = $props();
-
-  // Get search value and tab from URL params.
-  // Support both canonical `search` and legacy `search_email` links.
-  const searchValue = $derived(
-    $page.url.searchParams.get("search") || $page.url.searchParams.get("search_email") || ""
-  );
-  const currentTab = $derived($page.url.searchParams.get("tab") || "active");
-
-  // Swedish number formatting for counts (e.g., 2828 → "2 828", 50000 → "50 000")
   const numberFormatter = new Intl.NumberFormat("sv-SE");
-
-  untrack(() =>
-    setAdminUserCtx({
-      roles: data.roles,
-      userGroups: data.userGroups
-    })
+  const isLoading = $derived(navigating.to?.url.pathname === page.url.pathname);
+  const rangeStart = $derived(
+    data.pagination.total_count === 0
+      ? 0
+      : (data.pagination.page - 1) * data.pagination.page_size + 1
+  );
+  const rangeEnd = $derived(
+    Math.min(data.pagination.page * data.pagination.page_size, data.pagination.total_count)
   );
 
-  // Reference to UserTable component to access filterValue
-  let userTableRef: UserTable;
-
-  function goToPage(newPage: number) {
-    const url = new URL($page.url);
-    if (newPage > 1) {
-      url.searchParams.set("page", String(newPage));
-    } else {
-      url.searchParams.delete("page");
-    }
-    // resolve() requires a typed RouteId literal — for dynamic URLs we build the
-    // URL by hand and skip resolve(), see eslint-disable below.
-    // eslint-disable-next-line svelte/no-navigation-without-resolve
-    goto(url, { noScroll: true });
-  }
-
-  // Watch built-in table filter and trigger server-side search with debouncing
-  let debounceTimer: ReturnType<typeof setTimeout>;
-
-  $effect(() => {
-    if (userTableRef?.filterValue) {
-      const filterVal = userTableRef.filterValue;
-
-      // Subscribe to filter changes
-      let isInitialEmission = true;
-      const unsubscribe = filterVal.subscribe((value: string) => {
-        if (isInitialEmission) {
-          isInitialEmission = false;
-          // Prevent initial empty table state from wiping URL-driven searches.
-          if (!value.trim() && searchValue.trim()) {
-            return;
-          }
-        }
-
-        // Debounce navigation (250ms delay)
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          const trimmed = value.trim();
-
-          // Skip if search value hasn't changed from current URL (avoids resetting page on mount)
-          const currentSearch = $page.url.searchParams.get("search") || "";
-          if (trimmed === currentSearch) return;
-
-          // Only trigger search if empty OR >= 3 characters (matches backend validation)
-          // Prevents unnecessary network requests and 400 errors for short searches
-          if (trimmed === "" || trimmed.length >= 3) {
-            // Preserve current tab when searching, reset page to 1
-            const params = new SvelteURLSearchParams();
-            if (currentTab) params.set("tab", currentTab);
-            if (trimmed) params.set("search", trimmed);
-
-            const nextUrl = params.toString()
-              ? `/admin/users?${params.toString()}`
-              : "/admin/users";
-            const currentUrl = `${$page.url.pathname}${$page.url.search}`;
-            if (nextUrl === currentUrl) {
-              return;
-            }
-
-            // resolve() requires a typed RouteId literal — for dynamic URLs we build the
-            // URL by hand and skip resolve().
-            // eslint-disable-next-line svelte/no-navigation-without-resolve
-            goto(nextUrl, { noScroll: true, keepFocus: true, replaceState: true });
-          }
-          // If 1-2 chars: silently ignore (no request, no error, better UX)
-        }, 250);
-      });
-
-      return () => {
-        clearTimeout(debounceTimer);
-        unsubscribe();
-      };
+  setAdminUserCtx({
+    get roles() {
+      return data.roles;
+    },
+    get userGroups() {
+      return data.userGroups;
+    },
+    get passwordCapability() {
+      return data.passwordCapability;
     }
   });
 </script>
@@ -112,45 +41,67 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.users()}></Page.Title>
-    <Page.Tabbar>
-      <!-- TabTrigger uses goto() for proper SvelteKit navigation -->
-      <Page.TabTrigger tab="active">
-        <span class="inline-flex items-baseline">
-          <span>{m.active_users()}</span>
-          {#if data.counts?.active != null}
-            <span class="ml-1.5 text-sm text-gray-500">
-              ({numberFormatter.format(data.counts.active)})
-            </span>
+    <Page.Title title={m.users()} />
+    <nav aria-label={m.status()} class="flex flex-wrap gap-2">
+      {#each ["active", "inactive"] as tab (tab)}
+        <Button
+          variant={data.query.tab === tab ? "secondary" : "ghost"}
+          aria-current={data.query.tab === tab ? "page" : undefined}
+          href={resolve("/admin/users") +
+            userQueryString(data.query, { tab: tab === "inactive" ? "inactive" : "active" })}
+        >
+          {tab === "active" ? m.active_users() : m.inactive_users()}
+          {#if data.counts?.[tab] != null}
+            <span class="text-muted-foreground">({numberFormatter.format(data.counts[tab])})</span>
           {/if}
-        </span>
-      </Page.TabTrigger>
-      <Page.TabTrigger tab="inactive">
-        <span class="inline-flex items-baseline">
-          <span>{m.inactive_users()}</span>
-          {#if data.counts?.inactive != null}
-            <span class="ml-1.5 text-sm text-gray-500">
-              ({numberFormatter.format(data.counts.inactive)})
-            </span>
-          {/if}
-        </span>
-      </Page.TabTrigger>
-    </Page.Tabbar>
-    <UserEditor mode="create"></UserEditor>
+        </Button>
+      {/each}
+    </nav>
+    <UserEditor mode="create" />
   </Page.Header>
   <Page.Main>
-    <UserTable bind:this={userTableRef} users={data.users ?? []} initialFilterValue={searchValue} />
-
-    {#if data.pagination}
-      <ServerPagination
-        page={data.pagination.page}
-        totalPages={data.pagination.total_pages}
-        totalCount={data.pagination.total_count}
-        pageSize={data.pagination.page_size}
-        hasNext={data.pagination.has_next}
-        hasPrevious={data.pagination.has_previous}
-        on:change={(e) => goToPage(e.detail)}
-      />
-    {/if}
+    <div class="mx-auto w-full max-w-[1100px] py-6 pr-6">
+      {#key page.url.search}
+        <UserFilters query={data.query} roles={data.roles} />
+      {/key}
+      <div aria-busy={isLoading} class:opacity-60={isLoading}>
+        <p class="text-muted-foreground mb-3 text-sm" role="status">
+          {#if isLoading}
+            {m.loading()}
+          {:else}
+            {m.pagination_showing_range({
+              start: rangeStart,
+              end: rangeEnd,
+              total: data.pagination.total_count
+            })}
+          {/if}
+        </p>
+        <UserTable users={data.users} />
+        {#if data.pagination.total_count > data.pagination.total_pages * data.pagination.page_size}
+          <p class="text-muted-foreground mt-3 text-sm">{m.admin_users_refine_search()}</p>
+        {/if}
+        {#if data.pagination.total_pages > 1 || data.pagination.has_previous}
+          <nav class="mt-4 flex items-center gap-4" aria-label={m.admin_users_pagination()}>
+            <Button
+              variant="outline"
+              disabled={!data.pagination.has_previous || isLoading}
+              href={resolve("/admin/users") +
+                userQueryString(data.query, { page: data.query.page - 1 })}
+              aria-label={m.admin_users_previous_page()}>←</Button
+            >
+            <span class="text-sm tabular-nums"
+              >{data.pagination.page} / {data.pagination.total_pages}</span
+            >
+            <Button
+              variant="outline"
+              disabled={!data.pagination.has_next || isLoading}
+              href={resolve("/admin/users") +
+                userQueryString(data.query, { page: data.query.page + 1 })}
+              aria-label={m.admin_users_next_page()}>→</Button
+            >
+          </nav>
+        {/if}
+      </div>
+    </div>
   </Page.Main>
 </Page.Root>

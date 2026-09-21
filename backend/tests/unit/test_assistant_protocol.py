@@ -68,6 +68,32 @@ def test_tool_call_sse_preserves_null_tool_call_id():
     assert payload["tools"][0]["tool_call_id"] is None
 
 
+def test_tool_call_sse_carries_the_capability_purpose():
+    """A capability provider's call is rendered by purpose, so the purpose
+    must reach the client alongside the provider's name."""
+    event = to_sse_response(
+        Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[
+                ToolCallMetadata(
+                    server_name="GDM Safe Search",
+                    tool_name="search",
+                    tool_call_id="call-1",
+                    purpose="web_search",
+                ),
+                ToolCallMetadata(server_name="general", tool_name="tool"),
+            ],
+        ),
+        uuid4(),
+    )
+
+    tools = json.loads(event.data)["tools"]
+
+    assert tools[0]["purpose"] == "web_search"
+    assert tools[0]["server_name"] == "GDM Safe Search"
+    assert tools[1]["purpose"] is None
+
+
 def test_token_usage_sse_separates_turn_cost_from_context_headroom():
     event = to_sse_response(
         Completion(

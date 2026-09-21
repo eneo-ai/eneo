@@ -27,6 +27,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCPServer,
     MCPServerTool,
     is_builtin_provider,
+    is_capability_purpose,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
@@ -771,6 +772,19 @@ class MCPProxySession:
             return None
         server, original_tool_name, title = self._tool_registry[prefixed_tool_name]
         return (_trace_server_name(server), original_tool_name, title)
+
+    def get_tool_purpose(self, prefixed_tool_name: str) -> str | None:
+        """The capability a tool call serves, or None for general servers.
+
+        A capability provider (web search, image generation) is one function
+        from the user's point of view whichever server backs it, so clients
+        render its calls by purpose rather than by the provider's name.
+        """
+        entry = self._tool_registry.get(prefixed_tool_name)
+        if entry is None:
+            return None
+        server = entry[0]
+        return server.purpose if is_capability_purpose(server.purpose) else None
 
     def _capture_owner_task(self) -> None:
         """Bind this proxy session to the current asyncio.Task on first connect.

@@ -1,4 +1,5 @@
 import { browser } from "$app/environment";
+import { splitPendingInref } from "./inrefBuffer";
 import { PAGINATION } from "$lib/core/constants";
 import { toastError } from "$lib/core/errors";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
@@ -634,16 +635,10 @@ export class ChatService {
 
               if (!ensureCurrentSession(text)) return;
 
-              // Handle inref buffering (existing logic)
+              // Hold back text that may still become an <inref> citation tag.
               let textToAdd = text.answer;
               if (text.answer.includes("<") || inrefBuffer) {
-                inrefBuffer += text.answer;
-                if (isNotInref(inrefBuffer) || isCompleteInref(inrefBuffer)) {
-                  textToAdd = inrefBuffer;
-                  inrefBuffer = "";
-                } else {
-                  textToAdd = ""; // Wait for complete inref
-                }
+                [textToAdd, inrefBuffer] = splitPendingInref(inrefBuffer + text.answer);
               }
 
               // Buffer text for frame-aligned rendering (reduces jitter)
@@ -898,13 +893,13 @@ export class ChatService {
         }
       } finally {
         if (this.#streamGen === streamGen) {
+          // Flush the frame-buffered text first, then anything still held back
+          // as a possible <inref>, so the answer keeps its arrival order.
+          this.#finalizeStream();
           if (ref && inrefBuffer) {
             ref.answer += inrefBuffer;
             inrefBuffer = "";
           }
-
-          // Flush any remaining buffered content after stream completes
-          this.#finalizeStream();
           this.#activeDiagnosticsStreamGeneration = null;
           if (this.debugPanelOpen) {
             void this.#confirmPendingDiagnosticsMessages();
@@ -1138,19 +1133,3 @@ function emptyConversation(): Conversation {
     messages: []
   };
 }
-
-const couldBeInref = (buffer: string): boolean => {
-  // We assume that "<" can be anywhere in the buffer, but that there can only be one
-  const start = buffer.indexOf("<");
-  if (start === -1) return false;
-
-  const tag = "<inref";
-  const max = Math.min(tag.length, buffer.length - start);
-  return buffer.slice(start, start + max) === tag.slice(0, max);
-};
-const isNotInref = (buffer: string): boolean => !couldBeInref(buffer);
-const isCompleteInref = (buffer: string): boolean => {
-  if (!couldBeInref(buffer)) return false;
-  const start = buffer.indexOf("<");
-  return buffer.indexOf(">", start) !== -1;
-};

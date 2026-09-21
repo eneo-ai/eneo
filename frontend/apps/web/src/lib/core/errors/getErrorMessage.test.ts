@@ -12,8 +12,10 @@ vi.mock("$lib/paraglide/messages", () => ({
     eneo_error_9051: () => "Still attached.",
     eneo_error_9052: () => "The execution block changed.",
     eneo_error_9057: () => "Original unavailable.",
-    eneo_error_9058: () => "Active website sync.",
-    eneo_error_9059: () => "Crawler cleanup pending.",
+    eneo_error_9058: () => "Choose a different password.",
+    eneo_error_9059: () => "Password policy violation.",
+    eneo_error_9062: () => "Active website sync.",
+    eneo_error_9063: () => "Crawler cleanup pending.",
     request_failed: () => "Request failed."
   }
 }));
@@ -75,8 +77,8 @@ describe("getErrorMessage", () => {
     }
   });
 
-  it("keeps original-download and crawler lifecycle errors distinct", () => {
-    const messages = ([9057, 9058, 9059] as const).map((code) =>
+  it("keeps original-download, password and crawler lifecycle errors distinct", () => {
+    const messages = ([9057, 9058, 9059, 9062, 9063] as const).map((code) =>
       getErrorMessage(
         new EneoError("Backend fallback", "RESPONSE", 409, code, {}, { endpoint: "" })
       )
@@ -84,6 +86,8 @@ describe("getErrorMessage", () => {
 
     expect(messages).toEqual([
       "Original unavailable.",
+      "Choose a different password.",
+      "Password policy violation.",
       "Active website sync.",
       "Crawler cleanup pending."
     ]);

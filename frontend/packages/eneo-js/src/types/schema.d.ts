@@ -573,6 +573,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/users/password-policy/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the local password policy
+     * @description Return the policy enforced when creating or changing passwords stored in Eneo. Available to authenticated users regardless of their own login provider, so administrators can manage local accounts. Provider-managed passwords use their provider's policy instead.
+     */
+    get: operations["get_local_password_policy_api_v1_users_password_policy__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/users/me/": {
     parameters: {
       query?: never;
@@ -584,6 +604,46 @@ export interface paths {
     get: operations["Get_current_user_api_v1_users_me__get"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/users/me/password/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Change Current User'S Local Password
+     * @description Change the authenticated user's local Eneo password and invalidate previously issued Eneo sessions.
+     */
+    post: operations["Change_current_user_s_local_password_api_v1_users_me_password__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/users/me/sessions/invalidate/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Invalidate Current User'S Eneo Sessions
+     * @description Invalidate previously issued Eneo sessions at the authenticated user's request.
+     */
+    post: operations["Invalidate_current_user_s_Eneo_sessions_api_v1_users_me_sessions_invalidate__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -8671,6 +8731,9 @@ export interface components {
       | "module_auth_ticket_issued"
       | "module_auth_token_exchanged"
       | "module_auth_token_refreshed"
+      | "password_changed"
+      | "password_change_failed"
+      | "sessions_invalidated"
       | "assistant_created"
       | "assistant_deleted"
       | "assistant_updated"
@@ -8701,6 +8764,7 @@ export interface components {
       | "file_uploaded"
       | "file_deleted"
       | "file_original_download_link_created"
+      | "file_original_downloaded"
       | "file_signed_url_minted"
       | "info_blob_original_download_link_created"
       | "website_created"
@@ -9243,6 +9307,11 @@ export interface components {
       max_delegation_depth?: number | null;
       /** Revocation Cascade Enabled */
       revocation_cascade_enabled?: boolean | null;
+      /**
+       * Require Tenant Allowed Origin
+       * @default true
+       */
+      require_tenant_allowed_origin?: boolean;
       /** Require Expiration */
       require_expiration?: boolean | null;
       /** Max Expiration Days */
@@ -9260,6 +9329,11 @@ export interface components {
       max_delegation_depth?: number | null;
       /** Revocation Cascade Enabled */
       revocation_cascade_enabled?: boolean | null;
+      /**
+       * Require Tenant Allowed Origin
+       * @default true
+       */
+      require_tenant_allowed_origin?: boolean;
       /** Require Expiration */
       require_expiration?: boolean | null;
       /** Max Expiration Days */
@@ -12947,6 +13021,15 @@ export interface components {
        */
       is_org_enabled?: boolean | null;
     };
+    /** EneoPasswordChangeCapabilityPublic */
+    EneoPasswordChangeCapabilityPublic: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      source: "eneo";
+      policy?: components["schemas"]["LocalPasswordPolicy"];
+    };
     /**
      * EntityType
      * @description Categorize what type of entity was affected
@@ -13049,7 +13132,11 @@ export interface components {
       | 9056
       | 9057
       | 9058
-      | 9059;
+      | 9059
+      | 9060
+      | 9061
+      | 9062
+      | 9063;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -13229,6 +13316,16 @@ export interface components {
        */
       expires_at: string;
     };
+    /** ExternalPasswordChangeCapabilityPublic */
+    ExternalPasswordChangeCapabilityPublic: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      source: "external";
+      /** Policy */
+      policy?: null;
+    };
     /**
      * FavoriteProvidersUpdate
      * @description Request model for updating tenant's favorite provider types.
@@ -13301,6 +13398,18 @@ export interface components {
       affected_file_count: number;
       /** Blockers */
       blockers: components["schemas"]["FileUsageSummary"][];
+    };
+    /** FilePolicyInput */
+    FilePolicyInput: {
+      /** Inline File Text */
+      inline_file_text: boolean;
+    };
+    /** FilePolicyPublic */
+    FilePolicyPublic: {
+      /** Configured */
+      configured: boolean;
+      /** Inline File Text */
+      inline_file_text: boolean | null;
     };
     /** FilePublic */
     FilePublic: {
@@ -13388,6 +13497,7 @@ export interface components {
       mcp_restriction: components["schemas"]["McpRestrictionPublic"];
       prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
       reasoning_policy: components["schemas"]["ReasoningPolicyPublic"];
+      file_policy: components["schemas"]["FilePolicyPublic"];
       skills: components["schemas"]["SkillsPolicyPublic"];
       /** Updated At */
       updated_at: string | null;
@@ -13400,6 +13510,7 @@ export interface components {
       mcp_restriction?: components["schemas"]["McpRestrictionInput"] | null;
       prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
       reasoning_policy?: components["schemas"]["ReasoningPolicyInput"] | null;
+      file_policy?: components["schemas"]["FilePolicyInput"] | null;
       skills?: components["schemas"]["SkillsPolicyInput"] | null;
     };
     /** GroupChatAssistantPublic */
@@ -14312,6 +14423,39 @@ export interface components {
     Limits: {
       info_blobs: components["schemas"]["InfoBlobLimits"];
       attachments: components["schemas"]["AttachmentLimits"];
+    };
+    /** LocalPasswordPolicy */
+    LocalPasswordPolicy: {
+      /**
+       * Min Length
+       * @default 12
+       */
+      min_length?: number;
+      /**
+       * Max Bytes
+       * @default 72
+       */
+      max_bytes?: number;
+      /**
+       * Requires Uppercase
+       * @default false
+       */
+      requires_uppercase?: boolean;
+      /**
+       * Requires Lowercase
+       * @default false
+       */
+      requires_lowercase?: boolean;
+      /**
+       * Requires Number
+       * @default false
+       */
+      requires_number?: boolean;
+      /**
+       * Requires Symbol
+       * @default false
+       */
+      requires_symbol?: boolean;
     };
     /** LoggingDetailsPublic */
     LoggingDetailsPublic: {
@@ -16709,7 +16853,7 @@ export interface components {
       total_count: number;
       /**
        * Total Pages
-       * @description Total number of pages (calculated from total_count and page_size)
+       * @description Number of reachable pages (calculated from total_count and page_size, capped at 100)
        * @example 6
        */
       total_pages: number;
@@ -16952,6 +17096,21 @@ export interface components {
        * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. Set to null to disable space-level retention. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
        */
       data_retention_days?: number | null;
+    };
+    /** PasswordChangeRequest */
+    PasswordChangeRequest: {
+      /**
+       * Current Password
+       * Format: password
+       * @description Current local Eneo password.
+       */
+      current_password: string;
+      /**
+       * New Password
+       * Format: password
+       * @description New local password. The active constraints are returned in UserPublic.password_change.policy.
+       */
+      new_password: string;
     };
     /**
      * PatchFederationRequest
@@ -20608,6 +20767,8 @@ export interface components {
       result?: string | null;
       /** Mcp Tool Name */
       mcp_tool_name?: string | null;
+      /** Purpose */
+      purpose?: string | null;
       /** Meta */
       meta?: {
         [key: string]: unknown;
@@ -21009,8 +21170,8 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description User password (minimum 7 characters)
-       * @example SecurePassword123!
+       * @description New local password. Must satisfy the policy returned by GET /api/v1/users/password-policy/.
+       * @example Correct horse battery staple
        */
       password?: string | null;
       /**
@@ -21044,8 +21205,8 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description User password (minimum 7 characters)
-       * @example SecurePassword123!
+       * @description New local password. Must satisfy the policy returned by GET /api/v1/users/password-policy/.
+       * @example Correct horse battery staple
        */
       password?: string | null;
       /**
@@ -21161,6 +21322,11 @@ export interface components {
       state: components["schemas"]["UserState"];
       /** Quota Limit */
       quota_limit?: number | null;
+      /**
+       * Credential Version
+       * @default 0
+       */
+      credential_version?: number;
       /**
        * User Groups
        * @default []
@@ -21335,6 +21501,11 @@ export interface components {
       /** Quota Limit */
       quota_limit?: number | null;
       /**
+       * Credential Version
+       * @default 0
+       */
+      credential_version?: number;
+      /**
        * User Groups
        * @default []
        */
@@ -21442,6 +21613,10 @@ export interface components {
       roles: components["schemas"]["RolePublic"][];
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
+      /** Password Change */
+      password_change:
+        | components["schemas"]["EneoPasswordChangeCapabilityPublic"]
+        | components["schemas"]["ExternalPasswordChangeCapabilityPublic"];
     };
     /** UserPublicBase */
     UserPublicBase: {
@@ -21635,8 +21810,8 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description New password (minimum 7 characters)
-       * @example NewSecurePassword456!
+       * @description New local password. Must satisfy the policy returned by GET /api/v1/users/password-policy/.
+       * @example Another correct horse battery staple
        */
       password?: string | null;
       /**
@@ -24808,6 +24983,44 @@ export interface operations {
       };
     };
   };
+  get_local_password_policy_api_v1_users_password_policy__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalPasswordPolicy"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   Get_current_user_api_v1_users_me__get: {
     parameters: {
       query?: never;
@@ -24825,6 +25038,127 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["UserPublic"];
         };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  Change_current_user_s_local_password_api_v1_users_me_password__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PasswordChangeRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  Invalidate_current_user_s_Eneo_sessions_api_v1_users_me_sessions_invalidate__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Forbidden */
       403: {
@@ -28297,6 +28631,8 @@ export interface operations {
                     result?: string | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Purpose */
+                    purpose?: string | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -28354,6 +28690,8 @@ export interface operations {
                     result?: string | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Purpose */
+                    purpose?: string | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -28411,6 +28749,8 @@ export interface operations {
                     result?: string | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Purpose */
+                    purpose?: string | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -30863,6 +31203,7 @@ export interface operations {
         sort_by?: components["schemas"]["SortField"];
         sort_order?: components["schemas"]["SortOrder"];
         state_filter?: components["schemas"]["StateFilter"] | null;
+        role_id?: string | null;
       };
       header?: never;
       path?: never;
@@ -31502,6 +31843,7 @@ export interface operations {
            *       "auto_expire_unused_days": 180,
            *       "max_delegation_depth": 3,
            *       "revocation_cascade_enabled": true,
+           *       "require_tenant_allowed_origin": true,
            *       "max_rate_limit_override": 10000
            *     }
            */
@@ -31559,6 +31901,7 @@ export interface operations {
           /**
            * @example {
            *       "require_expiration": true,
+           *       "require_tenant_allowed_origin": true,
            *       "max_expiration_days": 90,
            *       "auto_expire_unused_days": 180
            *     }
@@ -40576,7 +40919,9 @@ export interface operations {
         /** @description Field to sort by. */
         sort_by?: components["schemas"]["UserSortBy"];
         /** @description Sort order (asc or desc). */
-        sort_order?: string;
+        sort_order?: "asc" | "desc";
+        /** @description Search username or email across all users before pagination. */
+        search?: string | null;
       };
       header?: never;
       path?: never;

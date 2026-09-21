@@ -4,11 +4,11 @@ on:
   push:
     branches:
       - develop
-      - 'release/**'
+      - "release/**"
   pull_request:
     branches:
       - develop
-      - 'release/**'
+      - "release/**"
   # Merge queue candidates (develop + queued PRs). Every scoped job runs in
   # full here (their conditions only scope pull_request events), and the
   # aggregate CI job reports the required "CI" check on the candidate.
@@ -253,6 +253,22 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
+      - name: Verify File/Icon upgrade and optional cleanup on PostgreSQL 13
+        # Migration tests are opt-in and run outside the parallel suite. The
+        # restore rehearsal needs its own application/database session.
+        working-directory: backend
+        timeout-minutes: 10
+        run: |
+          uv run pytest -v -m migration_isolation \
+            tests/integration/migrations/test_file_icon_preflight.py \
+            tests/integration/migrations/test_file_icon_legacy_cleanup.py
+          uv run pytest -v -o faulthandler_timeout=180 -m migration_isolation \
+            tests/integration/migrations/test_file_icon_bridge_rehearsal.py
+        env:
+          ENEO_FILE_ICON_REHEARSAL_PROFILE: smoke
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          DOCKER_HOST: unix:///var/run/docker.sock
+
   script-tests:
     name: Script tests
     needs: changes
@@ -347,6 +363,9 @@ jobs:
       # can't find. Keep this in sync with apps/web's playwright dependency.
       - name: Install Playwright Chromium
         run: bun x playwright@1.61.1 install --with-deps chromium chromium-headless-shell
+
+      - name: Run frontend dev lifecycle tests
+        run: FORCE_COLOR=1 bun run test:dev-lifecycle
 
       - name: Run web unit & component tests
         run: FORCE_COLOR=1 bun run --filter '@eneo/web' test

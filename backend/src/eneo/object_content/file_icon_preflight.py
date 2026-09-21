@@ -78,7 +78,9 @@ class PreflightIssue:
 class FileIconPreflightReport:
     format_version: int = 1
     outcome: Literal["ready", "blocked", "incomplete"] = "incomplete"
-    schema_state: Literal["pre_expand", "expanded", "unsupported"] = "unsupported"
+    schema_state: Literal["pre_expand", "expanded", "cleaned", "unsupported"] = (
+        "unsupported"
+    )
     alembic_revision: str | None = None
     server_encoding: str | None = None
     inline_maximum_bytes: int | None = None
@@ -119,7 +121,7 @@ async def _read_schema(
                   'alembic_version', 'files', 'icons', 'object_contents',
                   'file_content_references', 'icon_content_references',
                   'file_icon_backfill_items', 'file_icon_backfill_campaign',
-                  'object_content_deployment_policy'
+                  'object_content_deployment_policy', 'file_icon_backfill_admission_state'
               )
             """
         )
@@ -167,6 +169,19 @@ async def _read_schema(
             )
         )
         return None
+
+    cleaned = False
+    if (
+        columns.get("file_icon_backfill_admission_state", {}).get("legacy_cleaned_at")
+        == "timestamptz"
+    ):
+        cleaned = bool(
+            await connection.scalar(
+                sa.text(
+                    "SELECT legacy_cleaned_at IS NOT NULL FROM file_icon_backfill_admission_state WHERE singleton"
+                )
+            )
+        )
 
     required = {
         "files": {
@@ -229,6 +244,14 @@ async def _read_schema(
     else:
         unexpected.add("object_content_deployment_policy")
 
+    if cleaned:
+        for table, names in {
+            "files": ("text", "blob", "transcription"),
+            "icons": ("blob",),
+        }.items():
+            for name in names:
+                required[table].pop(name)
+
     mismatches = [
         f"{table}.{name}"
         for table, expected in required.items()
@@ -238,7 +261,7 @@ async def _read_schema(
     mismatches.extend(sorted(unexpected.intersection(columns)))
     if _PAGE_PARENT not in ancestors and "parent_file_id" in columns.get("files", {}):
         mismatches.append("unexpected files.parent_file_id")
-    if _EXPAND in ancestors:
+    if _EXPAND in ancestors and not cleaned:
         freezes = await connection.scalar(
             sa.text(
                 """
@@ -265,7 +288,9 @@ async def _read_schema(
             )
         )
         return None
-    report.schema_state = "expanded" if _EXPAND in ancestors else "pre_expand"
+    report.schema_state = (
+        "cleaned" if cleaned else ("expanded" if _EXPAND in ancestors else "pre_expand")
+    )
     return ancestors
 
 
@@ -327,6 +352,14 @@ async def _inspect(
     ancestors = await _read_schema(connection, report, migration_directory)
     if ancestors is None or report.blockers:
         report.outcome = "blocked"
+        return
+    if report.schema_state == "cleaned":
+        report.campaign_state = "complete"
+        report.capacity.remaining_logical_bytes = 0
+        report.capacity.detail = (
+            "Legacy columns have been cleaned; no legacy adoption capacity is required."
+        )
+        report.outcome = "ready"
         return
     report.selected_new_write_target = "postgres_inline"
     if _POLICY in ancestors:
