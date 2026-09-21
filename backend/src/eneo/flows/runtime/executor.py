@@ -6,6 +6,7 @@ import os
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from functools import partial
 from typing import TYPE_CHECKING, Any, Iterable, Sequence, assert_never, cast
 from uuid import UUID
 
@@ -1422,7 +1423,7 @@ class FlowRunExecutor:
             variable_resolver=self.variable_resolver,
             completion_service=self.completion_service,
             load_assistant=self._load_assistant,
-            resolve_step_input=self._resolve_step_input,
+            resolve_step_input=partial(self._resolve_step_input, attempt_no=attempt_no),
             retrieve_rag_chunks=self._retrieve_rag_chunks,
             process_typed_output=self._process_typed_output,
             apply_output_cap=self._apply_output_cap,
@@ -2389,6 +2390,7 @@ class FlowRunExecutor:
         self, transcription_call_observer: "ProviderCallObserver | None" = None
     ) -> StepInputResolutionDeps:
         return StepInputResolutionDeps(
+            apply_output_cap=self._apply_output_cap,
             variable_resolver=self.variable_resolver,
             resolve_http_input_source_text=self._resolve_http_input_source_text,
             file_service=self.file_service,
@@ -2420,9 +2422,11 @@ class FlowRunExecutor:
         transcription_call_observer: "ProviderCallObserver | None" = None,
         prompt_template: str = "",
         step_input_override: StepInputValue | None = None,
+        attempt_no: int = 1,
     ) -> StepInputValue:
         deps = self._build_step_input_resolution_deps(transcription_call_observer)
         return await resolve_step_input_runtime(
+            attempt_no=attempt_no,
             step=step,
             context=context,
             run=run,
@@ -2813,20 +2817,25 @@ class FlowRunExecutor:
         text: str,
         run: FlowRun,
         step: RuntimeStep,
+        existing_generated_file_id: UUID | None = None,
     ) -> tuple[str, list[UUID]]:
+        """Callers must verify that an existing file contains the same UTF-8 bytes."""
         encoded = text.encode("utf-8")
         if len(encoded) <= self.max_inline_text_bytes:
             return text, []
 
-        file_row = await save_generated_flow_file(
-            file_service=self.file_service,
-            run=run,
-            payload=encoded,
-            name=f"flow-{run.id}-step-{step.step_order}-output.txt",
-            mimetype="text/plain",
-            file_type=FileType.TEXT,
-        )
-        return utf8_prefix(text, max_bytes=self.max_inline_text_bytes), [file_row.id]
+        file_id = existing_generated_file_id
+        if file_id is None:
+            file_row = await save_generated_flow_file(
+                file_service=self.file_service,
+                run=run,
+                payload=encoded,
+                name=f"flow-{run.id}-step-{step.step_order}-output.txt",
+                mimetype="text/plain",
+                file_type=FileType.TEXT,
+            )
+            file_id = file_row.id
+        return utf8_prefix(text, max_bytes=self.max_inline_text_bytes), [file_id]
 
     @staticmethod
     def _run_error_from_bad_request(

@@ -269,8 +269,28 @@ async def test_refusal_does_not_persist(context, failure, code, expected_context
         await context.service.retry_from_failed_step(**context.request)
     assert exc.value.code == code
     assert exc.value.context == expected_context
+    if failure == "files":
+        assert str(exc.value) == "The completed prefix cannot be reused."
     context.service.run_service.create_run.assert_not_awaited()
     context.service.audit_service.log.assert_not_awaited()
+
+
+async def test_file_backed_transcript_prefix_cannot_be_retried(context):
+    from eneo.flows.domain.step_output import build_text_overflow_metadata
+
+    payload = context.results[0].output_payload_json
+    payload["text_overflow"] = build_text_overflow_metadata(
+        file_ids=[uuid4()], preview=payload["text"], full_text=payload["text"] * 100
+    )
+    with pytest.raises(ConflictException) as exc:
+        await context.service.retry_from_failed_step(**context.request)
+    assert exc.value.code == "flow_run_retry_prefix_unsupported"
+    assert exc.value.context == {
+        "step_order": 1,
+        "reason": "file_backed_prefix_unsupported",
+    }
+    assert str(exc.value) == "The completed prefix cannot be reused."
+    context.service.run_service.create_run.assert_not_awaited()
 
 
 async def test_approved_prefix_uses_effective_reviewed_payload(context):

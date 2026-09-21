@@ -542,6 +542,7 @@ def test_evidence_and_public_attempt_keep_consumed_material_aliases(redacted, te
     alias = build_step_material_aliases(materials=(material,), max_inline_bytes=2048)
     assert isinstance(alias, tuple)
     assert isinstance(alias[0], FileBackedStepText)
+    run.input_payload_json = {"transkribering": alias[0].model_dump(mode="json")}
     payload = build_step_input_payload(
         text=text,
         source_text=text,
@@ -550,6 +551,12 @@ def test_evidence_and_public_attempt_keep_consumed_material_aliases(redacted, te
         materials=(material,),
         max_inline_text_bytes=2048,
     )
+    payload["runtime_input"] = {
+        "text": alias[0].model_dump(mode="json"),
+        "file_ids": [],
+        "files": [],
+        "files_count": 0,
+    }
     attempt_input = FlowStepAttemptInput(
         resolved_input=payload,
         completion_configuration=FlowStepAttemptCompletionConfiguration(
@@ -604,6 +611,20 @@ def test_evidence_and_public_attempt_keep_consumed_material_aliases(redacted, te
         serialized = public_evidence.model_dump_json()
         assert "hunter2" not in serialized
         assert "password=x" not in serialized
+        serialized_payload = json.loads(serialized)
+        transcript_references = [
+            serialized_payload["run"]["input_payload_json"]["transkribering"],
+            serialized_payload["step_results"][0]["input_payload_json"][
+                "runtime_input"
+            ]["text"],
+            serialized_payload["step_attempts"][0]["input_payload_json"][
+                "resolved_input"
+            ]["runtime_input"]["text"],
+        ]
+        for value in transcript_references:
+            reference = FileBackedStepText.model_validate(value)
+            assert reference.file_id == material.file_id
+            assert reference.checksum == material.checksum
         for record in (*public_evidence.step_results, *public_evidence.step_attempts):
             reference = record.input_text_aliases[0]
             assert reference.inline_text_bytes == len(reference.preview.encode())

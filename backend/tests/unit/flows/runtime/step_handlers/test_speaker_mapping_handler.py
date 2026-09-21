@@ -378,6 +378,10 @@ async def test_oversized_renamed_transcript_fails_instead_of_overflowing(
             attempt_no=1,
         )
     assert excinfo.value.code == "typed_io_transcript_too_large"
+    assert (
+        str(excinfo.value)
+        == "Step 2: transcript with speaker names exceeds the inline output limit (10 bytes)."
+    )
 
 
 async def test_wrong_io_tuple_fails_before_any_model_call(harness) -> None:

@@ -291,6 +291,7 @@ class ApplyOutputCapFn(Protocol):
         text: str,
         run: FlowRun,
         step: RuntimeStep,
+        existing_generated_file_id: UUID | None = None,
     ) -> Awaitable[tuple[str, list[UUID]]]: ...
 
 

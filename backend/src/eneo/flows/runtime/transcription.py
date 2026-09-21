@@ -626,15 +626,6 @@ async def transcribe_audio_input(
         )
 
     transcript_bytes = len(combined.encode("utf-8"))
-    if transcript_bytes > max_inline_text_bytes:
-        raise TypedIOValidationException(
-            (
-                f"Step {step_order}: transcript exceeded max inline text bytes "
-                f"({transcript_bytes} > {max_inline_text_bytes})."
-            ),
-            code=FlowApiErrorCode.TYPED_IO_TRANSCRIPT_TOO_LARGE.value,
-        )
-
     threshold = int(max_inline_text_bytes * near_limit_ratio)
     near_inline_limit = transcript_bytes >= threshold
     estimated_tokens = count_tokens(combined)

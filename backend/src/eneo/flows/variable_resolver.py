@@ -144,7 +144,12 @@ class FlowVariableResolver:
         current_step_input: dict[str, Any] | None = None,
         resolved_step_text: Mapping[UUID, str] | None = None,
     ) -> FlowVariableContext:
-        normalized_flow_input = flow_input or {}
+        normalized_flow_input = dict(flow_input or {})
+        transcript_source = self._extract_transcript_source(
+            normalized_flow_input, resolved_step_text
+        )
+        if transcript_source is not None:
+            normalized_flow_input[transcript_source[0]] = transcript_source[1]
         context = FlowVariableContext()
         context.update(
             {
@@ -178,7 +183,6 @@ class FlowVariableResolver:
                 ),
             )
 
-        transcript_source = self._extract_transcript_source(normalized_flow_input)
         if transcript_source is not None:
             transcript_key, transcript_value = transcript_source
             context[FLOW_INPUT_TRANSCRIPTION_KEY] = transcript_value
@@ -285,6 +289,11 @@ class FlowVariableResolver:
                 )
 
         if isinstance(current_step_input, dict):
+            current_step_input = dict(current_step_input)
+            if isinstance(current_step_input.get("text"), dict):
+                current_step_input["text"] = self._resolve_transcript_reference(
+                    current_step_input["text"], resolved_step_text
+                )
             context["step_input"] = current_step_input
             runtime_source = _VariableSourceDescriptor(kind="runtime_input")
             context.register_source(("step_input",), runtime_source)
@@ -518,7 +527,8 @@ class FlowVariableResolver:
     @staticmethod
     def _extract_transcript_source(
         flow_input: dict[str, Any],
-    ) -> tuple[str, str] | None:
+        resolved_step_text: Mapping[UUID, str] | None = None,
+    ) -> tuple[str, str | _UnavailableStepText] | None:
         for key in (
             FLOW_INPUT_TRANSCRIPTION_KEY,
             "transcription",
@@ -526,9 +536,35 @@ class FlowVariableResolver:
             "transcribed_text",
         ):
             value = flow_input.get(key)
+            if key == FLOW_INPUT_TRANSCRIPTION_KEY and isinstance(value, dict):
+                return key, FlowVariableResolver._resolve_transcript_reference(
+                    cast(dict[str, Any], value), resolved_step_text
+                )
             if isinstance(value, str) and value.strip():
                 return key, value
         return None
+
+    @staticmethod
+    def _resolve_transcript_reference(
+        value: object, resolved_step_text: Mapping[UUID, str] | None
+    ) -> str | _UnavailableStepText:
+        try:
+            reference = FileBackedStepText.model_validate(value)
+        except ValueError:
+            return _UnavailableStepText(
+                message="Transcript has malformed persisted text metadata.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION,
+            )
+        if (
+            resolved_step_text is not None
+            and reference.source_step_id is not None
+            and reference.source_step_id in resolved_step_text
+        ):
+            return resolved_step_text[reference.source_step_id]
+        return _UnavailableStepText(
+            message="Complete transcript is unavailable to templates because it is stored in a generated output file.",
+            code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE,
+        )
 
     @staticmethod
     def _extract_runtime_input(result: FlowStepResult) -> dict[str, Any]:

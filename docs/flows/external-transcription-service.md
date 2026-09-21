@@ -51,6 +51,21 @@ audio for anyone allowed to download the run's artifacts. Oversized segment
 lists are dropped (`segments: null`, `segments_omitted_reason: "too_large"`)
 and the views fall back to parsing the timestamped lines.
 
+Transcripts above the inline text limit are stored once as a generated plain-text
+file. An unchanged `transcribe_only` output reuses that file. If an input binding
+changes the output, for example by adding a heading, the output follows the usual
+inline limit and gets a separate file when it exceeds the limit. Later steps read
+the complete output through `previous_step`; `{{transkribering}}` always resolves
+the raw transcript. File-backed outputs keep bounded previews. Section processing
+gives each model call only its selected section. The existing material size and
+model context limits still apply. Segment and word timing limits are unchanged.
+
+File-backed transcript outputs cannot be edited at a review checkpoint, have
+corrections folded into them, be reused in a prefix retry, or be regenerated
+from corrections. Speaker naming still rejects a renamed transcript above the
+inline output limit. These operations do not rewrite the generated transcript
+file; its bytes remain fixed for checkpoint history and evidence.
+
 The frontend reads the mode from `GET /api/v1/settings/`
 (`flow_transcription_service_mode`) to decide whether to show the model picker.
 

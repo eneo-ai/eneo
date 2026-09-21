@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from hashlib import sha256
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.step_output import (
+    FileBackedStepText,
+    ResolvedStepMaterial,
+    build_step_material_aliases,
+)
 from eneo.flows.domain.transcript_corrections import segments_content_hash
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
@@ -31,6 +38,7 @@ if TYPE_CHECKING:
     from eneo.flows.infrastructure.flow_transcript_words_repo import (
         FlowTranscriptWordsRepository,
     )
+    from eneo.flows.runtime.step_execution_runtime import ApplyOutputCapFn
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
     )
@@ -46,29 +54,21 @@ class AudioRuntimeResolution:
     near_inline_limit_message: str | None
     diarization_skipped_message: str | None = None
     diarization_reduced_precision_message: str | None = None
-
-
-class RuntimeAudioStep(Protocol):
-    @property
-    def assistant_id(self) -> UUID: ...
-
-    @property
-    def step_order(self) -> int: ...
-
-    @property
-    def step_id(self) -> UUID: ...
+    material: ResolvedStepMaterial | None = None
+    text_reference: FileBackedStepText | None = None
 
 
 @dataclass(frozen=True)
 class AudioRuntimeRequest:
     run: "FlowRun"
-    step: RuntimeAudioStep
+    step: RuntimeStep
     context: dict[str, Any]
     version_metadata: dict[str, Any] | None
     files: list["FileInfo"]
     requested_ids: list[UUID]
     max_audio_files: int
     max_inline_text_bytes: int
+    attempt_no: int = 1
     # Diarization bound from the participants form field, when known.
     max_speakers: int | None = None
 
@@ -82,23 +82,31 @@ class AudioRuntimeDeps:
     actor: FlowRunActor
     # Reads one already-authorized audio file's bytes at transcription time.
     load_audio_payload: LoadAudioPayload
+    apply_output_cap: ApplyOutputCapFn
     transcription_call_observer: "ProviderCallObserver | None" = None
     # Stores the step's word timings; None leaves word-level data unpersisted.
     transcript_words_repo: "FlowTranscriptWordsRepository | None" = None
 
 
-def apply_transcription_to_context(*, context: dict[str, Any], transcript: str) -> None:
-    context[FLOW_INPUT_TRANSCRIPTION_KEY] = transcript
+def apply_transcription_to_context(
+    *, context: dict[str, Any], transcript: str | FileBackedStepText
+) -> None:
+    value = (
+        transcript.model_dump(mode="json")
+        if isinstance(transcript, FileBackedStepText)
+        else transcript
+    )
+    context[FLOW_INPUT_TRANSCRIPTION_KEY] = value
     flow_input_context = context.get("flow_input")
     if isinstance(flow_input_context, dict):
-        flow_input_context[FLOW_INPUT_TRANSCRIPTION_KEY] = transcript
+        flow_input_context[FLOW_INPUT_TRANSCRIPTION_KEY] = value
 
 
 async def persist_transcription_on_run_input(
     *,
     flow_run_repo: "FlowRunRepository",
     run: "FlowRun",
-    transcript: str,
+    transcript: str | FileBackedStepText,
 ) -> None:
     updated_payload = await flow_run_repo.update_input_payload(
         run_id=run.id,
@@ -226,11 +234,30 @@ async def resolve_transcribe_and_attach_audio_input(
         max_speakers=request.max_speakers,
     )
     metadata = transcription_result.to_metadata()
+    _, file_ids = await deps.apply_output_cap(
+        text=transcription_result.text, run=request.run, step=request.step
+    )
+    material = None
+    text_reference = None
+    if file_ids:
+        if len(file_ids) != 1:
+            raise ValueError("Transcript overflow must reference exactly one file.")
+        material = ResolvedStepMaterial(
+            source_step_id=request.step.step_id,
+            source_attempt_no=request.attempt_no,
+            file_id=file_ids[0],
+            checksum=sha256(transcription_result.text.encode("utf-8")).hexdigest(),
+            byte_size=transcription_result.transcript_bytes,
+            text=transcription_result.text,
+        )
+        text_reference = build_step_material_aliases(
+            materials=(material,), max_inline_bytes=request.max_inline_text_bytes
+        )[0]
 
     await persist_transcription_on_run_input(
         flow_run_repo=deps.flow_run_repo,
         run=request.run,
-        transcript=transcription_result.text,
+        transcript=text_reference or transcription_result.text,
     )
     await persist_transcript_words(
         transcript_words_repo=deps.transcript_words_repo,
@@ -239,7 +266,7 @@ async def resolve_transcribe_and_attach_audio_input(
         result=transcription_result,
     )
     apply_transcription_to_context(
-        context=request.context, transcript=transcription_result.text
+        context=request.context, transcript=text_reference or transcription_result.text
     )
     await log_audio_transcribed_audit(
         audit_service=deps.audit_service,
@@ -282,4 +309,6 @@ async def resolve_transcribe_and_attach_audio_input(
         near_inline_limit_message=near_limit_message,
         diarization_skipped_message=diarization_message,
         diarization_reduced_precision_message=reduced_precision_message,
+        material=material,
+        text_reference=text_reference,
     )

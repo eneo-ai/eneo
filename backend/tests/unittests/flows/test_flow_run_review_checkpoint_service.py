@@ -916,6 +916,10 @@ async def test_edit_rejects_an_output_already_stored_as_a_generated_file(user):
         )
 
     assert exc_info.value.code == "flow_review_edit_file_backed_unsupported"
+    assert (
+        str(exc_info.value)
+        == "Review edit is not supported for a step output stored as a generated file."
+    )
     assert exc_info.value.context == {"file_id": str(file_id)}
     checkpoint_repo.edit_review_checkpoint_payload.assert_not_awaited()
 
@@ -949,6 +953,10 @@ async def test_edit_rejects_a_value_whose_text_exceeds_the_inline_ceiling(
         )
 
     assert exc_info.value.code == "flow_review_edit_output_too_large"
+    assert (
+        str(exc_info.value)
+        == "Review checkpoint output exceeds the inline output size limit."
+    )
     assert exc_info.value.context == {"max_inline_text_bytes": 4, "text_bytes": 6}
     checkpoint_repo.edit_review_checkpoint_payload.assert_not_awaited()
 

@@ -669,48 +669,6 @@ async def test_audio_resolve_selected_model_unavailable_fails_without_fallback(u
 
 
 @pytest.mark.asyncio
-async def test_audio_resolve_overflow_raises_specific_typed_error(user):
-    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
-        user, max_inline_text_bytes=20
-    )
-    file_id = uuid4()
-    step = _runtime_step()
-    run = _run(user=user, payload={})
-    _patch_run_input_payload(flow_run_repo, run)
-    context = executor.variable_resolver.build_context(run.input_payload_json, [])
-
-    file_service.get_files_by_ids.return_value = [
-        _audio_file(file_id=file_id, name="big.wav")
-    ]
-    model = SimpleNamespace(
-        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
-    )
-    space_repo.get_space_by_assistant = AsyncMock(
-        return_value=_SpaceStub(models=[model], default_model=model)
-    )
-    transcriber.transcribe = AsyncMock(return_value=_transcribed("x" * 200))
-
-    with pytest.raises(TypedIOValidationException) as exc:
-        await executor._resolve_step_input(
-            step=step,
-            context=context,
-            run=run,
-            prior_results=[],
-            state=_state(),
-            version_metadata={
-                "wizard": {
-                    "transcription_enabled": True,
-                    "transcription_model": {"id": str(model.id)},
-                    "transcription_language": "sv",
-                }
-            },
-            requested_file_ids=[file_id],
-        )
-
-    assert exc.value.code == "typed_io_transcript_too_large"
-
-
-@pytest.mark.asyncio
 async def test_audio_resolve_near_cap_adds_warning_diagnostic(user):
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
         user, max_inline_text_bytes=100
@@ -1021,9 +979,9 @@ async def test_audio_payload_read_failure_stays_inside_the_typed_contract(user):
 
 
 @pytest.mark.asyncio
-async def test_audio_resolve_multifile_overflow_raises_typed_error(user):
+async def test_audio_resolve_multifile_overflow_spills_once_in_request_order(user):
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
-        user, max_inline_text_bytes=90
+        user, max_inline_text_bytes=1024
     )
     file_id_1 = uuid4()
     file_id_2 = uuid4()
@@ -1042,27 +1000,31 @@ async def test_audio_resolve_multifile_overflow_raises_typed_error(user):
         return_value=_SpaceStub(models=[model], default_model=model)
     )
     transcriber.transcribe = AsyncMock(
-        side_effect=[_transcribed("b" * 45), _transcribed("a" * 45)]
+        side_effect=[_transcribed("b" * 550), _transcribed("a" * 550)]
     )
 
-    with pytest.raises(TypedIOValidationException) as exc:
-        await executor._resolve_step_input(
-            step=step,
-            context=context,
-            run=run,
-            prior_results=[],
-            state=_state(),
-            version_metadata={
-                "wizard": {
-                    "transcription_enabled": True,
-                    "transcription_model": {"id": str(model.id)},
-                    "transcription_language": "sv",
-                }
-            },
-            requested_file_ids=[file_id_2, file_id_1],
-        )
+    file_service.save_generated_file.return_value = SimpleNamespace(id=uuid4())
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_language": "sv",
+            }
+        },
+        requested_file_ids=[file_id_2, file_id_1],
+    )
 
-    assert exc.value.code == "typed_io_transcript_too_large"
+    assert resolved.text == "b" * 550 + "\n\n" + "a" * 550
+    file_service.save_generated_file.assert_awaited_once()
+    assert run.input_payload_json[FLOW_INPUT_TRANSCRIPTION_KEY]["file_id"] == str(
+        file_service.save_generated_file.return_value.id
+    )
     ordered_names = [
         call.args[0].name for call in transcriber.transcribe.await_args_list
     ]
@@ -1148,6 +1110,7 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
         max_inline_text_bytes=1024,
     )
     deps = AudioRuntimeDeps(
+        apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
         transcriber=transcriber,
         space_repo=space_repo,
         flow_run_repo=flow_run_repo,
@@ -1219,6 +1182,7 @@ async def test_resolve_transcribe_attach_swallow_audit_errors(user, monkeypatch)
         max_inline_text_bytes=1024,
     )
     deps = AudioRuntimeDeps(
+        apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
         transcriber=AsyncMock(),
         space_repo=AsyncMock(),
         flow_run_repo=flow_run_repo,

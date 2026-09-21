@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Self
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.step_output import FileBackedStepText
 
 EXPECTED_FLOW_VERSION_KEY = "expected_flow_version"
 STEP_INPUTS_KEY = "step_inputs"
@@ -37,8 +38,14 @@ class FlowRunInputEnvelopePatch:
         return patch
 
     @classmethod
-    def transcription(cls, *, transcript: str) -> Self:
-        return cls._from_merge_payload({FLOW_INPUT_TRANSCRIPTION_KEY: transcript})
+    def transcription(cls, *, transcript: str | FileBackedStepText) -> Self:
+        return cls._from_merge_payload(
+            {
+                FLOW_INPUT_TRANSCRIPTION_KEY: transcript.model_dump(mode="json")
+                if isinstance(transcript, FileBackedStepText)
+                else transcript
+            }
+        )
 
     def to_merge_dict(self) -> FlowPersistedJsonObject:
         return dict(self._merge_payload)

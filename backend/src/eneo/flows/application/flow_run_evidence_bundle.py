@@ -423,7 +423,12 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
             + tuple(debug_result.masked_paths)
         )
     return RedactedEvidenceBundle(
-        run=cast(dict[str, Any], run_result.value),
+        run=cast(
+            dict[str, Any],
+            _cohere_redacted_material_aliases(
+                bundle.run.model_dump(mode="json"), run_result.value
+            ),
+        ),
         definition_integrity=bundle.definition_integrity,
         final_output=bundle.final_output,
         definition_snapshot=cast(dict[str, Any], definition_result.value),
@@ -513,6 +518,9 @@ _MATERIAL_ALIAS_PATHS: tuple[tuple[str, ...], ...] = (
     ("input_payload_json", "material_aliases"),
     ("input_payload_json", "resolved_input", "material_aliases"),
     ("input_payload_json", "execution_inputs", "*", "material_aliases"),
+    ("input_payload_json", "transkribering"),
+    ("input_payload_json", "runtime_input", "text"),
+    ("input_payload_json", "resolved_input", "runtime_input", "text"),
 )
 
 
@@ -542,6 +550,9 @@ def _cohere_aliases_at(
         return
     before_list = original.get(key)
     after_list = redacted.get(key)
+    if isinstance(before_list, dict) and isinstance(after_list, dict):
+        redacted[key] = _cohere_redacted_alias(before_list, after_list)
+        return
     if isinstance(before_list, list) and isinstance(after_list, list):
         redacted[key] = [
             _cohere_redacted_alias(before, after)

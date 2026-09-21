@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 
 from eneo.flows.domain.flow import FlowRun
 from eneo.flows.domain.runtime import (
@@ -9,6 +10,7 @@ from eneo.flows.domain.runtime import (
     StepDiagnostic,
     StepExecutionOutput,
 )
+from eneo.flows.domain.step_output import FileBackedStepText
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.output_modes import transcribe_only_violation
@@ -72,10 +74,24 @@ class TranscribeOnlyStepHandler:
         rag_metadata = build_transcribe_only_rag_metadata(
             timeout_seconds=deps.rag_retrieval_timeout_seconds
         )
+        runtime_text = (prepared.step_input.runtime_input_metadata or {}).get("text")
+        reference = (
+            FileBackedStepText.model_validate(runtime_text)
+            if isinstance(runtime_text, dict)
+            else None
+        )
+        existing_generated_file_id = None
+        if (
+            reference is not None
+            and reference.checksum
+            == sha256(prepared.step_input.text.encode("utf-8")).hexdigest()
+        ):
+            existing_generated_file_id = reference.file_id
         persisted_text, generated_file_ids = await deps.apply_output_cap(
             text=prepared.step_input.text,
             run=run,
             step=step,
+            existing_generated_file_id=existing_generated_file_id,
         )
         return StepExecutionResult(
             output=StepExecutionOutput(

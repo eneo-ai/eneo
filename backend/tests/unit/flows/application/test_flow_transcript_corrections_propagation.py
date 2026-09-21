@@ -11,6 +11,7 @@ from eneo.flows.application.flow_transcript_corrections_propagation import (
     build_folded_transcript,
 )
 from eneo.flows.domain.flow import FlowRunReviewCheckpoint
+from eneo.flows.domain.step_output import build_text_overflow_metadata
 from eneo.flows.domain.transcript_corrections import (
     FlowTranscriptCorrectionSet,
     segments_content_hash,
@@ -153,6 +154,27 @@ def test_folds_corrections_and_speaker_edits_into_aligned_text() -> None:
         ),
         "provider": "kept",
     }
+
+
+def test_file_backed_transcript_corrections_are_not_folded() -> None:
+    payload = {
+        "text": "preview",
+        "text_overflow": build_text_overflow_metadata(
+            file_ids=[uuid4()], preview="preview", full_text=RENDERED
+        ),
+    }
+    checkpoint = _checkpoint(payload)
+    outcome = build_folded_transcript(
+        checkpoint=checkpoint,
+        step_result=_step_result(),
+        correction_set=_correction_set(occurrences_json=[OCCURRENCE]),
+    )
+    assert outcome.propagated is False
+    assert outcome.skip_reason == "file_backed_output"
+    assert outcome.folded_payload is None
+    assert (
+        checkpoint.current_payload_json == checkpoint.original_payload_json == payload
+    )
 
 
 def test_skips_when_the_set_is_stale() -> None:

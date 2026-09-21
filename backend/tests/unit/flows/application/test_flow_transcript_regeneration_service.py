@@ -10,6 +10,7 @@ from eneo.flows.application.flow_transcript_regeneration_service import (
     FlowTranscriptRegenerationService,
 )
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.step_output import build_text_overflow_metadata
 from eneo.flows.domain.transcript_corrections import (
     TranscriptSpeakerEdit,
     segments_content_hash,
@@ -214,6 +215,23 @@ async def test_rejects_unsafe_sources_before_creating_a_run(context, failure, re
     assert exc.value.context["reason"] == reason
     context.service.run_service.create_run.assert_not_awaited()
     context.service.audit_service.log.assert_not_awaited()
+
+
+@pytest.mark.parametrize("source_index", [0, 1])
+async def test_file_backed_prefix_cannot_be_regenerated(context, source_index):
+    payload = context.results[source_index].output_payload_json
+    payload["text_overflow"] = build_text_overflow_metadata(
+        file_ids=[uuid4()], preview=payload["text"], full_text=payload["text"] * 100
+    )
+    with pytest.raises(FlowBadRequestException) as exc:
+        await context.service.regenerate(**context.request)
+    assert exc.value.context == {"reason": "file_backed_prefix_unsupported"}
+    assert (
+        str(exc.value)
+        == "The reviewed transcript cannot be regenerated with this request."
+    )
+    context.service.run_service.create_run.assert_not_awaited()
+    context.service.corrections_repo.copy_snapshot.assert_not_awaited()
 
 
 async def test_source_content_access_is_required_before_any_mutation(context):
