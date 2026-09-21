@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any
@@ -83,6 +84,7 @@ class AudioRuntimeDeps:
     # Reads one already-authorized audio file's bytes at transcription time.
     load_audio_payload: LoadAudioPayload
     apply_output_cap: ApplyOutputCapFn
+    commit: Callable[[], Awaitable[None]]
     transcription_call_observer: "ProviderCallObserver | None" = None
     # Stores the step's word timings; None leaves word-level data unpersisted.
     transcript_words_repo: "FlowTranscriptWordsRepository | None" = None
@@ -259,6 +261,9 @@ async def resolve_transcribe_and_attach_audio_input(
         run=request.run,
         transcript=text_reference or transcription_result.text,
     )
+    if text_reference is not None:
+        # Later input validation may roll back before attempt activation.
+        await deps.commit()
     await persist_transcript_words(
         transcript_words_repo=deps.transcript_words_repo,
         run=request.run,

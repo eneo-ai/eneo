@@ -214,7 +214,18 @@ async def test_transcribe_only_binding_preserves_output_and_artifact_identity(
     for binding, selected_text, file_id, checksum in (
         (None, expected, persisted.file_id, output_checksum),
         ("{{transkribering}}", text, reference.file_id, reference.checksum),
+        (
+            "{{step_1.output.text}}\n{{transkribering}}\n{{transkribering}}",
+            expected + "\n" + text + "\n" + text,
+            None,
+            None,
+        ),
     ):
+        assistant.get_prompt_text.return_value = (
+            "Raw: {{transkribering}}\nOutput: {{step_1.output.text}}"
+            if file_id is None
+            else ""
+        )
         state = _state()
         state.prior_results = [previous]
         state.completed_by_order = {1: previous}
@@ -228,12 +239,43 @@ async def test_transcribe_only_binding_preserves_output_and_artifact_identity(
         )
         assert result.output.input_text == selected_text
         assert assistant.get_response.await_args.kwargs["question"] == selected_text
-        assert len(result.output.materials) == 1
-        alias = FileBackedStepText.model_validate(
-            build_completed_step_input_payload(result.output)["material_aliases"][0]
+        expected_files = (
+            {file_id: checksum}
+            if file_id is not None
+            else {
+                persisted.file_id: output_checksum,
+                reference.file_id: reference.checksum,
+            }
         )
-        assert alias.file_id == file_id
-        assert alias.checksum == checksum
+        aliases = [
+            FileBackedStepText.model_validate(alias)
+            for alias in build_completed_step_input_payload(result.output)[
+                "material_aliases"
+            ]
+        ]
+        assert len(result.output.materials) == len(aliases) == len(expected_files)
+        assert {alias.file_id: alias.checksum for alias in aliases} == expected_files
+        if file_id is None:
+            assert assistant.get_response.await_args.kwargs[
+                "prompt_override"
+            ].startswith("Raw: " + text + "\nOutput: " + expected)
+    if prefix:
+        section_step = replace(
+            next_step,
+            input_config={"text_processing": {"mode": "process_each_section"}},
+        )
+        with pytest.raises(
+            TypedIOValidationException,
+            match="Section processing requires exactly one file-backed material",
+        ) as caught:
+            await executor._resolve_step_input(
+                step=section_step,
+                run=run,
+                context={},
+                prior_results=[previous],
+                state=state,
+            )
+        assert caught.value.code == "typed_io_invalid_input_source_combination"
     assert files[reference.file_id].blob == text.encode("utf-8")
     assert executor.file_service.save_generated_file.await_count == (2 if prefix else 1)
 
@@ -292,7 +334,14 @@ def _assert_bounded_text(value, cap):
 
 
 @pytest.mark.parametrize(
-    "binding", [None, "{{transkribering}}", "{{flow_input.transkribering}}"]
+    "binding",
+    [
+        None,
+        "{{transkribering}}",
+        "{{flow_input.transkribering}}",
+        "{{flow_input}}",
+        "{{flow.input}}",
+    ],
 )
 async def test_next_step_reads_complete_spilled_transcript(user, binding):
     text = ("Complete transcript åäö.\n" * 200).strip()
@@ -328,8 +377,13 @@ async def test_next_step_reads_complete_spilled_transcript(user, binding):
     result = await executor._execute_step(
         step=next_step, run=run, state=state, attempt_no=1
     )
-    assert result.output.input_text == text
-    assert assistant.get_response.await_args.kwargs["question"] == text
+    if binding in {"{{flow_input}}", "{{flow.input}}"}:
+        assert result.output.input_text == "transkribering: " + text
+    else:
+        assert result.output.input_text == text
+    assert (
+        assistant.get_response.await_args.kwargs["question"] == result.output.input_text
+    )
     assert len(result.output.materials) == 1
     executor.file_service.save_generated_file.assert_awaited_once()
 
@@ -435,3 +489,33 @@ async def test_failed_transcript_attempt_keeps_only_bounded_inputs(user):
     for record in (saved.model_dump(mode="json"), terminal):
         _assert_bounded_text(record, executor.max_inline_text_bytes)
         assert text not in json.dumps(record, ensure_ascii=False)
+
+
+@pytest.mark.parametrize("oversized", [False, True])
+async def test_spilled_transcript_is_durable_before_input_binding_failure(
+    user, oversized
+):
+    text = "Long transcript.\n" * (200 if oversized else 2)
+    executor, repo, run, files, _ = _case(user, text)
+    step = _runtime_step(
+        input_type="audio", input_bindings={"question": "{{missing_variable}}"}
+    )
+
+    async def commit():
+        reference = FileBackedStepText.model_validate(
+            run.input_payload_json["transkribering"]
+        )
+        assert files[reference.file_id].blob == text.strip().encode("utf-8")
+        assert repo.update_input_payload.await_count == 1
+
+    executor.session.commit.side_effect = commit
+    with pytest.raises(TypedIOValidationException):
+        await executor._execute_step(
+            step=step,
+            run=run,
+            state=_state(),
+            attempt_no=1,
+            version_metadata=_metadata(executor),
+        )
+    repo.activate_step_attempt.assert_not_awaited()
+    assert executor.session.commit.await_count == int(oversized)

@@ -218,7 +218,7 @@ class VariableResolverProtocol(Protocol):
         step_names_by_order: dict[int, str] | None = None,
         step_ref_mapping: dict[str, int] | None = None,
         current_step_input: dict[str, Any] | None = None,
-        resolved_step_text: Mapping[UUID, str] | None = None,
+        resolved_file_text: Mapping[UUID, str] | None = None,
     ) -> FlowVariableContext: ...
 
     def interpolate_with_evidence(
@@ -1258,8 +1258,8 @@ async def prepare_step_execution(
         step_names_by_order=state.step_names_by_order,
         step_ref_mapping=state.step_ref_mapping,
         current_step_input=step_input.runtime_input_metadata,
-        resolved_step_text={
-            material.source_step_id: material.text for material in step_input.materials
+        resolved_file_text={
+            material.file_id: material.text for material in step_input.materials
         },
     )
     prompt_interpolation = (

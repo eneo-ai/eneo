@@ -2391,6 +2391,7 @@ class FlowRunExecutor:
     ) -> StepInputResolutionDeps:
         return StepInputResolutionDeps(
             apply_output_cap=self._apply_output_cap,
+            commit=self._commit,
             variable_resolver=self.variable_resolver,
             resolve_http_input_source_text=self._resolve_http_input_source_text,
             file_service=self.file_service,

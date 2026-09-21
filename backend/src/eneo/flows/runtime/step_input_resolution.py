@@ -88,6 +88,7 @@ from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     analyze_template,
     consumes_runtime_input,
+    referenced_form_fields,
 )
 from eneo.main.exceptions import (
     BadRequestException,
@@ -115,6 +116,7 @@ RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE: Final = (
 @dataclass(frozen=True)
 class StepInputResolutionDeps:
     apply_output_cap: ApplyOutputCapFn
+    commit: Callable[[], Awaitable[None]]
     variable_resolver: Any
     resolve_http_input_source_text: Callable[..., Awaitable[FlowHttpInputResolution]]
     file_service: FileService
@@ -214,10 +216,8 @@ async def resolve_step_input(
         step_input_override=step_input_override,
     )
     if state is not None:
-        merged_materials = {
-            item.source_step_id: item for item in state.resolved_materials
-        }
-        merged_materials.update({item.source_step_id: item for item in materials})
+        merged_materials = {item.file_id: item for item in state.resolved_materials}
+        merged_materials.update({item.file_id: item for item in materials})
         state.resolved_materials = tuple(merged_materials.values())
     processing_ceiling_bytes = (
         effective_upload_ceiling_bytes(deps.input_limits.file_max_size_bytes)
@@ -292,6 +292,7 @@ async def resolve_step_input(
             )
             audio_deps = AudioRuntimeDeps(
                 apply_output_cap=deps.apply_output_cap,
+                commit=deps.commit,
                 transcriber=deps.transcriber,
                 space_repo=deps.space_repo,
                 flow_run_repo=deps.flow_run_repo,
@@ -380,8 +381,8 @@ async def resolve_step_input(
         prior_results, state = _substitute_step_text(
             prior_results=prior_results,
             state=state,
-            resolved_step_text={
-                material.source_step_id: material.text for material in materials
+            resolved_file_text={
+                material.file_id: material.text for material in materials
             },
         )
 
@@ -393,9 +394,7 @@ async def resolve_step_input(
         state=state,
         runtime_input_metadata=runtime_input_metadata,
         variable_resolver=deps.variable_resolver,
-        resolved_step_text={
-            material.source_step_id: material.text for material in materials
-        },
+        resolved_file_text={material.file_id: material.text for material in materials},
     )
     if binding is not None:
         input_text = binding.text
@@ -764,16 +763,16 @@ def resolve_step_input_binding(
     state: RunExecutionState | None,
     runtime_input_metadata: dict[str, Any] | None,
     variable_resolver: Any,
-    resolved_step_text: Mapping[UUID, str] | None = None,
+    resolved_file_text: Mapping[UUID, str] | None = None,
 ) -> ResolvedStepInputBinding | None:
     bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
     if bindings is None:
         return None
-    if resolved_step_text:
+    if resolved_file_text:
         prior_results, state = _substitute_step_text(
             prior_results=prior_results,
             state=state,
-            resolved_step_text=resolved_step_text,
+            resolved_file_text=resolved_file_text,
         )
     structured_source_refs_input = (
         _resolve_structured_source_refs_input(
@@ -850,7 +849,7 @@ def resolve_step_input_binding(
         step_names_by_order=state.step_names_by_order if state else None,
         step_ref_mapping=state.step_ref_mapping if state else None,
         current_step_input=runtime_input_metadata,
-        resolved_step_text=resolved_step_text,
+        resolved_file_text=resolved_file_text,
     )
     interpolated_question = variable_resolver.interpolate_with_evidence(
         question_template,
@@ -1274,16 +1273,17 @@ async def _resolve_step_materials(
     for selected_template in (template, prompt_template):
         if not selected_template:
             continue
-        for reference in analyze_template(
+        references = analyze_template(
             selected_template,
             step_refs=state.step_ref_mapping if state else {},
-            form_field_names=set(),
+            form_field_names={FLOW_INPUT_TRANSCRIPTION_KEY},
+        )
+        if FLOW_INPUT_TRANSCRIPTION_KEY in referenced_form_fields(
+            references, form_field_names={FLOW_INPUT_TRANSCRIPTION_KEY}
         ):
-            if (reference.head, reference.tail) in {
-                (FLOW_INPUT_TRANSCRIPTION_KEY, ""),
-                ("flow_input", FLOW_INPUT_TRANSCRIPTION_KEY),
-                ("flow", "input." + FLOW_INPUT_TRANSCRIPTION_KEY),
-            }:
+            selected_transcript = True
+        for reference in references:
+            if reference.head == FLOW_INPUT_TRANSCRIPTION_KEY and not reference.tail:
                 selected_transcript = True
             order = reference.step_order
             if reference.head == "föregående_steg" and not reference.tail:
@@ -1314,7 +1314,7 @@ async def _resolve_step_materials(
             ]
         )
     artifacts: list[tuple[FlowStepResult, FileBackedStepText]] = []
-    selected_material_ids: set[tuple[UUID, UUID | None]] = set()
+    selected_material_ids: set[tuple[str, UUID]] = set()
     for result in selected:
         payload = result.output_payload_json
         if not isinstance(payload, dict) or (
@@ -1330,9 +1330,9 @@ async def _resolve_step_materials(
             ) from exc
         if isinstance(text, FileBackedStepText):
             artifacts.append((result, text))
-            selected_material_ids.add((result.step_id, text.file_id))
+            selected_material_ids.add(("file", text.file_id))
         else:
-            selected_material_ids.add((result.step_id, None))
+            selected_material_ids.add(("step", result.step_id))
     transcript = (run.input_payload_json or {}).get(FLOW_INPUT_TRANSCRIPTION_KEY)
     if selected_transcript and isinstance(transcript, dict):
         try:
@@ -1357,20 +1357,29 @@ async def _resolve_step_materials(
                 "Transcript is missing its source attempt identity.",
                 code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
             )
-        selected_material_ids.add((source.step_id, reference.file_id))
+        selected_material_ids.add(("file", reference.file_id))
         artifacts.append((source, reference))
     unique_artifacts: dict[UUID, tuple[FlowStepResult, FileBackedStepText]] = {}
     for result, reference in artifacts:
-        existing = unique_artifacts.get(result.step_id)
-        if existing is not None and existing[1].file_id != reference.file_id:
+        existing = unique_artifacts.get(reference.file_id)
+        if existing is not None and (
+            existing[1].full_text_bytes != reference.full_text_bytes
+            or (
+                existing[1].checksum is not None
+                and reference.checksum is not None
+                and existing[1].checksum != reference.checksum
+            )
+        ):
             raise TypedIOValidationException(
                 "Selected step text has inconsistent artifact identity or size.",
                 code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
             )
-        unique_artifacts[result.step_id] = (result, reference)
+        if existing is None or reference.checksum is not None:
+            unique_artifacts[reference.file_id] = (result, reference)
     artifacts = list(unique_artifacts.values())
     if text_processing_config(step.input_config) is not None and (
-        len(selected_material_ids) + len(set(runtime_file_ids)) != 1
+        len(selected_material_ids | {("file", file_id) for file_id in runtime_file_ids})
+        != 1
         or not (artifacts or runtime_file_ids)
     ):
         raise TypedIOValidationException(
@@ -1383,7 +1392,7 @@ async def _resolve_step_materials(
         raise RuntimeError(
             "Resolved Flow input limits are required before loading material"
         )
-    empty_material = {result.step_id: "" for result, _ in artifacts}
+    empty_material = {reference.file_id: "" for _, reference in artifacts}
     runtime_metadata = (
         _build_runtime_input_metadata(
             text="",
@@ -1401,7 +1410,7 @@ async def _resolve_step_materials(
         current_step_order=step.step_order,
         step_names_by_order=state.step_names_by_order if state else None,
         step_ref_mapping=state.step_ref_mapping if state else None,
-        resolved_step_text=empty_material,
+        resolved_file_text=empty_material,
         current_step_input=(
             step_input_override.runtime_input_metadata
             if step_input_override is not None
@@ -1418,23 +1427,18 @@ async def _resolve_step_materials(
             template, interpolation_context
         )
     elif step.input_source != "http_get":
-        inline_results = [
-            result.model_copy(update={"output_payload_json": {"text": ""}})
-            if result.step_id in empty_material
-            else result
-            for result in results.values()
-        ]
+        inline_results, inline_state = _substitute_step_text(
+            prior_results=list(results.values()),
+            state=state,
+            resolved_file_text=empty_material,
+        )
         inline_text += resolve_input_source_text(
             input_source=step.input_source,
             input_type=step.input_type,
             run=run,
             step_order=step.step_order,
             prior_results=inline_results,
-            state=replace(
-                state, completed_by_order={r.step_order: r for r in inline_results}
-            )
-            if state
-            else None,
+            state=inline_state,
             logger=None,
         )
     enforce_inline_input_cap(
@@ -1554,7 +1558,7 @@ async def _resolve_step_materials(
                 )
             cache[cache_key] = content
         assert result.current_attempt_no is not None
-        materials[result.step_id] = ResolvedStepMaterial(
+        materials[text.file_id] = ResolvedStepMaterial(
             source_step_id=result.step_id,
             source_attempt_no=result.current_attempt_no,
             file_id=text.file_id,
@@ -1998,16 +2002,23 @@ def _substitute_step_text(
     *,
     prior_results: list[FlowStepResult],
     state: RunExecutionState | None,
-    resolved_step_text: Mapping[UUID, str],
+    resolved_file_text: Mapping[UUID, str],
 ) -> tuple[list[FlowStepResult], RunExecutionState | None]:
     def resolved_result(result: FlowStepResult) -> FlowStepResult:
-        if result.step_id not in resolved_step_text:
-            return result
         payload = dict(result.output_payload_json or {})
         if OUTPUT_TEXT_OVERFLOW_KEY not in payload:
             return result
+        try:
+            text = interpret_step_text(payload)
+        except StepOutputMetadataError:
+            return result
+        if (
+            not isinstance(text, FileBackedStepText)
+            or text.file_id not in resolved_file_text
+        ):
+            return result
         payload.pop(OUTPUT_TEXT_OVERFLOW_KEY, None)
-        payload["text"] = resolved_step_text[result.step_id]
+        payload["text"] = resolved_file_text[text.file_id]
         return result.model_copy(update={"output_payload_json": payload})
 
     prior_results = [resolved_result(result) for result in prior_results]
@@ -2031,13 +2042,13 @@ def resolve_default_step_input_text(
     source_text: str,
     runtime_input_text: str | None,
     logger: Any,
-    resolved_step_text: Mapping[UUID, str] | None = None,
+    resolved_file_text: Mapping[UUID, str] | None = None,
 ) -> tuple[str, str]:
-    if resolved_step_text:
+    if resolved_file_text:
         prior_results, state = _substitute_step_text(
             prior_results=prior_results,
             state=state,
-            resolved_step_text=resolved_step_text,
+            resolved_file_text=resolved_file_text,
         )
     # HTTP text is already resolved; other implicit sources are read only
     # after explicit underlag has been ruled out.

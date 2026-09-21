@@ -20,6 +20,7 @@ from eneo.flows.application.flow_trace_audit import raise_flow_trace_audit_unava
 from eneo.flows.domain.flow import FlowRunStatus, FlowStepResultStatus
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
+    FileBackedStepText,
 )
 from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
 from eneo.flows.enums import FlowRunReviewCheckpointState
@@ -175,6 +176,18 @@ class FlowRunRetryService:
             run_id=source.id, tenant_id=self.user.tenant_id
         )
         reused_step_orders = tuple(step.step_order for step in prefix)
+        transcript = (source.input_payload_json or {}).get(FLOW_INPUT_TRANSCRIPTION_KEY)
+        if isinstance(transcript, dict):
+            reference = FileBackedStepText.model_validate(transcript)
+            for step in prefix:
+                if (
+                    step.step_id == reference.source_step_id
+                    and step.current_attempt_no == reference.source_attempt_no
+                ):
+                    _unsupported(
+                        step_order=step.step_order,
+                        reason="file_backed_prefix_unsupported",
+                    )
         definition = await load_published_definition(
             flow_version_repo=self.run_service.flow_version_repo,
             flow_id=flow_id,
@@ -272,7 +285,6 @@ class FlowRunRetryService:
         )
         if existing is not None:
             return _replay_result(existing, source.id)
-        transcript = (source.input_payload_json or {}).get(FLOW_INPUT_TRANSCRIPTION_KEY)
         created = await self.run_service.create_run(
             flow_id=flow_id,
             run_label=source.run_label,

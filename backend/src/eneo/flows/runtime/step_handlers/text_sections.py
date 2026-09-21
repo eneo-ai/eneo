@@ -101,8 +101,8 @@ async def prepare_text_sections(
             step_names_by_order=state.step_names_by_order,
             step_ref_mapping=state.step_ref_mapping,
             current_step_input=runtime_metadata,
-            resolved_step_text=(
-                {material.source_step_id: section_text} if material is not None else {}
+            resolved_file_text=(
+                {material.file_id: section_text} if material is not None else {}
             ),
         )
         interpolation = base.deps.variable_resolver.interpolate_with_evidence(
@@ -123,10 +123,8 @@ async def prepare_text_sections(
             state=state,
             runtime_input_metadata=runtime_metadata,
             variable_resolver=base.deps.variable_resolver,
-            resolved_step_text=(
-                {material.source_step_id: section_text}
-                if material is not None
-                else None
+            resolved_file_text=(
+                {material.file_id: section_text} if material is not None else None
             ),
         )
         if binding is not None:
@@ -139,10 +137,8 @@ async def prepare_text_sections(
                 state=state,
                 source_text=step_input.source_text,
                 runtime_input_text=section_text if material is None else None,
-                resolved_step_text=(
-                    {material.source_step_id: section_text}
-                    if material is not None
-                    else None
+                resolved_file_text=(
+                    {material.file_id: section_text} if material is not None else None
                 ),
                 logger=None,
             )

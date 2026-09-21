@@ -17,7 +17,9 @@ from eneo.flows.domain.flow_run_exceptions import (
 from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
 )
+from eneo.flows.domain.step_output import FileBackedStepText
 from eneo.flows.enums import FlowStepResultStatus
+from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
 from eneo.flows.flow_run_step_result_file import FlowStepResultFileReference
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 
@@ -185,6 +187,93 @@ def _step_result(status: FlowStepResultStatus) -> FlowStepResult:
         created_at=now,
         updated_at=now,
     )
+
+
+@pytest.mark.parametrize("outcome", ["failed", "inline", "transformed", "reused"])
+async def test_transcript_file_ownership_survives_step_outcome(outcome):
+    session = AsyncMock()
+    repo = FlowRunRepository(session=session)
+    result = _step_result(FlowStepResultStatus.RUNNING).model_copy(
+        update={"current_attempt_no": None}
+    )
+    transcript = FileBackedStepText(
+        preview="raw",
+        inline_text_bytes=3,
+        full_text_bytes=4096,
+        file_id=uuid4(),
+        checksum="a" * 64,
+        source_step_id=result.step_id,
+        source_attempt_no=2,
+    )
+    session.scalar.side_effect = [{}, result]
+    payload = await repo.update_input_payload(
+        run_id=result.flow_run_id,
+        tenant_id=result.tenant_id,
+        input_payload_patch=FlowRunInputEnvelopePatch.transcription(
+            transcript=transcript
+        ),
+    )
+    assert payload["transkribering"] == transcript.model_dump(mode="json")
+    inserts = [
+        call.args[0]
+        for call in session.execute.await_args_list
+        if call.args[0].is_insert
+        and call.args[0].table.name == "flow_run_step_result_files"
+    ]
+    assert len(inserts) == 1
+    registered = inserts[0].compile(dialect=postgresql.dialect()).params
+    assert registered["file_id_m0"] == transcript.file_id
+    assert registered["flow_run_id_m0"] == result.flow_run_id
+    assert registered["tenant_id_m0"] == result.tenant_id
+    assert registered["step_result_id_m0"] == result.id
+    assert registered["attempt_no_m0"] == 2
+    source_query = str(
+        session.scalar.await_args.args[0].compile(dialect=postgresql.dialect())
+    )
+    assert "flow_step_results.tenant_id =" in source_query
+    assert "flow_step_results.flow_run_id =" in source_query
+    assert "flow_step_results.step_id =" in source_query
+    assert "flow_step_attempts.attempt_no =" in source_query
+
+    result = result.model_copy(
+        update={
+            "status": FlowStepResultStatus.FAILED
+            if outcome == "failed"
+            else FlowStepResultStatus.COMPLETED,
+            "input_payload_json": {
+                "runtime_input": {"text": transcript.model_dump(mode="json")}
+            },
+            "output_payload_json": {"text": "ok"},
+        }
+    )
+    output_file_id = transcript.file_id if outcome == "reused" else uuid4()
+    references = (
+        [FlowStepResultFileReference(file_id=output_file_id, source="generated_output")]
+        if outcome in {"reused", "transformed"}
+        else []
+    )
+    session.scalar.side_effect = None
+    session.scalar.return_value = result
+    session.execute.reset_mock()
+    await repo.save_step_result(
+        flow_run_id=result.flow_run_id,
+        result=result,
+        tenant_id=result.tenant_id,
+        attempt_no=2,
+        result_file_references=None if outcome == "failed" else references,
+    )
+    if outcome == "failed":
+        session.execute.assert_not_awaited()
+        return
+    final_insert = session.execute.await_args.args[0]
+    assert final_insert.is_insert
+    final_params = final_insert.compile(dialect=postgresql.dialect()).params
+    assert {
+        value for key, value in final_params.items() if key.startswith("file_id_")
+    } == {
+        transcript.file_id,
+        *(reference.file_id for reference in references),
+    }
 
 
 @pytest.mark.asyncio

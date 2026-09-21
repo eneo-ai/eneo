@@ -1110,6 +1110,7 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
         max_inline_text_bytes=1024,
     )
     deps = AudioRuntimeDeps(
+        commit=AsyncMock(),
         apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
         transcriber=transcriber,
         space_repo=space_repo,
@@ -1182,6 +1183,7 @@ async def test_resolve_transcribe_attach_swallow_audit_errors(user, monkeypatch)
         max_inline_text_bytes=1024,
     )
     deps = AudioRuntimeDeps(
+        commit=AsyncMock(),
         apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
         transcriber=AsyncMock(),
         space_repo=AsyncMock(),

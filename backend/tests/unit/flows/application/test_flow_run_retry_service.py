@@ -293,6 +293,35 @@ async def test_file_backed_transcript_prefix_cannot_be_retried(context):
     context.service.run_service.create_run.assert_not_awaited()
 
 
+@pytest.mark.parametrize("source_index", [0, 1])
+async def test_retry_rejects_spilled_transcript_with_inline_output(
+    context, source_index
+):
+    from eneo.flows.domain.step_output import FileBackedStepText
+
+    source = context.results[source_index]
+    source.output_payload_json = {"text": "ok"}
+    context.source.input_payload_json["transkribering"] = FileBackedStepText(
+        preview="raw",
+        inline_text_bytes=3,
+        full_text_bytes=4096,
+        file_id=uuid4(),
+        checksum="a" * 64,
+        source_step_id=source.step_id,
+        source_attempt_no=source.current_attempt_no,
+    ).model_dump(mode="json")
+    with pytest.raises(ConflictException) as exc:
+        await context.service.retry_from_failed_step(**context.request)
+    assert exc.value.code == "flow_run_retry_prefix_unsupported"
+    assert exc.value.context == {
+        "step_order": source.step_order,
+        "reason": "file_backed_prefix_unsupported",
+    }
+    assert str(exc.value) == "The completed prefix cannot be reused."
+    context.service.run_service.create_run.assert_not_awaited()
+    context.service.audit_service.log.assert_not_awaited()
+
+
 async def test_approved_prefix_uses_effective_reviewed_payload(context):
     context.results[0].output_payload_json = {"text": "Approved correction"}
     context.runtime_steps[0].review_policy = object()

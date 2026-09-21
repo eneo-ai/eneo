@@ -246,12 +246,13 @@ def test_build_context_defers_malformed_text_failure_until_text_is_referenced() 
 
 
 def test_file_backed_text_can_be_supplied_by_input_resolution():
+    file_id = uuid4()
     result = _result(
         step_order=1,
         output_payload={
             "text": "preview",
             "text_overflow": {
-                "generated_file_ids": [str(uuid4())],
+                "generated_file_ids": [str(file_id)],
                 "inline_text_bytes": 7,
                 "full_text_bytes": 24,
             },
@@ -262,7 +263,7 @@ def test_file_backed_text_can_be_supplied_by_input_resolution():
         {},
         [result],
         current_step_order=2,
-        resolved_step_text={result.step_id: "Complete artifact text."},
+        resolved_file_text={file_id: "Complete artifact text."},
     )
     assert (
         resolver.interpolate("{{step_1.output.text}} / {{föregående_steg}}", context)

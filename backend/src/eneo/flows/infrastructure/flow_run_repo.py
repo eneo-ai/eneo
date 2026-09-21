@@ -58,7 +58,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     merge_flow_step_attempt_input,
     parse_flow_step_attempt_input,
 )
-from eneo.flows.domain.step_output import RejectedCompletion
+from eneo.flows.domain.step_output import FileBackedStepText, RejectedCompletion
 from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
 from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_STATUSES,
@@ -75,6 +75,7 @@ from eneo.flows.flow_run_error import (
     dump_flow_run_error,
 )
 from eneo.flows.flow_run_input_envelope import (
+    FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
 )
 from eneo.flows.flow_run_provenance import (
@@ -1297,6 +1298,42 @@ class FlowRunRepository:
             .with_for_update()
         )
         updated_payload = input_payload_patch.apply_to(current_payload)
+        transcript = input_payload_patch.to_merge_dict().get(
+            FLOW_INPUT_TRANSCRIPTION_KEY
+        )
+        if isinstance(transcript, dict):
+            reference = FileBackedStepText.model_validate(transcript)
+            result_row = await self.session.scalar(
+                sa.select(FlowStepResults)
+                .join(
+                    FlowStepAttempts,
+                    sa.and_(
+                        FlowStepAttempts.flow_run_id == FlowStepResults.flow_run_id,
+                        FlowStepAttempts.step_id == FlowStepResults.step_id,
+                        FlowStepAttempts.tenant_id == FlowStepResults.tenant_id,
+                    ),
+                )
+                .where(FlowStepResults.flow_run_id == run_id)
+                .where(FlowStepResults.tenant_id == tenant_id)
+                .where(FlowStepResults.step_id == reference.source_step_id)
+                .where(FlowStepAttempts.attempt_no == reference.source_attempt_no)
+            )
+            if result_row is None or reference.source_attempt_no is None:
+                raise FlowRunPersistenceInvariantError(
+                    operation="persist_transcript_file",
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                )
+            await self._replace_step_result_file_rows(
+                db_session=self.session,
+                result_row=result_row,
+                result_file_references=[
+                    FlowStepResultFileReference(
+                        file_id=reference.file_id, source="generated_output"
+                    )
+                ],
+                attempt_no=reference.source_attempt_no,
+            )
         await self.session.execute(
             sa.update(FlowRuns)
             .where(FlowRuns.id == run_id)
@@ -2679,8 +2716,8 @@ class FlowRunRepository:
         """Persist a step result and optionally replace this attempt's file rows.
 
         Returns the persisted result, or None when the parent run is already terminal.
-        A `result_file_references` value of None leaves file rows untouched for
-        non-success updates; an empty sequence intentionally clears them.
+        None leaves file rows untouched; a sequence replaces output files,
+        retaining runtime text.
         """
         db_session = session or self.session
         await self.lock_execution_ownership(
@@ -2768,6 +2805,25 @@ class FlowRunRepository:
             )
         return FlowStepResult.model_validate(saved)
 
+    @staticmethod
+    def _runtime_text_file_reference(
+        result_row: FlowStepResults, attempt_no: int
+    ) -> FlowStepResultFileReference | None:
+        runtime_input = (result_row.input_payload_json or {}).get("runtime_input")
+        if not isinstance(runtime_input, dict):
+            return None
+        text = cast(FlowPersistedJsonObject, runtime_input).get("text")
+        if isinstance(text, dict):
+            transcript = FileBackedStepText.model_validate(text)
+            if (
+                transcript.source_step_id == result_row.step_id
+                and transcript.source_attempt_no == attempt_no
+            ):
+                return FlowStepResultFileReference(
+                    file_id=transcript.file_id, source="generated_output"
+                )
+        return None
+
     async def _replace_step_result_file_rows(
         self,
         *,
@@ -2776,6 +2832,15 @@ class FlowRunRepository:
         result_file_references: Sequence[FlowStepResultFileReference],
         attempt_no: int,
     ) -> None:
+        references = {
+            reference.file_id: reference for reference in result_file_references
+        }
+        runtime_text = self._runtime_text_file_reference(result_row, attempt_no)
+        if runtime_text is not None:
+            references.setdefault(runtime_text.file_id, runtime_text)
+        result_file_references = sorted(
+            references.values(), key=lambda reference: str(reference.file_id)
+        )
         await db_session.execute(
             sa.delete(FlowRunStepResultFiles)
             .where(FlowRunStepResultFiles.step_result_id == result_row.id)
