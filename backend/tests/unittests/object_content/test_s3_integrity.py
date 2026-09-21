@@ -3,7 +3,7 @@ import re
 from collections.abc import Awaitable, Callable
 from hashlib import sha256
 from io import BytesIO
-from threading import Lock
+from threading import Event, Lock
 from typing import TYPE_CHECKING, BinaryIO, TypeVar, cast
 from uuid import UUID, uuid4
 
@@ -1024,7 +1024,7 @@ async def test_stream_checksum_failure_remains_an_integrity_error() -> None:
 async def test_verified_path_is_opt_in_and_owned_by_read(
     tmp_path, monkeypatch, require_local_path, corrupt
 ):
-    from eneo.object_content import s3_object_store
+    from eneo.object_content import verified_spool
     from eneo.object_content.content_service import detach_content_read
 
     monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
@@ -1032,14 +1032,14 @@ async def test_verified_path_is_opt_in_and_owned_by_read(
     client = _DownloadClient(payload)
     store = S3ObjectStore(_settings(), client=cast("S3Client", client))
     memory_spools = []
-    original = s3_object_store.SpooledTemporaryFile
+    original = verified_spool.SpooledTemporaryFile
 
     def memory_spool(*args, **kwargs):
         spool = original(*args, **kwargs)
         memory_spools.append(spool)
         return spool
 
-    monkeypatch.setattr(s3_object_store, "SpooledTemporaryFile", memory_spool)
+    monkeypatch.setattr(verified_spool, "SpooledTemporaryFile", memory_spool)
     context = store.open_verified_read(
         new_object_key(_settings()),
         expected_sha256=sha256(b"corrupt" if corrupt else payload).digest(),
@@ -1067,4 +1067,125 @@ async def test_verified_path_is_opt_in_and_owned_by_read(
         finally:
             await opened.aclose()
     assert len(client.requests) == 1
+    assert list(tmp_path.iterdir()) == []
+
+
+async def test_open_read_closes_without_consuming_chunks():
+    payload = b"unconsumed"
+    raw = BytesIO(payload)
+    body = StreamingBody(raw, len(payload))
+
+    class Client:
+        def get_object(self, **kwargs):
+            return {
+                "Body": body,
+                "ContentLength": len(payload),
+                "ContentType": "audio/wav",
+            }
+
+    store = S3ObjectStore(_settings(), client=cast("S3Client", Client()))
+    async with store.open_read(
+        new_object_key(_settings()),
+        expected_size_bytes=len(payload),
+        expected_media_type="audio/wav",
+    ):
+        pass
+    assert raw.closed
+
+
+@pytest.mark.parametrize("phase", ["open", "read", "close"])
+async def test_cancel_pending_s3_operation_settles_body(phase):
+    payload = b"cancelled"
+    entered = asyncio.Event()
+    release = Event()
+    loop = asyncio.get_running_loop()
+
+    def pending():
+        loop.call_soon_threadsafe(entered.set)
+        assert release.wait(5)
+
+    class Body(BytesIO):
+        def read(self, size=-1):
+            if phase == "read":
+                pending()
+            return super().read(size)
+
+        def close(self):
+            if phase == "close":
+                pending()
+            super().close()
+
+    body = Body(payload)
+
+    class Client:
+        def get_object(self, **kwargs):
+            if phase == "open":
+                pending()
+            return {
+                "Body": body,
+                "ContentLength": len(payload),
+                "ContentType": "audio/wav",
+            }
+
+    store = S3ObjectStore(_settings(), client=cast("S3Client", Client()))
+
+    async def read():
+        async with store.open_read(
+            new_object_key(_settings()),
+            expected_size_bytes=len(payload),
+            expected_media_type="audio/wav",
+        ) as opened:
+            async for _ in opened.chunks:
+                pass
+
+    task = asyncio.create_task(read())
+    try:
+        await asyncio.wait_for(entered.wait(), 3)
+        task.cancel()
+        await asyncio.sleep(0.02)
+        task.cancel()
+        await asyncio.sleep(0.02)
+        assert not task.done()
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert body.closed
+
+
+@pytest.mark.parametrize("failure", ["write", "read"])
+async def test_local_verified_spool_failure_is_unavailable(
+    tmp_path, monkeypatch, failure
+):
+    from eneo.object_content import verified_spool
+
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    original = verified_spool.NamedTemporaryFile
+
+    def spool(*args, **kwargs):
+        file = original(*args, **kwargs)
+
+        def fail(*args):
+            if failure == "write":
+                return 0
+            raise OSError("injected local read failure")
+
+        setattr(file, failure, fail)
+        return file
+
+    monkeypatch.setattr(verified_spool, "NamedTemporaryFile", spool)
+    payload = b"healthy source"
+    store = S3ObjectStore(
+        _settings(), client=cast("S3Client", _DownloadClient(payload))
+    )
+    with pytest.raises(ObjectStoreUnavailableError):
+        async with store.open_verified_read(
+            new_object_key(_settings()),
+            expected_sha256=sha256(payload).digest(),
+            expected_size_bytes=len(payload),
+            expected_media_type="application/octet-stream",
+            require_local_path=True,
+        ) as opened:
+            async for _ in opened.chunks:
+                pass
     assert list(tmp_path.iterdir()) == []

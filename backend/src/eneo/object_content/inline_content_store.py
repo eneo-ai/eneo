@@ -10,6 +10,11 @@ from eneo.object_content.content import (
     ContentTooLargeError,
     ObjectContentIntegrityError,
 )
+from eneo.object_content.content_repository import (
+    ObjectContentRepository,
+    ReadableContent,
+)
+from eneo.object_content.verified_spool import VerifiedSpool
 
 
 class InlineContentStore:
@@ -26,6 +31,29 @@ class InlineContentStore:
     @property
     def maximum_size_bytes(self) -> int:
         return self._maximum_size_bytes
+
+    @property
+    def io_chunk_bytes(self) -> int:
+        return self._io_chunk_bytes
+
+    async def verify_snapshot(
+        self,
+        repository: ObjectContentRepository,
+        content: ReadableContent,
+        *,
+        physical_size_bytes: int,
+        spool: VerifiedSpool,
+    ) -> None:
+        for offset in range(0, physical_size_bytes, self._io_chunk_bytes):
+            chunk = await repository.read_inline_slice(
+                content_id=content.content_id,
+                offset=offset,
+                length=min(self._io_chunk_bytes, physical_size_bytes - offset),
+            )
+            await spool.write(chunk)
+        spool.verify(
+            expected_sha256=content.sha256, expected_size_bytes=content.size_bytes
+        )
 
     async def materialize(self, content: CapturedContent) -> bytes:
         if content.size_bytes > self._maximum_size_bytes:

@@ -632,7 +632,30 @@ and subsequent vacuum work. These are fixture measurements, not capacity
 ceilings; measure representative deployment rows and replica lag. Reconstruction
 and hash verification require whole-value memory in PostgreSQL for each row,
 so this maintenance operation is not chunk-bounded. Old row versions also consume
-space until vacuum can reclaim them. The download path is unchanged.
+space until vacuum can reclaim them.
+
+Inline downloads use slice reads only when `inline_conversion_ready_at` is
+non-NULL. Readiness, access checks, physical payload length, and all slices
+share one read-only REPEATABLE READ transaction. Each query fetches at most
+`inline_io_chunk_bytes` through `substr`; its existing default is 256 KiB.
+The complete physical payload is hashed into a disk-backed verification spool,
+including for range requests. The transaction closes before a response or
+verified local path is exposed. Audio consumers can adopt that path by renaming
+it. Plan temporary disk capacity for the complete payload of each concurrent
+download. A failed read restarts from the beginning.
+
+While readiness is NULL, inline downloads retain whole-payload materialization.
+All inline writers must run the corrected storage code throughout conversion;
+a completed sweep alone does not enable slice reads. Explicit batch reads also
+retain whole-payload materialization, with one source query per page of at most
+500 unique access grants.
+
+Corruption reporting closes the snapshot first and fences the failure against
+the digest of the complete observed payload. That exceptional fence hashes the
+current whole payload in PostgreSQL and is not chunk-bounded. Local spool I/O
+failures do not mark durable content corrupt. See the
+[streaming-read measurement receipt](../goals/flows-scale/notes/receipts/eneo-q2h0-streaming-reads.md)
+for query counts, application RSS, PostgreSQL work, and latency measurements.
 
 For the bundled single-node reference, durable capacity is the
 `eneo_object_content_data` volume. Change `SEAWEEDFS_VOLUME_SIZE_LIMIT_MB` and

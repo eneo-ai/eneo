@@ -8,11 +8,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
-from pathlib import Path
 from secrets import token_hex
-from tempfile import NamedTemporaryFile, SpooledTemporaryFile
 from time import monotonic
-from typing import IO, TYPE_CHECKING, BinaryIO, Final, Mapping, TypeVar, cast
+from typing import TYPE_CHECKING, BinaryIO, Final, Mapping, TypeVar, cast
 from uuid import UUID
 
 from botocore.config import Config
@@ -34,14 +32,18 @@ from eneo.object_content.content import (
     ByteRange,
     CapturedContent,
     ContentRead,
+    ObjectContentIntegrityError,
+    ObjectContentUnavailableError,
     verification_chunk_window,
 )
 from eneo.object_content.lease import OperationCheckpoint
+from eneo.object_content.verified_spool import VerifiedSpool, settle_read_operation
 
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
     from mypy_boto3_s3.type_defs import (
         CompletedPartTypeDef,
+        GetObjectOutputTypeDef,
         ListMultipartUploadsRequestTypeDef,
         ListObjectsV2RequestTypeDef,
     )
@@ -691,41 +693,67 @@ class S3ObjectStore:
         expected_media_type: str,
     ) -> AsyncGenerator[ContentRead, None]:
         self._require_owned_key(key)
-        try:
-            result = await asyncio.to_thread(
-                self._client.get_object,
-                Bucket=self._settings.bucket,
-                Key=key,
+        async with self._read_response(key) as result:
+            if result.get("ContentLength") != expected_size_bytes:
+                raise ObjectStoreIntegrityError(
+                    "Object read length does not match intent"
+                )
+            if result.get("ContentType") != expected_media_type:
+                raise ObjectStoreIntegrityError(
+                    "Object read media type does not match intent"
+                )
+            chunks = self._stream_body(
+                result["Body"], expected_length=expected_size_bytes
             )
-        except ClientError as error:
-            if _client_error_code(error) in {"404", "NoSuchKey", "NotFound"}:
-                raise ObjectStoreNotFoundError(
-                    "Object content does not exist"
-                ) from error
-            raise ObjectStoreUnavailableError("Object read failed") from error
-        except BotoCoreError as error:
-            raise ObjectStoreUnavailableError("Object read failed") from error
+            try:
+                yield ContentRead(
+                    chunks=chunks,
+                    content_length=expected_size_bytes,
+                    media_type=expected_media_type,
+                    content_range=None,
+                )
+            finally:
+                await chunks.aclose()
 
-        if result.get("ContentLength") != expected_size_bytes:
-            result["Body"].close()
-            raise ObjectStoreIntegrityError("Object read length does not match intent")
-        if result.get("ContentType") != expected_media_type:
-            result["Body"].close()
-            raise ObjectStoreIntegrityError(
-                "Object read media type does not match intent"
-            )
+    @asynccontextmanager
+    async def _read_response(
+        self, key: str, *, range_header: str | None = None
+    ) -> AsyncGenerator[GetObjectOutputTypeDef]:
+        result: GetObjectOutputTypeDef | None = None
 
-        body = result["Body"]
-        chunks = self._stream_body(body, expected_length=expected_size_bytes)
+        async def acquire() -> None:
+            nonlocal result
+            if range_header is None:
+                result = await asyncio.to_thread(
+                    self._client.get_object,
+                    Bucket=self._settings.bucket,
+                    Key=key,
+                )
+            else:
+                result = await asyncio.to_thread(
+                    self._client.get_object,
+                    Bucket=self._settings.bucket,
+                    Key=key,
+                    Range=range_header,
+                )
+
         try:
-            yield ContentRead(
-                chunks=chunks,
-                content_length=expected_size_bytes,
-                media_type=expected_media_type,
-                content_range=None,
-            )
+            try:
+                await settle_read_operation(acquire())
+            except ClientError as error:
+                if _client_error_code(error) in {"404", "NoSuchKey", "NotFound"}:
+                    raise ObjectStoreNotFoundError(
+                        "Object content does not exist"
+                    ) from error
+                raise ObjectStoreUnavailableError("Object read failed") from error
+            except BotoCoreError as error:
+                raise ObjectStoreUnavailableError("Object read failed") from error
+            assert result is not None
+            yield result
         finally:
-            await chunks.aclose()
+            if result is not None:
+                body: StreamingBody = result["Body"]
+                await settle_read_operation(asyncio.to_thread(body.close))
 
     @asynccontextmanager
     async def open_verified_read(
@@ -768,52 +796,33 @@ class S3ObjectStore:
                 yield opened
             return
 
-        spool = (
-            NamedTemporaryFile(mode="w+b", delete=False)
-            if require_local_path
-            else SpooledTemporaryFile(
-                max_size=self._settings.spool_memory_bytes, mode="w+b"
-            )
-        )
-        verified_path = Path(spool.name) if require_local_path else None
-        digest = sha256()
         try:
-            async with self.open_read(
-                key,
-                expected_size_bytes=expected_size_bytes,
-                expected_media_type=expected_media_type,
-            ) as remote:
-                async for chunk in remote.chunks:
-                    digest.update(chunk)
-                    written = await asyncio.to_thread(spool.write, chunk)
-                    if written != len(chunk):
-                        raise ObjectStoreIntegrityError(
-                            "Verified object spool accepted a partial write"
-                        )
-
-            if digest.digest() != expected_sha256:
-                raise ObjectStoreIntegrityError(
-                    "Object bytes do not match the canonical SHA-256"
+            async with VerifiedSpool.open(
+                io_chunk_bytes=self._settings.io_chunk_bytes,
+                memory_bytes=None
+                if require_local_path
+                else self._settings.spool_memory_bytes,
+            ) as spool:
+                async with self.open_read(
+                    key,
+                    expected_size_bytes=expected_size_bytes,
+                    expected_media_type=expected_media_type,
+                ) as remote:
+                    async for chunk in remote.chunks:
+                        await spool.write(chunk)
+                spool.verify(
+                    expected_sha256=expected_sha256,
+                    expected_size_bytes=expected_size_bytes,
                 )
-
-            await asyncio.to_thread(spool.seek, 0)
-            chunks = self._stream_file(spool, expected_length=expected_size_bytes)
-            try:
-                yield ContentRead(
-                    chunks=chunks,
-                    content_length=expected_size_bytes,
+                async with spool.read(
                     media_type=expected_media_type,
-                    content_range=None,
-                    verified_path=verified_path,
-                )
-            finally:
-                await chunks.aclose()
-        finally:
-            try:
-                await asyncio.to_thread(spool.close)
-            finally:
-                if verified_path is not None:
-                    verified_path.unlink(missing_ok=True)
+                    require_local_path=require_local_path,
+                ) as opened:
+                    yield opened
+        except ObjectContentIntegrityError as error:
+            raise ObjectStoreIntegrityError(str(error)) from error
+        except ObjectContentUnavailableError as error:
+            raise ObjectStoreUnavailableError(str(error)) from error
 
     @asynccontextmanager
     async def _open_verified_range(
@@ -846,112 +855,84 @@ class S3ObjectStore:
 
         self._require_owned_key(key)
         try:
-            result = await asyncio.to_thread(
-                self._client.get_object,
-                Bucket=self._settings.bucket,
-                Key=key,
-                Range=window.aligned_range.request_header,
-            )
-        except ClientError as error:
-            if _client_error_code(error) in {"404", "NoSuchKey", "NotFound"}:
-                raise ObjectStoreNotFoundError(
-                    "Object content does not exist"
-                ) from error
-            raise ObjectStoreUnavailableError("Object range read failed") from error
-        except BotoCoreError as error:
-            raise ObjectStoreUnavailableError("Object range read failed") from error
-
-        aligned_length = window.aligned_range.content_length
-        body = result["Body"]
-        if result.get("ContentLength") != aligned_length:
-            body.close()
-            raise ObjectStoreIntegrityError(
-                "Object range length does not match verification window"
-            )
-        if result.get("ContentRange") != window.aligned_range.response_header:
-            body.close()
-            raise ObjectStoreIntegrityError(
-                "Object range response does not match verification window"
-            )
-        if result.get("ContentType") != expected_media_type:
-            body.close()
-            raise ObjectStoreIntegrityError(
-                "Object range media type does not match intent"
-            )
-
-        spool = SpooledTemporaryFile(
-            max_size=self._settings.spool_memory_bytes,
-            mode="w+b",
-        )
-        try:
-            remote_chunks = self._stream_body(body, expected_length=aligned_length)
-            verification_index = 0
-            chunk_hasher = sha256()
-            chunk_remaining = min(
-                verification_chunk_size_bytes,
-                expected_size_bytes
-                - window.first_chunk_index * verification_chunk_size_bytes,
-            )
-            try:
-                async for remote_chunk in remote_chunks:
-                    written = await asyncio.to_thread(spool.write, remote_chunk)
-                    if written != len(remote_chunk):
+            async with VerifiedSpool.open(
+                io_chunk_bytes=self._settings.io_chunk_bytes,
+                memory_bytes=self._settings.spool_memory_bytes,
+            ) as spool:
+                async with self._read_response(
+                    key, range_header=window.aligned_range.request_header
+                ) as result:
+                    aligned_length = window.aligned_range.content_length
+                    if result.get("ContentLength") != aligned_length:
                         raise ObjectStoreIntegrityError(
-                            "Verified object spool accepted a partial write"
+                            "Object range length does not match verification window"
                         )
-
-                    remaining = memoryview(remote_chunk)
-                    while remaining:
-                        piece = remaining[:chunk_remaining]
-                        chunk_hasher.update(piece)
-                        chunk_remaining -= len(piece)
-                        remaining = remaining[len(piece) :]
-                        if chunk_remaining != 0:
-                            continue
-                        if (
-                            chunk_hasher.digest()
-                            != verification_chunk_sha256[verification_index]
-                        ):
-                            raise ObjectStoreIntegrityError(
-                                "Object verification chunk does not match intent"
-                            )
-                        verification_index += 1
-                        if verification_index < window.chunk_count:
-                            chunk_hasher = sha256()
-                            absolute_chunk_index = (
-                                window.first_chunk_index + verification_index
-                            )
-                            chunk_remaining = min(
-                                verification_chunk_size_bytes,
-                                expected_size_bytes
-                                - absolute_chunk_index * verification_chunk_size_bytes,
-                            )
-                if verification_index != window.chunk_count:
-                    raise ObjectStoreIntegrityError(
-                        "Object range ended before every verification chunk"
+                    if (
+                        result.get("ContentRange")
+                        != window.aligned_range.response_header
+                    ):
+                        raise ObjectStoreIntegrityError(
+                            "Object range response does not match verification window"
+                        )
+                    if result.get("ContentType") != expected_media_type:
+                        raise ObjectStoreIntegrityError(
+                            "Object range media type does not match intent"
+                        )
+                    remote_chunks = self._stream_body(
+                        result["Body"], expected_length=aligned_length
                     )
-            finally:
-                await remote_chunks.aclose()
+                    verification_index = 0
+                    chunk_hasher = sha256()
+                    chunk_remaining = min(
+                        verification_chunk_size_bytes,
+                        expected_size_bytes
+                        - window.first_chunk_index * verification_chunk_size_bytes,
+                    )
+                    try:
+                        async for remote_chunk in remote_chunks:
+                            await spool.write(remote_chunk)
 
-            await asyncio.to_thread(
-                spool.seek,
-                byte_range.start - window.aligned_range.start,
-            )
-            chunks = self._stream_file(
-                spool,
-                expected_length=byte_range.content_length,
-            )
-            try:
-                yield ContentRead(
-                    chunks=chunks,
-                    content_length=byte_range.content_length,
+                            remaining = memoryview(remote_chunk)
+                            while remaining:
+                                piece = remaining[:chunk_remaining]
+                                chunk_hasher.update(piece)
+                                chunk_remaining -= len(piece)
+                                remaining = remaining[len(piece) :]
+                                if chunk_remaining != 0:
+                                    continue
+                                if (
+                                    chunk_hasher.digest()
+                                    != verification_chunk_sha256[verification_index]
+                                ):
+                                    raise ObjectStoreIntegrityError(
+                                        "Object verification chunk does not match intent"
+                                    )
+                                verification_index += 1
+                                if verification_index < window.chunk_count:
+                                    chunk_hasher = sha256()
+                                    absolute_chunk_index = (
+                                        window.first_chunk_index + verification_index
+                                    )
+                                    chunk_remaining = min(
+                                        verification_chunk_size_bytes,
+                                        expected_size_bytes
+                                        - absolute_chunk_index
+                                        * verification_chunk_size_bytes,
+                                    )
+                        if verification_index != window.chunk_count:
+                            raise ObjectStoreIntegrityError(
+                                "Object range ended before every verification chunk"
+                            )
+                    finally:
+                        await remote_chunks.aclose()
+                async with spool.read(
                     media_type=expected_media_type,
-                    content_range=byte_range.response_header,
-                )
-            finally:
-                await chunks.aclose()
-        finally:
-            await asyncio.to_thread(spool.close)
+                    byte_range=byte_range,
+                    start=byte_range.start - window.aligned_range.start,
+                ) as opened:
+                    yield opened
+        except ObjectContentUnavailableError as error:
+            raise ObjectStoreUnavailableError(str(error)) from error
 
     async def recompute_sha256(
         self,
@@ -989,8 +970,8 @@ class S3ObjectStore:
         transferred = 0
         try:
             while True:
-                chunk = await asyncio.to_thread(
-                    body.read, self._settings.io_chunk_bytes
+                chunk = await settle_read_operation(
+                    asyncio.to_thread(body.read, self._settings.io_chunk_bytes)
                 )
                 if not chunk:
                     break
@@ -1004,27 +985,6 @@ class S3ObjectStore:
             raise ObjectStoreIntegrityError("Object stream checksum failed") from error
         except BotoCoreError as error:
             raise ObjectStoreUnavailableError("Object stream interrupted") from error
-        finally:
-            await asyncio.to_thread(body.close)
-
-    async def _stream_file(
-        self,
-        source: IO[bytes],
-        *,
-        expected_length: int,
-    ) -> AsyncGenerator[bytes, None]:
-        transferred = 0
-        while transferred < expected_length:
-            chunk = await asyncio.to_thread(
-                source.read,
-                min(self._settings.io_chunk_bytes, expected_length - transferred),
-            )
-            if not chunk:
-                raise ObjectStoreIntegrityError(
-                    "Verified object spool ended before its length"
-                )
-            transferred += len(chunk)
-            yield chunk
 
     @property
     def _binding_key(self) -> str:
