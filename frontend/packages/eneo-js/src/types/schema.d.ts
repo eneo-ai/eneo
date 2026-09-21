@@ -16859,6 +16859,7 @@ export interface components {
       | "flow_step_timeout"
       | "flow_runtime_input_not_consumed"
       | "flow_mapped_provider_call_limit_exceeded"
+      | "flow_summarization_non_convergent"
       | "flow_unsupported_output_mode"
       | "flow_unsupported_output_type"
       | "typed_io_contract_violation"
@@ -20014,6 +20015,7 @@ export interface components {
         | "flow_step_execution_failed"
         | "flow_step_missing"
         | "flow_step_timeout"
+        | "flow_summarization_non_convergent"
         | "flow_task_failure"
         | "flow_task_timeout"
         | "flow_unsupported_output_mode"
@@ -20123,6 +20125,12 @@ export interface components {
        * @description Human label for the affected step, truncated to a small public diagnostic budget.
        */
       step_description?: string | null;
+      /** Summarization Bytes */
+      summarization_bytes?: number | null;
+      /** Summarization Records */
+      summarization_records?: number | null;
+      /** Summarization Rounds */
+      summarization_rounds?: number | null;
       /**
        * Total Items
        * @description Total mapped items in this step attempt.
@@ -22730,6 +22738,7 @@ export interface components {
             | "flow_step_execution_failed"
             | "flow_step_missing"
             | "flow_step_timeout"
+            | "flow_summarization_non_convergent"
             | "flow_task_failure"
             | "flow_task_timeout"
             | "flow_unsupported_output_mode"
@@ -23913,6 +23922,7 @@ export interface components {
             | "flow_step_execution_failed"
             | "flow_step_missing"
             | "flow_step_timeout"
+            | "flow_summarization_non_convergent"
             | "flow_task_failure"
             | "flow_task_timeout"
             | "flow_unsupported_output_mode"
@@ -30016,6 +30026,7 @@ export interface components {
       step_id: string;
       /** Step Order */
       step_order: number;
+      summarization_input?: components["schemas"]["SummarizationCallInput"] | null;
     };
     /**
      * ProviderCallEvidenceGap
@@ -33459,6 +33470,33 @@ export interface components {
        */
       total_subscriptions: number;
     };
+    /** SummarizationCallInput */
+    SummarizationCallInput: {
+      /** Group Index */
+      group_index: number;
+      /**
+       * Input Bytes
+       * @description UTF-8 bytes of the composed record input before input bindings.
+       */
+      input_bytes: number;
+      /**
+       * Input Sha256
+       * @description SHA-256 of the composed record input before input bindings.
+       */
+      input_sha256: string;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Max Provider Calls */
+      max_provider_calls: number;
+      /** Record Ids */
+      record_ids: string[];
+      /** Reserved Calls */
+      reserved_calls: number;
+      /** Reserved Input Tokens */
+      reserved_input_tokens: number;
+      /** Round */
+      round: number;
+    };
     /** SuperApiKeyStatus */
     SuperApiKeyStatus: {
       /** Super Api Key Configured */
@@ -34502,7 +34540,7 @@ export interface components {
      * TextProcessingMode
      * @enum {string}
      */
-    TextProcessingMode: "process_each_section";
+    TextProcessingMode: "process_each_section" | "summarize";
     /** ToggleRequest */
     ToggleRequest: {
       /** Value */
