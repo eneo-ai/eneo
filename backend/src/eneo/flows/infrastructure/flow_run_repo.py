@@ -171,7 +171,14 @@ class FlowRunRecoveryCandidate:
         )
 
 
-def _run_recovery_candidates_query() -> sa.Subquery:
+def _run_recovery_candidates_query(
+    *,
+    limit: int,
+    tenant_id: UUID | None = None,
+    after: tuple[datetime, UUID] | None = None,
+    through: tuple[datetime, UUID] | None = None,
+    descending: bool = False,
+) -> sa.Subquery:
     deadline_anchor = sa.func.statement_timestamp() - FLOW_RUN_ABANDONMENT_AFTER
     heartbeat = sa.select(
         FlowRuns.id,
@@ -204,7 +211,24 @@ def _run_recovery_candidates_query() -> sa.Subquery:
         ),
         sa.cast(sa.null(), sa.Uuid()).label("checkpoint_id"),
     ).where(FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value)
-    return sa.union_all(heartbeat, exhausted, reviews).subquery("recovery")
+    # PostgreSQL may sort every UNION input before applying an outer LIMIT.
+    bounded: list[sa.Select[Any]] = []
+    for branch in (heartbeat, exhausted, reviews):
+        anchor = branch.selected_columns.anchor_at
+        run_id = branch.selected_columns.id
+        if tenant_id is not None:
+            branch = branch.where(branch.selected_columns.tenant_id == tenant_id)
+        if after is not None:
+            branch = branch.where(sa.tuple_(anchor, run_id) > after)
+        if through is not None:
+            branch = branch.where(sa.tuple_(anchor, run_id) <= through)
+        order = (
+            (anchor.desc(), run_id.desc())
+            if descending
+            else (anchor.asc(), run_id.asc())
+        )
+        bounded.append(sa.select(branch.order_by(*order).limit(limit).subquery()))
+    return sa.union_all(*bounded).subquery("recovery")
 
 
 def _recorded_passage_byte_expressions() -> tuple[Any, Any]:
@@ -854,7 +878,7 @@ class FlowRunRepository:
         return [FlowRun.model_validate(row) for row in rows]
 
     async def recovery_sweep_boundary(self) -> tuple[datetime, UUID] | None:
-        candidates = _run_recovery_candidates_query()
+        candidates = _run_recovery_candidates_query(limit=1, descending=True)
         row = (
             await self.session.execute(
                 sa.select(candidates.c.anchor_at, candidates.c.id)
@@ -874,30 +898,22 @@ class FlowRunRepository:
     ) -> list[FlowRunRecoveryCandidate]:
         if limit < 1:
             return []
-        candidates = _run_recovery_candidates_query()
+        candidates = _run_recovery_candidates_query(
+            limit=limit, tenant_id=tenant_id, after=after, through=through
+        )
         stmt = (
             sa.select(candidates)
             .order_by(candidates.c.anchor_at.asc(), candidates.c.id.asc())
             .limit(limit)
         )
-        if tenant_id is not None:
-            stmt = stmt.where(candidates.c.tenant_id == tenant_id)
-        if after is not None:
-            stmt = stmt.where(
-                sa.tuple_(candidates.c.anchor_at, candidates.c.id) > after
-            )
-        if through is not None:
-            stmt = stmt.where(
-                sa.tuple_(candidates.c.anchor_at, candidates.c.id) <= through
-            )
         rows = (await self.session.execute(stmt)).all()
-        review_keys = [
-            (row.id, row.tenant_id)
+        review_rows = [
+            row
             for row in rows
             if row.kind == FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION.value
         ]
         checkpoints = {}
-        if review_keys:
+        if review_rows:
             checkpoint_rows = await self.session.execute(
                 sa.select(
                     FlowRunReviewCheckpoints.id,
@@ -926,8 +942,15 @@ class FlowRunRepository:
                     ),
                 )
                 .where(
-                    sa.tuple_(FlowRuns.id, FlowRuns.tenant_id).in_(review_keys),
+                    sa.tuple_(FlowRuns.id, FlowRuns.tenant_id).in_(
+                        [(row.id, row.tenant_id) for row in review_rows]
+                    ),
                     FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value,
+                    # The creation-time range keeps ID probes on the ordered review index.
+                    sa.tuple_(FlowRuns.created_at, FlowRuns.id)
+                    >= (review_rows[0].anchor_at, review_rows[0].id),
+                    sa.tuple_(FlowRuns.created_at, FlowRuns.id)
+                    <= (review_rows[-1].anchor_at, review_rows[-1].id),
                 )
             )
             checkpoints = {
