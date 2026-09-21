@@ -11,6 +11,16 @@ export function initAdminCrawler(client) {
         params: { query }
       }),
 
+    /**
+     * Read a bounded page of scheduled websites with their next-due state. Requires admin permission.
+     * @param {import('../types/resources').AdminCrawlerScheduleQuery} [query]
+     */
+    websites: async (query = {}) =>
+      client.fetch("/api/v1/admin/crawler/websites/", {
+        method: "get",
+        params: { query }
+      }),
+
     /** @param {{id: string}} run */
     details: async ({ id }) =>
       client.fetch("/api/v1/admin/crawler/runs/{id}/", {

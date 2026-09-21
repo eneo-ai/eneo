@@ -1,7 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import dayjs from "dayjs";
-  import type { AdminCrawlerOverview, AdminCrawlerQuery } from "@eneo/eneo-js";
+  import type {
+    AdminCrawlerOverview,
+    AdminCrawlerQuery,
+    AdminCrawlerScheduledWebsitePage,
+    AdminCrawlerScheduleQuery
+  } from "@eneo/eneo-js";
   import { ArrowRight, RefreshCw } from "lucide-svelte";
   import { Page } from "$lib/components/layout";
   import * as Card from "$lib/components/ui/card/index.js";
@@ -16,6 +21,9 @@
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import AdminCrawlDetails from "./AdminCrawlDetails.svelte";
+  import AdminCrawlerSchedulerHealth from "./AdminCrawlerSchedulerHealth.svelte";
+  import AdminCrawlerScheduleTable from "./AdminCrawlerScheduleTable.svelte";
+  import { intervalLabel, type ScheduleSort } from "./scheduleFormat";
   import CrawlLoadError from "$lib/features/knowledge/CrawlLoadError.svelte";
   import { crawlRunState, crawlRunStateLabel } from "$lib/features/knowledge/crawlRunState";
   import { m } from "$lib/paraglide/messages";
@@ -24,7 +32,9 @@
   const eneo = getEneo();
   type Status =
     "all" | Exclude<NonNullable<AdminCrawlerQuery["status"]>, "pending_dispatch" | "terminal">;
-  type View = NonNullable<AdminCrawlerQuery["view"]>;
+  type View = NonNullable<AdminCrawlerQuery["view"]> | "schedule";
+  type ScheduleInterval = "all" | NonNullable<AdminCrawlerScheduleQuery["interval"]>;
+  type ScheduleStateFilter = "all" | NonNullable<AdminCrawlerScheduleQuery["state"]>;
   type Period = NonNullable<AdminCrawlerQuery["period"]>;
   type Day = "today" | "yesterday";
   const days: Day[] = ["today", "yesterday"];
@@ -34,6 +44,14 @@
     { count: "failed", status: "unsuccessful" }
   ] as const;
   const periods: Period[] = ["today", "yesterday", "last_24_hours"];
+  const scheduleIntervals: ScheduleInterval[] = [
+    "all",
+    "daily",
+    "every_other_day",
+    "weekly",
+    "never"
+  ];
+  const scheduleStates: ScheduleStateFilter[] = ["all", "due", "waiting", "blocked"];
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   let period = $state<Period>("today");
   let view = $state<View>("all");
@@ -42,6 +60,10 @@
   let search = $state("");
   let cursors = $state<(string | null)[]>([null]);
   let overview = $state<AdminCrawlerOverview | null>(null);
+  let interval = $state<ScheduleInterval>("all");
+  let scheduleState = $state<ScheduleStateFilter>("all");
+  let sort = $state<ScheduleSort>("next_due");
+  let schedule = $state<AdminCrawlerScheduledWebsitePage | null>(null);
   let loading = $state(false);
   let rowsStale = $state(true);
   let loadFailed = $state(false);
@@ -49,6 +71,11 @@
   let detailsOpen = $state(false);
   let mounted = false;
   let refreshPending = false;
+
+  const nextCursor = $derived(view === "schedule" ? schedule?.next_cursor : overview?.next_cursor);
+  const filtered = $derived(
+    Boolean(search) || status !== "all" || interval !== "all" || scheduleState !== "all"
+  );
 
   const statuses = $derived<Status[]>([
     "all",
@@ -59,6 +86,11 @@
   ]);
 
   function query(): AdminCrawlerQuery {
+    // The schedule view still needs the overview for the summary, the day
+    // cards and the scheduler status, but not its rows.
+    if (view === "schedule") {
+      return { view: "all", period, time_zone: timeZone, search: "", limit: 1, cursor: null };
+    }
     return {
       view,
       period,
@@ -70,31 +102,59 @@
     };
   }
 
+  function scheduleQuery(): AdminCrawlerScheduleQuery {
+    return {
+      search,
+      interval: interval === "all" ? undefined : interval,
+      state: scheduleState === "all" ? undefined : scheduleState,
+      sort,
+      limit: 50,
+      cursor: cursors.at(-1) ?? null
+    };
+  }
+
+  function requestKey() {
+    return JSON.stringify(view === "schedule" ? [view, scheduleQuery()] : [view, query()]);
+  }
+
   async function refresh(queueIfBusy = false) {
     if (!mounted) return;
     if (loading) {
       refreshPending ||= queueIfBusy;
       return;
     }
-    const request = query();
-    const requestKey = JSON.stringify(request);
+    const key = requestKey();
     loading = true;
     try {
-      const result = await eneo.adminCrawler.overview(request);
-      if (mounted && requestKey === JSON.stringify(query())) {
-        const dayChanged = overview && overview.calendar.today.date !== result.calendar.today.date;
-        if (dayChanged && view !== "active" && period !== "last_24_hours" && cursors.length > 1) {
-          cursors = [null];
-          rowsStale = true;
-          refreshPending = true;
-        } else {
+      if (view === "schedule") {
+        const [result, websites] = await Promise.all([
+          eneo.adminCrawler.overview(query()),
+          eneo.adminCrawler.websites(scheduleQuery())
+        ]);
+        if (mounted && key === requestKey()) {
+          overview = result;
+          schedule = websites;
           rowsStale = false;
+          loadFailed = false;
         }
-        overview = result;
-        loadFailed = false;
+      } else {
+        const result = await eneo.adminCrawler.overview(query());
+        if (mounted && key === requestKey()) {
+          const dayChanged =
+            overview && overview.calendar.today.date !== result.calendar.today.date;
+          if (dayChanged && view !== "active" && period !== "last_24_hours" && cursors.length > 1) {
+            cursors = [null];
+            rowsStale = true;
+            refreshPending = true;
+          } else {
+            rowsStale = false;
+          }
+          overview = result;
+          loadFailed = false;
+        }
       }
     } catch {
-      if (mounted && requestKey === JSON.stringify(query())) loadFailed = true;
+      if (mounted && key === requestKey()) loadFailed = true;
     } finally {
       loading = false;
       if (mounted && refreshPending) {
@@ -112,10 +172,29 @@
   }
 
   function changeView(value: string) {
-    if (value !== "active" && value !== "recent" && value !== "all") return;
+    if (value !== "active" && value !== "recent" && value !== "all" && value !== "schedule") {
+      return;
+    }
     view = value;
     status = "all";
     filterChanged();
+  }
+
+  function changeSort(value: ScheduleSort) {
+    if (sort === value) return;
+    sort = value;
+    filterChanged();
+  }
+
+  function intervalFilterLabel(value: ScheduleInterval) {
+    return value === "all" ? m.admin_crawler_all_scheduled() : intervalLabel(value);
+  }
+
+  function scheduleStateLabel(value: ScheduleStateFilter) {
+    if (value === "all") return m.admin_crawler_all_states();
+    if (value === "due") return m.admin_crawler_state_due();
+    if (value === "waiting") return m.admin_crawler_state_waiting();
+    return m.admin_crawler_state_blocked();
   }
 
   function showIssues() {
@@ -152,6 +231,8 @@
 
   function clearFilters() {
     status = "all";
+    interval = "all";
+    scheduleState = "all";
     search = "";
     searchInput = "";
     filterChanged();
@@ -222,6 +303,7 @@
           <ArrowRight data-icon="inline-end" />
         </Button>
       </div>
+      <AdminCrawlerSchedulerHealth scheduler={overview?.scheduler} asOf={overview?.as_of} />
       <section class="flex flex-col gap-3" aria-label={m.admin_crawler_completed_view()}>
         <div class="grid gap-4 lg:grid-cols-2">
           {#each days as day (day)}
@@ -298,12 +380,15 @@
           <Tabs.Trigger value="all">{m.admin_crawler_all_view()}</Tabs.Trigger>
           <Tabs.Trigger value="active">{m.admin_crawler_active()}</Tabs.Trigger>
           <Tabs.Trigger value="recent">{m.admin_crawler_completed_view()}</Tabs.Trigger>
+          <Tabs.Trigger value="schedule">{m.admin_crawler_schedule()}</Tabs.Trigger>
         </Tabs.List>
         {#key view}
           <Tabs.Content value={view}>
             <div class="flex flex-col gap-4 pt-3">
               {#if view === "all"}<p class="text-secondary text-xs">
                   {m.admin_crawler_all_help()}
+                </p>{:else if view === "schedule"}<p class="text-secondary text-xs">
+                  {m.admin_crawler_schedule_help()}
                 </p>{/if}
               <form
                 class="flex flex-wrap items-end gap-3"
@@ -322,7 +407,7 @@
                     placeholder={m.admin_crawler_search_hint()}
                   />
                 </Field.Field>
-                {#if view !== "active"}
+                {#if view !== "active" && view !== "schedule"}
                   <Field.Field class="w-full sm:w-44">
                     <Field.Label for="crawler-period">{m.admin_crawler_period()}</Field.Label>
                     <Select.Root
@@ -346,30 +431,77 @@
                     </Select.Root>
                   </Field.Field>
                 {/if}
-                <Field.Field class="w-full sm:w-56">
-                  <Field.Label for="crawler-status">{m.status()}</Field.Label>
-                  <Select.Root
-                    type="single"
-                    value={status}
-                    onValueChange={(value) => {
-                      status = statuses.find((option) => option === value) ?? "all";
-                      filterChanged();
-                    }}
-                  >
-                    <Select.Trigger id="crawler-status" class="w-full"
-                      >{statusLabel(status)}</Select.Trigger
+                {#if view === "schedule"}
+                  <Field.Field class="w-full sm:w-44">
+                    <Field.Label for="crawler-interval">{m.admin_crawler_interval()}</Field.Label>
+                    <Select.Root
+                      type="single"
+                      value={interval}
+                      onValueChange={(value) => {
+                        interval = scheduleIntervals.find((option) => option === value) ?? "all";
+                        filterChanged();
+                      }}
                     >
-                    <Select.Content
-                      ><Select.Group>
-                        {#each statuses as option (option)}<Select.Item value={option}
-                            >{statusLabel(option)}</Select.Item
-                          >{/each}
-                      </Select.Group></Select.Content
+                      <Select.Trigger id="crawler-interval" class="w-full"
+                        >{intervalFilterLabel(interval)}</Select.Trigger
+                      >
+                      <Select.Content
+                        ><Select.Group>
+                          {#each scheduleIntervals as option (option)}<Select.Item value={option}
+                              >{intervalFilterLabel(option)}</Select.Item
+                            >{/each}
+                        </Select.Group></Select.Content
+                      >
+                    </Select.Root>
+                  </Field.Field>
+                  <Field.Field class="w-full sm:w-44">
+                    <Field.Label for="crawler-state">{m.status()}</Field.Label>
+                    <Select.Root
+                      type="single"
+                      value={scheduleState}
+                      onValueChange={(value) => {
+                        scheduleState = scheduleStates.find((option) => option === value) ?? "all";
+                        filterChanged();
+                      }}
                     >
-                  </Select.Root>
-                </Field.Field>
+                      <Select.Trigger id="crawler-state" class="w-full"
+                        >{scheduleStateLabel(scheduleState)}</Select.Trigger
+                      >
+                      <Select.Content
+                        ><Select.Group>
+                          {#each scheduleStates as option (option)}<Select.Item value={option}
+                              >{scheduleStateLabel(option)}</Select.Item
+                            >{/each}
+                        </Select.Group></Select.Content
+                      >
+                    </Select.Root>
+                  </Field.Field>
+                {:else}
+                  <Field.Field class="w-full sm:w-56">
+                    <Field.Label for="crawler-status">{m.status()}</Field.Label>
+                    <Select.Root
+                      type="single"
+                      value={status}
+                      onValueChange={(value) => {
+                        status = statuses.find((option) => option === value) ?? "all";
+                        filterChanged();
+                      }}
+                    >
+                      <Select.Trigger id="crawler-status" class="w-full"
+                        >{statusLabel(status)}</Select.Trigger
+                      >
+                      <Select.Content
+                        ><Select.Group>
+                          {#each statuses as option (option)}<Select.Item value={option}
+                              >{statusLabel(option)}</Select.Item
+                            >{/each}
+                        </Select.Group></Select.Content
+                      >
+                    </Select.Root>
+                  </Field.Field>
+                {/if}
                 <Button type="submit" variant="outline">{m.search()}</Button>
-                {#if search || searchInput || status !== "all"}
+                {#if searchInput || filtered}
                   <Button type="button" variant="ghost" onclick={clearFilters}
                     >{m.admin_crawler_clear_filters()}</Button
                   >
@@ -391,7 +523,19 @@
                   <div class="flex flex-col gap-3" role="status" aria-label={m.loading()}>
                     {#each [1, 2, 3] as row (row)}<Skeleton class="h-16 w-full" />{/each}
                   </div>
-                {:else if overview && !rowsStale}
+                {:else if view === "schedule" && schedule && overview && !rowsStale}
+                  <AdminCrawlerScheduleTable
+                    items={schedule.items}
+                    asOf={schedule.as_of}
+                    {sort}
+                    {filtered}
+                    onsort={changeSort}
+                    onselect={(id) => {
+                      selectedRunId = id;
+                      detailsOpen = true;
+                    }}
+                  />
+                {:else if view !== "schedule" && overview && !rowsStale}
                   <Table.Root class="min-w-[960px]">
                     <Table.Caption class="sr-only"
                       >{view === "active"
@@ -467,11 +611,16 @@
               </div>
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <p class="text-secondary text-xs">
+                  {#if view === "schedule" && schedule && !rowsStale}
+                    {m.admin_crawler_scheduled_count({
+                      count: schedule.total_count.toLocaleString(getLocale())
+                    })} ·
+                  {/if}
                   {overview
                     ? m.admin_crawler_fetched({ time: dayjs(overview.as_of).format("HH:mm:ss") })
                     : ""}
                 </p>
-                {#if cursors.length > 1 || overview?.next_cursor}
+                {#if cursors.length > 1 || nextCursor}
                   <div class="flex gap-2">
                     <Button
                       variant="outline"
@@ -487,10 +636,10 @@
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={rowsStale || !overview?.next_cursor || loading}
+                      disabled={rowsStale || !nextCursor || loading}
                       onclick={() => {
-                        if (overview?.next_cursor) {
-                          cursors = [...cursors, overview.next_cursor];
+                        if (nextCursor) {
+                          cursors = [...cursors, nextCursor];
                           rowsStale = true;
                           loadFailed = false;
                           void refresh();

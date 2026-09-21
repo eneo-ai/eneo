@@ -1,7 +1,12 @@
 import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { AdminCrawlerDetails, AdminCrawlerOverview, CrawlRun } from "@eneo/eneo-js";
+import type {
+  AdminCrawlerDetails,
+  AdminCrawlerOverview,
+  AdminCrawlerScheduledWebsitePage,
+  CrawlRun
+} from "@eneo/eneo-js";
 import "../../../../app.css";
 import { m } from "$lib/paraglide/messages";
 import dayjs from "dayjs";
@@ -10,6 +15,7 @@ import { crawlRunStateLabel } from "$lib/features/knowledge/crawlRunState";
 const api = vi.hoisted(() => ({
   adminCrawler: {
     overview: vi.fn(),
+    websites: vi.fn(),
     failures: vi.fn(),
     details: vi.fn(),
     history: vi.fn(),
@@ -46,6 +52,14 @@ const overview: AdminCrawlerOverview = {
     yesterday: { date: "2026-09-08", completed: 256, partial: 4, failed: 1, cancelled: 0 }
   },
   next_cursor: null,
+  scheduler: {
+    status: "ok",
+    ran_at: "2026-09-09T11:00:00Z",
+    stale_after_minutes: 65,
+    due: 3,
+    admitted: 3,
+    failed: 0
+  },
   items: [
     {
       website_id: "website-1",
@@ -77,6 +91,52 @@ const overview: AdminCrawlerOverview = {
   ]
 };
 
+const schedulePage: AdminCrawlerScheduledWebsitePage = {
+  as_of: "2026-09-09T12:00:00Z",
+  total_count: 2,
+  next_cursor: null,
+  items: [
+    {
+      website_id: "website-1",
+      website_name: "Scheduled site",
+      website_url: "https://scheduled.test",
+      space_id: "space-1",
+      space_name: "Communications",
+      update_interval: "daily",
+      last_crawled_at: "2026-09-09T02:00:00Z",
+      last_indexed_at: null,
+      consecutive_failures: 0,
+      next_retry_at: null,
+      auto_disabled: false,
+      latest_run: overview.items[0].run,
+      active_run_id: null,
+      interval_due_at: "2026-09-10T02:00:00Z",
+      next_due_at: "2026-09-10T02:00:00Z",
+      schedule_state: "waiting",
+      blocked_until: null
+    },
+    {
+      website_id: "website-2",
+      website_name: null,
+      website_url: "https://weekly.test",
+      space_id: null,
+      space_name: null,
+      update_interval: "weekly",
+      last_crawled_at: null,
+      last_indexed_at: null,
+      consecutive_failures: 2,
+      next_retry_at: "2026-09-09T14:00:00Z",
+      auto_disabled: false,
+      latest_run: null,
+      active_run_id: null,
+      interval_due_at: "2026-08-01T00:00:00Z",
+      next_due_at: "2026-09-11T00:00:00Z",
+      schedule_state: "blocked_backoff",
+      blocked_until: "2026-09-09T14:00:00Z"
+    }
+  ]
+};
+
 const details: AdminCrawlerDetails = {
   ...overview.items[0],
   space_id: "space-1",
@@ -96,6 +156,7 @@ beforeEach(async () => {
   await page.viewport(1180, 900);
   vi.clearAllMocks();
   api.adminCrawler.overview.mockResolvedValue(structuredClone(overview));
+  api.adminCrawler.websites.mockResolvedValue(structuredClone(schedulePage));
   api.adminCrawler.details.mockResolvedValue(structuredClone(details));
   api.adminCrawler.failures.mockResolvedValue({
     run: overview.items[0].run,
@@ -875,5 +936,187 @@ it("keeps a crawl in the default All view when polling changes it from running t
     .toHaveAttribute("aria-selected", "true");
   expect(api.adminCrawler.overview).toHaveBeenLastCalledWith(
     expect.objectContaining({ view: "all", cursor: null })
+  );
+});
+
+async function openSchedule() {
+  await page.getByRole("tab", { name: m.admin_crawler_schedule(), exact: true }).click();
+  await expect.poll(() => api.adminCrawler.websites.mock.calls.length).toBeGreaterThan(0);
+  await expect
+    .element(page.getByRole("table", { name: m.admin_crawler_schedule_caption(), exact: true }))
+    .toBeVisible();
+}
+
+const schedulerLabels = {
+  ok: () => m.admin_crawler_scheduler_ok(),
+  degraded: () => m.admin_crawler_scheduler_degraded(),
+  stale: () => m.admin_crawler_scheduler_stale(),
+  unknown: () => m.admin_crawler_scheduler_unknown()
+} as const;
+
+it.each(["ok", "degraded", "stale", "unknown"] as const)(
+  "shows scheduler health %s with counts only when they are known",
+  async (status) => {
+    const data = structuredClone(overview);
+    const known = status !== "unknown";
+    data.scheduler = {
+      status,
+      ran_at: known ? "2026-09-09T11:00:00Z" : null,
+      stale_after_minutes: 65,
+      due: known ? 3 : null,
+      admitted: known ? 2 : null,
+      failed: status === "degraded" ? 1 : 0
+    };
+    api.adminCrawler.overview.mockResolvedValue(data);
+    show();
+    const group = page.getByRole("group", { name: m.admin_crawler_scheduler(), exact: true });
+    await expect.element(group).toHaveTextContent(schedulerLabels[status]());
+    const counts = m.admin_crawler_scheduler_counts({
+      due: 3,
+      admitted: 2,
+      failed: status === "degraded" ? 1 : 0
+    });
+    const lastRun = m.admin_crawler_scheduler_last_run({
+      time: dayjs("2026-09-09T11:00:00Z").format("HH:mm")
+    });
+    if (known) {
+      await expect.element(group).toHaveTextContent(counts);
+      await expect.element(group).toHaveTextContent(lastRun);
+    } else {
+      await expect.element(group).not.toHaveTextContent(counts);
+      await expect
+        .element(group)
+        .not.toHaveTextContent(m.admin_crawler_scheduler_last_run({ time: "" }));
+    }
+    if (status === "ok") {
+      await expect.element(group).not.toHaveTextContent(m.admin_crawler_scheduler_help_stale());
+    } else {
+      const help = {
+        degraded: m.admin_crawler_scheduler_help_degraded(),
+        stale: m.admin_crawler_scheduler_help_stale(),
+        unknown: m.admin_crawler_scheduler_help_unknown()
+      }[status];
+      await expect.element(group).toHaveTextContent(help);
+    }
+  }
+);
+
+it("opens the schedule tab, queries websites and renders their state", async () => {
+  show();
+  await expect
+    .element(page.getByRole("button", { name: "Municipal website", exact: true }))
+    .toBeVisible();
+  await openSchedule();
+  expect(api.adminCrawler.websites).toHaveBeenLastCalledWith({
+    search: "",
+    interval: undefined,
+    state: undefined,
+    sort: "next_due",
+    limit: 50,
+    cursor: null
+  });
+  expect(api.adminCrawler.overview).toHaveBeenLastCalledWith(
+    expect.objectContaining({ view: "all", limit: 1, search: "" })
+  );
+  const table = page.getByRole("table", { name: m.admin_crawler_schedule_caption(), exact: true });
+  await expect
+    .element(table.getByRole("button", { name: "Scheduled site", exact: true }))
+    .toBeVisible();
+  await expect.element(table).toHaveTextContent(m.daily());
+  await expect.element(table).toHaveTextContent(m.admin_crawler_state_waiting());
+  await expect.element(table).toHaveTextContent("https://weekly.test");
+  await expect.element(table).toHaveTextContent(m.admin_crawler_no_run());
+  await expect.element(table).toHaveTextContent(
+    m.admin_crawler_state_blocked_backoff({
+      time: dayjs("2026-09-09T14:00:00Z").format("YYYY-MM-DD HH:mm")
+    })
+  );
+  await expect
+    .element(page.getByRole("button", { name: m.admin_crawler_period() }))
+    .not.toBeInTheDocument();
+  await expect
+    .element(page.getByRole("button", { name: m.admin_crawler_interval() }))
+    .toBeVisible();
+  await expect
+    .element(page.getByText(m.admin_crawler_scheduled_count({ count: "2" })))
+    .toBeVisible();
+});
+
+it("opens run details from a scheduled website", async () => {
+  show();
+  await openSchedule();
+  await page.getByRole("button", { name: "Scheduled site", exact: true }).click();
+  await expect.element(page.getByRole("dialog")).toBeVisible();
+  expect(api.adminCrawler.details).toHaveBeenCalledWith({ id: "run-1" });
+});
+
+it("changes the schedule sort and returns to the first page", async () => {
+  show();
+  api.adminCrawler.websites.mockResolvedValueOnce({
+    ...structuredClone(schedulePage),
+    next_cursor: "website-2"
+  });
+  await openSchedule();
+  await page.getByRole("button", { name: m.admin_crawler_next(), exact: true }).click();
+  await expect
+    .poll(() => api.adminCrawler.websites.mock.lastCall?.[0])
+    .toEqual(expect.objectContaining({ cursor: "website-2" }));
+  const sortByWebsite = page.getByRole("button", {
+    name: m.admin_crawler_sort_by({ column: m.website() }),
+    exact: true
+  });
+  await sortByWebsite.click();
+  await expect
+    .poll(() => api.adminCrawler.websites.mock.lastCall?.[0])
+    .toEqual(expect.objectContaining({ sort: "url", cursor: null }));
+  await expect
+    .poll(() => sortByWebsite.element().closest("th")?.getAttribute("aria-sort"))
+    .toBe("ascending");
+  await expect.element(sortByWebsite).toHaveAttribute("aria-pressed", "true");
+  const calls = api.adminCrawler.websites.mock.calls.length;
+  await sortByWebsite.click();
+  await expect.element(page.getByRole("button", { name: m.refresh(), exact: true })).toBeEnabled();
+  expect(api.adminCrawler.websites.mock.calls.length).toBe(calls);
+});
+
+it("filters the schedule by interval and state and clears both", async () => {
+  show();
+  await openSchedule();
+  await page.getByRole("button", { name: m.admin_crawler_interval() }).click();
+  await page.getByRole("option", { name: m.weekly(), exact: true }).click();
+  await expect
+    .poll(() => api.adminCrawler.websites.mock.lastCall?.[0])
+    .toEqual(expect.objectContaining({ interval: "weekly", cursor: null }));
+  await page.getByRole("button", { name: m.status() }).click();
+  await page.getByRole("option", { name: m.admin_crawler_state_blocked(), exact: true }).click();
+  await expect
+    .poll(() => api.adminCrawler.websites.mock.lastCall?.[0])
+    .toEqual(expect.objectContaining({ interval: "weekly", state: "blocked" }));
+  await page.getByRole("button", { name: m.admin_crawler_clear_filters(), exact: true }).click();
+  await expect
+    .poll(() => api.adminCrawler.websites.mock.lastCall?.[0])
+    .toEqual(expect.objectContaining({ interval: undefined, state: undefined }));
+});
+
+it("keeps polling the schedule view and restores the runs view cleanly", async () => {
+  const intervals = vi.spyOn(globalThis, "setInterval");
+  show();
+  await openSchedule();
+  const poll = intervals.mock.calls.find(([, delay]) => delay === 10_000)?.[0];
+  if (typeof poll !== "function") throw new Error("Missing crawler polling callback");
+  const before = api.adminCrawler.websites.mock.calls.length;
+  poll();
+  await expect.poll(() => api.adminCrawler.websites.mock.calls.length).toBe(before + 1);
+  await page.getByRole("tab", { name: m.admin_crawler_all_view(), exact: true }).click();
+  await expect
+    .element(page.getByRole("button", { name: "Municipal website", exact: true }))
+    .toBeVisible();
+  const settled = api.adminCrawler.websites.mock.calls.length;
+  const overviews = api.adminCrawler.overview.mock.calls.length;
+  poll();
+  await expect.poll(() => api.adminCrawler.overview.mock.calls.length).toBe(overviews + 1);
+  expect(api.adminCrawler.websites.mock.calls.length).toBe(settled);
+  expect(api.adminCrawler.overview).toHaveBeenLastCalledWith(
+    expect.objectContaining({ view: "all", limit: 50 })
   );
 });

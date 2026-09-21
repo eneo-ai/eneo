@@ -116,6 +116,13 @@ export type AdminCrawlerRelatedPage = components["schemas"]["AdminCrawlerRelated
 export type AdminCrawlerQuery = NonNullable<
   import("./schema").paths["/api/v1/admin/crawler/"]["get"]["parameters"]["query"]
 >;
+export type AdminCrawlerSchedulerHealth = components["schemas"]["AdminCrawlerSchedulerHealth"];
+export type AdminCrawlerScheduledWebsite = components["schemas"]["AdminCrawlerScheduledWebsite"];
+export type AdminCrawlerScheduledWebsitePage =
+  components["schemas"]["AdminCrawlerScheduledWebsitePage"];
+export type AdminCrawlerScheduleQuery = NonNullable<
+  import("./schema").paths["/api/v1/admin/crawler/websites/"]["get"]["parameters"]["query"]
+>;
 export type CrawlResourceFailure = components["schemas"]["CrawlResourceFailurePublic"];
 export type CrawlFailureQuery = { id: string } & NonNullable<
   paths["/api/v1/crawl-runs/{id}/failures/"]["get"]["parameters"]["query"]

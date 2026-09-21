@@ -2069,6 +2069,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/crawler/websites/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Admin Scheduled Websites
+     * @description Read every website with a crawl schedule in the administrator's tenant, when each is next due and how its last run ended. Requires admin permission; does not grant content access.
+     */
+    get: operations["list_admin_scheduled_websites_api_v1_admin_crawler_websites__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/crawler/runs/{id}/": {
     parameters: {
       query?: never;
@@ -8986,6 +9006,7 @@ export interface components {
       items: components["schemas"]["AdminCrawlerItem"][];
       /** Next Cursor */
       next_cursor: string | null;
+      scheduler: components["schemas"]["AdminCrawlerSchedulerHealth"];
     };
     /** AdminCrawlerRelatedPage */
     AdminCrawlerRelatedPage: {
@@ -9015,6 +9036,103 @@ export interface components {
       last_indexed_at: string | null;
       /** Latest Run Id */
       latest_run_id: string | null;
+    };
+    /** AdminCrawlerScheduledWebsite */
+    AdminCrawlerScheduledWebsite: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string | null;
+      /** Website Url */
+      website_url: string;
+      /** Space Id */
+      space_id: string | null;
+      /** Space Name */
+      space_name: string | null;
+      update_interval: components["schemas"]["UpdateInterval"];
+      /** Last Crawled At */
+      last_crawled_at: string | null;
+      /** Last Indexed At */
+      last_indexed_at: string | null;
+      /** Consecutive Failures */
+      consecutive_failures: number;
+      /** Next Retry At */
+      next_retry_at: string | null;
+      /**
+       * Auto Disabled
+       * @description Interval is never because repeated failures disabled it.
+       */
+      auto_disabled: boolean;
+      latest_run: components["schemas"]["CrawlRunPublic"] | null;
+      /** Active Run Id */
+      active_run_id: string | null;
+      /**
+       * Interval Due At
+       * @description last_crawled_at plus the interval, or the registration time when never crawled; null when disabled.
+       */
+      interval_due_at: string | null;
+      /**
+       * Next Due At
+       * @description Earliest hourly scheduler tick (UTC, minute 0) that can pick the website up; weekly websites only on Fridays UTC. Null when disabled or while a crawl run is active.
+       */
+      next_due_at: string | null;
+      schedule_state: components["schemas"]["ScheduleState"];
+      /**
+       * Blocked Until
+       * @description Circuit-breaker deadline while blocked_backoff.
+       */
+      blocked_until: string | null;
+    };
+    /** AdminCrawlerScheduledWebsitePage */
+    AdminCrawlerScheduledWebsitePage: {
+      /**
+       * As Of
+       * Format: date-time
+       */
+      as_of: string;
+      /** Items */
+      items: components["schemas"]["AdminCrawlerScheduledWebsite"][];
+      /** Total Count */
+      total_count: number;
+      /** Next Cursor */
+      next_cursor: string | null;
+    };
+    /** AdminCrawlerSchedulerHealth */
+    AdminCrawlerSchedulerHealth: {
+      /**
+       * Status
+       * @description ok: the hourly scheduler ran recently and admitted every due website in this tenant; degraded: it ran but some admissions failed; stale: no run recorded within stale_after_minutes; unknown: the marker could not be read.
+       * @enum {string}
+       */
+      status: "ok" | "degraded" | "stale" | "unknown";
+      /**
+       * Ran At
+       * @description When the last scheduler run finished, if a marker exists.
+       */
+      ran_at: string | null;
+      /**
+       * Stale After Minutes
+       * @default 65
+       */
+      stale_after_minutes?: number;
+      /**
+       * Due
+       * @description Websites in this tenant that were due in that run.
+       */
+      due: number | null;
+      /**
+       * Admitted
+       * @description Of those, how many were handed to the crawler.
+       */
+      admitted: number | null;
+      /**
+       * Failed
+       * @description Of those, how many could not be admitted; see the worker log.
+       */
+      failed: number | null;
     };
     /** AdminCrawlerSummary */
     AdminCrawlerSummary: {
@@ -18010,6 +18128,11 @@ export interface components {
        */
       files?: components["schemas"]["ModelId"][];
     };
+    /**
+     * ScheduleState
+     * @enum {string}
+     */
+    ScheduleState: "due" | "waiting" | "blocked_active_run" | "blocked_backoff" | "disabled";
     /** ScimTokenCreatedResponse */
     ScimTokenCreatedResponse: {
       /**
@@ -30840,6 +30963,61 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminCrawlerOverview"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_admin_scheduled_websites_api_v1_admin_crawler_websites__get: {
+    parameters: {
+      query?: {
+        search?: string;
+        /** @description Filter on one interval. Omit for every scheduled website; 'never' lists disabled websites instead. */
+        interval?: components["schemas"]["UpdateInterval"] | null;
+        state?: ("due" | "waiting" | "blocked") | null;
+        sort?: "next_due" | "last_crawled" | "url";
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCrawlerScheduledWebsitePage"];
         };
       };
       /** @description Bad Request */
