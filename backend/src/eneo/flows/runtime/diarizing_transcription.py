@@ -55,12 +55,15 @@ class RegistryFlowTranscriber:
         observer: ProviderCallObserver | None = None,
         max_speakers: int | None = None,
     ) -> TranscribedAudio:
-        return await self.transcriber.transcribe_from_filepath(
+        transcribed = await self.transcriber.transcribe_from_filepath(
             filepath=file.path,
             transcription_model=transcription_model,
             language=language,
             observer=observer,
         )
+        if transcribed.duration_seconds is not None:
+            file.cache_duration(transcribed.duration_seconds)
+        return transcribed
 
 
 class DiarizingFlowTranscriber(RegistryFlowTranscriber):

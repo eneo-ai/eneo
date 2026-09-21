@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -9,13 +10,13 @@ import pytest
 
 from eneo.files import audio
 from eneo.files.file_service import FileDownload
-from eneo.files.transcriber import TranscribedAudio
-from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
+from eneo.files.transcriber import Transcriber
+from eneo.flows.runtime.diarizing_transcription import (
+    DiarizingFlowTranscriber,
+    RegistryFlowTranscriber,
+)
 from eneo.flows.runtime.remote_transcription import RemoteFlowTranscriber
 from eneo.main.exceptions import TypedIOValidationException
-from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
-    TranscriptSegment,
-)
 from tests.unit.files import test_audio
 from tests.unit.flows.runtime.test_remote_transcription import (
     RESULT_BODY,
@@ -24,6 +25,10 @@ from tests.unit.flows.runtime.test_remote_transcription import (
     accepted,
     make_client,
     status,
+)
+from tests.unit.transcription_models.infrastructure.adapters.test_litellm_transcription import (
+    TRANSPORT,
+    _adapter,
 )
 from tests.unittests.flows import audio_spool_test_support
 from tests.unittests.flows.test_flow_transcription import (
@@ -41,7 +46,9 @@ recording = test_audio.recording
 ffmpeg = test_audio.ffmpeg
 
 
-@pytest.mark.parametrize("outcome", ["success", "failure", "cancel", "diarize"])
+@pytest.mark.parametrize(
+    "outcome", ["registry", "failure", "cancel", "diarize", "remote"]
+)
 async def test_audio_step_uses_download_and_removes_spool(
     user, recording, ffmpeg, monkeypatch, outcome, spool_contract
 ):
@@ -55,14 +62,26 @@ async def test_audio_step_uses_download_and_removes_spool(
     file_service.get_files_by_ids.return_value = [file]
     file_service.get_file_content.side_effect = AssertionError("whole-file hydration")
     model = SimpleNamespace(
-        id=uuid4(), name="whisper", model_name="whisper", can_access=True
+        id=uuid4(), name="whisper", model_name="whisper-1", can_access=True
     )
     space_repo.get_space_by_assistant.return_value = _SpaceStub([model], model)
     paths = []
+    decodes = []
+    decode = audio._decode_audio
     duration = AsyncMock(wraps=audio.measure_duration)
     monkeypatch.setattr(audio, "measure_duration", duration)
     download = spool_contract.downloads([file], payload=payload)
     file_service.get_audio_download = download
+
+    async def count_decode(filepath, **kwargs):
+        download.assert_finished()
+        path = Path(filepath)
+        assert path.read_bytes() == payload
+        paths.append(path)
+        decodes.append("duration" if kwargs.get("writer") is None else "wav")
+        return await decode(filepath, **kwargs)
+
+    monkeypatch.setattr(audio, "_decode_audio", count_decode)
 
     async def transcribe(spool, model, **kwargs):
         download.assert_finished()
@@ -74,34 +93,29 @@ async def test_audio_step_uses_download_and_removes_spool(
             raise TypedIOValidationException(
                 "typed failure", code="typed_io_transcription_failed"
             )
-        if outcome == "cancel":
-            asyncio.current_task().cancel()
-            await asyncio.sleep(0)
-        return TranscribedAudio("hello", 10)
+        asyncio.current_task().cancel()
+        await asyncio.sleep(0)
 
     transcriber.transcribe = transcribe
     observer = RecordingObserver()
-    if outcome == "diarize":
-
-        async def local(*, filepath, **kwargs):
-            download.assert_finished()
-            assert filepath.read_bytes() == payload
-            paths.append(filepath)
-            return TranscribedAudio(
-                "hello", 10, segments=(TranscriptSegment("hello", 0, 10),)
-            )
-
-        service = ScriptedService(
-            submit_responses=[accepted()],
-            status_responses=[status("completed")],
-            result_responses=[
-                httpx.Response(200, json={**RESULT_BODY, "model": model.model_name})
-            ],
-        )
-        executor.transcriber = DiarizingFlowTranscriber(
-            SimpleNamespace(transcribe_from_filepath=local),
-            RemoteFlowTranscriber(make_client(service)),
-        )
+    provider = AsyncMock(return_value=SimpleNamespace(text="hello"))
+    monkeypatch.setattr(TRANSPORT, provider)
+    registry = Transcriber(file_service=file_service)
+    monkeypatch.setattr(registry, "_get_adapter", AsyncMock(return_value=_adapter()))
+    service = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("completed")],
+        result_responses=[
+            httpx.Response(200, json={**RESULT_BODY, "model": model.model_name})
+        ],
+    )
+    remote = RemoteFlowTranscriber(make_client(service))
+    if outcome == "registry":
+        executor.transcriber = RegistryFlowTranscriber(registry)
+    elif outcome == "diarize":
+        executor.transcriber = DiarizingFlowTranscriber(registry, remote)
+    elif outcome == "remote":
+        executor.transcriber = remote
     run = _run(user=user, payload={})
     _patch_run_input_payload(flow_run_repo, run)
 
@@ -124,10 +138,14 @@ async def test_audio_step_uses_download_and_removes_spool(
             transcription_call_observer=observer,
         )
 
-    if outcome in {"success", "diarize"}:
-        assert (await execute()).text == (
-            RESULT_BODY["text"] if outcome == "diarize" else "hello"
-        )
+    if outcome in {"registry", "diarize", "remote"}:
+        result = await execute()
+        if outcome == "registry":
+            assert "hello" in result.text
+        else:
+            assert result.text == RESULT_BODY["text"]
+        assert decodes == (["duration"] if outcome == "remote" else ["wav"])
+        assert provider.await_count == (0 if outcome == "remote" else 1)
     else:
         error = (
             asyncio.CancelledError
@@ -140,10 +158,10 @@ async def test_audio_step_uses_download_and_removes_spool(
     assert not paths[0].exists()
     assert list(temp_dir.iterdir()) == []
     assert len(download.streams) == 1
-    assert duration.await_count == (1 if outcome == "diarize" else 0)
-    if outcome == "diarize":
-        assert observer.started_facts[0].audio_seconds == 10
-        assert len(observer.started_facts) == 1
+    assert duration.await_count == (1 if outcome == "remote" else 0)
+    if outcome in {"diarize", "remote"}:
+        assert observer.started_facts[-1].audio_seconds == 10
+        assert len(observer.started_facts) == (2 if outcome == "diarize" else 1)
         assert payload in service.requests[0].read()
     file_service.get_file_content.assert_not_awaited()
 

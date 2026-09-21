@@ -3,8 +3,8 @@
 Object-store audio reuses the verified download's named disk file; inline audio
 is hydrated once within the deployment's inline ceiling, written once to disk,
 and released before transcription. Both reuse the download's verified digest.
-Only remote submission measures and caches duration; local transcription applies
-its decode limits during its own decode. Remote acceptance releases the original.
+Duration is cached from the local bounded decode, or measured lazily when only
+the remote engine runs. Remote acceptance releases the original.
 Signed-URL submission awaits verification of the Vemsa-to-Eneo route in eneo-hy7c.
 """
 
@@ -31,9 +31,15 @@ class SpooledAudio:
     byte_size: int
     mimetype: str
     filename: str
-    _duration: asyncio.Task[float] | None = field(
+    _duration: asyncio.Future[float] | None = field(
         default=None, init=False, repr=False, compare=False
     )
+
+    def cache_duration(self, duration_seconds: float) -> None:
+        if self._duration is None:
+            duration: asyncio.Future[float] = asyncio.get_running_loop().create_future()
+            duration.set_result(duration_seconds)
+            object.__setattr__(self, "_duration", duration)
 
     async def measure_duration(self) -> float:
         task = self._duration
