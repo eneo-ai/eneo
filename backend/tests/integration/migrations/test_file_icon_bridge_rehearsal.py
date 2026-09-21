@@ -18,15 +18,18 @@ import sys
 import time
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from dataclasses import asdict
 from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from threading import Event
+from threading import Event, Thread
 from uuid import UUID, uuid4
 
 import psycopg2
 import pytest
+from _pytest.faulthandler import fault_handler_stderr_fd_key
+from psycopg2.extensions import TRANSACTION_STATUS_IDLE
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from testcontainers.postgres import PostgresContainer
@@ -60,6 +63,7 @@ _BRIDGE_REVISION = "202609081400"
 _BARRIER = 793_202_609
 _PROFILE = os.environ.get("ENEO_FILE_ICON_REHEARSAL_PROFILE", "smoke")
 assert _PROFILE in {"smoke", "capacity"}
+_UPGRADE_WATCHDOG_SECONDS = 60
 
 
 @pytest.fixture(scope="session")
@@ -83,9 +87,13 @@ def _sample_database(postgres, url, stop):
     """Sample only the disposable database container, including backup activity."""
     samples = []
     container = postgres.get_wrapped_container()
-    with _connect(url) as connection, connection.cursor() as cursor:
+    # psycopg2 >= 2.9 opens a transaction inside ``with connection`` even in
+    # autocommit mode. An idle-in-transaction sampler keeps its virtual xid,
+    # and CREATE INDEX CONCURRENTLY waits for that xid forever.
+    with closing(_connect(url)) as connection, connection.cursor() as cursor:
         connection.autocommit = True
         cursor.execute("SET statement_timeout = '5s'")
+        assert connection.info.transaction_status == TRANSACTION_STATUS_IDLE
         while True:
             cursor.execute(
                 "SELECT pg_current_wal_insert_lsn(), pg_database_size(current_database()), "
@@ -151,6 +159,65 @@ def database_measurements(test_settings, postgres_container):
         finally:
             stop.set()
             result.result(timeout=15)
+
+
+def _postgres_activity(url):
+    lines = []
+    with closing(_connect(url)) as connection, connection.cursor() as cursor:
+        connection.autocommit = True
+        cursor.execute("SET statement_timeout = '5s'")
+        for title, query in (
+            (
+                "pg_stat_activity",
+                "SELECT pid, backend_type, datname, state, wait_event_type, wait_event, "
+                "backend_xid, backend_xmin, xact_start, state_change, left(query, 160) "
+                "FROM pg_stat_activity WHERE pid <> pg_backend_pid() ORDER BY pid",
+            ),
+            (
+                "pg_stat_progress_create_index",
+                "SELECT pid, phase, lockers_total, lockers_done, current_locker_pid "
+                "FROM pg_stat_progress_create_index",
+            ),
+            (
+                "pg_locks: waiting, plus everything held by the blocking pids",
+                "SELECT pid, locktype, relation::regclass, virtualxid, transactionid, "
+                "virtualtransaction, mode, granted, pg_blocking_pids(pid) FROM pg_locks "
+                "WHERE NOT granted OR pid = ANY (SELECT unnest(pg_blocking_pids(pid)) "
+                "FROM pg_locks WHERE NOT granted) ORDER BY pid, granted",
+            ),
+        ):
+            cursor.execute(query)
+            lines.append(f"-- {title}")
+            lines.extend(str(row) for row in cursor.fetchall())
+    return lines
+
+
+def _upgrade(config, revision, url, stderr_fd):
+    """Run an Alembic upgrade; report PostgreSQL's view of a stalled one.
+
+    The report goes to the same descriptor as pytest's faulthandler dump so it
+    survives a CI timeout kill, unlike captured stdout.
+    """
+    done = Event()
+    started = time.perf_counter()
+
+    def watch():
+        while not done.wait(_UPGRADE_WATCHDOG_SECONDS):
+            try:
+                lines = _postgres_activity(url)
+            except Exception as error:  # noqa: BLE001
+                lines = [f"activity query failed: {error!r}"]
+            elapsed = time.perf_counter() - started
+            header = f"=== upgrade to {revision} still running after {elapsed:.0f}s ==="
+            os.write(stderr_fd, ("\n".join(["", header, *lines, ""])).encode())
+
+    watchdog = Thread(target=watch, name="upgrade-watchdog", daemon=True)
+    watchdog.start()
+    try:
+        command.upgrade(config, revision)
+    finally:
+        done.set()
+        watchdog.join(timeout=15)
 
 
 def _dump(postgres, database_name, path):
@@ -315,11 +382,16 @@ def _assert_adopted(url):
 
 
 @pytest.fixture(scope="session")
-async def setup_database(test_settings, postgres_container, database_measurements):
+async def setup_database(
+    request, test_settings, postgres_container, database_measurements
+):
     url = test_settings.sync_database_url
     config = expand._alembic_config(url)
+    stderr_fd = request.config.stash.get(
+        fault_handler_stderr_fd_key, sys.__stderr__.fileno()
+    )
     started = time.perf_counter()
-    command.upgrade(config, _RELEASED_REVISION)
+    _upgrade(config, _RELEASED_REVISION, url, stderr_fd)
     files, icon_id = _seed_sources(url)
     expected_sources = _source_facts(url)
     preflight_started = time.perf_counter()
@@ -349,13 +421,13 @@ async def setup_database(test_settings, postgres_container, database_measurement
         path = Path(temporary)
         _dump(postgres_container, test_settings.postgres_db, path / "before.dump")
         upgrade_started = time.perf_counter()
-        command.upgrade(config, _BRIDGE_REVISION)
+        _upgrade(config, _BRIDGE_REVISION, url, stderr_fd)
         report["expand_inventory_seconds"] = time.perf_counter() - upgrade_started
         assert _source_facts(url) == expected_sources
         # The historical bridge is tested above; current ORM models and API
         # routes require the complete schema shipped with this application.
         application_upgrade_started = time.perf_counter()
-        command.upgrade(config, "head")
+        _upgrade(config, "head", url, stderr_fd)
         report["application_upgrade_seconds"] = (
             time.perf_counter() - application_upgrade_started
         )
