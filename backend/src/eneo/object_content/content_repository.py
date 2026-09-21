@@ -1090,6 +1090,7 @@ class ObjectContentRepository:
                 select(ObjectContents)
                 .where(ObjectContents.id == content_id)
                 .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).one_or_none()
         if row is None:

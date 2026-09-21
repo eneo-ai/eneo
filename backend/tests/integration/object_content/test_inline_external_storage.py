@@ -938,14 +938,33 @@ async def test_corruption_recovery_releases_content_before_waiting_for_admission
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("detached_state", ["retained", "delete_pending"])
+@pytest.mark.parametrize("handoff", ["observation", "completed_adoption"])
 async def test_corruption_handoff_preserves_reference_detachment(
     object_content_database: DatabaseSessionManager,
     monkeypatch: pytest.MonkeyPatch,
     detached_state: str,
+    handoff: str,
 ) -> None:
     database = object_content_database
     payload = b"a" * 1_048_576
-    content_id = await _legacy_upload(database, payload)
+    if handoff == "completed_adoption":
+        file_id = await _seed_legacy_text(database, payload=payload)
+        backfill = _backfill(
+            database,
+            auto_inline_max_bytes=len(payload),
+            batch_bytes=len(payload),
+            inline_maximum_bytes=len(payload),
+        )
+        assert (await backfill.run_once()).state.value == "complete"
+        async with database.session() as session, session.begin():
+            content_id = await session.scalar(
+                select(FileContentReferences.content_id).where(
+                    FileContentReferences.file_id == file_id
+                )
+            )
+        assert content_id is not None
+    else:
+        content_id = await _legacy_upload(database, payload)
     if detached_state == "retained":
         async with database.session() as session, session.begin():
             await session.execute(
@@ -956,8 +975,13 @@ async def test_corruption_handoff_preserves_reference_detachment(
     await _corrupt_payload(database, content_id, b"b" * len(payload))
     original = ObjectContentRepository.mark_backend_failure
 
-    async def detach_before_failure(repository, **kwargs):
+    async def detach_reference():
         async with database.session() as session, session.begin():
+            await session.execute(
+                select(ObjectContents.id)
+                .where(ObjectContents.id == content_id)
+                .with_for_update(nowait=True)
+            )
             await session.execute(
                 delete(FileContentReferences).where(
                     FileContentReferences.content_id == content_id
@@ -969,11 +993,39 @@ async def test_corruption_handoff_preserves_reference_detachment(
                 )
                 == detached_state
             )
+
+    async def detach_before_failure(repository, **kwargs):
+        await detach_reference()
         return await original(repository, **kwargs)
 
-    monkeypatch.setattr(
-        ObjectContentRepository, "mark_backend_failure", detach_before_failure
-    )
+    completed_checks: list[bool] = []
+    if handoff == "completed_adoption":
+        original_check = ObjectContentRepository._has_completed_file_icon_item
+        original_lock = ObjectContentRepository._content_for_update
+
+        async def completed_after_first_check(repository, checked_id):
+            assert await original_check(repository, checked_id)
+            completed = bool(completed_checks)
+            completed_checks.append(completed)
+            return completed
+
+        async def detach_before_relocking(repository, locked_id):
+            if len(completed_checks) == 2:
+                await detach_reference()
+            return await original_lock(repository, locked_id)
+
+        monkeypatch.setattr(
+            ObjectContentRepository,
+            "_has_completed_file_icon_item",
+            completed_after_first_check,
+        )
+        monkeypatch.setattr(
+            ObjectContentRepository, "_content_for_update", detach_before_relocking
+        )
+    else:
+        monkeypatch.setattr(
+            ObjectContentRepository, "mark_backend_failure", detach_before_failure
+        )
     reconciler = ObjectContentReconciler(
         ObjectContentCoreSettings(_env_file=None), database
     )
@@ -981,6 +1033,8 @@ async def test_corruption_handoff_preserves_reference_detachment(
     assert result.inline_conversion.rejected == 1
     assert result.inline_conversion.sweep_completed
     assert not result.inline_conversion.ready
+    if handoff == "completed_adoption":
+        assert completed_checks == [False, True]
     async with database.session() as session, session.begin():
         content = await session.get(ObjectContents, content_id)
         assert content is not None and content.state == detached_state
@@ -989,6 +1043,13 @@ async def test_corruption_handoff_preserves_reference_detachment(
         assert content.failure_code == (
             "backend_corrupt" if detached_state == "retained" else None
         )
+        if handoff == "completed_adoption":
+            item = await session.scalar(
+                select(FileIconBackfillItems).where(
+                    FileIconBackfillItems.content_id == content_id
+                )
+            )
+            assert item is not None and item.state == "done"
     if detached_state == "delete_pending":
         resumed = await reconciler.run_once()
         assert resumed.inline_deleted == 1

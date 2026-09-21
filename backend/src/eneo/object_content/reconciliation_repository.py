@@ -305,7 +305,6 @@ class ObjectContentReconciliationRepository:
             if logical_size != content.size_bytes or digest != content.sha256:
                 # The failure owner takes admission/campaign locks before content.
                 await observation.rollback()
-                self._session.expire(content)
             else:
                 rewritten_sha256 = await self._session.scalar(
                     update(InlineContentPayloads)
