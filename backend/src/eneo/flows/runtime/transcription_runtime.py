@@ -13,8 +13,10 @@ from eneo.audit.domain.outcome import Outcome
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.step_output import (
     FileBackedStepText,
+    InlineTranscript,
     ResolvedStepMaterial,
     build_step_material_aliases,
+    inline_transcript,
 )
 from eneo.flows.domain.transcript_source import (
     TranscriptSourceReference,
@@ -94,12 +96,12 @@ class AudioRuntimeDeps:
 
 
 def apply_transcription_to_context(
-    *, context: dict[str, Any], transcript: str | FileBackedStepText
+    *, context: dict[str, Any], transcript: FileBackedStepText | InlineTranscript
 ) -> None:
     value = (
-        transcript.model_dump(mode="json")
-        if isinstance(transcript, FileBackedStepText)
-        else transcript
+        transcript.text
+        if isinstance(transcript, InlineTranscript)
+        else transcript.model_dump(mode="json")
     )
     context[FLOW_INPUT_TRANSCRIPTION_KEY] = value
     flow_input_context = context.get("flow_input")
@@ -111,7 +113,7 @@ async def persist_transcription_on_run_input(
     *,
     flow_run_repo: "FlowRunRepository",
     run: "FlowRun",
-    transcript: str | FileBackedStepText,
+    transcript: FileBackedStepText | InlineTranscript,
 ) -> None:
     updated_payload = await flow_run_repo.update_input_payload(
         run_id=run.id,
@@ -267,18 +269,22 @@ async def resolve_transcribe_and_attach_audio_input(
         text_reference = build_step_material_aliases(
             materials=(material,), max_inline_bytes=request.max_inline_text_bytes
         )[0]
+        assert isinstance(text_reference, FileBackedStepText)
 
+    transcript_value = text_reference or inline_transcript(
+        text=transcription_result.text,
+        source_step_id=request.step.step_id,
+        source_attempt_no=request.attempt_no,
+    )
     await persist_transcription_on_run_input(
         flow_run_repo=deps.flow_run_repo,
         run=request.run,
-        transcript=text_reference or transcription_result.text,
+        transcript=transcript_value,
     )
     if text_reference is not None:
         # Later input validation may roll back before attempt activation.
         await deps.commit()
-    apply_transcription_to_context(
-        context=request.context, transcript=text_reference or transcription_result.text
-    )
+    apply_transcription_to_context(context=request.context, transcript=transcript_value)
     await log_audio_transcribed_audit(
         audit_service=deps.audit_service,
         actor=deps.actor,

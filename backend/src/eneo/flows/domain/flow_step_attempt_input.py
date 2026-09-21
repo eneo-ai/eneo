@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from eneo.flows.domain.step_output import FileBackedStepText
+from eneo.flows.domain.step_output import StepMaterialReference
 from eneo.json_types import JsonObject
 
 FLOW_STEP_ATTEMPT_INPUT_SCHEMA_VERSION: Literal["flow-step-attempt-input.v1"] = (
@@ -67,7 +67,7 @@ class FlowStepAttemptCompletionConfiguration(_FlowStepAttemptInputModel):
 class FlowStepAttemptExecutionInput(_FlowStepAttemptInputModel):
     question: str
     question_truncated: bool = False
-    material_aliases: tuple[FileBackedStepText, ...] = ()
+    material_aliases: tuple[StepMaterialReference, ...] = ()
     effective_prompt: str
     effective_prompt_truncated: bool = Field(
         default=False,

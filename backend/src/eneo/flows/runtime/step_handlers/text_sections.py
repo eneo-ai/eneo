@@ -70,7 +70,7 @@ async def prepare_text_processing_call(
         step_ref_mapping=state.step_ref_mapping,
         current_step_input=runtime_metadata,
         resolved_file_text=(
-            {material.file_id: section_text} if material is not None else {}
+            {material.identity: section_text} if material is not None else {}
         ),
     )
     interpolation = base.deps.variable_resolver.interpolate_with_evidence(
@@ -90,7 +90,7 @@ async def prepare_text_processing_call(
         runtime_input_metadata=runtime_metadata,
         variable_resolver=base.deps.variable_resolver,
         resolved_file_text=(
-            {material.file_id: section_text} if material is not None else None
+            {material.identity: section_text} if material is not None else None
         ),
     )
     if binding is not None:
@@ -104,7 +104,7 @@ async def prepare_text_processing_call(
             source_text=step_input.source_text,
             runtime_input_text=section_text if material is None else None,
             resolved_file_text=(
-                {material.file_id: section_text} if material is not None else None
+                {material.identity: section_text} if material is not None else None
             ),
             logger=None,
         )

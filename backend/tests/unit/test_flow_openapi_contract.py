@@ -70,6 +70,25 @@ def test_text_processing_contract_fields_are_typed(openapi_spec):
     ].keys()
 
 
+def test_material_alias_schema_discriminates_inline_and_file_sources(openapi_spec):
+    schemas = openapi_spec["components"]["schemas"]
+    for name in ("FlowRunStepPublic", "FlowStepAttemptPublic"):
+        reference = schemas[name]["properties"]["input_text_aliases"]["items"]
+        assert reference["discriminator"]["propertyName"] == "kind"
+        assert set(reference["discriminator"]["mapping"]) == {
+            "file_backed_step_text",
+            "inline_step_text",
+        }
+    inline = schemas["InlineStepTextReference"]["properties"]
+    assert {
+        "source_step_id",
+        "source_attempt_no",
+        "selector",
+        "selection",
+    } <= inline.keys()
+    assert "text" not in inline and "preview" not in inline
+
+
 def test_text_processing_request_preserves_other_input_configuration():
     values = {
         "assistant_id": "00000000-0000-0000-0000-000000000001",

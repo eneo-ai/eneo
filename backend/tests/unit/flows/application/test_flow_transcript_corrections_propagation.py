@@ -375,3 +375,25 @@ def test_folds_split_lines_with_word_windows_when_words_are_given() -> None:
             ]
         )
     }
+
+
+def test_folded_transcript_drops_the_original_captured_input_link():
+    checkpoint = _checkpoint(
+        {
+            "text": RENDERED,
+            "text_source_selector": {"kind": "json_path", "path": ["input", "text"]},
+        }
+    )
+    outcome = build_folded_transcript(
+        transcript_source=_source_state(SEGMENTS),
+        checkpoint=checkpoint,
+        step_result=_step_result(),
+        correction_set=_correction_set(occurrences_json=[OCCURRENCE]),
+    )
+    assert outcome.propagated
+    assert "Çagri" in outcome.folded_payload["text"]
+    assert "text_source_selector" not in outcome.folded_payload
+    assert checkpoint.current_payload_json["text_source_selector"]["path"] == [
+        "input",
+        "text",
+    ]

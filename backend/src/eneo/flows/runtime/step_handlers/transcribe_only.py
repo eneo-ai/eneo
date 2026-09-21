@@ -10,7 +10,7 @@ from eneo.flows.domain.runtime import (
     StepDiagnostic,
     StepExecutionOutput,
 )
-from eneo.flows.domain.step_output import FileBackedStepText
+from eneo.flows.domain.step_output import FileBackedStepText, FlowResolvedInputJsonPath
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.output_modes import transcribe_only_violation
@@ -114,5 +114,15 @@ class TranscribeOnlyStepHandler:
                 rag_metadata=rag_metadata,
                 transcription_metadata=prepared.step_input.transcription_metadata,
                 runtime_input_metadata=prepared.step_input.runtime_input_metadata,
+                output_payload_extensions=(
+                    {
+                        "text_source_selector": FlowResolvedInputJsonPath(
+                            kind="json_path", path=("input", "text")
+                        ).model_dump(mode="json")
+                    }
+                    if not generated_file_ids
+                    and runtime_text == prepared.step_input.text
+                    else {}
+                ),
             )
         )

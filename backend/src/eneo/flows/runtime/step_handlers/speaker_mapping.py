@@ -28,6 +28,12 @@ from eneo.flows.domain.speaker_mapping_config import (
     speaker_mapping_infer_names,
     speaker_mapping_participants_field,
 )
+from eneo.flows.domain.step_output import (
+    InlineTranscript,
+    inline_output_reference,
+    inline_transcript,
+    material_reference_identity,
+)
 from eneo.flows.domain.transcript_source import TranscriptSourceReference
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -56,7 +62,7 @@ from eneo.flows.runtime.step_handlers.base import (
 )
 from eneo.main.exceptions import TypedIOValidationException
 
-PersistTranscriptFn = Callable[[FlowRun, str], Awaitable[None]]
+PersistTranscriptFn = Callable[[FlowRun, InlineTranscript], Awaitable[None]]
 TranscriptSourceForStepFn = Callable[
     [FlowRun, FlowStepResult], Awaitable[TranscriptSourceReference | None]
 ]
@@ -290,8 +296,33 @@ class SpeakerMappingStepHandler:
         # Keep the run-level transcript variable in step with the renamed text
         # so later steps using {{transkribering}} see the same names.
         run_payload = run.input_payload_json or {}
-        if run_payload.get(FLOW_INPUT_TRANSCRIPTION_KEY) == source_text:
-            await self.persist_transcript(run, renamed)
+        current = run_payload.get(FLOW_INPUT_TRANSCRIPTION_KEY)
+        if (
+            isinstance(current, dict)
+            and cast(dict[str, object], current).get("kind") == "inline_transcript"
+            and previous is not None
+            and previous.current_attempt_no is not None
+        ):
+            transcript = InlineTranscript.model_validate(current)
+            source_reference = inline_output_reference(
+                previous.output_payload_json or {},
+                source_step_id=previous.step_id,
+                source_attempt_no=previous.current_attempt_no,
+            )
+            if (
+                material_reference_identity(transcript.reference)
+                == material_reference_identity(source_reference)
+                and transcript.text == source_text
+            ):
+                await self.persist_transcript(
+                    run,
+                    inline_transcript(
+                        text=renamed,
+                        source_step_id=step.step_id,
+                        source_attempt_no=attempt_no,
+                        selector_path=("output", "text"),
+                    ),
+                )
         return StepExecutionResult(output=output)
 
     async def _pass_through(

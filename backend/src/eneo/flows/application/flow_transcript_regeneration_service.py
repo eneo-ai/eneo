@@ -26,6 +26,7 @@ from eneo.flows.domain.speaker_review import attribution_text
 from eneo.flows.domain.step_output import (
     FileBackedStepText,
     StepOutputMetadataError,
+    inline_transcript,
     interpret_step_text,
 )
 from eneo.flows.domain.transcript_corrections import (
@@ -293,7 +294,11 @@ class FlowTranscriptRegenerationService:
                     },
                 }
             else:
-                payload = {**payload, "text": reviewed}
+                payload = {
+                    **payload,
+                    "text": reviewed,
+                }
+            payload.pop("text_source_selector", None)
             prefix.append(previous.model_copy(update={"output_payload_json": payload}))
         provenance = {
             "version": 1,
@@ -329,7 +334,12 @@ class FlowTranscriptRegenerationService:
             prefix_seed=FlowRunPrefixSeed(
                 kind="reviewed_transcript_snapshot",
                 source_run_id=source.id,
-                transcript=reviewed,
+                transcript=inline_transcript(
+                    text=reviewed,
+                    source_step_id=prefix[-1].step_id,
+                    source_attempt_no=1,
+                    selector_path=("output", "text"),
+                ),
                 provenance=provenance,
                 results=tuple(prefix),
                 transcript_sources={step_id: transcript.source},

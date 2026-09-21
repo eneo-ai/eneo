@@ -8,7 +8,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
-from eneo.flows.domain.step_output import FileBackedStepText
+from eneo.flows.domain.step_output import StepMaterialReference
 
 
 def summarization_json_bytes(value: JsonValue) -> bytes:
@@ -78,7 +78,7 @@ class SummarizationProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     rounds: int = Field(strict=True, ge=0)
-    sources: tuple[FileBackedStepText, ...]
+    sources: tuple[StepMaterialReference, ...]
     records: tuple[TextProcessingRecord, ...]
 
 
@@ -96,7 +96,7 @@ class SectionManifest(BaseModel):
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     utf8_length: int = Field(strict=True, gt=0)
     character_length: int = Field(strict=True, gt=0)
-    sources: tuple[FileBackedStepText, ...] = ()
+    sources: tuple[StepMaterialReference, ...] = ()
     sections: tuple[TextSection, ...] = Field(min_length=1)
 
     @model_validator(mode="after")

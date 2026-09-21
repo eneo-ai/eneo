@@ -609,7 +609,10 @@ def test_redaction_leaves_business_json_that_looks_like_an_alias_alone():
     ],
     ids=["raw", "redacted", "redacted-preview-expands-past-artifact-size"],
 )
-def test_evidence_and_public_attempt_keep_consumed_material_aliases(redacted, text):
+@pytest.mark.parametrize("inline", [False, True])
+def test_evidence_and_public_attempt_keep_consumed_material_aliases(
+    redacted, text, inline
+):
     from eneo.flows.api.flow_models import (
         FlowRunEvidenceResponse,
         FlowRunPublic,
@@ -617,6 +620,7 @@ def test_evidence_and_public_attempt_keep_consumed_material_aliases(redacted, te
     )
     from eneo.flows.domain.step_output import (
         FileBackedStepText,
+        InlineStepTextReference,
         ResolvedStepMaterial,
         build_step_material_aliases,
     )
@@ -626,14 +630,16 @@ def test_evidence_and_public_attempt_keep_consumed_material_aliases(redacted, te
     material = ResolvedStepMaterial(
         source_step_id=uuid4(),
         source_attempt_no=2,
-        file_id=uuid4(),
+        file_id=None if inline else uuid4(),
         checksum=hashlib.sha256(text.encode()).hexdigest(),
         byte_size=len(text.encode()),
         text=text,
     )
     alias = build_step_material_aliases(materials=(material,), max_inline_bytes=2048)
     assert isinstance(alias, tuple)
-    assert isinstance(alias[0], FileBackedStepText)
+    assert isinstance(
+        alias[0], InlineStepTextReference if inline else FileBackedStepText
+    )
     run.input_payload_json = {"transkribering": alias[0].model_dump(mode="json")}
     payload = build_step_input_payload(
         text=text,
@@ -714,11 +720,17 @@ def test_evidence_and_public_attempt_keep_consumed_material_aliases(redacted, te
             ]["runtime_input"]["text"],
         ]
         for value in transcript_references:
+            if inline:
+                assert InlineStepTextReference.model_validate(value) == alias[0]
+                continue
             reference = FileBackedStepText.model_validate(value)
             assert reference.file_id == material.file_id
             assert reference.checksum == material.checksum
         for record in (*public_evidence.step_results, *public_evidence.step_attempts):
             reference = record.input_text_aliases[0]
+            if inline:
+                assert reference == alias[0]
+                continue
             assert reference.inline_text_bytes == len(reference.preview.encode())
             assert reference.inline_text_bytes < reference.full_text_bytes
             assert reference.file_id == material.file_id
@@ -736,6 +748,25 @@ def test_evidence_and_public_attempt_keep_consumed_material_aliases(redacted, te
     assert evidence["step_results"][0]["effective_prompt_truncated"] is True
     assert evidence["step_results"][0]["input_payload_json"] == payload
     assert text not in json.dumps(evidence)
+
+
+def test_evidence_redacts_inline_transcript_bytes_without_changing_source_identity():
+    from eneo.flows.domain.step_output import inline_transcript
+
+    run, version = _evidence_run_and_version()
+    transcript = inline_transcript(
+        text="password=hunter2",
+        source_step_id=uuid4(),
+        source_attempt_no=1,
+    )
+    run.input_payload_json = {"transkribering": transcript.model_dump(mode="json")}
+    bundle = build_evidence_bundle(
+        run=run, version=version, step_results=[], step_attempts=[]
+    )
+    evidence = redact_evidence_bundle(bundle).to_dict()
+    redacted = evidence["run"]["input_payload_json"]["transkribering"]
+    assert "hunter2" not in redacted["text"]
+    assert redacted["reference"] == transcript.reference.model_dump(mode="json")
 
 
 def test_evidence_bundle_requires_lineage_for_exactly_admitted_attempts() -> None:

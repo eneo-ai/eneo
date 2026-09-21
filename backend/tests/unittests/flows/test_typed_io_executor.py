@@ -1241,7 +1241,6 @@ async def test_resolve_step_input_json_source_refs_build_exact_structured_projec
     }
 
     if section_processing:
-        from eneo.flows.domain.text_processing import SectionManifest
         from tests.unittests.flows.test_text_sections import _case
 
         executor, _, assistant, run, material_state, section_step, text, _, _, _ = (
@@ -1280,27 +1279,15 @@ async def test_resolve_step_input_json_source_refs_build_exact_structured_projec
             state.completed_by_order[4] = previous
             section_step = replace(section_step, step_order=5, input_bindings=None)
 
-        result = await executor._execute_step(
-            step=section_step, run=run, state=state, attempt_no=1
-        )
-
-        manifest = SectionManifest.model_validate(
-            result.output.output_payload_extensions["section_manifest"]
-        )
-        sections = manifest.resplit(text)
-        assert len(sections) > 1
-        for section, call in zip(
-            sections, assistant.get_response.await_args_list, strict=True
-        ):
-            assert call.kwargs["question"]
-            assert "unused" not in call.kwargs["question"]
-            assert json.loads(call.kwargs["question"]) == {
-                "meeting": {"summary": "Grounded summary"},
-                "decisions": ["Approve"],
-            }
-            assert call.kwargs["prompt_override"].split("\nDone.")[0] == (
-                "Material:\n" + section
+        with pytest.raises(TypedIOValidationException) as caught:
+            await executor._execute_step(
+                step=section_step, run=run, state=state, attempt_no=1
             )
+        assert (
+            caught.value.code
+            == FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value
+        )
+        assistant.get_response.assert_not_awaited()
 
 
 @pytest.mark.asyncio

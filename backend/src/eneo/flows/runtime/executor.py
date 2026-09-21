@@ -69,6 +69,7 @@ from eneo.flows.domain.runtime import (
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
 from eneo.flows.domain.step_output import (
+    InlineTranscript,
     StepOutputValidationException,
     build_step_material_aliases,
     utf8_prefix,
@@ -1435,7 +1436,9 @@ class FlowRunExecutor:
             transcript_source_repo=FlowTranscriptSourceRepository(session=self.session),
         )
 
-    async def _persist_run_transcript(self, run: FlowRun, transcript: str) -> None:
+    async def _persist_run_transcript(
+        self, run: FlowRun, transcript: InlineTranscript
+    ) -> None:
         await persist_transcription_on_run_input(
             flow_run_repo=self.flow_run_repo, run=run, transcript=transcript
         )

@@ -94,7 +94,7 @@ from eneo.flows.domain.rag_evidence import (
     RecordedPassageContent,
     RetrievedSource,
 )
-from eneo.flows.domain.step_output import FileBackedStepText, parse_step_text_aliases
+from eneo.flows.domain.step_output import StepMaterialReference, parse_step_text_aliases
 from eneo.flows.domain.text_processing import TextProcessingConfig
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
 from eneo.flows.enums import (
@@ -1573,7 +1573,7 @@ class FlowRunStepPublic(BaseModel):
 
     @computed_field
     @property
-    def input_text_aliases(self) -> tuple[FileBackedStepText, ...]:
+    def input_text_aliases(self) -> tuple[StepMaterialReference, ...]:
         return parse_step_text_aliases(
             (self.input_payload_json or {}).get("material_aliases")
         )
@@ -2121,7 +2121,7 @@ class FlowStepAttemptPublic(BaseModel):
 
     @computed_field
     @property
-    def input_text_aliases(self) -> tuple[FileBackedStepText, ...]:
+    def input_text_aliases(self) -> tuple[StepMaterialReference, ...]:
         resolved = (
             self.input_payload_json.resolved_input if self.input_payload_json else None
         )

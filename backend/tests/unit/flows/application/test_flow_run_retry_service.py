@@ -333,12 +333,27 @@ async def test_approved_prefix_uses_effective_reviewed_payload(context):
     assert seed.review_established_step_ids == frozenset({context.results[0].step_id})
 
 
-async def test_retry_preserves_transcription_input_from_completed_prefix(context):
-    context.source.input_payload_json["transkribering"] = "Approved transcript"
+@pytest.mark.parametrize("producer_index", [0, 2])
+async def test_retry_preserves_transcription_input_from_completed_prefix(
+    context, producer_index
+):
+    from eneo.flows.domain.step_output import inline_transcript
+
+    producer = context.results[producer_index]
+    transcript = inline_transcript(
+        text="Approved transcript",
+        source_step_id=producer.step_id,
+        source_attempt_no=producer.current_attempt_no,
+    )
+    context.source.input_payload_json["transkribering"] = transcript.model_dump(
+        mode="json"
+    )
     await context.service.retry_from_failed_step(**context.request)
     args = context.service.run_service.create_run.await_args.kwargs
     assert args["input_payload_json"] == {"question": "Summarize"}
-    assert args["prefix_seed"].transcript == "Approved transcript"
+    assert args["prefix_seed"].transcript == (
+        transcript if producer_index == 0 else None
+    )
 
 
 async def test_other_principal_is_refused_before_lock_or_creation(context):

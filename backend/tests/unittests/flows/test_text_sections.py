@@ -19,7 +19,10 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunErrorDetails
 from eneo.flows.runtime.step_deadline import current_step_deadline_scope
 from eneo.flows.runtime.step_execution_runtime import build_output_payload
-from eneo.flows.runtime.step_handlers.text_sections import prepare_text_sections
+from eneo.flows.runtime.step_handlers.text_sections import (
+    prepare_text_processing_call,
+    prepare_text_sections,
+)
 from eneo.main.exceptions import (
     ProviderRejectedRequestException,
     TypedIOValidationException,
@@ -45,11 +48,16 @@ def _case(
     fail_at=None,
     failure=None,
     text=None,
+    inline=False,
 ):
-    executor, _, run_repo, _ = _build_executor(user, max_inline_text_bytes=2048)
+    executor, _, run_repo, _ = _build_executor(
+        user, max_inline_text_bytes=8 * 1024 * 1024 if inline else 2048
+    )
     if text is None:
         text = "".join(f"Å municipal material {index}.\n\t" for index in range(150))
     material, file, reference = _file_backed_material(text)
+    if inline:
+        material = material.model_copy(update={"output_payload_json": {"text": text}})
     executor.file_service.get_owned_file_infos.side_effect = None
     executor.file_service.get_owned_file_infos.return_value = [file]
     executor.file_service.repo.get_content_references.return_value = [reference]
@@ -187,9 +195,12 @@ async def test_longer_prompt_reduces_section_size(user):
     assert sizes[1] < sizes[0]
 
 
-async def test_prompt_only_material_preserves_independent_flow_input_question(user):
+@pytest.mark.parametrize("inline", [False, True])
+async def test_prompt_only_material_preserves_independent_flow_input_question(
+    user, inline
+):
     executor, _, assistant, run, state, step, text, _, questions, _ = _case(
-        user, prompt="Material:\n{{step_1.output.text}}\nDone."
+        user, prompt="Material:\n{{step_1.output.text}}\nDone.", inline=inline
     )
     instruction = "ONLY INCLUDE RECORDS ABOUT SCHOOLS"
     run = run.model_copy(update={"input_payload_json": {"text": instruction}})
@@ -209,6 +220,121 @@ async def test_prompt_only_material_preserves_independent_flow_input_question(us
         assert call.kwargs["prompt_override"].split("\nDone.")[0] == (
             "Material:\n" + section
         )
+
+
+async def test_section_preparation_keeps_selected_text_for_json_consumer(user):
+    text = '{"report": "A plain text report encoded as JSON."}'
+    executor, _, _, run, state, step, _, _, _, _ = _case(user, text=text)
+    step = replace(step, input_type="json")
+    base = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+
+    prepared, _ = await prepare_text_processing_call(
+        step=step,
+        run=run,
+        state=state,
+        base=base,
+        section_text="SLICE",
+    )
+
+    assert prepared.prepared.step_input.text == "SLICE"
+
+
+@pytest.mark.parametrize("input_type", ["text", "json"])
+@pytest.mark.parametrize("binding", [None, "{{step_1.output.text}}"])
+@pytest.mark.parametrize("structured", [{"records": []}, []])
+async def test_sections_refuse_structured_upstream_before_preparation(
+    user, input_type, binding, structured
+):
+    executor, _, assistant, run, state, step, _, _, _, _ = _case(user, inline=True)
+    source = state.prior_results[0]
+    source.output_payload_json["structured"] = structured
+    step = replace(
+        step,
+        input_type=input_type,
+        input_bindings={"question": binding} if binding else None,
+    )
+    with pytest.raises(TypedIOValidationException) as caught:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    assert (
+        caught.value.code
+        == FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value
+    )
+    assert "structured" in str(caught.value)
+    assistant.preflight_response_context.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.parametrize("input_type", ["text", "json"])
+async def test_json_looking_inline_text_sections_preserve_implicit_source(
+    user, input_type
+):
+    text = json.dumps({"report": "Municipal records. " * 200})
+    executor, _, _, run, state, step, _, _, questions, _ = _case(
+        user, text=text, inline=True
+    )
+    step = replace(step, input_type=input_type)
+    result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    manifest = SectionManifest.model_validate(
+        result.output.output_payload_extensions["section_manifest"]
+    )
+    assert 1300 < len(text.encode()) < 8 * 1024 * 1024
+    assert len(questions) > 1
+    assert tuple(questions) == manifest.resplit(text)
+
+
+async def test_raw_inline_transcript_after_structured_completion_stays_text(user):
+    from eneo.flows.domain.step_output import inline_transcript
+
+    text = "Raw transcript. " * 200
+    executor, _, _, run, state, step, _, _, questions, _ = _case(
+        user, text=text, inline=True
+    )
+    source = state.prior_results[0]
+    run.input_payload_json = {
+        "transkribering": inline_transcript(
+            text=text,
+            source_step_id=source.step_id,
+            source_attempt_no=source.current_attempt_no,
+        ).model_dump(mode="json")
+    }
+    source.output_payload_json = {
+        "text": "Transformed completion",
+        "structured": {"summary": "Transformed"},
+    }
+    step = replace(step, input_bindings={"question": "{{transkribering}}"})
+    result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    manifest = SectionManifest.model_validate(
+        result.output.output_payload_extensions["section_manifest"]
+    )
+    assert tuple(questions) == manifest.resplit(text)
+    assert manifest.sources[0].selector.path == ("input", "text")
+
+
+@pytest.mark.parametrize("source_count", [0, 2])
+async def test_sections_refuse_zero_or_distinct_identical_inline_sources(
+    user, source_count
+):
+    executor, _, assistant, run, state, step, text, _, _, _ = _case(user, inline=True)
+    if source_count == 0:
+        state.prior_results.clear()
+        state.completed_by_order.clear()
+    else:
+        second = state.prior_results[0].model_copy(
+            update={"step_id": uuid4(), "step_order": 2}
+        )
+        state.prior_results.append(second)
+        state.completed_by_order[2] = second
+        step = replace(step, step_order=3, input_source="all_previous_steps")
+    with pytest.raises(TypedIOValidationException) as caught:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    assert (
+        caught.value.code
+        == FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value
+    )
+    assert str(caught.value) == "Section processing requires exactly one material."
+    assistant.get_response.assert_not_awaited()
 
 
 async def test_sections_refuse_knowledge_before_preflight_or_provider_calls(user):
@@ -259,7 +385,10 @@ async def test_section_aggregate_overflow_stops_before_the_next_call(user):
 
 
 @pytest.mark.parametrize("binding", [None, "repeat", "prompt_only"])
-async def test_sections_resplit_material_and_render_each_reference(user, binding):
+@pytest.mark.parametrize("inline", [False, True])
+async def test_sections_resplit_material_and_render_each_reference(
+    user, binding, inline
+):
     text = (
         " \n\t"
         + "".join(f"Å municipal material {index}.\n\t" for index in range(150))
@@ -267,7 +396,7 @@ async def test_sections_resplit_material_and_render_each_reference(user, binding
     )
     prompt = "First:\n{{step_1.output.text}}\nSecond:\n{{step_1.output.text}}\nDone."
     executor, _, assistant, run, state, step, text, _, questions, _ = _case(
-        user, prompt=prompt, text=text
+        user, prompt=prompt, text=text, inline=inline
     )
     question_template = {
         "repeat": "Read {{step_1.output.text}} and again {{step_1.output.text}}",
@@ -523,3 +652,29 @@ async def test_section_builder_round_trip(case):
     assert len(changed.encode()) == len(text.encode())
     with pytest.raises(ValueError, match="hash"):
         manifest.resplit(changed)
+
+
+async def test_linked_inline_material_refuses_inconsistent_selected_bytes(user):
+    from eneo.flows.domain.step_output import inline_transcript
+
+    executor, _, assistant, run, state, step, text, _, _, _ = _case(
+        user,
+        inline=True,
+        prompt="{{transkribering}}",
+    )
+    source = state.prior_results[0]
+    source.output_payload_json["text_source_selector"] = {
+        "kind": "json_path",
+        "path": ["input", "text"],
+    }
+    run.input_payload_json = {
+        "transkribering": inline_transcript(
+            text=text + "Changed",
+            source_step_id=source.step_id,
+            source_attempt_no=source.current_attempt_no,
+        ).model_dump(mode="json")
+    }
+    with pytest.raises(TypedIOValidationException) as caught:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    assert caught.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    assistant.get_response.assert_not_awaited()

@@ -33,7 +33,12 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.flow_step_attempt_input import parse_flow_step_attempt_input
 from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.domain.runtime import RuntimeStep
-from eneo.flows.domain.step_output import FileBackedStepText, utf8_prefix
+from eneo.flows.domain.step_output import (
+    FileBackedStepText,
+    InlineStepTextReference,
+    InlineTranscript,
+    utf8_prefix,
+)
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
 from eneo.flows.domain.transcript_source import TranscriptSourceExportRow
 from eneo.flows.enums import FlowRunReviewCheckpointState
@@ -580,6 +585,11 @@ def _cohere_aliases_at(
 def _cohere_redacted_alias(original: JsonValue, redacted: JsonValue) -> JsonValue:
     if not (isinstance(original, dict) and isinstance(redacted, dict)):
         return redacted
+    if original.get("kind") == "inline_step_text":
+        return InlineStepTextReference.model_validate(redacted).model_dump(mode="json")
+    if original.get("kind") == "inline_transcript":
+        transcript = InlineTranscript.model_validate(original)
+        return {**redacted, "reference": transcript.reference.model_dump(mode="json")}
     alias = FileBackedStepText.model_validate(original)
     redacted_preview = redacted["preview"]
     if not isinstance(redacted_preview, str):

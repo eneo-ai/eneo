@@ -64,7 +64,11 @@ from eneo.flows.domain.flow_step_attempt_input import (
     merge_flow_step_attempt_input,
     parse_flow_step_attempt_input,
 )
-from eneo.flows.domain.step_output import FileBackedStepText, RejectedCompletion
+from eneo.flows.domain.step_output import (
+    FileBackedStepText,
+    InlineTranscript,
+    RejectedCompletion,
+)
 from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
 from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_STATUSES,
@@ -1570,7 +1574,12 @@ class FlowRunRepository:
         transcript = input_payload_patch.to_merge_dict().get(
             FLOW_INPUT_TRANSCRIPTION_KEY
         )
-        if isinstance(transcript, dict):
+        if (
+            isinstance(transcript, dict)
+            and cast(dict[str, object], transcript).get("kind") == "inline_transcript"
+        ):
+            InlineTranscript.model_validate(transcript)
+        elif isinstance(transcript, dict):
             reference = FileBackedStepText.model_validate(transcript)
             result_row = await self.session.scalar(
                 sa.select(FlowStepResults)

@@ -51,6 +51,7 @@ from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantE
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
     RejectedCompletion,
+    StepMaterialIdentity,
     StepOutputValidationException,
     build_text_overflow_metadata,
     sample_rejected_output,
@@ -222,7 +223,7 @@ class VariableResolverProtocol(Protocol):
         step_names_by_order: dict[int, str] | None = None,
         step_ref_mapping: dict[str, int] | None = None,
         current_step_input: dict[str, Any] | None = None,
-        resolved_file_text: Mapping[UUID, str] | None = None,
+        resolved_file_text: Mapping[StepMaterialIdentity, str] | None = None,
     ) -> FlowVariableContext: ...
 
     def interpolate_with_evidence(
@@ -1292,7 +1293,7 @@ async def prepare_step_execution(
         step_ref_mapping=state.step_ref_mapping,
         current_step_input=step_input.runtime_input_metadata,
         resolved_file_text={
-            material.file_id: material.text for material in step_input.materials
+            material.identity: material.text for material in step_input.materials
         },
     )
     prompt_interpolation = (

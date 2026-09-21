@@ -169,11 +169,14 @@ async def test_naming_snapshot_preserves_confirmed_unresolved_and_provisional(co
     await context.service.regenerate(**context.request)
     args = context.service.run_service.create_run.await_args.kwargs
     seed = args["prefix_seed"]
-    assert "Anna: Confirmed." in seed.transcript
-    assert "[Talare går inte att avgöra]: Unresolved." in seed.transcript
-    assert "[Överlappande tal – osäker talare]: Pending." in seed.transcript
-    assert "Anna: Pending." not in seed.transcript
-    assert "Stale summary" not in seed.transcript
+    assert "Anna: Confirmed." in seed.transcript.text
+    assert "[Talare går inte att avgöra]: Unresolved." in seed.transcript.text
+    assert "[Överlappande tal – osäker talare]: Pending." in seed.transcript.text
+    assert "Anna: Pending." not in seed.transcript.text
+    assert "Stale summary" not in seed.transcript.text
+    assert seed.transcript.reference.source_step_id == seed.results[-1].step_id
+    assert seed.transcript.reference.source_attempt_no == 1
+    assert seed.transcript.reference.selector.path == ("output", "text")
     assert len(seed.results) == 2
     assert (
         seed.results[1].output_payload_json["speaker_mapping"]["source_attempt_no"] == 1
@@ -301,7 +304,7 @@ async def test_null_revision_can_regenerate_an_unedited_transcript(context):
     await context.service.regenerate(**context.request)
     seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
     assert seed.provenance["correction_revision"] is None
-    assert seed.transcript.count("[Överlappande tal – osäker talare]") == 3
+    assert seed.transcript.text.count("[Överlappande tal – osäker talare]") == 3
     context.service.corrections_repo.copy_snapshot.assert_not_awaited()
 
 

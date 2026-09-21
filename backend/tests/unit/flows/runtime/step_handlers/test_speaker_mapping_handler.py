@@ -9,6 +9,7 @@ import pytest
 
 from eneo.flows.domain.runtime import StepExecutionOutput, StepInputValue
 from eneo.flows.domain.speaker_labels import SPEAKER_MAPPING_OUTPUT_CONTRACT
+from eneo.flows.domain.step_output import inline_transcript
 from eneo.flows.output_processing import validate_against_contract
 from eneo.flows.runtime.step_execution_runtime import (
     PreparedCompletionCall,
@@ -163,6 +164,7 @@ def _state():
         step_id=uuid4(),
         current_attempt_no=3,
         input_payload_json={"transcription": {"diarization": "external"}},
+        output_payload_json={"text": SOURCE},
     )
     return SimpleNamespace(completed_by_order={1: previous}), previous
 
@@ -173,11 +175,20 @@ async def test_proposal_renames_transcript_and_records_provenance(harness) -> No
     state, previous = _state()
     run = SimpleNamespace(
         id=uuid4(),
-        input_payload_json={"deltagare": "Anna, Bo", "transkribering": SOURCE},
+        input_payload_json={
+            "deltagare": "Anna, Bo",
+            "transkribering": inline_transcript(
+                text=SOURCE,
+                source_step_id=previous.step_id,
+                source_attempt_no=previous.current_attempt_no,
+                selector_path=("output", "text"),
+            ).model_dump(mode="json"),
+        },
     )
 
+    step = _step()
     result = await handler.execute(
-        step=_step(), run=run, state=state, version_metadata=None, attempt_no=1
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
     )
 
     output = result.output
@@ -203,14 +214,31 @@ async def test_proposal_renames_transcript_and_records_provenance(harness) -> No
     # Knowledge retrieval is skipped for this step.
     assert calls["deps"].retrieve_rag_chunks is handler_module._no_rag
     assert any(d.code == "speaker_mapping_unmapped_labels" for d in output.diagnostics)
-    persist.assert_awaited_once_with(run, output.full_text)
+    persist.assert_awaited_once()
+    stored = persist.await_args.args[1]
+    assert stored.text == output.full_text
+    assert stored.reference.source_step_id == step.step_id
+    assert stored.reference.source_attempt_no == 1
+    assert stored.reference.selector.path == ("output", "text")
 
 
-async def test_run_transcript_is_left_alone_when_it_differs(harness) -> None:
+async def test_run_transcript_keeps_distinct_source_with_identical_text(
+    harness,
+) -> None:
     _, activate = harness
     handler, persist = _handler(activate)
     state, _ = _state()
-    run = SimpleNamespace(id=uuid4(), input_payload_json={"transkribering": "other"})
+    run = SimpleNamespace(
+        id=uuid4(),
+        input_payload_json={
+            "transkribering": inline_transcript(
+                text=SOURCE,
+                source_step_id=uuid4(),
+                source_attempt_no=3,
+                selector_path=("output", "text"),
+            ).model_dump(mode="json")
+        },
+    )
 
     await handler.execute(
         step=_step(), run=run, state=state, version_metadata=None, attempt_no=1
@@ -236,7 +264,16 @@ async def test_absent_evidence_preserves_known_and_unknown_speakers(
     handler, persist = _handler(activate)
     state, _ = _state()
     run = SimpleNamespace(
-        id=uuid4(), input_payload_json={"deltagare": "Anna", "transkribering": SOURCE}
+        id=uuid4(),
+        input_payload_json={
+            "deltagare": "Anna",
+            "transkribering": inline_transcript(
+                text=SOURCE,
+                source_step_id=state.completed_by_order[1].step_id,
+                source_attempt_no=3,
+                selector_path=("output", "text"),
+            ).model_dump(mode="json"),
+        },
     )
 
     result = await handler.execute(
@@ -256,7 +293,8 @@ async def test_absent_evidence_preserves_known_and_unknown_speakers(
         diagnostic.code == "speaker_mapping_unmapped_labels"
         for diagnostic in result.output.diagnostics
     )
-    persist.assert_awaited_once_with(run, expected)
+    persist.assert_awaited_once()
+    assert persist.await_args.args[1].text == expected
 
 
 @pytest.mark.parametrize(
@@ -282,7 +320,15 @@ async def test_invalid_speaker_fields_fail_before_transcript_is_persisted(
         await handler.execute(
             step=_step(),
             run=SimpleNamespace(
-                id=uuid4(), input_payload_json={"transkribering": SOURCE}
+                id=uuid4(),
+                input_payload_json={
+                    "transkribering": inline_transcript(
+                        text=SOURCE,
+                        source_step_id=state.completed_by_order[1].step_id,
+                        source_attempt_no=3,
+                        selector_path=("output", "text"),
+                    ).model_dump(mode="json")
+                },
             ),
             state=state,
             version_metadata=None,
@@ -577,7 +623,17 @@ async def test_inferred_names_are_grounded_before_renaming_or_persisting(
     }
     handler, persist = _handler(activate, prepared_text=source)
     state, _ = _state()
-    run = SimpleNamespace(id=uuid4(), input_payload_json={"transkribering": source})
+    run = SimpleNamespace(
+        id=uuid4(),
+        input_payload_json={
+            "transkribering": inline_transcript(
+                text=source,
+                source_step_id=state.completed_by_order[1].step_id,
+                source_attempt_no=3,
+                selector_path=("output", "text"),
+            ).model_dump(mode="json")
+        },
+    )
     result = await handler.execute(
         step=_step(output_config={"speaker_mapping": {"infer_names": True}}),
         run=run,
@@ -595,4 +651,5 @@ async def test_inferred_names_are_grounded_before_renaming_or_persisting(
     assert "SPEAKER_01: Behåll den där, Agne." in output.full_text
     assert output.structured_output["speakers"][1]["confidence"] == "low"
     assert output.structured_output["speakers"][1]["evidence"] == ""
-    persist.assert_awaited_once_with(run, output.full_text)
+    persist.assert_awaited_once()
+    assert persist.await_args.args[1].text == output.full_text

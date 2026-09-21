@@ -16,6 +16,7 @@ from eneo.flows.application.flow_run_review_checkpoint_service import (
 )
 from eneo.flows.domain.flow import FlowRunReviewCheckpoint, FlowStepResult
 from eneo.flows.domain.speaker_labels import SPEAKER_MAPPING_OUTPUT_CONTRACT
+from eneo.flows.domain.step_output import inline_transcript
 from eneo.flows.domain.transcript_corrections import (
     FlowTranscriptCorrectionSet,
     segments_content_hash,
@@ -224,7 +225,15 @@ async def test_service_loads_source_and_syncs_run_transcript() -> None:
         id=checkpoint.flow_run_id,
         tenant_id=checkpoint.tenant_id,
         flow_id=checkpoint.flow_id,
-        input_payload_json={"transkribering": SOURCE, "deltagare": "Anna, Bo"},
+        input_payload_json={
+            "transkribering": inline_transcript(
+                text=SOURCE,
+                source_step_id=SOURCE_STEP_ID,
+                source_attempt_no=1,
+                selector_path=("output", "text"),
+            ).model_dump(mode="json"),
+            "deltagare": "Anna, Bo",
+        },
     )
     flow_run_repo = AsyncMock()
     flow_run_repo.get_step_result = AsyncMock(
@@ -246,7 +255,8 @@ async def test_service_loads_source_and_syncs_run_transcript() -> None:
     assert "Okänd gäst: Hallå." in str(edited.current_payload_json["text"])
     patch = flow_run_repo.update_input_payload.await_args.kwargs["input_payload_patch"]
     assert (
-        patch.to_merge_dict()["transkribering"] == edited.current_payload_json["text"]
+        patch.to_merge_dict()["transkribering"]["text"]
+        == edited.current_payload_json["text"]
     )
 
 
@@ -375,7 +385,14 @@ async def test_approval_folds_source_step_corrections_under_the_names() -> None:
         id=checkpoint.flow_run_id,
         tenant_id=checkpoint.tenant_id,
         flow_id=checkpoint.flow_id,
-        input_payload_json={"transkribering": mapped},
+        input_payload_json={
+            "transkribering": inline_transcript(
+                text=mapped,
+                source_step_id=checkpoint.step_id,
+                source_attempt_no=1,
+                selector_path=("output", "text"),
+            ).model_dump(mode="json")
+        },
     )
     source = _source_result(checkpoint, SOURCE).model_copy(
         update={"input_payload_json": {}}
@@ -435,7 +452,9 @@ async def test_approval_folds_source_step_corrections_under_the_names() -> None:
     approved = service.flow_run_review_checkpoint_repo.approve_review_checkpoint
     assert approved.await_args.kwargs["current_payload_json"] == fold.folded_payload
     patch = flow_run_repo.update_input_payload.await_args.kwargs["input_payload_patch"]
-    assert patch.to_merge_dict()["transkribering"] == fold.folded_payload["text"]
+    assert (
+        patch.to_merge_dict()["transkribering"]["text"] == fold.folded_payload["text"]
+    )
 
 
 async def test_approval_skips_a_stale_source_set_but_still_approves() -> None:
@@ -487,7 +506,14 @@ async def test_v3_approval_does_not_report_failed_propagation_as_success(failure
         id=checkpoint.flow_run_id,
         tenant_id=checkpoint.tenant_id,
         flow_id=checkpoint.flow_id,
-        input_payload_json={"transkribering": SOURCE},
+        input_payload_json={
+            "transkribering": inline_transcript(
+                text=SOURCE,
+                source_step_id=SOURCE_STEP_ID,
+                source_attempt_no=1,
+                selector_path=("output", "text"),
+            ).model_dump(mode="json")
+        },
     )
     source = _source_result(
         checkpoint, SOURCE if failure != "unaligned_text" else "changed"
@@ -525,7 +551,14 @@ async def test_v3_unresolved_approval_propagates_to_named_output_and_run_variabl
         id=checkpoint.flow_run_id,
         tenant_id=checkpoint.tenant_id,
         flow_id=checkpoint.flow_id,
-        input_payload_json={"transkribering": SOURCE},
+        input_payload_json={
+            "transkribering": inline_transcript(
+                text=SOURCE,
+                source_step_id=SOURCE_STEP_ID,
+                source_attempt_no=1,
+                selector_path=("output", "text"),
+            ).model_dump(mode="json")
+        },
     )
     source = _source_result(checkpoint, SOURCE).model_copy(
         update={"input_payload_json": {"transcription": {"segments": SOURCE_SEGMENTS}}}
@@ -569,6 +602,21 @@ async def test_v3_unresolved_approval_propagates_to_named_output_and_run_variabl
     assert (
         repo.update_input_payload.await_args.kwargs[
             "input_payload_patch"
-        ].to_merge_dict()["transkribering"]
+        ].to_merge_dict()["transkribering"]["text"]
         == text
     )
+
+
+def test_reviewed_transcript_names_edited_output_instead_of_captured_input():
+    checkpoint = _checkpoint(
+        {
+            "text": "Captured input",
+            "text_source_selector": {"kind": "json_path", "path": ["input", "text"]},
+        }
+    ).model_copy(
+        update={"output_type": FlowOutputType.TEXT, "output_contract_json": None}
+    )
+    payload = build_edited_review_payload(
+        checkpoint=checkpoint, edited_value="Reviewed output"
+    )
+    assert payload == {"text": "Reviewed output"}

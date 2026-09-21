@@ -13,8 +13,13 @@ from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStepResult
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
     FileBackedStepText,
+    InlineStepTextReference,
+    InlineTranscript,
+    StepMaterialIdentity,
     StepOutputMetadataError,
+    inline_output_identity,
     interpret_step_text,
+    material_reference_identity,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
@@ -119,7 +124,7 @@ class FlowVariableResolver:
         step_names_by_order: dict[int, str] | None = None,
         step_ref_mapping: dict[str, int] | None = None,
         current_step_input: dict[str, Any] | None = None,
-        resolved_file_text: Mapping[UUID, str] | None = None,
+        resolved_file_text: Mapping[StepMaterialIdentity, str] | None = None,
     ) -> dict[str, Any]:
         return dict(
             self.build_context_with_evidence(
@@ -142,7 +147,7 @@ class FlowVariableResolver:
         step_names_by_order: dict[int, str] | None = None,
         step_ref_mapping: dict[str, int] | None = None,
         current_step_input: dict[str, Any] | None = None,
-        resolved_file_text: Mapping[UUID, str] | None = None,
+        resolved_file_text: Mapping[StepMaterialIdentity, str] | None = None,
     ) -> FlowVariableContext:
         normalized_flow_input = dict(flow_input or {})
         transcript_source = self._extract_transcript_source(
@@ -219,6 +224,7 @@ class FlowVariableResolver:
         for result in prior_results:
             runtime_input = self._extract_runtime_input(result)
             output = dict(result.output_payload_json or {})
+            output.pop("text_source_selector", None)
             step_text = self._extract_step_text(result, resolved_file_text)
             step_text_by_order[result.step_order] = step_text
             if "text" in output or OUTPUT_TEXT_OVERFLOW_KEY in output:
@@ -489,7 +495,7 @@ class FlowVariableResolver:
     @staticmethod
     def _extract_step_text(
         result: FlowStepResult,
-        resolved_file_text: Mapping[UUID, str] | None = None,
+        resolved_file_text: Mapping[StepMaterialIdentity, str] | None = None,
     ) -> str | _UnavailableStepText:
         payload = result.output_payload_json or {}
         if "text" in payload or OUTPUT_TEXT_OVERFLOW_KEY in payload:
@@ -516,6 +522,14 @@ class FlowVariableResolver:
                     ),
                     code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE,
                 )
+            if resolved_file_text is not None and result.current_attempt_no is not None:
+                identity = inline_output_identity(
+                    payload,
+                    source_step_id=result.step_id,
+                    source_attempt_no=result.current_attempt_no,
+                )
+                if identity in resolved_file_text:
+                    return resolved_file_text[identity]
             return text.text
         structured = payload.get("structured")
         if isinstance(structured, (dict, list)):
@@ -527,7 +541,7 @@ class FlowVariableResolver:
     @staticmethod
     def _extract_transcript_source(
         flow_input: dict[str, Any],
-        resolved_file_text: Mapping[UUID, str] | None = None,
+        resolved_file_text: Mapping[StepMaterialIdentity, str] | None = None,
     ) -> tuple[str, str | _UnavailableStepText] | None:
         for key in (
             FLOW_INPUT_TRANSCRIPTION_KEY,
@@ -546,9 +560,21 @@ class FlowVariableResolver:
 
     @staticmethod
     def _resolve_transcript_reference(
-        value: object, resolved_file_text: Mapping[UUID, str] | None
+        value: object, resolved_file_text: Mapping[StepMaterialIdentity, str] | None
     ) -> str | _UnavailableStepText:
         try:
+            if (
+                isinstance(value, dict)
+                and cast(dict[str, object], value).get("kind") == "inline_transcript"
+            ):
+                payload = cast(dict[str, object], value)
+                reference = InlineStepTextReference.model_validate(
+                    payload.get("reference")
+                )
+                identity = material_reference_identity(reference)
+                if resolved_file_text is not None and identity in resolved_file_text:
+                    return resolved_file_text[identity]
+                return InlineTranscript.model_validate(value).text
             reference = FileBackedStepText.model_validate(value)
         except ValueError:
             return _UnavailableStepText(

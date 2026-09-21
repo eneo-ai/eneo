@@ -421,7 +421,7 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
         call.kwargs["persist_cache_to_file"]
         for call in transcriber.transcribe.await_args_list
     ] == [False, False]
-    assert run.input_payload_json[FLOW_INPUT_TRANSCRIPTION_KEY] == resolved.text
+    assert run.input_payload_json[FLOW_INPUT_TRANSCRIPTION_KEY]["text"] == resolved.text
     assert context["flow_input"][FLOW_INPUT_TRANSCRIPTION_KEY] == resolved.text
     assert resolved.text.startswith("tx:b.wav:sv")
     assert flow_run_repo.update_input_payload.await_count == 1
@@ -586,7 +586,7 @@ async def test_audio_resolve_ignores_shared_file_transcription_cache(
 
     assert resolved.text == "fresh flow transcript"
     assert file_1.transcription == "stale shared transcript"
-    assert run.input_payload_json[FLOW_INPUT_TRANSCRIPTION_KEY] == (
+    assert run.input_payload_json[FLOW_INPUT_TRANSCRIPTION_KEY]["text"] == (
         "fresh flow transcript"
     )
 
@@ -1166,7 +1166,10 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
     assert result.text == "transcribed text"
     assert result.transcription_metadata["language"] == "sv"
     assert result.near_inline_limit_message is not None
-    assert run.input_payload_json[FLOW_INPUT_TRANSCRIPTION_KEY] == "transcribed text"
+    assert (
+        run.input_payload_json[FLOW_INPUT_TRANSCRIPTION_KEY]["text"]
+        == "transcribed text"
+    )
     assert context[FLOW_INPUT_TRANSCRIPTION_KEY] == "transcribed text"
     assert context["flow_input"][FLOW_INPUT_TRANSCRIPTION_KEY] == "transcribed text"
     flow_run_repo.update_input_payload.assert_awaited_once()

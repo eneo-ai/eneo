@@ -14,6 +14,7 @@ from eneo.flows.application.flow_transcript_corrections_service import (
     FlowTranscriptCorrectionsService,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.domain.step_output import inline_transcript
 from eneo.flows.domain.transcript_corrections import (
     TranscriptCorrectionOccurrence,
     TranscriptSpeakerEdit,
@@ -1512,7 +1513,7 @@ async def test_regeneration_snapshots_saved_review_and_keeps_original_output(
         )
         assert (
             "[Talare går inte att avgöra]: Ett!."
-            in child.input_payload_json["transkribering"]
+            in child.input_payload_json["transkribering"]["text"]
         )
         results = await repo.list_step_results(
             run_id=child_id, tenant_id=admin_user.tenant_id
@@ -1532,8 +1533,14 @@ async def test_regeneration_snapshots_saved_review_and_keeps_original_output(
         assert "segments" not in results[0].input_payload_json["transcription"]
         assert (
             results[0].output_payload_json["text"]
-            == child.input_payload_json["transkribering"]
+            == child.input_payload_json["transkribering"]["text"]
         )
+        assert child.input_payload_json["transkribering"] == inline_transcript(
+            text=results[0].output_payload_json["text"],
+            source_step_id=scenario.transcription_step_id,
+            source_attempt_no=1,
+            selector_path=("output", "text"),
+        ).model_dump(mode="json")
         correction_repo = FlowTranscriptCorrectionsRepository(session=session)
         copied = await correction_repo.get_for_step(
             run_id=child_id,
@@ -1663,7 +1670,7 @@ async def test_regeneration_snapshots_saved_review_and_keeps_original_output(
         )
         assert child.output_payload_json["text"] == "Updated summary"
         assert (
-            child.input_payload_json["transkribering"]
+            child.input_payload_json["transkribering"]["text"]
             in completion.get_response.await_args.kwargs["question"]
         )
         attempts = (
@@ -1769,7 +1776,12 @@ async def test_large_source_is_reviewed_and_regenerated_through_api(
             run_id=scenario.flow_run_id,
             tenant_id=admin_user.tenant_id,
             input_payload_patch=FlowRunInputEnvelopePatch.transcription(
-                transcript=render_original_segments(segments)
+                transcript=inline_transcript(
+                    text=render_original_segments(segments),
+                    source_step_id=scenario.transcription_step_id,
+                    source_attempt_no=result.current_attempt_no,
+                    selector_path=("output", "text"),
+                )
             ),
         )
         result.status = "completed"

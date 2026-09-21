@@ -21,6 +21,7 @@ from eneo.flows.domain.flow import FlowRunStatus, FlowStepResultStatus
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
     FileBackedStepText,
+    InlineTranscript,
 )
 from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
 from eneo.flows.enums import FlowRunReviewCheckpointState
@@ -177,7 +178,19 @@ class FlowRunRetryService:
         )
         reused_step_orders = tuple(step.step_order for step in prefix)
         transcript = (source.input_payload_json or {}).get(FLOW_INPUT_TRANSCRIPTION_KEY)
-        if isinstance(transcript, dict):
+        inline = None
+        if (
+            isinstance(transcript, dict)
+            and cast(dict[str, object], transcript).get("kind") == "inline_transcript"
+        ):
+            inline = InlineTranscript.model_validate(transcript)
+            if not any(
+                step.step_id == inline.reference.source_step_id
+                and step.current_attempt_no == inline.reference.source_attempt_no
+                for step in prefix
+            ):
+                inline = None
+        elif isinstance(transcript, dict):
             reference = FileBackedStepText.model_validate(transcript)
             for step in prefix:
                 if (
@@ -305,7 +318,8 @@ class FlowRunRetryService:
                 provenance=provenance,
                 kind="reused_prefix",
                 review_established_step_ids=frozenset(review_established_step_ids),
-                transcript=transcript if isinstance(transcript, str) else None,
+                transcript=inline
+                or (transcript if isinstance(transcript, str) else None),
             ),
         )
         if created.created:

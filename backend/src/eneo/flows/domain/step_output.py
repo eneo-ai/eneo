@@ -4,10 +4,17 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final, Literal, TypeAlias, cast
+from typing import Annotated, Final, Literal, TypeAlias, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_redaction import redact_string_with_reason
@@ -198,39 +205,222 @@ class FileBackedStepText(BaseModel):
         return self
 
 
+FlowResolvedInputJsonPathSegment: TypeAlias = (
+    Annotated[str, Field(strict=True, min_length=1)]
+    | Annotated[int, Field(strict=True, ge=0)]
+)
+
+
+class FlowResolvedInputJsonPath(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["json_path"]
+    path: tuple[FlowResolvedInputJsonPathSegment, ...]
+
+
+class FlowResolvedInputHashedSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    encoding: Literal["utf8", "canonical_json"]
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    byte_size: int = Field(strict=True, ge=0)
+
+
+class InlineStepTextReference(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["inline_step_text"] = "inline_step_text"
+    source_step_id: UUID
+    source_attempt_no: int = Field(strict=True, ge=1)
+    selector: FlowResolvedInputJsonPath
+    selection: FlowResolvedInputHashedSelection
+
+    @model_validator(mode="after")
+    def _text_encoding(self) -> InlineStepTextReference:
+        if self.selection.encoding != "utf8":
+            raise ValueError("Inline material must select UTF-8 text.")
+        return self
+
+
+StepMaterialReference: TypeAlias = Annotated[
+    FileBackedStepText | InlineStepTextReference, Field(discriminator="kind")
+]
+StepMaterialIdentity: TypeAlias = (
+    UUID | tuple[UUID, int, tuple[FlowResolvedInputJsonPathSegment, ...]]
+)
+_MATERIAL_REFERENCE = TypeAdapter[StepMaterialReference](StepMaterialReference)
+
+
+def material_reference_identity(
+    reference: StepMaterialReference,
+) -> StepMaterialIdentity:
+    if isinstance(reference, FileBackedStepText):
+        return reference.file_id
+    return (
+        reference.source_step_id,
+        reference.source_attempt_no,
+        reference.selector.path,
+    )
+
+
+def inline_text_reference(
+    *,
+    source_step_id: UUID,
+    source_attempt_no: int,
+    text: str,
+    selector_path: tuple[FlowResolvedInputJsonPathSegment, ...] = ("output", "text"),
+) -> InlineStepTextReference:
+    encoded = text.encode("utf-8")
+    return InlineStepTextReference(
+        source_step_id=source_step_id,
+        source_attempt_no=source_attempt_no,
+        selector=FlowResolvedInputJsonPath(kind="json_path", path=selector_path),
+        selection=FlowResolvedInputHashedSelection(
+            encoding="utf8",
+            sha256=hashlib.sha256(encoded).hexdigest(),
+            byte_size=len(encoded),
+        ),
+    )
+
+
+class InlineTranscript(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["inline_transcript"] = "inline_transcript"
+    text: str
+    reference: InlineStepTextReference
+
+    @model_validator(mode="after")
+    def _verified_text(self) -> InlineTranscript:
+        verify_inline_text(self.reference, self.text)
+        return self
+
+
+def verify_inline_text(reference: InlineStepTextReference, text: str) -> None:
+    encoded = text.encode("utf-8")
+    if (
+        len(encoded) != reference.selection.byte_size
+        or hashlib.sha256(encoded).hexdigest() != reference.selection.sha256
+    ):
+        raise StepOutputMetadataError("Inline text does not match its selected bytes.")
+
+
+def inline_transcript(
+    *,
+    text: str,
+    source_step_id: UUID,
+    source_attempt_no: int,
+    selector_path: tuple[FlowResolvedInputJsonPathSegment, ...] = ("input", "text"),
+) -> InlineTranscript:
+    return InlineTranscript(
+        text=text,
+        reference=inline_text_reference(
+            source_step_id=source_step_id,
+            source_attempt_no=source_attempt_no,
+            text=text,
+            selector_path=selector_path,
+        ),
+    )
+
+
+def inline_output_reference(
+    payload: Mapping[str, object],
+    *,
+    source_step_id: UUID,
+    source_attempt_no: int,
+) -> InlineStepTextReference:
+    text = payload.get("text")
+    if not isinstance(text, str):
+        raise StepOutputMetadataError("Inline output must contain text.")
+    identity = inline_output_identity(
+        payload, source_step_id=source_step_id, source_attempt_no=source_attempt_no
+    )
+    return inline_text_reference(
+        source_step_id=source_step_id,
+        source_attempt_no=source_attempt_no,
+        text=text,
+        selector_path=identity[2],
+    )
+
+
+def inline_output_identity(
+    payload: Mapping[str, object],
+    *,
+    source_step_id: UUID,
+    source_attempt_no: int,
+) -> tuple[UUID, int, tuple[FlowResolvedInputJsonPathSegment, ...]]:
+    selector = (
+        FlowResolvedInputJsonPath.model_validate(payload["text_source_selector"])
+        if "text_source_selector" in payload
+        else FlowResolvedInputJsonPath(kind="json_path", path=("output", "text"))
+    )
+    return source_step_id, source_attempt_no, selector.path
+
+
 @dataclass(frozen=True)
 class ResolvedStepMaterial:
     source_step_id: UUID
     source_attempt_no: int
-    file_id: UUID
+    file_id: UUID | None
     checksum: str
     byte_size: int
     text: str
+    selector_path: tuple[FlowResolvedInputJsonPathSegment, ...] = ("output", "text")
+
+    @classmethod
+    def from_inline(
+        cls, *, reference: InlineStepTextReference, text: str
+    ) -> ResolvedStepMaterial:
+        verify_inline_text(reference, text)
+        return cls(
+            source_step_id=reference.source_step_id,
+            source_attempt_no=reference.source_attempt_no,
+            file_id=None,
+            checksum=reference.selection.sha256,
+            byte_size=reference.selection.byte_size,
+            text=text,
+            selector_path=reference.selector.path,
+        )
+
+    @property
+    def reference(self) -> StepMaterialReference:
+        if self.file_id is None:
+            return InlineStepTextReference(
+                source_step_id=self.source_step_id,
+                source_attempt_no=self.source_attempt_no,
+                selector=FlowResolvedInputJsonPath(
+                    kind="json_path", path=self.selector_path
+                ),
+                selection=FlowResolvedInputHashedSelection(
+                    encoding="utf8", sha256=self.checksum, byte_size=self.byte_size
+                ),
+            )
+        preview = utf8_prefix(self.text, max_bytes=min(256, self.byte_size - 1))
+        return FileBackedStepText(
+            preview=preview,
+            inline_text_bytes=len(preview.encode("utf-8")),
+            file_id=self.file_id,
+            checksum=self.checksum,
+            full_text_bytes=self.byte_size,
+            source_step_id=self.source_step_id,
+            source_attempt_no=self.source_attempt_no,
+        )
+
+    @property
+    def identity(self) -> StepMaterialIdentity:
+        if self.file_id is not None:
+            return self.file_id
+        return self.source_step_id, self.source_attempt_no, self.selector_path
 
 
 def build_step_material_aliases(
     *,
     materials: Sequence[ResolvedStepMaterial],
     max_inline_bytes: int,
-) -> tuple[FileBackedStepText, ...]:
+) -> tuple[StepMaterialReference, ...]:
     if not materials:
         return ()
-    aliases = tuple(
-        FileBackedStepText(
-            preview=(
-                preview := utf8_prefix(
-                    material.text, max_bytes=min(256, material.byte_size - 1)
-                )
-            ),
-            inline_text_bytes=len(preview.encode("utf-8")),
-            file_id=material.file_id,
-            checksum=material.checksum,
-            full_text_bytes=material.byte_size,
-            source_step_id=material.source_step_id,
-            source_attempt_no=material.source_attempt_no,
-        )
-        for material in materials
-    )
+    aliases = tuple(material.reference for material in materials)
     if (
         len(
             json.dumps(
@@ -244,11 +434,11 @@ def build_step_material_aliases(
     return aliases
 
 
-def parse_step_text_aliases(value: object) -> tuple[FileBackedStepText, ...]:
+def parse_step_text_aliases(value: object) -> tuple[StepMaterialReference, ...]:
     if not isinstance(value, list):
         return ()
     return tuple(
-        FileBackedStepText.model_validate(item) for item in cast(list[object], value)
+        _MATERIAL_REFERENCE.validate_python(item) for item in cast(list[object], value)
     )
 
 

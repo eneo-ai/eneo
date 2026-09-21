@@ -164,6 +164,7 @@ def build_folded_transcript(
             return skip_folded_transcript(
                 correction_set, "payload_rebuild_failed", previous_text
             )
+    folded_payload.pop("text_source_selector", None)
     return TranscriptCorrectionsFoldOutcome(
         correction_set=correction_set,
         previous_text=previous_text,

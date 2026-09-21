@@ -49,8 +49,12 @@ from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantE
 from eneo.flows.domain.speaker_labels import apply_speaker_names
 from eneo.flows.domain.step_output import (
     FileBackedStepText,
+    InlineTranscript,
     StepOutputMetadataError,
+    inline_output_reference,
+    inline_transcript,
     interpret_step_text,
+    material_reference_identity,
 )
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionSet
 from eneo.flows.domain.transcript_source import TranscriptSourceState
@@ -101,7 +105,7 @@ _REVIEW_RESUME_IDEMPOTENCY_KEY_MAX_LENGTH = 255
 _REVIEW_CHECKPOINT_SCHEMA_VERSION = 1
 # The reviewer edits the step's value; both persisted encodings of that value are
 # rebuilt from it, so neither is accepted from the client.
-_REVIEW_DERIVED_PAYLOAD_KEYS = frozenset({"text", "structured"})
+_REVIEW_DERIVED_PAYLOAD_KEYS = frozenset({"text", "structured", "text_source_selector"})
 
 # The authoritative value a reviewer submits: the text of a text step, or the
 # structured value of a JSON step.
@@ -729,8 +733,45 @@ class FlowRunReviewCheckpointService:
             return
         current = (run.input_payload_json or {}).get(FLOW_INPUT_TRANSCRIPTION_KEY)
         previous_payload = checkpoint.current_payload_json or {}
-        previous_text = previous_payload.get("text")
-        if current not in (source_text, previous_text):
+        transcript = (
+            InlineTranscript.model_validate(current)
+            if isinstance(current, dict)
+            and cast(dict[str, object], current).get("kind") == "inline_transcript"
+            else None
+        )
+        source_references = [
+            inline_output_reference(
+                previous_payload,
+                source_step_id=checkpoint.step_id,
+                source_attempt_no=checkpoint.attempt_no,
+            )
+        ]
+        extension = previous_payload.get("speaker_mapping")
+        if isinstance(extension, dict):
+            source = await self.flow_run_repo.get_step_result(
+                run_id=run.id,
+                tenant_id=run.tenant_id,
+                step_id=UUID(
+                    str(cast(dict[str, object], extension).get("source_step_id"))
+                ),
+            )
+            if source is not None and source.current_attempt_no is not None:
+                source_references.append(
+                    inline_output_reference(
+                        source.output_payload_json or {},
+                        source_step_id=source.step_id,
+                        source_attempt_no=source.current_attempt_no,
+                    )
+                )
+        if (
+            transcript is None
+            or material_reference_identity(transcript.reference)
+            not in {
+                material_reference_identity(reference)
+                for reference in source_references
+            }
+            or transcript.text not in (source_text, previous_payload.get("text"))
+        ):
             if required:
                 raise FlowBadRequestException(
                     "The downstream transcript changed. Reload before approval.",
@@ -742,7 +783,12 @@ class FlowRunReviewCheckpointService:
             run_id=run.id,
             tenant_id=run.tenant_id,
             input_payload_patch=FlowRunInputEnvelopePatch.transcription(
-                transcript=new_text
+                transcript=inline_transcript(
+                    text=new_text,
+                    source_step_id=checkpoint.step_id,
+                    source_attempt_no=checkpoint.attempt_no,
+                    selector_path=("output", "text"),
+                )
             ),
         )
 

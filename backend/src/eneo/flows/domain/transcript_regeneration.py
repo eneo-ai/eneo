@@ -8,6 +8,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowStepResult
+from eneo.flows.domain.step_output import InlineTranscript
 from eneo.flows.domain.transcript_source import TranscriptSource
 
 
@@ -18,7 +19,7 @@ class FlowRunPrefixSeed:
     provenance: dict[str, Any]
     kind: Literal["reviewed_transcript_snapshot", "reused_prefix"]
     review_established_step_ids: frozenset[UUID] = frozenset()
-    transcript: str | None = None
+    transcript: str | InlineTranscript | None = None
     transcript_sources: Mapping[UUID, TranscriptSource] = field(
         default_factory=dict[UUID, TranscriptSource]
     )

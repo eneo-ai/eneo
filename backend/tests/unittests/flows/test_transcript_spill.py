@@ -54,6 +54,17 @@ async def test_transcription_stages_an_exact_attempt_reference(spool_contract, u
     assert reference["step_id"] == str(step.step_id)
     assert reference["attempt_no"] == 3
     assert reference["bounds"]["segments_omitted_reason"] == 2
+    persisted = run.input_payload_json["transkribering"]
+    assert isinstance(persisted, dict)
+    assert persisted["text"] == "Transcript."
+    assert persisted["reference"]["source_step_id"] == str(step.step_id)
+    assert persisted["reference"]["source_attempt_no"] == 3
+    assert persisted["reference"]["selector"]["path"] == ["input", "text"]
+    assert persisted["reference"]["selection"] == {
+        "encoding": "utf8",
+        "sha256": sha256(b"Transcript.").hexdigest(),
+        "byte_size": len(b"Transcript."),
+    }
 
 
 async def test_per_source_audio_publishes_one_combined_attempt_source(
@@ -266,7 +277,7 @@ async def test_transcript_spills_once_and_persisted_inputs_are_bounded(
     assistant.get_response.assert_not_awaited()
     if not oversized:
         executor.file_service.save_generated_file.assert_not_awaited()
-        assert run.input_payload_json["transkribering"] == text
+        assert run.input_payload_json["transkribering"]["text"] == text
         assert stored_input["runtime_input"]["text"] == text
         assert payload["text"] == text
         assert "text_overflow" not in payload
@@ -324,7 +335,9 @@ async def test_transcript_audit_records_produced_character_count(
     ]
     assert len(audits) == 1
     assert audits[0]["metadata"]["extra"]["text_length"] == len(text.strip())
-    assert isinstance(run.input_payload_json["transkribering"], dict) == oversized
+    assert (
+        run.input_payload_json["transkribering"]["kind"] == "file_backed_step_text"
+    ) == oversized
 
 
 @pytest.mark.parametrize("oversized", [False, True])
@@ -354,7 +367,7 @@ async def test_transcribe_only_binding_preserves_output_and_artifact_identity(
     persisted = interpret_step_text(payload)
     if not oversized:
         assert persisted.text == expected
-        assert run.input_payload_json["transkribering"] == text
+        assert run.input_payload_json["transkribering"]["text"] == text
         executor.file_service.save_generated_file.assert_not_awaited()
         return
 
@@ -439,7 +452,7 @@ async def test_transcribe_only_binding_preserves_output_and_artifact_identity(
         )
         with pytest.raises(
             TypedIOValidationException,
-            match="Section processing requires exactly one file-backed material",
+            match="Section processing requires exactly one material",
         ) as caught:
             await executor._resolve_step_input(
                 step=section_step,
@@ -566,15 +579,19 @@ async def test_next_step_reads_complete_spilled_transcript(
 
 
 @pytest.mark.parametrize("binding", [None, "{{transkribering}}"])
-async def test_transcript_and_previous_step_select_one_section_material(user, binding):
+@pytest.mark.parametrize("inline", [False, True])
+async def test_transcript_and_previous_step_select_one_section_material(
+    user, binding, inline
+):
     from eneo.flows.domain.step_output import (
         ResolvedStepMaterial,
         build_step_material_aliases,
+        inline_transcript,
     )
     from tests.unittests.flows.test_text_sections import _case as section_case
 
     executor, _, assistant, run, state, step, text, file, questions, _ = section_case(
-        user, prompt="Current section: {{transkribering}}"
+        user, prompt="Current section: {{transkribering}}", inline=inline
     )
     source = state.prior_results[0]
     run.input_payload_json = {
@@ -592,6 +609,16 @@ async def test_transcript_and_previous_step_select_one_section_material(user, bi
             max_inline_bytes=2048,
         )[0].model_dump(mode="json")
     }
+    if inline:
+        run.input_payload_json["transkribering"] = inline_transcript(
+            text=text,
+            source_step_id=source.step_id,
+            source_attempt_no=source.current_attempt_no,
+        ).model_dump(mode="json")
+        source.output_payload_json["text_source_selector"] = {
+            "kind": "json_path",
+            "path": ["input", "text"],
+        }
     step = replace(step, input_bindings={"question": binding} if binding else None)
     result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
     manifest = SectionManifest.model_validate(
@@ -606,7 +633,10 @@ async def test_transcript_and_previous_step_select_one_section_material(user, bi
     ):
         assert call.kwargs["prompt_override"].startswith("Current section: " + section)
         assert text not in call.kwargs["prompt_override"]
-    executor.file_service.get_file_content.assert_awaited_once()
+    if inline:
+        executor.file_service.get_file_content.assert_not_awaited()
+    else:
+        executor.file_service.get_file_content.assert_awaited_once()
 
 
 async def test_failed_transcript_attempt_keeps_only_bounded_inputs(

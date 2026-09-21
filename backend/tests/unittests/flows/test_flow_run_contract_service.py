@@ -109,11 +109,13 @@ async def test_run_contract_projects_published_section_processing_steps(mode):
 
     assert len(contract.text_processing_steps) == 1
     processing = contract.text_processing_steps[0]
-    assert processing.step_id == step.id
-    assert processing.step_order == 1
-    assert processing.mode == mode
-    assert processing.output_array_key == "records"
-    assert processing.item_schema == {"type": "object"}
+    assert processing.model_dump(mode="json") == {
+        "step_id": str(step.id),
+        "step_order": 1,
+        "mode": mode,
+        "output_array_key": "records",
+        "item_schema": {"type": "object"},
+    }
 
 
 def _published_version(

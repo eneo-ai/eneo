@@ -5080,12 +5080,19 @@ async def test_create_run_rejects_invalid_run_label(label_creation, label):
 async def test_create_run_idempotency_includes_normalized_run_label(
     label_creation, replay_label, conflict, with_prefix_seed
 ):
+    from eneo.flows.domain.step_output import inline_transcript
+
     service, flow, run_repo = label_creation
     seed = (
         FlowRunPrefixSeed(
             kind="reviewed_transcript_snapshot",
             source_run_id=uuid4(),
-            transcript="Reviewed text",
+            transcript=inline_transcript(
+                text="Reviewed text",
+                source_step_id=uuid4(),
+                source_attempt_no=3,
+                selector_path=("output", "text"),
+            ),
             provenance={"version": 1},
             results=(),
         )
@@ -5101,10 +5108,15 @@ async def test_create_run_idempotency_includes_normalized_run_label(
     )
     fingerprint = run_repo.create.await_args.kwargs["request_fingerprint"]
     if seed is not None:
-        assert (
-            run_repo.create.await_args.kwargs["input_payload_json"]["transkribering"]
-            == "Reviewed text"
-        )
+        transcript = run_repo.create.await_args.kwargs["input_payload_json"][
+            "transkribering"
+        ]
+        assert transcript == inline_transcript(
+            text="Reviewed text",
+            source_step_id=seed.transcript.reference.source_step_id,
+            source_attempt_no=1,
+            selector_path=("output", "text"),
+        ).model_dump(mode="json")
         run_repo.seed_validated_prefix.assert_awaited_once_with(
             run=first.run, seed=seed
         )

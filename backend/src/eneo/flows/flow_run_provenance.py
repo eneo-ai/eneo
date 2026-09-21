@@ -21,6 +21,12 @@ from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.flow_step_attempt_input import MappedExecutionMode
 from eneo.flows.domain.rag_evidence import SourceUsageState
+from eneo.flows.domain.step_output import (
+    FlowResolvedInputHashedSelection as FlowResolvedInputHashedSelection,
+)
+from eneo.flows.domain.step_output import (
+    FlowResolvedInputJsonPath as FlowResolvedInputJsonPath,
+)
 from eneo.flows.domain.text_processing import (
     SummarizationProvenance,
     summarization_json_bytes,
@@ -49,17 +55,6 @@ FLOW_RESOLVED_INPUT_MAX_CANONICAL_BYTES = 1024 * 1024
 
 class _FlowResolvedInputModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-FlowResolvedInputJsonPathSegment: TypeAlias = (
-    Annotated[str, Field(strict=True, min_length=1)]
-    | Annotated[int, Field(strict=True, ge=0)]
-)
-
-
-class FlowResolvedInputJsonPath(_FlowResolvedInputModel):
-    kind: Literal["json_path"]
-    path: tuple[FlowResolvedInputJsonPathSegment, ...]
 
 
 class _FlowResolvedInputSelectedSource(_FlowResolvedInputModel):
@@ -106,12 +101,6 @@ FlowResolvedInputSource: TypeAlias = Annotated[
     | FlowResolvedInputHttpResponseSource,
     Field(discriminator="kind"),
 ]
-
-
-class FlowResolvedInputHashedSelection(_FlowResolvedInputModel):
-    encoding: Literal["utf8", "canonical_json"]
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    byte_size: int = Field(strict=True, ge=0)
 
 
 class FlowResolvedInputBoundFileSelection(_FlowResolvedInputModel):

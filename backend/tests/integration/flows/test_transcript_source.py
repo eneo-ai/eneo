@@ -1197,3 +1197,125 @@ async def test_word_write_rollback_preserves_prior_words_and_source(
         )
         assert words.segments_hash == "a" * 64
         assert words.words_json[0]["words"][0]["word"] == "Prior"
+
+
+@pytest.mark.parametrize("mode", ["summarize", "process_each_section"])
+async def test_inline_transcript_sections_persist_identity_after_reload(
+    source_scenario, mode
+):
+    from dataclasses import replace
+
+    from eneo.flows.domain.flow import FlowStepResultStatus
+    from eneo.flows.domain.step_output import InlineTranscript, inline_transcript
+    from eneo.flows.domain.text_processing import SectionManifest
+    from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
+    from eneo.flows.flow_run_provenance import parse_attempt_provenance
+    from eneo.flows.runtime.step_execution_runtime import build_output_payload
+    from eneo.flows.runtime.step_result_builder import build_completed_step_result
+    from tests.unittests.flows.test_text_sections import _case
+
+    session, scenario, user = source_scenario
+    repo = FlowRunRepository(session)
+    text = "A short inline meeting transcript."
+    transcript = inline_transcript(
+        text=text,
+        source_step_id=scenario.transcription_step_id,
+        source_attempt_no=1,
+    )
+    for order, step_id in enumerate(
+        (scenario.transcription_step_id, scenario.plain_step_id), 1
+    ):
+        await repo.create_or_get_attempt_started(
+            run_id=scenario.flow_run_id,
+            flow_id=scenario.flow_id,
+            tenant_id=scenario.tenant_id,
+            step_id=step_id,
+            step_order=order,
+            attempt_no=1,
+            dispatch_task_id="inline-material-test",
+        )
+    producer = await repo.get_step_result(
+        run_id=scenario.flow_run_id,
+        tenant_id=scenario.tenant_id,
+        step_id=scenario.transcription_step_id,
+    )
+    producer = producer.model_copy(
+        update={
+            "status": FlowStepResultStatus.COMPLETED,
+            "current_attempt_no": 1,
+            "output_payload_json": {
+                "text": text,
+                "text_source_selector": transcript.reference.selector.model_dump(
+                    mode="json"
+                ),
+            },
+        }
+    )
+    await repo.save_step_result(
+        scenario.flow_run_id, producer, scenario.tenant_id, attempt_no=1
+    )
+    await repo.update_input_payload(
+        run_id=scenario.flow_run_id,
+        tenant_id=scenario.tenant_id,
+        input_payload_patch=FlowRunInputEnvelopePatch.transcription(
+            transcript=transcript
+        ),
+    )
+    await session.commit()
+    run = await repo.get(run_id=scenario.flow_run_id, tenant_id=scenario.tenant_id)
+    assert (
+        InlineTranscript.model_validate(run.input_payload_json["transkribering"])
+        == transcript
+    )
+    executor, _, assistant, _, state, step, _, _, questions, _ = _case(
+        user,
+        text=text,
+        inline=True,
+        prompt="Read {{transkribering}}",
+    )
+    state.prior_results = [producer]
+    state.completed_by_order = {1: producer}
+    step = replace(
+        step,
+        step_id=scenario.plain_step_id,
+        input_config={"text_processing": {"mode": mode}},
+    )
+    executor.flow_run_repo = repo
+    executor.session = session
+    await session.commit()
+    result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    assert questions == [text]
+    assert assistant.get_response.await_count == 1
+    claimed = await repo.get_step_result(
+        run_id=run.id, tenant_id=run.tenant_id, step_id=step.step_id
+    )
+    step = replace(step, assistant_id=claimed.assistant_id)
+    completed = build_completed_step_result(
+        claimed=claimed,
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step=step,
+        output=result.output,
+        output_payload_json=build_output_payload(result.output),
+        execution_hash="inline-material-test",
+    )
+    await repo.save_step_result(run.id, completed, run.tenant_id, attempt_no=1)
+    await session.commit()
+    stored = await repo.get_step_result(
+        run_id=run.id, tenant_id=run.tenant_id, step_id=step.step_id
+    )
+    manifest = SectionManifest.model_validate(
+        stored.output_payload_json["section_manifest"]
+    )
+    assert manifest.sources == (transcript.reference,)
+    attempt = await repo.get_step_attempt(
+        run_id=run.id, tenant_id=run.tenant_id, step_id=step.step_id, attempt_no=1
+    )
+    aliases = attempt.input_payload_json["execution_inputs"][0]["material_aliases"]
+    assert aliases == [transcript.reference.model_dump(mode="json")]
+    if mode == "summarize":
+        provenance = parse_attempt_provenance(attempt.provenance_json).provenance
+        assert provenance.summarization.sources == (transcript.reference,)
+        assert provenance.summarization.rounds == 0
+        assert len(provenance.summarization.records) == 1

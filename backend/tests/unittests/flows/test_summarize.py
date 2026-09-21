@@ -50,9 +50,10 @@ def _case(*args, **kwargs):
     return case
 
 
-async def test_summarize_fitting_material_uses_one_call_and_one_record(user):
+@pytest.mark.parametrize("inline", [False, True])
+async def test_summarize_fitting_material_uses_one_call_and_one_record(user, inline):
     executor, repo, assistant, run, state, step, _, _, questions, _ = _case(
-        user, text="A short municipal report."
+        user, text="A short municipal report.", inline=inline
     )
     step = replace(step, input_config={"text_processing": {"mode": "summarize"}})
 

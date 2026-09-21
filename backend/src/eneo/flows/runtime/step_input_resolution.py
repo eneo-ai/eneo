@@ -36,8 +36,13 @@ from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
     FileBackedStepText,
+    InlineTranscript,
+    StepMaterialIdentity,
     StepOutputMetadataError,
+    inline_output_identity,
+    inline_output_reference,
     interpret_step_text,
+    material_reference_identity,
 )
 from eneo.flows.domain.text_processing import text_processing_config
 from eneo.flows.domain.transcript_source import (
@@ -223,8 +228,8 @@ async def resolve_step_input(
         step_input_override=step_input_override,
     )
     if state is not None:
-        merged_materials = {item.file_id: item for item in state.resolved_materials}
-        merged_materials.update({item.file_id: item for item in materials})
+        merged_materials = {item.identity: item for item in state.resolved_materials}
+        merged_materials.update({item.identity: item for item in materials})
         state.resolved_materials = tuple(merged_materials.values())
     processing_ceiling_bytes = (
         effective_upload_ceiling_bytes(deps.input_limits.file_max_size_bytes)
@@ -390,7 +395,7 @@ async def resolve_step_input(
             prior_results=prior_results,
             state=state,
             resolved_file_text={
-                material.file_id: material.text for material in materials
+                material.identity: material.text for material in materials
             },
         )
 
@@ -402,7 +407,7 @@ async def resolve_step_input(
         state=state,
         runtime_input_metadata=runtime_input_metadata,
         variable_resolver=deps.variable_resolver,
-        resolved_file_text={material.file_id: material.text for material in materials},
+        resolved_file_text={material.identity: material.text for material in materials},
     )
     if binding is not None:
         input_text = binding.text
@@ -562,7 +567,9 @@ def finalize_step_input_question(
 ) -> tuple[str, dict[str, Any] | list[Any] | None]:
     if step.input_type != "json":
         return text, structured
-    if binding is not None and binding.structured is None:
+    if (binding is not None and binding.structured is None) or text_processing_config(
+        step.input_config
+    ) is not None:
         # Explicit underlag is the complete LLM input; JSON normalization
         # may parse it for contracts, but must not replace it with source data.
         try:
@@ -771,7 +778,7 @@ def resolve_step_input_binding(
     state: RunExecutionState | None,
     runtime_input_metadata: dict[str, Any] | None,
     variable_resolver: Any,
-    resolved_file_text: Mapping[UUID, str] | None = None,
+    resolved_file_text: Mapping[StepMaterialIdentity, str] | None = None,
 ) -> ResolvedStepInputBinding | None:
     bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
     if bindings is None:
@@ -1273,6 +1280,7 @@ async def _resolve_step_materials(
     results = _prior_results_by_order(prior_results=prior_results, state=state)
     selected: list[FlowStepResult] = []
     selected_transcript = False
+    processing = text_processing_config(step.input_config) is not None
     template = (
         effective_question_binding(step.input_bindings)
         if step_input_override is None
@@ -1296,7 +1304,9 @@ async def _resolve_step_materials(
             order = reference.step_order
             if reference.head == "föregående_steg" and not reference.tail:
                 order = step.step_order - 1
-            if reference.tail not in {"", "output", "output.text"}:
+            if reference.tail not in {"", "output", "output.text"} and not (
+                processing and reference.tail.startswith("output.")
+            ):
                 continue
             if order is not None and order < step.step_order and order in results:
                 selected.append(results[order])
@@ -1318,13 +1328,33 @@ async def _resolve_step_materials(
                     step.input_source == "all_previous_steps"
                     or order == step.step_order - 1
                 )
-                and not _can_read_structured_output(result, input_type=step.input_type)
+                and (
+                    text_processing_config(step.input_config) is not None
+                    or not _can_read_structured_output(
+                        result, input_type=step.input_type
+                    )
+                )
             ]
         )
+    if processing and step_input_override is None:
+        for ref in source_ref_bindings(step.input_bindings):
+            order = _source_ref_step_order(ref.step_ref, state=state)
+            if order is not None and order < step.step_order and order in results:
+                selected.append(results[order])
     artifacts: list[tuple[FlowStepResult, FileBackedStepText]] = []
-    selected_material_ids: set[tuple[str, UUID]] = set()
-    for result in selected:
+    selected_material_ids: set[StepMaterialIdentity] = set()
+    inline_materials: dict[StepMaterialIdentity, ResolvedStepMaterial] = {}
+    for result in {result.step_id: result for result in selected}.values():
         payload = result.output_payload_json
+        if (
+            text_processing_config(step.input_config) is not None
+            and isinstance(payload, dict)
+            and isinstance(payload.get("structured"), (dict, list))
+        ):
+            raise TypedIOValidationException(
+                "Section processing requires text; selected upstream output is structured.",
+                code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+            )
         if not isinstance(payload, dict) or (
             "text" not in payload and OUTPUT_TEXT_OVERFLOW_KEY not in payload
         ):
@@ -1338,11 +1368,71 @@ async def _resolve_step_materials(
             ) from exc
         if isinstance(text, FileBackedStepText):
             artifacts.append((result, text))
-            selected_material_ids.add(("file", text.file_id))
-        else:
-            selected_material_ids.add(("step", result.step_id))
+            selected_material_ids.add(text.file_id)
+        elif processing:
+            if result.current_attempt_no is None:
+                raise TypedIOValidationException(
+                    "Selected step text is missing its source attempt identity.",
+                    code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+                )
+            try:
+                reference = inline_output_reference(
+                    payload,
+                    source_step_id=result.step_id,
+                    source_attempt_no=result.current_attempt_no,
+                )
+            except ValueError as exc:
+                raise TypedIOValidationException(
+                    "Selected step text has malformed persisted metadata.",
+                    code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+                ) from exc
+            identity = material_reference_identity(reference)
+            selected_material_ids.add(identity)
+            inline_materials[identity] = ResolvedStepMaterial.from_inline(
+                reference=reference,
+                text=text.text,
+            )
     transcript = (run.input_payload_json or {}).get(FLOW_INPUT_TRANSCRIPTION_KEY)
-    if selected_transcript and isinstance(transcript, dict):
+    if (
+        selected_transcript
+        and isinstance(transcript, dict)
+        and cast(dict[str, object], transcript).get("kind") == "inline_transcript"
+    ):
+        try:
+            stored_transcript = InlineTranscript.model_validate(transcript)
+        except ValueError as exc:
+            raise TypedIOValidationException(
+                "Transcript has malformed persisted text metadata.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            ) from exc
+        reference = stored_transcript.reference
+        if processing and not any(
+            result.step_id == reference.source_step_id
+            and result.current_attempt_no == reference.source_attempt_no
+            and result.step_order < step.step_order
+            for result in results.values()
+        ):
+            raise TypedIOValidationException(
+                "Transcript is missing its source attempt identity.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            )
+        identity = material_reference_identity(reference)
+        selected_material_ids.add(identity)
+        if processing:
+            existing = inline_materials.get(identity)
+            if existing is not None and (
+                existing.checksum != reference.selection.sha256
+                or existing.byte_size != reference.selection.byte_size
+            ):
+                raise TypedIOValidationException(
+                    "Selected inline text has inconsistent content for its source identity.",
+                    code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+                )
+            inline_materials[identity] = ResolvedStepMaterial.from_inline(
+                reference=reference,
+                text=stored_transcript.text,
+            )
+    elif selected_transcript and isinstance(transcript, dict):
         try:
             reference = FileBackedStepText.model_validate(transcript)
         except ValueError as exc:
@@ -1365,7 +1455,7 @@ async def _resolve_step_materials(
                 "Transcript is missing its source attempt identity.",
                 code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
             )
-        selected_material_ids.add(("file", reference.file_id))
+        selected_material_ids.add(reference.file_id)
         artifacts.append((source, reference))
     unique_artifacts: dict[UUID, tuple[FlowStepResult, FileBackedStepText]] = {}
     for result, reference in artifacts:
@@ -1386,21 +1476,22 @@ async def _resolve_step_materials(
             unique_artifacts[reference.file_id] = (result, reference)
     artifacts = list(unique_artifacts.values())
     if text_processing_config(step.input_config) is not None and (
-        len(selected_material_ids | {("file", file_id) for file_id in runtime_file_ids})
-        != 1
-        or not (artifacts or runtime_file_ids)
+        len(selected_material_ids | set(runtime_file_ids)) != 1
+        or not (artifacts or inline_materials or runtime_file_ids)
     ):
         raise TypedIOValidationException(
-            "Section processing requires exactly one file-backed material.",
+            "Section processing requires exactly one material.",
             code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
         )
     if not artifacts:
-        return ()
+        return tuple(inline_materials.values())
     if deps.input_limits is None:
         raise RuntimeError(
             "Resolved Flow input limits are required before loading material"
         )
-    empty_material = {reference.file_id: "" for _, reference in artifacts}
+    empty_material: dict[StepMaterialIdentity, str] = {
+        reference.file_id: "" for _, reference in artifacts
+    }
     runtime_metadata = (
         _build_runtime_input_metadata(
             text="",
@@ -1574,7 +1665,7 @@ async def _resolve_step_materials(
             byte_size=reference.size_bytes,
             text=cache[cache_key],
         )
-    return tuple(materials.values())
+    return (*inline_materials.values(), *materials.values())
 
 
 async def admit_runtime_files(
@@ -2010,23 +2101,32 @@ def _substitute_step_text(
     *,
     prior_results: list[FlowStepResult],
     state: RunExecutionState | None,
-    resolved_file_text: Mapping[UUID, str],
+    resolved_file_text: Mapping[StepMaterialIdentity, str],
 ) -> tuple[list[FlowStepResult], RunExecutionState | None]:
     def resolved_result(result: FlowStepResult) -> FlowStepResult:
         payload = dict(result.output_payload_json or {})
-        if OUTPUT_TEXT_OVERFLOW_KEY not in payload:
+        if "text" not in payload:
             return result
         try:
             text = interpret_step_text(payload)
         except StepOutputMetadataError:
             return result
-        if (
-            not isinstance(text, FileBackedStepText)
-            or text.file_id not in resolved_file_text
-        ):
+        identity: StepMaterialIdentity
+        if isinstance(text, FileBackedStepText):
+            identity = text.file_id
+        elif result.current_attempt_no is not None:
+            identity = inline_output_identity(
+                payload,
+                source_step_id=result.step_id,
+                source_attempt_no=result.current_attempt_no,
+            )
+        else:
+            return result
+        if identity not in resolved_file_text:
             return result
         payload.pop(OUTPUT_TEXT_OVERFLOW_KEY, None)
-        payload["text"] = resolved_file_text[text.file_id]
+        payload.pop("text_source_selector", None)
+        payload["text"] = resolved_file_text[identity]
         return result.model_copy(update={"output_payload_json": payload})
 
     prior_results = [resolved_result(result) for result in prior_results]
@@ -2050,7 +2150,7 @@ def resolve_default_step_input_text(
     source_text: str,
     runtime_input_text: str | None,
     logger: Any,
-    resolved_file_text: Mapping[UUID, str] | None = None,
+    resolved_file_text: Mapping[StepMaterialIdentity, str] | None = None,
 ) -> tuple[str, str]:
     if resolved_file_text:
         prior_results, state = _substitute_step_text(
