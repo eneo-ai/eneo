@@ -4,9 +4,22 @@ set -e
 
 # Check if running as worker
 if [[ "${RUN_AS_WORKER,,}" == "true" ]]; then
-    echo "Starting ARQ worker for background task processing"
-    echo "Launching..."
-    exec arq src.eneo.worker.arq.WorkerSettings
+    worker_role="${WORKER_ROLE:-general}"
+    case "$worker_role" in
+        general)
+            worker_settings="src.eneo.worker.arq.WorkerSettings"
+            ;;
+        crawler)
+            worker_settings="src.eneo.worker.arq.CrawlerWorkerSettings"
+            ;;
+        *)
+            echo "Unsupported WORKER_ROLE: $worker_role" >&2
+            exit 2
+            ;;
+    esac
+
+    echo "Starting $worker_role ARQ worker"
+    exec arq "$worker_settings"
 fi
 
 # Skip Alembic migrations in OpenAPI-only mode

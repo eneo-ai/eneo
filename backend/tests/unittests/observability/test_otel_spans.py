@@ -11,6 +11,9 @@ Severity convention: Python logging names (WARNING, CRITICAL) throughout.
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from unittest.mock import MagicMock
 
 import pytest
@@ -36,6 +39,43 @@ from eneo.server.middleware.trace_id import (
     TraceIdResponseMiddleware,
     current_trace_id,
 )
+
+
+def test_init_observability_does_not_retain_unexported_metrics() -> None:
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import json
+
+from opentelemetry import metrics
+from opentelemetry.metrics._internal import _PROXY_METER_PROVIDER
+
+from eneo.main.observability import init_observability
+
+init_observability()
+provider = metrics.get_meter_provider()
+for index in range(1000):
+    metrics.get_meter(f\"probe-{index}\").create_histogram(\"probe.duration\")
+print(json.dumps({
+    \"provider\": type(provider).__name__,
+    \"meter\": type(metrics.get_meter(\"probe-final\")).__name__,
+    \"retained_proxy_meters\": len(_PROXY_METER_PROVIDER._meters),
+}))
+""",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(probe.stdout.splitlines()[-1])
+
+    assert result == {
+        "provider": "NoOpMeterProvider",
+        "meter": "NoOpMeter",
+        "retained_proxy_meters": 0,
+    }
 
 
 @pytest.fixture()

@@ -81,7 +81,7 @@ frontend/
 - Pydantic 2 for request/response models and `pydantic-settings` for configuration
 - `dependency-injector` container wiring services and repositories per request
 - LiteLLM as the transport for completion, embedding, and transcription providers
-- Scrapy for web crawling, `pdfplumber`, `docx2python`, `python-pptx`, and
+- Asynchronous HTTP crawling, with `pdfplumber`, `docx2python`, `python-pptx`, and
   pandas for text extraction
 
 **Process model:** the backend container runs Alembic migrations and then
@@ -252,12 +252,12 @@ covers deployment and operations.
 - **Language**: Python with async/await
 - **Concurrency**: `WORKER_MAX_JOBS` concurrent jobs per worker process
   (default 15) and `TENANT_WORKER_CONCURRENCY_LIMIT` concurrent crawl jobs per
-  tenant (default 4), enforced with a Redis semaphore
+  tenant (default 4), enforced through durable PostgreSQL admission
 
 **Responsibilities:**
 
 - Document upload processing (extraction, chunking, embedding, versioned publish)
-- Web crawling, metered by a crawl feeder that releases queued crawls in batches
+- Crawl admission and recovery, with execution on the dedicated crawler worker
 - SharePoint and Confluence synchronisation, including subscription renewal
 - Audit log export and cleanup, usage statistics, conversation insights
 - Scheduled jobs: daily data retention, weekly cleanup of orphaned models,
@@ -283,6 +283,46 @@ async def log_audit_event(
 @worker.cron_job(hour=3, minute=0)  # Run daily at 3 AM
 ```
 
+**Web Crawling:**
+
+The API, general worker and crawler worker share a durable crawl lifecycle in
+PostgreSQL. Redis carries work to the dedicated `arq:crawler` queue.
+
+1. **Admission:** A manual request or schedule creates a crawl run in PostgreSQL
+   before dispatch. Concurrency limits determine when queued work can start.
+2. **Execution:** The crawler worker claims an execution attempt with a renewable
+   lease, then discovers pages through links or a sitemap. It records progress
+   against that attempt.
+3. **Publication:** Extracted text is hashed, split and embedded. Unchanged text
+   with the same embedding model reuses stored content. Publication checks that
+   the attempt still owns its lease before committing each batch.
+4. **Recovery:** The general worker reconciles missed deliveries, expired leases
+   and transport cleanup. A dead execution becomes interrupted; a stale worker
+   cannot publish after losing ownership. Both worker services are required.
+
+Recursive crawls fetch HTML again so unchanged pages can still lead to new or
+previously missed descendants. Conditional page requests are limited to sitemap
+crawls with file downloads disabled. Robots server errors, timeouts and network
+failures stop discovery after bounded retries. Only complete discovery can
+authorize removal of sources no longer present; partial runs preserve them.
+
+A normalized source URL identifies each website document. Files at different
+URLs remain separate even when their names match; a title change at the same URL
+keeps the source's version history. Migration preserves existing metadata and
+citation IDs. Unknown or ambiguous legacy URLs remain available and require
+resolution before publication can replace them. Changed content retains previous
+versions, while removal of an absent source removes its history and citation
+references. There is no automatic age-based retention policy. Crawl history is
+paginated, and the UI loads older runs on request.
+
+Uploads and crawl downloads share extraction subprocesses with time, output,
+archive and PDF bounds; Linux also enforces address-space limits and parent-death
+cleanup. HTML parsing and text splitting use a bounded thread pool so they do not
+run directly on the worker's event loop. Quota checks include retained versions
+and serialize the final commit after provider work, rolling back an over-limit
+publication. Stored knowledge also prevents changes to embedding model semantics
+or provider routing; those changes require a new model and reindexing.
+
 The worker writes a heartbeat key to Redis; `/api/healthz` reports the worker
 as unhealthy when that heartbeat is stale.
 
@@ -307,7 +347,6 @@ so no login session lives in Redis.
 - Pub/sub channel between worker and backend: task status updates are published
   by the worker and forwarded to browsers over the WebSocket
 - API-key rate limiting counters per key over `API_KEY_RATE_LIMIT_WINDOW_SECONDS`
-- Per-tenant crawl concurrency semaphores
 - Small coordination state: pending MCP tool approvals, one-time module-login
   tickets, the runtime debug toggle, audit-session rate limits
 

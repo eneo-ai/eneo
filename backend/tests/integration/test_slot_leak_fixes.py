@@ -6,8 +6,9 @@ Tests cover:
 2. Partial batch failure tracking - successful_urls only includes actually persisted URLs
 3. Embedding API failures - errors don't corrupt successful_urls tracking
 4. Cancellation safety - cleanup on task cancellation
-5. Zombie job prevention - stale crawlers don't corrupt state
-6. Redis TTL management - heartbeat refreshes both counter and flag TTL
+
+PostgreSQL lease expiry, stale-worker fencing, and crash recovery are covered by
+test_crawl_lifecycle.py through observable database behavior.
 
 Run with: pytest tests/integration/test_slot_leak_fixes.py -v
 """
@@ -53,6 +54,8 @@ class TestPersistBatchReturnType:
             tenant_id=uuid4(),
             tenant_slug="test",
             user_id=uuid4(),
+            attempt_id=uuid4(),
+            lease_owner="test-worker",
             embedding_model_id=None,
             embedding_model_name=None,
             embedding_model_open_source=False,
@@ -90,6 +93,8 @@ class TestPersistBatchReturnType:
             tenant_id=uuid4(),
             tenant_slug="test",
             user_id=uuid4(),
+            attempt_id=uuid4(),
+            lease_owner="test-worker",
             embedding_model_id=None,
             embedding_model_name=None,
             embedding_model_open_source=False,
@@ -292,71 +297,6 @@ class TestCancellationSafety:
         pass  # Documentation test
 
 
-# =============================================================================
-# INTEGRATION TESTS: Redis TTL and Zombie Prevention
-# =============================================================================
-
-
-class TestRedisTTLManagement:
-    """Tests for Redis TTL management in heartbeat."""
-
-    def test_heartbeat_refreshes_both_keys(self):
-        """
-        Heartbeat should refresh TTL for BOTH:
-        - tenant:{tenant_id}:active_jobs (counter)
-        - job:{job_id}:slot_preacquired (flag)
-
-        This is documented in the HeartbeatMonitor._refresh_redis_ttl() method.
-        Note: Heartbeat logic was extracted to HeartbeatMonitor during refactoring.
-        """
-        import inspect
-
-        from eneo.worker.crawl.heartbeat import HeartbeatMonitor
-
-        source = inspect.getsource(HeartbeatMonitor._refresh_redis_ttl)
-
-        # Verify pipeline pattern for atomic TTL refresh
-        assert "pipe = self._redis_client.pipeline(transaction=True)" in source
-        assert "pipe.expire(concurrency_key, self._semaphore_ttl_seconds)" in source
-        assert "pipe.expire(flag_key, self._semaphore_ttl_seconds)" in source
-
-
-class TestZombieJobPrevention:
-    """Tests for zombie job prevention mechanisms."""
-
-    def test_preemption_check_exists(self):
-        """
-        Crawl task should check for job preemption during heartbeat.
-
-        If job status is FAILED, crawl should exit gracefully.
-        Note: Preemption logic was extracted to HeartbeatMonitor during refactoring.
-        """
-        import inspect
-
-        from eneo.worker.crawl.heartbeat import HeartbeatMonitor
-
-        source = inspect.getsource(HeartbeatMonitor._check_preemption)
-
-        # Verify preemption check exists in HeartbeatMonitor
-        assert "job.status == JobStatus.FAILED" in source
-        assert "JobPreemptedError" in source
-
-    def test_preemption_handling_in_crawl_task(self):
-        """
-        crawl_task should handle JobPreemptedError from HeartbeatMonitor
-        and return preempted_during_crawl status.
-        """
-        import inspect
-
-        from eneo.worker import crawl_tasks
-
-        source = inspect.getsource(crawl_tasks.crawl_task)
-
-        # Verify crawl_task handles preemption from HeartbeatMonitor
-        assert "JobPreemptedError" in source
-        assert "preempted_during_crawl" in source
-
-
 class TestCrawlContextSecurity:
     """Tests for security measures in CrawlContext."""
 
@@ -376,6 +316,8 @@ class TestCrawlContextSecurity:
             tenant_id=uuid4(),
             tenant_slug="test",
             user_id=uuid4(),
+            attempt_id=uuid4(),
+            lease_owner="test-worker",
             embedding_model_id=None,
             embedding_model_name=None,
             embedding_model_open_source=False,

@@ -23,6 +23,36 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from eneo.main.container.container import Container
 
+
+async def test_session_manager_honors_configured_pool_capacity(
+    test_settings, monkeypatch
+):
+    from eneo.database import database
+
+    configured = test_settings.model_copy(
+        update={
+            "db_pool_size": 1,
+            "db_pool_max_overflow": 0,
+            "db_pool_timeout": 0.1,
+            "db_pool_pre_ping": True,
+            "db_pool_recycle": 60,
+        }
+    )
+    monkeypatch.setattr(database, "get_settings", lambda: configured, raising=False)
+    manager = database.DatabaseSessionManager()
+    manager.init(test_settings.database_url)
+    try:
+        async with manager.connect() as first:
+            assert await first.scalar(text("SELECT 1")) == 1
+            with pytest.raises(SQLAlchemyTimeoutError):
+                async with manager.connect():
+                    pass
+        async with manager.connect() as reused:
+            assert await reused.scalar(text("SELECT 1")) == 1
+    finally:
+        await manager.close()
+
+
 # =============================================================================
 # UNIT TESTS: Container.session_scope() method
 # =============================================================================

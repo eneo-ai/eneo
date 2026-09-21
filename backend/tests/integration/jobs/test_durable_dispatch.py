@@ -96,13 +96,22 @@ async def test_durable_enqueue_waits_for_commit(admin_user) -> None:
                     name=params.filename,
                     task_params=params,
                 )
-                assert await job_manager.get_job_status(job.id) == JobStatus.not_found
+                assert (
+                    await job_manager.get_job_status(job.id, Task.UPLOAD_FILE)
+                    == JobStatus.not_found
+                )
 
             for _ in range(50):
-                if await job_manager.get_job_status(job.id) == JobStatus.queued:
+                if (
+                    await job_manager.get_job_status(job.id, Task.UPLOAD_FILE)
+                    == JobStatus.queued
+                ):
                     break
                 await asyncio.sleep(0.01)
-            assert await job_manager.get_job_status(job.id) == JobStatus.queued
+            assert (
+                await job_manager.get_job_status(job.id, Task.UPLOAD_FILE)
+                == JobStatus.queued
+            )
     finally:
         await job_manager.close()
 
@@ -119,7 +128,7 @@ async def test_redispatch_recovers_lost_delivery_with_real_redis(
         params=params,
     )
     await job_manager.init()
-    assert await job_manager.get_job_status(job_id) == JobStatus.not_found
+    assert await job_manager.get_job_status(job_id, task) == JobStatus.not_found
 
     assert job_manager._redis is not None
     arq_job = ArqJob(str(job_id), redis=job_manager._redis)

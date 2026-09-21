@@ -4,11 +4,11 @@ on:
   push:
     branches:
       - develop
-      - 'release/**'
+      - "release/**"
   pull_request:
     branches:
       - develop
-      - 'release/**'
+      - "release/**"
   # Merge queue candidates (develop + queued PRs). Every scoped job runs in
   # full here (their conditions only scope pull_request events), and the
   # aggregate CI job reports the required "CI" check on the candidate.
@@ -238,6 +238,17 @@ jobs:
         # -n 4: public-repo ubuntu-latest runners have 4 vCPUs, and each xdist
         # worker gets its own session-scoped Postgres testcontainer.
         run: uv run pytest -v -n 4 -m integration tests/integration/
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          DOCKER_HOST: unix:///var/run/docker.sock
+
+      - name: Verify crawler migration rollback
+        # These tests own disposable databases and deliberately change their schema.
+        run: >-
+          uv run pytest -q -m migration_isolation
+          tests/integration/migrations/test_crawl_lifecycle_round_trip.py
+          tests/integration/migrations/test_website_source_url_identity.py
+          tests/integration/migrations/test_crawler_develop_rollback.py
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock

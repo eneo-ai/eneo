@@ -89,6 +89,8 @@ class ErrorCodes(int, Enum):
     PASSWORD_POLICY_VIOLATION = 9059
     LOCAL_PASSWORD_CHANGE_UNAVAILABLE = 9060
     CURRENT_PASSWORD_INCORRECT = 9061
+    WEBSITE_CRAWL_ACTIVE = 9062
+    WEBSITE_CRAWL_CLEANUP_PENDING = 9063
 
 
 class NotFoundException(Exception):
@@ -163,7 +165,7 @@ class BadRequestException(Exception):
 
 
 class ModelInUseException(Exception):
-    """Raised when trying to soft-delete a model that is still referenced.
+    """Raised when deleting or semantically changing a model still in use.
 
     Surfaced as 400 with a dedicated error code so the frontend can show a
     localized "Model is in use" message and offer the migration flow as a
@@ -175,6 +177,14 @@ class ModelInUseException(Exception):
 
 
 class QuotaExceededException(Exception):
+    pass
+
+
+class TenantQuotaExceededException(QuotaExceededException):
+    pass
+
+
+class UserQuotaExceededException(QuotaExceededException):
     pass
 
 

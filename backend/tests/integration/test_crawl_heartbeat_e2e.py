@@ -358,7 +358,6 @@ class TestHeartbeatWithOtherSettings:
             json={
                 "crawl_heartbeat_interval_seconds": 120,
                 "retry_times": 5,
-                "crawl_job_max_age_seconds": 3600,
             },
             headers={"X-API-Key": super_admin_token},
         )
@@ -371,28 +370,18 @@ class TestHeartbeatWithOtherSettings:
                 "crawl_heartbeat_interval_seconds", tenant.crawler_settings
             )
             retries = get_crawler_setting("retry_times", tenant.crawler_settings)
-            max_age = get_crawler_setting(
-                "crawl_job_max_age_seconds", tenant.crawler_settings
-            )
-
-            # Verify all settings configured independently
             assert heartbeat == 120
             assert retries == 5
-            assert max_age == 3600
 
-    async def test_heartbeat_with_stale_threshold(
+    async def test_heartbeat_is_independent_of_page_batching(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container
     ):
-        """Heartbeat interval should be shorter than stale threshold.
-
-        If heartbeat > stale threshold, job would be marked stale before heartbeat fires.
-        """
-        # Configure with reasonable relationship
+        """Time-based leases do not depend on how many pages were persisted."""
         await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
             json={
-                "crawl_heartbeat_interval_seconds": 300,  # 5 minutes
-                "crawl_stale_threshold_minutes": 10,  # 10 minutes
+                "crawl_heartbeat_interval_seconds": 300,
+                "crawl_page_batch_size": 200,
             },
             headers={"X-API-Key": super_admin_token},
         )
@@ -401,15 +390,12 @@ class TestHeartbeatWithOtherSettings:
             tenant_repo = container.tenant_repo()
             tenant = await tenant_repo.get(test_tenant.id)
 
-            heartbeat_seconds = get_crawler_setting(
+            heartbeat = get_crawler_setting(
                 "crawl_heartbeat_interval_seconds", tenant.crawler_settings
             )
-            stale_minutes = get_crawler_setting(
-                "crawl_stale_threshold_minutes", tenant.crawler_settings
+            page_batch_size = get_crawler_setting(
+                "crawl_page_batch_size", tenant.crawler_settings
             )
 
-            # Verify sensible relationship
-            stale_seconds = stale_minutes * 60
-            assert heartbeat_seconds < stale_seconds, (
-                "Heartbeat should fire before stale threshold to prevent false positives"
-            )
+            assert heartbeat == 300
+            assert page_batch_size == 200

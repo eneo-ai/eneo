@@ -122,14 +122,14 @@ space's default embedding model when none is selected).
 The scheduler checks every hour on the hour (UTC): a daily website is queued
 once at least 24 hours have passed since its last crawl, an every-other-day
 website after 48 hours, and a weekly website only on Fridays (UTC) once seven
-days have passed. Use **Start crawl** on the website to run a crawl manually
-at any time.
+days have passed. Use **Start crawl** to request a run manually; an active run
+is reused. The general worker admits due crawls and the crawler worker executes them.
 
 <Tabs items={["Basic crawl", "Sitemap based crawl"]}>
   <Tabs.Tab>
     Starts at the URL and follows links within the site until the tenant's
     page limit or time limit is reached. `robots.txt` is respected by
-    default and request rate is auto-throttled. This is the only mode that can
+    default and request concurrency and delay are bounded. This is the only mode that can
     download linked files.
   </Tabs.Tab>
   <Tabs.Tab>
@@ -141,10 +141,10 @@ at any time.
 
 ### Monitor Progress
 
-Each crawl is recorded as a crawl run with its page count and status, visible
-on the website page and over the WebSocket. If a website fails ten crawls in
-a row it is automatically disabled; change its update interval to re-enable
-it.
+Each crawl records progress, its terminal outcome and any failures. The website
+page shows run history and lets you stop an active crawl or request another run.
+If a website fails ten crawls in a row it is automatically disabled; change its
+update interval to re-enable it.
 
 ### Crawler Limits
 
@@ -157,11 +157,9 @@ Crawl limits are not set per website. They are deployment defaults from
 | `CLOSESPIDER_ITEMCOUNT`            | 20000               | Maximum pages per crawl                              |
 | `DOWNLOAD_MAX_SIZE`                | 10485760 (10 MB)    | Maximum size of a downloaded file                    |
 | `OBEY_ROBOTS`                      | `true`              | Respect `robots.txt`                                 |
-| `AUTOTHROTTLE_ENABLED`             | `true`              | Slow down based on the target server's response time |
 | `CRAWL_PAGE_BATCH_SIZE`            | 100                 | Pages committed per database write                   |
 | `CRAWL_EMBEDDING_CONCURRENCY`      | 3                   | Parallel embedding calls per crawl                   |
 | `TENANT_WORKER_CONCURRENCY_LIMIT`  | 4                   | Concurrent crawl jobs per tenant                     |
-| `CRAWL_FEEDER_ENABLED`             | `true`              | Release queued crawls in batches                     |
 | `USING_CRAWL`                      | `true`              | Enable crawling for the deployment                   |
 
 Per-tenant overrides are stored on the tenant and read by the worker at the
@@ -198,7 +196,7 @@ Content is extracted from source formats:
 - **Word**: `docx2python`
 - **PowerPoint**: `python-pptx`
 - **Excel**: pandas with the `calamine` engine
-- **Web**: Scrapy spiders, HTML parsed with BeautifulSoup and converted with `html2text`
+- **Web**: bounded asynchronous HTTP crawling with main-content extraction
 
 ### 2. Chunking
 
@@ -312,7 +310,8 @@ Deleting a collection or website removes every document in it.
 
 ### Worker Capacity
 
-The worker runs the same image as the backend with `RUN_AS_WORKER=true`. Two
+The general worker runs with `RUN_AS_WORKER=true`; crawler execution requires
+the dedicated crawler service as well. Both use the backend image. Two
 settings in `env_backend.env` control throughput:
 
 ```bash
@@ -331,7 +330,7 @@ additional worker container with the same environment.
 ### Health
 
 - `GET /api/healthz` reports the worker heartbeat; a stale heartbeat returns `503`
-- `GET /api/healthz/crawler` shows crawl queue lengths and feeder diagnostics
+- `GET /api/healthz/crawler` reports crawler health, execution leases and recovery diagnostics
 
 ---
 
@@ -366,7 +365,7 @@ docker compose restart worker
 **Check error messages:**
 
 ```bash
-docker compose logs worker | grep -i crawl
+docker compose logs worker crawler | grep -i crawl
 curl -s https://your-eneo-instance.com/api/healthz/crawler
 ```
 

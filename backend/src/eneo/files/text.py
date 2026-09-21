@@ -12,6 +12,8 @@ from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfminer.pdfparser import PDFSyntaxError
 from pptx.exc import PackageNotFoundError
 
+from eneo.files.extraction_limits import FileExtractionLimits
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +38,11 @@ class NoExtractableTextError(ExtractionError):
         super().__init__(
             f"File '{filename}' contains no extractable text", "NO_EXTRACTABLE_TEXT"
         )
+
+
+class ExtractionLimitError(ExtractionError):
+    def __init__(self, filename: str, limit: str):
+        super().__init__(f"File '{filename}' exceeded the {limit}", "EXTRACTION_LIMIT")
 
 
 class EncryptedFileError(ExtractionError):
@@ -208,11 +215,20 @@ class TextExtractor:
         return "\n\n".join(parts)
 
     @classmethod
-    def extract_from_pdf(cls, filepath: Path, filename: str | None = None) -> str:
+    def extract_from_pdf(
+        cls,
+        filepath: Path,
+        filename: str | None = None,
+        *,
+        limits: FileExtractionLimits | None = None,
+    ) -> str:
         display_name = filename or filepath.name
         try:
             with pdfplumber.open(filepath) as pdf:
+                if limits is not None and len(pdf.pages) > limits.max_pdf_pages:
+                    raise ExtractionLimitError(display_name, "PDF page limit")
                 page_texts: list[str] = []
+                output_bytes = 0
                 has_content = False
                 for page in pdf.pages:
                     try:
@@ -225,7 +241,13 @@ class TextExtractor:
                         )
                         page_text = page.extract_text() or ""
                     has_content = has_content or bool(page_text.strip())
-                    page_texts.append(f"[PAGE {page.page_number}]\n{page_text}")
+                    marked_text = f"[PAGE {page.page_number}]\n{page_text}"
+                    output_bytes += len(marked_text.encode("utf-8")) + (
+                        2 if page_texts else 0
+                    )
+                    if limits is not None and output_bytes > limits.max_output_bytes:
+                        raise ExtractionLimitError(display_name, "text output limit")
+                    page_texts.append(marked_text)
 
                 extracted_text = "\n\n".join(page_texts)
 
@@ -241,6 +263,8 @@ class TextExtractor:
 
             return TextSanitizer.sanitize(extracted_text)
 
+        except ExtractionLimitError:
+            raise
         except PDFPasswordIncorrect as e:
             logger.warning(f"Password-protected PDF rejected: {display_name}")
             raise EncryptedFileError(display_name) from e
@@ -383,7 +407,12 @@ class TextExtractor:
             )
 
     def extract(
-        self, filepath: Path, mimetype: str | None = None, filename: str | None = None
+        self,
+        filepath: Path,
+        mimetype: str | None = None,
+        filename: str | None = None,
+        *,
+        limits: FileExtractionLimits | None = None,
     ) -> str:
         mimetype = mimetype or magic.from_file(filepath, mime=True)  # pyright: ignore[reportUnknownMemberType]  # python-magic stubs are incomplete
         # Use original filename for error messages, fallback to temp filepath
@@ -413,7 +442,9 @@ class TextExtractor:
             ):
                 extracted_text = self.extract_from_plain_text(filepath, display_name)
             case TextMimeTypes.PDF:
-                extracted_text = self.extract_from_pdf(filepath, display_name)
+                extracted_text = self.extract_from_pdf(
+                    filepath, display_name, limits=limits
+                )
             case TextMimeTypes.DOCX:
                 extracted_text = self.extract_from_docx(filepath, display_name)
             case TextMimeTypes.PPTX:
@@ -429,3 +460,17 @@ class TextExtractor:
                 extracted_text = self.extract_from_plain_text(filepath, display_name)
 
         return extracted_text.strip()
+
+    async def extract_bounded(
+        self,
+        filepath: Path,
+        mimetype: str | None = None,
+        filename: str | None = None,
+        *,
+        limits: FileExtractionLimits | None = None,
+    ) -> str:
+        from eneo.files.bounded_extraction import extract_in_process
+
+        return await extract_in_process(
+            filepath, mimetype, filename or filepath.name, limits=limits
+        )

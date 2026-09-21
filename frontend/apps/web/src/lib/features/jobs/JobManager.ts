@@ -71,14 +71,14 @@ function createJobManager(data: { eneo: Eneo }) {
         .map((job) => [job.id, job])
     );
 
-    // Detect if any jobs changed from active to complete
+    // Refresh knowledge for every terminal outcome, including failed crawls.
     let jobsCompleted = false;
     for (const [id, newJob] of updatedJobs) {
       const oldJob = currentJobs.get(id);
       if (
         oldJob &&
         (oldJob.status === "in progress" || oldJob.status === "queued") &&
-        newJob.status === "complete"
+        (newJob.status === "complete" || newJob.status === "failed")
       ) {
         jobsCompleted = true;
         break;

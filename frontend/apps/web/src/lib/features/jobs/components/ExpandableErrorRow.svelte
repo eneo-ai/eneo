@@ -10,9 +10,16 @@
     tooltip?: string;
     /** Row border token; differs per container. */
     borderClass?: string;
+    warning?: boolean;
   }
 
-  let { label, message, tooltip, borderClass = "border-default" }: Props = $props();
+  let {
+    label,
+    message,
+    tooltip,
+    borderClass = "border-default",
+    warning = false
+  }: Props = $props();
 
   let expanded = $state(false);
 </script>
@@ -24,7 +31,11 @@
 >
   <div class="flex w-full items-center justify-between gap-x-3 whitespace-nowrap">
     <div class="flex-shrink truncate pr-4" title={tooltip}>{label}</div>
-    <div class="text-negative-default min-w-fit font-medium">{m.failed()}</div>
+    <div
+      class="{warning ? 'text-warning-stronger' : 'text-negative-default'} min-w-fit font-medium"
+    >
+      {warning ? m.crawl_completed_with_warnings() : m.failed()}
+    </div>
   </div>
   {#if expanded}
     <div class="text-secondary mt-1 w-full text-xs break-words whitespace-normal">

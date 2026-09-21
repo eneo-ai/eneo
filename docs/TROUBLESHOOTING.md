@@ -1043,6 +1043,21 @@ nmap -p 3000,8000,5432,6379 localhost
 docker compose exec frontend nslookup backend
 ```
 
+**Worker cron jobs**:
+```bash
+# List every scheduled job and the queue that owns it
+docker compose exec worker run-cron --list
+
+# Run one now instead of waiting for its schedule, e.g. the hourly crawl scheduler.
+# The owning worker executes it exactly as on schedule; follow that worker's log.
+docker compose exec worker run-cron crawl_all_websites
+docker compose logs -f worker | grep -E "crawl_all_websites|websites due|admission"
+```
+
+If the admin crawler overview shows no scheduled crawls, check the worker log for
+`Failed to admit scheduled crawl`: the scheduler logs one entry per website it
+could not admit and still reports the cron run as successful.
+
 ---
 
 ## 📞 Getting Additional Help

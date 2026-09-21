@@ -17,7 +17,11 @@ vi.mock("$lib/paraglide/messages", () => ({
     job_failure_storage_unavailable: () => "storage_unavailable",
     job_failure_storage_verification_failed: () => "storage_verification_failed",
     job_failure_knowledge_source_conflict: () => "knowledge_source_conflict",
-    job_failure_unknown: () => "unknown"
+    job_failure_unknown: () => "unknown",
+    crawl_failure_remote_unreachable: () => "remote_unreachable",
+    crawl_failure_tenant_quota_exceeded: () => "tenant_quota_exceeded",
+    crawl_failure_user_quota_exceeded: () => "user_quota_exceeded",
+    crawl_failure_unknown: () => "unknown"
   }
 }));
 
@@ -48,6 +52,17 @@ describe("getJobFailureMessage", () => {
       "no_extractable_audio"
     );
   });
+
+  it("reuses crawl recovery guidance for typed crawl failures", () => {
+    expect(getJobFailureMessage("remote_unreachable", "crawl")).toBe("remote_unreachable");
+  });
+
+  it.each(["tenant_quota_exceeded", "user_quota_exceeded"])(
+    "identifies which storage quota stopped a crawl: %s",
+    (code) => {
+      expect(getJobFailureMessage(code, "crawl")).toBe(code);
+    }
+  );
 
   it.each([null, undefined, "future_failure_code"])(
     "uses the safe localized fallback for %s",

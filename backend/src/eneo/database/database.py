@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.inspection import inspect
 
+from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -46,7 +47,15 @@ class DatabaseSessionManager:
             logger.debug("Database already initialized, skipping reinitialization")
             return
 
-        self._engine = create_async_engine(host, pool_size=20, max_overflow=10)
+        settings = get_settings()
+        self._engine = create_async_engine(
+            host,
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_pool_max_overflow,
+            pool_timeout=settings.db_pool_timeout,
+            pool_pre_ping=settings.db_pool_pre_ping,
+            pool_recycle=settings.db_pool_recycle,
+        )
         self._sessionmaker = async_sessionmaker(
             autocommit=False,
             bind=self._engine,

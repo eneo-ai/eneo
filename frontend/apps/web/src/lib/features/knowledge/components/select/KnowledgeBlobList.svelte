@@ -1,18 +1,31 @@
 <script lang="ts">
   import type { InfoBlob } from "@eneo/eneo-js";
   import * as Pagination from "$lib/components/ui/pagination/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import BlobPreview from "../BlobPreview.svelte";
 
   type Props = {
-    /** The full set of blobs; pagination is applied locally. `undefined` while not yet loaded. */
+    /** Currently loaded blobs; more can be fetched through `onLoadMore`. */
     blobs: InfoBlob[] | undefined;
     loading?: boolean;
+    loadingMore?: boolean;
+    hasMore?: boolean;
+    totalCount?: number;
+    onLoadMore?: () => void | Promise<void>;
     /** Message shown when loading has finished and there are no blobs. */
     emptyMessage: string;
   };
 
-  let { blobs, loading = false, emptyMessage }: Props = $props();
+  let {
+    blobs,
+    loading = false,
+    loadingMore = false,
+    hasMore = false,
+    totalCount,
+    onLoadMore,
+    emptyMessage
+  }: Props = $props();
 
   const ITEMS_PER_PAGE = 10;
 
@@ -84,6 +97,19 @@
           </Pagination.Item>
         </Pagination.Content>
       </Pagination.Root>
+    {/if}
+    {#if hasMore && onLoadMore}
+      <div class="border-default mt-1 flex justify-center border-t pt-2">
+        <Button variant="outline" size="sm" disabled={loadingMore} onclick={onLoadMore}>
+          {#if loadingMore}
+            {m.loading_more()}
+          {:else if totalCount !== undefined}
+            {m.website_indexed_content_load_more({ current: blobs.length, total: totalCount })}
+          {:else}
+            {m.load_more()}
+          {/if}
+        </Button>
+      </div>
     {/if}
   {:else}
     <div class="text-muted flex items-center gap-2 py-2 text-sm">{emptyMessage}</div>

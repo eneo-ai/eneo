@@ -16,6 +16,24 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+class PartialEmbeddingBatchError(Exception):
+    """Preserve the ordered prefix completed before a provider batch failed."""
+
+    def __init__(
+        self,
+        *,
+        completed: ChunkEmbeddingList,
+        completed_count: int,
+        cause: Exception,
+    ) -> None:
+        super().__init__(
+            f"Embedding provider failed after {completed_count} completed chunks"
+        )
+        self.completed = completed
+        self.completed_count = completed_count
+        self.cause = cause
+
+
 class EmbeddingModelAdapter(abc.ABC):
     """Base class for embedding model adapters.
 
@@ -40,14 +58,14 @@ class EmbeddingModelAdapter(abc.ABC):
         Yields:
             Batches of chunks (up to max_batch_size items each)
         """
-        configured_batch_size = getattr(self.model, "max_batch_size", None)
+        configured_batch_size = self.model.max_batch_size
         batch_size = configured_batch_size if configured_batch_size else 32
 
         if configured_batch_size is not None and configured_batch_size < 1:
             logger.warning(
                 "[EmbeddingBatch] Invalid batch size %s for model %s; falling back to 32",
                 configured_batch_size,
-                getattr(self.model, "name", "<unknown>"),
+                self.model.name,
             )
             batch_size = 32
 
@@ -55,35 +73,21 @@ class EmbeddingModelAdapter(abc.ABC):
         if total_chunks == 0:
             logger.debug(
                 "[EmbeddingBatch] Model %s received no chunks to process",
-                getattr(self.model, "name", "<unknown>"),
+                self.model.name,
             )
             return
 
         total_batches = math.ceil(total_chunks / batch_size)
-        logger.info(
+        logger.debug(
             "[EmbeddingBatch] Model %s starting batch run: chunks=%s batch_size=%s batches=%s",
-            getattr(self.model, "name", "<unknown>"),
+            self.model.name,
             total_chunks,
             batch_size,
             total_batches,
         )
 
-        for index, start in enumerate(range(0, total_chunks, batch_size), start=1):
-            batch = chunks[start : start + batch_size]
-            logger.debug(
-                "[EmbeddingBatch] Model %s batch %s/%s size=%s",
-                getattr(self.model, "name", "<unknown>"),
-                index,
-                total_batches,
-                len(batch),
-            )
-            yield batch
-
-        logger.info(
-            "[EmbeddingBatch] Model %s completed batch run: batches=%s",
-            getattr(self.model, "name", "<unknown>"),
-            total_batches,
-        )
+        for start in range(0, total_chunks, batch_size):
+            yield chunks[start : start + batch_size]
 
     @abstractmethod
     async def get_embedding_for_query(self, query: str) -> list[float]:

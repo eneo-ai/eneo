@@ -14,6 +14,7 @@
     Cloud,
     Cpu,
     Fingerprint,
+    Globe,
     HardDrive,
     History,
     KeyRound,
@@ -86,6 +87,7 @@
       items: [
         navItem("/admin/usage", ChartPie, m.usage()),
         navItem("/admin/insights", Lightbulb, m.insights()),
+        navItem("/admin/crawler", Globe, m.admin_crawler_title()),
         navItem("/admin/audit-logs", History, m.audit_logs())
       ]
     },

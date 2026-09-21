@@ -11,6 +11,9 @@ from eneo.ai_models.embedding_models.embedding_model import (
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.ai_models_table import EmbeddingModels
+from eneo.embedding_models.domain.embedding_model_repo import (
+    guard_embedding_model_update,
+)
 from eneo.main.exceptions import UniqueException
 from eneo.main.models import IdAndName
 
@@ -54,6 +57,9 @@ class AdminEmbeddingModelsService:
     async def update_model(
         self, model: EmbeddingModelUpdate
     ) -> EmbeddingModelLegacy | None:
+        await guard_embedding_model_update(
+            self.session, model.id, model.model_dump(exclude_unset=True)
+        )
         return await self.delegate.update(model)
 
     async def delete_model(self, id: UUID) -> EmbeddingModelLegacy | None:

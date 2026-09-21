@@ -418,6 +418,8 @@ async def test_inventory_recovery_waits_for_admission_without_locking_content(
         async def wait_for_inventory_on_admission() -> bool:
             async with database.session() as session, session.begin():
                 while not inventory_task.done():
+                    # Include connections opened after the observer's first poll.
+                    await session.execute(text("SELECT pg_stat_clear_snapshot()"))
                     waiting = await session.scalar(
                         text("""
                         SELECT EXISTS (

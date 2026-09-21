@@ -325,7 +325,7 @@ async def fail_stale_sharepoint_sync_jobs(container: Container):
     A hard crash mid-sync (worker killed, OOM) leaves a stuck Job that arq will not
     retry and no finally fails. Because the sync commits its status only at the end,
     a crashed job reverts to QUEUED, so the reaper covers both states. Mirrors the
-    crawl OrphanWatchdog so stuck syncs surface as failures instead of hanging.
+    crawl lease reconciler so stuck syncs surface as failures instead of hanging.
     """
     stale_before = datetime.now(timezone.utc) - timedelta(
         minutes=SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES

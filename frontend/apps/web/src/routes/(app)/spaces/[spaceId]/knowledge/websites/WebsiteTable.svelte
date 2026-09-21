@@ -3,15 +3,21 @@
   import WebsiteActions from "./WebsiteActions.svelte";
   import { createRender } from "svelte-headless-table";
   import WebsiteStatus from "./WebsiteStatus.svelte";
+  import CrawlRunDetails from "$lib/features/knowledge/CrawlRunDetails.svelte";
   import WebsiteSync from "./WebsiteSync.svelte";
   import SelectionHeaderCheckbox from "./SelectionHeaderCheckbox.svelte";
   import SelectionCellCheckbox from "./SelectionCellCheckbox.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived, writable } from "svelte/store";
-  import type { WebsiteSparse } from "@eneo/eneo-js";
+  import type { CrawlResourceFailure, CrawlRun, WebsiteSparse } from "@eneo/eneo-js";
   import { IconWeb } from "@eneo/icons/web";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import { m } from "$lib/paraglide/messages";
+  import dayjs from "dayjs";
+  import {
+    toggleVisibleWebsiteSelection,
+    visibleWebsiteIdsFromTableRows
+  } from "../bulkWebsiteActions";
 
   const {
     state: { currentSpace }
@@ -21,7 +27,11 @@
     $currentSpace.knowledge.websites.filter((c) => c.space_id === $currentSpace.id)
   );
 
+  let selectedRun: CrawlRun | null = null;
+  let initialKind: CrawlResourceFailure["kind"] | null = null;
+  let detailsOpen = false;
   const websites = ownedWebsites;
+  const visibleWebsiteIds = writable<string[]>([]);
 
   // Selection state for bulk operations
   export let selectedWebsiteIds = writable<Set<string>>(new Set());
@@ -57,11 +67,7 @@
 
   // Toggle all websites selection
   function toggleSelectAll() {
-    if ($selectedWebsiteIds.size === $websites.length && $websites.length > 0) {
-      $selectedWebsiteIds = new Set();
-    } else {
-      $selectedWebsiteIds = new Set($websites.map((w) => w.id));
-    }
+    $selectedWebsiteIds = toggleVisibleWebsiteSelection($selectedWebsiteIds, $visibleWebsiteIds);
   }
 
   const table = Table.createWithStore(websites);
@@ -74,7 +80,7 @@
       header: () => {
         return createRender(SelectionHeaderCheckbox, {
           selectedWebsiteIds,
-          websites: $websites,
+          visibleWebsiteIds,
           onToggleAll: toggleSelectAll
         });
       },
@@ -136,7 +142,12 @@
       header: m.status(),
       cell: (item) => {
         return createRender(WebsiteStatus, {
-          website: item.value
+          website: item.value,
+          onshowFailures: (kind) => {
+            selectedRun = item.value.latest_crawl ?? null;
+            initialKind = kind;
+            detailsOpen = true;
+          }
         });
       },
       plugins: {
@@ -170,12 +181,25 @@
       }
     }),
 
+    table.column({
+      accessor: "last_indexed_at",
+      header: m.website_last_indexed(),
+      cell: (item) =>
+        createRender(Table.FormattedCell, {
+          value: item.value ? dayjs(item.value).format("YYYY-MM-DD HH:mm") : "—",
+          monospaced: true,
+          class: "whitespace-nowrap"
+        })
+    }),
+
     table.columnActions({
       cell: (item) => {
         return createRender(WebsiteActions, { website: item.value });
       }
     })
   ]);
+  const { pageRows } = viewModel;
+  $: $visibleWebsiteIds = visibleWebsiteIdsFromTableRows($pageRows);
 
   function createModelFilter(embeddingModel: { id: string }) {
     return function (website: WebsiteSparse) {
@@ -198,3 +222,7 @@
     <Table.Group></Table.Group>
   {/if}
 </Table.Root>
+
+{#if selectedRun}
+  <CrawlRunDetails run={selectedRun} bind:open={detailsOpen} {initialKind} />
+{/if}

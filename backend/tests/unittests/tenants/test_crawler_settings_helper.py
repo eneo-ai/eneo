@@ -41,8 +41,8 @@ class TestCrawlerSettingSpecs:
             assert has_default or has_env_attr, f"{name} needs 'default' or 'env_attr'"
 
     def test_expected_settings_count(self):
-        """Verify we have all 18 crawler settings."""
-        assert len(CRAWLER_SETTING_SPECS) == 18
+        """Verify the active settings contract stays intentional."""
+        assert len(CRAWLER_SETTING_SPECS) == 10
 
     def test_known_settings_present(self):
         """Verify all known settings are present."""
@@ -55,14 +55,7 @@ class TestCrawlerSettingSpecs:
             "closespider_itemcount",
             "obey_robots",
             "autothrottle_enabled",
-            "tenant_worker_concurrency_limit",
-            "crawl_stale_threshold_minutes",
             "crawl_heartbeat_interval_seconds",
-            "crawl_feeder_enabled",
-            "crawl_feeder_interval_seconds",
-            "crawl_feeder_batch_size",
-            "crawl_job_max_age_seconds",
-            "tenant_worker_semaphore_ttl_seconds",
             "crawl_page_batch_size",
         ]
         for name in expected:
@@ -85,11 +78,6 @@ class TestGetCrawlerSetting:
         # download_timeout has hardcoded default of 90
         assert result == 90
 
-    def test_returns_explicit_default_for_unknown_setting(self):
-        """Returns provided default for unknown settings."""
-        result = get_crawler_setting("nonexistent_setting", {}, default=999)
-        assert result == 999
-
     def test_raises_keyerror_for_unknown_without_default(self):
         """Raises KeyError for unknown setting with no default."""
         with pytest.raises(KeyError, match="Unknown crawler setting"):
@@ -110,13 +98,8 @@ class TestGetCrawlerSetting:
             mock_settings.download_max_size = 10485760
             mock_settings.obey_robots = True
             mock_settings.autothrottle_enabled = True
-            mock_settings.tenant_worker_concurrency_limit = 4
-            mock_settings.crawl_stale_threshold_minutes = 30
             mock_settings.crawl_heartbeat_interval_seconds = 300
-            mock_settings.crawl_feeder_enabled = False
-            mock_settings.crawl_feeder_interval_seconds = 10
-            mock_settings.crawl_feeder_batch_size = 10
-            mock_settings.crawl_job_max_age_seconds = 1800
+            mock_settings.crawl_page_batch_size = 100
             mock.return_value = mock_settings
 
             for setting in CRAWLER_SETTING_SPECS.keys():
@@ -147,21 +130,14 @@ class TestGetAllCrawlerSettings:
             mock_settings.download_max_size = 10485760
             mock_settings.obey_robots = True
             mock_settings.autothrottle_enabled = True
-            mock_settings.tenant_worker_concurrency_limit = 4
-            mock_settings.crawl_stale_threshold_minutes = 30
             mock_settings.crawl_heartbeat_interval_seconds = 300
-            mock_settings.crawl_feeder_enabled = False
-            mock_settings.crawl_feeder_interval_seconds = 10
-            mock_settings.crawl_feeder_batch_size = 10
-            mock_settings.crawl_job_max_age_seconds = 1800
-            mock_settings.tenant_worker_semaphore_ttl_seconds = 18000
             mock_settings.crawl_page_batch_size = 100
             mock.return_value = mock_settings
 
             result = get_all_crawler_settings({})
             assert "download_timeout" in result
             assert "crawl_max_length" in result
-            assert len(result) == 18
+            assert len(result) == 10
 
     def test_tenant_overrides_merged_correctly(self):
         """Tenant-specific values override defaults."""
@@ -172,13 +148,8 @@ class TestGetAllCrawlerSettings:
             mock_settings.download_max_size = 10485760
             mock_settings.obey_robots = True
             mock_settings.autothrottle_enabled = True
-            mock_settings.tenant_worker_concurrency_limit = 4
-            mock_settings.crawl_stale_threshold_minutes = 30
             mock_settings.crawl_heartbeat_interval_seconds = 300
-            mock_settings.crawl_feeder_enabled = False
-            mock_settings.crawl_feeder_interval_seconds = 10
-            mock_settings.crawl_feeder_batch_size = 10
-            mock_settings.crawl_job_max_age_seconds = 1800
+            mock_settings.crawl_page_batch_size = 100
             mock.return_value = mock_settings
 
             tenant_settings = {"download_timeout": 200, "dns_timeout": 60}
@@ -197,19 +168,12 @@ class TestGetAllCrawlerSettings:
             mock_settings.download_max_size = 10485760
             mock_settings.obey_robots = True
             mock_settings.autothrottle_enabled = True
-            mock_settings.tenant_worker_concurrency_limit = 4
-            mock_settings.crawl_stale_threshold_minutes = 30
             mock_settings.crawl_heartbeat_interval_seconds = 300
-            mock_settings.crawl_feeder_enabled = False
-            mock_settings.crawl_feeder_interval_seconds = 10
-            mock_settings.crawl_feeder_batch_size = 10
-            mock_settings.crawl_job_max_age_seconds = 1800
-            mock_settings.tenant_worker_semaphore_ttl_seconds = 18000
             mock_settings.crawl_page_batch_size = 100
             mock.return_value = mock_settings
 
             result = get_all_crawler_settings(None)
-            assert len(result) == 18
+            assert len(result) == 10
 
 
 class TestValidateCrawlerSetting:

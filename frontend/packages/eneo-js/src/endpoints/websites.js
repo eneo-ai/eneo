@@ -2,6 +2,10 @@
 /** @typedef {import('../types/resources').Website} Website */
 /** @typedef {import('../types/resources').CrawlRun} CrawlRun */
 /** @typedef {import('../types/resources').EmbeddingModel} EmbeddingModel  */
+/** @typedef {import('../types/resources').InfoBlob} InfoBlob */
+/** @typedef {import('../types/resources').WebsiteInfoBlobPage} WebsiteInfoBlobPage */
+/** @typedef {import('../types/resources').WebsiteCrawlRunPage} WebsiteCrawlRunPage */
+/** @typedef {import('../types/resources').CrawlFailurePage} CrawlFailurePage */
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
@@ -127,9 +131,9 @@ export function initWebsites(client) {
 
     indexedBlobs: {
       /**
-       * List all info-blobs (=> crawl results) of a specific website
+       * List all indexed crawl results for a website.
        * @param {{id: string} | Website} website Website
-       * @returns {Promise<import('./files').InfoBlob[]>}
+       * @returns {Promise<InfoBlob[]>}
        * @throws {EneoError}
        * */
       list: async (website) => {
@@ -139,12 +143,54 @@ export function initWebsites(client) {
           params: { path: { id } }
         });
         return res.items;
+      },
+
+      /**
+       * List one bounded page of indexed crawl results for a website.
+       * @param {{id: string, limit?: number, cursor?: string | null}} website Website and page options
+       * @returns {Promise<WebsiteInfoBlobPage>}
+       * @throws {EneoError}
+       * */
+      listPage: async (website) => {
+        const { id, limit = 100, cursor } = website;
+        const res = await client.fetch("/api/v1/websites/{id}/info-blobs/page/", {
+          method: "get",
+          params: {
+            path: { id },
+            query: { limit, cursor }
+          }
+        });
+        return res;
       }
     },
 
     crawlRuns: {
       /**
-       * List all runs of a specific website
+       * List recorded page and file failures for one crawl run.
+       * @param {import('../types/resources').CrawlFailureQuery} options
+       * @returns {Promise<CrawlFailurePage>}
+       * @throws {EneoError}
+       */
+      failures: async ({ id, limit = 100, cursor, kind }) =>
+        client.fetch("/api/v1/crawl-runs/{id}/failures/", {
+          method: "get",
+          params: { path: { id }, query: { limit, cursor, kind } }
+        }),
+
+      /**
+       * Read the latest run without fetching website contents or run history.
+       * @param {{id: string} | Website} website Website
+       * @returns {Promise<CrawlRun | null>}
+       * @throws {EneoError}
+       */
+      latest: async ({ id }) =>
+        client.fetch("/api/v1/websites/{id}/runs/latest/", {
+          method: "get",
+          params: { path: { id } }
+        }),
+
+      /**
+       * List the newest page of runs. Use listPage to traverse older history.
        * @param {{id: string} | Website} website Website
        * @returns {Promise<CrawlRun[]>}
        * @throws {EneoError}
@@ -159,6 +205,18 @@ export function initWebsites(client) {
       },
 
       /**
+       * List a bounded page of runs, newest first.
+       * @param {{id: string, limit?: number, cursor?: string}} website
+       * @returns {Promise<WebsiteCrawlRunPage>}
+       * @throws {EneoError}
+       */
+      listPage: async ({ id, limit = 100, cursor }) =>
+        client.fetch("/api/v1/websites/{id}/runs/", {
+          method: "get",
+          params: { path: { id }, query: { limit, cursor } }
+        }),
+
+      /**
        * Manually trigger a new crawl run
        * @param {{id: string} | Website} website Website
        * @returns {Promise<CrawlRun>}
@@ -171,6 +229,20 @@ export function initWebsites(client) {
           params: { path: { id } }
         });
         return res;
+      },
+
+      /**
+       * Stop a queued or running crawl. Repeating the request is safe.
+       * @param {{id: string} | CrawlRun} crawlRun Crawl run to stop
+       * @returns {Promise<CrawlRun>}
+       * @throws {EneoError}
+       * */
+      cancel: async (crawlRun) => {
+        const { id } = crawlRun;
+        return client.fetch("/api/v1/crawl-runs/{id}/cancel/", {
+          method: "post",
+          params: { path: { id } }
+        });
       }
     },
 
@@ -189,6 +261,37 @@ export function initWebsites(client) {
         }
       });
       return res;
+    },
+
+    /**
+     * Stop active crawls for a bounded website selection.
+     * Websites without an active crawl are reported without failing the batch.
+     * @param {{website_ids: string[]}} params List of website IDs to stop
+     * @throws {EneoError}
+     * */
+    bulkStop: async (params) => {
+      return client.fetch("/api/v1/websites/bulk/stop/", {
+        method: "post",
+        requestBody: {
+          "application/json": params
+        }
+      });
+    },
+
+    /**
+     * Permanently delete a bounded selection of website sources.
+     * Sources with active crawls remain in place while their crawl is stopped;
+     * submit them again after crawler cleanup completes.
+     * @param {{website_ids: string[]}} params List of website IDs to delete
+     * @throws {EneoError}
+     * */
+    bulkDelete: async (params) => {
+      return client.fetch("/api/v1/websites/bulk/delete/", {
+        method: "post",
+        requestBody: {
+          "application/json": params
+        }
+      });
     },
 
     /**

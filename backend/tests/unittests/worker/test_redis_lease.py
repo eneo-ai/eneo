@@ -7,8 +7,8 @@ import pytest
 
 from eneo.worker.redis.lease import redis_lease
 
-_REFRESH = "eneo.worker.redis.lease.LuaScripts.refresh_leader_lock"
-_RELEASE = "eneo.worker.redis.lease.LuaScripts.release_leader_lock"
+_REFRESH = "eneo.worker.redis.lease.LuaScripts.refresh_owned_lock"
+_RELEASE = "eneo.worker.redis.lease.LuaScripts.release_owned_lock"
 
 
 def _redis(set_result):

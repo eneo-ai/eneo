@@ -7,9 +7,8 @@ are correctly configured and ready for enforcement by the crawler:
 - Timeout values are within valid ranges and properly typed
 - Multi-tenant timeout isolation
 
-Note: Full E2E testing of actual HTTP timeout enforcement would require
-running live Scrapy crawlers with test HTTP servers that delay responses.
-These tests verify the integration layer that makes timeout enforcement possible.
+The engine-level suite separately verifies enforcement against a local async
+HTTP server. These tests cover the persisted tenant configuration path.
 """
 
 import pytest
