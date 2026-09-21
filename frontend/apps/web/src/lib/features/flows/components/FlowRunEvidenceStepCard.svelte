@@ -63,6 +63,8 @@
     fileIds: string[];
     speakerReviews?: TranscriptFileReview[];
     segments: TranscriptSegment[] | null;
+    /** True while the paged transcript source is still being read. */
+    loading?: boolean;
     /** The transcription step the segments (and any corrections) anchor to. */
     stepId: string | null;
     getAudioUrl: (fileIndex: number) => Promise<SignedAudio>;
@@ -372,6 +374,11 @@
               {:else if correctionsController?.speakerEdits.length}
                 <p class="text-muted text-xs">
                   {m.flow_transcript_review_regenerate()}
+                </p>
+              {/if}
+              {#if ownsStoredSegments && transcriptContext?.loading && !transcriptContext.segments}
+                <p class="text-muted-foreground text-sm" aria-live="polite">
+                  {m.flow_run_evidence_transcript_loading()}
                 </p>
               {/if}
               <TranscriptPlayer

@@ -3,8 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 import type { TranscriptSegment } from "$lib/features/flows/transcriptSegments";
 import { createTranscriptCorrectionsController } from "./transcriptCorrectionsController.svelte";
 
+// Every segment read through the transcript-source route carries the
+// whole-source hash; a save is only attempted with it.
+const SOURCE_HASH = "a".repeat(64);
+
 function segment(index: number, text: string, speaker = "SPEAKER_00"): TranscriptSegment {
-  return { index, fileIndex: 0, start: index * 4, end: index * 4 + 4, speaker, text };
+  return {
+    index,
+    fileIndex: 0,
+    start: index * 4,
+    end: index * 4 + 4,
+    speaker,
+    text,
+    segmentsHash: SOURCE_HASH
+  };
 }
 
 const RAW_SEGMENTS = [
@@ -168,7 +180,6 @@ it("sends v3 source hash and preserves same-label confirmation after reload", as
     ])
   ).toBe(true);
   expect(save.mock.calls[0][0]).toMatchObject({
-    schemaVersion: 3,
     segmentsHash: "a".repeat(64),
     speakerEdits: [{ segment_index: 0, speaker: "SPEAKER_00", decision: "confirmed" }]
   });
@@ -282,4 +293,18 @@ it("retries a failed initial load without overwriting existing corrections", asy
   } finally {
     log.mockRestore();
   }
+});
+
+it("never saves segments that carry no source hash", async () => {
+  const segments = RAW_SEGMENTS.map(
+    ({ segmentsHash: _hash, ...rest }) => rest as TranscriptSegment
+  );
+  const { controller, save } = makeController({ segments });
+  await controller.load();
+  expect(
+    await controller.saveSpeakerEdits([
+      { segment_index: 0, char_start: null, char_end: null, speaker: "SPEAKER_00" }
+    ])
+  ).toBe(false);
+  expect(save).not.toHaveBeenCalled();
 });

@@ -5630,6 +5630,7 @@
   "flow_run_review_deadline_timestamp": "Frist: {value}",
   "flow_run_review_load_failed": "Kunde inte läsa granskningspunkten.",
   "flow_run_review_audio_context_failed": "Ljudunderlaget kunde inte hämtas. Du kan fortfarande granska transkriptet.",
+  "flow_run_evidence_transcript_loading": "Hämtar transkriptet …",
   "flow_run_review_no_active_checkpoint": "Ingen aktiv granskningspunkt.",
   "flow_run_review_original_payload": "Ursprungligt resultat",
   "flow_run_review_payload_invalid": "Det redigerade resultatet måste vara ett giltigt JSON-objekt eller en JSON-lista.",

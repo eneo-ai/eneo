@@ -33,12 +33,11 @@
     speakerNamesFromRows,
     type SpeakerMappingRow
   } from "$lib/features/flows/speakerMappingReview";
+  import { loadTranscriptSource, transcriptSourceRef } from "$lib/features/flows/transcriptSource";
   import {
     attachWords,
     parseTranscript,
     isPureTranscript,
-    segmentsFromMetadata,
-    fileReviewsFromMetadata,
     type TranscriptFileReview,
     type TranscriptSegment
   } from "$lib/features/flows/transcriptSegments";
@@ -324,11 +323,13 @@
       const fileIds = Array.isArray(transcription?.file_ids)
         ? transcription.file_ids.filter((id): id is string => typeof id === "string")
         : (sourceStep?.runtime_input_file_ids ?? []);
-      speakerReviews = fileReviewsFromMetadata(transcription);
-      const segments = segmentsFromMetadata(transcription);
       const stepId = sourceStep?.step_id ?? null;
+      const ref = transcriptSourceRef(transcription, stepId);
+      const loaded = ref ? await loadTranscriptSource(eneo, { flowId, runId, ...ref }) : null;
+      const present = loaded?.status === "present" ? loaded : null;
+      speakerReviews = present?.speakerReviews ?? [];
       storedSegments =
-        segments && stepId ? attachWords(segments, await loadTranscriptWords(stepId)) : segments;
+        present && stepId ? attachWords(present.segments, await loadTranscriptWords(stepId)) : null;
       transcriptStepId = stepId;
       audioFileIds = fileIds;
       setupCorrectionsController();

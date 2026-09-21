@@ -5630,6 +5630,7 @@
   "flow_run_review_deadline_timestamp": "Deadline: {value}",
   "flow_run_review_load_failed": "Could not load review checkpoint.",
   "flow_run_review_audio_context_failed": "Audio context could not be loaded. You can still review the transcript.",
+  "flow_run_evidence_transcript_loading": "Loading the transcript …",
   "flow_run_review_no_active_checkpoint": "No active review checkpoint.",
   "flow_run_review_original_payload": "Original output",
   "flow_run_review_payload_invalid": "The edited output must be a valid JSON object or array.",

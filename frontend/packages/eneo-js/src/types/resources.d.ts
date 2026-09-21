@@ -341,6 +341,12 @@ export type FlowTranscriptCorrectionOccurrence =
   components["schemas"]["TranscriptCorrectionOccurrencePublic"];
 export type FlowTranscriptSpeakerEdit = components["schemas"]["TranscriptSpeakerEditPublic"];
 export type FlowRunTranscriptWords = components["schemas"]["FlowTranscriptWordsPublic"];
+export type FlowRunTranscriptSourcePage =
+  | components["schemas"]["PresentTranscriptSourcePage"]
+  | components["schemas"]["OmittedTranscriptSourcePage"]
+  | components["schemas"]["UnavailableTranscriptSourcePage"];
+export type FlowTranscriptSourceOmissionReason =
+  components["schemas"]["TranscriptSourceOmissionReason"];
 export type FlowTranscriptSegmentWords = components["schemas"]["TranscriptSegmentWordsPublic"];
 export type FlowTranscriptWord = components["schemas"]["TranscriptWordPublic"];
 export type FlowRunEvidence = components["schemas"]["FlowRunEvidenceResponse"];

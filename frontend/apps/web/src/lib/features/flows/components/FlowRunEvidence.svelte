@@ -30,11 +30,11 @@
     type FlowRunTranscriptContext
   } from "./FlowRunEvidenceStepCard.svelte";
   import {
-    attachWords,
-    fileReviewsFromMetadata,
-    segmentsFromMetadata,
-    type TranscriptWordsPayload
-  } from "$lib/features/flows/transcriptSegments";
+    loadTranscriptSource,
+    transcriptSourceRef,
+    type TranscriptSourceLoad
+  } from "$lib/features/flows/transcriptSource";
+  import { attachWords, type TranscriptWordsPayload } from "$lib/features/flows/transcriptSegments";
   import TranscriptCorrectionReviewDialog from "./TranscriptCorrectionReviewDialog.svelte";
   import {
     createTranscriptCorrectionsController,
@@ -120,8 +120,29 @@
       loadError = true;
     }
     loading = false;
+    await loadTranscriptSourceRows();
     await loadTranscriptWords();
     setupCorrectionsController();
+  }
+
+  // The transcript source is an immutable per-attempt row read through the
+  // paged route; the step payload only names it. Loaded once per evidence
+  // load, before word timings, so the corrections controller anchors to it.
+  let transcriptSource = $state<TranscriptSourceLoad | null>(null);
+  let transcriptSourceLoading = $state(false);
+
+  async function loadTranscriptSourceRows() {
+    transcriptSource = null;
+    const ref = transcriptSourceTarget;
+    if (!ref) return;
+    transcriptSourceLoading = true;
+    try {
+      transcriptSource = await loadTranscriptSource(eneo, { flowId, runId, ...ref });
+    } catch {
+      transcriptSource = null;
+    } finally {
+      transcriptSourceLoading = false;
+    }
   }
 
   onMount(() => {
@@ -294,6 +315,20 @@
 
   // The transcription step's audio and segments, available to every step card
   // that shows the transcript (raw or renamed).
+  // The transcription step of the run: the step whose payload names audio
+  // files and a transcript source attempt.
+  const transcriptSourceTarget = $derived.by(() => {
+    for (const result of evidence?.step_results ?? []) {
+      const transcription = getStepTranscription(result) as Record<string, unknown> | null;
+      const fileIds = Array.isArray(transcription?.file_ids)
+        ? transcription.file_ids.filter((id): id is string => typeof id === "string")
+        : [];
+      if (fileIds.length === 0) continue;
+      return transcriptSourceRef(transcription, result.step_id);
+    }
+    return null;
+  });
+
   const transcriptContext = $derived.by((): FlowRunTranscriptContext | null => {
     for (const result of evidence?.step_results ?? []) {
       const transcription = getStepTranscription(result);
@@ -301,11 +336,12 @@
         ? transcription.file_ids.filter((id): id is string => typeof id === "string")
         : [];
       if (fileIds.length === 0) continue;
-      const segments = segmentsFromMetadata(transcription as Record<string, unknown>);
+      const source = transcriptSource?.status === "present" ? transcriptSource : null;
       return {
         fileIds,
-        speakerReviews: fileReviewsFromMetadata(transcription as Record<string, unknown>),
-        segments: segments ? attachWords(segments, transcriptWords) : null,
+        speakerReviews: source?.speakerReviews ?? [],
+        segments: source ? attachWords(source.segments, transcriptWords) : null,
+        loading: transcriptSourceLoading,
         stepId: result.step_id,
         getAudioUrl: (fileIndex: number) => {
           const fileId = fileIds[fileIndex];

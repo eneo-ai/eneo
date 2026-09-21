@@ -133,6 +133,35 @@ function buildEneo({
             speaker_edits: args.speakerEdits
           }))
         },
+        transcriptSource: {
+          // Serve the fixture's transcript through the paged route: one page,
+          // the whole-source hash, speaker review on the first page.
+          get: vi.fn(async ({ stepId }: { stepId: string }) => {
+            const list = (await (steps ?? (async () => []))()) as Array<{
+              step_id: string;
+              input_payload_json?: { transcription?: Record<string, unknown> };
+            }>;
+            const t = list.find((step) => step.step_id === stepId)?.input_payload_json
+              ?.transcription;
+            const segments = Array.isArray(t?.segments) ? t.segments : null;
+            if (!segments) return { status: "unavailable_pre_row" };
+            return {
+              status: "present",
+              run_id: "run-1",
+              step_id: stepId,
+              attempt_no: 1,
+              source_hash: typeof t?.segments_hash === "string" ? t.segments_hash : "a".repeat(64),
+              start_segment_index: 0,
+              page_size: 200,
+              max_response_bytes: 16 * 1024 * 1024,
+              next_segment_index: null,
+              speaker_review: t?.speaker_review ?? null,
+              segments: segments.map((segment, index) => ({ segment_index: index, ...segment })),
+              bounds: {},
+              component_omissions: { detail: null, words: null }
+            };
+          })
+        },
         transcriptWords: { get: vi.fn(async () => null) },
         reviewCheckpoints: {
           active: active ?? vi.fn(async () => activeCheckpoint),
@@ -1011,6 +1040,7 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
           input_payload_json: {
             transcription: {
               file_ids: ["file-1"],
+              source: { attempt_no: 1 },
               segments_hash: "a".repeat(64),
               segments: [
                 {
@@ -1086,6 +1116,7 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
           input_payload_json: {
             transcription: {
               file_ids: ["file-1"],
+              source: { attempt_no: 1 },
               segments: [{ file_index: 0, start: 0, end: 4, speaker: "SPEAKER_00", text: "Hej." }]
             }
           }
@@ -1124,6 +1155,7 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
         input_payload_json: {
           transcription: {
             file_ids: ["file-1"],
+            source: { attempt_no: 1 },
             segments: [
               { file_index: 0, start: 0, end: 4, speaker: "SPEAKER_00", text: "Hej." },
               { file_index: 0, start: 5, end: 9, speaker: "SPEAKER_01", text: "Hallå." }

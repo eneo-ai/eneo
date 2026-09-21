@@ -133,14 +133,16 @@ export function createTranscriptCorrectionsController(options: {
     saving = true;
     queue = queue
       .then(async (previousSaved) => {
-        if (!previousSaved || blocked) return false;
+        // The hash anchors the save to the transcript source the segments came
+        // from; without it the server cannot tell a stale anchor from a fresh one.
+        if (!previousSaved || blocked || !segmentsHash) return false;
         try {
           const saved = await eneo.flows.runs.transcriptCorrections.save({
             flowId,
             runId,
             stepId,
             expectedRevision: revision,
-            ...(segmentsHash ? { schemaVersion: 3 as const, segmentsHash } : {}),
+            segmentsHash,
             occurrences: convertTranscriptAnchors(
               sortOccurrences(draftOccurrences),
               rawSegments,

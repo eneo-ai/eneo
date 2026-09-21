@@ -232,10 +232,11 @@ export function initFlows(client) {
        * Requires tenant-admin permission. Review-required runs remain stored.
        * @param {(import('../types/schema').components['schemas']['FlowRunHistoryPurgeRequest'] & ({scope?: 'organization'} | {scope: 'space', spaceId: string} | {scope: 'flow', flowId: string}))} [options]
        * @throws {EneoError}
-      */
+       */
       purge: async (options = {}) => {
         if (
-          (options.scope !== undefined && !["organization", "space", "flow"].includes(options.scope)) ||
+          (options.scope !== undefined &&
+            !["organization", "space", "flow"].includes(options.scope)) ||
           (options.scope !== "space" && "spaceId" in options) ||
           (options.scope !== "flow" && "flowId" in options)
         ) {
@@ -1119,9 +1120,11 @@ export function initFlows(client) {
          * Replace one transcription step's correction list. Send the full
          * `occurrences` and `speakerEdits` lists; `expectedRevision` is the
          * compare token (null creates the step's first set, empty lists
-         * clear it).
+         * clear it). `segmentsHash` is the whole-source hash the transcript
+         * source page reported; a save anchored to another transcript is
+         * refused as stale.
          *
-         * @param {{flowId: string, runId: string, stepId: string, expectedRevision: number | null, occurrences: import('../types/resources').FlowTranscriptCorrectionOccurrence[], speakerEdits?: import('../types/resources').FlowTranscriptSpeakerEdit[], schemaVersion?: 2 | 3, segmentsHash?: string}} params
+         * @param {{flowId: string, runId: string, stepId: string, expectedRevision: number | null, occurrences: import('../types/resources').FlowTranscriptCorrectionOccurrence[], speakerEdits?: import('../types/resources').FlowTranscriptSpeakerEdit[], segmentsHash: string}} params
          * @returns {Promise<import('../types/resources').FlowRunTranscriptCorrections>}
          */
         save: async ({
@@ -1131,7 +1134,6 @@ export function initFlows(client) {
           expectedRevision = null,
           occurrences,
           speakerEdits = [],
-          schemaVersion = 2,
           segmentsHash
         }) => {
           return _fetch(
@@ -1144,7 +1146,8 @@ export function initFlows(client) {
                   expected_revision: expectedRevision,
                   occurrences,
                   speaker_edits: speakerEdits,
-                  ...(schemaVersion === 3 ? { schema_version: 3, segments_hash: segmentsHash } : {})
+                  schema_version: 3,
+                  segments_hash: segmentsHash
                 }
               }
             }
@@ -1184,6 +1187,32 @@ export function initFlows(client) {
             }
           }
         );
+      },
+
+      transcriptSource: {
+        /**
+         * One page of the immutable transcript source behind a transcription
+         * attempt: up to 200 segments with absolute indexes, the complete
+         * source hash (send it unchanged as `segments_hash` when saving
+         * corrections), and, on the first page only, the speaker review
+         * detail. Follow `next_segment_index` until it is null. A page whose
+         * status is `omitted` or `unavailable_pre_row` carries no segments.
+         *
+         * @param {{flowId: string, runId: string, stepId: string, attemptNo: number, startSegmentIndex?: number}} params
+         * @returns {Promise<import('../types/resources').FlowRunTranscriptSourcePage>}
+         */
+        get: async ({ flowId, runId, stepId, attemptNo, startSegmentIndex = 0 }) => {
+          return _fetch(
+            "/api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/attempts/{attempt_no}/transcript-source/",
+            {
+              method: "get",
+              params: {
+                path: { flow_id: flowId, run_id: runId, step_id: stepId, attempt_no: attemptNo },
+                query: { start_segment_index: startSegmentIndex }
+              }
+            }
+          );
+        }
       },
 
       transcriptWords: {
