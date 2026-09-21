@@ -1,12 +1,30 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.step_output import FileBackedStepText
+
+
+def summarization_json_bytes(value: JsonValue) -> bytes:
+    """Encode fold input independently of JSONB's numeric representation."""
+
+    def normalize(value: JsonValue) -> JsonValue:
+        if isinstance(value, dict):
+            return {key: normalize(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        if isinstance(value, float) and value.is_integer():
+            # JSONB expands the serialized decimal, not the binary float's integer.
+            return int(Decimal(str(value)))
+        return value
+
+    return canonical_json_bytes(normalize(value))
 
 
 class TextProcessingMode(StrEnum):

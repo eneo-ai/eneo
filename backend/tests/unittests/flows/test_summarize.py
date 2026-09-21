@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import runpy
 from contextlib import asynccontextmanager
@@ -15,10 +14,6 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 
-from eneo.flows.domain.canonical_json_hash import (
-    canonical_json_bytes,
-    canonical_json_hash,
-)
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     SummarizationBudget,
@@ -26,12 +21,10 @@ from eneo.flows.domain.mapped_execution_policy import (
 from eneo.flows.domain.text_processing import (
     SectionManifest,
     SectionRange,
-    SummarizationProvenance,
     TextProcessingRecord,
     TextSection,
 )
 from eneo.flows.flow_run_error import FlowRunErrorDetails
-from eneo.flows.flow_run_provenance import parse_attempt_provenance
 from eneo.flows.runtime.step_deadline import (
     StepDeadline,
     current_step_deadline_scope,
@@ -41,7 +34,6 @@ from eneo.flows.runtime.step_handlers.summarize import (
     fold_section_records,
     record_bytes,
 )
-from eneo.flows.runtime.step_result_builder import build_attempt_provenance
 from eneo.main.exceptions import (
     ProviderCapabilityRejectedException,
     TypedIOValidationException,
@@ -49,8 +41,13 @@ from eneo.main.exceptions import (
 from eneo.model_providers.domain.provider_call_observer import (
     CompletionCallRequestFacts,
 )
-from tests.unittests.flows.test_text_sections import _case
-from tests.unittests.flows.test_typed_io_executor import _completed_step_result
+from tests.unittests.flows.test_text_sections import _case as _section_case
+
+
+def _case(*args, **kwargs):
+    case = _section_case(*args, **kwargs)
+    case[0]._persist_summarization = AsyncMock()
+    return case
 
 
 async def test_summarize_fitting_material_uses_one_call_and_one_record(user):
@@ -81,7 +78,8 @@ async def test_summarize_folds_section_records_in_one_fitting_call(user):
     }
     assert repo.activate_step_attempt.await_count == 1
     assert "summarization" not in result.output.output_payload_extensions
-    lineage = result.output.summarization.model_dump(mode="json")
+    provenance = executor._persist_summarization.await_args.args[0]
+    lineage = provenance.model_dump(mode="json")
     assert lineage["rounds"] == 1
     assert lineage["records"][-1]["parents"] == [
         f"section:{i}" for i in range(len(parents))
@@ -91,11 +89,8 @@ async def test_summarize_folds_section_records_in_one_fitting_call(user):
     assert (
         lineage["records"][-1]["value"] == result.output.structured_output["records"][0]
     )
-    persisted = parse_attempt_provenance(build_attempt_provenance(output=result.output))
-    assert persisted.status == "tracked"
-    assert persisted.provenance.summarization.model_dump(mode="json") == lineage
     assert result.output.citation_sidecar is None
-    assert all(not record.citations for record in result.output.summarization.records)
+    assert all(not record.citations for record in provenance.records)
 
 
 @pytest.mark.parametrize("terminal_bytes", [112, 113])
@@ -135,7 +130,7 @@ async def test_terminal_record_completes_without_byte_contraction(user, terminal
         (base,) = await executor._activate_prepared_assistant_steps(
             run, step, state, 1, (base,)
         )
-        record, outputs, provenance = await fold_section_records(
+        record, outputs = await fold_section_records(
             step=step,
             run=run,
             state=state,
@@ -148,176 +143,6 @@ async def test_terminal_record_completes_without_byte_contraction(user, terminal
     assert record.value == terminal
     assert record_bytes([record]) == terminal_bytes
     assert len(outputs) == len(questions) == 1
-    assert provenance.rounds == 1
-
-
-@pytest.mark.parametrize(
-    "failure_kind",
-    ["refusal", "provider", "timeout", "cancelled", "section", "backstop", "late"],
-)
-async def test_failed_fold_persists_all_reached_records(
-    user, monkeypatch, failure_kind
-):
-    from eneo.flows.runtime import step_deadline
-    from eneo.flows.runtime.run_cancellation import FlowStepCancelledError
-
-    executor, repo, assistant, run, state, step, questions, _ = _fold_case(
-        user, expands=failure_kind == "refusal"
-    )
-    respond = assistant.get_response.side_effect
-    folds = 0
-
-    async def fail_after_one_fold(**kwargs):
-        nonlocal folds
-        if failure_kind == "section" and len(questions) == 2:
-            questions.append(kwargs["question"])
-            raise RuntimeError("Section provider failed")
-        if kwargs["question"].startswith('{"records":'):
-            folds += 1
-            if folds == 2 and failure_kind in {"provider", "timeout", "cancelled"}:
-                questions.append(kwargs["question"])
-                if failure_kind == "timeout":
-                    raise current_step_deadline_scope().deadline.timeout_error(
-                        step_order=step.step_order, phase="provider request"
-                    )
-                if failure_kind == "cancelled":
-                    raise FlowStepCancelledError("Run cancelled")
-                raise RuntimeError("Provider failed")
-        return await respond(**kwargs)
-
-    assistant.get_response.side_effect = fail_after_one_fold
-    if failure_kind == "backstop":
-        executor._step_deadline_seconds = lambda step: 1
-        monkeypatch.setattr(step_deadline, "STEP_DEADLINE_BACKSTOP_GRACE_SECONDS", 0)
-        process = executor._process_typed_output
-
-        async def stall_processing(**kwargs):
-            if folds == 2:
-                await asyncio.Event().wait()
-            return await process(**kwargs)
-
-        executor._process_typed_output = stall_processing
-    if failure_kind == "late":
-        clock = [0.0]
-        monkeypatch.setattr(step_deadline, "_now", lambda: clock[0])
-        executor._step_deadline_seconds = lambda step: 1.5
-        handler = executor._build_step_handler(step.output_mode)
-
-        async def finish_after_deadline(**kwargs):
-            result = await handler.execute(**kwargs)
-            clock[0] = 2.0
-            return result
-
-        executor._build_step_handler = lambda mode: SimpleNamespace(
-            execute=finish_after_deadline
-        )
-    with pytest.raises(Exception) as caught:
-        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
-    assert folds == 0 if failure_kind == "section" else folds >= 2
-    claimed = _completed_step_result(
-        run_id=run.id,
-        flow_id=run.flow_id,
-        tenant_id=run.tenant_id,
-        step_order=step.step_order,
-        text="",
-    ).model_copy(update={"step_id": step.step_id})
-    executor._terminalize_run = AsyncMock()
-    if isinstance(caught.value, FlowStepCancelledError):
-        await executor._handle_cancelled_step(
-            run_id=run.id,
-            tenant_id=run.tenant_id,
-            step=step,
-            attempt_no=1,
-            state=state,
-            exc=caught.value,
-        )
-    elif isinstance(caught.value, TypedIOValidationException):
-        await executor._handle_typed_step_failure(
-            run_id=run.id,
-            tenant_id=run.tenant_id,
-            step=step,
-            attempt_no=1,
-            state=state,
-            claimed=claimed,
-            typed_exc=caught.value,
-            failed_input_payload=getattr(caught.value, "input_payload_json", None),
-        )
-    else:
-        await executor._handle_generic_step_failure(
-            run_id=run.id,
-            tenant_id=run.tenant_id,
-            step=step,
-            attempt_no=1,
-            state=state,
-            claimed=claimed,
-            exc=caught.value,
-        )
-    persisted = parse_attempt_provenance(
-        repo.finish_attempt.await_args.kwargs["provenance_json"]
-    )
-    assert persisted.provenance is not None
-    provenance = persisted.provenance.summarization
-    assert provenance is not None
-    assert provenance.rounds == (
-        0 if failure_kind == "section" else 2 if failure_kind == "late" else 1
-    )
-    assert len(provenance.records) == len(questions) - (
-        failure_kind not in {"refusal", "late"}
-    )
-    by_id = {record.id: record for record in provenance.records}
-    assert any(record.round == 1 for record in provenance.records) == (
-        failure_kind != "section"
-    )
-    for call in assistant.get_response.await_args_list:
-        receipt = call.kwargs["provider_call_observer"].summarization_input
-        if receipt is not None:
-            assert set(receipt.record_ids) <= by_id.keys()
-    assert all(set(record.parents) <= by_id.keys() for record in provenance.records)
-
-
-async def test_fold_receipt_hash_survives_jsonb_record_key_reordering(user):
-    from sqlalchemy.dialects.postgresql import JSONB, dialect
-
-    executor, _, assistant, run, state, step, _, _, _, _ = _case(user)
-    contract = json.loads(json.dumps(step.output_contract))
-    contract["properties"]["records"]["items"]["properties"]["a"] = {"type": "string"}
-    step = replace(
-        step,
-        input_config={"text_processing": {"mode": "summarize"}},
-        output_contract=contract,
-    )
-    respond = assistant.get_response.side_effect
-
-    async def complete(**kwargs):
-        response = await respond(**kwargs)
-        value = json.loads(response.completion)
-        value["records"][0]["a"] = "å"
-        response.completion = json.dumps(value)
-        return response
-
-    assistant.get_response.side_effect = complete
-    result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
-    jsonb = JSONB()
-    pg = dialect(json_serializer=lambda value: json.dumps(value, sort_keys=True))
-    restored = jsonb.result_processor(pg, None)(
-        jsonb.bind_processor(pg)(result.output.summarization.model_dump(mode="json"))
-    )
-    provenance = SummarizationProvenance.model_validate(restored)
-    by_id = {record.id: record for record in provenance.records}
-    folds = [
-        call.kwargs
-        for call in assistant.get_response.await_args_list
-        if call.kwargs["provider_call_observer"].summarization_input is not None
-    ]
-    assert folds
-    for call in folds:
-        receipt = call["provider_call_observer"].summarization_input
-        values = {
-            "records": [by_id[record_id].value for record_id in receipt.record_ids]
-        }
-        assert call["question"].encode("utf-8") == canonical_json_bytes(values)
-        assert receipt.input_sha256 == canonical_json_hash(values)
-        assert receipt.input_bytes == len(canonical_json_bytes(values))
 
 
 def _fold_case(user, *, expands=False):
@@ -347,11 +172,12 @@ def _fold_case(user, *, expands=False):
 async def test_summarize_groups_consecutive_records_and_reports_each_round(user):
     executor, _, assistant, run, state, step, questions, progress = _fold_case(user)
 
-    result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
 
     folds = [q for q in questions if q.startswith('{"records":')]
     assert len(folds) > 1
-    lineage = result.output.summarization.model_dump(mode="json")
+    provenance = executor._persist_summarization.await_args.args[0]
+    lineage = provenance.model_dump(mode="json")
     assert lineage["rounds"] >= 2
     first_round = [r for r in lineage["records"] if r["round"] == 1]
     section_ids = [r["id"] for r in lineage["records"] if r["round"] == 0]

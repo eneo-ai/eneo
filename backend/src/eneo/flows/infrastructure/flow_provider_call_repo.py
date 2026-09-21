@@ -35,9 +35,11 @@ from eneo.flows.domain.provider_call import (
     TranscriptionCallCompletion,
     TranscriptionProviderCallRequest,
 )
+from eneo.flows.domain.text_processing import SummarizationProvenance
 from eneo.flows.enums import FlowStepAttemptStatus
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdgeIndexes,
+    append_summarization_provenance,
     parse_resolved_input_edges,
 )
 
@@ -739,6 +741,7 @@ class FlowProviderCallRepository:
         tenant_id: UUID,
         request: ProviderCallRequest,
         resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
+        summarization: SummarizationProvenance | None = None,
     ) -> ProviderCall:
         attempt_id, raw_resolved_input_edges = await self._lock_open_attempt(
             FlowStepAttempts.flow_run_id == run_id,
@@ -746,6 +749,17 @@ class FlowProviderCallRepository:
             FlowStepAttempts.attempt_no == attempt_no,
             FlowStepAttempts.tenant_id == tenant_id,
         )
+        if (
+            isinstance(request, CompletionProviderCallRequest)
+            and request.summarization_input is not None
+        ):
+            if summarization is None:
+                raise ValueError("Summarization calls require their input provenance.")
+            await self._persist_summarization(
+                attempt_id=attempt_id,
+                summarization=summarization,
+                required_record_ids=request.summarization_input.record_ids,
+            )
         if isinstance(request, TranscriptionProviderCallRequest):
             # A transcription request produces the step input, so the resolved
             # input aggregate it would point at does not exist yet.
@@ -766,6 +780,53 @@ class FlowProviderCallRepository:
                 ),
             ),
         )
+
+    async def persist_summarization_for_execution(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+        summarization: SummarizationProvenance,
+    ) -> None:
+        try:
+            attempt_id, _ = await self._lock_open_attempt(
+                FlowStepAttempts.flow_run_id == run_id,
+                FlowStepAttempts.step_id == step_id,
+                FlowStepAttempts.attempt_no == attempt_no,
+                FlowStepAttempts.tenant_id == tenant_id,
+            )
+        except FlowProviderCallAttemptNotOpenError:
+            return
+        await self._persist_summarization(
+            attempt_id=attempt_id,
+            summarization=summarization,
+        )
+
+    async def _persist_summarization(
+        self,
+        *,
+        attempt_id: UUID,
+        summarization: SummarizationProvenance,
+        required_record_ids: tuple[str, ...] = (),
+    ) -> None:
+        existing = await self.session.scalar(
+            sa.select(FlowStepAttempts.provenance_json).where(
+                FlowStepAttempts.id == attempt_id
+            )
+        )
+        payload = append_summarization_provenance(
+            existing,
+            summarization,
+            required_record_ids=required_record_ids,
+        )
+        if payload != existing:
+            await self.session.execute(
+                sa.update(FlowStepAttempts)
+                .where(FlowStepAttempts.id == attempt_id)
+                .values(provenance_json=payload)
+            )
 
     async def _lock_open_attempt(
         self,

@@ -21,7 +21,6 @@ from eneo.flows.domain.step_output import (
     build_step_material_aliases,
     utf8_prefix,
 )
-from eneo.flows.domain.text_processing import SummarizationProvenance
 from eneo.flows.flow_run_provenance import (
     CitationsProvenance,
     FlowAttemptProvenance,
@@ -71,7 +70,6 @@ def build_terminal_attempt_input(
 def build_incomplete_attempt_provenance(
     *,
     rag_metadata: object = None,
-    summarization: SummarizationProvenance | None = None,
 ) -> dict[str, Any] | None:
     """Build evidence captured before an attempt produced a complete output."""
     rag = (
@@ -79,9 +77,9 @@ def build_incomplete_attempt_provenance(
         if isinstance(rag_metadata, dict)
         else None
     )
-    if rag is None and summarization is None:
+    if rag is None:
         return None
-    return FlowAttemptProvenance(rag=rag, summarization=summarization).to_payload()
+    return FlowAttemptProvenance(rag=rag).to_payload()
 
 
 def build_attempt_provenance(
@@ -117,18 +115,12 @@ def build_attempt_provenance(
         if output.citation_sidecar is not None
         else None
     )
-    if (
-        llm is None
-        and rag is None
-        and citations is None
-        and output.summarization is None
-    ):
+    if llm is None and rag is None and citations is None:
         return None
     return FlowAttemptProvenance(
         llm=llm,
         rag=rag,
         citations=citations,
-        summarization=output.summarization,
     ).to_payload()
 
 

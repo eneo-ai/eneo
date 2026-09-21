@@ -2484,7 +2484,6 @@ async def test_cancelled_step_preserves_activated_attempt_input(user):
     assert finish_kwargs["status"] == FlowStepAttemptStatus.CANCELLED
     assert finish_kwargs["requested_model"] == "openai/gpt-5.4-nano"
     assert finish_kwargs["provider"] == "openai"
-    assert finish_kwargs["provenance_json"] is None
     assert "attempt_input" not in finish_kwargs
 
 

@@ -10,7 +10,6 @@ from dataclasses import replace
 from hashlib import sha256
 from typing import Any, cast
 
-from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowRun
 from eneo.flows.domain.mapped_execution_policy import SummarizationBudget
 from eneo.flows.domain.provider_call import SummarizationCallInput
@@ -23,6 +22,7 @@ from eneo.flows.domain.text_processing import (
     SectionManifest,
     SummarizationProvenance,
     TextProcessingRecord,
+    summarization_json_bytes,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.runtime.step_deadline import record_step_progress, require_step_budget
@@ -90,7 +90,7 @@ async def fold_section_records(
     manifest: SectionManifest,
     array_key: str,
     budget: SummarizationBudget,
-) -> tuple[TextProcessingRecord, list[StepExecutionOutput], SummarizationProvenance]:
+) -> tuple[TextProcessingRecord, list[StepExecutionOutput]]:
     lineage = list(records)
     outputs: list[StepExecutionOutput] = []
     round_no = 0
@@ -118,7 +118,7 @@ async def fold_section_records(
                             run=run,
                             state=state,
                             base=base,
-                            section_text=canonical_json_bytes(
+                            section_text=summarization_json_bytes(
                                 {
                                     array_key: [
                                         record.value for record in records[start:end]
@@ -168,7 +168,7 @@ async def fold_section_records(
                         citation for parent in parents for citation in parent.citations
                     )
                 )
-                composed_input = canonical_json_bytes(
+                composed_input = summarization_json_bytes(
                     {array_key: [parent.value for parent in parents]}
                 )
                 call.prepared.summarization_input = SummarizationCallInput(
@@ -181,6 +181,11 @@ async def fold_section_records(
                     reserved_input_tokens=budget.input_tokens,
                     max_provider_calls=budget.max_provider_calls,
                     max_input_tokens=budget.max_input_tokens,
+                )
+                call.prepared.summarization = SummarizationProvenance(
+                    rounds=round_no,
+                    sources=manifest.sources,
+                    records=tuple(lineage),
                 )
                 output = await complete_step_execution(
                     step=step,
@@ -243,19 +248,13 @@ async def fold_section_records(
             ):
                 raise budget.refusal()
             records = next_records
-    except BaseException as exc:
-        setattr(
-            exc,
-            "summarization",
-            SummarizationProvenance(
-                rounds=round_no, sources=manifest.sources, records=tuple(lineage)
-            ),
-        )
-        raise
-    return (
-        records[0],
-        outputs,
-        SummarizationProvenance(
-            rounds=round_no, sources=manifest.sources, records=tuple(lineage)
-        ),
-    )
+    finally:
+        if base.deps.persist_summarization is not None:
+            await base.deps.persist_summarization(
+                SummarizationProvenance(
+                    rounds=round_no,
+                    sources=manifest.sources,
+                    records=tuple(lineage),
+                )
+            )
+    return records[0], outputs

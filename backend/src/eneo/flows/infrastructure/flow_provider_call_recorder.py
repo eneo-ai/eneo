@@ -24,6 +24,7 @@ from eneo.flows.domain.provider_call import (
     TranscriptionProviderCallRequest,
 )
 from eneo.flows.domain.provider_call_evidence_gap import ProviderCallEvidenceGap
+from eneo.flows.domain.text_processing import SummarizationProvenance
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdgeIndexes,
     MappedProviderCallProvenance,
@@ -86,6 +87,7 @@ class FlowProviderCallRecorder:
         mapped_call: MappedProviderCallProvenance | None,
         resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
         summarization_input: SummarizationCallInput | None = None,
+        summarization: SummarizationProvenance | None = None,
     ):
         self.run_id = run_id
         self.step_id = step_id
@@ -97,6 +99,7 @@ class FlowProviderCallRecorder:
         self.mapped_call = mapped_call
         self.resolved_input_edge_indexes = resolved_input_edge_indexes
         self.summarization_input = summarization_input
+        self.summarization = summarization
         self._started_evidence: dict[UUID, tuple[int, str]] = {}
 
     async def started(self, request: ProviderCallRequestFacts) -> UUID:
@@ -113,6 +116,7 @@ class FlowProviderCallRecorder:
                     tenant_id=self.tenant_id,
                     request=call_request,
                     resolved_input_edge_indexes=self.resolved_input_edge_indexes,
+                    summarization=self.summarization,
                 )
 
         started = await self._persist_with_retry(

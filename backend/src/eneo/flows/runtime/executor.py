@@ -73,6 +73,7 @@ from eneo.flows.domain.step_output import (
     build_step_material_aliases,
     utf8_prefix,
 )
+from eneo.flows.domain.text_processing import SummarizationProvenance
 from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
@@ -110,6 +111,7 @@ from eneo.flows.infrastructure.flow_provider_call_recorder import (
     FlowProviderCallRecorder,
     ProviderCallEvidencePersistenceError,
 )
+from eneo.flows.infrastructure.flow_provider_call_repo import FlowProviderCallRepository
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunExecutionOwner,
@@ -1006,14 +1008,13 @@ class FlowRunExecutor:
                     attempt_no=attempt_no,
                 )
                 output = execution_result.output
-            except FlowStepCancelledError as exc:
+            except FlowStepCancelledError:
                 return await self._handle_cancelled_step(
                     run_id=run_id,
                     tenant_id=tenant_id,
                     step=step,
                     attempt_no=attempt_no,
                     state=state,
-                    exc=exc,
                 )
             except TypedIOValidationException as typed_exc:
                 contract_diag: dict[str, Any] | None = None
@@ -1301,13 +1302,6 @@ class FlowRunExecutor:
                             )
                         if partial_evidence is not None:
                             setattr(typed, "rag_metadata", partial_evidence)
-                        summarization = getattr(exc, "summarization", None)
-                        if summarization is None:
-                            summarization = getattr(
-                                exc.__cause__, "summarization", None
-                            )
-                        if summarization is not None:
-                            setattr(typed, "summarization", summarization)
                         raise typed from exc
                     record_step_phase(FlowStepPhase.FINALIZATION)
                     if deadline.expired():
@@ -1321,8 +1315,6 @@ class FlowRunExecutor:
                         )
                         if result.output.rag_metadata is not None:
                             setattr(late, "rag_metadata", result.output.rag_metadata)
-                        if result.output.summarization is not None:
-                            setattr(late, "summarization", result.output.summarization)
                         raise late
                 step_span.set_result(status="completed")
                 return result
@@ -1446,7 +1438,8 @@ class FlowRunExecutor:
             build_provider_call_observer=lambda mapped_call,
             resolved_input_edge_indexes,
             completion_model_id,
-            summarization_input=None: FlowProviderCallRecorder(
+            summarization_input=None,
+            summarization=None: FlowProviderCallRecorder(
                 run_id=run.id,
                 step_id=step.step_id,
                 attempt_no=attempt_no,
@@ -1457,6 +1450,13 @@ class FlowRunExecutor:
                 mapped_call=mapped_call,
                 resolved_input_edge_indexes=resolved_input_edge_indexes,
                 summarization_input=summarization_input,
+                summarization=summarization,
+            ),
+            persist_summarization=partial(
+                self._persist_summarization,
+                run=run,
+                step=step,
+                attempt_no=attempt_no,
             ),
             # Transcription runs while the step input is still being produced,
             # so it has neither a mapped call nor a resolved input aggregate.
@@ -1472,6 +1472,25 @@ class FlowRunExecutor:
                 resolved_input_edge_indexes=(),
             ),
         )
+
+    async def _persist_summarization(
+        self,
+        summarization: SummarizationProvenance,
+        *,
+        run: FlowRun,
+        step: RuntimeStep,
+        attempt_no: int,
+    ) -> None:
+        async with sessionmanager.session() as session, session.begin():
+            await FlowProviderCallRepository(
+                session
+            ).persist_summarization_for_execution(
+                run_id=run.id,
+                step_id=step.step_id,
+                attempt_no=attempt_no,
+                tenant_id=run.tenant_id,
+                summarization=summarization,
+            )
 
     async def _prepare_assistant_step(
         self,
@@ -1908,7 +1927,6 @@ class FlowRunExecutor:
         step: RuntimeStep,
         attempt_no: int,
         state: RunExecutionState | None,
-        exc: FlowStepCancelledError | None = None,
     ) -> dict[str, Any]:
         await self._rollback()
         if current_execution_ownership_lost():
@@ -1932,9 +1950,6 @@ class FlowRunExecutor:
             error_message="Run was cancelled during step execution.",
             requested_model=requested_model,
             provider=provider,
-            provenance_json=build_incomplete_attempt_provenance(
-                summarization=getattr(exc, "summarization", None),
-            ),
         )
         await self._commit()
         return {"status": "skipped", "reason": "run_cancelled"}
@@ -2030,7 +2045,6 @@ class FlowRunExecutor:
             provider=provider if isinstance(provider, str) else None,
             provenance_json=build_incomplete_attempt_provenance(
                 rag_metadata=getattr(typed_exc, "rag_metadata", None),
-                summarization=getattr(typed_exc, "summarization", None),
             ),
             attempt_input=build_terminal_attempt_input(
                 start=attempt_start,
@@ -2175,7 +2189,6 @@ class FlowRunExecutor:
             provider=provider,
             provenance_json=build_incomplete_attempt_provenance(
                 rag_metadata=getattr(exc, "rag_metadata", None),
-                summarization=getattr(exc, "summarization", None),
             ),
             attempt_input=build_terminal_attempt_input(
                 start=attempt_start,

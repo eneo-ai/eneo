@@ -21,7 +21,10 @@ from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.flow_step_attempt_input import MappedExecutionMode
 from eneo.flows.domain.rag_evidence import SourceUsageState
-from eneo.flows.domain.text_processing import SummarizationProvenance
+from eneo.flows.domain.text_processing import (
+    SummarizationProvenance,
+    summarization_json_bytes,
+)
 from eneo.flows.source_display import (
     format_source_container_display_name,
     format_source_container_label,
@@ -658,6 +661,45 @@ def normalize_attempt_provenance(
     return parse_result.provenance if parse_result.status == "tracked" else None
 
 
+def append_summarization_provenance(
+    existing: dict[str, Any] | None,
+    incoming: SummarizationProvenance,
+    *,
+    required_record_ids: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    parsed = parse_attempt_provenance(existing)
+    if parsed.status == "corrupt":
+        raise ValueError("Cannot append summarization to corrupt attempt provenance.")
+    provenance = parsed.provenance or FlowAttemptProvenance()
+    previous = provenance.summarization
+    if previous is not None and previous.sources != incoming.sources:
+        raise ValueError("Summarization source lineage cannot change.")
+    records = {record.id: record for record in previous.records} if previous else {}
+    for record in incoming.records:
+        if record.id in records:
+            if summarization_json_bytes(
+                records[record.id].model_dump(mode="json")
+            ) != summarization_json_bytes(record.model_dump(mode="json")):
+                raise ValueError(
+                    "Summarization records cannot change after persistence."
+                )
+            continue
+        if not set(record.parents) <= records.keys():
+            raise ValueError("Summarization parents must already exist in provenance.")
+        records[record.id] = record
+    if not set(required_record_ids) <= records.keys():
+        raise ValueError("Summarization call references missing provenance records.")
+    return provenance.model_copy(
+        update={
+            "summarization": SummarizationProvenance(
+                rounds=max(previous.rounds if previous else 0, incoming.rounds),
+                sources=incoming.sources,
+                records=tuple(records.values()),
+            )
+        }
+    ).to_payload()
+
+
 def resolve_attempt_terminalization_evidence(
     existing: dict[str, Any] | None,
     incoming: dict[str, Any] | None,
@@ -674,8 +716,14 @@ def resolve_attempt_terminalization_evidence(
             provenance_json=existing,
             write_runtime_payloads=True,
         )
+    # Fold records are committed before dispatch; finalization cannot replace them.
+    finalized = dict(incoming)
+    if existing_result.provenance is not None:
+        summary = existing_result.provenance.summarization
+        if summary is not None:
+            finalized["summarization"] = summary.model_dump(mode="json")
     return FlowAttemptTerminalizationEvidence(
-        provenance_json=incoming,
+        provenance_json=finalized,
         write_runtime_payloads=True,
     )
 

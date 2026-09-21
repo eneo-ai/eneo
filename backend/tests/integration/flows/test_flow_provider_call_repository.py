@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import wave
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -15,6 +17,7 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import (
     FlowProviderCalls,
     FlowStepAttemptResolvedInputs,
+    FlowStepAttempts,
     FlowStepResults,
 )
 from eneo.database.tables.token_usage_table import ProviderTokenUsages
@@ -33,10 +36,16 @@ from eneo.flows.domain.provider_call import (
     ProviderCallRequest,
     ProviderCallResponseFormat,
     ProviderCallUnknownReason,
+    SummarizationCallInput,
     TranscriptionCallCompletion,
     TranscriptionProviderCallRequest,
 )
 from eneo.flows.domain.step_output import RejectedCompletion
+from eneo.flows.domain.text_processing import (
+    SummarizationProvenance,
+    TextProcessingRecord,
+    summarization_json_bytes,
+)
 from eneo.flows.enums import FlowStepAttemptStatus
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdgeIndexes,
@@ -45,11 +54,13 @@ from eneo.flows.flow_run_provenance import (
     FlowResolvedInputJsonPath,
     MappedProviderCallProvenance,
     build_resolved_input_edge,
+    parse_attempt_provenance,
 )
 from eneo.flows.infrastructure.flow_provider_call_recorder import (
     FlowProviderCallRecorder,
 )
 from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallAttemptNotOpenError,
     FlowProviderCallNotFoundError,
     FlowProviderCallRepository,
     FlowProviderCallResolvedInputLinkError,
@@ -140,6 +151,7 @@ def _build_flow(
     space_id: UUID,
     user_id: UUID,
     assistant_id: UUID,
+    step_order: int = 1,
 ) -> Flow:
     return Flow(
         id=None,
@@ -160,7 +172,7 @@ def _build_flow(
                 flow_id=uuid4(),
                 tenant_id=tenant_id,
                 assistant_id=assistant_id,
-                step_order=1,
+                step_order=step_order,
                 user_description="Summarize the input",
                 input_source="flow_input",
                 input_type="text",
@@ -185,11 +197,15 @@ async def _create_started_attempt(
     space_factory,
     assistant_factory,
     activate_resolved_inputs: bool = True,
+    step_order: int = 1,
+    space_user_id: UUID | None = None,
 ) -> _StartedAttempt:
     model = await completion_model_factory(
         session, f"provider-call-model-{uuid4().hex}"
     )
-    space = await space_factory(session, "Provider call lifecycle space", [model.id])
+    space = await space_factory(
+        session, "Provider call lifecycle space", [model.id], user_id=space_user_id
+    )
     assistant = await assistant_factory(
         session,
         "Provider call lifecycle assistant",
@@ -202,6 +218,7 @@ async def _create_started_attempt(
             space_id=space.id,
             user_id=admin_user.id,
             assistant_id=assistant.id,
+            step_order=step_order,
         ),
         tenant_id=admin_user.tenant_id,
     )
@@ -264,6 +281,374 @@ async def _create_started_attempt(
             aggregate=FlowResolvedInputEdges(schema_version=1, edges=()),
         )
     return context
+
+
+async def _summarization_runtime(context, admin_user, *, numeric=False):
+    from tests.unittests.flows.test_summarize import _fold_case
+
+    executor, _, assistant, run, state, step, _, _ = _fold_case(admin_user)
+    executor._persist_summarization = type(executor)._persist_summarization.__get__(
+        executor
+    )
+    executor.max_inline_text_bytes = 8192
+    assistant.completion_model.id = context.completion_model_id
+    run = run.model_copy(update={"id": context.run_id, "flow_id": context.flow_id})
+    step = replace(step, step_id=context.step_id)
+    if numeric:
+        contract = json.loads(json.dumps(step.output_contract))
+        contract["properties"]["records"]["items"]["properties"]["numbers"] = {
+            "type": "array",
+            "items": {"type": "number"},
+        }
+        step = replace(step, output_contract=contract)
+
+    async def activate(**kwargs):
+        async with sessionmanager.session() as session, session.begin():
+            return await FlowRunRepository(session).activate_step_attempt(**kwargs)
+
+    executor.flow_run_repo.activate_step_attempt.side_effect = activate
+    return executor, assistant, run, state, step
+
+
+async def _read_summarization_evidence(context):
+    async with sessionmanager.session() as session, session.begin():
+        attempt = await session.get(FlowStepAttempts, context.attempt_id)
+        receipts = list(
+            await session.scalars(
+                sa.select(FlowProviderCalls)
+                .where(
+                    FlowProviderCalls.flow_step_attempt_id == context.attempt_id,
+                    FlowProviderCalls.summarization_input.is_not(None),
+                )
+                .order_by(FlowProviderCalls.ordinal)
+            )
+        )
+        parsed = parse_attempt_provenance(attempt.provenance_json)
+        assert parsed.provenance is not None
+        provenance = parsed.provenance.summarization
+        assert provenance is not None
+        by_id = {record.id: record for record in provenance.records}
+        assert len(by_id) == len(provenance.records)
+        assert receipts
+        for receipt in receipts:
+            assert set(receipt.summarization_input["record_ids"]) <= by_id.keys()
+        assert all(set(record.parents) <= by_id.keys() for record in provenance.records)
+        status = attempt.status
+        session.expunge_all()
+        return provenance, receipts, status
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("cancel_via_api", [False, True])
+async def test_summarization_receipts_resolve_before_worker_finalization(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    client,
+    flow_process_auth_headers,
+    cancel_via_api,
+):
+    async with sessionmanager.session() as session, session.begin():
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            activate_resolved_inputs=False,
+            step_order=2,
+            space_user_id=admin_user.id,
+        )
+    executor, assistant, run, state, step = await _summarization_runtime(
+        context, admin_user
+    )
+    respond = assistant.get_response.side_effect
+    dispatched = []
+    checkpoint = None
+
+    async def dispatch(**kwargs):
+        nonlocal checkpoint
+        observer = kwargs["provider_call_observer"]
+        call_id = await observer.started(
+            CompletionCallRequestFacts(
+                request_schema_version=2,
+                provider_request_hash=sha256(kwargs["question"].encode()).hexdigest(),
+                requested_model="test-model",
+                provider="test",
+                response_format="none",
+                requested_capabilities=(),
+                reason="initial",
+            )
+        )
+        dispatched.append(call_id)
+        if observer.summarization_input is not None:
+            checkpoint, _, _ = await _read_summarization_evidence(context)
+        if (
+            observer.summarization_input is not None
+            and observer.summarization_input.round == 2
+        ):
+            if cancel_via_api:
+                response = await client.post(
+                    f"/api/v1/flows/{context.flow_id}/runs/{context.run_id}/cancel/",
+                    headers=flow_process_auth_headers,
+                )
+                assert response.status_code == 200, response.text
+                assert response.json()["status"] == "cancelled"
+            raise RuntimeError("Injected failure mid-fold")
+        response = await respond(**kwargs)
+        await observer.completed(
+            call_id,
+            CompletionCallResultFacts(
+                response_model="test-model",
+                provider_response_id=None,
+                num_tokens_input=None,
+                num_tokens_output=None,
+            ),
+        )
+        return response
+
+    assistant.get_response.side_effect = dispatch
+    with pytest.raises(RuntimeError, match="Injected failure mid-fold"):
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    assert len(dispatched) > 3
+    before, receipts, status = await _read_summarization_evidence(context)
+    assert before == checkpoint
+    assert any(record.round == 1 for record in before.records)
+    assert any(receipt.summarization_input["round"] == 2 for receipt in receipts)
+    if cancel_via_api:
+        assert status == FlowStepAttemptStatus.CANCELLED.value
+    async with sessionmanager.session() as session, session.begin():
+        finished = await FlowRunRepository(session).finish_attempt(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            attempt_no=1,
+            status=FlowStepAttemptStatus.FAILED,
+            provenance_json={"schema_version": "flow-attempt-provenance.v3"},
+        )
+        assert (finished is None) == cancel_via_api
+    after, _, _ = await _read_summarization_evidence(context)
+    assert after == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_summarization_input_hash_survives_postgresql_numeric_normalization(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session, session.begin():
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            activate_resolved_inputs=False,
+            step_order=2,
+            space_user_id=admin_user.id,
+        )
+    executor, assistant, run, state, step = await _summarization_runtime(
+        context, admin_user, numeric=True
+    )
+    respond = assistant.get_response.side_effect
+    dispatched = {}
+
+    async def dispatch(**kwargs):
+        observer = kwargs["provider_call_observer"]
+        call_id = await observer.started(
+            CompletionCallRequestFacts(
+                request_schema_version=2,
+                provider_request_hash=sha256(kwargs["question"].encode()).hexdigest(),
+                requested_model="test-model",
+                provider="test",
+                response_format="none",
+                requested_capabilities=(),
+                reason="initial",
+            )
+        )
+        dispatched[call_id] = kwargs["question"].encode("utf-8")
+        response = await respond(**kwargs)
+        value = json.loads(response.completion)
+        value["records"][0]["value"] = "short"
+        value["records"][0]["numbers"] = [
+            1e20,
+            1.2345678901234568e20,
+            10**30 + 1,
+            1e-7,
+            1.0,
+            -0.0,
+        ]
+        response.completion = json.dumps(value)
+        await observer.completed(
+            call_id,
+            CompletionCallResultFacts(
+                response_model="test-model",
+                provider_response_id=None,
+                num_tokens_input=None,
+                num_tokens_output=None,
+            ),
+        )
+        return response
+
+    assistant.get_response.side_effect = dispatch
+    result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    reached, _, _ = await _read_summarization_evidence(context)
+    terminal_record_id = reached.records[-1].id
+    assert reached.records[-1].round == reached.rounds
+    assert summarization_json_bytes(
+        reached.records[-1].value
+    ) == summarization_json_bytes(result.output.structured_output["records"][0])
+    async with sessionmanager.session() as session, session.begin():
+        await FlowRunRepository(session).finish_attempt(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            attempt_no=1,
+            status=FlowStepAttemptStatus.COMPLETED,
+            provenance_json={"schema_version": "flow-attempt-provenance.v3"},
+        )
+    provenance, receipts, _ = await _read_summarization_evidence(context)
+    by_id = {record.id: record for record in provenance.records}
+    assert provenance.records[-1].id == terminal_record_id
+    assert isinstance(provenance.records[0].value["numbers"][0], int)
+    assert provenance.records[0].value["numbers"][2] == 10**30 + 1
+    for receipt in receipts:
+        descriptor = receipt.summarization_input
+        reconstructed = summarization_json_bytes(
+            {
+                "records": [
+                    by_id[record_id].value for record_id in descriptor["record_ids"]
+                ]
+            }
+        )
+        assert descriptor["input_sha256"] == sha256(reconstructed).hexdigest()
+        assert descriptor["input_bytes"] == len(reconstructed)
+        assert dispatched[receipt.id] == reconstructed
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_summarization_provenance_and_receipt_commit_atomically(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session, session.begin():
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+    provenance = SummarizationProvenance(
+        rounds=1,
+        sources=(),
+        records=(
+            TextProcessingRecord(
+                id="section:0", round=0, section_indexes=(0,), value={"value": "parent"}
+            ),
+            TextProcessingRecord(
+                id="round:1:0",
+                round=1,
+                parents=("section:0",),
+                section_indexes=(0,),
+                value={"value": "child"},
+            ),
+        ),
+    )
+    encoded = summarization_json_bytes({"records": [provenance.records[-1].value]})
+    request = CompletionProviderCallRequest(
+        request_schema_version=2,
+        provider_request_hash="a" * 64,
+        requested_model="test-model",
+        provider="test",
+        requested_capabilities=(),
+        summarization_input=SummarizationCallInput(
+            round=2,
+            group_index=0,
+            record_ids=("round:1:0",),
+            input_bytes=len(encoded),
+            input_sha256=sha256(encoded).hexdigest(),
+            reserved_calls=1,
+            reserved_input_tokens=10,
+            max_provider_calls=10,
+            max_input_tokens=1000,
+        ),
+    )
+
+    async def start(session):
+        return await FlowProviderCallRepository(session).start_call_for_execution(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            attempt_no=1,
+            request=request,
+            resolved_input_edge_indexes=(),
+            summarization=provenance,
+        )
+
+    with pytest.raises(RuntimeError, match="Abort receipt transaction"):
+        async with sessionmanager.session() as session, session.begin():
+            await start(session)
+            async with sessionmanager.session() as reader, reader.begin():
+                attempt = await reader.get(FlowStepAttempts, context.attempt_id)
+                assert attempt.provenance_json is None
+                assert (
+                    await reader.scalar(
+                        sa.select(sa.func.count())
+                        .select_from(FlowProviderCalls)
+                        .where(
+                            FlowProviderCalls.flow_step_attempt_id
+                            == context.attempt_id,
+                        )
+                    )
+                    == 0
+                )
+            raise RuntimeError("Abort receipt transaction")
+    async with sessionmanager.session() as reader, reader.begin():
+        attempt = await reader.get(FlowStepAttempts, context.attempt_id)
+        assert attempt.provenance_json is None
+        assert (
+            await reader.scalar(
+                sa.select(sa.func.count())
+                .select_from(FlowProviderCalls)
+                .where(
+                    FlowProviderCalls.flow_step_attempt_id == context.attempt_id,
+                )
+            )
+            == 0
+        )
+    async with sessionmanager.session() as session, session.begin():
+        await start(session)
+        await start(session)
+    persisted, receipts, _ = await _read_summarization_evidence(context)
+    assert persisted == provenance
+    assert len(receipts) == 2
+    async with sessionmanager.session() as session, session.begin():
+        await FlowRunRepository(session).finish_attempt(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            attempt_no=1,
+            status=FlowStepAttemptStatus.CANCELLED,
+        )
+    with pytest.raises(FlowProviderCallAttemptNotOpenError):
+        async with sessionmanager.session() as session, session.begin():
+            await start(session)
+    after, receipts, status = await _read_summarization_evidence(context)
+    assert after == persisted
+    assert len(receipts) == 2
+    assert status == FlowStepAttemptStatus.CANCELLED.value
 
 
 @pytest.mark.asyncio

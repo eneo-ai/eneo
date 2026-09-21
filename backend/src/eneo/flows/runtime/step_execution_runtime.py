@@ -8,7 +8,7 @@ import logging
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Awaitable, Final, Literal, Protocol, Sequence, cast
+from typing import Any, Awaitable, Callable, Final, Literal, Protocol, Sequence, cast
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import Completion, ModelKwargs
@@ -54,6 +54,7 @@ from eneo.flows.domain.step_output import (
     StepOutputValidationException,
     build_text_overflow_metadata,
 )
+from eneo.flows.domain.text_processing import SummarizationProvenance
 from eneo.flows.enums import FlowOutputMode, FlowOutputType, FlowStepPhase
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_capability_manifest import is_citation_capable_step
@@ -314,6 +315,7 @@ class BuildProviderCallObserverFn(Protocol):
         resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
         completion_model_id: UUID,
         summarization_input: SummarizationCallInput | None = None,
+        summarization: SummarizationProvenance | None = None,
     ) -> ProviderCallObserver: ...
 
 
@@ -334,6 +336,7 @@ class PreparedStepExecution:
     resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes | None = None
     completion_call: PreparedCompletionCall | None = None
     summarization_input: SummarizationCallInput | None = None
+    summarization: SummarizationProvenance | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -376,6 +379,9 @@ class StepExecutionRuntimeDeps:
     build_transcription_call_observer: BuildTranscriptionCallObserverFn | None = None
     mapped_call_context: MappedProviderCallProvenance | None = None
     summarization_budget: SummarizationBudget | None = None
+    persist_summarization: (
+        Callable[[SummarizationProvenance], Awaitable[None]] | None
+    ) = None
 
 
 def _resolve_litellm_model_name(assistant: RuntimeAssistantProtocol) -> str | None:
@@ -663,6 +669,7 @@ async def call_assistant_with_timeout(
                 prepared.resolved_input_edge_indexes,
                 completion_model.id,
                 prepared.summarization_input,
+                prepared.summarization,
             )
 
     if await execution_ownership_is_lost():

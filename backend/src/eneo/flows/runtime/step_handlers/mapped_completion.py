@@ -155,7 +155,6 @@ async def execute_section_completion(
         total_items=total,
     )
     folding = False
-    provenance = None
     extensions: dict[str, Any] = {
         "section_manifest": sections.manifest.model_dump(mode="json")
     }
@@ -219,7 +218,7 @@ async def execute_section_completion(
                     ),
                 ),
             )
-            final_record, folded_outputs, provenance = await fold_section_records(
+            final_record, folded_outputs = await fold_section_records(
                 step=per_call_step,
                 run=run,
                 state=state,
@@ -265,20 +264,20 @@ async def execute_section_completion(
                 ],
                 rag_metadata=evidence.payload(),
                 output_payload_extensions=extensions,
-                summarization=provenance,
             )
         )
     except BaseException as exc:
-        if budget is not None and getattr(exc, "summarization", None) is None:
-            setattr(
-                exc,
-                "summarization",
-                provenance
-                or SummarizationProvenance(
+        if (
+            budget is not None
+            and not folding
+            and base.deps.persist_summarization is not None
+        ):
+            await base.deps.persist_summarization(
+                SummarizationProvenance(
                     rounds=0,
                     sources=sections.manifest.sources,
                     records=tuple(section_records(records, outputs)),
-                ),
+                )
             )
         completed_items = min(len(outputs), total)
         scope = current_step_deadline_scope()
