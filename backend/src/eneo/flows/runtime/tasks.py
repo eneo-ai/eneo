@@ -54,7 +54,10 @@ from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRow,
 )
-from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
+from eneo.flows.runtime.diarizing_transcription import (
+    DiarizingFlowTranscriber,
+    RegistryFlowTranscriber,
+)
 from eneo.flows.runtime.execution_heartbeat import (
     FlowExecutionOwnershipLost,
     execution_heartbeats,
@@ -891,7 +894,7 @@ def _build_flow_transcriber(
     """
     settings = get_settings()
     if not settings.flow_transcription_service_configured:
-        return registry_transcriber
+        return RegistryFlowTranscriber(registry_transcriber)
     remote = build_remote_flow_transcriber(settings)
     if settings.flow_transcription_service_mode == "diarize":
         return DiarizingFlowTranscriber(registry_transcriber, remote)

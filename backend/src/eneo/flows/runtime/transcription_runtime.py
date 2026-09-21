@@ -23,11 +23,11 @@ from eneo.flows.flow_run_input_envelope import (
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 
+from .audio_spool import OpenAudioDownload
 from .transcription import (
     REDUCED_PRECISION_ALIGNMENTS,
     FlowStepTranscriber,
     FlowTranscriptionResult,
-    LoadAudioPayload,
     resolve_and_transcribe_audio_for_step,
 )
 
@@ -81,8 +81,7 @@ class AudioRuntimeDeps:
     flow_run_repo: "FlowRunRepository"
     audit_service: "AuditService | None"
     actor: FlowRunActor
-    # Reads one already-authorized audio file's bytes at transcription time.
-    load_audio_payload: LoadAudioPayload
+    open_audio_download: OpenAudioDownload
     apply_output_cap: ApplyOutputCapFn
     commit: Callable[[], Awaitable[None]]
     transcription_call_observer: "ProviderCallObserver | None" = None
@@ -226,7 +225,7 @@ async def resolve_transcribe_and_attach_audio_input(
         transcriber=deps.transcriber,
         max_files=request.max_audio_files,
         max_inline_text_bytes=request.max_inline_text_bytes,
-        load_audio_payload=deps.load_audio_payload,
+        open_audio_download=deps.open_audio_download,
         transcription_call_observer=deps.transcription_call_observer,
         max_speakers=request.max_speakers,
     )

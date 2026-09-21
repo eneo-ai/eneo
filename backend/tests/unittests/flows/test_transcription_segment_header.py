@@ -9,6 +9,9 @@ import pytest
 
 from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.runtime.transcription import transcribe_audio_input
+from tests.unittests.flows import audio_spool_test_support
+
+spool_contract = audio_spool_test_support.spool_contract
 
 
 def _frontend_segment_filename(
@@ -35,7 +38,7 @@ def _audio_file(name: str, file_id: UUID | None = None) -> SimpleNamespace:
     )
 
 
-async def _transcribe(files: list[SimpleNamespace], blocks: list[str]):
+async def _transcribe(spool_contract, files: list[SimpleNamespace], blocks: list[str]):
     transcriber = SimpleNamespace(
         transcribe=AsyncMock(
             side_effect=[
@@ -44,11 +47,6 @@ async def _transcribe(files: list[SimpleNamespace], blocks: list[str]):
         )
     )
     model = SimpleNamespace(id=uuid4(), name="whisper-1", model_name="whisper-1")
-    by_id = {file.id: file for file in files}
-
-    async def load_audio_payload(file_id: UUID) -> SimpleNamespace:
-        return by_id[file_id]
-
     return await transcribe_audio_input(
         files=files,
         transcriber=transcriber,
@@ -57,12 +55,12 @@ async def _transcribe(files: list[SimpleNamespace], blocks: list[str]):
         step_order=1,
         max_files=10,
         max_inline_text_bytes=10_000,
-        load_audio_payload=load_audio_payload,
+        open_audio_download=spool_contract.downloads(files),
     )
 
 
 @pytest.mark.asyncio
-async def test_segmented_recorder_files_get_part_headers() -> None:
+async def test_segmented_recorder_files_get_part_headers(spool_contract) -> None:
     session_id = "abcdef00-0000-0000-0000-000000000000"
     files = [
         _audio_file(
@@ -81,7 +79,7 @@ async def test_segmented_recorder_files_get_part_headers() -> None:
         ),
     ]
 
-    result = await _transcribe(files, ["alpha", "beta"])
+    result = await _transcribe(spool_contract, files, ["alpha", "beta"])
 
     assert result.text == (
         "## Del 1 — kl 09:00:00\n\nalpha\n\n## Del 2 — kl 09:22:00\n\nbeta"
@@ -90,7 +88,7 @@ async def test_segmented_recorder_files_get_part_headers() -> None:
 
 
 @pytest.mark.asyncio
-async def test_single_segment_upload_stays_unlabelled() -> None:
+async def test_single_segment_upload_stays_unlabelled(spool_contract) -> None:
     session_id = "abcdef00-0000-0000-0000-000000000000"
     files = [
         _audio_file(
@@ -102,13 +100,15 @@ async def test_single_segment_upload_stays_unlabelled() -> None:
         )
     ]
 
-    result = await _transcribe(files, ["alpha"])
+    result = await _transcribe(spool_contract, files, ["alpha"])
 
     assert result.text == "alpha"
 
 
 @pytest.mark.asyncio
-async def test_mixed_or_unrelated_audio_files_fall_back_to_plain_join() -> None:
+async def test_mixed_or_unrelated_audio_files_fall_back_to_plain_join(
+    spool_contract,
+) -> None:
     files = [
         _audio_file(
             "recording-abcdef00-0000-0000-0000-000000000000-seg00-2026-04-30T09-00-00-000Z.webm"
@@ -116,13 +116,15 @@ async def test_mixed_or_unrelated_audio_files_fall_back_to_plain_join() -> None:
         _audio_file("meeting-upload.webm"),
     ]
 
-    result = await _transcribe(files, ["alpha", "beta"])
+    result = await _transcribe(spool_contract, files, ["alpha", "beta"])
 
     assert result.text == "alpha\n\nbeta"
 
 
 @pytest.mark.asyncio
-async def test_different_segment_sessions_fall_back_to_plain_join() -> None:
+async def test_different_segment_sessions_fall_back_to_plain_join(
+    spool_contract,
+) -> None:
     files = [
         _audio_file(
             "recording-abcdef00-0000-0000-0000-000000000000-seg00-2026-04-30T09-00-00-000Z.webm"
@@ -132,13 +134,15 @@ async def test_different_segment_sessions_fall_back_to_plain_join() -> None:
         ),
     ]
 
-    result = await _transcribe(files, ["alpha", "beta"])
+    result = await _transcribe(spool_contract, files, ["alpha", "beta"])
 
     assert result.text == "alpha\n\nbeta"
 
 
 @pytest.mark.asyncio
-async def test_malformed_segment_timestamp_falls_back_to_plain_join() -> None:
+async def test_malformed_segment_timestamp_falls_back_to_plain_join(
+    spool_contract,
+) -> None:
     files = [
         _audio_file(
             "recording-abcdef00-0000-0000-0000-000000000000-seg00-2026-04-30T09-00-00-123-456Z.webm"
@@ -148,6 +152,6 @@ async def test_malformed_segment_timestamp_falls_back_to_plain_join() -> None:
         ),
     ]
 
-    result = await _transcribe(files, ["alpha", "beta"])
+    result = await _transcribe(spool_contract, files, ["alpha", "beta"])
 
     assert result.text == "alpha\n\nbeta"

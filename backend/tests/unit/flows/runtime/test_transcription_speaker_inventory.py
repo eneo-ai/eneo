@@ -22,6 +22,9 @@ from eneo.transcription_models.infrastructure.adapters.litellm_transcription imp
     TranscriptSegment,
     TranscriptWord,
 )
+from tests.unittests.flows import audio_spool_test_support
+
+spool_contract = audio_spool_test_support.spool_contract
 
 FILE_TEXT = "\n".join(
     [
@@ -39,7 +42,7 @@ def _transcriber(*results: TranscribedAudio) -> SimpleNamespace:
     return SimpleNamespace(transcribe=AsyncMock(side_effect=list(results)))
 
 
-async def _run(files, transcriber, max_speakers=None):
+async def _run(spool_contract, files, transcriber, max_speakers=None):
     return await transcribe_audio_input(
         max_speakers=max_speakers,
         files=files,
@@ -49,20 +52,18 @@ async def _run(files, transcriber, max_speakers=None):
         step_order=1,
         max_files=5,
         max_inline_text_bytes=100_000,
-        load_audio_payload=AsyncMock(
-            side_effect=lambda file_id: SimpleNamespace(id=file_id, blob=b"x")
-        ),
+        open_audio_download=spool_contract.downloads(files),
     )
 
 
-async def test_labels_are_unique_across_files_and_inventoried() -> None:
+async def test_labels_are_unique_across_files_and_inventoried(spool_contract) -> None:
     files = [_file("a.mp3"), _file("b.mp3")]
     transcriber = _transcriber(
         TranscribedAudio(FILE_TEXT, 10.0, diarization="external"),
         TranscribedAudio(FILE_TEXT, 10.0, diarization="external"),
     )
 
-    result = await _run(files, transcriber)
+    result = await _run(spool_contract, files, transcriber)
 
     assert "SPEAKER_02: Hej." in result.text and "SPEAKER_03: Hallå." in result.text
     assert result.text.count("SPEAKER_00: Hej.") == 1
@@ -73,7 +74,7 @@ async def test_labels_are_unique_across_files_and_inventoried() -> None:
     assert result.to_metadata()["speakers"] == result.speakers
 
 
-async def test_step_is_forced_only_when_every_file_was_forced() -> None:
+async def test_step_is_forced_only_when_every_file_was_forced(spool_contract) -> None:
     transcriber = _transcriber(
         TranscribedAudio(FILE_TEXT, 10.0, diarization="external", alignment="forced"),
         TranscribedAudio(
@@ -81,30 +82,32 @@ async def test_step_is_forced_only_when_every_file_was_forced() -> None:
         ),
     )
 
-    result = await _run([_file("a.mp3"), _file("b.mp3")], transcriber)
+    result = await _run(spool_contract, [_file("a.mp3"), _file("b.mp3")], transcriber)
 
     assert result.alignment == "segment_only"
     assert result.to_metadata()["alignment"] == "segment_only"
 
 
-async def test_speaker_bound_reaches_the_transcriber_and_metadata() -> None:
+async def test_speaker_bound_reaches_the_transcriber_and_metadata(
+    spool_contract,
+) -> None:
     transcriber = _transcriber(
         TranscribedAudio(FILE_TEXT, 10.0, diarization="external")
     )
 
-    result = await _run([_file("a.mp3")], transcriber, max_speakers=2)
+    result = await _run(spool_contract, [_file("a.mp3")], transcriber, max_speakers=2)
 
     assert transcriber.transcribe.await_args.kwargs["max_speakers"] == 2
     assert result.to_metadata()["max_speakers"] == 2
 
 
-async def test_files_without_speaker_labels_add_nothing() -> None:
+async def test_files_without_speaker_labels_add_nothing(spool_contract) -> None:
     transcriber = _transcriber(
         TranscribedAudio("Bara text.", 10.0, diarization=None),
         TranscribedAudio(FILE_TEXT, 10.0, diarization="external"),
     )
 
-    result = await _run([_file("a.mp3"), _file("b.mp3")], transcriber)
+    result = await _run(spool_contract, [_file("a.mp3"), _file("b.mp3")], transcriber)
 
     # The unlabelled file does not consume label numbers.
     assert "SPEAKER_00: Hej." in result.text
@@ -117,7 +120,7 @@ FILE_SEGMENTS = (
 )
 
 
-async def test_segments_follow_the_text_labels_per_file() -> None:
+async def test_segments_follow_the_text_labels_per_file(spool_contract) -> None:
     files = [_file("a.mp3"), _file("b.mp3")]
     transcriber = _transcriber(
         TranscribedAudio(
@@ -128,7 +131,7 @@ async def test_segments_follow_the_text_labels_per_file() -> None:
         ),
     )
 
-    result = await _run(files, transcriber)
+    result = await _run(spool_contract, files, transcriber)
 
     segments = result.to_metadata()["segments"]
     assert [segment["speaker"] for segment in segments] == [
@@ -149,7 +152,7 @@ async def test_segments_follow_the_text_labels_per_file() -> None:
     assert result.to_metadata()["segments_omitted_reason"] is None
 
 
-async def test_segments_are_all_or_nothing_across_files() -> None:
+async def test_segments_are_all_or_nothing_across_files(spool_contract) -> None:
     transcriber = _transcriber(
         TranscribedAudio(
             FILE_TEXT, 10.0, diarization="external", transcript_segments=FILE_SEGMENTS
@@ -157,13 +160,14 @@ async def test_segments_are_all_or_nothing_across_files() -> None:
         TranscribedAudio(FILE_TEXT, 10.0, diarization="external"),
     )
 
-    result = await _run([_file("a.mp3"), _file("b.mp3")], transcriber)
+    result = await _run(spool_contract, [_file("a.mp3"), _file("b.mp3")], transcriber)
 
     assert result.segments is None
     assert result.to_metadata()["segments"] is None
 
 
 async def test_oversized_segments_are_omitted_with_a_reason(
+    spool_contract,
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(transcription, "MAX_SEGMENTS_BYTES", 10)
@@ -173,7 +177,7 @@ async def test_oversized_segments_are_omitted_with_a_reason(
         ),
     )
 
-    result = await _run([_file("a.mp3")], transcriber)
+    result = await _run(spool_contract, [_file("a.mp3")], transcriber)
 
     assert result.segments is None
     assert result.to_metadata()["segments_omitted_reason"] == "too_large"
@@ -189,7 +193,9 @@ TIMED_SEGMENTS = (
 )
 
 
-async def test_words_are_keyed_to_the_stored_segment_index_across_files() -> None:
+async def test_words_are_keyed_to_the_stored_segment_index_across_files(
+    spool_contract,
+) -> None:
     transcriber = _transcriber(
         TranscribedAudio(
             FILE_TEXT, 10.0, diarization="external", transcript_segments=TIMED_SEGMENTS
@@ -205,7 +211,7 @@ async def test_words_are_keyed_to_the_stored_segment_index_across_files() -> Non
         ),
     )
 
-    result = await _run([_file("a.mp3"), _file("b.mp3")], transcriber)
+    result = await _run(spool_contract, [_file("a.mp3"), _file("b.mp3")], transcriber)
 
     # The second file's first segment has no words, so index 2 is skipped and
     # index 3 (its second segment) keeps its per-file timestamps.
@@ -229,6 +235,7 @@ async def test_words_are_keyed_to_the_stored_segment_index_across_files() -> Non
 
 
 async def test_words_are_dropped_with_the_segments_they_anchor_to(
+    spool_contract,
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(transcription, "MAX_SEGMENTS_BYTES", 10)
@@ -238,14 +245,16 @@ async def test_words_are_dropped_with_the_segments_they_anchor_to(
         ),
     )
 
-    result = await _run([_file("a.mp3")], transcriber)
+    result = await _run(spool_contract, [_file("a.mp3")], transcriber)
 
     assert result.segments is None
     assert result.words is None
     assert result.to_metadata()["words_omitted_reason"] == "segments_unavailable"
 
 
-async def test_oversized_words_are_omitted_but_segments_kept(monkeypatch) -> None:
+async def test_oversized_words_are_omitted_but_segments_kept(
+    spool_contract, monkeypatch
+) -> None:
     monkeypatch.setattr(transcription, "MAX_WORDS_BYTES", 10)
     transcriber = _transcriber(
         TranscribedAudio(
@@ -253,7 +262,7 @@ async def test_oversized_words_are_omitted_but_segments_kept(monkeypatch) -> Non
         ),
     )
 
-    result = await _run([_file("a.mp3")], transcriber)
+    result = await _run(spool_contract, [_file("a.mp3")], transcriber)
 
     assert result.segments is not None
     assert result.words is None
@@ -268,7 +277,9 @@ SHARED_CASES = json.loads(
 
 
 @pytest.mark.parametrize("case", SHARED_CASES, ids=lambda case: case["name"])
-async def test_shared_vemsa_case_adapter_checkpoint_correction_render(case):
+async def test_shared_vemsa_case_adapter_checkpoint_correction_render(
+    spool_contract, case
+):
     wire = case["result"]
     source = TranscribedAudio(
         wire["text"],
@@ -277,7 +288,7 @@ async def test_shared_vemsa_case_adapter_checkpoint_correction_render(case):
         transcript_segments=_parse_result_segments(wire["segments"]),
         speaker_review=wire["speaker_review"],
     )
-    result = await _run([_file("a.mp3")], _transcriber(source))
+    result = await _run(spool_contract, [_file("a.mp3")], _transcriber(source))
     assert result.text == wire["text"]
     segments = result.segments
     assert segments
@@ -307,7 +318,9 @@ async def test_shared_vemsa_case_adapter_checkpoint_correction_render(case):
             )
 
 
-async def test_two_files_namespace_overlap_ids_and_keep_unknown_speakers_in_inventory():
+async def test_two_files_namespace_overlap_ids_and_keep_unknown_speakers_in_inventory(
+    spool_contract,
+):
     wire = next(case["result"] for case in SHARED_CASES if case["name"] == "overlap")
     source = TranscribedAudio(
         wire["text"],
@@ -317,7 +330,7 @@ async def test_two_files_namespace_overlap_ids_and_keep_unknown_speakers_in_inve
         speaker_review=wire["speaker_review"],
     )
     files = [_file("a.mp3"), _file("b.mp3")]
-    result = await _run(files, _transcriber(source, source))
+    result = await _run(spool_contract, files, _transcriber(source, source))
     assert result.segments[1]["overlap_ids"] == [f"{files[0].id}:overlap_0000"]
     assert result.segments[4]["overlap_ids"] == [f"{files[1].id}:overlap_0000"]
     assert (
@@ -331,7 +344,7 @@ async def test_two_files_namespace_overlap_ids_and_keep_unknown_speakers_in_inve
     assert all("ses" not in entry["samples"] for entry in result.speakers)
 
 
-async def test_review_size_fallback_retains_uncertainty(monkeypatch):
+async def test_review_size_fallback_retains_uncertainty(spool_contract, monkeypatch):
     wire = next(case["result"] for case in SHARED_CASES if case["name"] == "overlap")
     source = TranscribedAudio(
         wire["text"],
@@ -341,7 +354,7 @@ async def test_review_size_fallback_retains_uncertainty(monkeypatch):
         speaker_review=wire["speaker_review"],
     )
     monkeypatch.setattr(transcription, "MAX_SEGMENTS_BYTES", 1)
-    result = await _run([_file("a.mp3")], _transcriber(source))
+    result = await _run(spool_contract, [_file("a.mp3")], _transcriber(source))
     assert result.segments is None
     assert result.words is None
     assert result.segments_omitted_reason == "too_large"
@@ -349,7 +362,9 @@ async def test_review_size_fallback_retains_uncertainty(monkeypatch):
     assert "SPEAKER_00: ses" not in result.text
 
 
-async def test_final_segment_order_remaps_words_and_keeps_overlap_precision():
+async def test_final_segment_order_remaps_words_and_keeps_overlap_precision(
+    spool_contract,
+):
     source = TranscribedAudio(
         "unused",
         4,
@@ -385,14 +400,14 @@ async def test_final_segment_order_remaps_words_and_keeps_overlap_precision():
             ],
         },
     )
-    result = await _run([_file("a.mp3")], _transcriber(source))
+    result = await _run(spool_contract, [_file("a.mp3")], _transcriber(source))
     assert result.segments[0]["text"] == "Först"
     assert result.words[0]["segment_index"] == 0
     assert result.words[0]["words"][0]["start"] == 0.1234567
     assert result.speaker_review["files"][0]["overlaps"][0]["end"] == 0.1234568
 
 
-async def test_empty_first_file_preserves_review_file_identity():
+async def test_empty_first_file_preserves_review_file_identity(spool_contract):
     wire = next(case["result"] for case in SHARED_CASES if case["name"] == "overlap")
     source = TranscribedAudio(
         wire["text"],
@@ -402,6 +417,7 @@ async def test_empty_first_file_preserves_review_file_identity():
         speaker_review=wire["speaker_review"],
     )
     result = await _run(
+        spool_contract,
         [_file("empty.mp3"), _file("speech.mp3")],
         _transcriber(TranscribedAudio("", 0, diarization="external"), source),
     )

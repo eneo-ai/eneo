@@ -38,6 +38,9 @@ from eneo.transcription_models.infrastructure.adapters.litellm_transcription imp
     TranscriptSegment,
     TranscriptWord,
 )
+from tests.unittests.flows import audio_spool_test_support
+
+spool_contract = audio_spool_test_support.spool_contract
 
 JOB_ID = "abc123"
 
@@ -169,16 +172,11 @@ class RecordingObserver:
         self.unknown_calls.append((call_id, reason))
 
 
-def audio_file(blob: bytes = b"fake-mp3-bytes") -> SimpleNamespace:
-    return SimpleNamespace(
-        id=UUID(int=1), name="meeting.mp3", mimetype="audio/mpeg", blob=blob
-    )
-
-
-@pytest.fixture(autouse=True)
-def fixed_duration(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        remote_transcription, "measure_duration", AsyncMock(return_value=42.0)
+async def audio_file(spool_contract, blob: bytes = b"fake-mp3-bytes"):
+    return await spool_contract.spool(
+        SimpleNamespace(
+            id=UUID(int=1), name="meeting.mp3", mimetype="audio/mpeg", blob=blob
+        )
     )
 
 
@@ -203,7 +201,7 @@ async def test_submit_sends_multipart_job_contract() -> None:
     assert b'name="diarize"' in body and b"true" in body
 
 
-async def test_accepted_job_is_recorded_before_the_first_poll() -> None:
+async def test_accepted_job_is_recorded_before_the_first_poll(spool_contract) -> None:
     observer = RecordingObserver()
 
     class Service(ScriptedService):
@@ -219,13 +217,18 @@ async def test_accepted_job_is_recorded_before_the_first_poll() -> None:
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
     await RemoteFlowTranscriber(make_client(service)).transcribe(
-        audio_file(), SimpleNamespace(), observer=observer
+        await audio_file(spool_contract),
+        SimpleNamespace(),
+        observer=observer,
+        file_id=UUID(int=1),
     )
     assert observer.completed_calls[0][0] == observer.accepted_calls[0][0]
 
 
 @pytest.mark.parametrize("error", [httpx.WriteError, httpx.ReadTimeout])
-async def test_lost_submission_response_resubmits_once_with_same_key(error):
+async def test_lost_submission_response_resubmits_once_with_same_key(
+    spool_contract, error
+):
     class Service(ScriptedService):
         def handler(self, request):
             if request.method == "POST" and self.submit_count == 0:
@@ -241,7 +244,10 @@ async def test_lost_submission_response_resubmits_once_with_same_key(error):
     )
     observer = RecordingObserver()
     await RemoteFlowTranscriber(make_client(service)).transcribe(
-        audio_file(), SimpleNamespace(), observer=observer
+        await audio_file(spool_contract),
+        SimpleNamespace(),
+        observer=observer,
+        file_id=UUID(int=1),
     )
     submits = [request for request in service.requests if request.method == "POST"]
     assert len(submits) == 2
@@ -265,7 +271,7 @@ async def test_lost_submission_response_resubmits_once_with_same_key(error):
     ],
 )
 async def test_admission_wait_honours_retry_after(
-    refusal, retry_after, expected_wait, monkeypatch
+    spool_contract, refusal, retry_after, expected_wait, monkeypatch
 ):
     clock = {"now": 0.0}
     waits = []
@@ -296,14 +302,19 @@ async def test_admission_wait_honours_retry_after(
     with step_deadline_scope(StepDeadline.start(10), step_order=1):
         await RemoteFlowTranscriber(
             make_client(service, poll_interval_seconds=1)
-        ).transcribe(audio_file(), SimpleNamespace(), observer=observer)
+        ).transcribe(
+            await audio_file(spool_contract),
+            SimpleNamespace(),
+            observer=observer,
+            file_id=UUID(int=1),
+        )
     assert sum(waits) == expected_wait
     assert service.submit_count == 2
     assert len(observer.started_facts) == 1
     assert observer.unknown_calls == []
 
 
-async def test_admission_deadline_records_known_refusal(monkeypatch):
+async def test_admission_deadline_records_known_refusal(spool_contract, monkeypatch):
     clock = {"now": 0.0}
 
     async def sleep(delay):
@@ -323,7 +334,12 @@ async def test_admission_deadline_records_known_refusal(monkeypatch):
         with pytest.raises(TypedIOValidationException) as exc_info:
             await RemoteFlowTranscriber(
                 make_client(service, poll_interval_seconds=1)
-            ).transcribe(audio_file(), SimpleNamespace(), observer=observer)
+            ).transcribe(
+                await audio_file(spool_contract),
+                SimpleNamespace(),
+                observer=observer,
+                file_id=UUID(int=1),
+            )
     assert exc_info.value.provider_work_may_have_completed is False
     assert clock["now"] == 2
     assert service.submit_count == 1
@@ -350,14 +366,19 @@ async def test_admission_deadline_records_known_refusal(monkeypatch):
         ),
     ],
 )
-async def test_submission_validation_reason_uses_vemsa_detail(detail, expected):
+async def test_submission_validation_reason_uses_vemsa_detail(
+    spool_contract, detail, expected
+):
     service = ScriptedService(
         submit_responses=[httpx.Response(422, json={"detail": detail})]
     )
     observer = RecordingObserver()
     with pytest.raises(ProviderRejectedRequestException) as exc_info:
         await RemoteFlowTranscriber(make_client(service)).transcribe(
-            audio_file(), SimpleNamespace(), observer=observer
+            await audio_file(spool_contract),
+            SimpleNamespace(),
+            observer=observer,
+            file_id=UUID(int=1),
         )
     assert exc_info.value.failure_kind.value == "input"
     assert exc_info.value.service_reason == expected
@@ -365,7 +386,7 @@ async def test_submission_validation_reason_uses_vemsa_detail(detail, expected):
     assert [reason for _, reason in observer.rejected_calls] == ["provider_rejected"]
 
 
-async def test_cancellation_before_dispatch_keeps_audio_usage_complete():
+async def test_cancellation_before_dispatch_keeps_audio_usage_complete(spool_contract):
     from eneo.flows.application.flow_run_service import _transcription_usage
 
     service = ScriptedService()
@@ -376,7 +397,10 @@ async def test_cancellation_before_dispatch_keeps_audio_usage_complete():
     ):
         with pytest.raises(FlowStepCancelledError):
             await RemoteFlowTranscriber(make_client(service)).transcribe(
-                audio_file(), SimpleNamespace(), observer=observer
+                await audio_file(spool_contract),
+                SimpleNamespace(),
+                observer=observer,
+                file_id=UUID(int=1),
             )
     assert service.submit_count == 0
     assert observer.unknown_calls == []
@@ -432,7 +456,7 @@ async def test_poll_timeout_retains_last_progress_in_error_details(monkeypatch):
     assert service.cancel_count == 1
 
 
-async def test_unknown_submission_is_repeated_only_once():
+async def test_unknown_submission_is_repeated_only_once(spool_contract):
     requests = []
 
     def handle(request):
@@ -444,7 +468,10 @@ async def test_unknown_submission_is_repeated_only_once():
     observer = RecordingObserver()
     with pytest.raises(OpenAIException):
         await RemoteFlowTranscriber(client).transcribe(
-            audio_file(), SimpleNamespace(), observer=observer
+            await audio_file(spool_contract),
+            SimpleNamespace(),
+            observer=observer,
+            file_id=UUID(int=1),
         )
     assert len(requests) == 2
     assert all(request.method == "POST" for request in requests)
@@ -456,7 +483,7 @@ async def test_unknown_submission_is_repeated_only_once():
 
 
 @pytest.mark.parametrize("change", ["scope", "file_id", "digest", "task"])
-async def test_submission_key_is_stable_and_scoped_to_operation(change):
+async def test_submission_key_is_stable_and_scoped_to_operation(spool_contract, change):
     service = ScriptedService(
         submit_responses=[accepted(), accepted(), accepted()],
         status_responses=[
@@ -468,24 +495,32 @@ async def test_submission_key_is_stable_and_scoped_to_operation(change):
     )
     observer = RecordingObserver()
     transcriber = RemoteFlowTranscriber(make_client(service))
-    file = audio_file()
-    await transcriber.transcribe(file, SimpleNamespace(), observer=observer)
-    await transcriber.transcribe(file, SimpleNamespace(), observer=observer)
+    file = await audio_file(spool_contract)
+    file_id = UUID(int=1)
+    await transcriber.transcribe(
+        file, SimpleNamespace(), observer=observer, file_id=file_id
+    )
+    await transcriber.transcribe(
+        file, SimpleNamespace(), observer=observer, file_id=file_id
+    )
     if change == "scope":
         observer.operation_scope = "other-tenant/run/step/attempt-2"
     elif change == "file_id":
-        file.id = uuid4()
+        file_id = uuid4()
     elif change == "digest":
-        file.blob = b"different audio"
+        file = await audio_file(spool_contract, b"different audio")
     if change == "task":
         await transcriber.label_speakers(
             file,
             words=[TranscriptWord(word="Hej", start=0, end=1)],
             model_name=RESULT_BODY["model"],
             observer=observer,
+            file_id=file_id,
         )
     else:
-        await transcriber.transcribe(file, SimpleNamespace(), observer=observer)
+        await transcriber.transcribe(
+            file, SimpleNamespace(), observer=observer, file_id=file_id
+        )
     keys = [
         request.headers["Idempotency-Key"]
         for request in service.requests
@@ -495,7 +530,7 @@ async def test_submission_key_is_stable_and_scoped_to_operation(change):
     assert keys[2] != keys[0]
 
 
-async def test_run_cancellation_interrupts_admission_wait(monkeypatch):
+async def test_run_cancellation_interrupts_admission_wait(spool_contract, monkeypatch):
     cancelled = False
 
     async def sleep(delay):
@@ -516,7 +551,10 @@ async def test_run_cancellation_interrupts_admission_wait(monkeypatch):
     ):
         with pytest.raises(FlowStepCancelledError):
             await RemoteFlowTranscriber(make_client(service)).transcribe(
-                audio_file(), SimpleNamespace(), observer=observer
+                await audio_file(spool_contract),
+                SimpleNamespace(),
+                observer=observer,
+                file_id=UUID(int=1),
             )
     assert service.submit_count == 1
     assert observer.unknown_calls == []
@@ -553,7 +591,7 @@ async def test_terminal_failure_kind_never_parses_reason(kind, expected):
     assert exc_info.value.service_reason == "capacity input cancelled"
 
 
-async def test_acceptance_persistence_failure_cancels_without_polling():
+async def test_acceptance_persistence_failure_cancels_without_polling(spool_contract):
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserverError,
     )
@@ -563,7 +601,10 @@ async def test_acceptance_persistence_failure_cancels_without_polling():
     service = ScriptedService(submit_responses=[accepted()])
     with pytest.raises(ProviderCallObserverError):
         await RemoteFlowTranscriber(make_client(service)).transcribe(
-            audio_file(), SimpleNamespace(), observer=observer
+            await audio_file(spool_contract),
+            SimpleNamespace(),
+            observer=observer,
+            file_id=UUID(int=1),
         )
     assert service.submit_count == 1
     assert service.cancel_count == 1
@@ -667,7 +708,9 @@ async def test_submit_diarize_job_requires_words() -> None:
         )
 
 
-async def test_label_speakers_returns_service_text_and_records_its_own_call() -> None:
+async def test_label_speakers_returns_service_text_and_records_its_own_call(
+    spool_contract,
+) -> None:
     service = ScriptedService(
         submit_responses=[accepted()],
         status_responses=[status("completed")],
@@ -677,11 +720,12 @@ async def test_label_speakers_returns_service_text_and_records_its_own_call() ->
     observer = RecordingObserver()
 
     result = await transcriber.label_speakers(
-        audio_file(),
+        await audio_file(spool_contract),
         words=[TranscriptWord("hej", 0.0, 0.4)],
         model_name=RESULT_BODY["model"],
         language="sv",
         observer=observer,
+        file_id=UUID(int=1),
     )
 
     assert result.text == RESULT_BODY["text"]
@@ -690,7 +734,9 @@ async def test_label_speakers_returns_service_text_and_records_its_own_call() ->
     assert len(observer.completed_calls) == 1
 
 
-async def test_label_speakers_rejects_a_service_that_ignored_the_task() -> None:
+async def test_label_speakers_rejects_a_service_that_ignored_the_task(
+    spool_contract,
+) -> None:
     # A pre-task service runs a full transcription and reports its own model.
     service = ScriptedService(
         submit_responses=[accepted()],
@@ -701,15 +747,18 @@ async def test_label_speakers_rejects_a_service_that_ignored_the_task() -> None:
 
     with pytest.raises(OpenAIException) as excinfo:
         await transcriber.label_speakers(
-            audio_file(),
+            await audio_file(spool_contract),
             words=[TranscriptWord("hej", 0.0, 0.4)],
             model_name="not-the-service-model",
+            file_id=UUID(int=1),
         )
 
     assert excinfo.value.details["reason"] == "diarize_task_unsupported"
 
 
-async def test_transcribe_returns_service_text_verbatim_with_duration() -> None:
+async def test_transcribe_returns_service_text_verbatim_with_duration(
+    spool_contract,
+) -> None:
     service = ScriptedService(
         submit_responses=[accepted()],
         status_responses=[status("queued"), status("running"), status("completed")],
@@ -719,15 +768,16 @@ async def test_transcribe_returns_service_text_verbatim_with_duration() -> None:
     observer = RecordingObserver()
 
     result = await transcriber.transcribe(
-        audio_file(),
+        await audio_file(spool_contract),
         SimpleNamespace(),
         language=None,
         persist_cache_to_file=False,
         observer=observer,
+        file_id=UUID(int=1),
     )
 
     assert result.text == RESULT_BODY["text"]
-    assert result.duration_seconds == 123.5
+    assert result.duration_seconds == 42.0
     assert result.diarization == "external"
     assert result.alignment == "segment_split"
     assert result.transcript_segments == (
@@ -783,7 +833,7 @@ async def test_submit_status_maps_to_typed_provider_errors(
         assert excinfo.value.details["retryable"] is True
 
 
-async def test_failed_job_is_rejected_and_recorded() -> None:
+async def test_failed_job_is_rejected_and_recorded(spool_contract) -> None:
     service = ScriptedService(
         submit_responses=[accepted()],
         status_responses=[status("failed")],
@@ -792,14 +842,21 @@ async def test_failed_job_is_rejected_and_recorded() -> None:
     observer = RecordingObserver()
 
     with pytest.raises(ProviderRejectedRequestException):
-        await transcriber.transcribe(audio_file(), SimpleNamespace(), observer=observer)
+        await transcriber.transcribe(
+            await audio_file(spool_contract),
+            SimpleNamespace(),
+            observer=observer,
+            file_id=UUID(int=1),
+        )
 
     assert [reason for _, reason in observer.rejected_calls] == ["provider_rejected"]
     assert observer.unknown_calls == []
     assert service.submit_count == 1
 
 
-async def test_successful_job_does_not_resolve_an_unknown_submission(monkeypatch):
+async def test_successful_job_does_not_resolve_an_unknown_submission(
+    spool_contract, monkeypatch
+):
     clock = {"now": 0.0}
     monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
     service = ScriptedService(
@@ -812,9 +869,17 @@ async def test_successful_job_does_not_resolve_an_unknown_submission(monkeypatch
     with step_deadline_scope(StepDeadline.start(30), step_order=1):
         with pytest.raises(OpenAIException):
             await transcriber.transcribe(
-                audio_file(), SimpleNamespace(), observer=observer
+                await audio_file(spool_contract),
+                SimpleNamespace(),
+                observer=observer,
+                file_id=UUID(int=1),
             )
-        await transcriber.transcribe(audio_file(), SimpleNamespace(), observer=observer)
+        await transcriber.transcribe(
+            await audio_file(spool_contract),
+            SimpleNamespace(),
+            observer=observer,
+            file_id=UUID(int=1),
+        )
         clock["now"] = 30.0
         with pytest.raises(TypedIOValidationException) as exc_info:
             require_step_budget(phase="next transcription")
@@ -825,7 +890,7 @@ async def test_successful_job_does_not_resolve_an_unknown_submission(monkeypatch
     assert exc_info.value.provider_work_may_have_completed is True
 
 
-async def test_cancelled_submission_is_not_resubmitted() -> None:
+async def test_cancelled_submission_is_not_resubmitted(spool_contract) -> None:
     """The step's budget ran out while the job was being submitted: the
     cancellation propagates without the retry policy sending the job again."""
     service = ScriptedService()
@@ -841,7 +906,10 @@ async def test_cancelled_submission_is_not_resubmitted() -> None:
     with step_deadline_scope(StepDeadline.start(30), step_order=1) as scope:
         with pytest.raises(asyncio.CancelledError):
             await transcriber.transcribe(
-                audio_file(), SimpleNamespace(), observer=observer
+                await audio_file(spool_contract),
+                SimpleNamespace(),
+                observer=observer,
+                file_id=UUID(int=1),
             )
         assert scope.provider_request_in_flight is False
         assert scope.provider_outcome_unresolved is True
@@ -856,7 +924,9 @@ async def test_cancelled_submission_is_not_resubmitted() -> None:
     assert service.submit_count == 1
 
 
-async def test_no_job_is_submitted_after_the_step_budget_expires(monkeypatch) -> None:
+async def test_no_job_is_submitted_after_the_step_budget_expires(
+    spool_contract, monkeypatch
+) -> None:
     clock = {"now": 0.0}
     monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
     service = ScriptedService(submit_responses=[accepted()])
@@ -867,7 +937,10 @@ async def test_no_job_is_submitted_after_the_step_budget_expires(monkeypatch) ->
         clock["now"] = 11.0
         with pytest.raises(TypedIOValidationException) as exc_info:
             await transcriber.transcribe(
-                audio_file(), SimpleNamespace(), observer=observer
+                await audio_file(spool_contract),
+                SimpleNamespace(),
+                observer=observer,
+                file_id=UUID(int=1),
             )
 
     assert exc_info.value.code == "flow_step_timeout"
@@ -877,6 +950,7 @@ async def test_no_job_is_submitted_after_the_step_budget_expires(monkeypatch) ->
 
 
 async def test_receipt_written_as_the_budget_runs_out_is_settled_not_submitted(
+    spool_contract,
     monkeypatch,
 ) -> None:
     clock = {"now": 0.0}
@@ -893,7 +967,10 @@ async def test_receipt_written_as_the_budget_runs_out_is_settled_not_submitted(
     with step_deadline_scope(StepDeadline.start(1.0), step_order=3):
         with pytest.raises(TypedIOValidationException) as exc_info:
             await transcriber.transcribe(
-                audio_file(), SimpleNamespace(), observer=observer
+                await audio_file(spool_contract),
+                SimpleNamespace(),
+                observer=observer,
+                file_id=UUID(int=1),
             )
 
     assert "(not sent)" in str(exc_info.value)
@@ -902,7 +979,9 @@ async def test_receipt_written_as_the_budget_runs_out_is_settled_not_submitted(
     assert [reason for _, reason in observer.rejected_calls] == ["budget_exhausted"]
 
 
-async def test_cancelled_poll_keeps_the_in_flight_fact_and_stops_the_job() -> None:
+async def test_cancelled_poll_keeps_the_in_flight_fact_and_stops_the_job(
+    spool_contract,
+) -> None:
     """The executor's backstop cancels the wait for a submitted job: the job is
     told to stop (best effort), and the in-flight fact stays published so the
     step's timeout message says the provider may still have completed it."""
@@ -919,7 +998,10 @@ async def test_cancelled_poll_keeps_the_in_flight_fact_and_stops_the_job() -> No
         with pytest.raises(TimeoutError):
             async with asyncio.timeout(0.1):
                 await transcriber.transcribe(
-                    audio_file(), SimpleNamespace(), observer=observer
+                    await audio_file(spool_contract),
+                    SimpleNamespace(),
+                    observer=observer,
+                    file_id=UUID(int=1),
                 )
         assert scope.provider_request_in_flight is False
         assert scope.provider_outcome_unresolved is True
@@ -935,7 +1017,7 @@ async def test_cancelled_poll_keeps_the_in_flight_fact_and_stops_the_job() -> No
     assert [reason for _, reason in observer.unknown_calls] == ["request_cancelled"]
 
 
-async def test_poll_deadline_cancels_job_and_is_unknown_outcome() -> None:
+async def test_poll_deadline_cancels_job_and_is_unknown_outcome(spool_contract) -> None:
     service = ScriptedService(
         submit_responses=[accepted()],
         status_responses=[status("queued", queue_position=3) for _ in range(50)],
@@ -946,7 +1028,10 @@ async def test_poll_deadline_cancels_job_and_is_unknown_outcome() -> None:
     with step_deadline_scope(StepDeadline.start(0.01), step_order=1):
         with pytest.raises(TypedIOValidationException):
             await transcriber.transcribe(
-                audio_file(), SimpleNamespace(), observer=observer
+                await audio_file(spool_contract),
+                SimpleNamespace(),
+                observer=observer,
+                file_id=UUID(int=1),
             )
 
     assert [reason for _, reason in observer.unknown_calls] == ["provider_error"]
@@ -955,7 +1040,9 @@ async def test_poll_deadline_cancels_job_and_is_unknown_outcome() -> None:
     assert service.cancel_count == 1
 
 
-async def test_cancelled_job_is_terminal_and_recorded_as_cancelled() -> None:
+async def test_cancelled_job_is_terminal_and_recorded_as_cancelled(
+    spool_contract,
+) -> None:
     service = ScriptedService(
         submit_responses=[accepted()],
         status_responses=[status("running"), status("cancelled")],
@@ -964,7 +1051,12 @@ async def test_cancelled_job_is_terminal_and_recorded_as_cancelled() -> None:
     observer = RecordingObserver()
 
     with pytest.raises(RemoteTranscriptionCancelledException) as excinfo:
-        await transcriber.transcribe(audio_file(), SimpleNamespace(), observer=observer)
+        await transcriber.transcribe(
+            await audio_file(spool_contract),
+            SimpleNamespace(),
+            observer=observer,
+            file_id=UUID(int=1),
+        )
 
     assert excinfo.value.details == {"reason": "provider_cancelled", "retryable": True}
     assert [reason for _, reason in observer.unknown_calls] == ["request_cancelled"]
@@ -975,7 +1067,7 @@ async def test_cancelled_job_is_terminal_and_recorded_as_cancelled() -> None:
     assert service.status_responses == []
 
 
-async def test_run_cancellation_stops_polling_and_cancels_job() -> None:
+async def test_run_cancellation_stops_polling_and_cancels_job(spool_contract) -> None:
     service = ScriptedService(
         submit_responses=[accepted()],
         status_responses=[status("queued", queue_position=1) for _ in range(50)],
@@ -990,7 +1082,10 @@ async def test_run_cancellation_stops_polling_and_cancels_job() -> None:
     with run_cancel_probe_scope(run_cancelled):
         with pytest.raises(FlowStepCancelledError):
             await transcriber.transcribe(
-                audio_file(), SimpleNamespace(), observer=observer
+                await audio_file(spool_contract),
+                SimpleNamespace(),
+                observer=observer,
+                file_id=UUID(int=1),
             )
 
     assert service.cancel_count == 1
@@ -1015,7 +1110,7 @@ async def test_failing_cancellation_probe_keeps_waiting() -> None:
     assert service.cancel_count == 0
 
 
-async def test_worker_cancellation_cancels_job_service_side() -> None:
+async def test_worker_cancellation_cancels_job_service_side(spool_contract) -> None:
     service = ScriptedService(
         submit_responses=[accepted()],
         status_responses=[status("running") for _ in range(50)],
@@ -1026,7 +1121,12 @@ async def test_worker_cancellation_cancels_job_service_side() -> None:
     observer = RecordingObserver()
 
     task = asyncio.create_task(
-        transcriber.transcribe(audio_file(), SimpleNamespace(), observer=observer)
+        transcriber.transcribe(
+            await audio_file(spool_contract),
+            SimpleNamespace(),
+            observer=observer,
+            file_id=UUID(int=1),
+        )
     )
     while service.submit_count == 0:
         await asyncio.sleep(0.001)
@@ -1122,6 +1222,7 @@ async def test_raced_409_result_reenters_poll_loop() -> None:
 
 
 async def test_submit_retries_rate_limit_then_succeeds(
+    spool_contract,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def no_sleep(_: float) -> None:
@@ -1137,7 +1238,10 @@ async def test_submit_retries_rate_limit_then_succeeds(
     observer = RecordingObserver()
 
     result = await transcriber.transcribe(
-        audio_file(), SimpleNamespace(), observer=observer
+        await audio_file(spool_contract),
+        SimpleNamespace(),
+        observer=observer,
+        file_id=UUID(int=1),
     )
 
     assert result.text == RESULT_BODY["text"]
@@ -1155,6 +1259,7 @@ async def test_transcribe_rejects_non_audio_file() -> None:
         await transcriber.transcribe(
             SimpleNamespace(name="doc.pdf", mimetype="application/pdf", blob=b"x"),
             SimpleNamespace(),
+            file_id=UUID(int=1),
         )
 
     assert service.requests == []
@@ -1244,7 +1349,7 @@ def test_result_parsing_defends_against_malformed_payloads() -> None:
         client._parse_job_id(response)
 
 
-async def test_flow_audio_step_runs_through_remote_transcriber() -> None:
+async def test_flow_audio_step_runs_through_remote_transcriber(spool_contract) -> None:
     """The remote engine satisfies the flow step's transcriber seam end to end."""
     from uuid import uuid4 as new_id
 
@@ -1255,9 +1360,7 @@ async def test_flow_audio_step_runs_through_remote_transcriber() -> None:
     file_id = new_id()
     file_info = SimpleNamespace(id=file_id, name="meeting.mp3", mimetype="audio/mpeg")
 
-    async def load_audio_payload(requested_id: object) -> SimpleNamespace:
-        assert requested_id == file_id
-        return audio_file()
+    open_audio_download = spool_contract.downloads([file_info])
 
     service = ScriptedService(
         submit_responses=[accepted()],
@@ -1272,11 +1375,11 @@ async def test_flow_audio_step_runs_through_remote_transcriber() -> None:
         step_order=1,
         max_files=3,
         max_inline_text_bytes=1_048_576,
-        load_audio_payload=load_audio_payload,
+        open_audio_download=open_audio_download,
     )
 
     assert result.text == RESULT_BODY["text"]
-    assert result.audio_seconds == 123.5
+    assert result.audio_seconds == 42.0
     assert result.model_name == "anchor-model"
 
     cancelled = ScriptedService(
@@ -1297,7 +1400,7 @@ async def test_flow_audio_step_runs_through_remote_transcriber() -> None:
                 step_order=1,
                 max_files=3,
                 max_inline_text_bytes=1_048_576,
-                load_audio_payload=load_audio_payload,
+                open_audio_download=open_audio_download,
             )
 
     failing = ScriptedService(submit_responses=[httpx.Response(422)])
@@ -1310,7 +1413,7 @@ async def test_flow_audio_step_runs_through_remote_transcriber() -> None:
             step_order=1,
             max_files=3,
             max_inline_text_bytes=1_048_576,
-            load_audio_payload=load_audio_payload,
+            open_audio_download=open_audio_download,
         )
     assert excinfo.value.code == FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value
 

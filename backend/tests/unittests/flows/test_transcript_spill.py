@@ -18,6 +18,7 @@ from eneo.flows.domain.text_processing import SectionManifest
 from eneo.flows.runtime.step_execution_runtime import build_output_payload
 from eneo.flows.runtime.step_result_builder import build_completed_step_input_payload
 from eneo.main.exceptions import TypedIOValidationException
+from tests.unittests.flows import audio_spool_test_support
 from tests.unittests.flows.test_flow_transcription import (
     _audio_file,
     _patch_run_input_payload,
@@ -32,8 +33,10 @@ from tests.unittests.flows.test_typed_io_executor import (
     _runtime_step,
 )
 
+spool_contract = audio_spool_test_support.spool_contract
 
-def _case(user, text):
+
+def _case(user, text, spool_contract):
     executor, _, repo, _ = _build_executor(user, max_inline_text_bytes=2048)
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
     _patch_run_input_payload(repo, run)
@@ -45,6 +48,9 @@ def _case(user, text):
         return [FileInfo.model_validate(files[file_id]) for file_id in file_ids]
 
     async def load(file_id):
+        assert files[file_id].file_type is not FileType.AUDIO, (
+            "Audio must use its download stream"
+        )
         return files[file_id]
 
     async def save(**kwargs):
@@ -75,6 +81,7 @@ def _case(user, text):
 
     executor.file_service.get_owned_file_infos.side_effect = describe
     executor.file_service.get_file_content.side_effect = load
+    executor.file_service.get_audio_download = spool_contract.downloads([audio])
     executor.file_service.save_generated_file.side_effect = save
     executor.file_service.repo.get_content_references.side_effect = lambda ids: [
         ref for ref in references if ref.file_id in ids
@@ -96,9 +103,11 @@ def _case(user, text):
 
 
 @pytest.mark.parametrize("oversized", [False, True])
-async def test_transcript_spills_once_and_persisted_inputs_are_bounded(user, oversized):
+async def test_transcript_spills_once_and_persisted_inputs_are_bounded(
+    spool_contract, user, oversized
+):
     text = ("Å long meeting transcript.\n" * (200 if oversized else 2)).strip()
-    executor, repo, run, files, assistant = _case(user, text)
+    executor, repo, run, files, assistant = _case(user, text, spool_contract)
     step = _runtime_step(input_type="audio", output_mode="transcribe_only")
     output = (
         await executor._execute_step(
@@ -156,9 +165,11 @@ def _metadata(executor):
 
 
 @pytest.mark.parametrize("oversized", [False, True])
-async def test_transcript_audit_records_produced_character_count(user, oversized):
+async def test_transcript_audit_records_produced_character_count(
+    spool_contract, user, oversized
+):
     text = "Å long meeting transcript.\n" * (200 if oversized else 2)
-    executor, _, run, _, _ = _case(user, text)
+    executor, _, run, _, _ = _case(user, text, spool_contract)
     executor.audit_service = AsyncMock()
     await executor._execute_step(
         step=_runtime_step(input_type="audio", output_mode="transcribe_only"),
@@ -180,10 +191,10 @@ async def test_transcript_audit_records_produced_character_count(user, oversized
 @pytest.mark.parametrize("oversized", [False, True])
 @pytest.mark.parametrize("prefix", ["", "Meeting notes\n"])
 async def test_transcribe_only_binding_preserves_output_and_artifact_identity(
-    user, oversized, prefix
+    spool_contract, user, oversized, prefix
 ):
     text = ("Bound transcript.\n" * (200 if oversized else 2)).strip()
-    executor, repo, run, files, assistant = _case(user, text)
+    executor, repo, run, files, assistant = _case(user, text, spool_contract)
     step = _runtime_step(
         input_type="audio",
         output_mode="transcribe_only",
@@ -303,7 +314,9 @@ async def test_transcribe_only_binding_preserves_output_and_artifact_identity(
     assert executor.file_service.save_generated_file.await_count == (2 if prefix else 1)
 
 
-async def test_reused_and_fresh_transcript_artifacts_persist_the_same_inline_text(user):
+async def test_reused_and_fresh_transcript_artifacts_persist_the_same_inline_text(
+    spool_contract, user
+):
     text = "åäö" * 800
     prefix = "Notes: "
     expected = prefix + text
@@ -312,7 +325,7 @@ async def test_reused_and_fresh_transcript_artifacts_persist_the_same_inline_tex
         (expected, "{{step_input.text}}", 1),
         (text, prefix + "{{step_input.text}}", 2),
     ):
-        executor, _, run, files, _ = _case(user, transcript)
+        executor, _, run, files, _ = _case(user, transcript, spool_contract)
         step = _runtime_step(
             input_type="audio",
             output_mode="transcribe_only",
@@ -366,9 +379,11 @@ def _assert_bounded_text(value, cap):
         "{{flow.input}}",
     ],
 )
-async def test_next_step_reads_complete_spilled_transcript(user, binding):
+async def test_next_step_reads_complete_spilled_transcript(
+    spool_contract, user, binding
+):
     text = ("Complete transcript åäö.\n" * 200).strip()
-    executor, repo, run, _, assistant = _case(user, text)
+    executor, repo, run, _, assistant = _case(user, text, spool_contract)
     step = _runtime_step(input_type="audio", output_mode="transcribe_only")
     output = (
         await executor._execute_step(
@@ -455,9 +470,11 @@ async def test_transcript_and_previous_step_select_one_section_material(user, bi
     executor.file_service.get_file_content.assert_awaited_once()
 
 
-async def test_failed_transcript_attempt_keeps_only_bounded_inputs(user):
+async def test_failed_transcript_attempt_keeps_only_bounded_inputs(
+    spool_contract, user
+):
     text = ("Long transcript for a failed completion.\n" * 200).strip()
-    executor, repo, run, _, assistant = _case(user, text)
+    executor, repo, run, _, assistant = _case(user, text, spool_contract)
     executor._process_typed_output = AsyncMock(
         side_effect=TypedIOValidationException(
             "Completion rejected", code="typed_io_contract_violation"
@@ -516,10 +533,10 @@ async def test_failed_transcript_attempt_keeps_only_bounded_inputs(user):
 
 @pytest.mark.parametrize("oversized", [False, True])
 async def test_spilled_transcript_is_durable_before_input_binding_failure(
-    user, oversized
+    spool_contract, user, oversized
 ):
     text = "Long transcript.\n" * (200 if oversized else 2)
-    executor, repo, run, files, _ = _case(user, text)
+    executor, repo, run, files, _ = _case(user, text, spool_contract)
     step = _runtime_step(
         input_type="audio", input_bindings={"question": "{{missing_variable}}"}
     )

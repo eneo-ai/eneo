@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 import re
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
 from eneo.completion_models.infrastructure.context_builder import count_tokens
@@ -26,6 +26,7 @@ from eneo.flows.flow_run_error import (
     FlowRunErrorDetails,
     TranscriptionFailureKind,
 )
+from eneo.flows.runtime.audio_spool import OpenAudioDownload, SpooledAudio, spool_audio
 from eneo.flows.runtime.run_cancellation import FlowStepCancelledError
 from eneo.flows.runtime.step_deadline import current_step_deadline_scope
 from eneo.flows.transcription_config import (
@@ -43,9 +44,6 @@ from eneo.main.exceptions import (
 from eneo.model_providers.domain.provider_call_observer import (
     ProviderCallObserverError,
 )
-
-# Reads one authorized audio file's bytes, immediately before transcription.
-LoadAudioPayload: TypeAlias = Callable[[UUID], Awaitable["File"]]
 
 
 class TranscriptionProviderError(OpenAIException):
@@ -109,15 +107,16 @@ class TranscriptionFailure(TypedIOValidationException):
 class FlowStepTranscriber(Protocol):
     """What a flow audio step needs from a transcription engine.
 
-    Satisfied by ``Transcriber`` (model-registry LiteLLM path) and
+    Satisfied by ``RegistryFlowTranscriber`` (model-registry LiteLLM path) and
     ``RemoteFlowTranscriber`` (external transcription service).
     """
 
     async def transcribe(
         self,
-        file: "File",
+        file: SpooledAudio,
         transcription_model: "TranscriptionModel",
         *,
+        file_id: UUID,
         language: str | None = None,
         diarize: bool = True,
         persist_cache_to_file: bool = True,
@@ -207,7 +206,7 @@ def _join_transcription_blocks(
 
 
 if TYPE_CHECKING:
-    from eneo.files.file_models import File, FileInfo
+    from eneo.files.file_models import FileInfo
     from eneo.files.transcriber import TranscribedAudio
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
@@ -433,19 +432,13 @@ async def transcribe_audio_input(
     step_order: int,
     max_files: int,
     max_inline_text_bytes: int,
-    load_audio_payload: "LoadAudioPayload",
+    open_audio_download: "OpenAudioDownload",
     transcription_call_observer: "ProviderCallObserver | None" = None,
     near_limit_ratio: float = 0.85,
     diarize: bool = True,
     max_speakers: int | None = None,
 ) -> FlowTranscriptionResult:
-    """Transcribe each audio file in request order, one payload at a time.
-
-    ``files`` carries descriptive fields only. ``load_audio_payload`` reads one
-    file's bytes immediately before it is transcribed and the result is released
-    afterwards, so a step's memory cost is its largest audio file rather than
-    the sum of every file it was given.
-    """
+    """Transcribe files in request order, closing each spool on every exit."""
     if not files:
         raise TypedIOValidationException(
             f"Step {step_order}: audio input requires at least one audio file.",
@@ -488,13 +481,11 @@ async def transcribe_audio_input(
     label_offset = 0
 
     for file_index, file in enumerate(files):
-        # Reading a payload is part of this step's typed failure surface: it
-        # authorizes, hydrates and verifies bytes, and every way it can fail
-        # must reach the caller as a flow error rather than an escaping
-        # exception.
         try:
             try:
-                audio_file = await load_audio_payload(file.id)
+                audio_file = await spool_audio(
+                    file.id, open_audio_download=open_audio_download
+                )
             except NotFoundException as exc:
                 # A file can disappear between being identified and being read.
                 # Report it as the missing file it is, not a transcription fault.
@@ -506,6 +497,7 @@ async def transcribe_audio_input(
                 transcribed = await transcriber.transcribe(
                     audio_file,
                     transcription_model,
+                    file_id=file.id,
                     language=provider_language,
                     diarize=diarize,
                     persist_cache_to_file=False,
@@ -513,7 +505,7 @@ async def transcribe_audio_input(
                     max_speakers=max_speakers if diarize else None,
                 )
             finally:
-                del audio_file
+                await audio_file.aclose()
         except (
             TypedIOValidationException,
             ProviderCallObserverError,
@@ -749,7 +741,7 @@ async def resolve_and_transcribe_audio_for_step(
     transcriber: FlowStepTranscriber,
     max_files: int,
     max_inline_text_bytes: int,
-    load_audio_payload: LoadAudioPayload,
+    open_audio_download: OpenAudioDownload,
     transcription_call_observer: "ProviderCallObserver | None" = None,
     max_speakers: int | None = None,
 ) -> FlowTranscriptionResult:
@@ -795,7 +787,7 @@ async def resolve_and_transcribe_audio_for_step(
         step_order=step_order,
         max_files=max_files,
         max_inline_text_bytes=max_inline_text_bytes,
-        load_audio_payload=load_audio_payload,
+        open_audio_download=open_audio_download,
         transcription_call_observer=transcription_call_observer,
         diarize=transcription_config.diarization,
         max_speakers=max_speakers,

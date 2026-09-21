@@ -298,7 +298,7 @@ async def resolve_step_input(
                 flow_run_repo=deps.flow_run_repo,
                 audit_service=deps.audit_service,
                 actor=deps.actor,
-                load_audio_payload=deps.file_service.get_file_content,
+                open_audio_download=deps.file_service.get_audio_download,
                 transcription_call_observer=deps.transcription_call_observer,
                 transcript_words_repo=deps.transcript_words_repo,
             )

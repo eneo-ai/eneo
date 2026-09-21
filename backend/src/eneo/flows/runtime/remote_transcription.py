@@ -23,8 +23,6 @@ import hashlib
 import json
 import math
 import random
-import tempfile
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -35,7 +33,7 @@ from uuid import UUID, uuid4
 
 import httpx
 
-from eneo.files.audio import AudioMimeTypes, measure_duration
+from eneo.files.audio import AudioMimeTypes
 from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.domain.provider_call_evidence_gap import (
     ProviderCallEvidenceGap,
@@ -49,6 +47,7 @@ from eneo.flows.flow_run_error import (
 from eneo.flows.infrastructure.flow_provider_call_recorder import (
     ProviderCallEvidencePersistenceError,
 )
+from eneo.flows.runtime.audio_spool import SpooledAudio
 from eneo.flows.runtime.run_cancellation import (
     FlowStepCancelledError,
     RunCancelProbe,
@@ -89,7 +88,6 @@ from eneo.transcription_models.infrastructure.adapters.litellm_transcription imp
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from eneo.files.file_models import File
     from eneo.main.config import Settings
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
@@ -678,9 +676,10 @@ class RemoteFlowTranscriber:
 
     async def transcribe(
         self,
-        file: "File",
+        file: SpooledAudio,
         transcription_model: "TranscriptionModel",
         *,
+        file_id: UUID,
         language: str | None = None,
         diarize: bool = True,
         persist_cache_to_file: bool = True,
@@ -689,6 +688,7 @@ class RemoteFlowTranscriber:
     ) -> TranscribedAudio:
         result, audio_seconds = await self._run_job(
             file,
+            file_id=file_id,
             language=language,
             diarize=diarize,
             task="transcribe",
@@ -700,7 +700,7 @@ class RemoteFlowTranscriber:
         )
         return TranscribedAudio(
             text=result.text,
-            duration_seconds=result.duration_seconds or audio_seconds,
+            duration_seconds=audio_seconds,
             transcript_segments=result.segments,
             diarization="external" if diarize else None,
             alignment=result.alignment if diarize else None,
@@ -709,8 +709,9 @@ class RemoteFlowTranscriber:
 
     async def label_speakers(
         self,
-        file: "File",
+        file: SpooledAudio,
         *,
+        file_id: UUID,
         words: "Sequence[TranscriptWord] | None",
         model_name: str,
         segments: "Sequence[TranscriptSegment] | None" = None,
@@ -725,6 +726,7 @@ class RemoteFlowTranscriber:
         """
         result, _ = await self._run_job(
             file,
+            file_id=file_id,
             language=language,
             diarize=True,
             task="diarize",
@@ -752,8 +754,9 @@ class RemoteFlowTranscriber:
 
     async def _run_job(
         self,
-        file: "File",
+        file: SpooledAudio,
         *,
+        file_id: UUID,
         language: str | None,
         diarize: bool,
         task: JobTask,
@@ -764,47 +767,30 @@ class RemoteFlowTranscriber:
         max_speakers: int | None = None,
     ) -> tuple[RemoteTranscriptionResult, float]:
         record_step_phase(FlowStepPhase.TRANSCRIPTION)
-        mimetype: str = file.mimetype or ""
-        if file.blob is None or not AudioMimeTypes.has_value(mimetype):
+        if not AudioMimeTypes.has_value(file.mimetype):
             raise ValueError("File needs to be an audio file")
-
-        # Validate both decoded ceilings locally before sending the original
-        # bytes; the service still owns its transcription and diarization decode.
-        suffix = Path(str(file.name or "")).suffix or ".audio"
-        temp_file_path: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-                temp_file_path = Path(temp_file.name)
-                temp_file.write(file.blob)
-
-            audio_seconds = await measure_duration(str(temp_file_path))
-            audio_digest = await asyncio.to_thread(_digest_file, temp_file_path)
-
-            job_id, call_id = await self._submit_job(
-                file_id=file.id,
-                file_path=temp_file_path,
-                filename=str(file.name or temp_file_path.name),
-                mimetype=mimetype,
-                language=language,
-                diarize=diarize,
-                task=task,
-                words=words,
-                segments=segments,
-                model=model,
-                max_speakers=max_speakers,
-                audio_seconds=audio_seconds,
-                audio_digest=audio_digest,
-                observer=observer,
-            )
-        except BaseException:
-            if temp_file_path is not None:
-                with suppress(FileNotFoundError):
-                    temp_file_path.unlink()
-            raise
+        audio_seconds = file.duration_seconds
+        job_id, call_id = await self._submit_job(
+            file_id=file_id,
+            file_path=file.path,
+            filename=file.filename,
+            mimetype=file.mimetype,
+            language=language,
+            diarize=diarize,
+            task=task,
+            words=words,
+            segments=segments,
+            model=model,
+            max_speakers=max_speakers,
+            audio_seconds=audio_seconds,
+            audio_digest=file.digest,
+            observer=observer,
+        )
 
         # The job is provider work in flight until the service answers.
         mark_provider_request_in_flight(True)
         acceptance: asyncio.Task[None] | None = None
+        waiting_for_result = False
         try:
             if observer is not None and call_id is not None:
                 acceptance = asyncio.create_task(observer.accepted(call_id, job_id))
@@ -816,8 +802,7 @@ class RemoteFlowTranscriber:
                     deadline=asyncio.get_running_loop().time()
                     + self.client.result_timeout_seconds,
                 )
-            temp_file_path.unlink(missing_ok=True)
-            temp_file_path = None
+            waiting_for_result = True
             result = await self.client.wait_for_result(
                 job_id, run_cancelled=current_run_cancel_probe()
             )
@@ -873,16 +858,11 @@ class RemoteFlowTranscriber:
             raise
         except Exception:
             settle_provider_request(known=False)
-            if temp_file_path is not None:
+            if not waiting_for_result:
                 await self.client.cancel(job_id)
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "provider_error")
             raise
-        finally:
-            if temp_file_path is not None:
-                # Preserve the accepted-job failure if local cleanup also fails.
-                with suppress(OSError):
-                    temp_file_path.unlink(missing_ok=True)
 
         settle_provider_request(known=True)
         if observer is not None and call_id is not None:
@@ -1314,14 +1294,6 @@ def _json_object(response: httpx.Response) -> dict[str, object]:
     if isinstance(body, dict):
         return cast(dict[str, object], body)
     return {}
-
-
-def _digest_file(file_path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(file_path, "rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _positive_speaker_bound(value: object) -> int:

@@ -21,7 +21,13 @@ from eneo.files.file_repo import (
     LegacyFileInfoRecord,
 )
 from eneo.files.file_service import FileService
-from eneo.object_content.content import ContentAccessClass, ContentState, StorageKind
+from eneo.main.exceptions import UnauthorizedException
+from eneo.object_content.content import (
+    ContentAccessClass,
+    ContentRead,
+    ContentState,
+    StorageKind,
+)
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 
 
@@ -191,6 +197,67 @@ def _legacy_metadata(*, file_type: FileType = FileType.TEXT) -> FileMetadata:
         tenant_id=uuid4(),
         parent_file_id=None,
     )
+
+
+@pytest.mark.parametrize("owned", [False, True])
+async def test_audio_download_checks_owner_before_opening_original(service, owned):
+    metadata = _legacy_metadata(file_type=FileType.AUDIO).model_copy(
+        update={
+            "tenant_id": service.user.tenant_id,
+            "owner_user_id": service.user.id if owned else uuid4(),
+        }
+    )
+    payload = b"original audio"
+    reference = FileContentReferenceRecord(
+        file_id=metadata.id,
+        content_id=uuid4(),
+        variant=FileContentVariant.ORIGINAL,
+        ordinal=0,
+        page_number=None,
+        width=None,
+        height=None,
+        duration_ms=None,
+        sha256=sha256(payload).digest(),
+        size_bytes=len(payload),
+        media_type="audio/mpeg",
+        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        state=ContentState.AVAILABLE,
+        storage_kind=StorageKind.OBJECT_STORE,
+    )
+    service.repo.get_by_id.return_value = metadata
+    service.repo.get_content_references.return_value = [reference]
+    events = []
+
+    @asynccontextmanager
+    async def open_content(grant, *, range_header):
+        assert grant.tenant_id == metadata.tenant_id
+        assert grant.content_id == reference.content_id
+        assert range_header is None
+        events.append("opened")
+
+        async def chunks():
+            yield payload[:4]
+            yield payload[4:]
+
+        try:
+            yield ContentRead(chunks(), len(payload), "audio/mpeg", None)
+        finally:
+            events.append("closed")
+
+    service._object_content.open_content = open_content
+    if owned:
+        download = await service.get_audio_download(metadata.id)
+        try:
+            assert b"".join([chunk async for chunk in download.chunks]) == payload
+        finally:
+            await download.aclose()
+        assert events == ["opened", "closed"]
+    else:
+        with pytest.raises(UnauthorizedException):
+            await service.get_audio_download(metadata.id)
+        assert events == []
+        service.repo.get_content_references.assert_not_awaited()
+    service.repo.get_legacy_content.assert_not_awaited()
 
 
 @pytest.mark.asyncio

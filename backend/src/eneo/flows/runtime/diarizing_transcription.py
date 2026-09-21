@@ -17,13 +17,14 @@ from __future__ import annotations
 import time
 from dataclasses import replace
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from eneo.files.transcriber import TranscribedAudio, Transcriber
+from eneo.flows.runtime.audio_spool import SpooledAudio
 from eneo.flows.runtime.remote_transcription import RemoteFlowTranscriber
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
-    from eneo.files.file_models import File
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
     )
@@ -36,18 +37,46 @@ logger = get_logger(__name__)
 DIARIZATION_SKIPPED_EMPTY_TRANSCRIPT = "skipped:empty_transcript"
 
 
-class DiarizingFlowTranscriber:
+class RegistryFlowTranscriber:
+    """Use the registry engine on an admitted flow spool without a shared cache."""
+
+    def __init__(self, transcriber: Transcriber) -> None:
+        self.transcriber = transcriber
+
+    async def transcribe(
+        self,
+        file: SpooledAudio,
+        transcription_model: TranscriptionModel,
+        *,
+        file_id: UUID,
+        language: str | None = None,
+        diarize: bool = True,
+        persist_cache_to_file: bool = True,
+        observer: ProviderCallObserver | None = None,
+        max_speakers: int | None = None,
+    ) -> TranscribedAudio:
+        transcribed = await self.transcriber.transcribe_from_filepath(
+            filepath=file.path,
+            transcription_model=transcription_model,
+            language=language,
+            observer=observer,
+        )
+        return replace(transcribed, duration_seconds=file.duration_seconds)
+
+
+class DiarizingFlowTranscriber(RegistryFlowTranscriber):
     """``FlowStepTranscriber`` composed of the registry engine and the service."""
 
     def __init__(self, transcriber: Transcriber, remote: RemoteFlowTranscriber) -> None:
-        self.transcriber = transcriber
+        super().__init__(transcriber)
         self.remote = remote
 
     async def transcribe(
         self,
-        file: File,
+        file: SpooledAudio,
         transcription_model: TranscriptionModel,
         *,
+        file_id: UUID,
         language: str | None = None,
         diarize: bool = True,
         persist_cache_to_file: bool = True,
@@ -55,9 +84,10 @@ class DiarizingFlowTranscriber:
         max_speakers: int | None = None,
     ) -> TranscribedAudio:
         del persist_cache_to_file
-        transcribed = await self.transcriber.transcribe(
+        transcribed = await super().transcribe(
             file,
             transcription_model,
+            file_id=file_id,
             language=language,
             # Flow transcripts never touch the File's shared transcription cache.
             persist_cache_to_file=False,
@@ -78,6 +108,7 @@ class DiarizingFlowTranscriber:
         started = time.monotonic()
         labelled = await self.remote.label_speakers(
             file,
+            file_id=file_id,
             words=None,
             segments=transcribed.segments,
             model_name=transcription_model.model_name,

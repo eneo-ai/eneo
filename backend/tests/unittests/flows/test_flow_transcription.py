@@ -35,12 +35,15 @@ from eneo.flows.runtime.transcription_runtime import (
     resolve_transcribe_and_attach_audio_input,
 )
 from eneo.main.exceptions import NotFoundException, TypedIOValidationException
+from tests.unittests.flows import audio_spool_test_support
+
+spool_contract = audio_spool_test_support.spool_contract
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure_kind", ["capacity", "provider"])
 async def test_remote_failure_facts_survive_executor_terminalization(
-    user, monkeypatch, failure_kind
+    spool_contract, user, monkeypatch, failure_kind
 ):
     from eneo.flows.api.flow_models import FlowRunPublic
     from eneo.flows.domain.flow import FlowStepResult
@@ -48,9 +51,6 @@ async def test_remote_failure_facts_survive_executor_terminalization(
     from eneo.flows.runtime import remote_transcription
     from eneo.flows.runtime.transcription import transcribe_audio_input
 
-    monkeypatch.setattr(
-        remote_transcription, "measure_duration", AsyncMock(return_value=42.0)
-    )
     reason = "No GPU capacity. " * 100 if failure_kind == "capacity" else None
     observer = AsyncMock(operation_scope="tenant/run/step/attempt-1")
     observer.started.return_value = uuid4()
@@ -90,10 +90,10 @@ async def test_remote_failure_facts_survive_executor_terminalization(
             step_order=1,
             max_files=1,
             max_inline_text_bytes=1024,
-            load_audio_payload=AsyncMock(return_value=file),
+            open_audio_download=spool_contract.downloads([file]),
             transcription_call_observer=observer,
         )
-    executor, _, _, _, _ = _build_executor(user)
+    executor, _, _, _, _ = _build_executor(user, spool_contract=spool_contract)
     executor._terminalize_run = AsyncMock()
     run = _run(user=user)
     step = _runtime_step()
@@ -253,6 +253,7 @@ def _patch_run_input_payload(flow_run_repo: AsyncMock, run: FlowRun) -> None:
 def _build_executor(
     user,
     *,
+    spool_contract,
     max_inline_text_bytes: int = 1024,
     max_audio_files: int = 10,
 ):
@@ -304,11 +305,15 @@ def _build_executor(
     async def _get_file_content(file_id, **_kwargs):
         for staged in _staged_files():
             if staged.id == file_id:
+                assert staged.file_type is not FileType.AUDIO, (
+                    "Audio must use its download stream"
+                )
                 return staged
         raise AssertionError(f"unstaged file content requested: {file_id}")
 
     file_service.get_owned_file_infos.side_effect = _owned_file_infos
     file_service.get_file_content.side_effect = _get_file_content
+    file_service.get_audio_download = spool_contract.downloads(_staged_files)
     template_asset_repo = AsyncMock()
     encryption_service = AsyncMock()
     transcriber = AsyncMock()
@@ -349,9 +354,11 @@ def _state() -> RunExecutionState:
 
 
 @pytest.mark.asyncio
-async def test_audio_resolve_transcribes_in_request_order_and_persists_transcript(user):
+async def test_audio_resolve_transcribes_in_request_order_and_persists_transcript(
+    spool_contract, user
+):
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
-        user
+        spool_contract=spool_contract, user=user
     )
     file_id_1 = uuid4()
     file_id_2 = uuid4()
@@ -378,6 +385,7 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
         file_obj,
         transcription_model,
         *,
+        file_id,
         language=None,
         diarize=True,
         persist_cache_to_file,
@@ -385,7 +393,7 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
         observer=None,
     ):
         assert persist_cache_to_file is False
-        return _transcribed(f"tx:{file_obj.name}:{language or 'auto'}")
+        return _transcribed(f"tx:{file_obj.filename}:{language or 'auto'}")
 
     transcriber.transcribe = AsyncMock(side_effect=_tx)
 
@@ -406,7 +414,7 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
     )
 
     ordered_names = [
-        call.args[0].name for call in transcriber.transcribe.await_args_list
+        call.args[0].filename for call in transcriber.transcribe.await_args_list
     ]
     assert ordered_names == ["b.wav", "a.wav"]
     assert [
@@ -423,7 +431,9 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
 
 
 @pytest.mark.asyncio
-async def test_null_tenant_audio_limit_executes_with_default_capacity(user) -> None:
+async def test_null_tenant_audio_limit_executes_with_default_capacity(
+    spool_contract, user
+) -> None:
     limits = resolve_flow_input_limits(
         {"input_limits": {"audio_max_files_per_run": None}},
         defaults=SimpleNamespace(
@@ -432,7 +442,8 @@ async def test_null_tenant_audio_limit_executes_with_default_capacity(user) -> N
         ),
     )
     executor, _, space_repo, file_service, transcriber = _build_executor(
-        user,
+        spool_contract=spool_contract,
+        user=user,
         max_audio_files=limits.audio_max_files_per_run,
     )
     files = [_audio_file(name=f"audio-{index}.wav") for index in range(11)]
@@ -470,9 +481,9 @@ async def test_null_tenant_audio_limit_executes_with_default_capacity(user) -> N
 
 
 @pytest.mark.asyncio
-async def test_audio_resolve_passes_no_language_for_auto(user):
+async def test_audio_resolve_passes_no_language_for_auto(spool_contract, user):
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
-        user
+        spool_contract=spool_contract, user=user
     )
     file_id = uuid4()
     step = _runtime_step()
@@ -513,9 +524,11 @@ async def test_audio_resolve_passes_no_language_for_auto(user):
 
 
 @pytest.mark.asyncio
-async def test_audio_resolve_ignores_shared_file_transcription_cache(user):
+async def test_audio_resolve_ignores_shared_file_transcription_cache(
+    spool_contract, user
+):
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
-        user
+        spool_contract=spool_contract, user=user
     )
     file_id = uuid4()
     step = _runtime_step()
@@ -539,13 +552,15 @@ async def test_audio_resolve_ignores_shared_file_transcription_cache(user):
         file_obj,
         transcription_model,
         *,
+        file_id,
         language=None,
         diarize=True,
         persist_cache_to_file,
         max_speakers=None,
         observer=None,
     ):
-        assert file_obj is file_1
+        assert file_obj.path.read_bytes() == file_1.blob
+        assert file_id == file_1.id
         assert transcription_model is model
         assert language is None
         assert persist_cache_to_file is False
@@ -577,9 +592,9 @@ async def test_audio_resolve_ignores_shared_file_transcription_cache(user):
 
 
 @pytest.mark.asyncio
-async def test_audio_resolve_missing_wizard_model_fails_strictly(user):
+async def test_audio_resolve_missing_wizard_model_fails_strictly(spool_contract, user):
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
-        user
+        spool_contract=spool_contract, user=user
     )
     file_id = uuid4()
     step = _runtime_step()
@@ -622,9 +637,11 @@ async def test_audio_resolve_missing_wizard_model_fails_strictly(user):
 
 
 @pytest.mark.asyncio
-async def test_audio_resolve_selected_model_unavailable_fails_without_fallback(user):
+async def test_audio_resolve_selected_model_unavailable_fails_without_fallback(
+    spool_contract, user
+):
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
-        user
+        spool_contract=spool_contract, user=user
     )
     file_id = uuid4()
     step = _runtime_step()
@@ -669,9 +686,9 @@ async def test_audio_resolve_selected_model_unavailable_fails_without_fallback(u
 
 
 @pytest.mark.asyncio
-async def test_audio_resolve_near_cap_adds_warning_diagnostic(user):
+async def test_audio_resolve_near_cap_adds_warning_diagnostic(spool_contract, user):
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
-        user, max_inline_text_bytes=100
+        spool_contract=spool_contract, user=user, max_inline_text_bytes=100
     )
     file_id = uuid4()
     step = _runtime_step()
@@ -715,9 +732,11 @@ async def test_audio_resolve_near_cap_adds_warning_diagnostic(user):
 
 
 @pytest.mark.asyncio
-async def test_audio_resolve_multifile_near_cap_keeps_request_order(user):
+async def test_audio_resolve_multifile_near_cap_keeps_request_order(
+    spool_contract, user
+):
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
-        user, max_inline_text_bytes=100
+        spool_contract=spool_contract, user=user, max_inline_text_bytes=100
     )
     file_id_1 = uuid4()
     file_id_2 = uuid4()
@@ -740,6 +759,7 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(user):
         file_obj,
         transcription_model,
         *,
+        file_id,
         language=None,
         diarize=True,
         persist_cache_to_file,
@@ -747,7 +767,7 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(user):
         observer=None,
     ):
         assert persist_cache_to_file is False
-        if file_obj.name == "b.wav":
+        if file_obj.filename == "b.wav":
             return _transcribed("b" * 40, duration_seconds=12.5)
         return _transcribed("a" * 43, duration_seconds=17.5)
 
@@ -783,13 +803,13 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(user):
         item.code == "typed_io_transcript_near_limit" for item in resolved.diagnostics
     )
     ordered_names = [
-        call.args[0].name for call in transcriber.transcribe.await_args_list
+        call.args[0].filename for call in transcriber.transcribe.await_args_list
     ]
     assert ordered_names == ["b.wav", "a.wav"]
 
 
 @pytest.mark.asyncio
-async def test_audio_step_reads_one_payload_at_a_time(user):
+async def test_audio_step_reads_one_payload_at_a_time(spool_contract, user):
     """A step's memory cost must be its largest audio file, not their sum.
 
     The step resolves against metadata and reads each file's bytes only while
@@ -798,7 +818,7 @@ async def test_audio_step_reads_one_payload_at_a_time(user):
     """
 
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
-        user, max_inline_text_bytes=1000
+        spool_contract=spool_contract, user=user, max_inline_text_bytes=1000
     )
     file_id_1 = uuid4()
     file_id_2 = uuid4()
@@ -821,19 +841,19 @@ async def test_audio_step_reads_one_payload_at_a_time(user):
     events: list[str] = []
 
     async def _tx(file_obj, transcription_model, *, language=None, **_kwargs):
-        events.append(f"transcribe {file_obj.name}")
-        return _transcribed(f"text for {file_obj.name}")
+        events.append(f"transcribe {file_obj.filename}")
+        return _transcribed(f"text for {file_obj.filename}")
 
     staged_names = {
         file.id: file.name for file in file_service.get_files_by_ids.return_value
     }
-    original_get_file_content = file_service.get_file_content.side_effect
+    original_download = file_service.get_audio_download
 
-    async def _recorded_get_file_content(file_id, **kwargs):
+    async def _recorded_download(file_id):
         events.append(f"load {staged_names[file_id]}")
-        return await original_get_file_content(file_id, **kwargs)
+        return await original_download(file_id)
 
-    file_service.get_file_content.side_effect = _recorded_get_file_content
+    file_service.get_audio_download = _recorded_download
     transcriber.transcribe = AsyncMock(side_effect=_tx)
 
     resolved = await executor._resolve_step_input(
@@ -887,11 +907,13 @@ async def test_audio_step_reads_one_payload_at_a_time(user):
 
 
 @pytest.mark.asyncio
-async def test_audio_payload_lost_between_identify_and_read_is_a_missing_file(user):
+async def test_audio_payload_lost_between_identify_and_read_is_a_missing_file(
+    spool_contract, user
+):
     """Deferred reads must keep the missing-file failure, not blame transcription."""
 
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
-        user
+        spool_contract=spool_contract, user=user
     )
     file_id = uuid4()
     step = _runtime_step()
@@ -908,7 +930,7 @@ async def test_audio_payload_lost_between_identify_and_read_is_a_missing_file(us
     space_repo.get_space_by_assistant = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
-    file_service.get_file_content.side_effect = NotFoundException()
+    file_service.get_audio_download.error = NotFoundException()
 
     with pytest.raises(TypedIOValidationException) as exc:
         await executor._resolve_step_input(
@@ -932,11 +954,13 @@ async def test_audio_payload_lost_between_identify_and_read_is_a_missing_file(us
 
 
 @pytest.mark.asyncio
-async def test_audio_payload_read_failure_stays_inside_the_typed_contract(user):
+async def test_audio_payload_read_failure_stays_inside_the_typed_contract(
+    spool_contract, user
+):
     """Every way a deferred read can fail must reach the caller as a flow error."""
 
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
-        user
+        spool_contract=spool_contract, user=user
     )
     file_id = uuid4()
     step = _runtime_step()
@@ -955,7 +979,7 @@ async def test_audio_payload_read_failure_stays_inside_the_typed_contract(user):
     )
     # Not a missing file: storage unreachable, ownership raced, bytes failed
     # verification. None of these may escape as an untyped exception.
-    file_service.get_file_content.side_effect = RuntimeError("object content down")
+    file_service.get_audio_download.error = RuntimeError("object content down")
 
     with pytest.raises(TypedIOValidationException) as exc:
         await executor._resolve_step_input(
@@ -979,9 +1003,11 @@ async def test_audio_payload_read_failure_stays_inside_the_typed_contract(user):
 
 
 @pytest.mark.asyncio
-async def test_audio_resolve_multifile_overflow_spills_once_in_request_order(user):
+async def test_audio_resolve_multifile_overflow_spills_once_in_request_order(
+    spool_contract, user
+):
     executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
-        user, max_inline_text_bytes=1024
+        spool_contract=spool_contract, user=user, max_inline_text_bytes=1024
     )
     file_id_1 = uuid4()
     file_id_2 = uuid4()
@@ -1026,14 +1052,16 @@ async def test_audio_resolve_multifile_overflow_spills_once_in_request_order(use
         file_service.save_generated_file.return_value.id
     )
     ordered_names = [
-        call.args[0].name for call in transcriber.transcribe.await_args_list
+        call.args[0].filename for call in transcriber.transcribe.await_args_list
     ]
     assert ordered_names == ["b.wav", "a.wav"]
 
 
 @pytest.mark.asyncio
-async def test_audio_resolve_requires_space_transcription_model(user):
-    executor, flow_run_repo, space_repo, file_service, _ = _build_executor(user)
+async def test_audio_resolve_requires_space_transcription_model(spool_contract, user):
+    executor, flow_run_repo, space_repo, file_service, _ = _build_executor(
+        user, spool_contract=spool_contract
+    )
     file_id = uuid4()
     step = _runtime_step()
     run = _run(user=user, payload={})
@@ -1069,7 +1097,7 @@ async def test_audio_resolve_requires_space_transcription_model(user):
 
 @pytest.mark.asyncio
 async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
-    user, monkeypatch
+    spool_contract, user, monkeypatch
 ):
     flow_run_repo = AsyncMock()
     audit_service = AsyncMock()
@@ -1117,7 +1145,7 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
         flow_run_repo=flow_run_repo,
         audit_service=audit_service,
         actor=FlowRunActor.from_user(user=user),
-        load_audio_payload=AsyncMock(),
+        open_audio_download=spool_contract.downloads([]),
     )
 
     result = await resolve_transcribe_and_attach_audio_input(
@@ -1145,7 +1173,9 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
 
 
 @pytest.mark.asyncio
-async def test_resolve_transcribe_attach_swallow_audit_errors(user, monkeypatch):
+async def test_resolve_transcribe_attach_swallow_audit_errors(
+    spool_contract, user, monkeypatch
+):
     flow_run_repo = AsyncMock()
     audit_service = AsyncMock()
     audit_service.log_async = AsyncMock(side_effect=RuntimeError("audit down"))
@@ -1190,7 +1220,7 @@ async def test_resolve_transcribe_attach_swallow_audit_errors(user, monkeypatch)
         flow_run_repo=flow_run_repo,
         audit_service=audit_service,
         actor=FlowRunActor.from_user(user=user),
-        load_audio_payload=AsyncMock(),
+        open_audio_download=spool_contract.downloads([]),
     )
 
     result = await resolve_transcribe_and_attach_audio_input(

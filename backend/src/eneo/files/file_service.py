@@ -749,6 +749,17 @@ class FileService:
             )
         )[0]
 
+    async def get_audio_download(self, file_id: UUID) -> FileDownload:
+        metadata = await self.repo.get_by_id(file_id=file_id)
+        self._require_owner(metadata, action="read_content")
+        if metadata.file_type is not FileType.AUDIO:
+            raise ValueError("File needs to be an audio file")
+        references = await self.repo.get_content_references([file_id])
+        original = self._first_reference(references, FileContentVariant.ORIGINAL)
+        if original is None:
+            return await self._open_legacy_audio_download(metadata, range_header=None)
+        return await self._open_download(metadata, original, range_header=None)
+
     async def get_owned_file_for_key_share(
         self,
         file_id: UUID,

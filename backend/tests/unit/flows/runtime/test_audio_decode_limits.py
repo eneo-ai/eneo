@@ -29,7 +29,10 @@ from tests.unit.transcription_models.infrastructure.adapters.test_litellm_transc
     TRANSPORT,
     _adapter,
 )
+from tests.unittests.flows import audio_spool_test_support
 from tests.unittests.flows.test_flow_transcription import _audio_file
+
+spool_contract = audio_spool_test_support.spool_contract
 
 recording = test_audio.recording
 ffmpeg = test_audio.ffmpeg
@@ -41,8 +44,9 @@ ffmpeg = test_audio.ffmpeg
     [("duration_seconds", 1), ("decoded_bytes", 6000)],
 )
 async def test_oversized_audio_is_a_final_typed_refusal_before_provider_work(
-    recording, ffmpeg, monkeypatch, engine, limit, ceiling
+    recording, ffmpeg, monkeypatch, engine, limit, ceiling, spool_contract
 ):
+    spool_contract.duration_seconds = None
     source, _, temp_dir = recording
     settings = get_settings().model_copy(update={f"flow_audio_max_{limit}": ceiling})
     monkeypatch.setattr(audio, "get_settings", lambda: settings)
@@ -67,7 +71,7 @@ async def test_oversized_audio_is_a_final_typed_refusal_before_provider_work(
     )
     file = _audio_file(name="recording.wav")
     file.blob = source.read_bytes()
-    load = AsyncMock(return_value=file)
+    download = spool_contract.downloads([file])
 
     with pytest.raises(TypedIOValidationException) as error:
         await transcribe_audio_input(
@@ -78,7 +82,7 @@ async def test_oversized_audio_is_a_final_typed_refusal_before_provider_work(
             step_order=1,
             max_files=1,
             max_inline_text_bytes=1024,
-            load_audio_payload=load,
+            open_audio_download=download,
             transcription_call_observer=observer,
         )
 
@@ -104,8 +108,9 @@ async def test_oversized_audio_is_a_final_typed_refusal_before_provider_work(
 
 
 async def test_remote_counts_duration_without_materialising_decoded_audio(
-    recording, ffmpeg, monkeypatch
+    recording, ffmpeg, monkeypatch, spool_contract
 ):
+    spool_contract.duration_seconds = None
     source, _, temp_dir = recording
     temporary_files = []
     named_temp_file = audio.tempfile.NamedTemporaryFile
@@ -124,9 +129,13 @@ async def test_remote_counts_duration_without_materialising_decoded_audio(
     observer = RecordingObserver()
     file = _audio_file(name="recording.wav")
     file.blob = source.read_bytes()
-    await RemoteFlowTranscriber(make_client(service)).transcribe(
-        file, _adapter().model, observer=observer
-    )
+    spool = await spool_contract.spool(file)
+    try:
+        await RemoteFlowTranscriber(make_client(service)).transcribe(
+            spool, _adapter().model, file_id=file.id, observer=observer
+        )
+    finally:
+        await spool.aclose()
 
     assert len(temporary_files) == 1
     assert observer.started_facts[0].audio_seconds == 10
