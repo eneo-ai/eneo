@@ -93,9 +93,11 @@
   };
 
   // Linking a template overwrites texts and appearance, so it asks first;
-  // detaching hands every part back to the editor, so it asks too.
+  // detaching hands every part back to the editor, so it asks too. Reapplying
+  // is linking again: the release is copied whole, unlocked parts included.
   let templateChoice = $state("");
   let confirmTemplate = $state(false);
+  let confirmReapply = $state(false);
   let confirmDetach = $state(false);
   let applying = $state(false);
   const chosenTemplate = $derived(templates.find((t) => t.id === templateChoice) ?? null);
@@ -135,10 +137,8 @@
     }
   }
 
-  async function linkTemplate() {
-    if (!chosenTemplate) return;
-    const templateId = chosenTemplate.id;
-    const done = await withTemplate(
+  async function linkTemplate(templateId: string): Promise<boolean> {
+    return withTemplate(
       () =>
         eneo.widgets.linkTemplate({
           widget: { id: widget.id },
@@ -147,10 +147,19 @@
         }),
       () => m.widget_admin_template_could_not_apply()
     );
-    if (done) {
+  }
+
+  async function applyChosenTemplate() {
+    if (!chosenTemplate) return;
+    if (await linkTemplate(chosenTemplate.id)) {
       confirmTemplate = false;
       templateChoice = "";
     }
+  }
+
+  async function reapplyTemplate() {
+    if (!link) return;
+    if (await linkTemplate(link.id)) confirmReapply = false;
   }
 
   async function detachTemplate() {
@@ -316,6 +325,9 @@
                     <!-- eslint-enable svelte/no-navigation-without-resolve -->
                   {/if}
                   {#if current.status !== "archived"}
+                    <Button variant="outline" onclick={() => (confirmReapply = true)}>
+                      {m.widget_admin_template_reapply()}
+                    </Button>
                     <Button variant="outline" onclick={() => (confirmDetach = true)}>
                       {m.widget_admin_template_detach()}
                     </Button>
@@ -424,8 +436,29 @@
         disabled={applying}
         onclick={(event) => {
           event.preventDefault();
-          void linkTemplate();
+          void applyChosenTemplate();
         }}>{m.widget_admin_template_apply()}</AlertDialog.Action
+      >
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
+
+<AlertDialog.Root bind:open={confirmReapply}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.widget_admin_template_reapply_confirm_title()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.widget_admin_template_reapply_confirm_description({ name: link?.name ?? "" })}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel disabled={applying}>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action
+        disabled={applying}
+        onclick={(event) => {
+          event.preventDefault();
+          void reapplyTemplate();
+        }}>{m.widget_admin_template_reapply()}</AlertDialog.Action
       >
     </AlertDialog.Footer>
   </AlertDialog.Content>

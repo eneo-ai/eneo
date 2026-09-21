@@ -311,7 +311,8 @@ async def test_widget_templates(
         headers=_auth(admin_token),
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["theme"]["primary_color"] == "#123456"
+    template = resp.json()
+    assert template["theme"]["primary_color"] == "#123456"
 
     # Editors can list but not write.
     resp = await client.get(
@@ -330,6 +331,7 @@ async def test_widget_templates(
 
     # Nothing follows a template until it is published.
     assert template["published_at"] is None
+    assert template["published"] is None
     assert template["has_unpublished_changes"] is True
     resp = await client.post(
         f"/api/v1/spaces/{space_id}/widgets/",
@@ -351,6 +353,12 @@ async def test_widget_templates(
     published = resp.json()
     assert published["published_at"] is not None
     assert published["has_unpublished_changes"] is False
+    assert published["published"] == {
+        "texts": template["texts"],
+        "theme": template["theme"],
+        "language": template["language"],
+        "locked_groups": template["locked_groups"],
+    }
     resp = await client.post(
         f"/api/v1/admin/widget-templates/{template['id']}/publish/",
         headers=_auth(regular_user_token),
@@ -393,6 +401,8 @@ async def test_widget_templates(
     assert resp.status_code == 200, resp.text
     assert resp.json()["has_unpublished_changes"] is True
     assert resp.json()["linked_widgets"] == 1
+    # The release pickers show is the one widgets get, not the edited draft.
+    assert resp.json()["published"]["theme"]["primary_color"] == "#123456"
     resp = await client.get(
         f"/api/v1/widgets/{widget['id']}/", headers=_auth(admin_token)
     )

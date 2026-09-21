@@ -22,7 +22,7 @@
   import WidgetTextsFields from "$lib/features/widget/admin/WidgetTextsFields.svelte";
   import WidgetThemeFields from "$lib/features/widget/admin/WidgetThemeFields.svelte";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import { LOCK_GROUPS } from "$lib/features/widget/admin/templateLocks";
+  import { LOCK_GROUPS, publicationSummary } from "$lib/features/widget/admin/templateLocks";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { FileText, Palette } from "lucide-svelte";
@@ -136,6 +136,16 @@
           })
   );
   let confirmPublish = $state(false);
+  // The dialog names what the followers lose or regain, so an admin is not
+  // confirming a count but a change.
+  const summary = $derived(publicationSummary(template));
+  const groupNames = (groups: (typeof LOCK_GROUPS)[number][]) =>
+    groups.map((group) => lockLabels[group].label).join(", ");
+  const changesNothing = $derived(
+    summary.written.length === 0 &&
+      summary.newlyLocked.length === 0 &&
+      summary.released.length === 0
+  );
 
   const publish = createAsyncState(async () => {
     try {
@@ -388,6 +398,34 @@
         {m.widget_admin_template_publish_confirm_description()}
       </AlertDialog.Description>
     </AlertDialog.Header>
+    <ul
+      class="flex list-disc flex-col gap-1 pl-5 text-sm"
+      aria-label={m.widget_admin_template_publish_changes_label()}
+    >
+      {#if summary.written.length > 0}
+        <li>{m.widget_admin_template_publish_writes({ parts: groupNames(summary.written) })}</li>
+      {/if}
+      {#if summary.newlyLocked.length > 0}
+        <li>
+          {m.widget_admin_template_publish_new_locks({ parts: groupNames(summary.newlyLocked) })}
+        </li>
+      {/if}
+      {#if summary.released.length > 0}
+        <li>
+          {m.widget_admin_template_publish_released_locks({ parts: groupNames(summary.released) })}
+        </li>
+      {/if}
+      {#if summary.changedUnlocked.length > 0}
+        <li>
+          {m.widget_admin_template_publish_unlocked_changes({
+            parts: groupNames(summary.changedUnlocked)
+          })}
+        </li>
+      {/if}
+      {#if changesNothing}
+        <li>{m.widget_admin_template_publish_no_widget_changes()}</li>
+      {/if}
+    </ul>
     <AlertDialog.Footer>
       <AlertDialog.Cancel disabled={publish.isLoading}>{m.cancel()}</AlertDialog.Cancel>
       <AlertDialog.Action

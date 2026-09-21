@@ -42,6 +42,12 @@ function template(overrides: Partial<WidgetTemplate> = {}): WidgetTemplate {
     linked_widgets: 3,
     published_at: "2026-09-21T10:00:00Z",
     published_by_user_id: null,
+    published: {
+      texts: { title: "", welcome: "", placeholder: "", suggested_questions: [], subtitle: "AI" },
+      theme: { primary_color: "#1F4E79", radius: 12 },
+      language: "sv",
+      locked_groups: ["appearance", "language"]
+    },
     has_unpublished_changes: false,
     created_at: "2026-09-21T10:00:00Z",
     updated_at: "2026-09-21T10:00:00Z",
@@ -97,6 +103,42 @@ describe("widget template page", () => {
     click(dialogButtons.nth(1));
     await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1), { timeout: 3000 });
     await expect.element(page.getByText("widget_admin_template_published_at")).toBeVisible();
+  });
+
+  test("the publish dialog says which parts the followers lose or keep", async () => {
+    renderPage(
+      template({
+        has_unpublished_changes: true,
+        theme: { primary_color: "#654321", radius: 12 },
+        texts: {
+          title: "Fråga oss",
+          welcome: "",
+          placeholder: "",
+          suggested_questions: [],
+          subtitle: "AI"
+        },
+        locked_groups: ["appearance"]
+      })
+    );
+    click(page.getByRole("button", { name: "widget_admin_template_publish" }));
+    const changes = page.getByRole("list", { name: "widget_admin_template_publish_changes_label" });
+    await expect.element(changes.getByText("widget_admin_template_publish_writes")).toBeVisible();
+    await expect
+      .element(changes.getByText("widget_admin_template_publish_released_locks"))
+      .toBeVisible();
+    await expect
+      .element(changes.getByText("widget_admin_template_publish_unlocked_changes"))
+      .toBeVisible();
+    expect(changes.getByText("widget_admin_template_publish_no_widget_changes").query()).toBeNull();
+  });
+
+  test("the publish dialog says when the followers do not change at all", async () => {
+    renderPage(template({ has_unpublished_changes: true, description: "Ny beskrivning" }));
+    click(page.getByRole("button", { name: "widget_admin_template_publish" }));
+    await expect
+      .element(page.getByText("widget_admin_template_publish_no_widget_changes"))
+      .toBeVisible();
+    expect(page.getByText("widget_admin_template_publish_writes").query()).toBeNull();
   });
 
   test("a template nobody follows publishes without a question", async () => {

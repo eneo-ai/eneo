@@ -36,6 +36,7 @@ from eneo.widgets.presentation.widget_models import (
     WidgetTemplateCreate,
     WidgetTemplateInUseResponse,
     WidgetTemplatePublic,
+    WidgetTemplateReleasePublic,
     WidgetTemplateUpdate,
     WidgetUpdate,
     WidgetUsageDayPublic,
@@ -498,6 +499,16 @@ def _template_public(
         linked_widgets=linked_widgets,
         published_at=template.published_at,
         published_by_user_id=template.published_by_user_id,
+        published=(
+            WidgetTemplateReleasePublic(
+                texts=template.published.texts,
+                theme=template.published.theme,
+                language=template.published.language,
+                locked_groups=list(template.published.locked_groups),
+            )
+            if template.published is not None
+            else None
+        ),
         has_unpublished_changes=template.has_unpublished_changes,
         created_by_user_id=template.created_by_user_id,
         created_at=template.created_at,

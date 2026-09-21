@@ -1,7 +1,9 @@
 <!--
   Choose a template: a radio group of cards, each showing the template's
   colours as swatches, its name and description and whether it is the
-  organisation's default. Optionally offers "no template".
+  organisation's default. Swatches and language come from the published
+  release, which is what a widget receives; the draft may be ahead of it.
+  Optionally offers "no template".
 -->
 <script lang="ts">
   import type { WidgetTemplate } from "@eneo/eneo-js";
@@ -10,6 +12,7 @@
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { m } from "$lib/paraglide/messages";
   import { DEFAULT_PRIMARY_COLOR, isHexColor } from "../contrast";
+  import { templateRelease } from "./templateLocks";
 
   type Props = {
     templates: WidgetTemplate[];
@@ -30,11 +33,11 @@
   const NONE = "";
 
   function accent(template: WidgetTemplate) {
-    const colour = template.theme.primary_color ?? "";
+    const colour = templateRelease(template).theme.primary_color ?? "";
     return isHexColor(colour) ? colour : DEFAULT_PRIMARY_COLOR;
   }
   function header(template: WidgetTemplate) {
-    const colour = template.theme.header_color ?? "";
+    const colour = templateRelease(template).theme.header_color ?? "";
     return isHexColor(colour) ? colour : null;
   }
   function languageLabel(language: WidgetTemplate["language"]) {
@@ -88,16 +91,18 @@
                 style:background={header(template)}
               ></span>
             {/if}
-            {#if template.theme.logo_url}
+            {#if templateRelease(template).theme.logo_url}
               <img
                 class="h-6 w-6 rounded object-contain"
-                src={template.theme.logo_url}
+                src={templateRelease(template).theme.logo_url}
                 alt=""
                 width="24"
                 height="24"
               />
             {/if}
-            <span class="text-secondary text-xs">{languageLabel(template.language)}</span>
+            <span class="text-secondary text-xs"
+              >{languageLabel(templateRelease(template).language)}</span
+            >
           </span>
           <span class="sr-only">
             {m.widget_admin_template_swatch_alt({

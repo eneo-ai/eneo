@@ -159,6 +159,16 @@ class WidgetTemplateUpdate(BaseModel):
     )
 
 
+class WidgetTemplateReleasePublic(BaseModel):
+    """A published release: what a widget receives when it links to the
+    template and what its followers are held to."""
+
+    texts: WidgetTexts
+    theme: WidgetTheme
+    language: WidgetLanguage
+    locked_groups: list[TemplateLockGroup]
+
+
 class WidgetTemplatePublic(BaseModel):
     """The draft (texts, theme, language, locked_groups) plus its publication
     state. Followers are linked to and locked by the published release."""
@@ -178,6 +188,13 @@ class WidgetTemplatePublic(BaseModel):
         default=None, description="None until the template is first published."
     )
     published_by_user_id: Optional[UUID] = None
+    published: Optional[WidgetTemplateReleasePublic] = Field(
+        default=None,
+        description=(
+            "The release widgets link to and are held to; the draft fields"
+            " above may be ahead of it. None until the template is published."
+        ),
+    )
     has_unpublished_changes: bool = Field(
         description="The draft differs from the published release."
     )

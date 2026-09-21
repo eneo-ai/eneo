@@ -22636,6 +22636,8 @@ export interface components {
       published_at?: string | null;
       /** Published By User Id */
       published_by_user_id?: string | null;
+      /** @description The release widgets link to and are held to; the draft fields above may be ahead of it. None until the template is published. */
+      published?: components["schemas"]["WidgetTemplateReleasePublic"] | null;
       /**
        * Has Unpublished Changes
        * @description The draft differs from the published release.
@@ -22653,6 +22655,18 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /**
+     * WidgetTemplateReleasePublic
+     * @description A published release: what a widget receives when it links to the
+     *     template and what its followers are held to.
+     */
+    WidgetTemplateReleasePublic: {
+      texts: components["schemas"]["WidgetTexts"];
+      theme: components["schemas"]["WidgetTheme"];
+      language: components["schemas"]["WidgetLanguage"];
+      /** Locked Groups */
+      locked_groups: components["schemas"]["TemplateLockGroup"][];
     };
     /** WidgetTemplateUpdate */
     WidgetTemplateUpdate: {

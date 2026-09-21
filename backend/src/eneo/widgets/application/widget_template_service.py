@@ -150,8 +150,8 @@ class WidgetTemplateService:
         validate_permission(self.user, Permission.ADMIN)
         template = await self._owned(template_id)
         assert template.id is not None
-        # Archived followers keep their link as history but never block
-        # deletion; the column is SET NULL when the template goes.
+        # Archived widgets never block deletion; the foreign key clears
+        # their link when the template goes, so only the audit log records it.
         linked = len(await self.widget_repo.list_by_template(template.id))
         if linked:
             raise WidgetTemplateInUseError(linked)
