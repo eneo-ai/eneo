@@ -2,7 +2,7 @@ from hashlib import sha256
 from random import Random
 
 import pytest
-from sqlalchemy import event, select
+from sqlalchemy import event, select, text
 
 from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.object_content_table import ObjectContentReconciliationState
@@ -16,6 +16,247 @@ from tests.integration.object_content.test_inline_external_storage import (
     _upload,
 )
 from tests.integration.object_content.test_storage_ownership import _owner_ids
+
+
+async def _toast_chunks(database):
+    async with database.session() as session, session.begin():
+        relation = await session.scalar(
+            text(
+                "SELECT reltoastrelid::regclass::text FROM pg_class "
+                "WHERE oid = 'inline_content_payloads'::regclass"
+            )
+        )
+        return await session.scalar(text(f"SELECT count(*) FROM {relation}"))
+
+
+@pytest.mark.parametrize("local_path", [False, True])
+async def test_mixed_representations_dispatch_without_conversion(
+    object_content_database, local_path
+):
+    database = object_content_database
+    settings = ObjectContentCoreSettings(_env_file=None)
+    fixtures = [
+        ("compressed_external", b"a" * (2 * 1024 * 1024), True, True),
+        ("compressed_heap", b"a" * 12000, True, False),
+        ("uncompressed_external", Random(13).randbytes(2 * 1024 * 1024), False, True),
+        ("small_heap", b"small heap payload", False, False),
+        ("empty", b"", False, False),
+    ]
+    contents = []
+    for name, payload, compressed, external in fixtures:
+        before = await _toast_chunks(database)
+        content_id = (
+            await (_legacy_upload if compressed else _upload)(database, payload)
+            if payload
+            else await _empty_upload(database)
+        )
+        stored, raw = await _physical_sizes(database, content_id)
+        assert raw == len(payload)
+        assert (stored < raw) == compressed, name
+        assert ((await _toast_chunks(database)) > before) == external, name
+        contents.append((content_id, payload, compressed))
+    tenant_id, _ = await _owner_ids(database)
+    async with database.session() as session, session.begin():
+        assert (
+            await session.scalar(
+                select(ObjectContentReconciliationState.inline_conversion_ready_at)
+            )
+            is None
+        )
+    statements = []
+
+    def capture(connection, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(database._engine.sync_engine, "before_cursor_execute", capture)
+    try:
+        for content_id, payload, compressed in contents:
+            statements.clear()
+            grant = ContentReadGrant(
+                content_id, tenant_id, ContentAccessClass.PRIVATE_RESOURCE
+            )
+            async with ObjectContentService(settings, database).open_content(
+                grant, require_local_path=local_path
+            ) as opened:
+                assert b"".join([chunk async for chunk in opened.chunks]) == payload
+                if local_path and not compressed:
+                    assert opened.verified_path.read_bytes() == payload
+            assert any("substr(" in sql for sql in statements) == (
+                bool(payload) and not compressed
+            )
+            assert (
+                any(", inline_content_payloads.payload," in sql for sql in statements)
+                == compressed
+            )
+            assert not any("inline_conversion_ready_at" in sql for sql in statements)
+    finally:
+        event.remove(database._engine.sync_engine, "before_cursor_execute", capture)
+
+
+@pytest.mark.parametrize("compressed", [False, True])
+async def test_metadata_size_functions_do_not_fetch_external_payload(
+    object_content_database, compressed
+):
+    from eneo.object_content.content_repository import ContentReadSnapshot
+
+    database = object_content_database
+    payload = b"a" * (2 * 1024 * 1024)
+    content_id = await (_legacy_upload if compressed else _upload)(database, payload)
+    stored, raw = await _physical_sizes(database, content_id)
+    assert (stored < raw) == compressed
+    assert await _toast_chunks(database) > 0
+    tenant_id, _ = await _owner_ids(database)
+    grant = ContentReadGrant(content_id, tenant_id, ContentAccessClass.PRIVATE_RESOURCE)
+    statements = []
+
+    def capture(connection, cursor, statement, parameters, context, executemany):
+        if "octet_length(inline_content_payloads.payload)" in statement:
+            statements.append((statement, parameters))
+
+    event.listen(database._engine.sync_engine, "before_cursor_execute", capture)
+    try:
+        async with ContentReadSnapshot.open(database) as snapshot:
+            (
+                _,
+                physical_size,
+                slice_capable,
+            ) = await snapshot.repository.get_read_metadata(grant)
+    finally:
+        event.remove(database._engine.sync_engine, "before_cursor_execute", capture)
+    assert physical_size == len(payload)
+    assert slice_capable == (not compressed)
+    assert len(statements) == 1
+    metadata, parameters = statements[0]
+    assert "pg_column_size(inline_content_payloads.payload)" in metadata
+    assert "inline_conversion_ready_at" not in metadata
+    baseline = metadata.replace(
+        "octet_length(inline_content_payloads.payload)",
+        "inline_content_payloads.content_id",
+    ).replace(
+        "pg_column_size(inline_content_payloads.payload)",
+        "inline_content_payloads.content_id",
+    )
+    detoast = metadata.replace(
+        "pg_column_size(inline_content_payloads.payload)",
+        "sha256(inline_content_payloads.payload)",
+    )
+    blocks = []
+    async with database._engine.connect() as connection:
+        for statement in (baseline, metadata, detoast):
+            result = await connection.exec_driver_sql(
+                "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + statement, parameters
+            )
+            plan = result.scalar_one()[0]["Plan"]
+            blocks.append(plan["Shared Hit Blocks"] + plan["Shared Read Blocks"])
+    assert blocks[1] == blocks[0]
+    assert blocks[2] > blocks[1] + 4
+    print({"compressed": compressed, "baseline_metadata_detoast_blocks": blocks})
+
+
+async def test_conversion_after_metadata_preserves_compressed_snapshot(
+    object_content_database, monkeypatch
+):
+    from eneo.database.tables.object_content_table import ObjectContents
+    from eneo.object_content.content_repository import ObjectContentRepository
+
+    database = object_content_database
+    payload = b"a" * (2 * 1024 * 1024)
+    content_id = await _legacy_upload(database, payload)
+    settings = ObjectContentCoreSettings(_env_file=None)
+    tenant_id, _ = await _owner_ids(database)
+    grant = ContentReadGrant(content_id, tenant_id, ContentAccessClass.PRIVATE_RESOURCE)
+    original = ObjectContentRepository.get_read_metadata
+    converted = False
+
+    async def convert_after_metadata(repository, grant):
+        nonlocal converted
+        result = await original(repository, grant)
+        if not converted:
+            converted = True
+            assert result[2] is False
+            conversion = await ObjectContentReconciler(settings, database).run_once()
+            assert conversion.inline_conversion.converted == 1
+            stored, raw = (
+                await repository._session.execute(
+                    text(
+                        "SELECT pg_column_size(payload), octet_length(payload) "
+                        "FROM inline_content_payloads WHERE content_id = :id"
+                    ),
+                    {"id": content_id},
+                )
+            ).one()
+            assert stored < raw == len(payload)
+            assert await _physical_sizes(database, content_id) == (
+                len(payload),
+                len(payload),
+            )
+            assert (await original(repository, grant))[2] is False
+        else:
+            assert result[2] is True
+        return result
+
+    monkeypatch.setattr(
+        ObjectContentRepository, "get_read_metadata", convert_after_metadata
+    )
+    statements = []
+
+    def capture(connection, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(database._engine.sync_engine, "before_cursor_execute", capture)
+    try:
+        for expect_slices in (False, True):
+            statements.clear()
+            async with ObjectContentService(settings, database).open_content(
+                grant
+            ) as opened:
+                assert b"".join([chunk async for chunk in opened.chunks]) == payload
+            assert any("substr(" in sql for sql in statements) == expect_slices
+            assert any(
+                ", inline_content_payloads.payload," in sql for sql in statements
+            ) == (not expect_slices)
+        assert converted
+    finally:
+        event.remove(database._engine.sync_engine, "before_cursor_execute", capture)
+    async with database.session() as session, session.begin():
+        control = await session.get(ObjectContents, content_id)
+        assert control.state == "available"
+        assert control.failure_code is None
+
+
+async def _empty_upload(database):
+    from eneo.database.tables.object_content_table import (
+        FileContentReferences,
+        InlineContentPayloads,
+    )
+    from tests.integration.object_content.test_storage_ownership import (
+        _file,
+        _inline_content,
+    )
+
+    tenant_id, user_id = await _owner_ids(database)
+    async with database.session() as session, session.begin():
+        owner = _file(tenant_id=tenant_id, user_id=user_id, name="empty")
+        control = _inline_content(
+            tenant_id=tenant_id, user_id=user_id, idempotency_key="empty", payload=b""
+        )
+        session.add_all([owner, control])
+        await session.flush()
+        session.add_all(
+            [
+                InlineContentPayloads(
+                    content_id=control.id, storage_kind="postgres_inline", payload=b""
+                ),
+                FileContentReferences(
+                    file_id=owner.id,
+                    content_id=control.id,
+                    variant="original",
+                    ordinal=0,
+                ),
+            ]
+        )
+        content_id = control.id
+    return content_id
 
 
 @pytest.mark.parametrize("local_path", [False, True])
@@ -89,17 +330,24 @@ async def test_ready_inline_download_uses_snapshot_slices(
     assert any(
         "REPEATABLE READ" in sql and "READ ONLY" in sql for sql, _, _ in statements
     )
-    assert any("inline_conversion_ready_at" in sql for sql, _, _ in statements)
+    assert not any("inline_conversion_ready_at" in sql for sql, _, _ in statements)
     for sql, _, _ in statements:
         assert "sha256(" not in sql.lower()
         assert "SELECT inline_content_payloads.payload" not in sql
         assert ", inline_content_payloads.payload," not in sql
 
 
-@pytest.mark.parametrize("ready", [False, True])
-@pytest.mark.parametrize("damage", ["hash", "short", "trailing", "empty"])
+@pytest.mark.parametrize(
+    ("compressed", "damage"),
+    [
+        (compressed, damage)
+        for compressed in (False, True)
+        for damage in ("hash", "short", "trailing")
+    ]
+    + [(False, "empty")],
+)
 async def test_inline_corruption_reports_complete_observation_after_snapshot_close(
-    object_content_database, monkeypatch, tmp_path, ready, damage
+    object_content_database, monkeypatch, tmp_path, compressed, damage
 ):
     from eneo.database.tables.object_content_table import ObjectContents
     from eneo.object_content.content import ObjectContentIntegrityError
@@ -112,20 +360,27 @@ async def test_inline_corruption_reports_complete_observation_after_snapshot_clo
     payload = b"a" * (512 * 1024 + 5)
     content_id = await _upload(database, payload)
     settings = ObjectContentCoreSettings(_env_file=None)
-    if ready:
-        await ObjectContentReconciler(settings, database).run_once()
     corrupted = {
         "hash": b"b" * len(payload),
         "short": payload[:-1],
         "trailing": payload + b"unexpected",
         "empty": b"",
     }[damage]
-    await _corrupt_payload(database, content_id, corrupted)
+    await _corrupt_payload(database, content_id, corrupted, compressed=compressed)
+    stored, raw = await _physical_sizes(database, content_id)
+    assert (stored < raw) == compressed
     tenant_id, _ = await _owner_ids(database)
     grant = ContentReadGrant(content_id, tenant_id, ContentAccessClass.PRIVATE_RESOURCE)
     monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
     original = ObjectContentRepository.mark_backend_failure
     observations = []
+    paths = []
+    original_metadata = ObjectContentRepository.get_read_metadata
+
+    async def metadata(repository, grant):
+        result = await original_metadata(repository, grant)
+        paths.append(result[2])
+        return result
 
     async def report(repository, **kwargs):
         assert database._engine.pool.checkedout() == 0
@@ -133,10 +388,12 @@ async def test_inline_corruption_reports_complete_observation_after_snapshot_clo
         return await original(repository, **kwargs)
 
     monkeypatch.setattr(ObjectContentRepository, "mark_backend_failure", report)
+    monkeypatch.setattr(ObjectContentRepository, "get_read_metadata", metadata)
     with pytest.raises(ObjectContentIntegrityError):
         async with ObjectContentService(settings, database).open_content(grant):
             pytest.fail("Corruption exposed a download")
     assert observations == [sha256(corrupted).digest()]
+    assert paths == [not compressed]
     assert list(tmp_path.iterdir()) == []
     async with database.session() as session, session.begin():
         control = await session.get(ObjectContents, content_id)
@@ -144,9 +401,9 @@ async def test_inline_corruption_reports_complete_observation_after_snapshot_clo
         assert control.failure_code == "backend_corrupt"
 
 
-@pytest.mark.parametrize("ready", [False, True])
+@pytest.mark.parametrize("compressed", [False, True])
 async def test_download_stale_corruption_retries_after_inline_round_trip(
-    object_content_database, monkeypatch, ready
+    object_content_database, monkeypatch, compressed
 ):
     from eneo.database.tables.object_content_table import ObjectContents
     from eneo.object_content.content import StorageKind
@@ -164,12 +421,21 @@ async def test_download_stale_corruption_retries_after_inline_round_trip(
     payload = b"a" * (512 * 1024)
     content_id = await _upload(database, payload)
     settings = ObjectContentCoreSettings(_env_file=None)
-    if ready:
-        await ObjectContentReconciler(settings, database).run_once()
-    await _corrupt_payload(database, content_id, b"b" * len(payload))
+    await _corrupt_payload(
+        database, content_id, b"b" * len(payload), compressed=compressed
+    )
+    stored, raw = await _physical_sizes(database, content_id)
+    assert (stored < raw) == compressed
     tenant_id, actor_id = await _owner_ids(database)
     original = ObjectContentRepository.mark_backend_failure
     reports = 0
+    paths = []
+    original_metadata = ObjectContentRepository.get_read_metadata
+
+    async def metadata(repository, grant):
+        result = await original_metadata(repository, grant)
+        paths.append(result[2])
+        return result
 
     async def replace_placement(repository, **kwargs):
         nonlocal reports
@@ -203,10 +469,12 @@ async def test_download_stale_corruption_retries_after_inline_round_trip(
     monkeypatch.setattr(
         ObjectContentRepository, "mark_backend_failure", replace_placement
     )
+    monkeypatch.setattr(ObjectContentRepository, "get_read_metadata", metadata)
     grant = ContentReadGrant(content_id, tenant_id, ContentAccessClass.PRIVATE_RESOURCE)
     async with ObjectContentService(settings, database).open_content(grant) as opened:
         assert b"".join([chunk async for chunk in opened.chunks]) == payload
     assert reports == 1
+    assert paths == [not compressed, True]
     async with database.session() as session, session.begin():
         control = await session.get(ObjectContents, content_id)
         assert control.state == "available"
@@ -303,7 +571,7 @@ async def test_inline_path_is_adopted_by_audio_without_consuming_chunks(
     assert list(tmp_path.iterdir()) == []
 
 
-async def test_not_ready_download_and_batch_keep_materialized_sources(
+async def test_compressed_download_and_batch_keep_materialized_sources(
     object_content_database,
 ):
     from uuid import uuid4
@@ -541,38 +809,9 @@ async def test_local_spool_failure_preserves_inline_availability(
 async def test_empty_inline_content_verifies_without_slice_queries(
     object_content_database, local_path
 ):
-    from eneo.database.tables.object_content_table import (
-        FileContentReferences,
-        InlineContentPayloads,
-    )
-    from tests.integration.object_content.test_storage_ownership import (
-        _file,
-        _inline_content,
-    )
-
     database = object_content_database
-    tenant_id, user_id = await _owner_ids(database)
-    async with database.session() as session, session.begin():
-        owner = _file(tenant_id=tenant_id, user_id=user_id, name="empty")
-        control = _inline_content(
-            tenant_id=tenant_id, user_id=user_id, idempotency_key="empty", payload=b""
-        )
-        session.add_all([owner, control])
-        await session.flush()
-        session.add_all(
-            [
-                InlineContentPayloads(
-                    content_id=control.id, storage_kind="postgres_inline", payload=b""
-                ),
-                FileContentReferences(
-                    file_id=owner.id,
-                    content_id=control.id,
-                    variant="original",
-                    ordinal=0,
-                ),
-            ]
-        )
-        content_id = control.id
+    content_id = await _empty_upload(database)
+    tenant_id, _ = await _owner_ids(database)
     settings = ObjectContentCoreSettings(_env_file=None)
     await ObjectContentReconciler(settings, database).run_once()
     grant = ContentReadGrant(content_id, tenant_id, ContentAccessClass.PRIVATE_RESOURCE)

@@ -19,7 +19,6 @@ from eneo.database.tables.file_icon_backfill_table import (
 from eneo.database.tables.object_content_table import (
     InlineContentPayloads,
     ObjectContentHolds,
-    ObjectContentReconciliationState,
     ObjectContents,
     ObjectStoreObjects,
 )
@@ -764,12 +763,10 @@ class ObjectContentRepository:
                 select(
                     ObjectContents,
                     func.octet_length(InlineContentPayloads.payload),
+                    func.pg_column_size(InlineContentPayloads.payload),
                     ObjectStoreObjects.object_key,
                     ObjectStoreObjects.verification_chunk_size_bytes,
                     func.octet_length(ObjectStoreObjects.verification_chunk_sha256),
-                    select(ObjectContentReconciliationState.inline_conversion_ready_at)
-                    .where(ObjectContentReconciliationState.id == 1)
-                    .scalar_subquery(),
                 )
                 .outerjoin(
                     InlineContentPayloads,
@@ -789,7 +786,7 @@ class ObjectContentRepository:
         ).one_or_none()
         if row is None:
             raise ObjectContentStateError("Object content is not available")
-        control, physical_size, key, chunk_size, digest_bytes, ready_at = row
+        control, physical_size, stored_size, key, chunk_size, digest_bytes = row
         content = self._readable(control)
         if (
             content.storage_kind is StorageKind.POSTGRES_INLINE
@@ -806,7 +803,7 @@ class ObjectContentRepository:
                 require_inline_payload=False,
             ),
             physical_size,
-            ready_at is not None,
+            physical_size is not None and stored_size >= physical_size,
         )
 
     async def read_inline_slice(
@@ -1272,7 +1269,7 @@ class ObjectContentRepository:
 
 
 class ContentReadSnapshot:
-    """Keep readiness, access facts and physical bytes in one read-only snapshot."""
+    """Keep representation, access facts and bytes in one read-only snapshot."""
 
     def __init__(self, repository: ObjectContentRepository) -> None:
         self.repository = repository

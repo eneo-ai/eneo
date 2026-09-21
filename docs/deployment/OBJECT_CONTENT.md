@@ -618,10 +618,10 @@ prefix). Durable evidence is in the singleton
 `inline_conversion_upper_id` delimit the active sweep; scanned/converted counts
 are cumulative, while rejected/skipped counts describe the current or most
 recent sweep. `inline_conversion_completed_at` records the last sweep without
-skipped rows, even if corrupt rows were rejected. Only
-`inline_conversion_ready_at` establishes readiness for subsequent bounded
-inline-read work; rejected corrupt rows keep it unset and follow the existing
-backend-failure recovery path.
+skipped rows, even if corrupt rows were rejected. `inline_conversion_ready_at`
+records a completed sweep without rejected rows. It is an optional progress
+signal for operators; downloads do not read it. Rejected corrupt rows keep it
+unset and follow the existing backend-failure recovery path.
 
 Plan disk, WAL, backup, and replica headroom before restarting conversion.
 On the PostgreSQL 13 integration fixture, one compressible 1,048,576-byte payload
@@ -634,9 +634,17 @@ and hash verification require whole-value memory in PostgreSQL for each row,
 so this maintenance operation is not chunk-bounded. Old row versions also consume
 space until vacuum can reclaim them.
 
-Inline downloads use slice reads only when `inline_conversion_ready_at` is
-non-NULL. Readiness, access checks, physical payload length, and all slices
-share one read-only REPEATABLE READ transaction. Each query fetches at most
+Inline downloads choose their read path from each row's physical representation.
+Metadata reads compare `pg_column_size(payload)` with `octet_length(payload)`;
+both inspect headers without fetching or decompressing TOAST values. Uncompressed
+rows, including small heap values, use slice reads immediately, even while other
+rows remain compressed. Streaming eligibility does not wait for the conversion
+sweep. No additional operator action is needed to enable it; the coordinated
+upgrade drain and capacity planning for automatic conversion still apply.
+Conversion makes old compressed rows eligible for slice reads.
+
+Access checks, physical representation, payload length, and all reads share one
+read-only REPEATABLE READ transaction. Each slice query fetches at most
 `inline_io_chunk_bytes` through `substr`; its existing default is 256 KiB.
 The complete physical payload is hashed into a disk-backed verification spool,
 including for range requests. The transaction closes before a response or
@@ -644,11 +652,12 @@ verified local path is exposed. Audio consumers can adopt that path by renaming
 it. Plan temporary disk capacity for the complete payload of each concurrent
 download. A failed read restarts from the beginning.
 
-While readiness is NULL, inline downloads retain whole-payload materialization.
-All inline writers must run the corrected storage code throughout conversion;
-a completed sweep alone does not enable slice reads. Explicit batch reads also
-retain whole-payload materialization, with one source query per page of at most
-500 unique access grants.
+Compressed rows retain whole-payload materialization in the same snapshot:
+repeated slices would decompress from the beginning through each slice end.
+A conversion committed during a download takes effect on its next snapshot.
+All inline writers must run the corrected storage code throughout conversion.
+Explicit batch reads also retain whole-payload materialization, with one source
+query per page of at most 500 unique access grants.
 
 Corruption reporting closes the snapshot first and fences the failure against
 the digest of the complete observed payload. That exceptional fence hashes the

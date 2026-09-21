@@ -733,3 +733,125 @@ FileDownload, the audio spool, StorageKind, deployment policy, the move queue an
 slice-1 conversion are unchanged. Audio path adoption is tested without consuming
 download chunks. No schema, settings, generated contracts, git state or history
 were changed.
+
+## Per-row dispatch (eneo-tbia, 2026-09-21)
+
+This section supersedes the readiness-gated dispatch described above. The
+prerelease change targets the next release and updates the existing
+`docs/deployment/OBJECT_CONTENT.md` operator guide. PostgreSQL remains the
+default store.
+
+`get_read_metadata` now selects `pg_column_size(payload)` alongside
+`octet_length(payload)` and returns slice eligibility when stored size is at
+least raw size. Its sole production caller is `_open_download` (verified by
+searching `backend/src`); no other reader needs the removed singleton readiness
+subquery. The reconciliation owner retains its progress and readiness facts.
+
+For persisted BYTEA values, both size functions inspect headers and pointers
+without fetching TOAST chunks or decompressing data. In PostgreSQL 13 and 16,
+`byteaoctetlen` calls `toast_raw_datum_size` and subtracts `VARHDRSZ`;
+`pg_column_size` calls `toast_datum_size`. The external branches read the TOAST
+pointer's raw and stored sizes. Heap branches read the short, ordinary, or
+compressed header. Uncompressed external values therefore have stored size
+equal to raw size; uncompressed heap values include their header in stored size;
+compressed values have smaller stored size. Source evidence:
+[PostgreSQL 13 size functions](https://github.com/postgres/postgres/blob/REL_13_STABLE/src/backend/utils/adt/varlena.c),
+[PostgreSQL 13 TOAST sizes](https://github.com/postgres/postgres/blob/REL_13_STABLE/src/backend/access/common/detoast.c),
+[PostgreSQL 16 size functions](https://github.com/postgres/postgres/blob/REL_16_STABLE/src/backend/utils/adt/varlena.c),
+and [PostgreSQL 16 TOAST sizes](https://github.com/postgres/postgres/blob/REL_16_STABLE/src/backend/access/common/detoast.c).
+PostgreSQL 13 is exercised by the integration harness; PostgreSQL 16 evidence
+here is source inspection, not a test against the owner's database.
+
+The captured metadata statement was replayed with
+`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`. The controls-only baseline replaces
+both payload-size expressions with the payload row's ID, preserving the joins
+and predicates. The positive control replaces the stored-size expression with
+`sha256(payload)` to force detoasting. Counts include shared hits and reads:
+
+| 2 MiB payload representation | Controls only | Actual metadata | SHA-256 control |
+| --- | ---: | ---: | ---: |
+| Uncompressed external | 6 | 6 | 273 |
+| Compressed external | 6 | 6 | 11 |
+
+The mixed-table test asserts compression from the sizes and external storage
+from newly created TOAST chunks. It covers compressed external, compressed heap,
+uncompressed external, small uncompressed heap, and empty values before any
+conversion runs. Captured SQL requires whole reads for compressed rows, slices
+for both nonempty uncompressed representations, no slices for empty content,
+and no readiness lookup. Every download returns the canonical bytes.
+
+The conversion race pauses after metadata, commits a real compressed-row
+conversion on another connection, and checks that the original snapshot still
+sees compression while a fresh snapshot sees uncompressed storage. The current
+download reads whole; the next download slices. The existing move-between-slices
+test continues to cover concurrent placement changes during slicing. Corruption
+and stale-observation retry tests assert the stored representation and dispatch
+for both paths. Empty damage has one uncompressed case because empty BYTEA
+cannot supply a compressed representation.
+
+The deployment guide requires no extra action to enable per-row streaming.
+The coordinated upgrade drain remains required. Conversion remains automatic
+at startup and every minute, so disk, WAL, backup, and replica capacity planning
+still applies. Its benefit is making old compressed rows eligible for slices;
+making the sweep opt-in remains a separate scope decision. The verified spool,
+S3 reader, slice-1 conversion mechanics, and benchmark module are unchanged.
+No representation flag, setting, or manifest was added.
+
+### Per-row validation
+
+Commands ran from `backend`. Before editing, collection succeeded for the unit
+suite (`198 tests collected in 5.19s`), full integration suite
+(`326/327 tests collected (1 deselected) in 0.82s`), audio spool module
+(`13 tests collected in 1.49s`), and flagged benchmark
+(`1 test collected in 0.38s`). Preflight Pyright and Ruff passed.
+
+The first test-only run reported `15 failed, 3 passed, 21 deselected in 76.17s
+(0:01:16)`. Alongside the expected readiness failures, it exposed a fixture
+that PostgreSQL left uncompressed. The fixture was corrected to a compressible
+2 MiB value whose TOAST chunks are asserted. The next test-only run reported
+`4 failed, 1 passed, 34 deselected in 31.19s`: the unchanged metadata still
+queried readiness and omitted stored size. The matrix's local-path assertion
+was also narrowed to the slicing path, preserving the existing compressed-row
+fallback contract.
+
+| Command | Result |
+| --- | --- |
+| `uv run pytest tests/integration/object_content/test_inline_streaming.py -q -s` | `39 passed in 115.33s (0:01:55)` |
+| `uv run pytest tests/unittests/object_content -q` | `198 passed in 8.91s` |
+| `uv run pytest tests/unittests/flows/test_audio_spool.py -q` | `13 passed in 2.30s` |
+| `uv run pyright` | `0 errors, 0 warnings, 0 informations` |
+| `uv run ruff check` on the four changed Python files | `All checks passed!` |
+| `uv run ruff format --check` on those same files | `4 files already formatted` |
+| `uv run pytest tests/integration/object_content -q -n 4` | `15 failed, 313 passed, 2 skipped in 370.60s (0:06:10)`; exit 1 |
+
+The full integration failures match all 15 IDs in the baseline allowlist above,
+with no additional or missing IDs. The failure signatures also match: unsupported
+`pdf_limits`, the cancellation setup timeout caused by that same upload double,
+unsupported `expected_tenant_id`, invalid `Files.user_id`, and the stale
+deployment-policy revision. The full command therefore still exits 1; the
+per-row change adds no failure outside the accepted baseline.
+
+The unchanged benchmark ran separately after the full suite:
+
+```bash
+ENEO_RUN_INLINE_READ_BENCHMARK=1 PYTHONPATH=src uv run pytest tests/integration/object_content/test_inline_streaming_benchmark.py -q -s
+```
+
+It reported `1 passed in 67.00s (0:01:07)`. Both 384 MiB modes used 1,536 slices;
+their application RSS deltas were 1,933,312 and 2,408,448 bytes, with latencies
+2.709 and 2.361 seconds. Four concurrent 64 MiB reads used 1,024 slices in each
+mode, with maximum latencies 0.601 and 0.620 seconds. All measured lock-wait
+counts were zero. These measurements satisfy the unchanged benchmark's gates;
+they do not establish a performance improvement over its previous receipt.
+
+The four Python files passed to both Ruff commands were:
+
+```text
+src/eneo/object_content/content_repository.py
+src/eneo/object_content/content_service.py
+tests/integration/object_content/test_inline_streaming.py
+tests/integration/object_content/test_inline_external_storage.py
+```
+
+`git diff --check` passed. Only those four files and the two permitted documents
+changed; no git mutation was performed.

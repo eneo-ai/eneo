@@ -151,13 +151,18 @@ async def _legacy_upload(database: DatabaseSessionManager, payload: bytes) -> UU
 
 
 async def _corrupt_payload(
-    database: DatabaseSessionManager, content_id: UUID, payload: bytes
+    database: DatabaseSessionManager,
+    content_id: UUID,
+    payload: bytes,
+    *,
+    compressed: bool = True,
 ) -> None:
     async with database.session() as session, session.begin():
         await session.execute(text("SET LOCAL session_replication_role = replica"))
         await session.execute(
             text(
-                "ALTER TABLE inline_content_payloads ALTER COLUMN payload SET STORAGE EXTENDED"
+                "ALTER TABLE inline_content_payloads ALTER COLUMN payload SET STORAGE "
+                + ("EXTENDED" if compressed else "EXTERNAL")
             )
         )
         await session.execute(

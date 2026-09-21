@@ -750,7 +750,7 @@ class ObjectContentService:
                     (
                         source,
                         physical_size,
-                        ready,
+                        slice_capable,
                     ) = await snapshot.repository.get_read_metadata(grant)
                     byte_range = (
                         None
@@ -760,7 +760,7 @@ class ObjectContentService:
                         )
                     )
                     if source.content.storage_kind is StorageKind.POSTGRES_INLINE:
-                        if ready:
+                        if slice_capable:
                             assert physical_size is not None
                             spool = await resources.enter_async_context(
                                 VerifiedSpool.open(
