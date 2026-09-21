@@ -88,6 +88,14 @@ def test_texts_are_cleaned_and_bounded():
     assert texts.suggested_questions == ["Öppettider?", "Bygglov"]
     with pytest.raises(ValueError):
         WidgetTexts(suggested_questions=[" "])
+    assert WidgetTexts(
+        suggested_questions=["a", "b", "c", "d"]
+    ).suggested_questions == [
+        "a",
+        "b",
+        "c",
+        "d",
+    ]
     with pytest.raises(ValueError):
         WidgetTexts(suggested_questions=["a", "b", "c", "d", "e"])
     with pytest.raises(ValueError):
@@ -180,6 +188,12 @@ def test_theme_header_colour_and_logo_are_validated():
     dark = WidgetTheme(primary_color_dark="#abcdef", header_color_dark="")
     assert dark.primary_color_dark == "#ABCDEF"
     assert dark.header_color_dark is None
+    # The editor expands shorthand before saving; the API only stores #RRGGBB.
+    assert WidgetTheme(primary_color="#AABBCC").primary_color == "#AABBCC"
+    with pytest.raises(ValueError):
+        WidgetTheme(primary_color="#ABC")
+    with pytest.raises(ValueError):
+        WidgetTheme(header_color="#abc")
     with pytest.raises(ValueError):
         WidgetTheme(primary_color_dark="red")
     with pytest.raises(ValueError):

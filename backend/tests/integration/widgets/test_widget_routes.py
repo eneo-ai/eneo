@@ -111,7 +111,8 @@ async def test_widget_lifecycle(client, admin_token, space_with_assistant):
             "theme": {"primary_color": "#005a9c"},
             "texts": {
                 "title": "Fråga kommunen",
-                "suggested_questions": ["Öppettider?"],
+                # The editor's limit: four questions must save.
+                "suggested_questions": ["Öppettider?", "Bygglov", "Skola", "Avfall"],
             },
         },
         headers=_auth(admin_token),
@@ -123,6 +124,12 @@ async def test_widget_lifecycle(client, admin_token, space_with_assistant):
         "https://*.kommun.se",
     ]
     assert updated["theme"]["primary_color"] == "#005A9C"
+    assert updated["texts"]["suggested_questions"] == [
+        "Öppettider?",
+        "Bygglov",
+        "Skola",
+        "Avfall",
+    ]
     assert updated["token_generation"] == 1
     assert updated["activation_blockers"] == ["target_not_published"]
 

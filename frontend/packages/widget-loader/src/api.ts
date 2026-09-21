@@ -81,8 +81,13 @@ export function installApi(win: Window & { Eneo?: EneoApi }, version: string): E
   api.setContext = (context) => api("setContext", context);
   api.on = (event, listener) => {
     if (EVENTS.indexOf(event) === -1 || typeof listener !== "function") return () => {};
-    const handler: EventListener = (domEvent) => listener((domEvent as CustomEvent).detail);
-    wrapped.set(listener, handler);
+    // One wrapper per callback, shared across events: addEventListener then
+    // ignores a repeated registration and off() removes exactly that wrapper.
+    let handler = wrapped.get(listener);
+    if (!handler) {
+      handler = (domEvent) => listener((domEvent as CustomEvent).detail);
+      wrapped.set(listener, handler);
+    }
     document.addEventListener(EVENT_PREFIX + event, handler);
     return () => api.off(event, listener);
   };

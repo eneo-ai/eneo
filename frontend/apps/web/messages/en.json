@@ -4886,7 +4886,7 @@
   "widget_admin_text_placeholder": "Input placeholder",
   "widget_admin_text_placeholder_description": "Hint text in the question field.",
   "widget_admin_text_suggestions": "Suggested questions",
-  "widget_admin_text_suggestions_description": "At most five. Visitors see them as buttons before their first question.",
+  "widget_admin_text_suggestions_description": "At most four. Visitors see them as buttons before their first question.",
   "widget_admin_text_subtitle": "Description",
   "widget_admin_text_subtitle_description": "Required. Shown under the title in the chat header. This is the place for an AI disclosure, for example that visitors are talking to an AI assistant whose answers can contain errors.",
   "widget_admin_text_footer": "Footer text",

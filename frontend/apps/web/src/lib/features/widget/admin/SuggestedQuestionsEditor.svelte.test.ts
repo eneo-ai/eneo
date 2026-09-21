@@ -46,3 +46,28 @@ describe("SuggestedQuestionsEditor", () => {
     expect(document.querySelectorAll("input").length).toBe(2);
   });
 });
+
+describe("SuggestedQuestionsEditor limit", () => {
+  test("Add and Enter both stop at the API's four questions", async () => {
+    const onChange = vi.fn<(questions: string[]) => void>();
+    const screen = render(SuggestedQuestionsEditor, {
+      questions: ["Ett", "Två", "Tre"],
+      onChange: (questions) => {
+        onChange(questions);
+        void screen.rerender({ questions });
+      }
+    });
+    const add = page.getByRole("button", { name: "widget_admin_questions_add" });
+    await userEvent.click(add);
+    const fourth = page.getByRole("textbox").nth(3);
+    await expect.element(fourth).toHaveFocus();
+    await userEvent.type(fourth, "Fyra");
+    await expect.element(add).toBeDisabled();
+
+    // Enter on the last row commits but never opens a fifth row.
+    await userEvent.keyboard("{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith(["Ett", "Två", "Tre", "Fyra"]);
+    expect(document.querySelectorAll("input").length).toBe(4);
+    await expect.element(add).toBeDisabled();
+  });
+});

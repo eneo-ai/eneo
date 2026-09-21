@@ -11,7 +11,8 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { m } from "$lib/paraglide/messages";
 
-  const MAX = 5;
+  // Mirrors MAX_SUGGESTED_QUESTIONS in the backend's WidgetTexts.
+  const MAX = 4;
   const MAX_LENGTH = 120;
 
   type Props = {
