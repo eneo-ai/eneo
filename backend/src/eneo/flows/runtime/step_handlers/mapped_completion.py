@@ -16,7 +16,11 @@ from eneo.flows.domain.runtime import (
     StepExecutionOutput,
 )
 from eneo.flows.domain.step_mapped_execution import single_mapped_array_key
-from eneo.flows.domain.text_processing import TextProcessingMode, text_processing_config
+from eneo.flows.domain.text_processing import (
+    SummarizationProvenance,
+    TextProcessingMode,
+    text_processing_config,
+)
 from eneo.flows.enums import FlowStepPhase
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
@@ -265,6 +269,17 @@ async def execute_section_completion(
             )
         )
     except BaseException as exc:
+        if budget is not None and getattr(exc, "summarization", None) is None:
+            setattr(
+                exc,
+                "summarization",
+                provenance
+                or SummarizationProvenance(
+                    rounds=0,
+                    sources=sections.manifest.sources,
+                    records=tuple(section_records(records, outputs)),
+                ),
+            )
         completed_items = min(len(outputs), total)
         scope = current_step_deadline_scope()
         if folding and scope is not None:

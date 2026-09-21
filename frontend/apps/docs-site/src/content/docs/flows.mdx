@@ -253,22 +253,26 @@ A material that fits the measured request needs one call. Longer material first
 produces section records. If those records fit together, one further call combines
 them. Otherwise consecutive groups are combined sequentially, and the process
 repeats until one record remains. Each intermediate record uses the same item
-schema. Every fold round must reduce both the number of records and their total
-UTF-8 JSON bytes.
+schema. One valid record completes the fold. If another round is needed, the
+current round must reduce both the number of records and their total UTF-8 JSON
+bytes.
 
 Section calls, fold calls, and capability fallbacks share the attempt deadline and
 the existing mapped-execution call and input-token limits. Summarization requires
 a finite call ceiling. When the token ceiling is unset, the finite call ceiling
 and model input capacity determine a finite aggregate token bound. Intermediate
 records remain subject to the structured-output size limit. Folding performs no
-knowledge retrieval and inherits only its parent records' recorded citations.
+knowledge retrieval. Records copy citations only when their parents carry them;
+otherwise they carry none. JSON section processing does not track citations, so
+summarization currently produces no citations.
 
-The attempt's `summarization` provenance stores the intermediate records with their
-rounds, parent references, section indexes, and source material aliases. Before
-dispatch, provider-call receipts store lineage IDs, input byte counts and hashes,
-and budget reservations. Progress reports completed and total groups
-within each round. A fold that cannot shrink or fit within its remaining aggregate
-limits stops with `flow_summarization_non_convergent`; the error details carry
+The attempt's `summarization` provenance retains the records reached on success,
+refusal, timeout, or failure, with their rounds, parent references, section indexes,
+and source material aliases. Before dispatch, provider-call receipts store lineage
+IDs, canonical input byte counts and hashes, and budget reservations. Progress
+reports completed and total groups within each round. An unfinished fold that
+cannot shrink or fit within its remaining aggregate limits stops with
+`flow_summarization_non_convergent`; the error details carry
 `summarization_rounds`, `summarization_records`, and `summarization_bytes`.
 
 ### `compose_text`

@@ -1006,13 +1006,14 @@ class FlowRunExecutor:
                     attempt_no=attempt_no,
                 )
                 output = execution_result.output
-            except FlowStepCancelledError:
+            except FlowStepCancelledError as exc:
                 return await self._handle_cancelled_step(
                     run_id=run_id,
                     tenant_id=tenant_id,
                     step=step,
                     attempt_no=attempt_no,
                     state=state,
+                    exc=exc,
                 )
             except TypedIOValidationException as typed_exc:
                 contract_diag: dict[str, Any] | None = None
@@ -1300,6 +1301,13 @@ class FlowRunExecutor:
                             )
                         if partial_evidence is not None:
                             setattr(typed, "rag_metadata", partial_evidence)
+                        summarization = getattr(exc, "summarization", None)
+                        if summarization is None:
+                            summarization = getattr(
+                                exc.__cause__, "summarization", None
+                            )
+                        if summarization is not None:
+                            setattr(typed, "summarization", summarization)
                         raise typed from exc
                     record_step_phase(FlowStepPhase.FINALIZATION)
                     if deadline.expired():
@@ -1313,6 +1321,8 @@ class FlowRunExecutor:
                         )
                         if result.output.rag_metadata is not None:
                             setattr(late, "rag_metadata", result.output.rag_metadata)
+                        if result.output.summarization is not None:
+                            setattr(late, "summarization", result.output.summarization)
                         raise late
                 step_span.set_result(status="completed")
                 return result
@@ -1898,6 +1908,7 @@ class FlowRunExecutor:
         step: RuntimeStep,
         attempt_no: int,
         state: RunExecutionState | None,
+        exc: FlowStepCancelledError | None = None,
     ) -> dict[str, Any]:
         await self._rollback()
         if current_execution_ownership_lost():
@@ -1921,7 +1932,9 @@ class FlowRunExecutor:
             error_message="Run was cancelled during step execution.",
             requested_model=requested_model,
             provider=provider,
-            provenance_json=build_incomplete_attempt_provenance(),
+            provenance_json=build_incomplete_attempt_provenance(
+                summarization=getattr(exc, "summarization", None),
+            ),
         )
         await self._commit()
         return {"status": "skipped", "reason": "run_cancelled"}
@@ -2017,6 +2030,7 @@ class FlowRunExecutor:
             provider=provider if isinstance(provider, str) else None,
             provenance_json=build_incomplete_attempt_provenance(
                 rag_metadata=getattr(typed_exc, "rag_metadata", None),
+                summarization=getattr(typed_exc, "summarization", None),
             ),
             attempt_input=build_terminal_attempt_input(
                 start=attempt_start,
@@ -2161,6 +2175,7 @@ class FlowRunExecutor:
             provider=provider,
             provenance_json=build_incomplete_attempt_provenance(
                 rag_metadata=getattr(exc, "rag_metadata", None),
+                summarization=getattr(exc, "summarization", None),
             ),
             attempt_input=build_terminal_attempt_input(
                 start=attempt_start,

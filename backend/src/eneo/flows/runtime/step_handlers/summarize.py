@@ -1,9 +1,16 @@
+"""Fold records, copying only citations already carried by their parents.
+
+JSON section processing does not track citations, so current section records
+and their intermediate and terminal descendants carry none.
+"""
+
 from __future__ import annotations
 
 from dataclasses import replace
 from hashlib import sha256
 from typing import Any, cast
 
+from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowRun
 from eneo.flows.domain.mapped_execution_policy import SummarizationBudget
 from eneo.flows.domain.provider_call import SummarizationCallInput
@@ -87,142 +94,164 @@ async def fold_section_records(
     lineage = list(records)
     outputs: list[StepExecutionOutput] = []
     round_no = 0
-    while len(records) > 1:
-        budget.rounds = round_no
-        budget.records = len(records)
-        budget.bytes = record_bytes(records)
-        before_bytes = budget.bytes
-        groups: list[tuple[list[TextProcessingRecord], PreparedAssistantStep]] = []
-        start = 0
-        while start < len(records):
-            require_step_budget(
-                base.deps.deadline,
-                step_order=step.step_order,
-                phase="summarization grouping",
-            )
-            low, high = start, len(records)
-            best: PreparedAssistantStep | None = None
-            end = high
-            while end > low:
-                try:
-                    call, _ = await prepare_text_processing_call(
-                        step=step,
-                        run=run,
-                        state=state,
-                        base=base,
-                        section_text=structured_output_json(
-                            {array_key: [record.value for record in records[start:end]]}
-                        ),
-                    )
-                except TypedIOValidationException as exc:
-                    if (
-                        exc.code
-                        != FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW.value
-                    ):
-                        raise
-                    high = end - 1
-                else:
-                    low, best = end, call
-                if low >= high:
-                    break
-                end = (low + high + 1) // 2
-            if best is None:
+    try:
+        while len(records) > 1:
+            budget.rounds = round_no
+            budget.records = len(records)
+            budget.bytes = record_bytes(records)
+            before_bytes = budget.bytes
+            groups: list[tuple[list[TextProcessingRecord], PreparedAssistantStep]] = []
+            start = 0
+            while start < len(records):
+                require_step_budget(
+                    base.deps.deadline,
+                    step_order=step.step_order,
+                    phase="summarization grouping",
+                )
+                low, high = start, len(records)
+                best: PreparedAssistantStep | None = None
+                end = high
+                while end > low:
+                    try:
+                        call, _ = await prepare_text_processing_call(
+                            step=step,
+                            run=run,
+                            state=state,
+                            base=base,
+                            section_text=canonical_json_bytes(
+                                {
+                                    array_key: [
+                                        record.value for record in records[start:end]
+                                    ]
+                                }
+                            ).decode("utf-8"),
+                        )
+                    except TypedIOValidationException as exc:
+                        if (
+                            exc.code
+                            != FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW.value
+                        ):
+                            raise
+                        high = end - 1
+                    else:
+                        low, best = end, call
+                    if low >= high:
+                        break
+                    end = (low + high + 1) // 2
+                if best is None:
+                    raise budget.refusal()
+                groups.append((records[start:low], best))
+                start = low
+            if len(groups) >= len(records):
                 raise budget.refusal()
-            groups.append((records[start:low], best))
-            start = low
-        if len(groups) >= len(records):
-            raise budget.refusal()
-        admit_round(budget, tuple(call for _, call in groups))
-        round_no += 1
-        next_records: list[TextProcessingRecord] = []
-        output_budget = StructuredOutputBudget(
-            array_key=array_key,
-            ceiling_bytes=base.deps.max_inline_text_bytes,
-            total_items=len(groups),
-        )
-        record_step_progress(
-            f"Summarization round {round_no}",
-            completed_items=0,
-            total_items=len(groups),
-        )
-        for index, (parents, call) in enumerate(groups):
-            require_step_budget(
-                call.deps.deadline, step_order=step.step_order, phase="summarization"
-            )
-            inherited = tuple(
-                dict.fromkeys(
-                    citation for parent in parents for citation in parent.citations
-                )
-            )
-            composed_input = structured_output_json(
-                {array_key: [parent.value for parent in parents]}
-            ).encode("utf-8")
-            call.prepared.summarization_input = SummarizationCallInput(
-                round=round_no,
-                group_index=index,
-                record_ids=tuple(parent.id for parent in parents),
-                input_bytes=len(composed_input),
-                input_sha256=sha256(composed_input).hexdigest(),
-                reserved_calls=budget.provider_calls + 1,
-                reserved_input_tokens=budget.input_tokens,
-                max_provider_calls=budget.max_provider_calls,
-                max_input_tokens=budget.max_input_tokens,
-            )
-            output = await complete_step_execution(
-                step=step,
-                run=run,
-                state=state,
-                prepared=call.prepared,
-                deps=replace(call.deps, summarization_budget=budget),
-            )
-            value = output.structured_output
-            raw_items: object = (
-                value.get(array_key) if isinstance(value, dict) else None
-            )
-            items = cast(list[object], raw_items) if isinstance(raw_items, list) else []
-            if len(items) != 1 or not isinstance(items[0], dict):
-                raise TypedIOValidationException(
-                    "Each summarization group must produce exactly one record.",
-                    code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
-                )
-            record_value = cast(dict[str, Any], items[0])
-            output_budget.admit([record_value], completed_items=index + 1)
-            record = TextProcessingRecord(
-                id=f"round:{round_no}:{index}",
-                round=round_no,
-                parents=tuple(parent.id for parent in parents),
-                section_indexes=tuple(
-                    i for parent in parents for i in parent.section_indexes
-                ),
-                citations=inherited,
-                value=record_value,
-            )
-            next_records.append(record)
-            lineage.append(record)
-            output = replace(
-                output,
-                citation_sidecar={
-                    "citation_tracked": True,
-                    "citation_context_kind": "inherited" if inherited else "none",
-                    "cited_source_ids": list(inherited),
-                    "cited_source_count": len(inherited),
-                    "direct_cited_source_ids": [],
-                    "inherited_cited_source_ids": list(inherited),
-                    "unknown_citation_ids": [],
-                },
-            )
-            outputs.append(output)
-            record_step_progress(
-                f"Summarization round {round_no}",
-                completed_items=index + 1,
+            admit_round(budget, tuple(call for _, call in groups))
+            round_no += 1
+            next_records: list[TextProcessingRecord] = []
+            output_budget = StructuredOutputBudget(
+                array_key=array_key,
+                ceiling_bytes=base.deps.max_inline_text_bytes,
                 total_items=len(groups),
             )
-        budget.rounds = round_no
-        budget.records = len(next_records)
-        budget.bytes = record_bytes(next_records)
-        if len(next_records) >= len(records) or budget.bytes >= before_bytes:
-            raise budget.refusal()
-        records = next_records
+            record_step_progress(
+                f"Summarization round {round_no}",
+                completed_items=0,
+                total_items=len(groups),
+            )
+            for index, (parents, call) in enumerate(groups):
+                require_step_budget(
+                    call.deps.deadline,
+                    step_order=step.step_order,
+                    phase="summarization",
+                )
+                inherited = tuple(
+                    dict.fromkeys(
+                        citation for parent in parents for citation in parent.citations
+                    )
+                )
+                composed_input = canonical_json_bytes(
+                    {array_key: [parent.value for parent in parents]}
+                )
+                call.prepared.summarization_input = SummarizationCallInput(
+                    round=round_no,
+                    group_index=index,
+                    record_ids=tuple(parent.id for parent in parents),
+                    input_bytes=len(composed_input),
+                    input_sha256=sha256(composed_input).hexdigest(),
+                    reserved_calls=budget.provider_calls + 1,
+                    reserved_input_tokens=budget.input_tokens,
+                    max_provider_calls=budget.max_provider_calls,
+                    max_input_tokens=budget.max_input_tokens,
+                )
+                output = await complete_step_execution(
+                    step=step,
+                    run=run,
+                    state=state,
+                    prepared=call.prepared,
+                    deps=replace(call.deps, summarization_budget=budget),
+                )
+                value = output.structured_output
+                raw_items: object = (
+                    value.get(array_key) if isinstance(value, dict) else None
+                )
+                items = (
+                    cast(list[object], raw_items) if isinstance(raw_items, list) else []
+                )
+                if len(items) != 1 or not isinstance(items[0], dict):
+                    raise TypedIOValidationException(
+                        "Each summarization group must produce exactly one record.",
+                        code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+                    )
+                record_value = cast(dict[str, Any], items[0])
+                output_budget.admit([record_value], completed_items=index + 1)
+                record = TextProcessingRecord(
+                    id=f"round:{round_no}:{index}",
+                    round=round_no,
+                    parents=tuple(parent.id for parent in parents),
+                    section_indexes=tuple(
+                        i for parent in parents for i in parent.section_indexes
+                    ),
+                    citations=inherited,
+                    value=record_value,
+                )
+                next_records.append(record)
+                lineage.append(record)
+                output = replace(
+                    output,
+                    citation_sidecar={
+                        "citation_tracked": True,
+                        "citation_context_kind": "inherited",
+                        "cited_source_ids": list(inherited),
+                        "cited_source_count": len(inherited),
+                        "direct_cited_source_ids": [],
+                        "inherited_cited_source_ids": list(inherited),
+                        "unknown_citation_ids": [],
+                    }
+                    if inherited
+                    else None,
+                )
+                outputs.append(output)
+                record_step_progress(
+                    f"Summarization round {round_no}",
+                    completed_items=index + 1,
+                    total_items=len(groups),
+                )
+            budget.rounds = round_no
+            budget.records = len(next_records)
+            budget.bytes = record_bytes(next_records)
+            if len(next_records) > 1 and (
+                len(next_records) >= len(records) or budget.bytes >= before_bytes
+            ):
+                raise budget.refusal()
+            records = next_records
+    except BaseException as exc:
+        setattr(
+            exc,
+            "summarization",
+            SummarizationProvenance(
+                rounds=round_no, sources=manifest.sources, records=tuple(lineage)
+            ),
+        )
+        raise
     return (
         records[0],
         outputs,
