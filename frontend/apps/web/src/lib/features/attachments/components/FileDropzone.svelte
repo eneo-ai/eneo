@@ -1,8 +1,10 @@
 <!--
     Drop area for picking local files: drag and drop (including folders),
-    a file picker, the selected list, and an inline summary of what the
-    server accepts. Files whose type is not accepted never enter the list;
-    they are reported through `onfilesrejected` so the caller can explain.
+    a file picker, an inline summary of what the server accepts and,
+    with `keepSelection`, the list of picked files. Files whose type is
+    not accepted never enter the selection; every pick is reported through
+    `onselect` so the caller can queue the accepted files and explain the
+    rejected ones.
 -->
 <script lang="ts">
   import CloudUploadIcon from "@lucide/svelte/icons/cloud-upload";
@@ -14,19 +16,22 @@
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { m } from "$lib/paraglide/messages";
   import { cn } from "$lib/utils.js";
-  import {
-    summarizeFileFormats,
-    type FileFormatGroupKind,
-    type FormatLimit
-  } from "../fileFormatSummary";
+  import type { AcceptedFormat } from "../AttachmentManager";
+  import { summarizeFileFormats, type FileFormatGroupKind } from "../fileFormatSummary";
+
+  export type FileSelection = { accepted: File[]; rejected: File[] };
 
   type Props = {
     files?: File[];
-    formats: readonly FormatLimit[];
+    formats: readonly AcceptedFormat[];
     name?: string;
     disabled?: boolean;
+    multiple?: boolean;
+    /** Keep picked files in the list below the drop prompt (false: only report them). */
+    keepSelection?: boolean;
+    description?: string;
     class?: string;
-    onfilesrejected?: (rejectedFiles: File[]) => void;
+    onselect?: (selection: FileSelection) => void;
   };
 
   let {
@@ -34,8 +39,11 @@
     formats,
     name = "dropzoneInput",
     disabled = false,
+    multiple = true,
+    keepSelection = true,
+    description,
     class: className,
-    onfilesrejected
+    onselect
   }: Props = $props();
 
   const groupLabels: Record<FileFormatGroupKind, () => string> = {
@@ -141,14 +149,15 @@
     const accepted: File[] = [];
     const rejected: File[] = [];
     for (const file of newFiles) {
-      if (!acceptedMimeTypes.includes(file.type)) {
+      if (!acceptedMimeTypes.includes(file.type.split(";")[0])) {
         rejected.push(file);
       } else if (!isDuplicate(file) && !accepted.includes(file)) {
         accepted.push(file);
       }
     }
-    if (accepted.length > 0) files = [...files, ...accepted];
-    if (rejected.length > 0) onfilesrejected?.(rejected);
+    if (!multiple) accepted.splice(1);
+    if (keepSelection && accepted.length > 0) files = [...files, ...accepted];
+    if (accepted.length > 0 || rejected.length > 0) onselect?.({ accepted, rejected });
   }
 
   function removeFile(file: File) {
@@ -173,7 +182,7 @@
   <input
     bind:this={input}
     type="file"
-    multiple
+    {multiple}
     {name}
     {disabled}
     accept={acceptedMimeTypes.join(",")}
@@ -194,6 +203,9 @@
       <span class="font-medium">
         {isDragging ? m.drop_files_here() : m.upload_dropzone_prompt()}
       </span>
+      {#if description}
+        <span class="text-muted-foreground text-sm">{description}</span>
+      {/if}
       <span class="text-accent-default text-sm underline underline-offset-4">
         {m.browse_files()}
       </span>

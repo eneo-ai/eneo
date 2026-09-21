@@ -8356,6 +8356,8 @@ export interface components {
       mimetype: string;
       /** Size Limit */
       size_limit: number;
+      /** Extensions */
+      extensions: string[];
     };
     /**
      * AccessJustificationRequest

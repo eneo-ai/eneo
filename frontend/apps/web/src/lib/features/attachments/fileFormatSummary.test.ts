@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { summarizeFileFormats, type FormatLimit } from "./fileFormatSummary";
+import type { AcceptedFormat } from "./AttachmentManager";
+import { summarizeFileFormats } from "./fileFormatSummary";
 
-const format = (mimetype: string, extensions: string[], size = 1024): FormatLimit => ({
+const format = (mimetype: string, extensions: string[], maxSize = 1024): AcceptedFormat => ({
   mimetype,
   extensions,
-  size,
-  vision: false
+  maxSize
 });
 
 describe("summarizeFileFormats", () => {

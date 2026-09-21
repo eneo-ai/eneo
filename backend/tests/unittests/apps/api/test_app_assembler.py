@@ -47,19 +47,22 @@ _UPLOAD_ADMISSION = UploadAdmissionSnapshot(
 
 def _text_uploads(limit: int = CUSTOM_TEXT_LIMIT):
     return [
-        AcceptedFileType(mimetype=m, size_limit=limit) for m in TextMimeTypes.values()
+        AcceptedFileType.for_mimetype(m, size_limit=limit)
+        for m in TextMimeTypes.values()
     ]
 
 
 def _image_uploads(limit: int = CUSTOM_IMAGE_LIMIT):
     return [
-        AcceptedFileType(mimetype=m, size_limit=limit) for m in ImageMimeTypes.values()
+        AcceptedFileType.for_mimetype(m, size_limit=limit)
+        for m in ImageMimeTypes.values()
     ]
 
 
 def _audio_uploads(limit: int = CUSTOM_AUDIO_LIMIT):
     return [
-        AcceptedFileType(mimetype=m, size_limit=limit) for m in AudioMimeTypes.values()
+        AcceptedFileType.for_mimetype(m, size_limit=limit)
+        for m in AudioMimeTypes.values()
     ]
 
 

@@ -9,9 +9,15 @@
   import { getEneo } from "$lib/core/Eneo";
   import { toastError } from "$lib/core/errors";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
-  import type { AttachmentValidationError } from "$lib/features/attachments/AttachmentManager";
-  import FileDropzone from "$lib/features/attachments/components/FileDropzone.svelte";
+  import {
+    unsupportedTypeError,
+    type AttachmentValidationError
+  } from "$lib/features/attachments/AttachmentManager";
+  import FileDropzone, {
+    type FileSelection
+  } from "$lib/features/attachments/components/FileDropzone.svelte";
   import FileSizeValidationPanel from "$lib/features/attachments/components/FileSizeValidationPanel.svelte";
+  import { acceptedFormatsFromLimits } from "$lib/features/attachments/getAttachmentRules";
   import { getJobManager } from "$lib/features/jobs/JobManager";
   import { m } from "$lib/paraglide/messages";
 
@@ -28,8 +34,8 @@
     user,
     state: { showHeader }
   } = getAppContext();
-  const formats = limits.info_blobs.formats;
-  const formatLimitByType = new Map(formats.map((format) => [format.mimetype, format.size]));
+  const formats = acceptedFormatsFromLimits(limits.info_blobs.formats);
+  const formatLimitByType = new Map(formats.map((format) => [format.mimetype, format.maxSize]));
 
   const {
     queueUploads,
@@ -60,14 +66,7 @@
     for (const file of files) {
       const limit = formatLimitByType.get(file.type);
       if (limit === undefined) {
-        errors.push({
-          kind: "unsupported_type",
-          fileName: file.name,
-          message: m.attachment_error_unsupported_type({
-            fileName: file.name,
-            fileType: file.type || m.unknown()
-          })
-        });
+        errors.push(unsupportedTypeError(file));
       } else if (file.size > limit) {
         errors.push({
           kind: "file_size",
@@ -117,7 +116,7 @@
     duplicateFileNames = [];
   }
 
-  function handleRejectedFiles(rejected: File[]) {
+  function handleSelection({ rejected }: FileSelection) {
     skippedFiles = [...skippedFiles, ...rejected];
   }
 
@@ -174,7 +173,7 @@
       bind:files
       {formats}
       disabled={isUploading}
-      onfilesrejected={handleRejectedFiles}
+      onselect={handleSelection}
       class="max-h-[60vh] overflow-y-auto"
     />
 

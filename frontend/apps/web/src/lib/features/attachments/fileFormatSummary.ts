@@ -1,6 +1,4 @@
-import type { Limits } from "@eneo/eneo-js";
-
-export type FormatLimit = Limits["info_blobs"]["formats"][number];
+import type { AcceptedFormat } from "./AttachmentManager";
 
 export type FileFormatGroupKind = "documents" | "images" | "audio" | "other";
 
@@ -30,10 +28,10 @@ function normalizeExtension(extension: string): string {
 }
 
 /**
- * Turn the backend's per-mimetype format limits into a short, human-readable
- * summary: one group per file family with its extensions and size limit.
+ * Turn per-mimetype accepted formats into a short, human-readable summary:
+ * one group per file family with its extensions and size limit.
  */
-export function summarizeFileFormats(formats: readonly FormatLimit[]): FileFormatGroup[] {
+export function summarizeFileFormats(formats: readonly AcceptedFormat[]): FileFormatGroup[] {
   const extensionsByKind = new Map<FileFormatGroupKind, Set<string>>();
   const sizesByKind = new Map<FileFormatGroupKind, Set<number>>();
 
@@ -46,7 +44,7 @@ export function summarizeFileFormats(formats: readonly FormatLimit[]): FileForma
     extensionsByKind.set(kind, extensions);
 
     const sizes = sizesByKind.get(kind) ?? new Set<number>();
-    sizes.add(format.size);
+    sizes.add(format.maxSize);
     sizesByKind.set(kind, sizes);
   }
 

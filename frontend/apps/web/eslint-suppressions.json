@@ -274,11 +274,6 @@
       "count": 10
     }
   },
-  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/run/InputUpload.svelte": {
-    "eneo/no-raw-color": {
-      "count": 16
-    }
-  },
   "src/routes/(app)/spaces/[spaceId]/assistants/AssistantTile.svelte": {
     "eneo/no-raw-color": {
       "count": 3

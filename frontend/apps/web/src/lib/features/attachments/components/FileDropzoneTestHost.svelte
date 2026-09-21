@@ -1,15 +1,17 @@
-<!-- Test-only host: exposes the bound file list and rejections to the test. -->
+<!-- Test-only host: exposes the bound file list and selections to the test. -->
 <script lang="ts">
-  import type { FormatLimit } from "../fileFormatSummary";
-  import FileDropzone from "./FileDropzone.svelte";
+  import type { AcceptedFormat } from "../AttachmentManager";
+  import FileDropzone, { type FileSelection } from "./FileDropzone.svelte";
 
   type Props = {
-    formats: FormatLimit[];
-    onfilesrejected?: (rejectedFiles: File[]) => void;
+    formats: AcceptedFormat[];
+    multiple?: boolean;
+    keepSelection?: boolean;
+    onselect?: (selection: FileSelection) => void;
     onfileschanged?: (files: File[]) => void;
   };
 
-  const { formats, onfilesrejected, onfileschanged }: Props = $props();
+  const { formats, multiple, keepSelection, onselect, onfileschanged }: Props = $props();
 
   let files = $state<File[]>([]);
 
@@ -18,4 +20,4 @@
   });
 </script>
 
-<FileDropzone bind:files {formats} {onfilesrejected} />
+<FileDropzone bind:files {formats} {multiple} {keepSelection} {onselect} />

@@ -7,7 +7,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { getAssistantEditor } from "$lib/features/assistants/AssistantEditor";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
-  import AttachmentUploadTextButton from "$lib/features/attachments/components/AttachmentUploadTextButton.svelte";
+  import AttachmentDropzone from "$lib/features/attachments/components/AttachmentDropzone.svelte";
   import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
   import type { UploadedFile } from "@eneo/eneo-js";
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
@@ -143,4 +143,4 @@
 {/each}
 
 <div class="h-2"></div>
-<AttachmentUploadTextButton multiple></AttachmentUploadTextButton>
+<AttachmentDropzone multiple></AttachmentDropzone>
