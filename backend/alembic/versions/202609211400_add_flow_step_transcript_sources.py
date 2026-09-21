@@ -1,7 +1,7 @@
 """add flow step transcript sources
 
-Revision ID: 202609211100
-Revises: 202609211000
+Revision ID: 202609211400
+Revises: 202609211300
 Create Date: 2026-09-21 11:00:00.000000
 """
 
@@ -12,8 +12,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from alembic import op
 
-revision: str = "202609211100"
-down_revision: str | None = "202609211000"
+revision: str = "202609211400"
+down_revision: str | None = "202609211300"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -110,7 +110,7 @@ def downgrade() -> None:
     )
     if retained:
         raise RuntimeError(
-            "Refusing to downgrade 202609211100: authoritative transcript sources "
+            "Refusing to downgrade 202609211400: authoritative transcript sources "
             "are still referenced by step attempts."
         )
     op.drop_table("flow_step_transcript_sources")

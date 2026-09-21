@@ -45,7 +45,7 @@ async def test_populated_source_table_refuses_downgrade(source_scenario, monkeyp
     migration = runpy.run_path(
         str(
             Path(__file__).parents[3]
-            / "alembic/versions/202609211100_add_flow_step_transcript_sources.py"
+            / "alembic/versions/202609211400_add_flow_step_transcript_sources.py"
         )
     )
     downgrade = migration["downgrade"]
@@ -60,7 +60,7 @@ async def test_populated_source_table_refuses_downgrade(source_scenario, monkeyp
 
     try:
         connection = await session.connection()
-        with pytest.raises(RuntimeError, match="Refusing to downgrade 202609211100"):
+        with pytest.raises(RuntimeError, match="Refusing to downgrade 202609211400"):
             await connection.run_sync(run_downgrade)
     finally:
         await session.rollback()
@@ -75,7 +75,7 @@ def test_source_table_creation_rolls_back_and_can_be_retried(
     migration = runpy.run_path(
         str(
             Path(__file__).parents[3]
-            / "alembic/versions/202609211100_add_flow_step_transcript_sources.py"
+            / "alembic/versions/202609211400_add_flow_step_transcript_sources.py"
         )
     )
     engine = sa.create_engine(test_settings.sync_database_url)

@@ -31,7 +31,7 @@ def test_transcript_source_migration_is_transactional_and_matches_model(monkeypa
     migration = runpy.run_path(
         str(
             Path(__file__).parents[2]
-            / "alembic/versions/202609211100_add_flow_step_transcript_sources.py"
+            / "alembic/versions/202609211400_add_flow_step_transcript_sources.py"
         )
     )
     operations = MagicMock()
