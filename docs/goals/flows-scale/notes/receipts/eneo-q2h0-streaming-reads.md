@@ -1,5 +1,12 @@
 # Inline streaming reads: measurement and validation receipt
 
+**Cleanup correction on base `7766ca3a7`:** shared spool cleanup now preserves
+the original exception or cancellation while attempting both close and unlink.
+An otherwise standalone cleanup `OSError` becomes `ObjectContentUnavailableError`.
+The resource measurements below predate this correction and remain unchanged;
+the benchmark was not rerun for this cleanup-only change. Its focused regression
+evidence is recorded under [Cleanup error precedence correction](#cleanup-error-precedence-correction).
+
 **The revised RSS caps, growth comparison and unchanged latency gates passed.**
 The benchmark completed all eight legs once: `1 passed in 61.89s (0:01:01)`.
 The 384 MiB RSS growth was 2.484375 MiB ordinary and 3.187500 MiB local-path,
@@ -539,7 +546,69 @@ The audio script wrote `/tmp/lanetest-eneo-worker-q2h0-174005.log`.
 These local logs are not a substitute for the counts and measurements preserved
 in this tracked receipt.
 
-## Source identity
+## Cleanup error precedence correction
+
+The review finding was reproduced with a real `BufferedRandom` wrapping a
+`FileIO` whose writes fail. A buffered write succeeds without reaching the raw
+file; seek flushes and raises the typed unavailable error, then close attempts
+the same failing flush. Before correction, the second raw `OSError` replaced
+the typed error. Cancelling a task with buffered bytes similarly escaped as
+`OSError` instead of leaving the task cancelled.
+
+Six tests were written and run before editing the production owner. They cover
+the repeated buffered flush failure, actual task cancellation with buffered
+bytes, standalone close failure, and unlink failure with no primary error,
+an unavailable error or cancellation. The first run reported:
+
+```text
+6 failed in 0.21s
+```
+
+Cleanup now captures close and unlink failures separately, always attempting
+both operations. An active primary exception resumes unchanged after cleanup;
+without one, a cleanup `OSError` is normalized to unavailable. Cancellation
+during close retains the existing settlement behavior. The focused rerun was:
+
+```text
+6 passed in 0.44s
+```
+
+The buffered tests assert the raw file is closed and its path removed. The
+unlink-denied cases assert an unlink attempt and preservation of the original
+exception, or normalization when there was none; the test removes the denied
+path during its own teardown. A failed filesystem unlink is not reported as a
+successful deletion.
+
+The source change is confined to `verified_spool.py`; the new test owner is
+`backend/tests/unittests/object_content/test_verified_spool.py`. The corrected
+spool source SHA-256 is
+`c45ac2ef5802f971cbae3ac8407413a5609659fe91b68a28ed4a79a3102a6a22`.
+The other four production files retain their measured hashes below. This
+correction has no new resource measurement or full-suite baseline comparison.
+
+Preflight preceded both test and implementation edits. The shared-spool unit
+module was new, so the existing object-content unit directory was collected
+before creating it. Commands ran from `backend` unless they specify otherwise:
+
+| Command / selection | Observed result |
+| --- | --- |
+| `PYTHONPATH=/Users/ccimen/eneo/eneo-worker-q2h0/backend/src uv run pytest tests/unittests/object_content/test_s3_integrity.py --collect-only -q` | `39 tests collected in 0.03s` |
+| `PYTHONPATH=/Users/ccimen/eneo/eneo-worker-q2h0/backend/src uv run pytest tests/unittests/object_content --collect-only -q` | `192 tests collected in 3.07s` |
+| `PYTHONPATH=/Users/ccimen/eneo/eneo-worker-q2h0/backend/src uv run pytest tests/integration/object_content/test_inline_streaming.py --collect-only -q` | `35 tests collected in 0.11s` |
+| `/Users/ccimen/.claude/skills/eneo-slice-landing/scripts/lanetest.sh /Users/ccimen/eneo/eneo-worker-q2h0 tests/unittests/flows/test_audio_spool.py` | `13 passed in 1.56s`; `pytest exit: 0` |
+| `PYTHONPATH=/Users/ccimen/eneo/eneo-worker-q2h0/backend/src uv run pytest tests/unittests/object_content/test_verified_spool.py -q` | Red: `6 failed in 0.21s`; green: `6 passed in 0.44s` |
+| `PYTHONPATH=/Users/ccimen/eneo/eneo-worker-q2h0/backend/src uv run pytest tests/unittests/object_content/test_s3_integrity.py tests/unittests/object_content/test_verified_spool.py -q` | `45 passed in 1.06s` |
+| `PYTHONPATH=/Users/ccimen/eneo/eneo-worker-q2h0/backend/src uv run pytest tests/integration/object_content/test_inline_streaming.py -q` | `35 passed in 111.05s (0:01:51)` |
+| `uv run pyright`, preflight and final | `0 errors, 0 warnings, 0 informations` |
+| `uv run ruff check src/eneo/object_content/verified_spool.py tests/unittests/object_content/test_verified_spool.py` | `All checks passed!` |
+| `uv run ruff format --check src/eneo/object_content/verified_spool.py tests/unittests/object_content/test_verified_spool.py` | `2 files already formatted` |
+
+The real PostgreSQL inline module passed. Logs are retained as
+`/tmp/smxs-2-it5-*.log`; the audio launcher log is
+`/tmp/lanetest-eneo-worker-q2h0-185606.log`. No git command was run for this
+correction.
+
+## Measured source identity before the cleanup correction
 
 The five production files were frozen before acquisition:
 

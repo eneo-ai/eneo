@@ -74,14 +74,30 @@ class VerifiedSpool:
             ) from error
         path = Path(file.name) if memory_bytes is None else None
         spool = cls(cast(BinaryIO, file), path, io_chunk_bytes)
+        has_primary_error = False
         try:
             yield spool
+        except BaseException:
+            has_primary_error = True
+            raise
         finally:
+            cleanup_error: BaseException | None = None
             try:
                 await settle_read_operation(asyncio.to_thread(file.close))
-            finally:
+            except BaseException as error:
+                cleanup_error = error
+            try:
                 if path is not None:
                     path.unlink(missing_ok=True)
+            except BaseException as error:
+                if cleanup_error is None:
+                    cleanup_error = error
+            if not has_primary_error and cleanup_error is not None:
+                if isinstance(cleanup_error, OSError):
+                    raise ObjectContentUnavailableError(
+                        "Verified spool cleanup failed"
+                    ) from cleanup_error
+                raise cleanup_error
 
     async def write(self, chunk: bytes) -> None:
         try:
