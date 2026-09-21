@@ -10,6 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_redaction import redact_string_with_reason
 from eneo.main.exceptions import TypedIOValidationException
 
 OUTPUT_TEXT_OVERFLOW_KEY: Final = "text_overflow"
@@ -31,6 +32,7 @@ class RejectedOutputEvidence(BaseModel):
     observed_bytes: int | None = Field(ge=0)
     sha256: str | None = Field(pattern=r"^[0-9a-f]{64}$")
     sampling_status: Literal["complete", "sampled", "unavailable"]
+    redaction_applied: bool = False
 
 
 @dataclass(frozen=True)
@@ -89,7 +91,12 @@ def sample_rejected_output(
     text: str | None, *, max_inline_bytes: int
 ) -> RejectedOutput:
     encoded = text.encode("utf-8") if text is not None else b""
+    observed_bytes = len(encoded) if text is not None else None
     digest = hashlib.sha256(encoded).hexdigest() if text is not None else None
+    redacted = redact_string_with_reason(text, key=None) if text is not None else None
+    redaction_applied = redacted is not None and redacted.reason is not None
+    if redacted is not None:
+        encoded = redacted.value.encode("utf-8")
     # JSON escaping can triple a sample, so the budget is found by bisection on
     # the serialized envelope: at most log2(ceiling) serializations of a
     # payload no larger than one model output.
@@ -105,8 +112,9 @@ def sample_rejected_output(
             truncated_by_runtime=not complete,
             evidence=RejectedOutputEvidence(
                 tail=tail.decode("utf-8", errors="ignore"),
-                observed_bytes=len(encoded) if text is not None else None,
+                observed_bytes=observed_bytes,
                 sha256=digest,
+                redaction_applied=redaction_applied,
                 sampling_status=(
                     "unavailable"
                     if text is None
@@ -128,7 +136,18 @@ def sample_rejected_output(
             upper = budget - 1
     if retained is not None:
         return retained
-    raise ValueError("The inline byte cap cannot hold rejection evidence metadata.")
+    # A ceiling smaller than the metadata must not replace the typed failure.
+    return RejectedOutput(
+        text="",
+        truncated_by_runtime=bool(encoded),
+        evidence=RejectedOutputEvidence(
+            tail="",
+            observed_bytes=observed_bytes,
+            sha256=digest,
+            sampling_status="unavailable",
+            redaction_applied=redaction_applied,
+        ),
+    )
 
 
 def interpret_rejected_output(

@@ -1004,12 +1004,29 @@ def fit_review_evidence(
 ) -> FlowReviewEvidence:
     """Fit excerpts and failure text together, marking budget omissions.
 
-    Runtime truncation remains independent of how much of that retained
-    prefix the planner's request budget can carry.
+    Runtime truncation remains independent of how much of the retained
+    beginning and ending the planner's request budget can carry.
     """
+    if fits(evidence):
+        return evidence
     excerpts = list(evidence.excerpts)
     failure = evidence.failure
     retained_output = failure.rejected_output if failure is not None else None
+    if (
+        retained_output is not None
+        and retained_output.evidence is not None
+        and retained_output.evidence.sampling_status == "complete"
+        and not retained_output.evidence.tail
+        and retained_output.text
+    ):
+        midpoint = (len(retained_output.text) + 1) // 2
+        retained_output = replace(
+            retained_output,
+            text=retained_output.text[:midpoint],
+            evidence=retained_output.evidence.model_copy(
+                update={"tail": retained_output.text[midpoint:]}
+            ),
+        )
     retained_tail = (
         retained_output.evidence.tail
         if retained_output is not None and retained_output.evidence is not None
@@ -1083,6 +1100,7 @@ def fit_review_evidence(
         render=render,
         fits=fits,
         prompt_groups=prompt_groups,
+        suffix_indices=(len(excerpts) - 1,) if retained_tail else (),
     )
 
 
@@ -1090,27 +1108,15 @@ def _token_count_sv(count: int | None) -> str:
     return "okänt antal" if count is None else f"{count}"
 
 
-def _render_unretained_answer(failure: FlowReviewFailureFact) -> list[str]:
-    """What is known about an answer the runtime did not keep.
-
-    When no answer text is available, the finish reason and the token
-    counts from the call receipt are the facts, and an unknown count is said
-    to be unknown. The counts are the attempt's aggregate over all its
-    completion calls (tool rounds and mapped items included), so they are
-    stated as such and never as the cut-off answer's own size; usage is not a
-    budget, so no limit is stated. The rule for what to do about it belongs to
-    the revision directive, not to the evidence."""
+def _render_attempt_usage(failure: FlowReviewFailureFact) -> str:
+    """Receipt totals cover all attempt calls, not one answer's size."""
     finish = failure.finish_reason or "okänd"
-    return [
-        "--- Modellens svar sparades inte ---",
+    return (
         f"Det sista svaret avbröts av modellen (finish_reason={finish}). "
         f"Försöket använde sammanlagt {_token_count_sv(failure.num_tokens_output)} "
         f"tokens ut och {_token_count_sv(failure.num_tokens_input)} tokens in över "
-        "sina modellanrop, inklusive eventuella verktygsrundor.",
-        "--- Slut ---",
-        "Kontraktet för stegets utdata ligger fast — ändra instruktionen så att "
-        "svaret uppfyller det.",
-    ]
+        "sina modellanrop, inklusive eventuella verktygsrundor."
+    )
 
 
 def _optional_str(value: object) -> str | None:
@@ -1157,6 +1163,8 @@ def render_review_evidence(
                 "--- Slut på instruktionen ---",
             ]
         )
+        if failure.error_code == FlowApiErrorCode.LLM_OUTPUT_TRUNCATED.value:
+            lines.append(_render_attempt_usage(failure))
         if failure.rejected_output is not None:
             lines.extend(
                 [
@@ -1191,10 +1199,14 @@ def render_review_evidence(
                 )
         for label, availability in availabilities:
             if availability == "truncated":
-                lines.append(f"({label}: kortad av utrymmesskäl, bara början visas)")
+                part = "slutet" if label == "Slutet av avvisad utdata" else "början"
+                lines.append(f"({label}: kortad av utrymmesskäl, bara {part} visas)")
             elif availability == "omitted_by_budget":
                 lines.append(f"({label}: {_EXCERPT_AVAILABILITY_SV[availability]})")
-        if failure.rejected_output is not None:
+        if failure.rejected_output is not None and (
+            failure.rejected_output.evidence is None
+            or failure.rejected_output.evidence.sampling_status != "unavailable"
+        ):
             if failure.rejected_output.truncated_by_runtime:
                 lines.append(
                     "(kortad av flödet vid körningen, början och slutet sparades)"
@@ -1206,7 +1218,13 @@ def render_review_evidence(
                 "för stegets utdata ligger fast — ändra instruktionen så att svaret uppfyller det."
             )
         else:
-            lines.extend(_render_unretained_answer(failure))
+            lines.extend(
+                [
+                    "--- Modellens svar sparades inte ---",
+                    "Kontraktet för stegets utdata ligger fast — ändra instruktionen så att "
+                    "svaret uppfyller det.",
+                ]
+            )
     # A run was read only if some text of it is rendered below; a placeholder
     # (omitted, not recorded, unavailable) is not a read.
     read_runs = len(
@@ -1851,6 +1869,12 @@ class AIBuilderFlowReviewService:
         rejected = interpret_rejected_output(
             cast(Mapping[str, object], payload) if isinstance(payload, dict) else None
         )
+        if (
+            rejected is not None
+            and rejected.evidence is not None
+            and rejected.evidence.redaction_applied
+        ):
+            raise unavailable("output_masked")
         error_code = attempt.get("error_code") or ""
         if (
             rejected is None

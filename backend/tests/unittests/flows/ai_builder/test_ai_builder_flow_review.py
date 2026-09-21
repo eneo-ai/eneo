@@ -3137,12 +3137,13 @@ def test_failure_text_fits_budget_with_explicit_shortening(runtime_truncated, bu
 
 
 @pytest.mark.parametrize("budget", [30000, 2000])
-def test_truncated_failure_samples_survive_review_budget(budget):
+@pytest.mark.parametrize("inline_ceiling", [6000, 200000])
+def test_truncated_failure_samples_survive_review_budget(budget, inline_ceiling):
     from eneo.flows.ai_builder.ai_builder_flow_review import FlowReviewFailureFact
     from eneo.flows.domain.step_output import sample_rejected_output
 
     output = sample_rejected_output(
-        "HEAD å " + " answer" * 16384 + " TAIL ö", max_inline_bytes=6000
+        "HEAD å " + " answer" * 16384 + " TAIL ö", max_inline_bytes=inline_ceiling
     )
     evidence = FlowReviewEvidence(
         flow_version=1,
@@ -3173,15 +3174,56 @@ def test_truncated_failure_samples_survive_review_budget(budget):
     assert retained.evidence is not None
     assert retained.evidence.observed_bytes == output.evidence.observed_bytes
     assert retained.evidence.sha256 == output.evidence.sha256
-    assert retained.evidence.sampling_status == "sampled"
+    assert retained.evidence.sampling_status == output.evidence.sampling_status
     rendered = render_review_evidence(fitted)
     assert len(rendered) <= budget
     assert "finish_reason=length" in rendered
     assert output.evidence.sha256 in rendered
-    if budget == 30000:
-        assert "HEAD å" in rendered
-        assert "TAIL ö" in rendered
+    assert "HEAD å" in rendered
+    assert "TAIL ö" in rendered
+    assert retained.evidence.tail.endswith("TAIL ö")
     assert "bara början sparades" not in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "inline_ceiling"),
+    [(None, 1024), ("short", 1024), (" answer" * 16384, 1024), ("Partial", 1)],
+    ids=["unavailable", "complete", "sampled", "metadata-only"],
+)
+async def test_captured_truncation_keeps_attempt_usage_in_review(
+    user, text, inline_ceiling
+):
+    from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderRunFailureContext
+    from eneo.flows.domain.step_output import sample_rejected_output
+
+    service, flow, run, reader, _ = _failure_review_service(
+        user,
+        retained=None,
+        error_code="flow_llm_output_truncated",
+        finish_reason="length",
+        num_tokens_input=6710,
+        num_tokens_output=16384,
+    )
+    bundle = reader.get_redacted_evidence_bundle.return_value
+    bundle.step_attempts[0]["output_payload_json"] = sample_rejected_output(
+        text, max_inline_bytes=inline_ceiling
+    ).to_payload()
+    evidence = await service.resolve_failure_evidence(
+        flow_id=flow.id,
+        space_id=flow.space_id,
+        reference=AIBuilderRunFailureContext(
+            flow_version=1, definition_checksum="sum", run_id=run.id, step_order=1
+        ),
+        audit=AsyncMock(),
+    )
+    rendered = render_review_evidence(evidence)
+    assert "Försöket använde sammanlagt 16384 tokens ut och 6710 tokens in" in rendered
+    assert "inklusive eventuella verktygsrundor" in rendered
+    assert "finish_reason=length" in rendered
+    if text is None or inline_ceiling == 1:
+        assert "Modellens svar sparades inte" in rendered
+        assert "början och slutet sparades" not in rendered
 
 
 def test_content_free_failure_fits_budget_without_an_output_excerpt():

@@ -1059,8 +1059,16 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
         "",
         None,
         "api_key=secret-head " + " answer" * 16384 + " password=secret-tail",
+        "start å " + " answer" * 16384 + " password=" + "boundary-credential" * 100,
     ],
-    ids=["sampled", "complete", "empty", "unavailable", "redacted"],
+    ids=[
+        "sampled",
+        "complete",
+        "empty",
+        "unavailable",
+        "redacted",
+        "credential-boundary",
+    ],
 )
 async def test_truncated_completion_retains_bounded_evidence_for_fresh_sessions(
     setup_database,
@@ -1121,16 +1129,20 @@ async def test_truncated_completion_retains_bounded_evidence_for_fresh_sessions(
             "observed_bytes": None,
             "sha256": None,
             "sampling_status": "unavailable",
+            "redaction_applied": False,
         }
     else:
+        from eneo.flows.flow_run_redaction import redact_string
+
+        redacted_text = redact_string(text, key=None)
         assert evidence["observed_bytes"] == len(text.encode("utf-8"))
         assert evidence["sha256"] == hashlib.sha256(text.encode("utf-8")).hexdigest()
         if len(text) > 1024:
             assert evidence["sampling_status"] == "sampled"
             assert payload["rejected_output"]
             assert evidence["tail"]
-            assert text.startswith(payload["rejected_output"])
-            assert text.endswith(evidence["tail"])
+            assert redacted_text.startswith(payload["rejected_output"])
+            assert redacted_text.endswith(evidence["tail"])
         else:
             assert evidence["sampling_status"] == "complete"
             assert payload["rejected_output"] == text
@@ -1159,13 +1171,15 @@ async def test_truncated_completion_retains_bounded_evidence_for_fresh_sessions(
             run_id=context.run_id,
             step_order=1,
         )
-        if text is not None and "secret-head" in text:
+        if text is not None and "password=" in text:
             from eneo.flows.ai_builder.ai_builder_error_contract import (
                 AIBuilderBadRequestException,
             )
 
             assert "secret-head" not in json.dumps(exported)
             assert "secret-tail" not in json.dumps(exported)
+            assert "boundary-credential" not in json.dumps(exported)
+            assert evidence["redaction_applied"] is True
             with pytest.raises(AIBuilderBadRequestException) as caught:
                 await service.resolve_failure_evidence(
                     flow_id=context.flow_id,

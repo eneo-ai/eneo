@@ -362,6 +362,7 @@ def fit_excerpts(
     render: Callable[[list[ReviewSampleExcerpt]], T],
     fits: Callable[[T], bool],
     prompt_groups: ReviewPromptGroups | None = None,
+    suffix_indices: Collection[int] = (),
 ) -> T:
     """The carrier with as much excerpt text as ``fits`` allows.
 
@@ -407,7 +408,9 @@ def fit_excerpts(
                                 if excerpt.availability == "included"
                                 else excerpt.availability
                             ),
-                            "text": excerpt.text[:allowed],
+                            "text": excerpt.text[-allowed:]
+                            if index in suffix_indices
+                            else excerpt.text[:allowed],
                         }
                     )
                 )

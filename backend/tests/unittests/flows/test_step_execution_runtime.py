@@ -3907,16 +3907,18 @@ MODEL = "model-a"
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("finish_reason", "output_type", "text"),
+    ("finish_reason", "output_type", "text", "inline_ceiling"),
     [
-        ("length", "text", "Partial"),
-        ("length", "json", '{"title":"A"}'),
-        ("stop", "text", "Done"),
-        ("content_filter", "text", "Answer"),
+        ("length", "text", "Partial", 1_000_000),
+        ("length", "json", '{"title":"A"}', 1_000_000),
+        ("length", "text", "Partial", 1),
+        ("length", "text", "Partial", 128),
+        ("stop", "text", "Done", 1_000_000),
+        ("content_filter", "text", "Answer", 1_000_000),
     ],
 )
 async def test_reduced_cap_terminal_reason_controls_flow_consumption(
-    finish_reason, output_type, text, monkeypatch
+    finish_reason, output_type, text, inline_ceiling, monkeypatch
 ):
     monkeypatch.setattr(
         "litellm.get_supported_openai_params",
@@ -4006,7 +4008,7 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
     process_output = AsyncMock(return_value=_typed_output_result())
     apply_cap = AsyncMock(return_value=(text, []))
     deps = StepExecutionRuntimeDeps(
-        max_inline_text_bytes=1_000_000,
+        max_inline_text_bytes=inline_ceiling,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -4042,8 +4044,17 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
         assert rejected_completion is not None
         assert rejected_completion.finish_reason == "length"
         assert rejected_completion.provider_response_id == "response-1"
-        assert rejected_completion.output.text == text
-        assert rejected_completion.output.evidence.sampling_status == "complete"
+        if inline_ceiling == 1_000_000:
+            assert rejected_completion.output.text == text
+            assert rejected_completion.output.evidence.sampling_status == "complete"
+        else:
+            assert rejected_completion.output.text == ""
+            assert rejected_completion.output.evidence.tail == ""
+            assert rejected_completion.output.evidence.sampling_status == "unavailable"
+            assert rejected_completion.output.evidence.observed_bytes == len(
+                text.encode("utf-8")
+            )
+            assert rejected_completion.output.evidence.sha256 is not None
         assert getattr(error, "rejected_output", None) is None
         process_output.assert_not_awaited()
         apply_cap.assert_not_awaited()
