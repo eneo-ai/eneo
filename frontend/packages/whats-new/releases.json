@@ -13,35 +13,12 @@
             "sv": "Skills: återanvändbara instruktioner för assistenter"
           },
           "body": {
-            "en": "Split long assistant and app prompts into named Skills that you can reuse, version and restore. Each assistant keeps the exact version it was built with, so editing a Skill never changes existing behaviour silently.",
-            "sv": "Dela upp långa instruktioner för assistenter och appar i namngivna Skills som du kan återanvända, versionshantera och återställa. Varje assistent behåller exakt den version den byggdes med, så en ändrad Skill ändrar aldrig beteende i smyg."
+            "en": "Split long assistant and app prompts into named Skills that you can reuse, version and restore; each assistant keeps the exact version it was built with. A Skill can be Always on or On demand, loaded only when the question calls for it, and a note above the answer shows when one was used.",
+            "sv": "Dela upp långa instruktioner för assistenter och appar i namngivna Skills som du kan återanvända, versionshantera och återställa; varje assistent behåller exakt den version den byggdes med. En Skill kan vara Alltid på eller Vid behov och laddas då bara när frågan kräver det, och en markering ovanför svaret visar när en Skill använts."
           },
-          "showMe": { "href": "/spaces/personal/skills", "anchor": "space-skills" }
-        },
-        {
-          "id": "skills-on-demand",
-          "type": "new",
-          "area": "skills",
-          "title": {
-            "en": "Skills that activate only when needed",
-            "sv": "Skills som aktiveras bara när de behövs"
-          },
-          "body": {
-            "en": "A Skill can be set to Always or On demand. On-demand Skills are loaded only when the question calls for them, which leaves more room in the context window for your conversation.",
-            "sv": "En Skill kan sättas till Alltid eller Vid behov. Skills vid behov laddas bara när frågan kräver det, vilket lämnar mer plats i kontextfönstret för din konversation."
-          }
-        },
-        {
-          "id": "skill-use-in-chat",
-          "type": "new",
-          "area": "chat",
-          "title": {
-            "en": "See when a Skill is used in an answer",
-            "sv": "Se när en Skill används i ett svar"
-          },
-          "body": {
-            "en": "When a Skill contributes to an answer, a note appears above it. Open the note to see whether the Skill is always on or was activated on demand, and why a Skill could not be used.",
-            "sv": "När en Skill bidrar till ett svar visas en markering ovanför svaret. Öppna den för att se om Skillen alltid är på eller aktiverades vid behov, och varför en Skill inte kunde användas."
+          "showMe": {
+            "href": "/spaces/personal/skills",
+            "anchor": "space-skills"
           }
         },
         {
@@ -57,7 +34,10 @@
             "en": "Organisation Skills are reviewed and published in one place. Administrators can see where each Skill is used, roll a published version out to every assistant, app and the personal chat in one run, and block a Skill immediately in an incident.",
             "sv": "Organisationens Skills granskas och publiceras på ett ställe. Administratörer ser var varje Skill används, kan rulla ut en publicerad version till alla assistenter, appar och den personliga chatten i ett svep, och stoppa en Skill direkt vid en incident."
           },
-          "showMe": { "href": "/admin/skills", "anchor": "admin-skills" }
+          "showMe": {
+            "href": "/admin/skills",
+            "anchor": "admin-skills"
+          }
         },
         {
           "id": "knowledge-on-demand",
@@ -86,6 +66,23 @@
           }
         },
         {
+          "id": "copy-rich-text",
+          "type": "new",
+          "area": "chat",
+          "title": {
+            "en": "Copy answers as rich text",
+            "sv": "Kopiera svar som formaterad text"
+          },
+          "body": {
+            "en": "The copy button on an answer can copy as Markdown or as rich text that pastes cleanly into Word and email. Pick your default under My account.",
+            "sv": "Kopieringsknappen på ett svar kan kopiera som Markdown eller som formaterad text som klistras in snyggt i Word och e-post. Välj ditt standardval under Mitt konto."
+          },
+          "showMe": {
+            "href": "/account",
+            "anchor": "account-copy-format"
+          }
+        },
+        {
           "id": "capability-providers",
           "type": "new",
           "area": "admin",
@@ -95,10 +92,13 @@
             "sv": "Välj leverantör för webbsökning och bildgenerering"
           },
           "body": {
-            "en": "Web search and image generation are now capabilities you connect under Administration › Tools: an external tool server, or for images a model from your own model catalogue. Per tool server you can also choose to forward the user's identity.",
-            "sv": "Webbsökning och bildgenerering är nu funktioner du kopplar under Administration › Verktyg: en extern verktygsserver, eller för bilder en modell ur din egen modellkatalog. Per verktygsserver kan du också välja att vidarebefordra användarens identitet."
+            "en": "Web search and image generation are now capabilities you connect under Administration › Tools: an external tool server, or for images a model from your own model catalogue. Per tool server you can choose to forward the user's identity, and turning a server off for the organisation now takes effect for assistants that already had it.",
+            "sv": "Webbsökning och bildgenerering är nu funktioner du kopplar under Administration › Verktyg: en extern verktygsserver, eller för bilder en modell ur din egen modellkatalog. Per verktygsserver kan du välja att vidarebefordra användarens identitet, och att stänga av en server för organisationen slår nu igenom även för assistenter som redan hade den."
           },
-          "showMe": { "href": "/admin/tools", "anchor": "admin-tools" }
+          "showMe": {
+            "href": "/admin/tools",
+            "anchor": "admin-tools"
+          }
         },
         {
           "id": "personal-assistant-governance",
@@ -119,20 +119,6 @@
           }
         },
         {
-          "id": "copy-rich-text",
-          "type": "new",
-          "area": "chat",
-          "title": {
-            "en": "Copy answers as rich text",
-            "sv": "Kopiera svar som formaterad text"
-          },
-          "body": {
-            "en": "The copy button on an answer can copy as Markdown or as rich text that pastes cleanly into Word and email. Pick your default under My account.",
-            "sv": "Kopieringsknappen på ett svar kan kopiera som Markdown eller som formaterad text som klistras in snyggt i Word och e-post. Välj ditt standardval under Mitt konto."
-          },
-          "showMe": { "href": "/account", "anchor": "account-copy-format" }
-        },
-        {
           "id": "model-details",
           "type": "improved",
           "area": "chat",
@@ -141,21 +127,21 @@
             "sv": "Jämför modeller innan du väljer"
           },
           "body": {
-            "en": "The model picker shows a preview of the highlighted model: guidance from your administrators, context size, capabilities and, where the organisation allows it, price.",
-            "sv": "Modellväljaren visar en förhandsvisning av den markerade modellen: vägledning från dina administratörer, kontextstorlek, funktioner och, där organisationen tillåter det, pris."
+            "en": "The model picker shows a preview of the highlighted model: guidance from your administrators, context size, capabilities and, where the organisation allows it, price. In space settings, the available completion, embedding and transcription models are listed together, grouped by provider.",
+            "sv": "Modellväljaren visar en förhandsvisning av den markerade modellen: vägledning från dina administratörer, kontextstorlek, funktioner och, där organisationen tillåter det, pris. I ytans inställningar listas tillgängliga svars-, inbäddnings- och transkriberingsmodeller tillsammans, grupperade per leverantör."
           }
         },
         {
-          "id": "tool-calls-in-chat",
+          "id": "chat-polish",
           "type": "improved",
           "area": "chat",
           "title": {
-            "en": "Clearer tool use in the conversation",
-            "sv": "Tydligare verktygsanvändning i konversationen"
+            "en": "Clearer tool use and smoother answers",
+            "sv": "Tydligare verktygsanvändning och jämnare svar"
           },
           "body": {
-            "en": "Tool calls show their parameters while they run and their response in the same panel, built-in tools appear as compact steps, a tool can ask you a question mid-call, and the assistant refers to tools by their readable names.",
-            "sv": "Verktygsanrop visar sina parametrar medan de körs och svaret i samma panel, inbyggda verktyg visas som kompakta steg, ett verktyg kan ställa en fråga till dig under anropet, och assistenten nämner verktyg med sina läsbara namn."
+            "en": "Tool calls show their parameters and response in one panel, built-in tools appear as compact steps, and a tool can ask you a question mid-call. While an answer streams, citations no longer flash as raw text and long answers render faster. Code blocks are highlighted for their language, and your tool choices in the personal chat are remembered between sessions.",
+            "sv": "Verktygsanrop visar parametrar och svar i samma panel, inbyggda verktyg visas som kompakta steg, och ett verktyg kan ställa en fråga till dig under anropet. Medan ett svar strömmas blinkar källhänvisningar inte längre som råtext, och långa svar renderas snabbare. Kodblock färgas efter sitt språk, och dina verktygsval i den personliga chatten kommer ihåg mellan sessioner."
           }
         },
         {
@@ -167,47 +153,8 @@
             "sv": "Bilagor: bilder i PDF:er, JSON och XML"
           },
           "body": {
-            "en": "Vision-capable models can read images embedded in PDFs and documents. JSON and XML files can be attached. You can pick the same file again after removing it, and the assistant reads attached files reliably instead of asking you to upload them again.",
-            "sv": "Bildförstående modeller kan läsa bilder i PDF:er och dokument. JSON- och XML-filer kan bifogas. Du kan välja samma fil igen efter att ha tagit bort den, och assistenten läser bifogade filer tillförlitligt i stället för att be dig ladda upp dem igen."
-          }
-        },
-        {
-          "id": "context-meter",
-          "type": "fixed",
-          "area": "chat",
-          "title": {
-            "en": "The context meter counts what is actually sent",
-            "sv": "Kontextmätaren räknar det som faktiskt skickas"
-          },
-          "body": {
-            "en": "The meter now includes the assistant's own instructions and attachments before you type, and measures the final request rather than adding up every step of a turn.",
-            "sv": "Mätaren räknar nu med assistentens egna instruktioner och bilagor innan du skriver, och mäter den slutliga förfrågan i stället för att summera varje steg i en tur."
-          }
-        },
-        {
-          "id": "streaming-polish",
-          "type": "fixed",
-          "area": "chat",
-          "title": {
-            "en": "Smoother streaming answers",
-            "sv": "Jämnare strömmade svar"
-          },
-          "body": {
-            "en": "Citation tags no longer flash as raw text while an answer streams, long answers render faster, code blocks are highlighted for their language, and your tool choices in the personal chat are remembered between sessions.",
-            "sv": "Källhänvisningar blinkar inte längre som råtext medan ett svar strömmas, långa svar renderas snabbare, kodblock färgas efter sitt språk, och dina verktygsval i den personliga chatten kommer ihåg mellan sessioner."
-          }
-        },
-        {
-          "id": "open-shared-sources",
-          "type": "fixed",
-          "area": "knowledge",
-          "title": {
-            "en": "Open sources from organisation knowledge",
-            "sv": "Öppna källor från organisationens kunskap"
-          },
-          "body": {
-            "en": "Citations that point to organisation knowledge or knowledge shared into your space can now be opened. Previously the answer could cite a source that you were not allowed to open.",
-            "sv": "Källhänvisningar som pekar på organisationens kunskap eller kunskap som delats till din yta går nu att öppna. Tidigare kunde svaret hänvisa till en källa som du inte fick öppna."
+            "en": "Vision-capable models can read images embedded in PDFs and documents, JSON and XML files can be attached, and you can pick the same file again after removing it. The assistant reads attached files reliably instead of asking you to upload them again. The context meter now counts the assistant's instructions and attachments before you type, and measures the final request rather than every step of a turn.",
+            "sv": "Bildförstående modeller kan läsa bilder i PDF:er och dokument, JSON- och XML-filer kan bifogas, och du kan välja samma fil igen efter att ha tagit bort den. Assistenten läser bifogade filer tillförlitligt i stället för att be dig ladda upp dem igen. Kontextmätaren räknar nu med assistentens instruktioner och bilagor innan du skriver, och mäter den slutliga förfrågan i stället för varje steg i en tur."
           }
         },
         {
@@ -224,16 +171,29 @@
           }
         },
         {
-          "id": "knowledge-processing",
+          "id": "open-shared-sources",
+          "type": "fixed",
+          "area": "knowledge",
+          "title": {
+            "en": "Open sources from organisation knowledge",
+            "sv": "Öppna källor från organisationens kunskap"
+          },
+          "body": {
+            "en": "Citations that point to organisation knowledge or knowledge shared into your space can now be opened. Previously the answer could cite a source that you were not allowed to open.",
+            "sv": "Källhänvisningar som pekar på organisationens kunskap eller kunskap som delats till din yta går nu att öppna. Tidigare kunde svaret hänvisa till en källa som du inte fick öppna."
+          }
+        },
+        {
+          "id": "knowledge-reliability",
           "type": "improved",
           "area": "knowledge",
           "title": {
-            "en": "Knowledge stays available while it is updated",
-            "sv": "Kunskap förblir tillgänglig medan den uppdateras"
+            "en": "Knowledge stays available and safe while it changes",
+            "sv": "Kunskap förblir tillgänglig och skyddad vid ändringar"
           },
           "body": {
-            "en": "A document that is being re-processed stays searchable until the new version is ready; a failed update changes nothing. Uploads are no longer lost if a background worker restarts, and a failed upload tells you why and what to do next.",
-            "sv": "Ett dokument som bearbetas om förblir sökbart tills den nya versionen är klar; en misslyckad uppdatering ändrar ingenting. Uppladdningar tappas inte längre om bakgrundsarbetet startar om, och en misslyckad uppladdning berättar varför och vad du kan göra."
+            "en": "A document that is being re-processed stays searchable until the new version is ready, and a failed update changes nothing. Uploads are no longer lost if a background worker restarts, and a failed upload tells you why. A file that a chat, assistant or app still uses is protected from deletion, and you can see what is using it first.",
+            "sv": "Ett dokument som bearbetas om förblir sökbart tills den nya versionen är klar, och en misslyckad uppdatering ändrar ingenting. Uppladdningar tappas inte längre om bakgrundsarbetet startar om, och en misslyckad uppladdning berättar varför. En fil som en chatt, assistent eller app fortfarande använder skyddas från radering, och du kan se vad som använder den först."
           }
         },
         {
@@ -250,19 +210,6 @@
           }
         },
         {
-          "id": "files-in-use",
-          "type": "fixed",
-          "area": "knowledge",
-          "title": {
-            "en": "Files in use cannot be deleted by mistake",
-            "sv": "Filer som används kan inte raderas av misstag"
-          },
-          "body": {
-            "en": "A file that a chat, assistant or app still uses is protected from deletion, and you can see what is using it first.",
-            "sv": "En fil som en chatt, assistent eller app fortfarande använder skyddas från radering, och du kan se vad som använder den först."
-          }
-        },
-        {
           "id": "prompt-guide",
           "type": "improved",
           "area": "assistants",
@@ -273,19 +220,6 @@
           "body": {
             "en": "The guide that helps you write an assistant's instructions now offers multiple-choice questions where several answers apply and produces higher-quality instructions.",
             "sv": "Guiden som hjälper dig skriva en assistents instruktioner erbjuder nu flervalsfrågor där flera svar passar och ger instruktioner av högre kvalitet."
-          }
-        },
-        {
-          "id": "model-availability",
-          "type": "improved",
-          "area": "spaces",
-          "title": {
-            "en": "Model overview in space settings",
-            "sv": "Modellöversikt i ytans inställningar"
-          },
-          "body": {
-            "en": "Available completion, embedding and transcription models are listed together, grouped by provider with clearer details for each row.",
-            "sv": "Tillgängliga svars-, inbäddnings- och transkriberingsmodeller listas tillsammans, grupperade per leverantör med tydligare uppgifter per rad."
           }
         },
         {
@@ -300,19 +234,9 @@
             "en": "If you sign in with a password you can now change it yourself under My account. Other devices where you are signed in are logged out when the password changes.",
             "sv": "Om du loggar in med lösenord kan du nu byta det själv under Mitt konto. Andra enheter där du är inloggad loggas ut när lösenordet byts."
           },
-          "showMe": { "href": "/account", "anchor": "account-password" }
-        },
-        {
-          "id": "login-page",
-          "type": "improved",
-          "area": "account",
-          "title": {
-            "en": "Clearer sign-in page",
-            "sv": "Tydligare inloggningssida"
-          },
-          "body": {
-            "en": "The sign-in page has been rebuilt with clearer error messages, better support for screen readers and keyboard navigation, and your email address stays filled in after a failed attempt.",
-            "sv": "Inloggningssidan är ombyggd med tydligare felmeddelanden, bättre stöd för skärmläsare och tangentbord, och din e-postadress finns kvar efter ett misslyckat försök."
+          "showMe": {
+            "href": "/account",
+            "anchor": "account-password"
           }
         },
         {
@@ -327,19 +251,22 @@
             "en": "Keys created before the current API key system and used since then keep working. Keys from the old system that have not been used at all are retired; create a new key under My API keys if you need one.",
             "sv": "Nycklar skapade före det nuvarande API-nyckelsystemet som använts sedan dess fortsätter fungera. Nycklar från det gamla systemet som inte använts alls tas bort; skapa en ny under Mina API-nycklar om du behöver en."
           },
-          "showMe": { "href": "/account/api-keys", "anchor": "account-api-keys" }
+          "showMe": {
+            "href": "/account/api-keys",
+            "anchor": "account-api-keys"
+          }
         },
         {
-          "id": "workspace-reliability",
-          "type": "fixed",
+          "id": "platform-polish",
+          "type": "improved",
           "area": "platform",
           "title": {
-            "en": "Faster start and fewer error pages",
-            "sv": "Snabbare start och färre felsidor"
+            "en": "Faster start, clearer sign-in, fewer error pages",
+            "sv": "Snabbare start, tydligare inloggning, färre felsidor"
           },
           "body": {
-            "en": "The app loads noticeably faster, an intermittent error page when opening the workspace is gone, and when something does fail the message shows the actual error.",
-            "sv": "Appen laddar märkbart snabbare, en återkommande felsida vid öppning av arbetsytan är borta, och när något ändå går fel visar meddelandet det verkliga felet."
+            "en": "The app loads noticeably faster and an intermittent error page when opening the workspace is gone; when something does fail, the message shows the actual error. The sign-in page has been rebuilt with clearer error messages, better support for screen readers and keyboard navigation, and your email address stays filled in after a failed attempt.",
+            "sv": "Appen laddar märkbart snabbare och en återkommande felsida vid öppning av arbetsytan är borta; när något ändå går fel visar meddelandet det verkliga felet. Inloggningssidan är ombyggd med tydligare felmeddelanden, bättre stöd för skärmläsare och tangentbord, och din e-postadress finns kvar efter ett misslyckat försök."
           }
         },
         {
@@ -355,7 +282,10 @@
             "en": "Administration › Storage shows what is using file storage, lets you set upload limits without restarts, connect an S3-compatible object store for new files, and move existing content between the database and object storage. The database remains the default.",
             "sv": "Administration › Lagring visar vad som tar plats i fillagringen, låter dig sätta uppladdningsgränser utan omstart, koppla en S3-kompatibel objektlagring för nya filer och flytta befintligt innehåll mellan databasen och objektlagringen. Databasen förblir standard."
           },
-          "showMe": { "href": "/admin/storage", "anchor": "admin-storage" }
+          "showMe": {
+            "href": "/admin/storage",
+            "anchor": "admin-storage"
+          }
         },
         {
           "id": "modules-admin",
@@ -370,7 +300,10 @@
             "en": "Optional modules such as speech-to-text are installed, configured and removed under Administration › Modules, and users sign in to them with their Eneo account.",
             "sv": "Valfria moduler som tal-till-text installeras, konfigureras och tas bort under Administration › Moduler, och användare loggar in i dem med sitt Eneo-konto."
           },
-          "showMe": { "href": "/admin/modules", "anchor": "admin-modules" }
+          "showMe": {
+            "href": "/admin/modules",
+            "anchor": "admin-modules"
+          }
         },
         {
           "id": "model-admin",
@@ -385,7 +318,10 @@
             "en": "Deprecation warnings appear only in the six months before the date, usage can be migrated away from a disabled model, price visibility for users can be turned off per organisation, and a missing encryption setup is explained instead of failing silently.",
             "sv": "Varningar om utfasning visas bara de sex månaderna före datumet, användning kan flyttas från en avstängd modell, prisvisning för användare kan stängas av per organisation, och en saknad krypteringsinställning förklaras i stället för att fela tyst."
           },
-          "showMe": { "href": "/admin/models", "anchor": "admin-models" }
+          "showMe": {
+            "href": "/admin/models",
+            "anchor": "admin-models"
+          }
         },
         {
           "id": "user-admin-filters",
@@ -400,20 +336,9 @@
             "en": "Role, email and username filters apply to the whole organisation and survive paging and switching between active and inactive users. Admin pages also work in narrow windows and on iPads.",
             "sv": "Filter på roll, e-post och användarnamn gäller hela organisationen och behålls när du bläddrar eller växlar mellan aktiva och inaktiva användare. Administrationssidorna fungerar också i smala fönster och på iPad."
           },
-          "showMe": { "href": "/admin/users", "anchor": "admin-users" }
-        },
-        {
-          "id": "mcp-enforcement",
-          "type": "fixed",
-          "area": "admin",
-          "audience": "admin",
-          "title": {
-            "en": "Disabled tool servers stay disabled",
-            "sv": "Avstängda verktygsservrar förblir avstängda"
-          },
-          "body": {
-            "en": "Turning a tool server off for the organisation now takes effect for assistants that already had it, and servers enabled later can be assigned to personal assistants.",
-            "sv": "Att stänga av en verktygsserver för organisationen slår nu igenom för assistenter som redan hade den, och servrar som aktiverats senare kan tilldelas personliga assistenter."
+          "showMe": {
+            "href": "/admin/users",
+            "anchor": "admin-users"
           }
         }
       ]
@@ -597,7 +522,10 @@
             "en": "A new Personal chat permission lets you give users the chat without access to assistants, for example during a staged rollout.",
             "sv": "En ny behörighet för personlig chatt låter dig ge användare chatten utan tillgång till assistenter, till exempel vid ett stegvis införande."
           },
-          "showMe": { "href": "/admin/roles", "anchor": "admin-roles" }
+          "showMe": {
+            "href": "/admin/roles",
+            "anchor": "admin-roles"
+          }
         },
         {
           "id": "model-admin-redesign",
@@ -612,7 +540,10 @@
             "en": "Deprecated models are clearly flagged, the models table shows lifecycle state and actions, migration warnings are split by severity with a deliberate override for hard blockers, display names must be unique, and Azure models appear as expected.",
             "sv": "Utfasade modeller markeras tydligt, modelltabellen visar livscykelstatus och åtgärder, migreringsvarningar delas upp efter allvarlighet med en medveten överstyrning för hårda stopp, visningsnamn måste vara unika, och Azure-modeller visas som de ska."
           },
-          "showMe": { "href": "/admin/models", "anchor": "admin-models" }
+          "showMe": {
+            "href": "/admin/models",
+            "anchor": "admin-models"
+          }
         },
         {
           "id": "audit-labels",
