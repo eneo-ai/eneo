@@ -89,6 +89,19 @@ Attach knowledge only to the step that needs it. Different steps may use differe
 
 Use DOCX template fill for fixed placeholders, DOCX create for generated documents, and PDF when the result is a final read-only artifact.
 
+## Long material
+
+A step reads its whole input at once. When a transcript or a document is larger than the model can read, the step fails with a typed error that says so, and nothing is silently cut.
+
+For material that can be long, set the step's text processing mode:
+
+- **Bearbeta varje avsnitt** splits the material into sections that fit the model, runs the step on every section, and returns an ordered list with one result per section. Use it for extraction, where every detail must be kept.
+- **Sammanfatta underlaget** does the same first pass, then folds the section results into one answer under fixed limits on calls and tokens. Use it when the next step needs one text, such as minutes or a summary.
+
+Sections do not overlap, so a fact is processed once. A fold that stops shrinking is refused with a typed error rather than looping. Every call records which sections or earlier results it consumed, so an answer can be traced back to the material.
+
+The shape follows the map and reduce pattern used by long-document tooling such as LangChain: process parts, then reduce. Knowledge attached to a step still uses retrieval with overlapping chunks; the two are separate.
+
 ## Review design
 
 Mark the step that needs human judgment for review. The run pauses at that step; arbitrary mid-run pause is not the supported model.
