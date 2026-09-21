@@ -5,6 +5,7 @@ import {
   contrastVerdict,
   isHexColor,
   launcherColors,
+  normalizeHexColor,
   themeColors
 } from "./contrast";
 
@@ -27,6 +28,13 @@ describe("contrast", () => {
     expect(isHexColor(" #ABCDEF ")).toBe(true);
     expect(isHexColor("#abcd")).toBe(false);
     expect(isHexColor("rgb(0,0,0)")).toBe(false);
+  });
+
+  it("normalises colours to the #RRGGBB form the API stores", () => {
+    expect(normalizeHexColor("#abc")).toBe("#AABBCC");
+    expect(normalizeHexColor(" #1f4 ")).toBe("#11FF44");
+    expect(normalizeHexColor("#abcdef")).toBe("#ABCDEF");
+    expect(normalizeHexColor("#1F4E79")).toBe("#1F4E79");
   });
 });
 

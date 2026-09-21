@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
   import type { WidgetPolicy, WidgetPolicyUpdate, WidgetTemplate } from "@eneo/eneo-js";
-  import { goto } from "$app/navigation";
+  import { beforeNavigate, goto } from "$app/navigation";
   import {
     LayoutGrid,
     Pencil,
@@ -29,6 +29,7 @@
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import WidgetOverviewList from "$lib/features/widget/admin/WidgetOverviewList.svelte";
   import { urlTab } from "$lib/features/widget/admin/tabState.svelte";
+  import { Autosave } from "$lib/features/widget/admin/widgetAutosave.svelte";
   import { DEFAULT_PRIMARY_COLOR, isHexColor } from "$lib/features/widget/contrast";
   import { m } from "$lib/paraglide/messages";
   import { getLocale, localizeHref } from "$lib/paraglide/runtime";
@@ -39,31 +40,29 @@
   const number = new Intl.NumberFormat(getLocale());
 
   // --- policy (saved as you type) -------------------------------------------
-  let policy = $state<WidgetPolicy>(untrack(() => data.policy));
-  let status = $state<"idle" | "saving" | "saved" | "error">("idle");
-  let pending: WidgetPolicyUpdate = {};
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  // The shared autosave serialises saves and keeps edits made while one is in
+  // flight, so a slow response never reverts a newer value on screen or on
+  // the server (the API stores the policy document whole).
+  const autosave = untrack(
+    () =>
+      new Autosave<WidgetPolicy, WidgetPolicyUpdate>(data.policy, async (update) => {
+        try {
+          return await data.eneo.widgets.policy.update(update);
+        } catch (error) {
+          toastError(error, m.widget_admin_save_failed());
+          throw error;
+        }
+      })
+  );
+
+  beforeNavigate(() => {
+    void autosave.flush();
+  });
+
+  const policy = $derived(autosave.widget);
 
   function patch(update: WidgetPolicyUpdate) {
-    policy = { ...policy, ...(update as Partial<WidgetPolicy>) };
-    pending = { ...pending, ...update };
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(save, 600);
-  }
-
-  async function save() {
-    timer = null;
-    const update = pending;
-    pending = {};
-    status = "saving";
-    try {
-      policy = await data.eneo.widgets.policy.update(update);
-      status = "saved";
-    } catch (error) {
-      pending = { ...update, ...pending };
-      status = "error";
-      toastError(error, m.widget_admin_save_failed());
-    }
+    autosave.patch(update);
   }
 
   function numberInput(event: Event, apply: (value: number) => void) {
@@ -71,15 +70,19 @@
     if (Number.isFinite(value)) apply(value);
   }
 
-  const statusLabel = $derived(
-    status === "saving"
-      ? m.widget_admin_saving()
-      : status === "saved"
-        ? m.widget_admin_saved()
-        : status === "error"
-          ? m.widget_admin_save_failed()
-          : ""
-  );
+  const statusLabel = $derived.by(() => {
+    switch (autosave.status) {
+      case "saving":
+        return m.widget_admin_saving();
+      case "saved":
+        return m.widget_admin_saved();
+      case "error":
+      case "conflict":
+        return m.widget_admin_save_failed();
+      default:
+        return "";
+    }
+  });
 
   // --- templates --------------------------------------------------------------
   let templates = $state<WidgetTemplate[]>(untrack(() => data.templates));

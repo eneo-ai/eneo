@@ -78,3 +78,44 @@ describe("window.Eneo", () => {
     expect(() => api.on("bogus" as never, vi.fn())).not.toThrow();
   });
 });
+
+describe("window.Eneo listeners", () => {
+  it("unsubscribes one event at a time when a callback listens to several", () => {
+    const api = installApi(window as EneoWindow, "1.0.0");
+    mount();
+    const listener = vi.fn();
+    const offOpen = api.on("open", listener);
+    const offClose = api.on("close", listener);
+
+    api.open();
+    api.close();
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    offOpen();
+    api.open();
+    expect(listener).toHaveBeenCalledTimes(2);
+    api.close();
+    expect(listener).toHaveBeenCalledTimes(3);
+
+    offClose();
+    api.open();
+    api.close();
+    expect(listener).toHaveBeenCalledTimes(3);
+  });
+
+  it("registers the same callback for one event once and removes it completely", () => {
+    const api = installApi(window as EneoWindow, "1.0.0");
+    mount();
+    const listener = vi.fn();
+    api.on("open", listener);
+    api.on("open", listener);
+
+    api.open();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    api.off("open", listener);
+    api.close();
+    api.open();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+});

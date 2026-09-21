@@ -238,6 +238,10 @@ class WidgetPrivacy(BaseModel):
     retention_days: int = Field(default=30, ge=0, le=3650)
     store_feedback_text: bool = False
 
+    @property
+    def never_persists(self) -> bool:
+        return self.retention_days == 0
+
 
 def normalize_allowed_origins(origins: list[str]) -> list[str]:
     seen: list[str] = []

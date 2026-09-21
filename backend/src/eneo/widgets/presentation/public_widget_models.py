@@ -28,6 +28,13 @@ class WidgetPublicConfig(BaseModel):
     bot_protection: BotProtection
     max_question_chars: int
     token_generation: int
+    single_turn: bool = Field(
+        description=(
+            "True when the widget stores nothing after the answer: no follow-up"
+            " questions, feedback or restore; every question starts a new"
+            " conversation."
+        )
+    )
     frame_ancestors: list[str] = Field(
         description=(
             "CSP host sources the embed page may be framed by. Mirrors the"

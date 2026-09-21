@@ -26,6 +26,9 @@ class WidgetVisitorContext(BaseModel):
     tenant_id: UUID
     space_id: UUID
     target_id: UUID
+    # Retention 0: conversation content must never be committed, so the
+    # session service keeps placeholders inside the request transaction.
+    never_persist: bool = False
 
 
 @dataclass(frozen=True)

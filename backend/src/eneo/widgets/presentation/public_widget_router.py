@@ -66,6 +66,7 @@ async def get_widget_config(request: Request, response: Response, widget: Active
         bot_protection=widget.bot_protection,
         max_question_chars=widget.limits.max_question_chars,
         token_generation=widget.token_generation,
+        single_turn=widget.privacy.never_persists,
         frame_ancestors=frame_ancestor_sources(widget.allowed_origins),
     )
 

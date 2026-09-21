@@ -11,7 +11,7 @@ from eneo.authentication.api_key_request_context import resolve_client_ip
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.container.container_overrides import override_user
-from eneo.main.exceptions import NotFoundException
+from eneo.main.exceptions import NotFoundException, TenantSuspendedException
 from eneo.server.dependencies.container import get_container
 from eneo.widgets.application.visitor_user import build_visitor_user
 from eneo.widgets.domain.exceptions import (
@@ -110,10 +110,16 @@ async def get_visitor_container(
     tenant = await container.tenant_repo().get(widget.tenant_id)
     if tenant is None:
         raise NotFoundException("Tenant not found.")
-    override_user(
-        container=container,
-        user=build_visitor_user(widget, principal.visitor_id, tenant),
-    )
+    user = build_visitor_user(widget, principal.visitor_id, tenant)
+    try:
+        # The same live tenant policy as every other principal; a suspended
+        # tenant's widget answers like a paused one.
+        await container.user_service().validate_active_identity(
+            user, correlation_id="widget-visitor"
+        )
+    except TenantSuspendedException as exc:
+        raise WidgetNotActiveError() from exc
+    override_user(container=container, user=user)
     request.state.widget_principal = principal
     return container
 

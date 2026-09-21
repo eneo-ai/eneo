@@ -86,6 +86,7 @@ async def test_public_config_only_for_active_widgets(
     assert body["texts"]["subtitle"]
     assert "allowed_origins" not in body
     assert body["frame_ancestors"] == ["https://www.kommun.se"]
+    assert body["single_turn"] is False
     assert resp.headers["cache-control"] == "public, max-age=60"
     etag = resp.headers["etag"]
 

@@ -48,6 +48,20 @@ describe("mountFromScript", () => {
     expect(element.getAttribute("launcher")).toBe("none");
   });
 
+  it("mounts a pinned bottom-left install snippet on the left", () => {
+    const script = scriptTag({
+      src: "https://eneo.kommun.se/widget/1.4.2/eneo.js",
+      integrity: "sha384-abc",
+      crossorigin: "anonymous",
+      "data-widget-id": "wgt_left",
+      "data-position": "bottom-left"
+    });
+    mountFromScript(script);
+    const element = document.querySelector("eneo-widget") as EneoWidgetElement;
+    expect(element.getAttribute("widget-id")).toBe("wgt_left");
+    expect(element.getAttribute("position")).toBe("bottom-left");
+  });
+
   it("does nothing without a widget id", () => {
     mountFromScript(scriptTag({ src: "https://eneo.example.se/widget/v1/eneo.js" }));
     expect(document.querySelector("eneo-widget")).toBeNull();

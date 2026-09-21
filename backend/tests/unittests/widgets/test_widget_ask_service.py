@@ -72,6 +72,7 @@ def _service(*, ask_result=None, session_questions=0, tokens=(120, 80)):
     usage.session = MagicMock()
     usage.record = AsyncMock()
     usage.delete_session = AsyncMock()
+    usage.lock_feedback = AsyncMock(return_value=None)
     audit = MagicMock()
     audit.log_async = AsyncMock()
     settings = SimpleNamespace(
@@ -352,12 +353,31 @@ async def test_feedback_moves_the_daily_counters_with_the_vote():
     widget = _widget()
     principal = _principal(widget)
     session = deps.session_service.get_session_by_uuid.return_value
+    order: list[str] = []
+    locked_vote: list[int | None] = [None]
+
+    async def lock(_session_id):
+        order.append("lock")
+        return locked_vote[0]
+
+    async def update(**_kwargs):
+        order.append("update")
+        return session
+
+    deps.usage.lock_feedback = AsyncMock(side_effect=lock)
+    deps.session_service.leave_feedback = AsyncMock(side_effect=update)
 
     await service.leave_feedback(principal, uuid4(), SessionFeedback(value=1))
     kwargs = deps.usage.record.await_args.kwargs
     assert (kwargs["helpful"], kwargs["unhelpful"]) == (1, 0)
+    # The previous vote is read under the row lock, before the update.
+    assert order == ["lock", "update"]
+    deps.usage.lock_feedback.assert_awaited_once_with(session.id)
 
-    session.feedback_value = 1
+    # An overlapping identical vote: the unlocked session object is stale
+    # (no vote yet) but the locked read sees the committed vote.
+    locked_vote[0] = 1
+    session.feedback_value = None
     await service.leave_feedback(principal, uuid4(), SessionFeedback(value=1))
     assert deps.usage.record.await_count == 1
 

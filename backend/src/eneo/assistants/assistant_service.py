@@ -3195,7 +3195,9 @@ class AssistantService:
         # calling never get a server and fall back to legacy
         # retrieve-and-inject inside Assistant.ask.
         knowledge_mcp_server = None
-        if internal_mcp.knowledge:
+        # No tools means no loopback server either: a widget visitor has no
+        # users row behind the scoped token, so its knowledge is injected.
+        if internal_mcp.knowledge and allow_tools:
             knowledge_mcp_server = await build_knowledge_mcp_server(
                 token=mint_scoped_token(),
                 tenant_id=self.user.tenant_id,

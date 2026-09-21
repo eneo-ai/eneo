@@ -112,7 +112,9 @@ class WidgetAskService:
         widget = principal.widget
         assert widget.id is not None
         session = await self._owned_session(widget, session_id)
-        previous = session.feedback_value
+        # Lock the row for the rest of the request transaction so overlapping
+        # votes serialise and the second one sees the first one's vote.
+        previous = await self.usage_repo.lock_feedback(session.id)
         if not widget.privacy.store_feedback_text:
             feedback = SessionFeedback(value=feedback.value, text=None)
         updated = await self.session_service.leave_feedback(
@@ -269,7 +271,7 @@ class WidgetAskService:
         finally:
             # Retention is not conditional on successful budget/statistics
             # writes. Failure here propagates and rolls back the chat write.
-            if widget.privacy.retention_days == 0:
+            if widget.privacy.never_persists:
                 await self.usage_repo.delete_session(session_id)
 
     @staticmethod

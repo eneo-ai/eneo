@@ -18,6 +18,13 @@ export function isHexColor(value: string): boolean {
   return HEX_COLOR.test(value.trim());
 }
 
+/** The `#RRGGBB` form the API stores: shorthand expanded, upper case. */
+export function normalizeHexColor(value: string): string {
+  const raw = value.trim().slice(1);
+  const full = raw.length === 3 ? [...raw].map((c) => c + c).join("") : raw;
+  return `#${full.toUpperCase()}`;
+}
+
 function channel(value: number): number {
   const srgb = value / 255;
   return srgb <= 0.03928 ? srgb / 12.92 : Math.pow((srgb + 0.055) / 1.055, 2.4);

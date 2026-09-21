@@ -13,7 +13,8 @@
     DARK_SURFACE,
     DEFAULT_PRIMARY_COLOR,
     isHexColor,
-    LIGHT_SURFACE
+    LIGHT_SURFACE,
+    normalizeHexColor
   } from "../contrast";
 
   type Props = {
@@ -42,18 +43,22 @@
   }: Props = $props();
 
   // What is typed stays local until it is a complete hex colour; the server
-  // only ever sees valid values, so no error appears mid-typing.
+  // only ever sees valid #RRGGBB values, so no error appears mid-typing.
   let draft = $state(untrack(() => value ?? ""));
   let lastSaved = untrack(() => value ?? "");
   $effect(() => {
     const saved = value ?? "";
     if (saved !== lastSaved) {
       lastSaved = saved;
-      draft = saved;
+      // The echo of what was just typed must not replace the draft: a
+      // six-digit colour passes through a valid three-digit prefix.
+      if (!isHexColor(draft) || normalizeHexColor(draft) !== saved) draft = saved;
     }
   });
   const current = $derived(draft);
-  const pickerValue = $derived(isHexColor(current) ? current : DEFAULT_PRIMARY_COLOR);
+  const pickerValue = $derived(
+    isHexColor(current) ? normalizeHexColor(current) : DEFAULT_PRIMARY_COLOR
+  );
   const contrast = $derived(
     checkContrast && current
       ? contrastVerdict(current, surface === "dark" ? DARK_SURFACE : LIGHT_SURFACE)
@@ -63,7 +68,11 @@
   function typed(raw: string) {
     draft = raw.trim();
     if (draft === "" && clearable) onChange(null);
-    else if (isHexColor(draft)) onChange(draft.toUpperCase());
+    else if (isHexColor(draft)) onChange(normalizeHexColor(draft));
+  }
+
+  function settle() {
+    if (isHexColor(draft)) draft = normalizeHexColor(draft);
   }
   const contrastLabel = $derived.by(() => {
     if (!contrast) return "";
@@ -120,6 +129,7 @@
       aria-describedby={`${id}-description`}
       value={current}
       oninput={(event) => typed(event.currentTarget.value)}
+      onblur={settle}
     />
     {#if clearable && current}
       <Button

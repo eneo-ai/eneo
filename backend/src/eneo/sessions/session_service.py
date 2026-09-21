@@ -199,6 +199,26 @@ class SessionService:
         async with session.begin():
             yield
 
+    def _never_persist(self) -> bool:
+        widget = getattr(self.user, "active_widget", None)
+        return widget is not None and widget.never_persist
+
+    @asynccontextmanager
+    async def _placeholder_transaction(self) -> AsyncGenerator[AsyncSession]:
+        """Where a new conversation or question placeholder is written.
+
+        Normally its own committed transaction, so the user's message survives
+        a completion failure. A zero-retention widget visitor must leave no
+        content behind on any exit, so its placeholders stay in the request
+        transaction: rolled back with a failure, deleted after the answer.
+        """
+        if self._never_persist():
+            async with self._write_transaction():
+                yield self.session_repo.session
+            return
+        async with sessionmanager.session() as session, session.begin():
+            yield session
+
     def _principal_columns(
         self,
     ) -> tuple[UUID | None, UUID | None, UUID | None, UUID | None]:
@@ -347,7 +367,7 @@ class SessionService:
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
         )
-        async with sessionmanager.session() as session, session.begin():
+        async with self._placeholder_transaction() as session:
             return await self._session_repository(session).add(session_add)
 
     def _build_session_add(
@@ -431,7 +451,7 @@ class SessionService:
             assistant_id=session_assistant_id,
             group_chat_id=group_chat_id,
         )
-        async with sessionmanager.session() as db_session, db_session.begin():
+        async with self._placeholder_transaction() as db_session:
             session_record = await self._session_repository(db_session).add(session_add)
             question_add = self._build_question_placeholder(
                 question=question,
@@ -482,7 +502,7 @@ class SessionService:
             skill_activation=skill_activation,
         )
 
-        async with sessionmanager.session() as db_session, db_session.begin():
+        async with self._placeholder_transaction() as db_session:
             return await self._insert_question_placeholder(
                 self._question_repository(db_session), question_add, files
             )

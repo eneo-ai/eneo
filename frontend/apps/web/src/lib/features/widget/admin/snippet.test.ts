@@ -32,6 +32,21 @@ describe("install snippets", () => {
     ).toBeNull();
   });
 
+  it("carries the saved launcher position in both snippets", () => {
+    const options = {
+      origin: "https://eneo.kommun.se",
+      publicId: "wgt_x",
+      position: "bottom-left" as const,
+      release
+    };
+    expect(floatingSnippet(options)).toBe(
+      '<script async src="https://eneo.kommun.se/widget/v1/eneo.js" data-widget-id="wgt_x" data-position="bottom-left"></script>'
+    );
+    expect(pinnedSnippet(options)).toBe(
+      '<script async src="https://eneo.kommun.se/widget/1.4.2/eneo.js" integrity="sha384-abc" crossorigin="anonymous" data-widget-id="wgt_x" data-position="bottom-left"></script>'
+    );
+  });
+
   it("escapes attribute values", () => {
     expect(
       floatingSnippet({ origin: "https://eneo.kommun.se", publicId: 'x"y', release })
