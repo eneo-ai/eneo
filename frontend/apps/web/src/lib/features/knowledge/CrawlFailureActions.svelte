@@ -2,7 +2,7 @@
   import type { CrawlResourceFailure, CrawlRun } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { hasCrawlIssues } from "./crawlRunState";
+  import { hasCrawlIssues, isMinorPartial } from "./crawlRunState";
 
   let {
     run,
@@ -40,7 +40,7 @@
         {m.crawl_failed_files_count({ count: run.files_failed ?? 0 })}
       </Button>
     {/if}
-    {#if !(run.pages_failed || run.files_failed) && hasCrawlIssues(run)}
+    {#if !(run.pages_failed || run.files_failed) && hasCrawlIssues(run) && !isMinorPartial(run)}
       <Button
         variant="link"
         size="sm"

@@ -47,6 +47,52 @@ export function isCompletedWithMissingResources(crawl: CrawlRun): boolean {
   );
 }
 
+/** Failed items may be at most this share of all items for a minor partial. */
+export const MINOR_FAILURE_SHARE = 0.05;
+
+const BENIGN_FAILURE_CODES = new Set([
+  "resources_missing",
+  "page_limit_reached",
+  "content_skipped"
+]);
+const SEVERE_FAILURE_CODES = new Set([
+  "tenant_quota_exceeded",
+  "user_quota_exceeded",
+  "remote_blocked",
+  "remote_unreachable",
+  "timed_out"
+]);
+
+/**
+ * A partial crawl that reads as completed with notes rather than an issue.
+ * Mirrors crawl_is_minor_partial on the backend: benign codes always, severe
+ * codes never, otherwise the failed share of all items decides. Runs without
+ * recorded counters cannot qualify.
+ */
+export function isMinorPartial(crawl: CrawlRun): boolean {
+  if (crawl.phase !== "terminal" || crawl.outcome !== "partial") return false;
+  const code = crawl.failure_code ?? null;
+  if (code && BENIGN_FAILURE_CODES.has(code)) return true;
+  if (code && SEVERE_FAILURE_CODES.has(code)) return false;
+  const counters = [
+    crawl.pages_crawled,
+    crawl.pages_unchanged,
+    crawl.files_downloaded,
+    crawl.files_unchanged,
+    crawl.pages_failed,
+    crawl.files_failed
+  ];
+  if (counters.some((value) => value == null)) return false;
+  const failed = (crawl.pages_failed ?? 0) + (crawl.files_failed ?? 0);
+  const total =
+    failed +
+    (crawl.pages_crawled ?? 0) +
+    (crawl.pages_unchanged ?? 0) +
+    (crawl.files_downloaded ?? 0) +
+    (crawl.files_unchanged ?? 0);
+  return failed <= MINOR_FAILURE_SHARE * total;
+}
+
 export function hasCrawlIssues(crawl: CrawlRun): boolean {
   return (
     (crawl.pages_failed ?? 0) > 0 ||
@@ -102,6 +148,10 @@ export function crawlFailureMessage(failureCode: string | null | undefined): str
       return m.crawl_failure_timed_out();
     case "processing_failed":
       return m.crawl_failure_processing_failed();
+    case "page_limit_reached":
+      return m.crawl_failure_page_limit_reached();
+    case "content_skipped":
+      return m.crawl_failure_content_skipped();
     case "tenant_quota_exceeded":
       return m.crawl_failure_tenant_quota_exceeded();
     case "user_quota_exceeded":
@@ -115,6 +165,9 @@ export function crawlFailureMessage(failureCode: string | null | undefined): str
 
 export function crawlRunFailureMessage(crawl: CrawlRun): string {
   if (isCompletedWithMissingResources(crawl)) return m.crawl_failure_resources_missing();
+  if (crawl.failure_code === "page_limit_reached" || crawl.failure_code === "content_skipped") {
+    return crawlFailureMessage(crawl.failure_code);
+  }
   if (
     crawl.outcome === "partial" &&
     crawl.failure_code !== "tenant_quota_exceeded" &&

@@ -9,17 +9,24 @@
     run,
     onshowFailures
   }: { run: CrawlRun; onshowFailures?: (kind: CrawlResourceFailure["kind"]) => void } = $props();
+  const columns = $derived([
+    { key: "updated" as const, label: m.crawl_counts_succeeded() },
+    { key: "unchanged" as const, label: m.crawl_counts_unchanged() },
+    { key: "failed" as const, label: m.crawl_counts_failed() }
+  ]);
   const rows = $derived([
     {
       kind: "page" as const,
       label: m.crawl_counts_pages(),
-      succeeded: run.pages_crawled,
+      updated: run.pages_crawled,
+      unchanged: run.pages_unchanged,
       failed: run.pages_failed
     },
     {
       kind: "file" as const,
       label: m.crawl_counts_files(),
-      succeeded: run.files_downloaded,
+      updated: run.files_downloaded,
+      unchanged: run.files_unchanged,
       failed: run.files_failed
     }
   ]);
@@ -30,26 +37,30 @@
   <thead class="text-secondary">
     <tr>
       <td></td>
-      <th scope="col" class="pb-1 pl-3 text-right font-normal">{m.crawl_counts_succeeded()}</th>
-      <th scope="col" class="pb-1 pl-3 text-right font-normal">{m.crawl_counts_failed()}</th>
+      {#each columns as column (column.key)}
+        <th scope="col" class="pb-1 pl-3 text-right font-normal">{column.label}</th>
+      {/each}
     </tr>
   </thead>
   <tbody>
     {#each rows as row (row.label)}
       <tr>
         <th scope="row" class="py-0.5 text-left font-normal">{row.label}</th>
-        {#each [row.succeeded, row.failed] as count, column (column)}
+        {#each columns as column (column.key)}
+          {@const count = row[column.key]}
+          {@const failedColumn = column.key === "failed"}
           <td
             class={cn(
               "py-0.5 pl-3 text-right",
-              column === 1 && count != null && count > 0 && "text-negative-stronger font-medium"
+              failedColumn && count != null && count > 0 && "text-negative-stronger font-medium",
+              column.key === "unchanged" && "text-secondary"
             )}
           >
             {#if count == null}
               <span aria-hidden="true">—</span><span class="sr-only"
                 >{m.crawl_counts_unknown()}</span
               >
-            {:else if column === 1 && count > 0 && onshowFailures}
+            {:else if failedColumn && count > 0 && onshowFailures}
               <Button
                 variant="link"
                 size="sm"

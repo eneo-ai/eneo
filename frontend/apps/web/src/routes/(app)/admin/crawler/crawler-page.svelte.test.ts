@@ -222,12 +222,17 @@ it("shows failed and unknown resource counts in history without an unusable page
   await dialog.getByRole("tab", { name: m.history(), exact: true }).click();
   const counts = dialog.getByRole("table", { name: m.crawl_counts_caption(), exact: true });
   await expect
-    .element(counts.getByRole("row", { name: `${m.crawl_counts_pages()} 12 3`, exact: true }))
+    .element(
+      counts.getByRole("row", {
+        name: `${m.crawl_counts_pages()} 12 ${m.crawl_counts_unknown()} 3`,
+        exact: true
+      })
+    )
     .toBeVisible();
   await expect
     .element(
       counts.getByRole("row", {
-        name: `${m.crawl_counts_files()} 0 ${m.crawl_counts_unknown()}`,
+        name: `${m.crawl_counts_files()} 0 ${m.crawl_counts_unknown()} ${m.crawl_counts_unknown()}`,
         exact: true
       })
     )
@@ -654,7 +659,7 @@ it("keeps rows and filters when a refresh fails, then retries the same query", a
   await expect
     .element(
       page.getByRole("row", {
-        name: `${m.crawl_counts_pages()} 8 ${m.crawl_counts_unknown()}`,
+        name: `${m.crawl_counts_pages()} 8 ${m.crawl_counts_unknown()} ${m.crawl_counts_unknown()}`,
         exact: true
       })
     )

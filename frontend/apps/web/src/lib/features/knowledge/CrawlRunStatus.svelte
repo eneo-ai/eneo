@@ -2,16 +2,20 @@
   import type { CrawlRun } from "@eneo/eneo-js";
   import { CircleCheck, CircleX, Clock3, LoaderCircle, TriangleAlert } from "lucide-svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import { m } from "$lib/paraglide/messages";
   import {
     crawlRunState,
     crawlRunStateLabel,
-    isCompletedWithMissingResources
+    isCompletedWithMissingResources,
+    isMinorPartial
   } from "./crawlRunState";
 
   let { run }: { run: CrawlRun } = $props();
   const state = $derived(crawlRunState(run));
+  const missingOnly = $derived(isCompletedWithMissingResources(run));
+  const notes = $derived(state === "partial" && !missingOnly && isMinorPartial(run));
   const completed = $derived(
-    state === "succeeded" || state === "unchanged" || isCompletedWithMissingResources(run)
+    state === "succeeded" || state === "unchanged" || missingOnly || notes
   );
   const active = $derived(["queued", "running", "finalizing", "stopping"].includes(state));
   const warning = $derived((state === "partial" && !completed) || state === "empty");
@@ -36,5 +40,9 @@
       aria-hidden="true"
       data-icon="inline-start"
     />{/if}
-  {crawlRunStateLabel(isCompletedWithMissingResources(run) ? "succeeded" : state)}
+  {missingOnly
+    ? crawlRunStateLabel("succeeded")
+    : notes
+      ? m.crawl_completed_with_notes()
+      : crawlRunStateLabel(state)}
 </Badge>

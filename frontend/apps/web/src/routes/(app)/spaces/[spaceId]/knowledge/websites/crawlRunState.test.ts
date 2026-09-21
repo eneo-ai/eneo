@@ -7,7 +7,8 @@ import {
   crawlRunStateLabel,
   canRequestCrawlStop,
   isActiveCrawlRun,
-  isCompletedWithMissingResources
+  isCompletedWithMissingResources,
+  isMinorPartial
 } from "$lib/features/knowledge/crawlRunState";
 
 function run(overrides: Partial<CrawlRun>): CrawlRun {
@@ -145,4 +146,80 @@ it("only treats verified missing resources as a completed crawl", () => {
   ).toBe(false);
   expect(isCompletedWithMissingResources(run({ ...completed, outcome: "failed" }))).toBe(false);
   expect(isCompletedWithMissingResources(run({ ...completed, phase: "running" }))).toBe(false);
+});
+
+// Shared with backend/tests/unit/websites/domain/test_crawl_assessment.py:
+// [id, failure_code, pages_crawled, pages_unchanged, files_downloaded,
+//  files_unchanged, pages_failed, files_failed, minor]
+const minorPartialCases = [
+  ["resources-missing", "resources_missing", 0, 0, 0, 0, 900, 0, true],
+  ["page-limit", "page_limit_reached", 162, 0, 0, 0, 0, 0, true],
+  ["content-skipped", "content_skipped", 357, 0, 0, 0, 1, 0, true],
+  ["one-in-358", "processing_failed", 340, 17, 2, 0, 1, 0, true],
+  ["exactly-five-percent", "processing_failed", 19, 0, 0, 0, 1, 0, true],
+  ["just-over-five-percent", "processing_failed", 18, 0, 0, 0, 1, 0, false],
+  ["unchanged-counts-as-items", "processing_failed", 0, 95, 0, 0, 5, 0, true],
+  ["files-count-too", "processing_failed", 0, 0, 38, 0, 0, 2, true],
+  ["half-failed", "processing_failed", 5, 0, 0, 0, 5, 0, false],
+  ["blocked-is-never-minor", "remote_blocked", 85, 0, 0, 0, 0, 1, false],
+  ["unreachable-is-never-minor", "remote_unreachable", 500, 0, 0, 0, 1, 0, false],
+  ["timed-out-is-never-minor", "timed_out", 500, 0, 0, 0, 1, 0, false],
+  ["tenant-quota", "tenant_quota_exceeded", 500, 0, 0, 0, 1, 0, false],
+  ["user-quota", "user_quota_exceeded", 500, 0, 0, 0, 1, 0, false],
+  ["legacy-row-without-unchanged", "processing_failed", 357, null, 0, 0, 1, 0, false],
+  ["legacy-row-without-any-counts", "processing_failed", null, null, null, null, null, null, false],
+  ["legacy-row-benign-code", "resources_missing", null, null, null, null, null, null, true],
+  ["no-code", null, 357, 0, 0, 0, 1, 0, true]
+] as const;
+
+describe("isMinorPartial", () => {
+  it.each(minorPartialCases)(
+    "%s",
+    (
+      _id,
+      failure_code,
+      pages_crawled,
+      pages_unchanged,
+      files_downloaded,
+      files_unchanged,
+      pages_failed,
+      files_failed,
+      minor
+    ) => {
+      expect(
+        isMinorPartial(
+          run({
+            phase: "terminal",
+            outcome: "partial",
+            failure_code,
+            pages_crawled,
+            pages_unchanged,
+            files_downloaded,
+            files_unchanged,
+            pages_failed,
+            files_failed
+          })
+        )
+      ).toBe(minor);
+    }
+  );
+
+  it("only applies to terminal partial runs", () => {
+    const base = { failure_code: "page_limit_reached" as const };
+    expect(isMinorPartial(run({ ...base, phase: "terminal", outcome: "failed" }))).toBe(false);
+    expect(isMinorPartial(run({ ...base, phase: "running", outcome: null }))).toBe(false);
+  });
+
+  it("explains benign codes specifically", () => {
+    expect(
+      crawlRunFailureMessage(
+        run({ phase: "terminal", outcome: "partial", failure_code: "page_limit_reached" })
+      )
+    ).toBe(m.crawl_failure_page_limit_reached());
+    expect(
+      crawlRunFailureMessage(
+        run({ phase: "terminal", outcome: "partial", failure_code: "content_skipped" })
+      )
+    ).toBe(m.crawl_failure_content_skipped());
+  });
 });

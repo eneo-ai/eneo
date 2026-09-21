@@ -11868,6 +11868,8 @@ export interface components {
       | "timed_out"
       | "processing_failed"
       | "resources_missing"
+      | "page_limit_reached"
+      | "content_skipped"
       | "tenant_quota_exceeded"
       | "user_quota_exceeded"
       | "cancelled";
@@ -11980,7 +11982,10 @@ export interface components {
        * Format: uuid
        */
       id: string;
-      /** Pages Crawled */
+      /**
+       * Pages Crawled
+       * @description Pages that were (re)indexed in this run.
+       */
       pages_crawled: number | null;
       /** Files Downloaded */
       files_downloaded: number | null;
@@ -11988,6 +11993,16 @@ export interface components {
       pages_failed: number | null;
       /** Files Failed */
       files_failed: number | null;
+      /**
+       * Pages Unchanged
+       * @description Pages verified unchanged and left as they were (HTTP 304 or identical content). Null for runs recorded before this was tracked.
+       */
+      pages_unchanged?: number | null;
+      /**
+       * Files Unchanged
+       * @description Files verified unchanged and left as they were. Null for runs recorded before this was tracked.
+       */
+      files_unchanged?: number | null;
       /** Failure Summary */
       failure_summary?: {
         [key: string]: number;

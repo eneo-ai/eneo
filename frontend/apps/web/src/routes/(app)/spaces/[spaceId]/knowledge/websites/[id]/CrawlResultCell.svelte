@@ -19,6 +19,7 @@
   export { cls as class };
 
   $: pagesCrawled = crawl.pages_crawled ?? 0;
+  $: pagesUnchanged = crawl.pages_unchanged ?? 0;
   $: filesDownloaded = crawl.files_downloaded ?? 0;
   $: pagesFailed = crawl.pages_failed ?? 0;
   $: filesFailed = crawl.files_failed ?? 0;
@@ -78,9 +79,20 @@
     {#if pagesCrawled || filesDownloaded}
       <Label.Single capitalize={false} item={successLabel(crawl)}></Label.Single>
     {/if}
-    {#if !pagesCrawled && !filesDownloaded && !pagesFailed && !filesFailed}
+    {#if pagesUnchanged}
+      <Label.Single
+        capitalize={false}
+        item={{ color: "gray", label: m.pages_unchanged_count({ count: pagesUnchanged }) }}
+      ></Label.Single>
+    {/if}
+    {#if !pagesCrawled && !filesDownloaded && !pagesUnchanged && !pagesFailed && !filesFailed}
       <Label.Single capitalize={false} item={crawlStatus(state, crawl)}></Label.Single>
     {/if}
+  {:else if state === "unchanged" && pagesUnchanged}
+    <Label.Single
+      capitalize={false}
+      item={{ color: "gray", label: m.pages_unchanged_count({ count: pagesUnchanged }) }}
+    ></Label.Single>
   {:else}
     <Label.Single capitalize={false} item={crawlStatus(state, crawl)}></Label.Single>
   {/if}
