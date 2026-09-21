@@ -1,5 +1,5 @@
 ## Changes
-<!-- What did you change? -->
+<!-- What did you change? For documentation, follow frontend/apps/docs-site/AUTHORING.md and state the target release line and page (or why docs are unaffected). -->
 
 ## Why
 <!-- Why was this needed? -->

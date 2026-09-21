@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
+import asyncpg
 import pytest
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
@@ -416,6 +417,47 @@ async def test_readiness_reports_database_outage_and_recovers_after_cache_expiry
     assert database.connect_count == 2
     assert recovered.ready is True
     assert recovered.code is ObjectContentReadinessCode.READY
+
+    await runtime.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(
+            asyncpg.exceptions.CannotConnectNowError(
+                "the database system is starting up"
+            ),
+            id="server-starting-up",
+        ),
+        pytest.param(
+            asyncpg.exceptions.ConnectionDoesNotExistError("connection was closed"),
+            id="connection-dropped",
+        ),
+        pytest.param(TimeoutError("handshake stalled"), id="handshake-timeout"),
+    ],
+)
+async def test_driver_level_connect_failures_are_database_unavailable_readiness(
+    error: BaseException,
+) -> None:
+    """asyncpg raises its own errors when PostgreSQL is restarting; they must
+    not escape the readiness probe as raw driver exceptions."""
+    database = _ReadinessDatabase()
+    runtime = ObjectContentRuntime(database=database)
+    runtime.start(settings=_settings(), store=cast("S3ObjectStore", _ReadinessStore()))
+
+    @asynccontextmanager
+    async def failing_connect() -> AsyncGenerator[AsyncConnection]:
+        raise error
+        yield  # pragma: no cover - makes this an async generator
+
+    database.connect = failing_connect  # type: ignore[method-assign]
+
+    readiness = await runtime.readiness()
+
+    assert readiness.ready is False
+    assert readiness.code is ObjectContentReadinessCode.DATABASE_UNAVAILABLE
 
     await runtime.stop()
 

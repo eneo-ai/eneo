@@ -509,7 +509,7 @@ The most relevant backend settings are:
 | Setting | Purpose |
 | --- | --- |
 | `INTERNAL_MCP_BASE_URL` | Base URL the backend uses to reach its own mounted `/internal-mcp/...` endpoints. Development defaults to the local backend on port 8123; the packaged server sets its local port 8000 default. |
-| `FILE_REFERENCE_BASE_URL` | Base URL placed in signed file references for URL-consuming MCP tools. It must resolve from those tools' network. |
+| `FILE_REFERENCE_BASE_URL` | Base URL placed in signed file references for URL-consuming MCP tools. It must resolve from those tools' network: an internal address when the servers share the backend's private network, the public origin when they run outside it. The download route is authenticated by the signed token alone. Unset, it falls back to `PUBLIC_ORIGIN`. See the deployment guide's [Signed file references](/guides/deployment#signed-file-references) section. |
 | `FILE_REFERENCE_URL_EXPIRY_SECONDS` | Lifetime of a minted file reference, capped by the original-download maximum. |
 | `INJECT_KNOWLEDGE_MIN_SCORE` | Optional embedding-model-specific relevance floor for inject mode. |
 | `MCP_TOOL_OUTPUT_MAX_CHARS` | Per-call character cap used by the MCP proxy and to derive safe built-in page sizes. |

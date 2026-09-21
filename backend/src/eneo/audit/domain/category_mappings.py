@@ -111,10 +111,11 @@ CATEGORY_MAPPINGS = {
     ActionType.PASSWORD_CHANGED.value: "security_events",
     ActionType.PASSWORD_CHANGE_FAILED.value: "security_events",
     ActionType.SESSIONS_INVALIDATED.value: "security_events",
-    # File Operations (4 actions)
+    # File Operations (6 actions)
     ActionType.FILE_UPLOADED.value: "file_operations",
     ActionType.FILE_DELETED.value: "file_operations",
     ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
+    ActionType.FILE_ORIGINAL_DOWNLOADED.value: "file_operations",
     ActionType.FILE_SIGNED_URL_MINTED.value: "file_operations",
     ActionType.INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
     # Integration Events (12 actions)

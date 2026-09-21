@@ -483,17 +483,10 @@ async def test_user_login_rejects_wrong_tenant_credentials(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert tenant_info.status_code == 200
-    # Verify user's tenant matches (TenantPublic doesn't include id, so check name/display_name)
+    # Verify user's tenant matches
     tenant_payload = tenant_info.json()
-    tenant_name = tenant_payload.get("name") or tenant_payload.get("display_name")
-    if tenant_name is None and isinstance(tenant_payload.get("tenant"), dict):
-        tenant_name = tenant_payload["tenant"].get("name") or tenant_payload[
-            "tenant"
-        ].get("display_name")
-
-    expected_names = {tenant_a["name"], tenant_a.get("display_name")}
-    expected_names.discard(None)
-    assert tenant_name in expected_names, "User should belong to Tenant A"
+    assert tenant_payload["id"] == tenant_a["id"], "User should belong to Tenant A"
+    assert tenant_payload["name"] == tenant_a["name"]
 
     # IMPORTANT: Current implementation doesn't have tenant-specific login endpoints
     # This test documents the expected behavior: users are bound to their tenant at creation
@@ -831,9 +824,7 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
         results_a.append(
             {
                 "space_id": space["id"],
-                "tenant_name": tenant_info.json()[
-                    "name"
-                ],  # TenantPublic has name, not id
+                "tenant_name": tenant_info.json()["name"],
             }
         )
 
@@ -851,9 +842,7 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
         results_b.append(
             {
                 "space_id": space["id"],
-                "tenant_name": tenant_info.json()[
-                    "name"
-                ],  # TenantPublic has name, not id
+                "tenant_name": tenant_info.json()["name"],
             }
         )
 

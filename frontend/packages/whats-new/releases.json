@@ -597,7 +597,7 @@
             "en": "A new Personal chat permission lets you give users the chat without access to assistants, for example during a staged rollout.",
             "sv": "En ny behörighet för personlig chatt låter dig ge användare chatten utan tillgång till assistenter, till exempel vid ett stegvis införande."
           },
-          "showMe": { "href": "/admin/legacy/roles", "anchor": "admin-roles" }
+          "showMe": { "href": "/admin/roles", "anchor": "admin-roles" }
         },
         {
           "id": "model-admin-redesign",

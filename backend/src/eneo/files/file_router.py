@@ -1,5 +1,6 @@
 import base64
 import time
+from types import SimpleNamespace
 from typing import Annotated, cast
 from urllib.parse import urlencode
 from uuid import UUID
@@ -10,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.signed_urls import (
@@ -464,8 +466,64 @@ async def download_original_file_signed(
         )
     except FileContentRangeError as exc:
         return _range_not_satisfiable_response(exc)
+    await _audit_original_download_redeemed(
+        container,
+        download,
+        content_disposition=content_disposition,
+        ranged=range is not None,
+        tenant_claim_present=expected_tenant_id is not None,
+    )
     return _download_response(
         download,
         content_disposition=content_disposition,
         include_repr_digest=True,
     )
+
+
+async def _audit_original_download_redeemed(
+    container: Container,
+    download: FileDownload,
+    *,
+    content_disposition: ContentDisposition,
+    ranged: bool,
+    tenant_claim_present: bool,
+) -> None:
+    """Record that a signed original link was redeemed.
+
+    The link is a bearer capability handed to tools, so the mint audit alone
+    does not show whether, when or from where it was used. The actor is the
+    bearer, not a signed-in user: the request context supplies the caller's
+    address and user agent. Audit failure does not withhold the bytes; the
+    token was already verified.
+    """
+    session = cast(AsyncSession, container.session())
+    try:
+        async with session.begin():
+            await container.audit_service().log_async(
+                tenant_id=download.tenant_id,
+                actor_type=ActorType.SYSTEM,
+                action=ActionType.FILE_ORIGINAL_DOWNLOADED,
+                entity_type=EntityType.FILE,
+                entity_id=download.file_id,
+                description=(
+                    f"Original file '{download.filename}' downloaded with a signed link"
+                ),
+                metadata=AuditMetadata.system_action(
+                    description="Signed original download link redeemed",
+                    target=SimpleNamespace(id=download.file_id, name=download.filename),
+                    extra={
+                        "content_disposition": content_disposition.value,
+                        "ranged": ranged,
+                        "tenant_claim_present": tenant_claim_present,
+                        "content_length": download.content_length,
+                    },
+                ),
+            )
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "Original download served but audit logging was unavailable",
+            extra={
+                "file_id": str(download.file_id),
+                "error_type": type(exc).__name__,
+            },
+        )

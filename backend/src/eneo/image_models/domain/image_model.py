@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
@@ -35,7 +37,7 @@ class ImageModelUsage:
     While any such provider exists the model cannot be deleted.
     """
 
-    id: "UUID"
+    id: UUID
     name: str
     purpose: str
 
@@ -43,10 +45,10 @@ class ImageModelUsage:
 class ImageModel(AIModel):
     def __init__(
         self,
-        user: "UserInDB",
-        id: "UUID",
-        created_at: "datetime",
-        updated_at: "datetime",
+        user: UserInDB,
+        id: UUID,
+        created_at: datetime,
+        updated_at: datetime,
         nickname: str,
         name: str,
         family: Optional[str],
@@ -63,8 +65,8 @@ class ImageModel(AIModel):
         default_quality: str = AUTO_IMAGE_OPTION,
         cost_per_image: Optional[Decimal] = None,
         security_classification: Optional["SecurityClassification"] = None,
-        tenant_id: Optional["UUID"] = None,
-        provider_id: Optional["UUID"] = None,
+        tenant_id: Optional[UUID] = None,
+        provider_id: Optional[UUID] = None,
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
         used_by_mcp_servers: Optional[list[ImageModelUsage]] = None,
@@ -103,11 +105,11 @@ class ImageModel(AIModel):
     @classmethod
     def create_from_db(
         cls,
-        image_model_db: "ImageModelsDB",
-        user: "UserInDB",
+        image_model_db: ImageModelsDB,
+        user: UserInDB,
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
-    ) -> "ImageModel":
+    ) -> ImageModel:
         return cls(
             user=user,
             id=image_model_db.id,

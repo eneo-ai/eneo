@@ -54,9 +54,11 @@ class SettingsPublic(SettingsBase):
     # deployment config, never persisted.
     file_references_enabled: bool = False
     # Read-only: whether an object-store connection is configured for this
-    # deployment. Gates UI that only works with S3-backed originals (the
-    # assistant inline-file-text toggle). Distinct from object_content_enabled,
-    # which only reports that the object-content module started.
+    # deployment. Informational for clients; signed file references and the
+    # assistant inline-file-text toggle work with PostgreSQL-backed originals
+    # too, so nothing in the UI is gated on it. Distinct from
+    # object_content_enabled, which only reports that the object-content
+    # module started.
     object_store_configured: bool = False
     # Read-only: whether the guarded SharePoint fixture API is available in
     # this deployment. Lets the UI expose local test controls without relying

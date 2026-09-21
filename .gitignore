@@ -64,6 +64,8 @@ specs/
 # OpenAI Codex configuration
 .codex
 AGENTS.md
+# Shared documentation placement rules; other agent files stay local.
+!/AGENTS.md
 
 # ── GSD baseline (auto-generated) ──
 .gsd

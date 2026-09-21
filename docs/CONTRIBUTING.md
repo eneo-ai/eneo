@@ -686,6 +686,11 @@ bun add -d package-name
 
 ## 📚 Documentation Standards
 
+For product documentation and release notes, start with the
+[documentation authoring guide](../frontend/apps/docs-site/AUTHORING.md).
+It owns branch selection, page placement and the distinction between detailed
+guides and user-facing release announcements.
+
 ### Code Documentation
 
 **Python Docstrings:**

@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "next dev --turbopack --port=3001",
     "build": "next build && pagefind --site out --output-path out/_pagefind",
+    "build:versions": "node scripts/build-versions.mjs",
+    "versions": "node scripts/resolve-versions.mjs",
+    "preview": "bunx serve site",
     "start": "next start",
     "lint": "next lint"
   },

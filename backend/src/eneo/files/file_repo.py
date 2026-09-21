@@ -23,7 +23,12 @@ from eneo.files.file_models import (
     FileType,
 )
 from eneo.main.exceptions import NotFoundException
-from eneo.object_content.content import ByteRange, ContentAccessClass, ContentState
+from eneo.object_content.content import (
+    ByteRange,
+    ContentAccessClass,
+    ContentState,
+    StorageKind,
+)
 from eneo.object_content.file_icon_cleanup import file_icon_legacy_is_cleaned
 
 _FILE_METADATA_COLUMNS = (
@@ -53,6 +58,7 @@ class FileContentReferenceRecord:
     size_bytes: int
     media_type: str
     access_class: ContentAccessClass
+    storage_kind: StorageKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +166,46 @@ def original_download_variants(
             FileContentVariant.GENERATED_ARTIFACT,
         )
     return (FileContentVariant.ORIGINAL,)
+
+
+def content_readable(
+    reference: FileContentReferenceRecord,
+    *,
+    object_store_configured: bool,
+) -> bool:
+    """Whether ``reference`` can be served by this deployment right now.
+
+    Inline content lives in PostgreSQL and is always readable. Object-store
+    content is readable only while a store is connected: a row left behind
+    by a disconnected store must not be promised to anyone, so the flags
+    that advertise a stored original (``original_available``,
+    ``has_download_reference``) go through here rather than through row
+    existence alone.
+    """
+    return (
+        reference.storage_kind is StorageKind.POSTGRES_INLINE or object_store_configured
+    )
+
+
+def readable_original_reference(
+    file_type: FileType,
+    references: Sequence[FileContentReferenceRecord],
+    *,
+    object_store_configured: bool,
+) -> FileContentReferenceRecord | None:
+    """The stored original a signed download URL can serve, if any.
+
+    Same variant preference as the download route, filtered by
+    :func:`content_readable`, so a file advertised as referenceable is one
+    whose bytes the deployment can actually produce.
+    """
+    for variant in original_download_variants(file_type):
+        for reference in references:
+            if reference.variant is variant and content_readable(
+                reference, object_store_configured=object_store_configured
+            ):
+                return reference
+    return None
 
 
 def legacy_primary_file_variant(
@@ -592,6 +638,7 @@ class FileRepository:
                 ObjectContents.size_bytes,
                 ObjectContents.verified_media_type,
                 ObjectContents.access_class,
+                ObjectContents.storage_kind,
             )
             .join(
                 ObjectContents,
@@ -618,6 +665,7 @@ class FileRepository:
                 size_bytes=row.size_bytes,
                 media_type=row.verified_media_type,
                 access_class=ContentAccessClass(row.access_class),
+                storage_kind=StorageKind(row.storage_kind),
             )
             for row in rows
         ]
