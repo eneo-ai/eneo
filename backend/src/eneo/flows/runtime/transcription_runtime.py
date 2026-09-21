@@ -17,6 +17,10 @@ from eneo.flows.domain.step_output import (
     build_step_material_aliases,
 )
 from eneo.flows.domain.transcript_corrections import segments_content_hash
+from eneo.flows.domain.transcript_source import (
+    TranscriptSource,
+    TranscriptSourceReference,
+)
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
@@ -84,6 +88,9 @@ class AudioRuntimeDeps:
     open_audio_download: OpenAudioDownload
     apply_output_cap: ApplyOutputCapFn
     commit: Callable[[], Awaitable[None]]
+    stage_transcript_source: Callable[
+        [TranscriptSourceReference, TranscriptSource], None
+    ]
     transcription_call_observer: "ProviderCallObserver | None" = None
     # Stores the step's word timings; None leaves word-level data unpersisted.
     transcript_words_repo: "FlowTranscriptWordsRepository | None" = None
@@ -230,6 +237,15 @@ async def resolve_transcribe_and_attach_audio_input(
         max_speakers=request.max_speakers,
     )
     metadata = transcription_result.to_metadata()
+    reference = TranscriptSourceReference(
+        run_id=request.run.id,
+        step_id=request.step.step_id,
+        attempt_no=request.attempt_no,
+        source_hash=transcription_result.source.source_hash,
+        bounds=transcription_result.source.bounds,
+    )
+    deps.stage_transcript_source(reference, transcription_result.source)
+    metadata["source"] = reference.model_dump(mode="json")
     _, file_ids = await deps.apply_output_cap(
         text=transcription_result.text, run=request.run, step=request.step
     )

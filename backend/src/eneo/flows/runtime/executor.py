@@ -74,6 +74,11 @@ from eneo.flows.domain.step_output import (
     utf8_prefix,
 )
 from eneo.flows.domain.text_processing import SummarizationProvenance
+from eneo.flows.domain.transcript_source import (
+    TranscriptSource,
+    TranscriptSourceReference,
+    with_transcript_source_reference,
+)
 from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
@@ -122,6 +127,9 @@ from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
 )
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
+)
+from eneo.flows.infrastructure.flow_transcript_source_repo import (
+    FlowTranscriptSourceRepository,
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.published_definition import (
@@ -579,6 +587,9 @@ class FlowRunExecutor:
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
         self.transcript_words_repo = transcript_words_repo
+        self._pending_transcript_sources: dict[
+            tuple[UUID, UUID, int], tuple[TranscriptSourceReference, TranscriptSource]
+        ] = {}
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
         self.flow_run_terminalizer = flow_run_terminalizer
         self.webhook_delivery_repo = (
@@ -1669,6 +1680,13 @@ class FlowRunExecutor:
                 "Flow step attempt input evidence was activated more than once "
                 f"(step_id={step.step_id}, attempt_no={attempt_no})."
             )
+        pending_source = self._pending_transcript_sources.get(
+            (run.id, step.step_id, attempt_no)
+        )
+        if pending_source is not None:
+            resolved_input = with_transcript_source_reference(
+                resolved_input, pending_source[0]
+            )
         activated = await self.flow_run_repo.activate_step_attempt(
             run_id=run.id,
             step_id=step.step_id,
@@ -1687,7 +1705,15 @@ class FlowRunExecutor:
                 "Flow step attempt closed before input evidence activation "
                 f"(step_id={step.step_id}, attempt_no={attempt_no})."
             )
+        await self._publish_transcript_source(
+            run_id=run.id,
+            step_id=step.step_id,
+            attempt_no=attempt_no,
+            tenant_id=run.tenant_id,
+            flow_id=run.flow_id,
+        )
         await self._commit()
+        self._pending_transcript_sources.pop((run.id, step.step_id, attempt_no), None)
         if attempt_start is not None:
             persisted_attempt_input = parse_flow_step_attempt_input(
                 activated.input_payload_json
@@ -2030,6 +2056,7 @@ class FlowRunExecutor:
                 requested_model = state_model
             if provider is None:
                 provider = state_provider
+        self._attach_pending_transcript_source(failure_plan.failed_result, attempt_no)
         await self.flow_run_repo.finish_attempt(
             run_id=run_id,
             step_id=step.step_id,
@@ -2065,12 +2092,22 @@ class FlowRunExecutor:
         # Terminalization won the race; report the persisted run outcome rather
         # than this step's failure.
         if saved_result is None:
-            await self._commit()
+            if (run_id, step.step_id, attempt_no) in self._pending_transcript_sources:
+                await self._rollback()
+            else:
+                await self._commit()
             return await self._return_after_terminalized_step_write(
                 run_id=run_id,
                 flow_id=claimed.flow_id,
                 tenant_id=tenant_id,
             )
+        await self._publish_transcript_source(
+            run_id=run_id,
+            step_id=step.step_id,
+            attempt_no=attempt_no,
+            tenant_id=tenant_id,
+            flow_id=claimed.flow_id,
+        )
         await self._terminalize_run(
             run_id=run_id,
             tenant_id=tenant_id,
@@ -2085,6 +2122,7 @@ class FlowRunExecutor:
             ),
         )
         await self._commit()
+        self._pending_transcript_sources.pop((run_id, step.step_id, attempt_no), None)
         return failure_plan.return_result
 
     async def _handle_generic_step_failure(
@@ -2168,6 +2206,7 @@ class FlowRunExecutor:
             ),
         )
         await self._rollback()
+        self._attach_pending_transcript_source(failure_plan.failed_result, attempt_no)
         attempt_start = _attempt_start_for_step(state=state, step=step)
         requested_model, provider = (
             (
@@ -2209,12 +2248,22 @@ class FlowRunExecutor:
         # Terminalization won the race; report the persisted run outcome rather
         # than this step's failure.
         if saved_result is None:
-            await self._commit()
+            if (run_id, step.step_id, attempt_no) in self._pending_transcript_sources:
+                await self._rollback()
+            else:
+                await self._commit()
             return await self._return_after_terminalized_step_write(
                 run_id=run_id,
                 flow_id=claimed.flow_id,
                 tenant_id=tenant_id,
             )
+        await self._publish_transcript_source(
+            run_id=run_id,
+            step_id=step.step_id,
+            attempt_no=attempt_no,
+            tenant_id=tenant_id,
+            flow_id=claimed.flow_id,
+        )
         await self._terminalize_run(
             run_id=run_id,
             tenant_id=tenant_id,
@@ -2229,6 +2278,7 @@ class FlowRunExecutor:
             ),
         )
         await self._commit()
+        self._pending_transcript_sources.pop((run_id, step.step_id, attempt_no), None)
         return failure_plan.return_result
 
     async def _persist_successful_step(
@@ -2438,7 +2488,45 @@ class FlowRunExecutor:
             transcription_call_observer=transcription_call_observer,
             max_speakers_hint=self.max_speakers_hint,
             transcript_words_repo=self.transcript_words_repo,
+            stage_transcript_source=self._stage_transcript_source,
         )
+
+    def _stage_transcript_source(
+        self, reference: TranscriptSourceReference, source: TranscriptSource
+    ) -> None:
+        key = (reference.run_id, reference.step_id, reference.attempt_no)
+        if key in self._pending_transcript_sources:
+            raise FlowRuntimeInvariantError(
+                "A transcription attempt produced more than one source."
+            )
+        self._pending_transcript_sources[key] = (reference, source)
+
+    def _attach_pending_transcript_source(
+        self, result: FlowStepResult, attempt_no: int
+    ) -> None:
+        pending = self._pending_transcript_sources.get(
+            (result.flow_run_id, result.step_id, attempt_no)
+        )
+        if pending is not None:
+            result.input_payload_json = with_transcript_source_reference(
+                result.input_payload_json, pending[0]
+            )
+
+    async def _publish_transcript_source(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+        flow_id: UUID,
+    ) -> None:
+        pending = self._pending_transcript_sources.get((run_id, step_id, attempt_no))
+        if pending is not None:
+            reference, source = pending
+            await FlowTranscriptSourceRepository(session=self.session).insert(
+                tenant_id=tenant_id, flow_id=flow_id, reference=reference, source=source
+            )
 
     async def _resolve_step_input(
         self,

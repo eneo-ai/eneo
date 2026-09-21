@@ -381,6 +381,7 @@ def _resolution_deps(
     run_repo.list_step_results.return_value = []
     run_repo.list_retained_input_file_ids.return_value = []
     return StepInputResolutionDeps(
+        stage_transcript_source=MagicMock(),
         commit=AsyncMock(),
         apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
         variable_resolver=FlowVariableResolver(),

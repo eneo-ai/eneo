@@ -25,6 +25,35 @@ from eneo.object_content.configuration import (
 _ALEMBIC_VERSION_NUM_LIMIT = 32
 
 
+def test_transcript_source_migration_is_transactional_and_matches_model(monkeypatch):
+    from eneo.database.tables.flow_tables import FlowStepTranscriptSources
+
+    migration = runpy.run_path(
+        str(
+            Path(__file__).parents[2]
+            / "alembic/versions/202609211100_add_flow_step_transcript_sources.py"
+        )
+    )
+    operations = MagicMock()
+    monkeypatch.setitem(migration["upgrade"].__globals__, "op", operations)
+    migration["upgrade"]()
+    args = operations.create_table.call_args.args
+    assert args[0] == "flow_step_transcript_sources"
+    columns = {
+        column.name: column for column in args[1:] if isinstance(column, sa.Column)
+    }
+    model = FlowStepTranscriptSources.__table__
+    assert columns.keys() == {column.name for column in model.columns}
+    assert {name: column.nullable for name, column in columns.items()} == {
+        column.name: column.nullable for column in model.columns
+    }
+    assert {call.args[0] for call in operations.create_index.call_args_list} == {
+        index.name for index in model.indexes
+    }
+    operations.get_context.assert_not_called()
+    assert operations.execute.call_args_list[0] == call("SET LOCAL lock_timeout = '5s'")
+
+
 def _abandonment_migration():
     return runpy.run_path(
         str(

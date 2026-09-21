@@ -40,6 +40,10 @@ from eneo.flows.domain.step_output import (
     interpret_step_text,
 )
 from eneo.flows.domain.text_processing import text_processing_config
+from eneo.flows.domain.transcript_source import (
+    TranscriptSource,
+    TranscriptSourceReference,
+)
 from eneo.flows.enums import FlowStepPhase
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -117,6 +121,9 @@ RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE: Final = (
 class StepInputResolutionDeps:
     apply_output_cap: ApplyOutputCapFn
     commit: Callable[[], Awaitable[None]]
+    stage_transcript_source: Callable[
+        [TranscriptSourceReference, TranscriptSource], None
+    ]
     variable_resolver: Any
     resolve_http_input_source_text: Callable[..., Awaitable[FlowHttpInputResolution]]
     file_service: FileService
@@ -301,6 +308,7 @@ async def resolve_step_input(
                 open_audio_download=deps.file_service.get_audio_download,
                 transcription_call_observer=deps.transcription_call_observer,
                 transcript_words_repo=deps.transcript_words_repo,
+                stage_transcript_source=deps.stage_transcript_source,
             )
             record_step_phase(FlowStepPhase.TRANSCRIPTION)
             audio_resolution = await resolve_transcribe_and_attach_audio_input(

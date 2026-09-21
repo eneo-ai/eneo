@@ -19,6 +19,11 @@ from eneo.flows.domain.speaker_labels import (
     renumber_speaker_labels,
 )
 from eneo.flows.domain.transcript_corrections import segments_content_hash
+from eneo.flows.domain.transcript_source import (
+    TranscriptSource,
+    TranscriptSourceBounds,
+    TranscriptSourceOmissionReason,
+)
 from eneo.flows.enums import FlowStepPhase
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import (
@@ -227,7 +232,10 @@ def _empty_speakers() -> list[dict[str, Any]]:
 # Segments are evidence for a reader, not input to any step, so a transcript
 # whose structured view would bloat the step's stored payload keeps only its
 # text; the reader falls back to parsing the timestamped lines.
-MAX_SEGMENTS_BYTES = 256 * 1024
+MAX_EMBEDDED_SEGMENTS_BYTES = 256 * 1024
+# A five-hour diarized transcript is about 0.5 MB before review detail.
+MAX_SEGMENTS_BYTES = 2 * 1024 * 1024
+MAX_DETAIL_BYTES = MAX_SEGMENTS_BYTES
 SEGMENTS_OMITTED_TOO_LARGE = "too_large"
 # Word timings live in their own row (see ``FlowStepTranscriptWords``) and
 # anchor to the stored segments by index, so they exist only when the
@@ -321,6 +329,7 @@ class FlowTranscriptionResult:
     elapsed_ms: int
     files_count: int
     near_inline_limit: bool
+    source: TranscriptSource
     # None: no speaker labels requested. "external": labelled by the external
     # service. "skipped:<reason>": requested but not produced.
     diarization: str | None = None
@@ -622,6 +631,11 @@ async def transcribe_audio_input(
     near_inline_limit = transcript_bytes >= threshold
     estimated_tokens = count_tokens(combined)
     elapsed_ms = int((time.monotonic() - transcription_started) * 1000)
+    source = capture_transcript_source(
+        segments=segments if every_file_segmented else [],
+        speaker_review={"files": review_files} if review_files else None,
+        words=words,
+    )
     kept_segments, segments_omitted_reason = _cap_segments(
         segments if every_file_segmented else []
     )
@@ -633,7 +647,7 @@ async def transcribe_audio_input(
                 ensure_ascii=False,
             ).encode("utf-8")
         )
-        > MAX_SEGMENTS_BYTES
+        > MAX_EMBEDDED_SEGMENTS_BYTES
     ):
         kept_segments = None
         segments_omitted_reason = SEGMENTS_OMITTED_TOO_LARGE
@@ -664,6 +678,7 @@ async def transcribe_audio_input(
         elapsed_ms=elapsed_ms,
         files_count=len(files),
         near_inline_limit=near_inline_limit,
+        source=source,
         diarization=_combine_diarization_outcomes(diarization_outcomes),
         diarization_elapsed_ms=sum(diarization_elapsed)
         if diarization_elapsed
@@ -676,6 +691,59 @@ async def transcribe_audio_input(
         words=kept_words,
         words_omitted_reason=words_omitted_reason,
         speaker_review=review_metadata,
+    )
+
+
+def capture_transcript_source(
+    *,
+    segments: list[dict[str, Any]],
+    speaker_review: dict[str, Any] | None,
+    words: list[dict[str, Any]],
+) -> TranscriptSource:
+    segments_bytes = (
+        len(json.dumps(segments, ensure_ascii=False).encode("utf-8")) if segments else 0
+    )
+    detail_bytes = (
+        len(json.dumps(speaker_review, ensure_ascii=False).encode("utf-8"))
+        if speaker_review
+        else 0
+    )
+    words_bytes = (
+        len(json.dumps(words, ensure_ascii=False).encode("utf-8")) if words else 0
+    )
+    segments_reason = (
+        TranscriptSourceOmissionReason.NO_SEGMENTS
+        if not segments
+        else TranscriptSourceOmissionReason.TOO_LARGE
+        if segments_bytes > MAX_SEGMENTS_BYTES
+        else None
+    )
+    detail_reason = (
+        TranscriptSourceOmissionReason.TOO_LARGE
+        if detail_bytes > MAX_DETAIL_BYTES
+        else None
+    )
+    words_reason = (
+        TranscriptSourceOmissionReason.TOO_LARGE
+        if words_bytes > MAX_WORDS_BYTES
+        else TranscriptSourceOmissionReason.SEGMENTS_UNAVAILABLE
+        if words and segments_reason is not None
+        else None
+    )
+    return TranscriptSource(
+        segments=segments if segments_reason is None else None,
+        speaker_review=speaker_review if detail_reason is None else None,
+        source_hash=segments_content_hash(segments) if segments else None,
+        bounds=TranscriptSourceBounds(
+            segments_bytes=segments_bytes,
+            detail_bytes=detail_bytes,
+            words_bytes=words_bytes,
+            segments_count=len(segments),
+            words_count=sum(len(entry["words"]) for entry in words),
+            segments_omitted_reason=segments_reason,
+            detail_omitted_reason=detail_reason,
+            words_omitted_reason=words_reason,
+        ),
     )
 
 
@@ -698,7 +766,7 @@ def _cap_segments(
     if not segments:
         return None, None
     size = len(json.dumps(segments, ensure_ascii=False).encode("utf-8"))
-    if size > MAX_SEGMENTS_BYTES:
+    if size > MAX_EMBEDDED_SEGMENTS_BYTES:
         return None, SEGMENTS_OMITTED_TOO_LARGE
     return segments, None
 

@@ -2688,3 +2688,65 @@ class FlowStepTranscriptWords(BasePublic):
             name="uq_flow_step_transcript_words_run_step",
         ),
     )
+
+
+class FlowStepTranscriptSources(BasePublic):
+    """Immutable attempt evidence. Writer: FlowTranscriptSourceRepository.insert."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Tenants.id, ondelete="CASCADE", name="fk_step_transcript_sources_tenant"
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Flows.id, ondelete="CASCADE", name="fk_step_transcript_sources_flow"
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    attempt_no: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    source_hash: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    segments_json: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
+    detail_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
+    segments_bytes: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    detail_bytes: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    words_bytes: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    segments_count: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    words_count: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    segments_omitted_reason: Mapped[int | None] = mapped_column(
+        sa.SmallInteger, nullable=True
+    )
+    detail_omitted_reason: Mapped[int | None] = mapped_column(
+        sa.SmallInteger, nullable=True
+    )
+    words_omitted_reason: Mapped[int | None] = mapped_column(
+        sa.SmallInteger, nullable=True
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_step_transcript_sources_run_tenant",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            name="uq_flow_step_transcript_sources_attempt",
+        ),
+        CheckConstraint(
+            "attempt_no >= 1 AND segments_bytes >= 0 AND detail_bytes >= 0 AND words_bytes >= 0 AND segments_count >= 0 AND words_count >= 0",
+            name="ck_transcript_sources_bounds",
+        ),
+    )

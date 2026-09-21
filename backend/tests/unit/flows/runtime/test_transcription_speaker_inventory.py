@@ -170,7 +170,7 @@ async def test_oversized_segments_are_omitted_with_a_reason(
     spool_contract,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(transcription, "MAX_SEGMENTS_BYTES", 10)
+    monkeypatch.setattr(transcription, "MAX_EMBEDDED_SEGMENTS_BYTES", 10)
     transcriber = _transcriber(
         TranscribedAudio(
             FILE_TEXT, 10.0, diarization="external", transcript_segments=FILE_SEGMENTS
@@ -181,6 +181,56 @@ async def test_oversized_segments_are_omitted_with_a_reason(
 
     assert result.segments is None
     assert result.to_metadata()["segments_omitted_reason"] == "too_large"
+
+
+async def test_source_preserves_segments_above_embedded_cap(spool_contract) -> None:
+    assert transcription.MAX_EMBEDDED_SEGMENTS_BYTES == 256 * 1024
+    text = "å" * 150_000
+    result = await _run(
+        spool_contract,
+        [_file("a.mp3")],
+        _transcriber(
+            TranscribedAudio(
+                "Transcript.",
+                18_000.0,
+                transcript_segments=(TranscriptSegment(text, 0.0, 18_000.0),),
+            )
+        ),
+    )
+
+    assert result.segments is None
+    assert result.segments_omitted_reason == "too_large"
+    assert result.source.segments[0]["text"] == text
+    assert result.source.bounds.segments_bytes > 256 * 1024
+    assert result.source.bounds.segments_omitted_reason is None
+    assert "source" not in result.to_metadata()
+
+
+async def test_source_preserves_large_review_detail_independently(spool_contract):
+    result = await _run(
+        spool_contract,
+        [_file("a.mp3")],
+        _transcriber(
+            TranscribedAudio(
+                "Hej.",
+                4.0,
+                transcript_segments=FILE_SEGMENTS,
+                speaker_review={"overlaps": [{"id": "overlap", "text": "å" * 150_000}]},
+            )
+        ),
+    )
+    assert result.segments is None
+    assert result.speaker_review["details_omitted_reason"] == "too_large"
+    assert "overlaps" not in result.speaker_review["files"][0]
+    assert result.source.segments is not None
+    assert (
+        result.source.speaker_review["files"][0]["overlaps"][0]["text"] == "å" * 150_000
+    )
+    assert result.source.bounds.detail_bytes == len(
+        json.dumps(result.source.speaker_review, ensure_ascii=False).encode("utf-8")
+    )
+    assert result.source.bounds.detail_bytes > transcription.MAX_EMBEDDED_SEGMENTS_BYTES
+    assert result.source.bounds.detail_omitted_reason is None
 
 
 FILE_WORDS = (
@@ -238,7 +288,7 @@ async def test_words_are_dropped_with_the_segments_they_anchor_to(
     spool_contract,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(transcription, "MAX_SEGMENTS_BYTES", 10)
+    monkeypatch.setattr(transcription, "MAX_EMBEDDED_SEGMENTS_BYTES", 10)
     transcriber = _transcriber(
         TranscribedAudio(
             FILE_TEXT, 10.0, diarization="external", transcript_segments=TIMED_SEGMENTS
@@ -353,7 +403,7 @@ async def test_review_size_fallback_retains_uncertainty(spool_contract, monkeypa
         transcript_segments=_parse_result_segments(wire["segments"]),
         speaker_review=wire["speaker_review"],
     )
-    monkeypatch.setattr(transcription, "MAX_SEGMENTS_BYTES", 1)
+    monkeypatch.setattr(transcription, "MAX_EMBEDDED_SEGMENTS_BYTES", 1)
     result = await _run(spool_contract, [_file("a.mp3")], _transcriber(source))
     assert result.segments is None
     assert result.words is None

@@ -669,10 +669,51 @@ class FlowRunRepository:
         seed: FlowRunPrefixSeed,
     ) -> None:
         """Import a validated prefix; the caller commits its required creation audit."""
+        from eneo.flows.domain.transcript_source import (
+            MissingTranscriptSourceError,
+            transcript_source_reference,
+            with_transcript_source_reference,
+        )
+        from eneo.flows.infrastructure.flow_transcript_source_repo import (
+            FlowTranscriptSourceRepository,
+        )
+
         now = datetime.now(timezone.utc)
         for source in seed.results:
             if source.id is None or source.current_attempt_no is None:
                 raise ValueError("Imported step results require a persisted attempt.")
+            input_payload = source.input_payload_json
+            reference = transcript_source_reference(input_payload)
+            if reference is not None:
+                if (reference.run_id, reference.step_id, reference.attempt_no) != (
+                    seed.source_run_id,
+                    source.step_id,
+                    source.current_attempt_no,
+                ):
+                    raise ValueError(
+                        "Imported transcript reference does not belong to the source attempt."
+                    )
+                sources = FlowTranscriptSourceRepository(session=self.session)
+                snapshot = await sources.get_for_attempt(
+                    tenant_id=run.tenant_id,
+                    run_id=reference.run_id,
+                    step_id=reference.step_id,
+                    attempt_no=reference.attempt_no,
+                )
+                if snapshot is None:
+                    raise MissingTranscriptSourceError(reference)
+                child_reference = reference.model_copy(
+                    update={"run_id": run.id, "attempt_no": 1}
+                )
+                await sources.insert(
+                    tenant_id=run.tenant_id,
+                    flow_id=run.flow_id,
+                    reference=child_reference,
+                    source=snapshot,
+                )
+                input_payload = with_transcript_source_reference(
+                    input_payload, child_reference
+                )
             provenance = FlowImportedAttemptProvenance(
                 kind=seed.kind,
                 source_run_id=seed.source_run_id,
@@ -685,7 +726,7 @@ class FlowRunRepository:
             values = dict(
                 status=FlowStepResultStatus.COMPLETED.value,
                 current_attempt_no=1,
-                input_payload_json=source.input_payload_json,
+                input_payload_json=input_payload,
                 output_payload_json=source.output_payload_json,
                 model_parameters_json={
                     "mode": seed.kind,
@@ -715,7 +756,7 @@ class FlowRunRepository:
                     step_order=source.step_order,
                     attempt_no=1,
                     status=FlowStepResultStatus.COMPLETED.value,
-                    input_payload_json=source.input_payload_json,
+                    input_payload_json=input_payload,
                     output_payload_json=source.output_payload_json,
                     flow_step_execution_hash=source.flow_step_execution_hash,
                     provenance_json=provenance,

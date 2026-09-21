@@ -36,6 +36,26 @@ from tests.unittests.flows.test_typed_io_executor import (
 spool_contract = audio_spool_test_support.spool_contract
 
 
+async def test_transcription_stages_an_exact_attempt_reference(spool_contract, user):
+    executor, repo, run, files, assistant = _case(user, "Transcript.", spool_contract)
+    step = _runtime_step(input_type="audio", output_mode="transcribe_only")
+    resolved = await executor._resolve_step_input(
+        run=run,
+        step=step,
+        context={"flow_input": {}},
+        prior_results=[],
+        state=_state(),
+        requested_file_ids=list(files),
+        attempt_no=3,
+        version_metadata=_metadata(executor),
+    )
+    reference = resolved.transcription_metadata["source"]
+    assert reference["run_id"] == str(run.id)
+    assert reference["step_id"] == str(step.step_id)
+    assert reference["attempt_no"] == 3
+    assert reference["bounds"]["segments_omitted_reason"] == 2
+
+
 def _case(user, text, spool_contract):
     executor, _, repo, _ = _build_executor(user, max_inline_text_bytes=2048)
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
