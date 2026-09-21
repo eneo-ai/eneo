@@ -4,13 +4,14 @@ Source of [docs.eneo.ai](https://docs.eneo.ai): a [Nextra 4](https://nextra.site
 
 ## Layout
 
-| Path                                                         | Purpose                                                                                                                                       |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/content/**/*.mdx`                                       | The pages. Folders map to URL paths; `_meta.ts` in each folder sets sidebar order and titles.                                                 |
-| `public/`                                                    | Images, diagrams and `CNAME`. Reference them with absolute paths (`/diagrams/x.svg`); `src/mdx-components.js` prefixes the version base path. |
-| `src/app/[[...mdxPath]]/layout.tsx`                          | Site chrome: navbar, version switcher, banner, footer.                                                                                        |
-| `src/lib/versions.ts`, `src/components/VersionSwitcher.tsx`  | Version metadata injected at build time (see below).                                                                                          |
-| `scripts/resolve-versions.mjs`, `scripts/build-versions.mjs` | Multi-version build used by CI.                                                                                                               |
+| Path                                                                   | Purpose                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/content/**/*.mdx`                                                 | The pages. Folders map to URL paths; `_meta.ts` in each folder sets sidebar order and titles.                                                                                                                                                                          |
+| `public/`                                                              | Images, diagrams and `CNAME`. Reference them with absolute paths (`/diagrams/x.svg`); `src/mdx-components.js` prefixes the version base path.                                                                                                                          |
+| `src/components/DocsShell.tsx`, `src/app/[[...mdxPath]]/layout.tsx`    | The document and site chrome: `<html lang>`, navbar, language and version switchers, banner, search, footer. The language comes from the URL, so there is no root layout.                                                                                              |
+| `src/app/global-not-found.tsx`, `src/app/[[...mdxPath]]/not-found.tsx` | The site-wide `404.html`, rendered through the shell via Next's `global-not-found` convention (`experimental.globalNotFound` in `next.config.ts`; still experimental, keep it when upgrading Next). The page switches to Swedish for `/sv/` addresses after hydration. |
+| `src/lib/versions.ts`, `src/components/VersionSwitcher.tsx`            | Version metadata injected at build time (see below).                                                                                                                                                                                                                   |
+| `scripts/resolve-versions.mjs`, `scripts/build-versions.mjs`           | Multi-version build used by CI.                                                                                                                                                                                                                                        |
 
 ## Local development
 

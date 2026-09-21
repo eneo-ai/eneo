@@ -64,3 +64,20 @@ export function versionTargets(basePath: string, pathname: string): string[] {
     ]),
   ];
 }
+
+// The exported 404.html answers any address, including one under another
+// version's base path.
+export function languageAtLocation(
+  pathname: string,
+  basePaths: readonly string[],
+): DocsLanguage {
+  const base =
+    basePaths
+      .filter(
+        (basePath) =>
+          basePath &&
+          (pathname === basePath || pathname.startsWith(`${basePath}/`)),
+      )
+      .sort((a, b) => b.length - a.length)[0] ?? "";
+  return splitDocsPath(pathname.slice(base.length) || "/").language;
+}

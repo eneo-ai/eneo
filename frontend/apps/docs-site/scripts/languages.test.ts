@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { createIndex, close } from "pagefind";
 import {
   hasSwedishPages,
+  languageAtLocation,
   publishedRoutes,
   sourceForPage,
   languagePath,
@@ -76,6 +77,22 @@ test("language URLs retain fragments and never localize assets or external links
     "/v2.1/guides/deployment",
   ]) {
     assert.equal(localizeDocsHref(href, "sv"), href);
+  }
+});
+
+test("the site-wide 404 reads the language from any version's address", () => {
+  const bases = ["", "/v2.1", "/dev"];
+  for (const [pathname, language] of [
+    ["/sv/guides/deployment", "sv"],
+    ["/sv", "sv"],
+    ["/v2.1/sv", "sv"],
+    ["/dev/sv/guides/deployment", "sv"],
+    ["/dev/guides/deployment", "en"],
+    ["/svenska", "en"],
+    ["/v2.1/guides/sv", "en"],
+    ["/", "en"],
+  ]) {
+    assert.equal(languageAtLocation(pathname, bases), language, pathname);
   }
 });
 

@@ -4,7 +4,8 @@ import NotFound from "./[[...mdxPath]]/not-found";
 
 export { metadata } from "@/components/DocsShell";
 
-// Unmatched URLs have no language segment to trust, so the 404 is English.
+// The document is exported in English; NotFound switches to the address's
+// language on the client.
 export default function GlobalNotFound() {
   return (
     <DocsShell language="en" page="/">
