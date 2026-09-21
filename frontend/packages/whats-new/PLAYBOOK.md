@@ -17,13 +17,18 @@ anything a user can see or do differently after the change:
   change your password under My account", not "Add PATCH /users/me/password".
 - Write `No` when nothing changes for users (refactors, CI, dependencies,
   internal admin tooling that has no screen).
-- Add the `user-facing` label to the PR.
 - If the feature has a natural place to point at, give the element a
   `data-tour="<kebab-case-anchor>"` attribute in the same PR. That is what the
   **Show me** button spotlights. Put the attribute on the row or section, not
   on the button inside it — it survives redesigns better. For a whole page,
   pass `tour="<anchor>"` to its `<Page.Title>`; the check script recognises
   both spellings.
+
+CI fails a PR that changes files under `frontend/apps/web/src` or its message
+catalogues without a filled-in section (`.github/scripts/check-user-facing.mjs`).
+Backend-only changes are not forced, but the section is still where the
+release notes come from: a crawler fix or a permission fix that users notice
+belongs there too.
 
 **When does an entry deserve Show me?** When the user would otherwise ask
 "where is that?": a new admin page, a new section on a settings page, a
@@ -39,22 +44,22 @@ corrects it. Context is cheap at PR time and expensive at release time.
 
 Run this when the release branch is cut or the tag is about to be pushed.
 
-1. Collect the raw material. Only PRs labelled `user-facing` merged since the
-   previous release tag:
+1. Collect the raw material — every `## User-facing` section merged since the
+   previous final release, grouped into described / No / missing:
 
    ```bash
-   PREV=$(git describe --tags --abbrev=0 --match 'v*' origin/develop)
-   gh pr list --state merged --base develop --label user-facing \
-     --search "merged:>$(git log -1 --format=%cI "$PREV")" \
-     --json number,title,body,labels --limit 200
+   node scripts/collect_user_facing.mjs > /tmp/user-facing.md
    ```
 
-   Use the `## User-facing` section of each body. Fall back to the title and
-   the `## Changes` section only when the section is missing, and say so in
-   the PR that adds the entry.
+   The default window is `<newest final GitHub release>..origin/develop`
+   (final tags live on release branches, so the script uses a git range, not
+   `git describe`). For a patch release from a release branch:
+   `--since v2.2.0 --head origin/release/v2.2`. Pull requests listed under
+   "No User-facing section" have to be read from their title and `## Changes`;
+   say in the PR that adds the entry which ones you used.
 
-2. Write one entry per PR (merge PRs that describe the same feature) into a
-   new release object at the **top** of `releases` in `releases.json`:
+2. Write one entry per change (merge PRs that describe the same feature) into
+   a new release object at the **top** of `releases` in `releases.json`:
 
    | Field      | Rule                                                                                                                       |
    | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -76,7 +81,9 @@ Run this when the release branch is cut or the tag is about to be pushed.
    - Name screens the way the UI names them ("My account", "Mitt konto").
    - Swedish is not a translation of English: write both as a Swede would
      read them. Keep product nouns (Skill, Space) as the UI shows them.
-   - Skip what users will not notice. Five good entries beat fifteen.
+   - Skip what users will not notice, and merge PRs that are one feature to
+     the user. Five good entries beat fifteen; the announcement shows the
+     first four, so put the biggest changes first.
    - Do not claim what you cannot see in the PR. If unsure, ask the author.
 
 4. Validate and open a PR:
@@ -86,20 +93,26 @@ Run this when the release branch is cut or the tag is about to be pushed.
    cd frontend && bun run --filter @eneo/whats-new format
    ```
 
-   Title the PR `docs(whats-new): draft release notes for vX.Y.Z` and label
-   it `user-facing`. The reviewer is the release owner.
+   Title the PR `docs(whats-new): draft release notes for vX.Y.Z`. The
+   reviewer is the release owner.
 
 ## 3. Review (release owner, 15–30 minutes)
 
-Read it as a user would. Cut, reorder, sharpen. Set `date`. Merge before the
-tag is pushed so the release image ships with its own notes.
+Read it as a user would. Cut, reorder, sharpen. Set `date`. Merge to the
+release branch before the tag is pushed so the release image ships with its
+own notes, and run the tag rule before creating the GitHub release:
 
-The image build enforces this on every `v*` tag
-(`scripts/check_whats_new.py --release-tag`): a **final** tag requires a `date`
-on every bundled release entry, including older history. An RC tag accepts
-undated entries; an entry whose core version is newer than the tag fails
-(notes for a later version must not ship in an older release). A hotfix tag
-needs no entry of its own, but all the notes it does ship must be dated.
+```bash
+python3 scripts/check_whats_new.py --repo-root . --release-tag vX.Y.Z
+```
+
+The image build runs the same command on every `v*` tag: a **final** tag
+requires a `date` on every bundled release entry, including older history.
+An RC tag accepts undated entries; an entry whose core version is newer than
+the tag fails (notes for a later version must not ship in an older release).
+A hotfix tag needs no entry of its own, but all the notes it does ship must be
+dated. Running it first avoids a published GitHub release whose image build
+then fails.
 
 ## Maintenance
 
@@ -114,6 +127,8 @@ else derives from it or is checked against it:
 | Labels in the app (sv/en)             | `apps/web/src/lib/features/whats-new/labels.ts`  | typed exhaustively + the same test                               |
 | Labels on docs.eneo.ai (en)           | `apps/docs-site/src/components/ReleaseNotes.tsx` | typed exhaustively; unknown values render raw, never crash       |
 | Content rules                         | `scripts/check_whats_new.py`                     | CI (frontend job) + `scripts/tests/test_check_whats_new.py`      |
+| Raw material at release time          | `scripts/collect_user_facing.mjs`                | `--self-test` in the script-tests CI job                         |
+| The `## User-facing` section on PRs   | `.github/scripts/check-user-facing.mjs`          | `--self-test` in the script-tests CI job; shared parser          |
 | Version ordering (all three runtimes) | `version-order.cases.json`                       | package, backend and script tests consume the same ordered cases |
 | Backend version pattern               | `backend/src/eneo/whats_new/whats_new_models.py` | mirrors the schema's `version` pattern; unit test                |
 
@@ -171,9 +186,9 @@ when their layout data reloads. New tenants follow the global default (on).
 - The backend keeps two markers per user (`GET /api/v1/whats-new/state/`):
   **seen** (`PUT …/seen/`), the newest release the user has opened the page
   for, and **announced** (`PUT …/announced/`), the newest release they have
-  been shown the one-time announcement dialog for. The profile menu shows a dot while
-  `releases[0].version` is newer than the seen marker, and the dot clears
-  when the user opens `/whats-new`.
+  been shown the one-time announcement dialog for. The profile menu shows a
+  dot while `releases[0].version` is newer than the seen marker, and the dot
+  clears when the user opens `/whats-new`.
 - **Announcement.** On the first app load after a release reaches the user,
   a dialog shows the first four visible entries and the total entry count.
   Its primary action starts the walkthrough, or opens the page if there are
@@ -198,14 +213,17 @@ when their layout data reloads. New tenants follow the global default (on).
   run and cleans up its spotlight and anchor observer. Late results from
   SvelteKit preloads are ignored; the API cannot cancel their network requests.
 - Stops without an anchor are skipped in the direction of travel. Progress
-  shows **Step N**, excluding skipped stops already encountered; it does not
-  promise a total before all pages have been checked. If nothing can be shown,
-  the user gets a message; the announcement also falls back to the notes page.
+  shows **Step N of M**, where M shrinks when a stop turns out to be
+  unreachable; it does not promise a total before all pages have been checked.
+  If nothing can be shown, the user gets a message; the announcement also
+  falls back to the notes page.
 - The tour is derived from visible entries with `showMe`, in release order.
   No second definition or permission list needs to be maintained.
 - The page shows one release at a time (newest selected; older ones via the
   version picker) with area and Show me filters within it.
-- Release notes on docs.eneo.ai render the English text from the same file.
+- Release notes on docs.eneo.ai render the English text from the same file;
+  the versioned docs build snapshots `frontend/packages/whats-new` per
+  release ref, so each documentation version shows its own notes.
 
 ## Backports
 
@@ -213,36 +231,30 @@ A patch release cut from `release/vX.Y` carries its own notes on that
 branch. Cherry-pick the `releases.json` change to `develop` in the same PR
 flow so the file stays a complete history.
 
-## CI rollout and validation
+## Checks in CI
 
-`PR user-facing notes` is a separate workflow. Editing the PR body or labels
-reruns only the lightweight **User-facing section** job. Manual retries read
-current PR metadata from GitHub, rather than the original event payload.
-The code/test workflow continues to report **CI** independently.
+- **Pull requests.** `User-facing section` (`.github/workflows/user-facing.yml`)
+  reruns on every body edit. The same reusable workflow is also called from
+  `ci.yml`, so the existing required **CI** check covers it during rollout.
+  Once the standalone check is added to the develop ruleset's required
+  status checks, remove the `user-facing` caller from `ci.yml` together with
+  its `needs`, `USER_FACING_RESULT` and `check_result` references.
+  Merge-queue candidates report it as skipped; each PR was checked before it
+  entered the queue.
+- **Frontend job.** `scripts/check_whats_new.py` against the real file (also
+  when only the script changes) and the package's `bun test`.
+- **Script tests job.** `scripts/tests/test_check_whats_new.py` plus the
+  `--self-test` runs of `check-user-facing.mjs` and `collect_user_facing.mjs`.
+- **Image build.** The `--release-tag` rule on every `v*` tag.
 
-When introducing this workflow, add **User-facing section** (GitHub Actions)
-to the required status checks in the repository's develop ruleset once the
-workflow is available on the target branch. Keep **CI** and **Dependency
-Review** required. Apply the same requirement to protected release branches
-that use this policy. Until this repository-setting step is done, the new
-check reports failures but does not itself prevent merging. The existing CI
-gate calls the same reusable workflow during this transition so initial PR
-validation stays required. Once the standalone check is required, remove the
-`user-facing` caller from `ci.yml` and its `needs`, `USER_FACING_RESULT`, and
-`check_result` references. The reusable workflow remains the canonical owner;
-its concurrency groups separate standalone and CI runs. Merge-queue
-candidates report it as skipped; each PR is checked before it enters the queue.
-Do not add `edited` to the full CI workflow merely to recheck prose.
-
-Focused regression checks (wrap every local command in the global resource
-supervisor described by the workspace instructions):
+Focused local runs:
 
 - Backend: `pytest tests/unit/whats_new/test_whats_new_models.py tests/integration/test_whats_new_state.py`
-  verifies the shared version contract and real concurrent PostgreSQL writes.
+  (the shared version contract and real concurrent PostgreSQL writes).
 - Package: `bun test frontend/packages/whats-new/src/index.test.js`.
-- Scripts: `python3 -m unittest discover -s scripts/tests -p test_check_whats_new.py`.
-- Web: in `frontend/apps/web`, run `vitest run --project server src/lib/features/whats-new/ --maxWorkers 1 --minWorkers 1`.
-- Browser contract (only when browser execution is authorized):
-  `vitest run --project client src/lib/features/whats-new/tour.svelte.test.ts --maxWorkers 1 --minWorkers 1`.
-  It connects the real tour and driver.js to DOM anchors, with only navigation
-  and network calls replaced.
+- Scripts: `python3 -m unittest discover -s scripts/tests -p test_check_whats_new.py`,
+  `node .github/scripts/check-user-facing.mjs --self-test`,
+  `node scripts/collect_user_facing.mjs --self-test`.
+- Web, in `frontend/apps/web`: `vitest run --project server src/lib/features/whats-new/`
+  and, in a browser, `vitest run --project client src/lib/features/whats-new/tour.svelte.test.ts`
+  (the real tour and driver.js on DOM anchors; only navigation and network calls are replaced).

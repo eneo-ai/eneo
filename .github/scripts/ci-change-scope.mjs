@@ -47,7 +47,9 @@ function classify(rawFiles) {
     "frontend/packages/whats-new/releases.schema.json",
   ].includes(file));
   const backend = full || whatsNewContract || files.some(isBackendFile);
-  const frontend = full || files.some(isShippedFrontendFile);
+  // The release-notes check runs in the frontend job against the real file.
+  const frontend =
+    full || files.some(isShippedFrontendFile) || files.includes("scripts/check_whats_new.py");
   const frontendE2e = full || backend || frontend || files.some(isE2eFile);
   const schema = full || backend || files.some(isSchemaFile);
   const scripts = full || whatsNewContract || files.some(isScriptTestFile);
@@ -165,6 +167,8 @@ function runSelfTest() {
   assert.equal(classify(["frontend/knip.json"]).frontend_e2e, true);
   assert.equal(classify(["frontend/packages/eneo-js/src/types/schema.d.ts"]).schema, true);
   assert.equal(classify([".github/scripts/project-intake.mjs"]).scripts, true);
+  assert.equal(classify(["scripts/check_whats_new.py"]).frontend, true);
+  assert.equal(classify(["scripts/check_whats_new.py"]).scripts, true);
   for (const name of ["version-order.cases.json", "releases.schema.json"]) {
     const contractScope = classify([`frontend/packages/whats-new/${name}`]);
     assert.equal(contractScope.backend, true);

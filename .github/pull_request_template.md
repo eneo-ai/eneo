@@ -12,7 +12,7 @@
 ## User-facing
 <!-- One or two sentences from the user's point of view, or "No".
      Feeds the What's new page at release time — see frontend/packages/whats-new/PLAYBOOK.md.
-     Add the `user-facing` label and a data-tour="..." anchor if there is something to point at. -->
+     Give anything worth pointing at a data-tour="..." anchor. -->
 
 ## Testing
 <!-- How did you test this? -->

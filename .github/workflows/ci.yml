@@ -277,6 +277,7 @@ jobs:
           node .github/scripts/project-intake.mjs --self-test
           node .github/scripts/ci-change-scope.mjs --self-test
           node .github/scripts/check-user-facing.mjs --self-test
+          node scripts/collect_user_facing.mjs --self-test
           node scripts/export_github_roadmap.mjs --self-test
 
   # Preserve the existing required CI gate during rollout. Remove this caller
