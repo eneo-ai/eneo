@@ -196,6 +196,79 @@ def test_sitemap_state_requires_a_failure_free_authoritative_outcome() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("failure_counts", "termination_reason", "healthy", "expected"),
+    [
+        # A healthy crawl cut off at the page limit is not a processing error.
+        ({}, "item_limit", True, CrawlFailureCode.PAGE_LIMIT_REACHED),
+        ({"empty_content": 2}, "item_limit", True, CrawlFailureCode.PAGE_LIMIT_REACHED),
+        ({"http_404": 1}, "item_limit", True, CrawlFailureCode.PAGE_LIMIT_REACHED),
+        ({"http_500": 1}, "item_limit", True, CrawlFailureCode.PROCESSING_FAILED),
+        ({}, "item_limit", False, CrawlFailureCode.PROCESSING_FAILED),
+        # Content-free pages on an otherwise complete crawl are a note.
+        ({"no_chunks": 1}, "completed", True, CrawlFailureCode.CONTENT_SKIPPED),
+        ({"EMPTY_CONTENT": 3}, "completed", True, CrawlFailureCode.CONTENT_SKIPPED),
+        (
+            {"http_404": 2, "no_chunks": 1},
+            "completed",
+            True,
+            CrawlFailureCode.CONTENT_SKIPPED,
+        ),
+        ({"http_404": 2}, "completed", True, CrawlFailureCode.RESOURCES_MISSING),
+        ({"no_chunks": 1}, "completed", False, CrawlFailureCode.PROCESSING_FAILED),
+        (
+            {"no_chunks": 1, "http_500": 1},
+            "completed",
+            True,
+            CrawlFailureCode.PROCESSING_FAILED,
+        ),
+        # Blocking must account for most failed items.
+        (
+            {"http_429": 1, "http_500": 3},
+            "completed",
+            True,
+            CrawlFailureCode.PROCESSING_FAILED,
+        ),
+        (
+            {"http_429": 3, "http_500": 1},
+            "completed",
+            True,
+            CrawlFailureCode.REMOTE_BLOCKED,
+        ),
+        ({"http_429": 1}, "completed", True, CrawlFailureCode.REMOTE_BLOCKED),
+        ({"http_403": 1}, "robots_unreachable", False, CrawlFailureCode.REMOTE_BLOCKED),
+        ({}, "robots_unreachable", False, CrawlFailureCode.REMOTE_UNREACHABLE),
+        # Provider timeouts are our problem, not the website's.
+        (
+            {"embedding_timeout": 4},
+            "completed",
+            True,
+            CrawlFailureCode.PROCESSING_FAILED,
+        ),
+        ({"request_timeout": 4}, "completed", True, CrawlFailureCode.TIMED_OUT),
+        ({}, "timeout", False, CrawlFailureCode.TIMED_OUT),
+        (
+            {"tenant_quota_exceeded": 1, "http_429": 5},
+            "quota_exceeded",
+            False,
+            CrawlFailureCode.TENANT_QUOTA_EXCEEDED,
+        ),
+    ],
+)
+def test_failure_codes_name_benign_endings_and_dominant_blocking(
+    failure_counts: dict[str, int],
+    termination_reason: str,
+    healthy: bool,
+    expected: CrawlFailureCode,
+) -> None:
+    assert (
+        _failure_code_for_crawl(
+            failure_counts, termination_reason, healthy_result=healthy
+        )
+        == expected
+    )
+
+
 async def test_embedding_provider_resolution_is_tenant_scoped() -> None:
     tenant_id = uuid4()
     provider_id = uuid4()

@@ -244,7 +244,7 @@ class TestEmbeddingRequestPolicy:
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, _, _ = await persist_batch(
+            success, failed, _, _, _unchanged = await persist_batch(
                 page_buffer=[
                     {
                         "url": "https://example.com/one",
@@ -298,7 +298,7 @@ class TestPackedEmbeddingRequests:
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, persisted, _ = await persist_batch(
+            success, failed, persisted, _, _unchanged = await persist_batch(
                 page_buffer=[
                     {
                         "url": f"https://example.com/page-{index}",
@@ -349,7 +349,7 @@ class TestPackedEmbeddingRequests:
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, persisted, failures = await persist_batch(
+            success, failed, persisted, failures, _unchanged = await persist_batch(
                 page_buffer=[
                     {
                         "url": f"https://example.com/page-{index}",
@@ -402,7 +402,7 @@ class TestPackedEmbeddingRequests:
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, persisted, failures = await persist_batch(
+            success, failed, persisted, failures, _unchanged = await persist_batch(
                 page_buffer=[
                     {
                         "url": "https://example.com/large",
@@ -463,7 +463,7 @@ class TestMemoryCapsEnforcement:
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, _, _ = await persist_batch(
+            success, failed, _, _, _unchanged = await persist_batch(
                 page_buffer=[
                     {
                         "url": "https://example.com/page",
@@ -558,7 +558,7 @@ class TestMemoryCapsEnforcement:
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, persisted, _ = await persist_batch(
+            success, failed, persisted, _, _unchanged = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=small_cap_ctx,
                 embedding_model=embedding_model_spec,
@@ -754,7 +754,7 @@ class TestPhase2SavepointBehavior:
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, urls, failures = await persist_batch(
+            success, failed, urls, failures, _unchanged = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=replace(crawl_context, max_batch_embedding_bytes=1),
                 embedding_model=embedding_model_spec,
@@ -831,7 +831,13 @@ class TestSuccessfulUrlsTracking:
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success_count, failed_count, successful_urls, _ = await persist_batch(
+            (
+                success_count,
+                failed_count,
+                successful_urls,
+                _,
+                _unchanged,
+            ) = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=embedding_model_spec,
@@ -864,8 +870,8 @@ class TestSuccessfulUrlsTracking:
             container=create_mock_container(MagicMock()),
         )
 
-        assert result == (0, 0, [], {}), (
-            f"Empty buffer should return (0, 0, [], {{}}), got {result}"
+        assert result == (0, 0, [], {}, 0), (
+            f"Empty buffer should return (0, 0, [], {{}}, 0), got {result}"
         )
 
     @pytest.mark.asyncio
@@ -881,7 +887,7 @@ class TestSuccessfulUrlsTracking:
             {"url": "https://example.com/page2", "content": "Content 2"},
         ]
 
-        success, failed, urls, failures_by_reason = await persist_batch(
+        success, failed, urls, failures_by_reason, _unchanged = await persist_batch(
             page_buffer=page_buffer,
             ctx=crawl_context,
             embedding_model=None,  # No model
@@ -935,7 +941,7 @@ class TestSuccessfulUrlsTracking:
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, urls, failures_by_reason = await persist_batch(
+            success, failed, urls, failures_by_reason, _unchanged = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=embedding_model_spec,
@@ -1010,7 +1016,7 @@ class TestPhaseIsolation:
         with patch("eneo.database.database.sessionmanager", mock_sm):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, persisted_urls, failures = await persist_batch(
+            success, failed, persisted_urls, failures, _unchanged = await persist_batch(
                 page_buffer=[{"url": url, "content": content}],
                 ctx=crawl_context,
                 embedding_model=embedding_model_spec,
@@ -1023,7 +1029,13 @@ class TestPhaseIsolation:
                 },
             )
 
-        assert (success, failed, persisted_urls, failures) == (1, 0, [url], {})
+        assert (success, failed, persisted_urls, failures, _unchanged) == (
+            0,
+            0,
+            [url],
+            {},
+            1,
+        )
         mock_embeddings_service.get_embeddings.assert_not_awaited()
         mock_sm.session.assert_not_called()
 
@@ -1041,7 +1053,7 @@ class TestPhaseIsolation:
         with patch("eneo.database.database.sessionmanager", mock_sm):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, persisted_urls, failures = await persist_batch(
+            success, failed, persisted_urls, failures, _unchanged = await persist_batch(
                 page_buffer=[
                     {
                         "url": source_url,
@@ -1058,7 +1070,13 @@ class TestPhaseIsolation:
                 },
             )
 
-        assert (success, failed, persisted_urls, failures) == (1, 0, [source_url], {})
+        assert (success, failed, persisted_urls, failures, _unchanged) == (
+            0,
+            0,
+            [source_url],
+            {},
+            1,
+        )
         mock_embeddings_service.get_embeddings.assert_not_awaited()
         mock_sm.session.assert_not_called()
 
@@ -1096,7 +1114,7 @@ class TestPhaseIsolation:
         ):
             # The outer timeout makes a missing transaction bound fail promptly.
             async with asyncio.timeout(3):
-                success, failed, published, failures = await persist_batch(
+                success, failed, published, failures, _unchanged = await persist_batch(
                     page_buffer=[
                         {"url": cached_url, "content": content, "etag": '"new"'},
                         {"url": unchanged_url, "content": content},
@@ -1114,7 +1132,7 @@ class TestPhaseIsolation:
                     },
                 )
 
-        assert (success, failed) == (2, 1)
+        assert (success, failed, _unchanged) == (1, 1, 1)
         assert published == [unchanged_url, changed_url]
         assert failures == {FailureReason.DB_ERROR.value: [cached_url]}
         mock_embeddings_service.get_embeddings.assert_awaited_once()
@@ -1181,7 +1199,7 @@ class TestPhaseIsolation:
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, persisted_urls, failures = await persist_batch(
+            success, failed, persisted_urls, failures, _unchanged = await persist_batch(
                 page_buffer=[{"url": url, "content": content}],
                 ctx=crawl_context,
                 embedding_model=embedding_model_spec,
@@ -1350,7 +1368,7 @@ class TestTransactionWallTimeGuard:
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, urls, _ = await persist_batch(
+            success, failed, urls, _, _unchanged = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=short_timeout_ctx,
                 embedding_model=embedding_model_spec,

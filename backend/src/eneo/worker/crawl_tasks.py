@@ -39,6 +39,11 @@ from eneo.model_providers.infrastructure.litellm_provider import (
 from eneo.tenants.crawler_settings_helper import get_crawler_setting
 from eneo.users.user_repo import UsersRepository
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
+from eneo.websites.domain.crawl_assessment import (
+    BENIGN_RESOURCE_REASONS,
+    MISSING_RESOURCE_REASONS,
+    is_blocked_reason,
+)
 from eneo.websites.domain.crawl_run import (
     CrawlFailureCode,
     CrawlOrigin,
@@ -232,32 +237,44 @@ def _failure_code_for_crawl(
     *,
     healthy_result: bool = False,
 ) -> CrawlFailureCode:
-    reasons = {reason.lower() for reason, count in failure_counts.items() if count > 0}
-    if (
-        healthy_result
-        and termination_reason == "completed"
-        and reasons
-        and reasons <= {"http_404", "http_410"}
-    ):
-        return CrawlFailureCode.RESOURCES_MISSING
-    reasons.add(termination_reason.lower())
-    if "tenant_quota_exceeded" in reasons:
+    """Name the dominant reason a crawl ended partial or failed.
+
+    Benign endings come first: a healthy crawl cut off at the page limit, or
+    one whose only failures were missing or content-free resources. Remote
+    blocking must account for most failed items before it names the run;
+    a single 429 among hundreds of pages is a note, not a blockade. Provider
+    (embedding) timeouts are processing failures, not remote ones.
+    """
+    counts = {
+        reason.lower(): count for reason, count in failure_counts.items() if count > 0
+    }
+    reasons = set(counts)
+    termination = termination_reason.lower()
+    benign = BENIGN_RESOURCE_REASONS | MISSING_RESOURCE_REASONS
+    if healthy_result and reasons <= benign:
+        if termination in {"item_limit", "page_limit"}:
+            return CrawlFailureCode.PAGE_LIMIT_REACHED
+        if termination == "completed" and reasons:
+            if reasons <= MISSING_RESOURCE_REASONS:
+                return CrawlFailureCode.RESOURCES_MISSING
+            return CrawlFailureCode.CONTENT_SKIPPED
+    if "tenant_quota_exceeded" in reasons or termination == "tenant_quota_exceeded":
         return CrawlFailureCode.TENANT_QUOTA_EXCEEDED
-    if "user_quota_exceeded" in reasons:
+    if "user_quota_exceeded" in reasons or termination == "user_quota_exceeded":
         return CrawlFailureCode.USER_QUOTA_EXCEEDED
-    if any(
-        reason == "robots_disallowed"
-        or reason.startswith(
-            ("http_401", "http_403", "http_407", "http_429", "http_451")
-        )
-        for reason in reasons
-    ):
+    failed_items = sum(counts.values())
+    blocked_items = sum(
+        count for reason, count in counts.items() if is_blocked_reason(reason)
+    )
+    if is_blocked_reason(termination) or blocked_items * 2 > failed_items > 0:
         return CrawlFailureCode.REMOTE_BLOCKED
-    if any("timeout" in reason for reason in reasons):
+    if termination == "timeout" or any(
+        "timeout" in reason and not reason.startswith("embedding") for reason in reasons
+    ):
         return CrawlFailureCode.TIMED_OUT
     if any(
         marker in reason
-        for reason in reasons
+        for reason in reasons | {termination}
         for marker in (
             "connector",
             "connection",
@@ -274,6 +291,15 @@ def _failure_code_for_crawl(
 def _failure_detail(code: CrawlFailureCode, outcome: CrawlOutcome) -> str:
     if code == CrawlFailureCode.RESOURCES_MISSING:
         return "The crawl completed; some pages or files were missing (HTTP 404 or 410)"
+    if code == CrawlFailureCode.PAGE_LIMIT_REACHED:
+        return (
+            "The crawl stopped at the configured page limit; raise the limit in "
+            "the crawler settings to index the remaining pages"
+        )
+    if code == CrawlFailureCode.CONTENT_SKIPPED:
+        return (
+            "The crawl completed; some pages had no indexable content and were skipped"
+        )
     if code == CrawlFailureCode.TENANT_QUOTA_EXCEEDED:
         return "The crawl stopped because the organization's storage quota was exceeded"
     if code == CrawlFailureCode.USER_QUOTA_EXCEEDED:
@@ -499,6 +525,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         files_downloaded: int | None = None,
         pages_failed: int | None = None,
         files_failed: int | None = None,
+        pages_unchanged: int | None = None,
+        files_unchanged: int | None = None,
         failure_summary: dict[str, int] | None = None,
     ) -> bool:
         nonlocal terminalized
@@ -521,6 +549,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     files_downloaded=files_downloaded,
                     pages_failed=pages_failed,
                     files_failed=files_failed,
+                    pages_unchanged=pages_unchanged,
+                    files_unchanged=files_unchanged,
                     failure_summary=failure_summary,
                     failures=failures,
                 )
@@ -546,7 +576,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
     num_pages = 0
     num_published_pages = 0
-    num_not_modified_pages = 0
+    num_unchanged_pages = 0
     num_files = 0
     num_published_files = 0
     num_failed_pages = 0
@@ -862,6 +892,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             files_downloaded=num_published_files,
                             pages_failed=num_failed_pages,
                             files_failed=num_failed_files,
+                            pages_unchanged=num_unchanged_pages,
+                            files_unchanged=num_skipped_files,
                             failures=failures,
                         )
                     if renewed:
@@ -932,7 +964,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             processing_file_seconds = 0.0
 
             async def _flush_pages() -> None:
-                nonlocal num_failed_pages, num_published_pages
+                nonlocal num_failed_pages, num_published_pages, num_unchanged_pages
                 nonlocal page_buffer_bytes, processing_page_seconds
                 nonlocal quota_exceeded
                 if not page_buffer:
@@ -946,6 +978,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     failed_count,
                     successful_urls,
                     batch_failures_by_reason,
+                    unchanged_count,
                 ) = await persist_batch(
                     page_buffer=batch,
                     ctx=crawl_context,
@@ -955,6 +988,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
                 processing_page_seconds += time.time() - flush_started
                 num_published_pages += success_count
+                num_unchanged_pages += unchanged_count
                 crawled_urls.update(successful_urls)
                 for reason, urls in batch_failures_by_reason.items():
                     for url in urls:
@@ -1008,6 +1042,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         failed_count,
                         successful_urls,
                         file_failures,
+                        file_unchanged,
                     ) = await persist_batch(
                         page_buffer=[
                             {
@@ -1023,7 +1058,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         existing_publications=existing_publications,
                     )
                     num_published_files += success_count
-                    if success_count:
+                    num_skipped_files += file_unchanged
+                    if success_count or file_unchanged:
                         crawled_urls.update(successful_urls)
                     if failed_count:
                         num_failed_files += failed_count
@@ -1130,7 +1166,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             ):
                                 await _flush_pages()
                         elif isinstance(event, PageUnchanged):
-                            num_not_modified_pages += 1
+                            num_unchanged_pages += 1
                             crawled_urls.add(event.url)
                         elif isinstance(event, PageFailed):
                             num_failed_pages += 1
@@ -1197,7 +1233,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             crawl_outcome = _classify_crawl_outcome(
                 published_pages=num_published_pages,
-                unchanged_pages=num_not_modified_pages,
+                unchanged_pages=num_unchanged_pages,
                 published_files=num_published_files,
                 unchanged_files=num_skipped_files,
                 failed_pages=num_failed_pages,
@@ -1207,7 +1243,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             crawl_has_usable_result = _crawl_has_usable_result(crawl_outcome)
             useful_items = (
                 num_published_pages
-                + num_not_modified_pages
+                + num_unchanged_pages
                 + num_published_files
                 + num_skipped_files
             )
@@ -1399,7 +1435,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 "=" * 60,
                 f"{status_label}: {params.url}",
                 "-" * 60,
-                f"Pages:   {num_pages} fetched, {num_not_modified_pages} not modified, "
+                f"Pages:   {num_pages} fetched, {num_unchanged_pages} not modified, "
                 f"{num_failed_pages} failed",
                 f"Files:   {num_files} downloaded, {num_failed_files} failed, {num_skipped_files} skipped ({file_skip_rate:.1f}%)",
                 f"Cleanup: {num_deleted_blobs} stale entries removed",
@@ -1425,7 +1461,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 extra={
                     "timings": timings,
                     "pages_crawled": num_published_pages,
-                    "pages_not_modified": num_not_modified_pages,
+                    "pages_not_modified": num_unchanged_pages,
                     "pages_failed": num_failed_pages,
                     "files_crawled": num_published_files,
                     "files_failed": num_failed_files,
@@ -1580,6 +1616,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 files_downloaded=num_published_files,
                 pages_failed=num_failed_pages,
                 files_failed=num_failed_files,
+                pages_unchanged=num_unchanged_pages,
+                files_unchanged=num_skipped_files,
                 failure_summary=failure_summary,
             )
             if not finished:
@@ -1638,6 +1676,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             "status": crawl_outcome.value,
             "pages_crawled": num_published_pages,
             "files_downloaded": num_published_files,
+            "pages_unchanged": num_unchanged_pages,
+            "files_unchanged": num_skipped_files,
         }
     except CrawlLeaseLostError:
         await _stop_heartbeat()
@@ -1649,6 +1689,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             files_downloaded=num_published_files,
             pages_failed=num_failed_pages,
             files_failed=num_failed_files,
+            pages_unchanged=num_unchanged_pages,
+            files_unchanged=num_skipped_files,
             failure_summary=dict(failure_counts) if failure_counts else None,
         ):
             logger.info(
@@ -1659,6 +1701,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 "status": CrawlOutcome.CANCELLED.value,
                 "pages_crawled": num_published_pages,
                 "files_downloaded": num_published_files,
+                "pages_unchanged": num_unchanged_pages,
+                "files_unchanged": num_skipped_files,
             }
         logger.warning(
             "Crawl worker stopped after losing its attempt lease",
@@ -1675,6 +1719,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             files_downloaded=num_published_files,
             pages_failed=num_failed_pages,
             files_failed=num_failed_files,
+            pages_unchanged=num_unchanged_pages,
+            files_unchanged=num_skipped_files,
             failure_summary=dict(failure_counts) if failure_counts else None,
         )
         raise
@@ -1688,6 +1734,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             files_downloaded=num_published_files,
             pages_failed=num_failed_pages,
             files_failed=num_failed_files,
+            pages_unchanged=num_unchanged_pages,
+            files_unchanged=num_skipped_files,
             failure_summary=dict(failure_counts) if failure_counts else None,
         )
         if cancelled:
@@ -1704,6 +1752,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 files_downloaded=num_published_files,
                 pages_failed=num_failed_pages,
                 files_failed=num_failed_files,
+                pages_unchanged=num_unchanged_pages,
+                files_unchanged=num_skipped_files,
                 failure_summary=dict(failure_counts) if failure_counts else None,
             )
             if interrupted:
@@ -1722,6 +1772,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             files_downloaded=num_published_files,
             pages_failed=num_failed_pages,
             files_failed=num_failed_files,
+            pages_unchanged=num_unchanged_pages,
+            files_unchanged=num_skipped_files,
             failure_summary=dict(failure_counts) if failure_counts else None,
         )
         raise

@@ -69,10 +69,22 @@ class WebsiteMetadata(BaseModel):
 
 
 class CrawlRunPublic(InDB):
-    pages_crawled: Optional[int]
+    pages_crawled: Optional[int] = Field(
+        description="Pages that were (re)indexed in this run."
+    )
     files_downloaded: Optional[int]
     pages_failed: Optional[int]
     files_failed: Optional[int]
+    pages_unchanged: Optional[int] = Field(
+        default=None,
+        description="Pages verified unchanged and left as they were (HTTP 304 "
+        "or identical content). Null for runs recorded before this was tracked.",
+    )
+    files_unchanged: Optional[int] = Field(
+        default=None,
+        description="Files verified unchanged and left as they were. Null for "
+        "runs recorded before this was tracked.",
+    )
     failure_summary: Optional[dict[str, int]] = None
     status: Status
     phase: CrawlPhase
@@ -95,6 +107,8 @@ class CrawlRunPublic(InDB):
             files_downloaded=crawl_run.files_downloaded,
             pages_failed=crawl_run.pages_failed,
             files_failed=crawl_run.files_failed,
+            pages_unchanged=crawl_run.pages_unchanged,
+            files_unchanged=crawl_run.files_unchanged,
             failure_summary=crawl_run.failure_summary,
             status=crawl_run.status,
             phase=crawl_run.phase,

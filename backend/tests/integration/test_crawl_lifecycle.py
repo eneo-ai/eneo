@@ -334,6 +334,8 @@ async def test_attempt_token_fences_claim_renewal_and_terminalization(
             files_downloaded=2,
             pages_failed=1,
             files_failed=0,
+            pages_unchanged=4,
+            files_unchanged=1,
         )
         assert (
             await session.scalar(
@@ -348,6 +350,8 @@ async def test_attempt_token_fences_claim_renewal_and_terminalization(
         assert progress.files_downloaded == 2
         assert progress.pages_failed == 1
         assert progress.files_failed == 0
+        assert progress.pages_unchanged == 4
+        assert progress.files_unchanged == 1
         assert (
             await repo.renew_attempt_lease(
                 attempt_id,
@@ -635,6 +639,7 @@ async def test_cancel_leased_attempt_stops_renewal_and_terminalizes_cancelled(
             failure_detail="The crawl was stopped by a user",
             pages_crawled=12,
             pages_failed=1,
+            pages_unchanged=3,
         )
 
         finished = await repo.one(run.id)
@@ -642,6 +647,7 @@ async def test_cancel_leased_attempt_stops_renewal_and_terminalizes_cancelled(
         assert finished.outcome == CrawlOutcome.CANCELLED
         assert finished.pages_crawled == 12
         assert finished.pages_failed == 1
+        assert finished.pages_unchanged == 3
         assert (
             await session.scalar(
                 sa.select(sa.func.count()).select_from(CrawlRunFailures)

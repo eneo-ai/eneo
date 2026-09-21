@@ -104,7 +104,13 @@ class TestPersistenceModuleSemantics:
             provider_config={},
         )
 
-        success, failed, success_urls, failures_by_reason = await persist_batch(
+        (
+            success,
+            failed,
+            success_urls,
+            failures_by_reason,
+            _unchanged,
+        ) = await persist_batch(
             page_buffer=[],
             ctx=ctx,
             embedding_model=embedding_model,
@@ -143,7 +149,13 @@ class TestPersistenceModuleSemantics:
             {"url": "https://example.com/page2", "content": "Test content 2"},
         ]
 
-        success, failed, success_urls, failures_by_reason = await persist_batch(
+        (
+            success,
+            failed,
+            success_urls,
+            failures_by_reason,
+            _unchanged,
+        ) = await persist_batch(
             page_buffer=page_buffer,
             ctx=ctx,
             embedding_model=None,  # No embedding model

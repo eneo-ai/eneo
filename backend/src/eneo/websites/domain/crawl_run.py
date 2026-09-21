@@ -54,6 +54,8 @@ class CrawlFailureCode(StrEnum):
     TIMED_OUT = "timed_out"
     PROCESSING_FAILED = "processing_failed"
     RESOURCES_MISSING = "resources_missing"
+    PAGE_LIMIT_REACHED = "page_limit_reached"
+    CONTENT_SKIPPED = "content_skipped"
     TENANT_QUOTA_EXCEEDED = "tenant_quota_exceeded"
     USER_QUOTA_EXCEEDED = "user_quota_exceeded"
     CANCELLED = "cancelled"
@@ -124,6 +126,8 @@ class CrawlRun(Entity):
         cancel_requested_at: Optional[datetime] = None,
         failure_summary: Optional[dict[str, int]] = None,
         failure_details_available: bool = False,
+        pages_unchanged: Optional[int] = None,
+        files_unchanged: Optional[int] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.website_id = website_id
@@ -132,6 +136,8 @@ class CrawlRun(Entity):
         self.files_downloaded = files_downloaded
         self.pages_failed = pages_failed
         self.files_failed = files_failed
+        self.pages_unchanged = pages_unchanged
+        self.files_unchanged = files_unchanged
         self.phase = phase
         self.outcome = outcome
         self.origin = origin
@@ -244,4 +250,6 @@ class CrawlRun(Entity):
             cancel_requested_at=record.cancel_requested_at,
             failure_summary=record.failure_summary,
             failure_details_available=record.failure_details_available,
+            pages_unchanged=record.pages_unchanged,
+            files_unchanged=record.files_unchanged,
         )

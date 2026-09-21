@@ -487,8 +487,14 @@ async def persist_batch(
     embedding_model: EmbeddingModelSpec | None,
     container: "Container",
     existing_publications: dict[str, tuple[bytes, UUID]] | None = None,
-) -> tuple[int, int, list[str], dict[str, list[str]]]:
+) -> tuple[int, int, list[str], dict[str, list[str]], int]:
     """Embed changed pages together and publish complete, memory-bounded groups.
+
+    Returns ``(published, failed, successful_identities, failures_by_reason,
+    unchanged)``. Pages whose content hash and embedding model match the
+    existing publication are verified but not re-indexed; they count as
+    unchanged, not published, while still appearing in successful_identities
+    so stale-content cleanup keeps them.
 
     Chunking and provider I/O happen without a database connection. The model
     adapter owns sequential request batching through max_batch_size. Only pages
@@ -499,10 +505,11 @@ async def persist_batch(
     aggregate execution bound.
     """
     if not page_buffer:
-        return 0, 0, [], {}
+        return 0, 0, [], {}, 0
 
     success_count = 0
     failed_count = 0
+    unchanged_count = 0
     successful_identities: list[str] = []
     failures_by_reason: dict[str, list[str]] = {}
 
@@ -519,7 +526,7 @@ async def persist_batch(
                 FailureReason.NO_EMBEDDING_MODEL,
                 page["url"],
             )
-        return 0, len(page_buffer), [], failures_by_reason
+        return 0, len(page_buffer), [], failures_by_reason, 0
 
     # Provider data is resolved during the short bootstrap transaction. A
     # fallback here would retain a database connection during provider I/O.
@@ -541,7 +548,7 @@ async def persist_batch(
                 FailureReason.MISSING_PROVIDER,
                 page["url"],
             )
-        return 0, len(page_buffer), [], failures_by_reason
+        return 0, len(page_buffer), [], failures_by_reason, 0
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=_CHUNK_SIZE,
@@ -589,7 +596,7 @@ async def persist_batch(
                 content_hash,
                 embedding_model.id,
             ):
-                success_count += 1
+                unchanged_count += 1
                 successful_identities.append(url)
                 if (
                     page.get("etag") is not None
@@ -643,7 +650,7 @@ async def persist_batch(
         successful_identities = [
             title for title in successful_identities if title not in failed_identities
         ]
-        success_count -= len(validator_refreshes)
+        unchanged_count -= len(validator_refreshes)
         failed_count += len(validator_refreshes)
         for page in validator_refreshes:
             add_failure(FailureReason.DB_ERROR, page["url"])
@@ -662,6 +669,7 @@ async def persist_batch(
             failed_count,
             successful_identities,
             failures_by_reason,
+            unchanged_count,
         )
 
     try:
@@ -684,6 +692,7 @@ async def persist_batch(
             failed_count + len(plans),
             successful_identities,
             failures_by_reason,
+            unchanged_count,
         )
 
     chunks_to_embed = [
@@ -733,6 +742,7 @@ async def persist_batch(
             failed_count + len(plans),
             successful_identities,
             failures_by_reason,
+            unchanged_count,
         )
 
     prepared_pages: list[PreparedPage] = []
@@ -837,6 +847,7 @@ async def persist_batch(
                     failed_count,
                     successful_identities,
                     failures_by_reason,
+                    unchanged_count,
                 )
 
     # Advance once after an exact successful result set so ChunkEmbeddingList
@@ -873,4 +884,10 @@ async def persist_batch(
             },
         )
 
-    return success_count, failed_count, successful_identities, failures_by_reason
+    return (
+        success_count,
+        failed_count,
+        successful_identities,
+        failures_by_reason,
+        unchanged_count,
+    )

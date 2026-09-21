@@ -1474,3 +1474,104 @@ async def test_scheduled_websites_require_admin_and_stay_in_tenant(
     assert response.status_code == 200, response.text
     assert response.json()["items"] == []
     assert str(ours) not in response.text
+
+
+async def test_overview_treats_minor_partials_as_completed(
+    client, db_container, admin_user, website_id, headers
+):
+    """Partial runs with only benign codes or a tiny failed share are completed
+    with notes; severe codes, failure-heavy runs and rows without unchanged
+    counters remain issues."""
+    now = datetime.now(timezone.utc)
+    rows = {
+        "minor": dict(
+            failure_code="processing_failed",
+            pages_crawled=340,
+            pages_unchanged=17,
+            files_downloaded=2,
+            files_unchanged=0,
+            pages_failed=1,
+            files_failed=0,
+        ),
+        "benign": dict(
+            failure_code="page_limit_reached",
+            pages_crawled=162,
+            pages_unchanged=0,
+            files_downloaded=0,
+            files_unchanged=0,
+            pages_failed=0,
+            files_failed=0,
+        ),
+        "severe": dict(
+            failure_code="processing_failed",
+            pages_crawled=5,
+            pages_unchanged=0,
+            files_downloaded=0,
+            files_unchanged=0,
+            pages_failed=5,
+            files_failed=0,
+        ),
+        "blocked": dict(
+            failure_code="remote_blocked",
+            pages_crawled=85,
+            pages_unchanged=0,
+            files_downloaded=0,
+            files_unchanged=0,
+            pages_failed=0,
+            files_failed=1,
+        ),
+        "legacy": dict(
+            failure_code="processing_failed", pages_crawled=357, pages_failed=1
+        ),
+    }
+    ids = {label: uuid4() for label in rows}
+    async with db_container(user=admin_user) as container:
+        for offset, (label, columns) in enumerate(rows.items()):
+            container.session().add(
+                CrawlRuns(
+                    id=ids[label],
+                    website_id=website_id,
+                    tenant_id=admin_user.tenant_id,
+                    phase="terminal",
+                    outcome="partial",
+                    origin="manual",
+                    finished_at=now - timedelta(minutes=30 - offset),
+                    **columns,
+                )
+            )
+
+    async def listed(status: str) -> set[str]:
+        response = await client.get(
+            "/api/v1/admin/crawler/",
+            params={
+                "view": "recent",
+                "period": "last_24_hours",
+                "status": status,
+                "limit": 100,
+            },
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        return {item["run"]["id"] for item in response.json()["items"]}
+
+    completed = await listed("completed")
+    warnings = await listed("warnings")
+    assert {str(ids["minor"]), str(ids["benign"])} <= completed
+    assert {str(ids["severe"]), str(ids["blocked"]), str(ids["legacy"])} <= warnings
+    assert not ({str(ids["minor"]), str(ids["benign"])} & warnings)
+    assert not (
+        {str(ids["severe"]), str(ids["blocked"]), str(ids["legacy"])} & completed
+    )
+
+    response = await client.get(
+        f"/api/v1/admin/crawler/runs/{ids['minor']}/", headers=headers
+    )
+    assert response.status_code == 200, response.text
+    run = response.json()["run"]
+    assert (run["pages_unchanged"], run["files_unchanged"]) == (17, 0)
+    legacy = (
+        await client.get(
+            f"/api/v1/admin/crawler/runs/{ids['legacy']}/", headers=headers
+        )
+    ).json()["run"]
+    assert legacy["pages_unchanged"] is None

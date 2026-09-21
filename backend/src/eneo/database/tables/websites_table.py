@@ -86,11 +86,19 @@ class CrawlRuns(BasePublic):
             name="ck_crawl_runs_files_failed",
         ),
         CheckConstraint(
+            "pages_unchanged IS NULL OR pages_unchanged >= 0",
+            name="ck_crawl_runs_pages_unchanged",
+        ),
+        CheckConstraint(
+            "files_unchanged IS NULL OR files_unchanged >= 0",
+            name="ck_crawl_runs_files_unchanged",
+        ),
+        CheckConstraint(
             "failure_code IS NULL OR failure_code IN ("
             "'dispatch_failed', 'invalid_dispatch', 'worker_interrupted', "
             "'lease_expired', 'remote_unreachable', 'remote_blocked', "
             "'timed_out', 'processing_failed', 'cancelled', "
-            "'tenant_quota_exceeded', 'user_quota_exceeded', 'resources_missing')",
+            "'tenant_quota_exceeded', 'user_quota_exceeded', 'resources_missing', 'page_limit_reached', 'content_skipped')",
             name="ck_crawl_runs_failure_code",
         ),
         CheckConstraint(
@@ -136,6 +144,12 @@ class CrawlRuns(BasePublic):
     files_downloaded: Mapped[Optional[int]] = mapped_column()
     pages_failed: Mapped[Optional[int]] = mapped_column()
     files_failed: Mapped[Optional[int]] = mapped_column()
+    pages_unchanged: Mapped[Optional[int]] = mapped_column(
+        comment="Pages verified unchanged (HTTP 304 or identical content)"
+    )
+    files_unchanged: Mapped[Optional[int]] = mapped_column(
+        comment="Files verified unchanged (identical extracted text)"
+    )
     failure_summary: Mapped[Optional[dict[str, int]]] = mapped_column(
         JSONB,
         nullable=True,
@@ -224,7 +238,7 @@ class CrawlAttempts(BasePublic):
             "'dispatch_failed', 'invalid_dispatch', 'worker_interrupted', "
             "'lease_expired', 'remote_unreachable', 'remote_blocked', "
             "'timed_out', 'processing_failed', 'cancelled', "
-            "'tenant_quota_exceeded', 'user_quota_exceeded', 'resources_missing')",
+            "'tenant_quota_exceeded', 'user_quota_exceeded', 'resources_missing', 'page_limit_reached', 'content_skipped')",
             name="ck_crawl_attempts_failure_code",
         ),
         CheckConstraint(

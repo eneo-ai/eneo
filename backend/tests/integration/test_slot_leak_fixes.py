@@ -77,8 +77,8 @@ class TestPersistBatchReturnType:
         )
 
         # Should return (0, 0, [], {})
-        assert result == (0, 0, [], {}), (
-            f"Empty buffer should return (0, 0, [], {{}}), got {result}"
+        assert result == (0, 0, [], {}, 0), (
+            f"Empty buffer should return (0, 0, [], {{}}, 0), got {result}"
         )
 
     @pytest.mark.asyncio
@@ -118,7 +118,7 @@ class TestPersistBatchReturnType:
             container=create_mock_container(MagicMock()),
         )
 
-        success_count, failed_count, successful_urls, _ = result
+        success_count, failed_count, successful_urls, _, _unchanged = result
 
         # All pages should fail when no embedding model
         assert success_count == 0, f"Expected 0 successes, got {success_count}"

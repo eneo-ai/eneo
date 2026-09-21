@@ -1370,7 +1370,7 @@ async def test_file_crawl_reobserves_linked_files_before_stale_cleanup(
     monkeypatch.setattr(
         crawl_tasks_module,
         "persist_batch",
-        AsyncMock(return_value=(1, 0, [website.url], {})),
+        AsyncMock(return_value=(1, 0, [website.url], {}, 0)),
     )
     engine = _ConditionalFileCrawlEngine(file_path)
     container = Container(session=providers.Object(SessionProxy()))
@@ -1477,11 +1477,14 @@ async def test_recursive_crawl_rediscovers_children_of_cached_pages(
         container.create_embeddings_service.override(providers.Object(embeddings))
         result = await crawl_task(job_id=dispatch_id, params=task, container=container)
 
+    # Both pages matched their stored content: verified, nothing re-indexed.
     assert result["status"] == (
         CrawlOutcome.FAILED.value
         if robots_unreachable
-        else CrawlOutcome.SUCCEEDED.value
+        else CrawlOutcome.UNCHANGED.value
     )
+    if not robots_unreachable:
+        assert (result["pages_crawled"], result["pages_unchanged"]) == (0, 2)
     assert set(requested) == (set() if robots_unreachable else {"/", "/child"})
     embeddings.get_embeddings.assert_not_awaited()
     async with db_session() as session:
@@ -1541,10 +1544,15 @@ async def test_page_only_sitemap_forwards_conditional_validators(
     result = await crawl_task(job_id=dispatch_id, params=task, container=container)
 
     assert result["status"] == CrawlOutcome.UNCHANGED.value
+    assert (result["pages_crawled"], result["pages_unchanged"]) == (0, 1)
     assert engine.request is not None
     assert engine.request.conditional_gets == (
         ConditionalGet(url=cast(str, normalize_url(website.url)), etag='"page-v1"'),
     )
+    async with db_session() as session:
+        finished = await CrawlRunRepository(session).one(run.id)
+        assert (finished.pages_crawled, finished.pages_unchanged) == (0, 1)
+        assert finished.files_unchanged == 0
 
 
 async def test_validator_database_failure_finishes_partial_and_preserves_existing_content(
@@ -1892,7 +1900,7 @@ async def test_persistence_failure_is_not_counted_as_a_successful_page(
     monkeypatch.setattr(
         crawl_tasks_module,
         "persist_batch",
-        AsyncMock(return_value=(0, 1, [], {"db_error": [website.url]})),
+        AsyncMock(return_value=(0, 1, [], {"db_error": [website.url]}, 0)),
     )
     container = Container(session=providers.Object(SessionProxy()))
     container.crawler.override(providers.Object(_SinglePageCrawlEngine()))
@@ -2043,8 +2051,8 @@ async def test_quota_exhaustion_stops_crawl_and_finishes_the_job(
         urls = [page["url"] for page in page_buffer]
         published_batches += 1
         if published_prefix and published_batches == 1:
-            return len(urls), 0, urls, {}
-        return 0, len(urls), [], {reason: urls}
+            return len(urls), 0, urls, {}, 0
+        return 0, len(urls), [], {reason: urls}, 0
 
     publisher = AsyncMock(side_effect=publish)
     monkeypatch.setattr(crawl_tasks_module, "persist_batch", publisher)
@@ -2100,7 +2108,7 @@ async def test_quota_exhaustion_stops_crawl_and_finishes_the_job(
 @pytest.mark.parametrize(
     ("engine", "expected_failures", "expects_backoff", "expected_code"),
     [
-        (_PageLimitedCrawlEngine(), 0, False, "processing_failed"),
+        (_PageLimitedCrawlEngine(), 0, False, "page_limit_reached"),
         (_UsefulPartialCrawlEngine(), 0, False, "processing_failed"),
         (_UsefulPartialCrawlEngine("http_404"), 0, False, "resources_missing"),
         (_FailureDominatedPartialCrawlEngine(), 4, True, "processing_failed"),
@@ -2229,8 +2237,8 @@ async def test_published_files_are_not_reduced_by_unrelated_download_failures(
     second_path = tmp_path / "second.pdf"
     persist_file = AsyncMock(
         side_effect=[
-            (1, 0, [first_path.stem], {}),
-            (1, 0, [second_path.stem], {}),
+            (1, 0, [first_path.stem], {}, 0),
+            (1, 0, [second_path.stem], {}, 0),
         ]
     )
     monkeypatch.setattr(crawl_tasks_module, "persist_batch", persist_file)
@@ -2288,7 +2296,7 @@ async def test_extraction_limit_records_file_failure_and_continues_crawl(
     monkeypatch.setattr(
         crawl_tasks_module,
         "persist_batch",
-        AsyncMock(return_value=(1, 0, [useful_url], {})),
+        AsyncMock(return_value=(1, 0, [useful_url], {}, 0)),
     )
     container = Container(session=providers.Object(SessionProxy()))
     container.crawler.override(

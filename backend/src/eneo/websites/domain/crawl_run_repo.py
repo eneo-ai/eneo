@@ -21,6 +21,11 @@ from eneo.jobs.job_models import Task
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import Status
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
+from eneo.websites.domain.crawl_assessment import (
+    BENIGN_FAILURE_CODES,
+    MINOR_FAILURE_SHARE,
+    SEVERE_FAILURE_CODES,
+)
 from eneo.websites.domain.crawl_run import (
     CrawlFailureCode,
     CrawlOrigin,
@@ -50,6 +55,38 @@ _CLEAN_OUTCOMES = {
     CrawlOutcome.UNCHANGED,
     CrawlOutcome.EMPTY,
 }
+
+
+def _minor_partial(run: type[CrawlRunsTable]) -> sa.ColumnElement[bool]:
+    """SQL twin of crawl_is_minor_partial: completed with notes, not an issue."""
+    failed = sa.func.coalesce(run.pages_failed, 0) + sa.func.coalesce(
+        run.files_failed, 0
+    )
+    total = (
+        failed
+        + sa.func.coalesce(run.pages_crawled, 0)
+        + sa.func.coalesce(run.pages_unchanged, 0)
+        + sa.func.coalesce(run.files_downloaded, 0)
+        + sa.func.coalesce(run.files_unchanged, 0)
+    )
+    counters_known = sa.and_(
+        run.pages_crawled.is_not(None),
+        run.pages_unchanged.is_not(None),
+        run.files_downloaded.is_not(None),
+        run.files_unchanged.is_not(None),
+        run.pages_failed.is_not(None),
+        run.files_failed.is_not(None),
+    )
+    return sa.or_(
+        run.failure_code.in_([code.value for code in BENIGN_FAILURE_CODES]),
+        sa.and_(
+            run.failure_code.not_in([code.value for code in SEVERE_FAILURE_CODES]),
+            counters_known,
+            failed <= MINOR_FAILURE_SHARE * total,
+        ),
+    )
+
+
 _PENDING_TRANSPORT_CLEANUP = sa.and_(
     CrawlAttempts.failure_code.in_(
         (
@@ -267,17 +304,12 @@ class CrawlRunRepository:
             CrawlHistoryPeriod.YESTERDAY: yesterday,
         }[period]
         queued = run.phase.in_((CrawlPhase.PENDING_DISPATCH, CrawlPhase.QUEUED))
+        minor = _minor_partial(run)
         completed = sa.or_(
             run.outcome.in_(_CLEAN_OUTCOMES),
-            sa.and_(
-                run.outcome == CrawlOutcome.PARTIAL,
-                run.failure_code == CrawlFailureCode.RESOURCES_MISSING,
-            ),
+            sa.and_(run.outcome == CrawlOutcome.PARTIAL, minor),
         )
-        partial = sa.and_(
-            run.outcome == CrawlOutcome.PARTIAL,
-            run.failure_code.is_distinct_from(CrawlFailureCode.RESOURCES_MISSING),
-        )
+        partial = sa.and_(run.outcome == CrawlOutcome.PARTIAL, ~minor)
         unsuccessful = run.outcome.in_((CrawlOutcome.FAILED, CrawlOutcome.INTERRUPTED))
         cancelled = run.outcome == CrawlOutcome.CANCELLED
         issues = sa.or_(partial, unsuccessful)
@@ -663,6 +695,8 @@ class CrawlRunRepository:
             "files_downloaded": crawl_run.files_downloaded,
             "pages_failed": crawl_run.pages_failed,
             "files_failed": crawl_run.files_failed,
+            "pages_unchanged": crawl_run.pages_unchanged,
+            "files_unchanged": crawl_run.files_unchanged,
             "failure_summary": crawl_run.failure_summary,
             "phase": crawl_run.phase.value,
             "outcome": crawl_run.outcome.value if crawl_run.outcome else None,
@@ -1273,6 +1307,8 @@ class CrawlRunRepository:
         files_downloaded: int | None = None,
         pages_failed: int | None = None,
         files_failed: int | None = None,
+        pages_unchanged: int | None = None,
+        files_unchanged: int | None = None,
         failures: Sequence[CrawlResourceFailure] = (),
     ) -> bool:
         if lease_duration <= timedelta(0):
@@ -1282,6 +1318,8 @@ class CrawlRunRepository:
             "files_downloaded": files_downloaded,
             "pages_failed": pages_failed,
             "files_failed": files_failed,
+            "pages_unchanged": pages_unchanged,
+            "files_unchanged": files_unchanged,
         }
         if any(value is not None and value < 0 for value in progress.values()):
             raise ValueError("Crawl counters cannot be negative")
@@ -1396,6 +1434,8 @@ class CrawlRunRepository:
         files_downloaded: int | None = None,
         pages_failed: int | None = None,
         files_failed: int | None = None,
+        pages_unchanged: int | None = None,
+        files_unchanged: int | None = None,
         failure_summary: dict[str, int] | None = None,
         failures: Sequence[CrawlResourceFailure] = (),
     ) -> bool:
@@ -1409,6 +1449,8 @@ class CrawlRunRepository:
             files_downloaded,
             pages_failed,
             files_failed,
+            pages_unchanged,
+            files_unchanged,
         )
         if any(value is not None and value < 0 for value in counters):
             raise ValueError("Crawl counters cannot be negative")
@@ -1453,6 +1495,10 @@ class CrawlRunRepository:
             run.pages_failed = pages_failed
         if files_failed is not None:
             run.files_failed = files_failed
+        if pages_unchanged is not None:
+            run.pages_unchanged = pages_unchanged
+        if files_unchanged is not None:
+            run.files_unchanged = files_unchanged
         if failure_summary is not None:
             run.failure_summary = failure_summary
         await self._record_failures(run.id, failures)
