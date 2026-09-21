@@ -3136,6 +3136,54 @@ def test_failure_text_fits_budget_with_explicit_shortening(runtime_truncated, bu
     assert "Avvisad utdata: utelämnad av utrymmesskäl, inte läst" in omitted_block
 
 
+@pytest.mark.parametrize("budget", [30000, 2000])
+def test_truncated_failure_samples_survive_review_budget(budget):
+    from eneo.flows.ai_builder.ai_builder_flow_review import FlowReviewFailureFact
+    from eneo.flows.domain.step_output import sample_rejected_output
+
+    output = sample_rejected_output(
+        "HEAD å " + " answer" * 16384 + " TAIL ö", max_inline_bytes=6000
+    )
+    evidence = FlowReviewEvidence(
+        flow_version=1,
+        definition_checksum="sum",
+        evidence_classification_level=3,
+        completed_run_count=0,
+        failed_run_count=1,
+        steps=[],
+        facts=[],
+        failure=FlowReviewFailureFact(
+            run_id=uuid4(),
+            step_order=3,
+            attempt_no=1,
+            error_code="flow_llm_output_truncated",
+            error_message="truncated",
+            effective_prompt="Return JSON. " * 100,
+            rejected_output=output,
+            requested_model=None,
+            finish_reason="length",
+        ),
+    )
+    fitted = fit_review_evidence(
+        evidence, fits=lambda value: len(render_review_evidence(value)) <= budget
+    )
+    assert fitted.failure is not None
+    assert fitted.failure.rejected_output is not None
+    retained = fitted.failure.rejected_output
+    assert retained.evidence is not None
+    assert retained.evidence.observed_bytes == output.evidence.observed_bytes
+    assert retained.evidence.sha256 == output.evidence.sha256
+    assert retained.evidence.sampling_status == "sampled"
+    rendered = render_review_evidence(fitted)
+    assert len(rendered) <= budget
+    assert "finish_reason=length" in rendered
+    assert output.evidence.sha256 in rendered
+    if budget == 30000:
+        assert "HEAD å" in rendered
+        assert "TAIL ö" in rendered
+    assert "bara början sparades" not in rendered
+
+
 def test_content_free_failure_fits_budget_without_an_output_excerpt():
     from eneo.flows.ai_builder.ai_builder_flow_review import FlowReviewFailureFact
 

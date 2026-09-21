@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.exceptions import TypedIOValidationException
@@ -23,10 +24,29 @@ class StepOutputMetadataError(ValueError):
     """Persisted step text metadata is incomplete or internally inconsistent."""
 
 
+class RejectedOutputEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tail: str
+    observed_bytes: int | None = Field(ge=0)
+    sha256: str | None = Field(pattern=r"^[0-9a-f]{64}$")
+    sampling_status: Literal["complete", "sampled", "unavailable"]
+
+
 @dataclass(frozen=True)
 class RejectedOutput:
     text: str
     truncated_by_runtime: bool
+    evidence: RejectedOutputEvidence | None = None
+
+    def to_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            REJECTED_OUTPUT_KEY: self.text,
+            REJECTED_OUTPUT_TRUNCATED_KEY: self.truncated_by_runtime,
+        }
+        if self.evidence is not None:
+            payload["rejection_evidence"] = self.evidence.model_dump(mode="json")
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +55,7 @@ class RejectedCompletion:
 
     finish_reason: str | None
     provider_response_id: str | None
+    output: RejectedOutput | None = None
 
 
 class StepOutputValidationException(TypedIOValidationException):
@@ -58,10 +79,56 @@ def utf8_prefix(text: str, *, max_bytes: int) -> str:
 def build_rejected_output_payload(
     text: str, *, max_inline_bytes: int
 ) -> dict[str, object]:
-    return {
-        REJECTED_OUTPUT_KEY: utf8_prefix(text, max_bytes=max_inline_bytes),
-        REJECTED_OUTPUT_TRUNCATED_KEY: len(text.encode("utf-8")) > max_inline_bytes,
-    }
+    return RejectedOutput(
+        text=utf8_prefix(text, max_bytes=max_inline_bytes),
+        truncated_by_runtime=len(text.encode("utf-8")) > max_inline_bytes,
+    ).to_payload()
+
+
+def sample_rejected_output(
+    text: str | None, *, max_inline_bytes: int
+) -> RejectedOutput:
+    encoded = text.encode("utf-8") if text is not None else b""
+    digest = hashlib.sha256(encoded).hexdigest() if text is not None else None
+    # JSON escaping can triple a sample, so the budget is found by bisection on
+    # the serialized envelope: at most log2(ceiling) serializations of a
+    # payload no larger than one model output.
+    lower, upper = 0, min(len(encoded), max_inline_bytes)
+    retained = None
+    while lower <= upper:
+        budget = (lower + upper) // 2
+        complete = len(encoded) <= budget
+        head = encoded if complete else encoded[: budget // 2]
+        tail = b"" if complete or budget == 0 else encoded[-(budget - budget // 2) :]
+        output = RejectedOutput(
+            text=head.decode("utf-8", errors="ignore"),
+            truncated_by_runtime=not complete,
+            evidence=RejectedOutputEvidence(
+                tail=tail.decode("utf-8", errors="ignore"),
+                observed_bytes=len(encoded) if text is not None else None,
+                sha256=digest,
+                sampling_status=(
+                    "unavailable"
+                    if text is None
+                    else "complete"
+                    if complete
+                    else "sampled"
+                ),
+            ),
+        )
+        # The existing inline ceiling also covers metadata and JSON escaping.
+        excess = (
+            len(json.dumps(output.to_payload(), ensure_ascii=False).encode("utf-8"))
+            - max_inline_bytes
+        )
+        if excess <= 0:
+            retained = output
+            lower = budget + 1
+        else:
+            upper = budget - 1
+    if retained is not None:
+        return retained
+    raise ValueError("The inline byte cap cannot hold rejection evidence metadata.")
 
 
 def interpret_rejected_output(
@@ -73,7 +140,15 @@ def interpret_rejected_output(
     truncated = payload.get(REJECTED_OUTPUT_TRUNCATED_KEY)
     if not isinstance(text, str) or not isinstance(truncated, bool):
         return None
-    return RejectedOutput(text=text, truncated_by_runtime=truncated)
+    evidence = None
+    if "rejection_evidence" in payload:
+        try:
+            evidence = RejectedOutputEvidence.model_validate(
+                payload["rejection_evidence"]
+            )
+        except ValidationError:
+            return None
+    return RejectedOutput(text=text, truncated_by_runtime=truncated, evidence=evidence)
 
 
 @dataclass(frozen=True)

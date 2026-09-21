@@ -28,6 +28,7 @@ import hashlib
 import logging
 from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable, Collection, Mapping
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol, Sequence, cast, get_args
 from uuid import UUID
@@ -382,13 +383,11 @@ class FlowReviewFailureFact(BaseModel):
     error_code: str
     error_message: str
     effective_prompt: str | None
-    # None when the runtime retained no answer. A truncated answer is never
-    # retained (the runtime rejects it before reading its text), so the
-    # attempt's finish reason and token counts are its evidence instead.
     rejected_output: RejectedOutput | None
     requested_model: str | None
     effective_prompt_availability: ExcerptAvailability = "included"
     rejected_output_availability: ExcerptAvailability = "included"
+    rejected_tail_availability: ExcerptAvailability = "included"
     # Content-free attempt metadata from the provider call receipt. None means
     # unknown: a missing or estimated count is never presented as a fact.
     finish_reason: str | None = None
@@ -1011,6 +1010,11 @@ def fit_review_evidence(
     excerpts = list(evidence.excerpts)
     failure = evidence.failure
     retained_output = failure.rejected_output if failure is not None else None
+    retained_tail = (
+        retained_output.evidence.tail
+        if retained_output is not None and retained_output.evidence is not None
+        else ""
+    )
     if failure is not None:
         excerpts.append(
             ReviewSampleExcerpt(
@@ -1031,8 +1035,20 @@ def fit_review_evidence(
                     text=retained_output.text,
                 )
             )
-    failure_excerpt_count = (1 if failure is not None else 0) + (
-        1 if retained_output is not None else 0
+        if retained_tail:
+            excerpts.append(
+                ReviewSampleExcerpt(
+                    run_id=failure.run_id,
+                    step_order=failure.step_order,
+                    field="output",
+                    availability=failure.rejected_tail_availability,
+                    text=retained_tail,
+                )
+            )
+    failure_excerpt_count = (
+        (1 if failure is not None else 0)
+        + (1 if retained_output is not None else 0)
+        + bool(retained_tail)
     )
 
     def render(fitted: list[ReviewSampleExcerpt]) -> FlowReviewEvidence:
@@ -1046,9 +1062,13 @@ def fit_review_evidence(
         }
         if retained_output is not None:
             output = own[1]
-            update["rejected_output"] = RejectedOutput(
-                text=output.text or "",
-                truncated_by_runtime=retained_output.truncated_by_runtime,
+            sampling = retained_output.evidence
+            if retained_tail and sampling is not None:
+                tail = own[2]
+                sampling = sampling.model_copy(update={"tail": tail.text or ""})
+                update["rejected_tail_availability"] = tail.availability
+            update["rejected_output"] = replace(
+                retained_output, text=output.text or "", evidence=sampling
             )
             update["rejected_output_availability"] = output.availability
         return evidence.model_copy(
@@ -1073,7 +1093,7 @@ def _token_count_sv(count: int | None) -> str:
 def _render_unretained_answer(failure: FlowReviewFailureFact) -> list[str]:
     """What is known about an answer the runtime did not keep.
 
-    A truncated answer has no text to show: the finish reason and the token
+    When no answer text is available, the finish reason and the token
     counts from the call receipt are the facts, and an unknown count is said
     to be unknown. The counts are the attempt's aggregate over all its
     completion calls (tool rounds and mapped items included), so they are
@@ -1145,11 +1165,30 @@ def render_review_evidence(
                     "--- Slut på avvisad utdata ---",
                 ]
             )
+            sampling = failure.rejected_output.evidence
+            if sampling is not None:
+                lines.append(
+                    f"finish_reason={failure.finish_reason}; "
+                    f"sampling_status={sampling.sampling_status}; "
+                    f"observed_bytes={sampling.observed_bytes}; sha256={sampling.sha256}"
+                )
+                if sampling.tail:
+                    lines.extend(
+                        [
+                            "--- Avvisad utdata, slutet ---",
+                            sampling.tail,
+                            "--- Slut på avvisad utdata ---",
+                        ]
+                    )
         availabilities = [("Instruktionen", failure.effective_prompt_availability)]
         if failure.rejected_output is not None:
             availabilities.append(
                 ("Avvisad utdata", failure.rejected_output_availability)
             )
+            if failure.rejected_output.evidence is not None:
+                availabilities.append(
+                    ("Slutet av avvisad utdata", failure.rejected_tail_availability)
+                )
         for label, availability in availabilities:
             if availability == "truncated":
                 lines.append(f"({label}: kortad av utrymmesskäl, bara början visas)")
@@ -1157,7 +1196,11 @@ def render_review_evidence(
                 lines.append(f"({label}: {_EXCERPT_AVAILABILITY_SV[availability]})")
         if failure.rejected_output is not None:
             if failure.rejected_output.truncated_by_runtime:
-                lines.append("(kortad av flödet vid körningen, bara början sparades)")
+                lines.append(
+                    "(kortad av flödet vid körningen, början och slutet sparades)"
+                    if failure.rejected_output.evidence is not None
+                    else "(kortad av flödet vid körningen, bara början sparades)"
+                )
             lines.append(
                 "Utdata ovan är vad modellen svarade och vad som avvisades; kontraktet "
                 "för stegets utdata ligger fast — ändra instruktionen så att svaret uppfyller det."
@@ -1813,9 +1856,7 @@ class AIBuilderFlowReviewService:
             rejected is None
             and error_code != FlowApiErrorCode.LLM_OUTPUT_TRUNCATED.value
         ):
-            # Only a truncation is explained without the answer's text: the
-            # runtime rejects it before any text exists, and the finish reason
-            # and token counts on the attempt say what happened.
+            # A provider may report truncation without returning visible text.
             raise unavailable("output_not_retained")
         attempt_input = parse_flow_step_attempt_input(
             attempt.get("input_payload_json")

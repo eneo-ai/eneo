@@ -53,6 +53,7 @@ from eneo.flows.domain.step_output import (
     RejectedCompletion,
     StepOutputValidationException,
     build_text_overflow_metadata,
+    sample_rejected_output,
 )
 from eneo.flows.domain.text_processing import SummarizationProvenance
 from eneo.flows.enums import FlowOutputMode, FlowOutputType, FlowStepPhase
@@ -1923,6 +1924,11 @@ async def _complete_step_execution(
         else None,
         provider_response_id=completion.provider_response_id
         if isinstance(completion, Completion)
+        else None,
+        output=sample_rejected_output(
+            completion.text, max_inline_bytes=deps.max_inline_text_bytes
+        )
+        if isinstance(completion, Completion) and completion.finish_reason == "length"
         else None,
     )
     if isinstance(completion, Completion) and completion.finish_reason == "length":

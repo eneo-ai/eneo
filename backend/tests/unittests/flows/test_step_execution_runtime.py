@@ -4042,6 +4042,8 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
         assert rejected_completion is not None
         assert rejected_completion.finish_reason == "length"
         assert rejected_completion.provider_response_id == "response-1"
+        assert rejected_completion.output.text == text
+        assert rejected_completion.output.evidence.sampling_status == "complete"
         assert getattr(error, "rejected_output", None) is None
         process_output.assert_not_awaited()
         apply_cap.assert_not_awaited()
@@ -4051,12 +4053,16 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
             error_message=str(error),
             input_payload_json=error.input_payload_json,
             effective_prompt=error.effective_prompt,
-            max_inline_text_bytes=8,
+            rejected_completion=rejected_completion,
+            max_inline_text_bytes=deps.max_inline_text_bytes,
         )
         assert failure.failed_result.status == FlowStepResultStatus.FAILED
         assert failure.failed_result.error_code == "flow_llm_output_truncated"
         assert "length" in failure.failed_result.error_message
-        assert failure.failed_result.output_payload_json is None
+        assert (
+            failure.failed_result.output_payload_json
+            == rejected_completion.output.to_payload()
+        )
     else:
         output = await complete_step_execution(
             step=step, run=run, state=_state(), prepared=prepared, deps=deps

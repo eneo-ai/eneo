@@ -2037,6 +2037,7 @@ class FlowRunExecutor:
             effective_prompt=failed_prompt if isinstance(failed_prompt, str) else None,
             run_error_message=run_error_message,
             rejected_output=getattr(typed_exc, "rejected_output", None),
+            rejected_completion=rejected_completion,
             max_inline_text_bytes=self.max_inline_text_bytes,
             step_phase=getattr(typed_exc, "step_phase", None),
             completed_items=getattr(typed_exc, "completed_items", None),

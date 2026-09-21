@@ -11,6 +11,7 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
 )
 from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.step_output import RejectedCompletion
 from eneo.flows.enums import FlowStepPhase, is_terminal_flow_run_status
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_error_taxonomy import FLOW_ERROR_TAXONOMY
@@ -116,6 +117,7 @@ def build_typed_failure_plan(
     input_payload_json: dict[str, Any] | None = None,
     effective_prompt: str | None = None,
     rejected_output: str | None = None,
+    rejected_completion: RejectedCompletion | None = None,
     max_inline_text_bytes: int | None = None,
     run_error_message: str | None = None,
     step_phase: FlowStepPhase | None = None,
@@ -163,6 +165,7 @@ def build_typed_failure_plan(
             input_payload_json=input_payload_json,
             effective_prompt=effective_prompt,
             rejected_output=rejected_output,
+            rejected_completion=rejected_completion,
             max_inline_text_bytes=max_inline_text_bytes,
         ),
         run_error_message=public_error,

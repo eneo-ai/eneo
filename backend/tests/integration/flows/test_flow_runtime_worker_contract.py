@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -11,7 +13,7 @@ import sqlalchemy as sa
 from dependency_injector import providers
 
 import eneo.flows.runtime.tasks as flow_runtime_tasks
-from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.ai_models.completion_models.completion_model import Completion, ModelKwargs
 from eneo.assistants.assistant import AssistantOrigin
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
@@ -1047,6 +1049,149 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
             == run_row.evidence_classification_level
         )
     assert completion_service.get_response.await_count == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "start å " + " answer" * 16384 + " end ö",
+        "short å",
+        "",
+        None,
+        "api_key=secret-head " + " answer" * 16384 + " password=secret-tail",
+    ],
+    ids=["sampled", "complete", "empty", "unavailable", "redacted"],
+)
+async def test_truncated_completion_retains_bounded_evidence_for_fresh_sessions(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    text,
+):
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(
+                completion=Completion(
+                    text=text, finish_reason="length", provider_response_id="cut-off"
+                ),
+                total_token_count=16384,
+            )
+        )
+    )
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+        )
+        context.executor.max_inline_text_bytes = 1024
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"runtime-truncation-{uuid4()}",
+            retry_count=0,
+        )
+
+    assert result["status"] == "failed"
+    _, step_result, attempts, _ = await _failure_state_from_fresh_session(
+        run_id=context.run_id, tenant_id=context.tenant_id
+    )
+    assert len(attempts) == 1
+    attempt = attempts[0]
+    assert attempt.error_code == "flow_llm_output_truncated"
+    assert attempt.finish_reason == "length"
+    assert step_result is not None
+    payload = attempt.output_payload_json
+    assert payload is not None
+    assert payload == step_result.output_payload_json
+    assert len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) <= 1024
+    evidence = payload["rejection_evidence"]
+    if text is None:
+        assert evidence == {
+            "tail": "",
+            "observed_bytes": None,
+            "sha256": None,
+            "sampling_status": "unavailable",
+        }
+    else:
+        assert evidence["observed_bytes"] == len(text.encode("utf-8"))
+        assert evidence["sha256"] == hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if len(text) > 1024:
+            assert evidence["sampling_status"] == "sampled"
+            assert payload["rejected_output"]
+            assert evidence["tail"]
+            assert text.startswith(payload["rejected_output"])
+            assert text.endswith(evidence["tail"])
+        else:
+            assert evidence["sampling_status"] == "complete"
+            assert payload["rejected_output"] == text
+            assert evidence["tail"] == ""
+    assert attempt.num_tokens_output is None
+    completion_service.get_response.assert_awaited_once()
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+            tenant=providers.Object(test_tenant),
+        )
+        flow = await container.flow_repo().get(
+            flow_id=context.flow_id, tenant_id=context.tenant_id
+        )
+        exported = await container.flow_run_evidence_service().export_evidence_json(
+            run_id=context.run_id
+        )
+        exported_output = exported["bundle"]["step_attempts"][0]["output_payload_json"]
+        assert exported_output["rejection_evidence"]["sha256"] == evidence["sha256"]
+        service = container.ai_builder_flow_review_service()
+        reference = await service.build_failure_reference(
+            flow_id=context.flow_id,
+            space_id=flow.space_id,
+            run_id=context.run_id,
+            step_order=1,
+        )
+        if text is not None and "secret-head" in text:
+            from eneo.flows.ai_builder.ai_builder_error_contract import (
+                AIBuilderBadRequestException,
+            )
+
+            assert "secret-head" not in json.dumps(exported)
+            assert "secret-tail" not in json.dumps(exported)
+            with pytest.raises(AIBuilderBadRequestException) as caught:
+                await service.resolve_failure_evidence(
+                    flow_id=context.flow_id,
+                    space_id=flow.space_id,
+                    reference=reference,
+                    audit=AsyncMock(),
+                )
+            assert caught.value.context["reason"] == "output_masked"
+        else:
+            from eneo.flows.ai_builder.ai_builder_flow_review import (
+                render_review_evidence,
+            )
+
+            review = await service.resolve_failure_evidence(
+                flow_id=context.flow_id,
+                space_id=flow.space_id,
+                reference=reference,
+                audit=AsyncMock(),
+            )
+            assert review.failure is not None
+            assert review.failure.rejected_output is not None
+            assert review.failure.rejected_output.to_payload() == exported_output
+            rendered = render_review_evidence(review)
+            if text and len(text) > 1024:
+                assert "start å " in rendered
+                assert " end ö" in rendered
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from uuid import uuid4
 
 import pytest
@@ -13,6 +15,7 @@ from eneo.flows.domain.step_output import (
     build_rejected_output_payload,
     interpret_rejected_output,
     interpret_step_text,
+    sample_rejected_output,
 )
 
 
@@ -56,6 +59,21 @@ def test_interpret_step_text_accepts_complete_inline_text() -> None:
     assert interpret_step_text({"text": "Complete text"}) == InlineStepText(
         text="Complete text"
     )
+
+
+@pytest.mark.parametrize("unit", ["å猫🙂", '\\"\n\x00'])
+def test_rejection_samples_bound_utf8_and_json_escaping(unit: str) -> None:
+    text = unit * 16384
+    output = sample_rejected_output(text, max_inline_bytes=1024)
+    payload = output.to_payload()
+    assert len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) <= 1024
+    assert output.evidence is not None
+    assert output.text and text.startswith(output.text)
+    assert output.evidence.tail and text.endswith(output.evidence.tail)
+    assert output.evidence.observed_bytes == len(text.encode("utf-8"))
+    assert output.evidence.sha256 == hashlib.sha256(text.encode("utf-8")).hexdigest()
+    assert output.evidence.sampling_status == "sampled"
+    assert interpret_rejected_output(payload) == output
 
 
 def test_interpret_step_text_accepts_one_overflow_file_and_bounded_preview() -> None:
