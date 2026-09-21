@@ -8,6 +8,8 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileType
@@ -17,10 +19,11 @@ from eneo.flows.application.flow_run_evidence import (
     parse_step_order,
 )
 from eneo.flows.application.flow_run_evidence_bundle import (
-    build_evidence_bundle as _build_evidence_bundle,
+    _cohere_redacted_alias,
+    redact_evidence_bundle,
 )
 from eneo.flows.application.flow_run_evidence_bundle import (
-    redact_evidence_bundle,
+    build_evidence_bundle as _build_evidence_bundle,
 )
 from eneo.flows.application.flow_run_evidence_export_manifest import (
     EVIDENCE_EXPORT_SCHEMA_VERSION,
@@ -46,6 +49,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptExecutionInput,
     FlowStepAttemptInput,
 )
+from eneo.flows.domain.step_output import FileBackedStepText
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
 from eneo.flows.enums import (
     FlowOutputType,
@@ -72,6 +76,55 @@ from eneo.flows.published_definition import (
 )
 from eneo.main.config import get_settings
 from tests.flow_snapshot_fixtures import assistant_snapshot
+
+
+@st.composite
+def _redacted_alias_cases(draw):
+    preview = draw(st.text(max_size=64))
+    full_text_bytes = len(preview.encode()) + draw(st.integers(1, 256))
+    replacement = draw(st.text(max_size=128))
+    file_id = draw(st.uuids())
+    checksum = draw(st.one_of(st.none(), st.binary(min_size=32, max_size=32)))
+    source = draw(st.one_of(st.none(), st.tuples(st.uuids(), st.integers(1, 100))))
+    return preview, full_text_bytes, replacement, file_id, checksum, source
+
+
+@given(case=_redacted_alias_cases())
+@example(case=("", 1, "", UUID(int=1), None, None))
+@example(case=("", 1, "expanded", UUID(int=1), None, None))
+@example(case=("a", 5, "Å猫🙂", UUID(int=1), bytes(32), (UUID(int=2), 1)))
+@example(case=("a", 4, "expanded preview", UUID(int=1), None, None))
+def test_redacted_alias_keeps_maximal_preview_and_artifact_identity(case):
+    preview, full_text_bytes, replacement, file_id, checksum, source = case
+    alias = FileBackedStepText(
+        preview=preview,
+        inline_text_bytes=len(preview.encode()),
+        full_text_bytes=full_text_bytes,
+        file_id=file_id,
+        checksum=checksum.hex() if checksum is not None else None,
+        source_step_id=source[0] if source is not None else None,
+        source_attempt_no=source[1] if source is not None else None,
+    )
+    original = alias.model_dump(mode="json")
+    result = _cohere_redacted_alias(original, {**original, "preview": replacement})
+    expected = max(
+        (
+            replacement[:end]
+            for end in range(len(replacement) + 1)
+            if len(replacement[:end].encode()) < full_text_bytes
+        ),
+        key=len,
+    )
+
+    assert isinstance(result, dict)
+    assert result["preview"] == expected
+    assert result["inline_text_bytes"] == len(expected.encode())
+    assert result == {
+        **original,
+        "preview": expected,
+        "inline_text_bytes": len(expected.encode()),
+    }
+    assert FileBackedStepText.model_validate(result).model_dump(mode="json") == result
 
 
 def build_evidence_bundle(**kwargs: Any):

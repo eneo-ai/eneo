@@ -102,6 +102,7 @@ dev = [
     "botocore-stubs>=1.43,<2",
     "mutmut>=3.7,<4",
     "types-lxml>=2026.2.16",
+    "hypothesis>=6,<7",
 ]
 
 [build-system]

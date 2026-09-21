@@ -4,21 +4,28 @@ import json
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.flows.domain.flow import FlowRunStatus
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.runtime import RunExecutionState
 from eneo.flows.domain.text_processing import SectionManifest
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunErrorDetails
 from eneo.flows.runtime.step_deadline import current_step_deadline_scope
 from eneo.flows.runtime.step_execution_runtime import build_output_payload
+from eneo.flows.runtime.step_handlers.text_sections import prepare_text_sections
 from eneo.main.exceptions import (
     ProviderRejectedRequestException,
     TypedIOValidationException,
 )
+from eneo.tenants.tenant import TenantInDB
+from eneo.users.user import UserInDB
 from tests.unittests.flows.test_resolved_input_runtime import _file_backed_material
 from tests.unittests.flows.test_typed_io_executor import (
     _build_executor,
@@ -439,14 +446,80 @@ async def test_provider_failure_persists_section_progress(user):
     assert error.details.phase is None
 
 
-async def test_sections_without_whitespace_keep_unicode_characters_intact(user):
-    executor, _, _, run, state, step, text, _, questions, _ = _case(
-        user, text="猫Å🙂" * 500
+@st.composite
+def _section_cases(draw):
+    text = draw(st.text(min_size=8, max_size=256))
+    budget = draw(st.integers(min_value=4, max_value=min(128, len(text) - 1)))
+    return text, budget
+
+
+@given(case=_section_cases())
+@example(case=("猫Å🙂" * 500, 512))
+async def test_section_builder_round_trip(case):
+    text, budget = case
+    tenant = TenantInDB(id=uuid4(), name="test_tenant", quota_limit=0, quota_used=0)
+    user = UserInDB(
+        id=uuid4(),
+        username="test_user",
+        email="test@user.com",
+        salt="test_salt",
+        password="test_pass",
+        tenant_id=tenant.id,
+        tenant=tenant,
+        state="active",
     )
-    result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
-    manifest = SectionManifest.model_validate(
-        result.output.output_payload_extensions["section_manifest"]
+    executor, _, assistant, run, state, step, _, _, _, _ = _case(user, text=text)
+
+    async def preflight(**kwargs):
+        overhead = len(kwargs["prompt_override"].encode()) + 37
+        measured = overhead + len(kwargs["question"].encode())
+        reserve = kwargs["useful_output_reserve_tokens"]
+        capacity = overhead + reserve + budget
+        preview = _context_preflight(measured)
+        package = replace(preview.preferred, output_cap_tokens=capacity - measured)
+        return replace(
+            preview,
+            capacity=ModelCapacity(capacity, capacity),
+            preferred=package,
+            fallback=package,
+            refusal=None if package.fits else "current_request_input_does_not_fit",
+        )
+
+    assistant.preflight_response_context = AsyncMock(side_effect=preflight)
+    base = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
     )
+    prepared = await prepare_text_sections(
+        step=step,
+        run=run,
+        state=state,
+        base=base,
+        policy=FlowMappedExecutionPolicy(),
+    )
+    manifest = prepared.manifest
+    questions = tuple(call.prepared.step_input.text for call in prepared.calls)
     assert len(questions) > 1
     assert manifest.resplit(text) == tuple(questions)
     assert "".join(questions) == text
+    assert "".join(questions).encode() == text.encode()
+    assert manifest.resplit(text) == tuple(
+        call.prepared.step_input.source_text for call in prepared.calls
+    )
+    start = 0
+    for index, (section, call) in enumerate(
+        zip(manifest.sections, prepared.calls, strict=True)
+    ):
+        assert section.output_index == index
+        assert section.core.start_char == start
+        assert section.core.end_char > start
+        assert (
+            call.prepared.step_input.source_text == text[start : section.core.end_char]
+        )
+        assert len(call.prepared.step_input.source_text.encode()) <= budget
+        start = section.core.end_char
+    assert start == len(text)
+    changed = chr(ord(text[0]) ^ 1) + text[1:]
+    assert len(changed) == len(text)
+    assert len(changed.encode()) == len(text.encode())
+    with pytest.raises(ValueError, match="hash"):
+        manifest.resplit(changed)

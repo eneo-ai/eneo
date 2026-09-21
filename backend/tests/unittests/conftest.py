@@ -1,6 +1,8 @@
+import os
 import uuid
 
 import pytest
+from hypothesis import settings
 
 from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelLegacy,
@@ -8,6 +10,15 @@ from eneo.ai_models.embedding_models.embedding_model import (
 from eneo.main.config import Settings, reset_settings
 from eneo.tenants.tenant import TenantInDB
 from eneo.users.user import UserInDB
+
+settings.register_profile(
+    "unit",
+    deadline=None,
+    print_blob=True,
+    max_examples=100,
+    derandomize=bool(os.getenv("CI")),
+)
+settings.load_profile("unit")
 
 
 @pytest.fixture(scope="session")
