@@ -60,7 +60,6 @@ export type GroupSparse = components["schemas"]["GroupPublicWithMetadata"];
 export type InfoBlob = Omit<components["schemas"]["InfoBlobPublic"], "text"> & {
   text?: string | undefined;
 };
-export type Widget = components["schemas"]["WidgetPublic"];
 export type CompletionModel = components["schemas"]["CompletionModelPublic"];
 export type EmbeddingModel = components["schemas"]["EmbeddingModelPublic"];
 export type TranscriptionModel = components["schemas"]["TranscriptionModelPublic"];
