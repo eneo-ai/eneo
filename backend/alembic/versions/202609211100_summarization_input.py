@@ -1,7 +1,7 @@
 """Retain summarization input references in provider-call receipts.
 
 Revision ID: 202609211100
-Revises: 202609201300
+Revises: 202609211000
 """
 
 import sqlalchemy as sa
@@ -10,7 +10,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision = "202609211100"
-down_revision = "202609201300"
+down_revision = "202609211000"
 branch_labels = None
 depends_on = None
 
