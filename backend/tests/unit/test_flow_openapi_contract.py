@@ -58,7 +58,10 @@ def test_text_processing_contract_fields_are_typed(openapi_spec):
         processing = config_schema["properties"]["text_processing"]["anyOf"][0]
         processing_schema = schemas[processing["$ref"].split("/")[-1]]
         mode = processing_schema["properties"]["mode"]
-        assert schemas[mode["$ref"].split("/")[-1]]["enum"] == ["process_each_section"]
+        assert schemas[mode["$ref"].split("/")[-1]]["enum"] == [
+            "process_each_section",
+            "summarize",
+        ]
     projection = schemas["FlowRunContractPublic"]["properties"]["text_processing_steps"]
     assert projection["type"] == "array"
     item = schemas[projection["items"]["$ref"].split("/")[-1]]
@@ -83,8 +86,37 @@ def test_text_processing_request_preserves_other_input_configuration():
     request = FlowStepCreateRequest.model_validate(values)
     assert request.model_dump(mode="json")["input_config"] == values["input_config"]
     values["input_config"]["text_processing"]["mode"] = "summarize"
+    assert FlowStepCreateRequest.model_validate(values).input_config is not None
+    values["input_config"]["text_processing"]["mode"] = "automatic"
     with pytest.raises(ValidationError):
         FlowStepCreateRequest.model_validate(values)
+
+
+def test_summarization_evidence_and_refusal_fields_are_public(openapi_spec):
+    schemas = openapi_spec["components"]["schemas"]
+    details = schemas["FlowRunErrorDetails"]["properties"]
+    for name in (
+        "summarization_rounds",
+        "summarization_records",
+        "summarization_bytes",
+    ):
+        assert {"type": "integer", "minimum": 0} in details[name]["anyOf"]
+    evidence = schemas["ProviderCallEvidence"]["properties"]["summarization_input"]
+    assert any(
+        item.get("$ref", "").endswith("/SummarizationCallInput")
+        for item in evidence["anyOf"]
+    )
+    assert {
+        "record_ids",
+        "input_bytes",
+        "input_sha256",
+        "max_provider_calls",
+        "max_input_tokens",
+    } <= set(schemas["SummarizationCallInput"]["required"])
+    assert {"records", "execution_input"}.isdisjoint(
+        schemas["SummarizationCallInput"]["properties"]
+    )
+    assert "flow_summarization_non_convergent" in FLOW_RUN_TERMINAL_ERROR_CODES
 
 
 def test_retry_failed_run_contract(openapi_spec):
@@ -2440,6 +2472,9 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
         "transcription_service_reason",
         "transcription_stage",
         "transcription_queue_position",
+        "summarization_rounds",
+        "summarization_records",
+        "summarization_bytes",
         # Budget facts from an admission or structured-output refusal.
         "measured_bytes",
         "ceiling_bytes",

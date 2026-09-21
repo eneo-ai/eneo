@@ -76,11 +76,12 @@ def _audio_metadata() -> dict:
         },
     ],
 )
-def test_text_processing_rejects_incompatible_step_or_nested_mapping(updates):
+@pytest.mark.parametrize("mode", ["process_each_section", "summarize"])
+def test_text_processing_rejects_incompatible_step_or_nested_mapping(updates, mode):
     step = _step(**updates)
     step.input_config = {
         **(step.input_config or {}),
-        "text_processing": {"mode": "process_each_section"},
+        "text_processing": {"mode": mode},
     }
     view = flow_step_validation_view_from_flow_step(step)
 
@@ -92,8 +93,9 @@ def test_text_processing_rejects_incompatible_step_or_nested_mapping(updates):
         assert "cannot be nested" in str(exc_info.value)
 
 
-def test_text_processing_requires_an_authored_array_of_records():
-    step = _step(input_config={"text_processing": {"mode": "process_each_section"}})
+@pytest.mark.parametrize("mode", ["process_each_section", "summarize"])
+def test_text_processing_requires_an_authored_array_of_records(mode):
+    step = _step(input_config={"text_processing": {"mode": mode}})
     with pytest.raises(FlowStepValidationError, match="array"):
         _validate_step_mapped_execution(
             step=flow_step_validation_view_from_flow_step(step)

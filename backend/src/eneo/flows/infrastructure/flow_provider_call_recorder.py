@@ -19,6 +19,7 @@ from eneo.flows.domain.provider_call import (
     ProviderCallRequestedCapability,
     ProviderCallResponseFormat,
     ProviderCallUnknownReason,
+    SummarizationCallInput,
     TranscriptionCallCompletion,
     TranscriptionProviderCallRequest,
 )
@@ -84,6 +85,7 @@ class FlowProviderCallRecorder:
         completion_model_id: UUID | None,
         mapped_call: MappedProviderCallProvenance | None,
         resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
+        summarization_input: SummarizationCallInput | None = None,
     ):
         self.run_id = run_id
         self.step_id = step_id
@@ -94,6 +96,7 @@ class FlowProviderCallRecorder:
         self.completion_model_id = completion_model_id
         self.mapped_call = mapped_call
         self.resolved_input_edge_indexes = resolved_input_edge_indexes
+        self.summarization_input = summarization_input
         self._started_evidence: dict[UUID, tuple[int, str]] = {}
 
     async def started(self, request: ProviderCallRequestFacts) -> UUID:
@@ -155,6 +158,7 @@ class FlowProviderCallRecorder:
             ),
             call_reason=_flow_call_reason(request.reason),
             mapped_call=self.mapped_call,
+            summarization_input=self.summarization_input,
         )
 
     async def accepted(self, call_id: UUID, provider_response_id: str) -> None:

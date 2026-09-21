@@ -980,6 +980,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Use a larger-context model, split the source document, or reduce the step input before rerun.",
         user_action="Use a smaller source, split the document, or ask a flow editor to choose a larger-context model.",
     ),
+    FlowApiErrorCode.SUMMARIZATION_NON_CONVERGENT: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="Summarization did not reduce both record count and bytes, or cannot finish within its finite aggregate limits.",
+        consumer_action="Inspect summarization rounds, records and bytes; reduce the input or request more concise records before rerun.",
+        user_action="Use less material or ask the flow editor for more concise intermediate records.",
+    ),
     FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",

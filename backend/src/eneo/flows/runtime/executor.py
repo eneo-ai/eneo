@@ -1435,7 +1435,8 @@ class FlowRunExecutor:
             run_cancelled=self._run_is_cancelled,
             build_provider_call_observer=lambda mapped_call,
             resolved_input_edge_indexes,
-            completion_model_id: FlowProviderCallRecorder(
+            completion_model_id,
+            summarization_input=None: FlowProviderCallRecorder(
                 run_id=run.id,
                 step_id=step.step_id,
                 attempt_no=attempt_no,
@@ -1445,6 +1446,7 @@ class FlowRunExecutor:
                 completion_model_id=completion_model_id,
                 mapped_call=mapped_call,
                 resolved_input_edge_indexes=resolved_input_edge_indexes,
+                summarization_input=summarization_input,
             ),
             # Transcription runs while the step input is still being produced,
             # so it has neither a mapped call nor a resolved input aggregate.

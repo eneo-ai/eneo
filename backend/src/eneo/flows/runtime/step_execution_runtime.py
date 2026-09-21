@@ -37,6 +37,8 @@ from eneo.flows.citation_sidecar import (
     strip_inline_reference_tags,
 )
 from eneo.flows.domain.flow import FlowRun, FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.mapped_execution_policy import SummarizationBudget
+from eneo.flows.domain.provider_call import SummarizationCallInput
 from eneo.flows.domain.rag_evidence import build_step_result_citation_state
 from eneo.flows.domain.runtime import (
     RunExecutionState,
@@ -311,6 +313,7 @@ class BuildProviderCallObserverFn(Protocol):
         mapped_call: MappedProviderCallProvenance | None,
         resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
         completion_model_id: UUID,
+        summarization_input: SummarizationCallInput | None = None,
     ) -> ProviderCallObserver: ...
 
 
@@ -330,6 +333,7 @@ class PreparedStepExecution:
     resolved_input_edges: tuple[FlowResolvedInputEdge, ...] = ()
     resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes | None = None
     completion_call: PreparedCompletionCall | None = None
+    summarization_input: SummarizationCallInput | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,6 +375,7 @@ class StepExecutionRuntimeDeps:
     build_provider_call_observer: BuildProviderCallObserverFn | None = None
     build_transcription_call_observer: BuildTranscriptionCallObserverFn | None = None
     mapped_call_context: MappedProviderCallProvenance | None = None
+    summarization_budget: SummarizationBudget | None = None
 
 
 def _resolve_litellm_model_name(assistant: RuntimeAssistantProtocol) -> str | None:
@@ -623,6 +628,18 @@ async def call_assistant_with_timeout(
             effective_prompt=prompt_override,
         )
 
+    if deps.summarization_budget is not None:
+        if prepared_request is None:
+            raise FlowRuntimeInvariantError("Summarization requires measured input.")
+        deps.summarization_budget.reserve(prepared_request.input_reserve.tokens)
+        if prepared.summarization_input is not None:
+            evidence = prepared.summarization_input
+            prepared.summarization_input = evidence.model_copy(
+                update={
+                    "reserved_calls": deps.summarization_budget.provider_calls,
+                    "reserved_input_tokens": deps.summarization_budget.input_tokens,
+                }
+            )
     provider_call_observer: ProviderCallObserver | None = None
     if deps.build_provider_call_observer is not None:
         if prepared.resolved_input_edge_indexes is None:
@@ -634,11 +651,19 @@ async def call_assistant_with_timeout(
             raise FlowRuntimeInvariantError(
                 "Provider I/O requires a resolved completion model."
             )
-        provider_call_observer = deps.build_provider_call_observer(
-            deps.mapped_call_context,
-            prepared.resolved_input_edge_indexes,
-            completion_model.id,
-        )
+        if prepared.summarization_input is None:
+            provider_call_observer = deps.build_provider_call_observer(
+                deps.mapped_call_context,
+                prepared.resolved_input_edge_indexes,
+                completion_model.id,
+            )
+        else:
+            provider_call_observer = deps.build_provider_call_observer(
+                deps.mapped_call_context,
+                prepared.resolved_input_edge_indexes,
+                completion_model.id,
+                prepared.summarization_input,
+            )
 
     if await execution_ownership_is_lost():
         raise FlowExecutionOwnershipLost()
@@ -1641,12 +1666,19 @@ async def _complete_step_execution(
         input_text=prepared.step_input.text,
     )
     record_step_phase(FlowStepPhase.RETRIEVAL)
-    info_blob_chunks, rag_metadata, rag_diagnostics = await deps.retrieve_rag_chunks(
-        assistant=prepared.assistant,
-        question=rag_query_derivation.query,
-        run_id=run.id,
-        step_order=step.step_order,
-    )
+    if prepared.summarization_input is not None:
+        info_blob_chunks, rag_metadata, rag_diagnostics = [], None, []
+    else:
+        (
+            info_blob_chunks,
+            rag_metadata,
+            rag_diagnostics,
+        ) = await deps.retrieve_rag_chunks(
+            assistant=prepared.assistant,
+            question=rag_query_derivation.query,
+            run_id=run.id,
+            step_order=step.step_order,
+        )
     diagnostics.extend(rag_diagnostics)
     if rag_metadata is not None:
         rag_metadata["query_derivation"] = rag_query_derivation.to_metadata()

@@ -1204,6 +1204,9 @@ class FlowProviderCalls(BasePublic):
     # evidence is activated. A transcription call runs while the step input is
     # still being produced, so it has no aggregate to point at.
     resolved_inputs_attempt_id: Mapped[Optional[UUID]] = mapped_column()
+    summarization_input: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB(none_as_null=True)
+    )
     ordinal: Mapped[int] = mapped_column(nullable=False)
     call_kind: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     status: Mapped[str] = mapped_column(sa.String(32), nullable=False)

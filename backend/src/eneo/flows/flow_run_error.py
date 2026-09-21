@@ -238,6 +238,9 @@ class FlowRunErrorDetails(BaseModel):
     )
 
     measured_bytes: int | None = Field(default=None, ge=0, strict=True)
+    summarization_rounds: int | None = Field(default=None, ge=0, strict=True)
+    summarization_records: int | None = Field(default=None, ge=0, strict=True)
+    summarization_bytes: int | None = Field(default=None, ge=0, strict=True)
     ceiling_bytes: int | None = Field(default=None, ge=0, strict=True)
     step_description: str | None = Field(
         default=None,
@@ -328,6 +331,9 @@ class FlowRunErrorDetails(BaseModel):
             if isinstance(reason, str)
             else None,
             measured_bytes=count("measured_bytes", "measured"),
+            summarization_rounds=count("summarization_rounds"),
+            summarization_records=count("summarization_records"),
+            summarization_bytes=count("summarization_bytes"),
             ceiling_bytes=count("ceiling_bytes", "ceiling"),
             completed_items=count("completed_items"),
             total_items=count("total_items"),

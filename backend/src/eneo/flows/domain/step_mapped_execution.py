@@ -46,7 +46,7 @@ def resolve_step_mapped_execution(
         processing = text_processing_config(input_config)
     except ValidationError as exc:
         raise FlowStepMappedExecutionConfigurationError(
-            "Step input_config.text_processing must select process_each_section."
+            "Step input_config.text_processing must select process_each_section or summarize."
         ) from exc
     if processing is not None:
         if per_source_configured or per_item_configured:
@@ -55,7 +55,7 @@ def resolve_step_mapped_execution(
             )
         if output_mode != "pass_through" or output_type != "json":
             raise FlowStepMappedExecutionConfigurationError(
-                "Section processing requires a pass_through completion step with JSON output."
+                "process_each_section and summarize require a pass_through completion step with JSON output."
             )
 
     if per_source_configured and per_item_configured:

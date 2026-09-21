@@ -5414,6 +5414,7 @@
   "flow_error_flow_evidence_export_too_large": "The run holds more evidence than one export can contain. Open the run's evidence view, which shows what fits and says exactly what it left out.",
   "flow_error_flow_runtime_input_not_consumed": "Runtime files were attached, but the step input does not reference them. Update the step to use step_input.* or remove the files.",
   "flow_error_flow_mapped_provider_call_limit_exceeded": "The mapped step may exceed the organization's provider-call limit. Use fewer items or files, or ask an administrator to raise the limit.",
+  "flow_error_flow_summarization_non_convergent": "The summary could not be completed within the step's limits. Use less source material or ask the flow editor to request shorter intermediate results.",
   "flow_error_flow_unsupported_output_mode": "This step uses an output mode the runtime cannot execute. Change the output mode and republish the flow.",
   "flow_error_flow_unsupported_output_type": "This step uses an output type the runtime cannot render. Choose a supported output type and republish the flow.",
   "flow_error_typed_io_validation_failed": "The step input or output did not pass validation. Open the step details, fix the input or configuration, and rerun.",

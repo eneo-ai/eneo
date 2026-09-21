@@ -133,6 +133,27 @@ class ProviderCallUnknownReason(str, Enum):
     STALE_STARTED = "stale_started"
 
 
+class SummarizationCallInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    round: int = Field(strict=True, ge=1)
+    group_index: int = Field(strict=True, ge=0)
+    record_ids: tuple[Annotated[str, Field(min_length=1)], ...] = Field(min_length=1)
+    input_bytes: int = Field(
+        strict=True,
+        ge=1,
+        description="UTF-8 bytes of the composed record input before input bindings.",
+    )
+    input_sha256: str = Field(
+        pattern=PROVIDER_REQUEST_HASH_PATTERN,
+        description="SHA-256 of the composed record input before input bindings.",
+    )
+    reserved_calls: int = Field(strict=True, ge=1)
+    reserved_input_tokens: int = Field(strict=True, ge=0)
+    max_provider_calls: int = Field(strict=True, ge=1)
+    max_input_tokens: int = Field(strict=True, ge=1)
+
+
 class CompletionProviderCallRequest(BaseModel):
     """Credential-free identity facts for one outbound completion request."""
 
@@ -150,6 +171,7 @@ class CompletionProviderCallRequest(BaseModel):
     requested_capabilities: ProviderCallRequestedCapabilities
     call_reason: ProviderCallReason = ProviderCallReason.INITIAL
     mapped_call: MappedProviderCallProvenance | None = None
+    summarization_input: SummarizationCallInput | None = None
 
     @model_validator(mode="after")
     def validate_capabilities_match_response_format(
@@ -261,6 +283,7 @@ class ProviderCall(BaseModel):
     response_format: ProviderCallResponseFormat
     requested_capabilities: ProviderCallRequestedCapabilities
     resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes
+    summarization_input: SummarizationCallInput | None = None
     call_reason: ProviderCallReason
     mapped_execution_mode: Literal["per_item", "per_source"] | None
     mapped_item_index: int | None = Field(default=None, ge=1)
@@ -306,6 +329,7 @@ class ProviderCallEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     event_id: UUID
+    summarization_input: SummarizationCallInput | None = None
     attempt_id: UUID
     step_id: UUID
     step_order: int = Field(ge=1)

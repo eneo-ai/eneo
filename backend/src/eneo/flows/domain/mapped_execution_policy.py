@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Final, Literal, Protocol, cast
 
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.config import get_settings
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -63,6 +64,56 @@ class FlowMappedExecutionPolicySource(Protocol):
     async def get_mapped_execution_policy_resolved(
         self,
     ) -> FlowMappedExecutionPolicy: ...
+
+
+@dataclass(slots=True)
+class SummarizationBudget:
+    max_provider_calls: int
+    max_input_tokens: int
+    provider_calls: int = 0
+    input_tokens: int = 0
+    rounds: int = 0
+    records: int = 0
+    bytes: int = 0
+
+    def refusal(self) -> TypedIOValidationException:
+        return TypedIOValidationException(
+            "Summarization cannot converge within its finite execution limits.",
+            code=FlowApiErrorCode.SUMMARIZATION_NON_CONVERGENT.value,
+            context={
+                "summarization_rounds": self.rounds,
+                "summarization_records": self.records,
+                "summarization_bytes": self.bytes,
+            },
+        )
+
+    def admit(self, *, calls: int, input_tokens: int) -> None:
+        if (
+            self.provider_calls + calls > self.max_provider_calls
+            or self.input_tokens + input_tokens > self.max_input_tokens
+        ):
+            raise self.refusal()
+
+    def reserve(self, input_tokens: int) -> None:
+        self.admit(calls=1, input_tokens=input_tokens)
+        self.provider_calls += 1
+        self.input_tokens += input_tokens
+
+
+def effective_summarization_budget(
+    policy: FlowMappedExecutionPolicy, *, model_input_tokens: int
+) -> SummarizationBudget:
+    calls = policy.max_provider_calls_per_mapped_step or 0
+    # An unset token policy is still finite: each permitted request must fit
+    # the model window. An absent call ceiling cannot authorize an open fold.
+    return SummarizationBudget(
+        max_provider_calls=calls,
+        max_input_tokens=min(
+            policy.max_estimated_input_tokens_per_mapped_step
+            or calls * model_input_tokens,
+            calls * model_input_tokens,
+        ),
+    )
 
 
 async def resolve_flow_mapped_execution_policy_from_source(

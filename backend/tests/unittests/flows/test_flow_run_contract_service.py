@@ -66,7 +66,8 @@ def _limits() -> FlowInputLimits:
     )
 
 
-async def test_run_contract_projects_published_section_processing_steps():
+@pytest.mark.parametrize("mode", ["process_each_section", "summarize"])
+async def test_run_contract_projects_published_section_processing_steps(mode):
     step = _step(step_order=1, input_type="text")
     flow = _flow(step=step).model_copy(update={"published_version": 1})
     schema = {
@@ -92,9 +93,7 @@ async def test_run_contract_projects_published_section_processing_steps():
                     "assistant_snapshot": assistant_snapshot(step.assistant_id),
                     "input_source": "flow_input",
                     "input_type": "text",
-                    "input_config": {
-                        "text_processing": {"mode": "process_each_section"}
-                    },
+                    "input_config": {"text_processing": {"mode": mode}},
                     "output_mode": "pass_through",
                     "output_type": "json",
                     "output_contract": schema,
@@ -112,7 +111,7 @@ async def test_run_contract_projects_published_section_processing_steps():
     processing = contract.text_processing_steps[0]
     assert processing.step_id == step.id
     assert processing.step_order == 1
-    assert processing.mode == "process_each_section"
+    assert processing.mode == mode
     assert processing.output_array_key == "records"
     assert processing.item_schema == {"type": "object"}
 

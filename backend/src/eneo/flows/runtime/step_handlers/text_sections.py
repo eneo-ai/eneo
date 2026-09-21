@@ -35,6 +35,116 @@ class PreparedTextSections:
     calls: tuple[PreparedAssistantStep, ...]
 
 
+async def prepare_text_processing_call(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    state: RunExecutionState,
+    base: PreparedAssistantStep,
+    section_text: str,
+) -> tuple[PreparedAssistantStep, int]:
+    step_input = base.prepared.step_input
+    material = step_input.materials[0] if step_input.materials else None
+    completion = base.prepared.completion_call
+    if completion is None:
+        raise RuntimeError("Text processing requires a packaged completion call.")
+    require_step_budget(
+        base.deps.deadline, step_order=step.step_order, phase="section preparation"
+    )
+    runtime_metadata = step_input.runtime_input_metadata
+    if material is None and runtime_metadata is not None:
+        runtime_metadata = {
+            **runtime_metadata,
+            "text": section_text,
+            "extracted_text_length": len(section_text),
+        }
+    context = base.deps.variable_resolver.build_context_with_evidence(
+        run.input_payload_json,
+        [
+            result
+            for result in state.prior_results
+            if result.status == FlowStepResultStatus.COMPLETED
+        ],
+        current_step_order=step.step_order,
+        step_names_by_order=state.step_names_by_order,
+        step_ref_mapping=state.step_ref_mapping,
+        current_step_input=runtime_metadata,
+        resolved_file_text=(
+            {material.file_id: section_text} if material is not None else {}
+        ),
+    )
+    interpolation = base.deps.variable_resolver.interpolate_with_evidence(
+        base.prepared.assistant.get_prompt_text(),
+        context,
+        binding_ref="assistant_prompt",
+    )
+    prompt = append_output_format_instructions(
+        interpolation.text,
+        resolve_format_spec(step.output_type).prompt_instructions(step.output_contract),
+    )
+    binding = resolve_step_input_binding(
+        step=step,
+        run=run,
+        prior_results=state.prior_results,
+        state=state,
+        runtime_input_metadata=runtime_metadata,
+        variable_resolver=base.deps.variable_resolver,
+        resolved_file_text=(
+            {material.file_id: section_text} if material is not None else None
+        ),
+    )
+    if binding is not None:
+        question = binding.text
+    else:
+        _, question = resolve_default_step_input_text(
+            step=step,
+            run=run,
+            prior_results=state.prior_results,
+            state=state,
+            source_text=step_input.source_text,
+            runtime_input_text=section_text if material is None else None,
+            resolved_file_text=(
+                {material.file_id: section_text} if material is not None else None
+            ),
+            logger=None,
+        )
+    question, structured = finalize_step_input_question(
+        step=step,
+        text=question,
+        structured=binding.structured
+        if binding is not None and binding.structured is not None
+        else step_input.structured,
+        binding=binding,
+        prior_results=state.prior_results,
+    )
+    prepared = replace(
+        base.prepared,
+        effective_prompt=prompt,
+        step_input=replace(
+            base.prepared.step_input,
+            text=question,
+            structured=structured,
+            source_text=section_text,
+            raw_extracted_text=section_text,
+        ),
+        llm_files=None,
+        completion_call=None,
+    )
+    prepared.completion_call = build_prepared_completion_call(
+        step=step,
+        state=state,
+        prepared=prepared,
+        useful_output_reserve_tokens=completion.useful_output_reserve_tokens,
+    )
+    estimate = await preview_step_execution_context(
+        step=step,
+        state=state,
+        prepared=prepared,
+        deps=replace(base.deps, logger=None),
+    )
+    return PreparedAssistantStep(prepared=prepared, deps=base.deps), estimate
+
+
 async def prepare_text_sections(
     *,
     step: RuntimeStep,
@@ -79,104 +189,9 @@ async def prepare_text_sections(
         raise RuntimeError("Section processing requires a packaged completion call.")
 
     async def measure(start: int, end: int) -> tuple[PreparedAssistantStep, int]:
-        require_step_budget(
-            base.deps.deadline, step_order=step.step_order, phase="section preparation"
+        return await prepare_text_processing_call(
+            step=step, run=run, state=state, base=base, section_text=text[start:end]
         )
-        section_text = text[start:end]
-        runtime_metadata = step_input.runtime_input_metadata
-        if material is None and runtime_metadata is not None:
-            runtime_metadata = {
-                **runtime_metadata,
-                "text": section_text,
-                "extracted_text_length": len(section_text),
-            }
-        context = base.deps.variable_resolver.build_context_with_evidence(
-            run.input_payload_json,
-            [
-                result
-                for result in state.prior_results
-                if result.status == FlowStepResultStatus.COMPLETED
-            ],
-            current_step_order=step.step_order,
-            step_names_by_order=state.step_names_by_order,
-            step_ref_mapping=state.step_ref_mapping,
-            current_step_input=runtime_metadata,
-            resolved_file_text=(
-                {material.file_id: section_text} if material is not None else {}
-            ),
-        )
-        interpolation = base.deps.variable_resolver.interpolate_with_evidence(
-            base.prepared.assistant.get_prompt_text(),
-            context,
-            binding_ref="assistant_prompt",
-        )
-        prompt = append_output_format_instructions(
-            interpolation.text,
-            resolve_format_spec(step.output_type).prompt_instructions(
-                step.output_contract
-            ),
-        )
-        binding = resolve_step_input_binding(
-            step=step,
-            run=run,
-            prior_results=state.prior_results,
-            state=state,
-            runtime_input_metadata=runtime_metadata,
-            variable_resolver=base.deps.variable_resolver,
-            resolved_file_text=(
-                {material.file_id: section_text} if material is not None else None
-            ),
-        )
-        if binding is not None:
-            question = binding.text
-        else:
-            _, question = resolve_default_step_input_text(
-                step=step,
-                run=run,
-                prior_results=state.prior_results,
-                state=state,
-                source_text=step_input.source_text,
-                runtime_input_text=section_text if material is None else None,
-                resolved_file_text=(
-                    {material.file_id: section_text} if material is not None else None
-                ),
-                logger=None,
-            )
-        question, structured = finalize_step_input_question(
-            step=step,
-            text=question,
-            structured=binding.structured
-            if binding is not None and binding.structured is not None
-            else step_input.structured,
-            binding=binding,
-            prior_results=state.prior_results,
-        )
-        prepared = replace(
-            base.prepared,
-            effective_prompt=prompt,
-            step_input=replace(
-                base.prepared.step_input,
-                text=question,
-                structured=structured,
-                source_text=section_text,
-                raw_extracted_text=section_text,
-            ),
-            llm_files=None,
-            completion_call=None,
-        )
-        prepared.completion_call = build_prepared_completion_call(
-            step=step,
-            state=state,
-            prepared=prepared,
-            useful_output_reserve_tokens=completion.useful_output_reserve_tokens,
-        )
-        estimate = await preview_step_execution_context(
-            step=step,
-            state=state,
-            prepared=prepared,
-            deps=replace(base.deps, logger=None),
-        )
-        return PreparedAssistantStep(prepared=prepared, deps=base.deps), estimate
 
     # Prove that the prompt, schema and output reserve fit before splitting text.
     empty_call, _ = await measure(0, 0)

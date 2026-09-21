@@ -115,12 +115,18 @@ def build_attempt_provenance(
         if output.citation_sidecar is not None
         else None
     )
-    if llm is None and rag is None and citations is None:
+    if (
+        llm is None
+        and rag is None
+        and citations is None
+        and output.summarization is None
+    ):
         return None
     return FlowAttemptProvenance(
         llm=llm,
         rag=rag,
         citations=citations,
+        summarization=output.summarization,
     ).to_payload()
 
 

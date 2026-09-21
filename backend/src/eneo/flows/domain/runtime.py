@@ -20,6 +20,7 @@ from eneo.flows.domain.step_output import (
 from eneo.flows.domain.step_output import (
     ResolvedStepMaterial as ResolvedStepMaterial,
 )
+from eneo.flows.domain.text_processing import SummarizationProvenance
 from eneo.flows.enums import flow_output_mode_uses_completion_model
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.flow_run_provenance import (
@@ -140,6 +141,7 @@ class StepExecutionOutput:
     transcription_metadata: dict[str, Any] | None = None
     runtime_input_metadata: dict[str, Any] | None = None
     output_payload_extensions: dict[str, Any] | None = None
+    summarization: SummarizationProvenance | None = None
     citation_sidecar: dict[str, Any] | None = None
     # Inherited sources the model cited, carried so the next consumer of this
     # output inherits them as well.

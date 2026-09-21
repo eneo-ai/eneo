@@ -240,6 +240,37 @@ section's core character range and output record index. Core ranges cover the
 complete material without overlap; optional context ranges do not own material
 characters.
 
+### Summarize long material into one record
+
+Set `input_config.text_processing.mode` to `summarize` when the step needs one
+answer over the complete material. It uses the same `pass_through` mode, JSON
+output contract, and single-material requirements as section processing. The
+terminal array contains exactly one object conforming to the array's item schema.
+Ask the assistant for concise records that preserve the facts needed for the final
+answer.
+
+A material that fits the measured request needs one call. Longer material first
+produces section records. If those records fit together, one further call combines
+them. Otherwise consecutive groups are combined sequentially, and the process
+repeats until one record remains. Each intermediate record uses the same item
+schema. Every fold round must reduce both the number of records and their total
+UTF-8 JSON bytes.
+
+Section calls, fold calls, and capability fallbacks share the attempt deadline and
+the existing mapped-execution call and input-token limits. Summarization requires
+a finite call ceiling. When the token ceiling is unset, the finite call ceiling
+and model input capacity determine a finite aggregate token bound. Intermediate
+records remain subject to the structured-output size limit. Folding performs no
+knowledge retrieval and inherits only its parent records' recorded citations.
+
+The attempt's `summarization` provenance stores the intermediate records with their
+rounds, parent references, section indexes, and source material aliases. Before
+dispatch, provider-call receipts store lineage IDs, input byte counts and hashes,
+and budget reservations. Progress reports completed and total groups
+within each round. A fold that cannot shrink or fit within its remaining aggregate
+limits stops with `flow_summarization_non_convergent`; the error details carry
+`summarization_rounds`, `summarization_records`, and `summarization_bytes`.
+
 ### `compose_text`
 
 `compose_text` assembles final text from resolved input bindings without calling an LLM, RAG retrieval, or MCP tools. AI Builder uses it for source-section document reports after semantic steps have already produced the section body, source label, source file id, and optional overview fields.

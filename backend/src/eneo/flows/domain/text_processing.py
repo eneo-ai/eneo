@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from enum import StrEnum
 from hashlib import sha256
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from eneo.flows.domain.step_output import FileBackedStepText
 
 
 class TextProcessingMode(StrEnum):
     PROCESS_EACH_SECTION = "process_each_section"
+    SUMMARIZE = "summarize"
 
 
 class TextProcessingConfig(BaseModel):
@@ -37,6 +38,30 @@ class SectionRange(BaseModel):
         if self.end_char <= self.start_char:
             raise ValueError("Section ranges must be nonempty and ordered.")
         return self
+
+
+class TextRecordLineage(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(min_length=1)
+    round: int = Field(strict=True, ge=0)
+    parents: tuple[str, ...] = ()
+    section_indexes: tuple[Annotated[int, Field(strict=True, ge=0)], ...] = Field(
+        min_length=1
+    )
+    citations: tuple[str, ...] = ()
+
+
+class TextProcessingRecord(TextRecordLineage):
+    value: dict[str, JsonValue]
+
+
+class SummarizationProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    rounds: int = Field(strict=True, ge=0)
+    sources: tuple[FileBackedStepText, ...]
+    records: tuple[TextProcessingRecord, ...]
 
 
 class TextSection(BaseModel):

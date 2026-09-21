@@ -90,12 +90,14 @@ class FlowProviderCallEvidenceMeasurement:
 
 
 def _provider_call_evidence_logical_bytes() -> ColumnElement[int]:
-    # Paired with `_to_evidence`: mapped_source_id is the projection's only
-    # unbounded scalar and must be measured as serialized JSON, including escapes.
+    # Measure variable-size evidence before admitting rows to a bounded page.
     return sa.func.coalesce(
         sa.func.octet_length(
             sa.cast(sa.func.to_jsonb(FlowProviderCalls.mapped_source_id), sa.Text)
         ),
+        0,
+    ) + sa.func.coalesce(
+        sa.func.octet_length(sa.cast(FlowProviderCalls.summarization_input, sa.Text)),
         0,
     )
 
@@ -866,6 +868,12 @@ class FlowProviderCallRepository:
                     else []
                 ),
                 resolved_input_edge_indexes=list(resolved_input_edge_indexes),
+                summarization_input=(
+                    request.summarization_input.model_dump(mode="json")
+                    if isinstance(request, CompletionProviderCallRequest)
+                    and request.summarization_input is not None
+                    else None
+                ),
                 call_reason=(
                     request.call_reason.value
                     if isinstance(request, CompletionProviderCallRequest)
@@ -1070,6 +1078,7 @@ def _to_evidence(
     return ProviderCallEvidence.model_validate(
         {
             "event_id": call.id,
+            "summarization_input": call.summarization_input,
             "attempt_id": call.flow_step_attempt_id,
             "step_id": step_id,
             "step_order": step_order,

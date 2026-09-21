@@ -21,6 +21,7 @@ from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.flow_step_attempt_input import MappedExecutionMode
 from eneo.flows.domain.rag_evidence import SourceUsageState
+from eneo.flows.domain.text_processing import SummarizationProvenance
 from eneo.flows.source_display import (
     format_source_container_display_name,
     format_source_container_label,
@@ -490,6 +491,7 @@ class FlowAttemptProvenance(BaseModel):
     llm: LlmProvenance | None = None
     rag: RagProvenance | None = None
     citations: CitationsProvenance | None = None
+    summarization: SummarizationProvenance | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)
@@ -733,7 +735,7 @@ def parse_attempt_provenance(raw: Any) -> FlowAttemptProvenanceParseResult:
         (
             key
             for key in raw_payload
-            if key in {"llm", "rag", "citations"}
+            if key in {"llm", "rag", "citations", "summarization"}
             and raw_payload.get(key) is not None
             and not isinstance(raw_payload.get(key), dict)
         ),
@@ -800,6 +802,9 @@ def _normalize_attempt_provenance_v3(raw: dict[str, Any]) -> FlowAttemptProvenan
         llm=llm,
         rag=_normalize_rag_provenance(raw.get("rag")),
         citations=_validate_extra_model(CitationsProvenance, raw.get("citations")),
+        summarization=_validate_extra_model(
+            SummarizationProvenance, raw.get("summarization")
+        ),
     )
 
 

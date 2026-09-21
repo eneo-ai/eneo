@@ -91,6 +91,20 @@ def _owner(
 
 FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
     _owner(
+        "flow_provider_calls",
+        "summarization_input",
+        owner_module="eneo.flows.domain.provider_call",
+        envelope_name="SummarizationCallInput",
+        owner_symbols=("SummarizationCallInput",),
+        storage_category=FlowJsonbStorageCategory.PROVENANCE_EVIDENCE,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.TABLE_SCHEMA_VERSION,
+        corruption_behavior=FlowJsonbCorruptionBehavior.MARK_EVIDENCE_UNAVAILABLE,
+        rationale=(
+            "Summarization receipts retain lineage references, content hashes, "
+            "and reservations without copying record values or execution inputs."
+        ),
+    ),
+    _owner(
         "tenants",
         "flow_settings",
         owner_module="eneo.flows.flow_settings",

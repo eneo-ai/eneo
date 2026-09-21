@@ -49,6 +49,9 @@ def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
     assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
         FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED
     ]
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.SUMMARIZATION_NON_CONVERGENT
+    ]
     # A spent step budget may leave a provider request in flight, so a new
     # run can duplicate work and spend.
     assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[FlowApiErrorCode.STEP_TIMEOUT]
