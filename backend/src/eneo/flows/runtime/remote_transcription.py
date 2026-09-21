@@ -1147,8 +1147,7 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
         delay = float(value)
     except ValueError:
         try:
-            # email.utils ships without a typed return; the value is a datetime.
-            retry_at = cast(datetime, parsedate_to_datetime(value))
+            retry_at = parsedate_to_datetime(value)
             delay = (retry_at - datetime.now(timezone.utc)).total_seconds()
         except (TypeError, ValueError, OverflowError):
             return None
