@@ -70,7 +70,9 @@ anpassar alla anslutningar.
 För att spara AI-leverantörernas autentiseringsuppgifter krävs en
 `ENCRYPTION_KEY`. Backend-containern ansluter till det externa nätverket
 `proxy_tier`, så skapa nätverket först och generera sedan nyckeln med samma
-backendavbildning som ska köras:
+backendavbildning som ska köras. Kommandot kräver att avbildningarna är låsta
+till den release guiden beskriver; `latest` pekar på den senaste slutliga
+utgåvan och kan vara äldre:
 
 ```bash
 docker network create proxy_tier
