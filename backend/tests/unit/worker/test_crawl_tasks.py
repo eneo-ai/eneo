@@ -1,9 +1,10 @@
 import asyncio
 import contextlib
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -16,6 +17,10 @@ from eneo.websites.domain.crawl_run import (
     CrawlFailureCode,
     CrawlOrigin,
     CrawlOutcome,
+)
+from eneo.websites.domain.crawl_schedule import (
+    SchedulerRunRecord,
+    SchedulerTenantCounts,
 )
 from eneo.worker.crawl_tasks import (
     _QUEUE_CLOSED,
@@ -250,22 +255,45 @@ class _FakeSession:
         yield self
 
 
-async def test_queue_website_crawls_reads_owner_through_website_session(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Each admission looks up the owner on its own transactional session.
+@dataclass
+class _SchedulerHarness:
+    """Fakes around queue_website_crawls: sessions, owner lookup, admission."""
 
-    The cron session has no transaction, so anything that queries through it
-    fails; the owner lookup and the crawl admission must both run on the
-    per-website session.
-    """
+    query_session: _FakeSession
+    website_sessions: list[_FakeSession]
+    repo_sessions: list[object]
+    containers: list[Any]
+    crawl: AsyncMock
+    reconcile: AsyncMock
+    recorder: AsyncMock
+    scheduler: SimpleNamespace
+    cron_container: Any
+
+
+def _website(tenant_id: UUID | None = None) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid4(),
+        tenant_id=tenant_id or uuid4(),
+        space_id=uuid4(),
+        user_id=uuid4(),
+        url="https://example.invalid/",
+    )
+
+
+def _scheduler_harness(
+    monkeypatch: pytest.MonkeyPatch,
+    websites: list[SimpleNamespace],
+    *,
+    crawl: AsyncMock | None = None,
+    recorder: AsyncMock | None = None,
+) -> _SchedulerHarness:
     import eneo.database.database as database_module
     import eneo.websites.application.crawl_dispatch as crawl_dispatch_module
     import eneo.worker.crawl_tasks as crawl_tasks_module
 
     query_session = _FakeSession("query")
-    website_session = _FakeSession("website")
-    sessions = iter([query_session, website_session])
+    website_sessions = [_FakeSession(f"website-{i}") for i in range(len(websites))]
+    sessions = iter([query_session, *website_sessions])
 
     @contextlib.asynccontextmanager
     async def _open_session():
@@ -275,15 +303,10 @@ async def test_queue_website_crawls_reads_owner_through_website_session(
         database_module, "sessionmanager", SimpleNamespace(session=_open_session)
     )
 
-    website = SimpleNamespace(
-        id=uuid4(),
-        tenant_id=uuid4(),
-        space_id=uuid4(),
-        user_id=uuid4(),
-        url="https://example.invalid/",
-    )
-    owner = SimpleNamespace(id=website.user_id, tenant=object())
-
+    owners = {
+        website.user_id: SimpleNamespace(id=website.user_id, tenant=object())
+        for website in websites
+    }
     repo_sessions: list[object] = []
 
     class _FakeUsersRepository:
@@ -291,12 +314,11 @@ async def test_queue_website_crawls_reads_owner_through_website_session(
             repo_sessions.append(session)
 
         async def get_user_by_id(self, user_id: object) -> SimpleNamespace:
-            assert user_id == website.user_id
-            return owner
+            return owners[cast(UUID, user_id)]
 
     monkeypatch.setattr(crawl_tasks_module, "UsersRepository", _FakeUsersRepository)
 
-    crawl = AsyncMock()
+    crawl = crawl or AsyncMock()
     containers: list[Any] = []
 
     class _FakeContainer:
@@ -310,20 +332,99 @@ async def test_queue_website_crawls_reads_owner_through_website_session(
     monkeypatch.setattr(crawl_tasks_module, "Container", _FakeContainer)
     reconcile = AsyncMock()
     monkeypatch.setattr(crawl_dispatch_module, "reconcile_crawl_work", reconcile)
+    recorder = recorder or AsyncMock()
+    monkeypatch.setattr(crawl_tasks_module, "record_crawl_scheduler_run", recorder)
 
     scheduler = SimpleNamespace(
         website_sparse_repo=SimpleNamespace(session=None),
-        get_websites_due_for_crawl=AsyncMock(return_value=[website]),
+        get_websites_due_for_crawl=AsyncMock(return_value=list(websites)),
     )
-    cron_container = SimpleNamespace(crawl_scheduler_service=lambda: scheduler)
+    return _SchedulerHarness(
+        query_session=query_session,
+        website_sessions=website_sessions,
+        repo_sessions=repo_sessions,
+        containers=containers,
+        crawl=crawl,
+        reconcile=reconcile,
+        recorder=recorder,
+        scheduler=scheduler,
+        cron_container=SimpleNamespace(crawl_scheduler_service=lambda: scheduler),
+    )
 
-    assert await queue_website_crawls(container=cast(Any, cron_container)) is True
 
-    assert scheduler.website_sparse_repo.session is query_session
-    assert repo_sessions == [website_session]
-    assert containers[0].providers_by_name["session"]() is website_session
-    assert containers[0].providers_by_name["user"]() is owner
-    crawl.assert_awaited_once_with(
+async def test_queue_website_crawls_reads_owner_through_website_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each admission looks up the owner on its own transactional session.
+
+    The cron session has no transaction, so anything that queries through it
+    fails; the owner lookup and the crawl admission must both run on the
+    per-website session.
+    """
+    website = _website()
+    harness = _scheduler_harness(monkeypatch, [website])
+
+    assert await queue_website_crawls(container=harness.cron_container) is True
+
+    website_session = harness.website_sessions[0]
+    assert harness.scheduler.website_sparse_repo.session is harness.query_session
+    assert harness.repo_sessions == [website_session]
+    assert harness.containers[0].providers_by_name["session"]() is website_session
+    assert harness.containers[0].providers_by_name["user"]().id == website.user_id
+    harness.crawl.assert_awaited_once_with(
         website, origin=CrawlOrigin.SCHEDULED, reconcile_after_commit=False
     )
-    reconcile.assert_awaited_once()
+    harness.reconcile.assert_awaited_once()
+
+
+async def test_queue_website_crawls_records_per_tenant_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The run marker counts due, admitted and failed websites per tenant."""
+    tenant_a, tenant_b = uuid4(), uuid4()
+    ok_site, broken_site = _website(tenant_a), _website(tenant_b)
+
+    async def _admit(website: SimpleNamespace, **_: object) -> None:
+        if website is broken_site:
+            raise RuntimeError("owner gone")
+
+    harness = _scheduler_harness(
+        monkeypatch, [ok_site, broken_site], crawl=AsyncMock(side_effect=_admit)
+    )
+
+    assert await queue_website_crawls(container=harness.cron_container) is False
+
+    harness.recorder.assert_awaited_once()
+    record: SchedulerRunRecord = harness.recorder.await_args.args[0]
+    assert (record.due, record.admitted, record.failed) == (2, 1, 1)
+    assert record.ran_at.tzinfo is not None
+    assert record.tenants == {
+        tenant_a: SchedulerTenantCounts(due=1, admitted=1, failed=0),
+        tenant_b: SchedulerTenantCounts(due=1, admitted=0, failed=1),
+    }
+    harness.reconcile.assert_awaited_once()
+
+
+async def test_queue_website_crawls_survives_marker_write_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Observability never fails the cron: a Redis error is logged and skipped."""
+    harness = _scheduler_harness(
+        monkeypatch, [_website()], recorder=AsyncMock(side_effect=ConnectionError)
+    )
+
+    assert await queue_website_crawls(container=harness.cron_container) is True
+
+    harness.reconcile.assert_awaited_once()
+
+
+async def test_queue_website_crawls_records_an_empty_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _scheduler_harness(monkeypatch, [])
+
+    assert await queue_website_crawls(container=harness.cron_container) is True
+
+    record: SchedulerRunRecord = harness.recorder.await_args.args[0]
+    assert (record.due, record.admitted, record.failed) == (0, 0, 0)
+    assert record.tenants == {}

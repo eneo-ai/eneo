@@ -86,3 +86,62 @@ async def test_scheduler_skips_websites_with_active_crawl_runs(
 
     due_ids = {site.id for site in due}
     assert website_id not in due_ids
+
+
+async def test_due_websites_follow_the_shared_interval_table(
+    db_session, admin_user, space_factory
+):
+    """Daily, every-other-day and weekly thresholds, the Friday gate and the
+    circuit breaker all come from crawl_schedule and behave as one table."""
+    now = datetime.now(timezone.utc)
+    tag = uuid4().hex[:8]
+    hours = timedelta(hours=1)
+    cases = {
+        "daily-25h": ("daily", now - 25 * hours, None, True),
+        "daily-23h": ("daily", now - 23 * hours, None, False),
+        "eod-49h": ("every_other_day", now - 49 * hours, None, True),
+        "eod-47h": ("every_other_day", now - 47 * hours, None, False),
+        "weekly-8d": ("weekly", now - 8 * 24 * hours, None, "friday"),
+        "weekly-6d": ("weekly", now - 6 * 24 * hours, None, False),
+        "never-crawled": ("daily", None, None, True),
+        "backoff-future": ("daily", now - 25 * hours, now + hours, False),
+        "backoff-past": ("daily", now - 25 * hours, now - hours, True),
+        "never": ("never", None, None, False),
+    }
+    ids: dict[str, object] = {}
+    async with db_session() as session:
+        embedding_model_id = await session.scalar(
+            sa.select(EmbeddingModels.id).limit(1)
+        )
+        space = await space_factory(session, f"Interval table {tag}")
+        for label, (interval, last_crawled_at, next_retry_at, _) in cases.items():
+            website = WebsitesTable(
+                name=label,
+                url=f"https://{tag}-{label}.example",
+                download_files=False,
+                crawl_type=CrawlType.CRAWL,
+                update_interval=interval,
+                size=0,
+                tenant_id=admin_user.tenant_id,
+                user_id=admin_user.id,
+                embedding_model_id=embedding_model_id,
+                space_id=space.id,
+                last_crawled_at=last_crawled_at,
+                next_retry_at=next_retry_at,
+            )
+            session.add(website)
+            await session.flush()
+            ids[label] = website.id
+
+    friday = datetime(2026, 9, 25, tzinfo=timezone.utc).date()
+    thursday = datetime(2026, 9, 24, tzinfo=timezone.utc).date()
+    async with db_session() as session:
+        repo = WebsiteSparseRepository(session)
+        due_friday = {site.id for site in await repo.get_due_websites(friday)}
+        due_thursday = {site.id for site in await repo.get_due_websites(thursday)}
+
+    for label, (_, _, _, expected) in cases.items():
+        on_friday = expected in (True, "friday")
+        on_thursday = expected is True
+        assert (ids[label] in due_friday) is on_friday, f"{label} on Friday"
+        assert (ids[label] in due_thursday) is on_thursday, f"{label} on Thursday"

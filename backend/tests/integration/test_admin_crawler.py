@@ -10,7 +10,12 @@ from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.database.tables.users_table import Users
-from eneo.database.tables.websites_table import CrawlRunFailures, CrawlRuns, Websites
+from eneo.database.tables.websites_table import (
+    CrawlAttempts,
+    CrawlRunFailures,
+    CrawlRuns,
+    Websites,
+)
 
 pytest_plugins = [
     "tests.integration.test_website_latest_crawl",
@@ -989,3 +994,483 @@ async def test_service_admin_key_can_read_and_cancel_but_cannot_create_crawl_job
         assert audit is not None
         assert audit.actor_id is None
         assert audit.log_metadata["actor"]["type"] == "service_key"
+
+
+# --- scheduler health -------------------------------------------------------
+
+
+def _scheduler_marker(ran_at, *, tenant_id, foreign_tenant_id) -> str:
+    from eneo.websites.domain.crawl_schedule import (
+        SchedulerRunRecord,
+        SchedulerTenantCounts,
+    )
+    from eneo.worker.redis.client import encode_scheduler_run
+
+    return encode_scheduler_run(
+        SchedulerRunRecord(
+            ran_at=ran_at,
+            due=5,
+            admitted=3,
+            failed=2,
+            tenants={
+                tenant_id: SchedulerTenantCounts(due=3, admitted=2, failed=1),
+                foreign_tenant_id: SchedulerTenantCounts(due=2, admitted=1, failed=1),
+            },
+        )
+    )
+
+
+async def test_overview_reports_tenant_scoped_scheduler_health(
+    client, headers, admin_user, redis_client
+):
+    from eneo.worker.redis.client import CRAWL_SCHEDULER_RUN_KEY
+
+    foreign_tenant_id = uuid4()
+    now = datetime.now(timezone.utc)
+    try:
+        await redis_client.set(
+            CRAWL_SCHEDULER_RUN_KEY,
+            _scheduler_marker(
+                now - timedelta(minutes=5),
+                tenant_id=admin_user.tenant_id,
+                foreign_tenant_id=foreign_tenant_id,
+            ),
+        )
+        response = await client.get("/api/v1/admin/crawler/", headers=headers)
+        assert response.status_code == 200, response.text
+        scheduler = response.json()["scheduler"]
+        assert scheduler["status"] == "degraded"
+        assert (scheduler["due"], scheduler["admitted"], scheduler["failed"]) == (
+            3,
+            2,
+            1,
+        )
+        assert scheduler["stale_after_minutes"] == 65
+        assert str(foreign_tenant_id) not in response.text
+
+        await redis_client.set(
+            CRAWL_SCHEDULER_RUN_KEY,
+            _scheduler_marker(
+                now - timedelta(hours=2),
+                tenant_id=admin_user.tenant_id,
+                foreign_tenant_id=foreign_tenant_id,
+            ),
+        )
+        scheduler = (
+            await client.get("/api/v1/admin/crawler/", headers=headers)
+        ).json()["scheduler"]
+        assert scheduler["status"] == "stale"
+        assert scheduler["ran_at"] is not None
+        assert scheduler["failed"] == 1
+
+        await redis_client.delete(CRAWL_SCHEDULER_RUN_KEY)
+        scheduler = (
+            await client.get("/api/v1/admin/crawler/", headers=headers)
+        ).json()["scheduler"]
+        assert scheduler == {
+            "status": "stale",
+            "ran_at": None,
+            "stale_after_minutes": 65,
+            "due": None,
+            "admitted": None,
+            "failed": None,
+        }
+    finally:
+        await redis_client.delete(CRAWL_SCHEDULER_RUN_KEY)
+
+
+async def test_overview_scheduler_health_is_unknown_when_redis_fails(
+    client, headers, monkeypatch
+):
+    from eneo.admin import admin_crawler_router
+
+    monkeypatch.setattr(
+        admin_crawler_router,
+        "read_crawl_scheduler_run",
+        AsyncMock(side_effect=ConnectionError("redis down")),
+    )
+
+    response = await client.get("/api/v1/admin/crawler/", headers=headers)
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["scheduler"]["status"] == "unknown"
+    assert data["scheduler"]["ran_at"] is None
+    assert data["scheduler"]["due"] is None
+    assert set(data["summary"]) == {"ongoing", "queued", "issues"}
+
+
+# --- scheduled websites listing ----------------------------------------------
+
+
+async def _seed_website(
+    session,
+    *,
+    owner,
+    model_id,
+    space_id,
+    url,
+    interval,
+    name=None,
+    last_crawled_at=None,
+    next_retry_at=None,
+    consecutive_failures=0,
+    created_at=None,
+):
+    website = Websites(
+        name=name,
+        url=url,
+        size=0,
+        download_files=False,
+        crawl_type="crawl",
+        update_interval=interval,
+        tenant_id=owner.tenant_id,
+        user_id=owner.id,
+        space_id=space_id,
+        embedding_model_id=model_id,
+        last_crawled_at=last_crawled_at,
+        next_retry_at=next_retry_at,
+        consecutive_failures=consecutive_failures,
+    )
+    if created_at is not None:
+        website.created_at = created_at
+    session.add(website)
+    await session.flush()
+    return website.id
+
+
+def _parse(value):
+    return datetime.fromisoformat(value) if value is not None else None
+
+
+async def test_scheduled_websites_project_state_filters_and_sorting(
+    client, db_container, admin_user, second_tenant_user, website_id, headers
+):
+    from eneo.database.tables.ai_models_table import EmbeddingModels
+    from eneo.websites.domain.crawl_schedule import ceil_to_tick
+
+    now = datetime.now(timezone.utc)
+    tag = uuid4().hex[:8]
+    active_run_id, done_run_id = uuid4(), uuid4()
+    async with db_container(user=admin_user) as container:
+        session = container.session()
+        model_id = await session.scalar(sa.select(EmbeddingModels.id).limit(1))
+        space_id = (await session.get(Websites, website_id)).space_id
+        seed = dict(session=session, owner=admin_user, model_id=model_id)
+        due_id = await _seed_website(
+            **seed,
+            space_id=space_id,
+            url=f"https://{tag}-due.example",
+            name=f"{tag} due",
+            interval="daily",
+            last_crawled_at=now - timedelta(days=2),
+        )
+        waiting_id = await _seed_website(
+            **seed,
+            space_id=None,
+            url=f"https://{tag}-waiting.example",
+            interval="daily",
+            last_crawled_at=now - timedelta(hours=1),
+        )
+        weekly_id = await _seed_website(
+            **seed,
+            space_id=space_id,
+            url=f"https://{tag}-weekly.example",
+            interval="weekly",
+            created_at=now - timedelta(days=30),
+        )
+        backoff_id = await _seed_website(
+            **seed,
+            space_id=space_id,
+            url=f"https://{tag}-backoff.example",
+            interval="daily",
+            last_crawled_at=now - timedelta(days=3),
+            next_retry_at=now + timedelta(hours=2),
+            consecutive_failures=2,
+        )
+        active_id = await _seed_website(
+            **seed,
+            space_id=space_id,
+            url=f"https://{tag}-active.example",
+            interval="every_other_day",
+            last_crawled_at=now - timedelta(days=5),
+        )
+        disabled_id = await _seed_website(
+            **seed,
+            space_id=space_id,
+            url=f"https://{tag}-disabled.example",
+            interval="never",
+            consecutive_failures=10,
+        )
+        session.add(
+            CrawlRuns(
+                id=done_run_id,
+                website_id=due_id,
+                tenant_id=admin_user.tenant_id,
+                phase="terminal",
+                outcome="succeeded",
+                origin="scheduled",
+                finished_at=now - timedelta(days=2),
+                pages_crawled=12,
+            )
+        )
+        job = Jobs(user_id=admin_user.id, task="crawl", status="queued", name="Crawl")
+        session.add(job)
+        await session.flush()
+        session.add(
+            CrawlRuns(
+                id=active_run_id,
+                website_id=active_id,
+                tenant_id=admin_user.tenant_id,
+                job_id=job.id,
+                phase="queued",
+                origin="manual",
+                attempt_count=1,
+            )
+        )
+        await session.flush()
+        session.add(
+            CrawlAttempts(
+                crawl_run_id=active_run_id,
+                attempt_number=1,
+                dispatch_id=job.id,
+                dispatch_payload={},
+            )
+        )
+        foreign_url = f"https://{tag}-foreign.example"
+        await _seed_website(
+            session=session,
+            owner=second_tenant_user,
+            model_id=model_id,
+            space_id=None,
+            url=foreign_url,
+            interval="daily",
+            last_crawled_at=now - timedelta(days=2),
+        )
+
+    response = await client.get(
+        "/api/v1/admin/crawler/websites/", params={"limit": 100}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+    page = response.json()
+    as_of = _parse(page["as_of"])
+    by_id = {item["website_id"]: item for item in page["items"]}
+    ours = {str(i) for i in (due_id, waiting_id, weekly_id, backoff_id, active_id)}
+    assert ours <= set(by_id)
+    assert str(disabled_id) not in by_id and str(website_id) not in by_id
+    assert foreign_url not in response.text
+    assert page["total_count"] == len(page["items"])
+
+    due = by_id[str(due_id)]
+    assert due["schedule_state"] == "due"
+    assert _parse(due["next_due_at"]) == ceil_to_tick(as_of)
+    assert due["latest_run"]["id"] == str(done_run_id)
+    assert due["space_name"] is not None and due["website_name"] == f"{tag} due"
+
+    waiting = by_id[str(waiting_id)]
+    assert waiting["schedule_state"] == "waiting"
+    assert _parse(waiting["next_due_at"]) == ceil_to_tick(
+        _parse(waiting["last_crawled_at"]) + timedelta(days=1)
+    )
+    assert waiting["space_name"] is None and waiting["latest_run"] is None
+
+    weekly = by_id[str(weekly_id)]
+    assert _parse(weekly["interval_due_at"]) == _parse(weekly["interval_due_at"])
+    assert _parse(weekly["interval_due_at"]) < as_of - timedelta(days=29)
+    next_weekly = _parse(weekly["next_due_at"])
+    assert next_weekly.weekday() == 4 and next_weekly.minute == 0
+    assert weekly["schedule_state"] == ("due" if as_of.weekday() == 4 else "waiting")
+
+    backoff = by_id[str(backoff_id)]
+    assert backoff["schedule_state"] == "blocked_backoff"
+    assert _parse(backoff["blocked_until"]) == _parse(backoff["next_retry_at"])
+    assert _parse(backoff["next_due_at"]) == ceil_to_tick(
+        _parse(backoff["next_retry_at"])
+    )
+
+    active = by_id[str(active_id)]
+    assert active["schedule_state"] == "blocked_active_run"
+    assert active["active_run_id"] == str(active_run_id)
+    assert active["latest_run"]["id"] == str(active_run_id)
+    assert active["next_due_at"] is None
+
+    # Default order is the stable keyset (interval_due_at, id).
+    keys = [(_parse(i["interval_due_at"]), i["website_id"]) for i in page["items"]]
+    assert keys == sorted(keys)
+
+    # Disabled websites only appear when asked for.
+    response = await client.get(
+        "/api/v1/admin/crawler/websites/",
+        params={"interval": "never", "limit": 100},
+        headers=headers,
+    )
+    disabled = {i["website_id"]: i for i in response.json()["items"]}
+    assert disabled[str(disabled_id)]["schedule_state"] == "disabled"
+    assert disabled[str(disabled_id)]["auto_disabled"] is True
+    assert disabled[str(website_id)]["auto_disabled"] is False
+    assert not (ours & set(disabled))
+
+    # State filters partition the scheduled set exactly as the projection does.
+    seen: set[str] = set()
+    expected_states = {
+        "due": {"due"},
+        "waiting": {"waiting"},
+        "blocked": {"blocked_active_run", "blocked_backoff"},
+    }
+    for state, allowed in expected_states.items():
+        response = await client.get(
+            "/api/v1/admin/crawler/websites/",
+            params={"state": state, "limit": 100},
+            headers=headers,
+        )
+        items = response.json()["items"]
+        assert {i["schedule_state"] for i in items} <= allowed, state
+        ids = {i["website_id"] for i in items}
+        assert not (ids & seen)
+        seen |= ids
+    assert seen == set(by_id)
+
+    response = await client.get(
+        "/api/v1/admin/crawler/websites/",
+        params={"interval": "weekly", "search": tag, "limit": 100},
+        headers=headers,
+    )
+    assert [i["website_id"] for i in response.json()["items"]] == [str(weekly_id)]
+
+    response = await client.get(
+        "/api/v1/admin/crawler/websites/",
+        params={"search": f"{tag}-back", "limit": 100},
+        headers=headers,
+    )
+    assert [i["website_id"] for i in response.json()["items"]] == [str(backoff_id)]
+
+    response = await client.get(
+        "/api/v1/admin/crawler/websites/",
+        params={"sort": "url", "search": tag, "limit": 100},
+        headers=headers,
+    )
+    urls = [i["website_url"] for i in response.json()["items"]]
+    assert urls == sorted(urls) and len(urls) == 5
+
+    response = await client.get(
+        "/api/v1/admin/crawler/websites/",
+        params={"sort": "last_crawled", "search": tag, "limit": 100},
+        headers=headers,
+    )
+    items = response.json()["items"]
+    stamps = [
+        _parse(i["last_crawled_at"]) or _parse(weekly["interval_due_at"]) for i in items
+    ]
+    assert stamps == sorted(stamps, reverse=True)
+    assert items[-1]["website_id"] == str(weekly_id)
+
+
+async def test_scheduled_websites_paginate_stably_across_ties(
+    client, db_container, admin_user, second_tenant_user, website_id, headers
+):
+    from eneo.database.tables.ai_models_table import EmbeddingModels
+
+    tag = uuid4().hex[:8]
+    created_at = datetime.now(timezone.utc) - timedelta(days=1)
+    async with db_container(user=admin_user) as container:
+        session = container.session()
+        model_id = await session.scalar(sa.select(EmbeddingModels.id).limit(1))
+        seeded = {
+            str(
+                await _seed_website(
+                    session=session,
+                    owner=admin_user,
+                    model_id=model_id,
+                    space_id=None,
+                    url=f"https://{tag}-{index:02d}.example",
+                    interval="daily",
+                    created_at=created_at,
+                )
+            )
+            for index in range(12)
+        }
+        foreign_id = await _seed_website(
+            session=session,
+            owner=second_tenant_user,
+            model_id=model_id,
+            space_id=None,
+            url=f"https://{tag}-foreign.example",
+            interval="daily",
+        )
+
+    collected: list[str] = []
+    cursor = None
+    while True:
+        params = {"search": tag, "limit": 5}
+        if cursor:
+            params["cursor"] = cursor
+        response = await client.get(
+            "/api/v1/admin/crawler/websites/", params=params, headers=headers
+        )
+        assert response.status_code == 200, response.text
+        page = response.json()
+        assert len(page["items"]) <= 5
+        assert page["total_count"] == 12
+        collected += [item["website_id"] for item in page["items"]]
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+    assert len(collected) == len(set(collected)) == 12
+    assert set(collected) == seeded
+
+    for bad_cursor in (uuid4(), foreign_id):
+        response = await client.get(
+            "/api/v1/admin/crawler/websites/",
+            params={"cursor": str(bad_cursor)},
+            headers=headers,
+        )
+        assert response.status_code == 400, response.text
+    for limit in (0, 101):
+        response = await client.get(
+            "/api/v1/admin/crawler/websites/", params={"limit": limit}, headers=headers
+        )
+        assert response.status_code == 422, response.text
+
+
+async def test_scheduled_websites_require_admin_and_stay_in_tenant(
+    client, db_container, admin_user, website_id, headers, second_tenant_token
+):
+    from eneo.database.tables.ai_models_table import EmbeddingModels
+    from eneo.users.user import UserAdd, UserState
+
+    tag = uuid4().hex[:8]
+    async with db_container(user=admin_user) as container:
+        session = container.session()
+        model_id = await session.scalar(sa.select(EmbeddingModels.id).limit(1))
+        ours = await _seed_website(
+            session=session,
+            owner=admin_user,
+            model_id=model_id,
+            space_id=None,
+            url=f"https://{tag}.example",
+            interval="daily",
+        )
+        regular = await container.user_repo().add(
+            UserAdd(
+                email=f"schedule-reader-{uuid4()}@example.com",
+                username=f"schedule-reader-{uuid4()}",
+                state=UserState.ACTIVE,
+                tenant_id=admin_user.tenant_id,
+            )
+        )
+        token = container.auth_service().create_access_token_for_user(regular)
+
+    response = await client.get(
+        "/api/v1/admin/crawler/websites/",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403, response.text
+
+    response = await client.get(
+        "/api/v1/admin/crawler/websites/",
+        params={"search": tag, "limit": 100},
+        headers={"Authorization": f"Bearer {second_tenant_token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["items"] == []
+    assert str(ours) not in response.text

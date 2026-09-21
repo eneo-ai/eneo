@@ -5,7 +5,7 @@ import os
 import secrets
 import socket
 import time
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from typing import Any, Generic, Protocol, TypeVar, cast
@@ -48,6 +48,10 @@ from eneo.websites.domain.crawl_run import (
     CrawlResourceKind,
     CrawlType,
 )
+from eneo.websites.domain.crawl_schedule import (
+    SchedulerRunRecord,
+    SchedulerTenantCounts,
+)
 from eneo.worker.crawl import (
     CrawlLeaseLostError,
     HeartbeatFailedError,
@@ -62,6 +66,7 @@ from eneo.worker.crawl_context import (
     CrawlContext,
     EmbeddingModelSpec,
 )
+from eneo.worker.redis.client import record_crawl_scheduler_run
 
 logger = get_logger(__name__)
 
@@ -334,6 +339,9 @@ async def queue_website_crawls(container: Container):
     )
     admitted = 0
     failed = 0
+    due_by_tenant = Counter(website.tenant_id for website in websites)
+    admitted_by_tenant: Counter[UUID] = Counter()
+    failed_by_tenant: Counter[UUID] = Counter()
     for website in websites:
         try:
             async with (
@@ -359,8 +367,10 @@ async def queue_website_crawls(container: Container):
                     reconcile_after_commit=False,
                 )
             admitted += 1
+            admitted_by_tenant[website.tenant_id] += 1
         except Exception:
             failed += 1
+            failed_by_tenant[website.tenant_id] += 1
             logger.exception(
                 "Failed to admit scheduled crawl",
                 extra={
@@ -370,6 +380,28 @@ async def queue_website_crawls(container: Container):
                     "user_id": str(website.user_id),
                 },
             )
+
+    # The marker is observability for the admin crawler view. A Redis
+    # failure must not fail the cron, and it is written before reconciliation
+    # so a dispatch error cannot lose it.
+    record = SchedulerRunRecord(
+        ran_at=datetime.now(timezone.utc),
+        due=len(websites),
+        admitted=admitted,
+        failed=failed,
+        tenants={
+            tenant_id: SchedulerTenantCounts(
+                due=due,
+                admitted=admitted_by_tenant[tenant_id],
+                failed=failed_by_tenant[tenant_id],
+            )
+            for tenant_id, due in due_by_tenant.items()
+        },
+    )
+    try:
+        await record_crawl_scheduler_run(record)
+    except Exception:
+        logger.exception("Failed to record the crawl scheduler run marker")
 
     from eneo.websites.application.crawl_dispatch import reconcile_crawl_work
 

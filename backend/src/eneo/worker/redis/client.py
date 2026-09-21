@@ -1,16 +1,29 @@
 """Redis client connection management for worker operations."""
 
+import json
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Any, NamedTuple, cast
+from uuid import UUID
 
 import redis.asyncio as aioredis
 from eneo.jobs.job_manager import DEFAULT_QUEUE_NAME
 from eneo.main.config import get_settings
 from eneo.redis.connection import build_redis_pool_kwargs
+from eneo.websites.domain.crawl_schedule import (
+    SchedulerRunRecord,
+    SchedulerTenantCounts,
+)
+
+logger = logging.getLogger(__name__)
 
 CRAWL_RECONCILIATION_HEALTH_KEY = "crawler:reconciliation:health"
 CRAWL_RECONCILIATION_HEALTH_TTL_SECONDS = 180
+
+CRAWL_SCHEDULER_RUN_KEY = "crawler:scheduler:last_run"
+CRAWL_SCHEDULER_RUN_TTL_SECONDS = 7 * 24 * 3600
+_SCHEDULER_RUN_VERSION = 1
 
 
 def _get_redis_connection() -> aioredis.Redis:
@@ -46,6 +59,79 @@ async def mark_crawl_reconciliation_healthy() -> None:
         "ok",
         ex=CRAWL_RECONCILIATION_HEALTH_TTL_SECONDS,
     )
+
+
+def encode_scheduler_run(record: SchedulerRunRecord) -> str:
+    """Serialise a scheduler run for Redis; tenant ids become string keys."""
+    payload = {
+        "version": _SCHEDULER_RUN_VERSION,
+        "ran_at": record.ran_at.isoformat(),
+        "due": record.due,
+        "admitted": record.admitted,
+        "failed": record.failed,
+        "tenants": {
+            str(tenant_id): {
+                "due": counts.due,
+                "admitted": counts.admitted,
+                "failed": counts.failed,
+            }
+            for tenant_id, counts in record.tenants.items()
+        },
+    }
+    return json.dumps(payload, separators=(",", ":"))
+
+
+def decode_scheduler_run(raw: bytes | str | None) -> SchedulerRunRecord | None:
+    """Parse a stored scheduler run; malformed data reads as no marker."""
+    if not raw:
+        return None
+    try:
+        text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+        payload = json.loads(text)
+        ran_at = datetime.fromisoformat(payload["ran_at"])
+        if ran_at.tzinfo is None:
+            raise ValueError("ran_at must be timezone-aware")
+        tenants = {
+            UUID(tenant_id): SchedulerTenantCounts(
+                due=int(counts["due"]),
+                admitted=int(counts["admitted"]),
+                failed=int(counts["failed"]),
+            )
+            for tenant_id, counts in payload.get("tenants", {}).items()
+        }
+        return SchedulerRunRecord(
+            ran_at=ran_at,
+            due=int(payload["due"]),
+            admitted=int(payload["admitted"]),
+            failed=int(payload["failed"]),
+            tenants=tenants,
+        )
+    except (ValueError, TypeError, KeyError, AttributeError):
+        logger.warning("Ignoring malformed crawl scheduler marker", exc_info=True)
+        return None
+
+
+async def record_crawl_scheduler_run(
+    record: SchedulerRunRecord, *, redis_client: aioredis.Redis | None = None
+) -> None:
+    """Persist what the last scheduler run did, for the admin crawler view."""
+    await (redis_client or get_redis()).set(
+        CRAWL_SCHEDULER_RUN_KEY,
+        encode_scheduler_run(record),
+        ex=CRAWL_SCHEDULER_RUN_TTL_SECONDS,
+    )
+
+
+async def read_crawl_scheduler_run(
+    *, redis_client: aioredis.Redis | None = None
+) -> SchedulerRunRecord | None:
+    """Read the last scheduler run.
+
+    Connection errors propagate so callers can tell "no marker" apart from
+    "Redis unavailable".
+    """
+    raw = await (redis_client or get_redis()).get(CRAWL_SCHEDULER_RUN_KEY)
+    return decode_scheduler_run(raw)
 
 
 def reset_redis_client() -> aioredis.Redis:

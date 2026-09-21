@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from datetime import date, datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
@@ -18,13 +20,26 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.websites.domain.crawl_run import CrawlResourceKind, CrawlRun
 from eneo.websites.domain.crawl_run_repo import CrawlHistoryPeriod, CrawlOverviewStatus
+from eneo.websites.domain.crawl_schedule import (
+    SCHEDULER_STALE_AFTER,
+    SchedulerHealthStatus,
+    ScheduleState,
+    scheduler_health_status,
+)
 from eneo.websites.domain.website import UpdateInterval, WebsiteSparse
+from eneo.websites.domain.website_sparse_repo import (
+    ScheduledSort,
+    ScheduledWebsite,
+    ScheduleFilter,
+)
 from eneo.websites.presentation.website_models import (
     CrawlFailurePagePublic,
     CrawlResourceFailurePublic,
     CrawlRunPublic,
 )
+from eneo.worker.redis.client import read_crawl_scheduler_run
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 AdminContainer = Annotated[Container, Depends(get_container(with_user=True))]
 AdminMutationContainer = Annotated[
@@ -66,12 +81,101 @@ class AdminCrawlerCalendar(BaseModel):
     yesterday: AdminCrawlerDaySummary
 
 
+class AdminCrawlerSchedulerHealth(BaseModel):
+    status: SchedulerHealthStatus = Field(
+        description=(
+            "ok: the hourly scheduler ran recently and admitted every due website "
+            "in this tenant; degraded: it ran but some admissions failed; stale: "
+            "no run recorded within stale_after_minutes; unknown: the marker "
+            "could not be read."
+        )
+    )
+    ran_at: datetime | None = Field(
+        description="When the last scheduler run finished, if a marker exists."
+    )
+    stale_after_minutes: int = int(SCHEDULER_STALE_AFTER.total_seconds() // 60)
+    due: int | None = Field(
+        description="Websites in this tenant that were due in that run."
+    )
+    admitted: int | None = Field(
+        description="Of those, how many were handed to the crawler."
+    )
+    failed: int | None = Field(
+        description="Of those, how many could not be admitted; see the worker log."
+    )
+
+
+class AdminCrawlerScheduledWebsite(BaseModel):
+    website_id: UUID
+    website_name: str | None
+    website_url: str
+    space_id: UUID | None
+    space_name: str | None
+    update_interval: UpdateInterval
+    last_crawled_at: datetime | None
+    last_indexed_at: datetime | None
+    consecutive_failures: int
+    next_retry_at: datetime | None
+    auto_disabled: bool = Field(
+        description="Interval is never because repeated failures disabled it."
+    )
+    latest_run: CrawlRunPublic | None
+    active_run_id: UUID | None
+    interval_due_at: datetime | None = Field(
+        description="last_crawled_at plus the interval, or the registration "
+        "time when never crawled; null when disabled."
+    )
+    next_due_at: datetime | None = Field(
+        description="Earliest hourly scheduler tick (UTC, minute 0) that can "
+        "pick the website up; weekly websites only on Fridays UTC. Null when "
+        "disabled or while a crawl run is active."
+    )
+    schedule_state: ScheduleState
+    blocked_until: datetime | None = Field(
+        description="Circuit-breaker deadline while blocked_backoff."
+    )
+
+    @classmethod
+    def from_domain(cls, item: ScheduledWebsite) -> "AdminCrawlerScheduledWebsite":
+        return cls(
+            website_id=item.website_id,
+            website_name=item.website_name,
+            website_url=item.website_url,
+            space_id=item.space_id,
+            space_name=item.space_name,
+            update_interval=item.update_interval,
+            last_crawled_at=item.last_crawled_at,
+            last_indexed_at=item.last_indexed_at,
+            consecutive_failures=item.consecutive_failures,
+            next_retry_at=item.next_retry_at,
+            auto_disabled=item.schedule.auto_disabled,
+            latest_run=(
+                CrawlRunPublic.from_domain(item.latest_run)
+                if item.latest_run is not None
+                else None
+            ),
+            active_run_id=item.active_run_id,
+            interval_due_at=item.schedule.interval_due_at,
+            next_due_at=item.schedule.next_due_at,
+            schedule_state=item.schedule.schedule_state,
+            blocked_until=item.schedule.blocked_until,
+        )
+
+
+class AdminCrawlerScheduledWebsitePage(BaseModel):
+    as_of: datetime
+    items: list[AdminCrawlerScheduledWebsite]
+    total_count: int
+    next_cursor: UUID | None
+
+
 class AdminCrawlerOverview(BaseModel):
     as_of: datetime
     summary: AdminCrawlerSummary
     calendar: AdminCrawlerCalendar
     items: list[AdminCrawlerItem]
     next_cursor: UUID | None
+    scheduler: AdminCrawlerSchedulerHealth
 
 
 class AdminCrawlerUser(BaseModel):
@@ -109,6 +213,32 @@ class AdminCrawlerRelatedPage(BaseModel):
     next_cursor: UUID | None
 
 
+async def _scheduler_health(
+    tenant_id: UUID, as_of: datetime
+) -> AdminCrawlerSchedulerHealth:
+    """Read the scheduler marker for one tenant; never fails the overview."""
+    try:
+        record = await asyncio.wait_for(read_crawl_scheduler_run(), timeout=1.0)
+    except Exception:
+        logger.warning("Crawl scheduler marker unavailable", exc_info=True)
+        return AdminCrawlerSchedulerHealth(
+            status="unknown", ran_at=None, due=None, admitted=None, failed=None
+        )
+    status = scheduler_health_status(record, tenant_id=tenant_id, now=as_of)
+    if record is None:
+        return AdminCrawlerSchedulerHealth(
+            status=status, ran_at=None, due=None, admitted=None, failed=None
+        )
+    counts = record.for_tenant(tenant_id)
+    return AdminCrawlerSchedulerHealth(
+        status=status,
+        ran_at=record.ran_at,
+        due=counts.due,
+        admitted=counts.admitted,
+        failed=counts.failed,
+    )
+
+
 @router.get(
     "/",
     response_model=AdminCrawlerOverview,
@@ -138,16 +268,19 @@ async def get_crawler_overview(
     except (ZoneInfoNotFoundError, ValueError) as error:
         raise BadRequestException("Invalid IANA time zone") from error
     as_of = datetime.now(timezone.utc)
-    overview = await container.crawl_run_repo().tenant_overview(
-        user.tenant_id,
-        as_of=as_of,
-        view=view,
-        status=status,
-        period=period,
-        time_zone=zone,
-        search=search,
-        limit=limit,
-        cursor=cursor,
+    overview, scheduler = await asyncio.gather(
+        container.crawl_run_repo().tenant_overview(
+            user.tenant_id,
+            as_of=as_of,
+            view=view,
+            status=status,
+            period=period,
+            time_zone=zone,
+            search=search,
+            limit=limit,
+            cursor=cursor,
+        ),
+        _scheduler_health(user.tenant_id, as_of),
     )
     return AdminCrawlerOverview(
         as_of=as_of,
@@ -176,6 +309,53 @@ async def get_crawler_overview(
             for item in overview.items
         ],
         next_cursor=overview.next_cursor,
+        scheduler=scheduler,
+    )
+
+
+@router.get(
+    "/websites/",
+    response_model=AdminCrawlerScheduledWebsitePage,
+    description=(
+        "Read every website with a crawl schedule in the administrator's tenant, "
+        "when each is next due and how its last run ended. Requires admin "
+        "permission; does not grant content access."
+    ),
+    responses=responses.get_responses([400, 403]),
+)
+async def list_admin_scheduled_websites(
+    container: AdminContainer,
+    search: Annotated[str, Query(max_length=200)] = "",
+    interval: Annotated[
+        UpdateInterval | None,
+        Query(
+            description="Filter on one interval. Omit for every scheduled "
+            "website; 'never' lists disabled websites instead."
+        ),
+    ] = None,
+    state: ScheduleFilter | None = None,
+    sort: ScheduledSort = "next_due",
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    cursor: UUID | None = None,
+) -> AdminCrawlerScheduledWebsitePage:
+    user = container.user()
+    validate_permission(user, Permission.ADMIN)
+    as_of = datetime.now(timezone.utc)
+    page = await container.website_sparse_repo().scheduled_for_tenant(
+        user.tenant_id,
+        as_of=as_of,
+        search=search,
+        interval=interval,
+        state=state,
+        sort=sort,
+        limit=limit,
+        cursor=cursor,
+    )
+    return AdminCrawlerScheduledWebsitePage(
+        as_of=as_of,
+        items=[AdminCrawlerScheduledWebsite.from_domain(item) for item in page.items],
+        total_count=page.total_count,
+        next_cursor=page.next_cursor,
     )
 
 

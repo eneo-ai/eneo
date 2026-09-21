@@ -16,6 +16,8 @@ from eneo.worker.redis.client import (
     get_worker_health,
     parse_arq_health_string,
     r,
+    read_crawl_scheduler_run,
+    record_crawl_scheduler_run,
     reset_redis_client,
 )
 from eneo.worker.redis.lease import redis_lease
@@ -28,6 +30,8 @@ __all__ = [
     "get_worker_health",
     "parse_arq_health_string",
     "r",
+    "read_crawl_scheduler_run",
+    "record_crawl_scheduler_run",
     "reset_redis_client",
     "redis_lease",
 ]
