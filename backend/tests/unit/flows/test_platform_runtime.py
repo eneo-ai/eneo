@@ -346,21 +346,24 @@ async def test_reconciler_uses_one_global_budget_and_advances_after_failure(
     from contextlib import asynccontextmanager
     from datetime import datetime, timedelta, timezone
 
+    from eneo.flows.domain.flow_run_recovery_policy import FlowRunRecoveryKind
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunRecoveryCandidate
     from eneo.flows.runtime import tasks
 
     now = datetime.now(timezone.utc)
     tenant_id = uuid4()
-    run = SimpleNamespace(
+    run = FlowRunRecoveryCandidate(
         id=uuid4(),
         tenant_id=tenant_id,
         revision=3,
-        execution_heartbeat_at=now - timedelta(minutes=4),
+        kind=FlowRunRecoveryKind.EXECUTION_HEARTBEAT_EXPIRED,
+        anchor_at=now - timedelta(minutes=4),
     )
     repo = AsyncMock()
 
-    repo.list_stale_running_runs.side_effect = [[run], []]
-    repo.stale_running_sweep_boundary.return_value = (
-        run.execution_heartbeat_at,
+    repo.list_recovery_candidates.side_effect = [[run], []]
+    repo.recovery_sweep_boundary.return_value = (
+        run.anchor_at,
         run.id,
     )
     terminalizer = AsyncMock()
@@ -393,12 +396,12 @@ async def test_reconciler_uses_one_global_budget_and_advances_after_failure(
     monkeypatch.setattr(tasks, "_stale_running_window_end", None)
     with pytest.raises(tasks.FlowTenantSweepPartialFailure):
         await tasks._reconcile_stale_running_runs_all_tenants(limit=1)
-    assert repo.list_stale_running_runs.await_args.kwargs == {
+    assert repo.list_recovery_candidates.await_args.kwargs == {
         "limit": 1,
         "after": None,
-        "through": (run.execution_heartbeat_at, run.id),
+        "through": (run.anchor_at, run.id),
     }
-    assert tasks._stale_running_cursor == (run.execution_heartbeat_at, run.id)
+    assert tasks._stale_running_cursor == (run.anchor_at, run.id)
     assert (
         terminalizer.terminalize_stale_running_run.await_args.kwargs[
             "expected_revision"
@@ -408,28 +411,38 @@ async def test_reconciler_uses_one_global_budget_and_advances_after_failure(
     tenant_repo.get_all_tenant_ids.assert_not_awaited()
 
 
-async def test_reconciler_wraps_finite_window_despite_newer_arrivals(monkeypatch):
+@pytest.mark.parametrize(
+    "recovery_kind",
+    ["execution_heartbeat_expired", "approved_review", "exhausted_dispatch"],
+)
+async def test_reconciler_wraps_finite_window_despite_newer_arrivals(
+    monkeypatch, recovery_kind
+):
     from contextlib import asynccontextmanager
     from datetime import datetime, timedelta, timezone
     from uuid import UUID
 
+    from eneo.flows.domain.flow_run_recovery_policy import FlowRunRecoveryKind
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunRecoveryCandidate
     from eneo.flows.runtime import tasks
 
-    anchor = datetime.now(timezone.utc) - timedelta(minutes=10)
+    anchor = datetime.now(timezone.utc) - timedelta(days=31)
     rows = []
 
     def append_run(number):
         rows.append(
-            SimpleNamespace(
+            FlowRunRecoveryCandidate(
                 id=UUID(int=number),
                 tenant_id=uuid4(),
                 revision=1,
-                execution_heartbeat_at=anchor + timedelta(seconds=number),
+                kind=FlowRunRecoveryKind(recovery_kind),
+                checkpoint_id=uuid4() if recovery_kind == "approved_review" else None,
+                anchor_at=anchor + timedelta(seconds=number),
             )
         )
 
     def key(row):
-        return row.execution_heartbeat_at, row.id
+        return row.anchor_at, row.id
 
     append_run(1)
     append_run(2)
@@ -446,8 +459,8 @@ async def test_reconciler_wraps_finite_window_despite_newer_arrivals(monkeypatch
         return candidates
 
     repo = AsyncMock()
-    repo.list_stale_running_runs.side_effect = discover
-    repo.stale_running_sweep_boundary.side_effect = lambda: max(map(key, rows))
+    repo.list_recovery_candidates.side_effect = discover
+    repo.recovery_sweep_boundary.side_effect = lambda: max(map(key, rows))
     attempts = []
 
     async def terminalize(**kwargs):
@@ -460,6 +473,7 @@ async def test_reconciler_wraps_finite_window_despite_newer_arrivals(monkeypatch
 
     terminalizer = AsyncMock()
     terminalizer.terminalize_stale_running_run.side_effect = terminalize
+    terminalizer.terminalize_abandoned_run.side_effect = terminalize
     container = SimpleNamespace(
         flow_run_repo=lambda: repo,
         flow_provider_call_repo=lambda: AsyncMock(),

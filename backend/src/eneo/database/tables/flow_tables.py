@@ -945,6 +945,22 @@ class FlowRuns(BasePublic):
             postgresql_where=sa.text("status = 'running'"),
         ),
         Index(
+            "ix_flow_runs_exhausted_dispatch_wait",
+            "dispatch_pending_since",
+            "id",
+            postgresql_include=("tenant_id", "revision"),
+            postgresql_where=sa.text(
+                "status = 'queued' AND dispatch_exhausted_at IS NOT NULL"
+            ),
+        ),
+        Index(
+            "ix_flow_runs_awaiting_review_created",
+            "created_at",
+            "id",
+            postgresql_include=("tenant_id", "revision"),
+            postgresql_where=sa.text("status = 'awaiting_review'"),
+        ),
+        Index(
             "ix_flow_runs_tenant_terminal_retention_anchor",
             "tenant_id",
             sa.text("coalesce(finished_at, created_at)"),
@@ -1606,6 +1622,13 @@ class FlowRunReviewCheckpoints(BasePublic):
             "tenant_id",
             "expires_at",
             postgresql_where=sa.text("state IN ('awaiting_review', 'edited')"),
+        ),
+        Index(
+            "ix_flow_review_approved_wait",
+            "approved_at",
+            "flow_run_id",
+            postgresql_include=("tenant_id", "id"),
+            postgresql_where=sa.text("state = 'approved'"),
         ),
     )
 

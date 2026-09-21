@@ -24,6 +24,9 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
 )
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.flows.domain.flow_run_recovery_policy import (
+    FlowRunAbandonmentDeadlineExceeded,
+)
 from eneo.flows.domain.review_checkpoint_exceptions import (
     FLOW_REVIEW_CHECKPOINT_LIFECYCLE_FAILURE_CLASSES,
     FlowReviewCheckpointAlreadyResumedError,
@@ -54,7 +57,10 @@ from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionSet
 from eneo.flows.domain.transcript_words import LocatedWord, locate_words
 from eneo.flows.enums import FlowOutputType, FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_api_exceptions import (
+    FlowBadRequestException,
+    flow_run_abandonment_refusal,
+)
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_input_envelope import (
@@ -576,6 +582,8 @@ class FlowRunReviewCheckpointService:
             return await operation
         except FlowRunNotFoundError as exc:
             raise NotFoundException("Flow run not found.") from exc
+        except FlowRunAbandonmentDeadlineExceeded as exc:
+            raise flow_run_abandonment_refusal(exc) from exc
         except FLOW_REVIEW_CHECKPOINT_LIFECYCLE_FAILURE_CLASSES as exc:
             raise _review_lifecycle_failure_to_api_exception(exc) from exc
 

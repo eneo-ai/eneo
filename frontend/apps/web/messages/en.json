@@ -5312,6 +5312,7 @@
   "flow_error_flow_task_timeout": "The worker task timed out while running this flow. Retry with smaller inputs or contact support if it keeps timing out.",
   "flow_error_flow_webhook_delivery_failed": "The run completed but webhook delivery failed. Check the webhook configuration and retry delivery if available.",
   "flow_error_flow_worker_stalled": "The worker stopped updating this run. Retry the run; contact support with the run ID if it happens again.",
+  "flow_error_flow_run_abandoned": "The run has waited 30 days to resume after an approved review or for a worker to take over after dispatch attempts were exhausted. Its history is kept.",
   "flow_error_flow_review_already_resumed": "This review has already been resumed. Reload the run to see the latest status.",
   "flow_error_flow_review_cancelled": "This review was cancelled. Reload the run before continuing.",
   "flow_error_flow_review_checkpoint_not_found": "The review checkpoint could not be found. Reload the run and try again.",

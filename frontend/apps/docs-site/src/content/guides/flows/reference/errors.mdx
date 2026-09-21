@@ -63,6 +63,26 @@ receipts remain available; unfinished provider calls have an unknown outcome.
 Inspect that evidence before submitting a new run, since provider work may
 already have happened.
 
+## Abandoned waits
+
+`flow_run_abandoned` means an approved review waited 30 days to resume, or a
+queued run with exhausted dispatch attempts reached 30 days from
+`dispatch_pending_since`. The maintenance sweep fails the run and keeps its
+history and files. For an approved review, automatic abandonment cancels the
+checkpoint as a system transition while preserving its approval timestamp and
+decision actor.
+
+The terminal error has `retryable: false` and `details.abandonment` containing
+`wait` (`approved_review` or `exhausted_dispatch`), `anchor_at`, `deadline`, and
+`checkpoint_id` for an approved review. These facts are separate from execution
+heartbeat recovery. Inspect earlier external effects before submitting a new
+run; abandonment does not establish that repeating the work is safe.
+
+Resume and redrive requests past their deadline return `400 flow_run_abandoned`
+with the same facts in `context.abandonment`. They do not terminalize the run;
+the sweep performs that transition, so the run may briefly retain its waiting
+status after a refusal.
+
 ## Codes that are not `FlowApiErrorCode`
 
 The catalog below covers Flow-specific failures. A Flow client will also meet these platform-level codes, most of them on the authentication and upload paths, and they are not in the `FlowApiErrorCode` enum:
@@ -173,6 +193,7 @@ Structured output uses the inline byte ceiling for both single calls and mapped 
 | Run lifecycle          | `flow_task_failure`                                      | Run execution                 | Inspect run logs and trace ids before retrying or escalating.                                                                                    |
 | Run lifecycle          | `flow_task_timeout`                                      | Run execution                 | Retry with smaller input or inspect worker capacity and timeout settings.                                                                        |
 | Run lifecycle          | `flow_worker_stalled`                                    | Run execution                 | Inspect worker and run health, then use the capability-gated rerun path or create a new run; escalate recurring stalls.                          |
+| Run lifecycle          | `flow_run_abandoned` | Request path or run execution | Inspect the retained history and any earlier external effects before submitting a new run; automatic retry is unsafe and retryable is false. |
 | Evidence and artifacts | `flow_audit_outbox_delivery_not_found`                   | Request path                  | List dead letters again and verify the environment before retrying.                                                                              |
 | Evidence and artifacts | `flow_audit_outbox_redrive_conflict`                     | Request path                  | List dead letters again and use the latest generation token.                                                                                     |
 | Evidence and artifacts | `flow_evidence_audit_logging_failed`                     | Request path                  | Retry later and alert operators if audit logging remains unavailable.                                                                            |

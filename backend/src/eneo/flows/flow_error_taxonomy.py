@@ -438,6 +438,16 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         ),
         user_action="Retry or contact support with the run ID.",
     ),
+    FlowApiErrorCode.RUN_ABANDONED: _entry(
+        category="Run lifecycle",
+        surfaced_through="API response and run error payload",
+        cause="An approved review or exhausted queued dispatch exceeded its 30-day wait.",
+        consumer_action=(
+            "Inspect the retained history and any earlier external effects before "
+            "submitting a new run; automatic retry is unsafe and retryable is false."
+        ),
+        user_action="Check the run history or contact support before starting another run.",
+    ),
     FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID: _entry(
         category="Run lifecycle",
         surfaced_through="Run error payload",

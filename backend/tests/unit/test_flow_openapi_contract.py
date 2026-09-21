@@ -2425,6 +2425,7 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
     assert details_schema.get("additionalProperties") is False
     assert set(details_schema.get("properties", {})) == {
         "recovery",
+        "abandonment",
         "step_description",
         "provider_call_evidence_gap",
         # Step-timeout facts: where the budget ran out and what had finished.
@@ -2463,6 +2464,33 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
     stalled_error = FlowRunError.model_validate(stalled_example)
     assert stalled_error.details.recovery.reason == "execution_heartbeat_expired"
     assert stalled_error.retryable is False
+    abandonment_schema = _resolve_component_ref(
+        openapi_spec,
+        next(
+            option
+            for option in details_schema["properties"]["abandonment"]["anyOf"]
+            if option.get("type") != "null"
+        ),
+    )
+    assert set(abandonment_schema["required"]) == {"wait", "anchor_at", "deadline"}
+    assert _extract_enum_values(
+        openapi_spec, abandonment_schema["properties"]["wait"]
+    ) == {
+        "approved_review",
+        "exhausted_dispatch",
+    }
+    for field in ("anchor_at", "deadline"):
+        assert abandonment_schema["properties"][field]["format"] == "date-time"
+    abandoned_error = FlowRunError.model_validate(
+        next(
+            example
+            for example in error_schema["examples"]
+            if example["code"] == "flow_run_abandoned"
+        )
+    )
+    assert abandoned_error.details.abandonment.wait == "approved_review"
+    assert abandoned_error.details.abandonment.checkpoint_id is not None
+    assert abandoned_error.retryable is False
     phase_property = details_schema["properties"]["phase"]
     assert openapi_spec["components"]["schemas"]["TranscriptionFailureKind"][
         "enum"

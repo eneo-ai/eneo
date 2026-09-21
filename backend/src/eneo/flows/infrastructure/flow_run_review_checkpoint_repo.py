@@ -40,6 +40,8 @@ from eneo.flows.domain.flow_run_exceptions import (
     FlowRunPersistenceInvariantError,
 )
 from eneo.flows.domain.flow_run_recovery_policy import (
+    FlowRunAbandonmentWait,
+    require_flow_run_wait_before_deadline,
     start_flow_dispatch_epoch,
 )
 from eneo.flows.domain.review_checkpoint_exceptions import (
@@ -1576,6 +1578,13 @@ class FlowRunReviewCheckpointRepository:
     ) -> None:
         state = checkpoint_row.state
         if state == FlowRunReviewCheckpointState.APPROVED.value:
+            if checkpoint_row.approved_at is not None:
+                require_flow_run_wait_before_deadline(
+                    wait=FlowRunAbandonmentWait.APPROVED_REVIEW,
+                    anchor_at=checkpoint_row.approved_at,
+                    now=datetime.now(timezone.utc),
+                    checkpoint_id=checkpoint_row.id,
+                )
             return
         if state == FlowRunReviewCheckpointState.REJECTED.value:
             raise FlowReviewCheckpointRejectedError()

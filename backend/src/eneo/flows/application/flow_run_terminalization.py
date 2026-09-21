@@ -18,7 +18,12 @@ from eneo.flows.domain.flow import (
     FlowStepResultStatus,
 )
 from eneo.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
-from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import (
+    FlowRunAbandonmentFacts,
+    FlowRunError,
+    FlowRunErrorDetails,
+)
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
@@ -96,6 +101,28 @@ class FlowRunTerminalizer:
             stale_running_revision=expected_revision,
         )
 
+    async def terminalize_abandoned_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        facts: FlowRunAbandonmentFacts,
+    ) -> FlowRunTerminalizationResult:
+        return await self._terminalize_run(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunLifecycleSource.ABANDONMENT_RECONCILER,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.ABANDONMENT_RECONCILER,
+                code=FlowApiErrorCode.RUN_ABANDONED,
+                message="Flow run exceeded its abandonment deadline.",
+                details=FlowRunErrorDetails(abandonment=facts),
+            ),
+            abandonment=(expected_revision, facts),
+        )
+
     async def _terminalize_run(
         self,
         *,
@@ -108,6 +135,7 @@ class FlowRunTerminalizer:
         cancelled_at: datetime | None = None,
         principal: FlowPrincipal | None = None,
         stale_running_revision: int | None = None,
+        abandonment: tuple[int, FlowRunAbandonmentFacts] | None = None,
     ) -> FlowRunTerminalizationResult:
         if not is_terminal_flow_run_status(target_status):
             raise ValueError("target_status must be a terminal FlowRunStatus")
@@ -153,15 +181,26 @@ class FlowRunTerminalizer:
                     "Cannot complete a flow run with active step results or open attempts."
                 )
 
-        terminal_run = await self.flow_run_repo.terminalize_run_status(
-            run_id=run_id,
-            tenant_id=tenant_id,
-            target_status=target_status,
-            error=error,
-            output_payload_json=output_payload_json,
-            cancelled_at=cancelled_at,
-            stale_running_revision=stale_running_revision,
-        )
+        if abandonment is not None:
+            assert error is not None
+            expected_revision, facts = abandonment
+            terminal_run = await self.flow_run_repo.terminalize_abandoned_run_status(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                expected_revision=expected_revision,
+                facts=facts,
+                error=error,
+            )
+        else:
+            terminal_run = await self.flow_run_repo.terminalize_run_status(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                target_status=target_status,
+                error=error,
+                output_payload_json=output_payload_json,
+                cancelled_at=cancelled_at,
+                stale_running_revision=stale_running_revision,
+            )
         if terminal_run is None:
             existing_run = await self.flow_run_repo.get(
                 run_id=run_id, tenant_id=tenant_id
@@ -214,9 +253,13 @@ class FlowRunTerminalizer:
                 error_message=effective_error_message,
             )
 
-        checkpoint_principal = self._principal_or_none_from_run(
-            run=terminal_run,
-            principal=principal,
+        checkpoint_principal = (
+            None
+            if abandonment is not None
+            else self._principal_or_none_from_run(
+                run=terminal_run,
+                principal=principal,
+            )
         )
         await self.flow_run_review_checkpoint_repo.cancel_active_review_checkpoint_for_terminal_run(
             tenant_id=tenant_id,
@@ -286,6 +329,12 @@ class FlowRunTerminalizer:
     def _audit_actor_fields(
         *, run: FlowRun, principal: FlowPrincipal | None, source: FlowRunLifecycleSource
     ) -> FlowAuditActorFields:
+        if source == FlowRunLifecycleSource.ABANDONMENT_RECONCILER:
+            return {
+                "actor_id": None,
+                "actor_type": ActorType.SYSTEM,
+                "actor_api_key_id": None,
+            }
         resolved = FlowRunTerminalizer._principal_or_none_from_run(
             run=run,
             principal=principal,

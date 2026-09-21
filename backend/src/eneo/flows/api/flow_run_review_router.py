@@ -240,7 +240,7 @@ Treat `expires_at` as the review submission deadline. Edit, approve, or reject r
 after this timestamp return `400` with code `flow_review_expired`; this endpoint may
 briefly show the checkpoint until the background reconciler marks the run cancelled.
 When approval happens before `expires_at`, resume remains valid after the deadline because
-the human decision is already persisted.
+the human decision is already persisted, but only for 30 days after `approved_at`.
 
 Current visibility follows run-detail visibility: service-key principals can read only
 checkpoints for runs they own, while human callers follow the existing flow view policy.
@@ -563,7 +563,8 @@ the decision durable before dispatching more runtime work. Use the latest checkp
 stale approvals return `400` with code `flow_review_stale_revision`.
 
 The approval must be submitted before the checkpoint `expires_at` deadline. After approval
-is persisted, resume remains valid even if the original deadline has passed.
+is persisted, resume remains valid for 30 days after `approved_at`, even if the original
+review deadline has passed.
 
 Service-key principals may approve checkpoints only for runs they own (key must have
 `resource_permissions.flows = write`).
@@ -604,6 +605,12 @@ checkpoint and run without dispatching another worker task. A successful respons
 Resume uses the approved checkpoint revision. It can run after the original `expires_at`
 deadline only when approval was already persisted before expiry; already expired checkpoints
 return `400` with code `flow_review_expired`.
+
+Resume must occur within 30 days of `approved_at`. After that deadline this request returns
+`400` with code `flow_run_abandoned` and writes no terminal state. The maintenance sweep
+fails the run and cancels the checkpoint as a system transition, preserving its approval
+timestamp and decision actor. Run history and files remain available; `retryable` is false
+because earlier external effects may have occurred.
 
 Service-key principals may resume approved checkpoints only for runs they own (key must have
 `resource_permissions.flows = write`).
@@ -1028,6 +1035,11 @@ async def resume_flow_run_review_checkpoint(
         get_container_for_explicit_transaction(with_user=True)
     ),
 ):
+    """Refuse an overdue approval under the review locks without terminal writes.
+
+    A refusal rolls back this request transaction. The maintenance sweep is the
+    sole owner of abandonment terminalization and its system audit.
+    """
     async with commit_flow_runtime_write_before_response(container):
         await flow_access_context.enforce_flow_scope(
             request,

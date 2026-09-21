@@ -1,0 +1,367 @@
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
+
+import pytest
+from freezegun import freeze_time
+
+from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import FlowRunError, FlowRunErrorDetails
+
+
+@pytest.mark.parametrize("wait", ["approved_review", "exhausted_dispatch"])
+def test_abandonment_serializes_its_own_facts_and_never_promises_safe_retry(wait):
+    from eneo.flows.domain.flow_run_recovery_policy import flow_run_abandonment_deadline
+    from eneo.flows.flow_run_error import FlowRunAbandonmentFacts
+
+    anchor = datetime(2026, 8, 22, tzinfo=timezone.utc)
+    checkpoint_id = uuid4() if wait == "approved_review" else None
+    facts = FlowRunAbandonmentFacts(
+        wait=wait,
+        anchor_at=anchor,
+        deadline=flow_run_abandonment_deadline(anchor),
+        checkpoint_id=checkpoint_id,
+    )
+    error = FlowRunError.from_source(
+        FlowRunLifecycleSource.ABANDONMENT_RECONCILER,
+        code=FlowApiErrorCode.RUN_ABANDONED,
+        message="Flow run exceeded its abandonment deadline.",
+        details=FlowRunErrorDetails(abandonment=facts),
+    )
+
+    payload = error.model_dump(mode="json", exclude_none=True)
+    assert payload["code"] == "flow_run_abandoned"
+    assert payload["retryable"] is False
+    assert payload["details"] == {
+        "abandonment": {
+            "wait": wait,
+            "anchor_at": "2026-08-22T00:00:00Z",
+            "deadline": "2026-09-21T00:00:00Z",
+            **({"checkpoint_id": str(checkpoint_id)} if checkpoint_id else {}),
+        }
+    }
+    assert FlowRunError.model_validate(payload) == error
+
+
+def _facts(wait):
+    from eneo.flows.flow_run_error import FlowRunAbandonmentFacts
+
+    return FlowRunAbandonmentFacts(
+        wait=wait,
+        anchor_at=datetime(2026, 8, 22, tzinfo=timezone.utc),
+        deadline=datetime(2026, 9, 21, tzinfo=timezone.utc),
+        checkpoint_id=uuid4() if wait == "approved_review" else None,
+    )
+
+
+@pytest.mark.parametrize("wait", ["approved_review", "exhausted_dispatch"])
+async def test_abandonment_update_rechecks_anchor_state_and_revision_under_parent_lock(
+    wait,
+):
+    from sqlalchemy.dialects import postgresql
+
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+
+    session = AsyncMock()
+    session.scalar.return_value = None
+    repo = FlowRunRepository(session=session)
+    facts = _facts(wait)
+    run_id, tenant_id = uuid4(), uuid4()
+    error = FlowRunError.from_source(
+        FlowRunLifecycleSource.ABANDONMENT_RECONCILER,
+        code=FlowApiErrorCode.RUN_ABANDONED,
+        message="Flow run exceeded its abandonment deadline.",
+        details=FlowRunErrorDetails(abandonment=facts),
+    )
+
+    assert (
+        await repo.terminalize_abandoned_run_status(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            expected_revision=7,
+            facts=facts,
+            error=error,
+        )
+        is None
+    )
+
+    lock, update = [call.args[0] for call in session.scalar.await_args_list]
+    assert "FOR UPDATE" in str(lock.compile(dialect=postgresql.dialect()))
+    compiled = update.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+    assert "flow_runs.revision =" in sql
+    assert "statement_timestamp()" in sql
+    assert run_id in compiled.params.values()
+    assert tenant_id in compiled.params.values()
+    assert facts.anchor_at in compiled.params.values()
+    assert 7 in compiled.params.values()
+    assert "input_payload_json=" not in sql
+    assert "output_payload_json=" not in sql
+    if wait == "approved_review":
+        assert "awaiting_review" in compiled.params.values()
+        assert "approved" in compiled.params.values()
+        assert "flow_run_review_checkpoints.approved_at =" in sql
+        assert "flow_run_review_checkpoints.tenant_id = flow_runs.tenant_id" in sql
+        assert facts.checkpoint_id in compiled.params.values()
+    else:
+        assert "queued" in compiled.params.values()
+        assert "flow_runs.dispatch_pending_since =" in sql
+        assert "flow_runs.dispatch_exhausted_at IS NOT NULL" in sql
+
+
+@pytest.mark.parametrize("wait", ["approved_review", "exhausted_dispatch"])
+@pytest.mark.parametrize("lost_race", [False, True])
+async def test_abandonment_terminalizes_once_as_system_and_keeps_approval_actor(
+    wait, lost_race
+):
+    from eneo.audit.domain.actor_types import ActorType
+    from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
+    from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+
+    now = datetime.now(timezone.utc)
+    run = FlowRun(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        flow_id=uuid4(),
+        flow_version=1,
+        principal_type="user",
+        principal_user_id=uuid4(),
+        trace_id=uuid4(),
+        status=FlowRunStatus.AWAITING_REVIEW
+        if wait == "approved_review"
+        else FlowRunStatus.QUEUED,
+        created_at=now,
+        updated_at=now,
+    )
+    run_repo, audit_repo, checkpoint_repo = AsyncMock(), AsyncMock(), AsyncMock()
+    run_repo.get.return_value = run
+    run_repo.terminalize_abandoned_run_status.return_value = (
+        None if lost_race else run.model_copy(update={"status": FlowRunStatus.FAILED})
+    )
+    terminalizer = FlowRunTerminalizer(run_repo, audit_repo, checkpoint_repo)
+    result = await terminalizer.terminalize_abandoned_run(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        expected_revision=run.revision,
+        facts=_facts(wait),
+    )
+
+    assert result.did_transition is not lost_race
+    run_repo.terminalize_run_status.assert_not_awaited()
+    if lost_race:
+        checkpoint_repo.cancel_active_review_checkpoint_for_terminal_run.assert_not_awaited()
+        audit_repo.insert_terminal_audit_outbox.assert_not_awaited()
+    else:
+        assert result.run.status == FlowRunStatus.FAILED
+        error = run_repo.terminalize_abandoned_run_status.await_args.kwargs["error"]
+        assert error.code == "flow_run_abandoned"
+        assert error.details.abandonment.wait == wait
+        assert error.retryable is False
+        checkpoint_repo.cancel_active_review_checkpoint_for_terminal_run.assert_awaited_once()
+        assert (
+            checkpoint_repo.cancel_active_review_checkpoint_for_terminal_run.await_args.kwargs[
+                "principal"
+            ]
+            is None
+        )
+        audit_repo.insert_terminal_audit_outbox.assert_awaited_once()
+        assert (
+            audit_repo.insert_terminal_audit_outbox.await_args.kwargs["actor_type"]
+            == ActorType.SYSTEM
+        )
+        assert (
+            audit_repo.insert_terminal_audit_outbox.await_args.kwargs["actor_id"]
+            is None
+        )
+
+
+@freeze_time("2026-09-21T00:00:00Z")
+async def test_approved_resume_past_deadline_is_refused_without_terminal_writes():
+    from eneo.flows.domain.flow_run_recovery_policy import (
+        FlowRunAbandonmentDeadlineExceeded,
+    )
+    from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
+        FlowRunReviewCheckpointRepository,
+    )
+
+    facts = _facts("approved_review")
+    session = AsyncMock()
+    repo = FlowRunReviewCheckpointRepository(
+        session=session, audit_outbox_repo=AsyncMock()
+    )
+    repo._load_review_checkpoint_and_run_rows_for_update = AsyncMock(
+        return_value=(
+            SimpleNamespace(
+                id=facts.checkpoint_id,
+                state="approved",
+                revision=2,
+                approved_at=facts.anchor_at,
+                expires_at=None,
+                resume_idempotency_key=None,
+            ),
+            SimpleNamespace(status="awaiting_review"),
+        )
+    )
+    with pytest.raises(FlowRunAbandonmentDeadlineExceeded) as caught:
+        await repo.resume_review_checkpoint(
+            checkpoint_id=facts.checkpoint_id,
+            tenant_id=uuid4(),
+            flow_id=uuid4(),
+            flow_run_id=uuid4(),
+            expected_revision=2,
+            resume_idempotency_key="resume",
+            principal=AsyncMock(),
+        )
+    assert caught.value.anchor_at == facts.anchor_at
+    assert caught.value.checkpoint_id == facts.checkpoint_id
+    session.scalar.assert_not_awaited()
+    session.execute.assert_not_awaited()
+
+
+async def test_shared_recovery_discovery_includes_both_waits_and_missing_checkpoint_without_payloads():
+    from sqlalchemy.dialects import postgresql
+
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+
+    session = AsyncMock()
+    session.execute.return_value = MagicMock(all=lambda: [])
+    repo = FlowRunRepository(session=session)
+    after = (datetime(2026, 8, 1, tzinfo=timezone.utc), uuid4())
+    through = (datetime(2026, 8, 22, tzinfo=timezone.utc), uuid4())
+    assert (
+        await repo.list_recovery_candidates(limit=3, after=after, through=through) == []
+    )
+    stmt = session.execute.await_args.args[0]
+    sql = str(
+        stmt.compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert "dispatch_exhausted_at IS NOT NULL" in sql
+    assert "approved_at <= statement_timestamp()" in sql
+    assert (
+        "flow_run_review_checkpoints.state IN ('awaiting_review', 'edited', 'approved')"
+        in sql
+    )
+    assert "missing_review_checkpoint" in sql
+    assert "NOT (EXISTS" in sql
+    assert "execution_heartbeat_at <= statement_timestamp()" in sql
+    assert "UNION ALL" in sql
+    assert "input_payload_json" not in sql
+    assert "current_payload_json" not in sql
+    assert "LIMIT 3" in sql
+    assert " > " in sql and " <= " in sql
+
+
+async def test_shared_sweep_reports_missing_checkpoint_without_inventing_deadline(
+    monkeypatch,
+):
+    from contextlib import asynccontextmanager
+
+    from eneo.flows.domain.flow_run_recovery_policy import FlowRunRecoveryKind
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunRecoveryCandidate
+    from eneo.flows.runtime import tasks
+
+    candidate = FlowRunRecoveryCandidate(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        revision=2,
+        kind=FlowRunRecoveryKind.MISSING_REVIEW_CHECKPOINT,
+        anchor_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+    )
+    assert candidate.abandonment is None
+    repo, terminalizer = AsyncMock(), AsyncMock()
+    repo.recovery_sweep_boundary.return_value = (candidate.anchor_at, candidate.id)
+    repo.list_recovery_candidates.return_value = [candidate]
+    container = SimpleNamespace(
+        flow_run_repo=lambda: repo,
+        flow_run_terminalizer=lambda: terminalizer,
+        flow_provider_call_repo=lambda: AsyncMock(),
+    )
+
+    @asynccontextmanager
+    async def session_context():
+        yield MagicMock()
+
+    monkeypatch.setattr(tasks.sessionmanager, "session", session_context)
+    monkeypatch.setattr(tasks, "enable_autobegin_for_flow_task_session", lambda _: None)
+    monkeypatch.setattr(tasks, "Container", lambda **_: container)
+    monkeypatch.setattr(tasks, "_stale_running_cursor", None)
+    monkeypatch.setattr(tasks, "_stale_running_window_end", None)
+    result = await tasks._reconcile_stale_running_runs_all_tenants(limit=1)
+    assert result["review_checkpoint_invariant_violations"] == 1
+    assert result["abandoned"] == 0
+    terminalizer.terminalize_abandoned_run.assert_not_awaited()
+    terminalizer.terminalize_stale_running_run.assert_not_awaited()
+    assert tasks._stale_running_cursor == (candidate.anchor_at, candidate.id)
+
+
+async def test_exhausted_dispatch_past_deadline_cannot_reset_its_epoch():
+    from eneo.flows.domain.flow_run_recovery_policy import (
+        FlowRunAbandonmentDeadlineExceeded,
+    )
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+
+    facts = _facts("exhausted_dispatch")
+    session = AsyncMock()
+    exhausted_at = datetime(2026, 8, 23, tzinfo=timezone.utc)
+    session.scalar.return_value = SimpleNamespace(
+        status="queued",
+        dispatch_pending_since=facts.anchor_at,
+        dispatch_exhausted_at=exhausted_at,
+        dispatched_at=facts.anchor_at,
+        dispatch_last_error=None,
+    )
+    repo = FlowRunRepository(session=session)
+    with pytest.raises(FlowRunAbandonmentDeadlineExceeded):
+        await repo.rearm_exhausted_accepted_dispatch_for_redrive(
+            run_id=uuid4(),
+            tenant_id=uuid4(),
+            expected_revision=2,
+            expected_dispatch_exhausted_at=exhausted_at,
+            now=facts.deadline,
+        )
+    assert session.scalar.await_count == 1
+    session.execute.assert_not_awaited()
+
+
+async def test_redrive_rechecks_deadline_after_waiting_for_parent_lock():
+    from eneo.flows.domain.flow_run_recovery_policy import (
+        FlowRunAbandonmentDeadlineExceeded,
+    )
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+
+    facts = _facts("exhausted_dispatch")
+    exhausted_at = datetime(2026, 8, 23, tzinfo=timezone.utc)
+    row = SimpleNamespace(
+        status="queued",
+        dispatch_pending_since=facts.anchor_at,
+        dispatch_exhausted_at=exhausted_at,
+        dispatched_at=facts.anchor_at,
+        dispatch_last_error=None,
+    )
+    with freeze_time("2026-09-20T23:59:59Z") as clock:
+        requested_at = datetime.now(timezone.utc)
+
+        async def lock_then_cross_deadline(statement):
+            if not statement.is_select:
+                pytest.fail(
+                    "An epoch past its deadline was rearmed after the lock wait"
+                )
+            clock.tick(2)
+            return row
+
+        session = AsyncMock()
+        session.scalar.side_effect = lock_then_cross_deadline
+        with pytest.raises(FlowRunAbandonmentDeadlineExceeded):
+            await FlowRunRepository(
+                session=session
+            ).rearm_exhausted_accepted_dispatch_for_redrive(
+                run_id=uuid4(),
+                tenant_id=uuid4(),
+                expected_revision=2,
+                expected_dispatch_exhausted_at=exhausted_at,
+                now=requested_at,
+            )

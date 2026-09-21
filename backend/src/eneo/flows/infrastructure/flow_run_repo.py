@@ -15,6 +15,7 @@ from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.principal_types import PrincipalType
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
+    FlowRunReviewCheckpoints,
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRunStepResultFiles,
@@ -50,7 +51,12 @@ from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_DISPATCH_MAX_ATTEMPTS,
     FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS,
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
+    FLOW_RUN_ABANDONMENT_AFTER,
+    FlowRunAbandonmentWait,
+    FlowRunRecoveryKind,
     flow_dispatch_retry_delay_seconds,
+    flow_run_abandonment_deadline,
+    require_flow_run_wait_before_deadline,
     start_flow_dispatch_epoch,
 )
 from eneo.flows.domain.flow_step_attempt_input import (
@@ -67,8 +73,10 @@ from eneo.flows.enums import (
     OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES,
     TERMINAL_FLOW_RUN_STATUSES,
     FlowRunPurpose,
+    FlowRunReviewCheckpointState,
 )
 from eneo.flows.flow_run_error import (
+    FlowRunAbandonmentFacts,
     FlowRunDispatchError,
     FlowRunError,
     dump_flow_run_dispatch_error,
@@ -139,7 +147,93 @@ class FlowRunRecoveryCandidate:
     id: UUID
     tenant_id: UUID
     revision: int
-    execution_heartbeat_at: datetime
+    anchor_at: datetime
+    kind: FlowRunRecoveryKind
+    checkpoint_id: UUID | None = None
+
+    @property
+    def abandonment(self) -> FlowRunAbandonmentFacts | None:
+        if self.kind not in (
+            FlowRunRecoveryKind.APPROVED_REVIEW,
+            FlowRunRecoveryKind.EXHAUSTED_DISPATCH,
+        ):
+            return None
+        return FlowRunAbandonmentFacts(
+            wait=FlowRunAbandonmentWait(self.kind.value),
+            anchor_at=self.anchor_at,
+            deadline=flow_run_abandonment_deadline(self.anchor_at),
+            checkpoint_id=self.checkpoint_id,
+        )
+
+
+def _run_recovery_candidates_query() -> sa.Subquery:
+    deadline_anchor = sa.func.statement_timestamp() - FLOW_RUN_ABANDONMENT_AFTER
+    heartbeat = sa.select(
+        FlowRuns.id,
+        FlowRuns.tenant_id,
+        FlowRuns.revision,
+        FlowRuns.execution_heartbeat_at.label("anchor_at"),
+        sa.literal(FlowRunRecoveryKind.EXECUTION_HEARTBEAT_EXPIRED.value).label("kind"),
+        sa.cast(sa.null(), sa.Uuid()).label("checkpoint_id"),
+    ).where(stale_running_flow_run_predicate())
+    exhausted = sa.select(
+        FlowRuns.id,
+        FlowRuns.tenant_id,
+        FlowRuns.revision,
+        FlowRuns.dispatch_pending_since.label("anchor_at"),
+        sa.literal(FlowRunRecoveryKind.EXHAUSTED_DISPATCH.value).label("kind"),
+        sa.cast(sa.null(), sa.Uuid()).label("checkpoint_id"),
+    ).where(
+        FlowRuns.status == FlowRunStatus.QUEUED.value,
+        FlowRuns.dispatch_exhausted_at.is_not(None),
+        FlowRuns.dispatch_pending_since <= deadline_anchor,
+    )
+    approved = (
+        sa.select(
+            FlowRuns.id,
+            FlowRuns.tenant_id,
+            FlowRuns.revision,
+            FlowRunReviewCheckpoints.approved_at.label("anchor_at"),
+            sa.literal(FlowRunRecoveryKind.APPROVED_REVIEW.value).label("kind"),
+            FlowRunReviewCheckpoints.id.label("checkpoint_id"),
+        )
+        .join(
+            FlowRunReviewCheckpoints,
+            sa.and_(
+                FlowRunReviewCheckpoints.flow_run_id == FlowRuns.id,
+                FlowRunReviewCheckpoints.tenant_id == FlowRuns.tenant_id,
+            ),
+        )
+        .where(
+            FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value,
+            FlowRunReviewCheckpoints.state
+            == FlowRunReviewCheckpointState.APPROVED.value,
+            FlowRunReviewCheckpoints.approved_at <= deadline_anchor,
+        )
+    )
+    missing = sa.select(
+        FlowRuns.id,
+        FlowRuns.tenant_id,
+        FlowRuns.revision,
+        # Creation time orders the invariant report; it is never an abandonment anchor.
+        FlowRuns.created_at.label("anchor_at"),
+        sa.literal(FlowRunRecoveryKind.MISSING_REVIEW_CHECKPOINT.value).label("kind"),
+        sa.cast(sa.null(), sa.Uuid()).label("checkpoint_id"),
+    ).where(
+        FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value,
+        ~sa.exists().where(
+            FlowRunReviewCheckpoints.flow_run_id == FlowRuns.id,
+            FlowRunReviewCheckpoints.tenant_id == FlowRuns.tenant_id,
+            FlowRunReviewCheckpoints.state.in_(
+                (
+                    FlowRunReviewCheckpointState.AWAITING_REVIEW.value,
+                    FlowRunReviewCheckpointState.EDITED.value,
+                    FlowRunReviewCheckpointState.APPROVED.value,
+                )
+            ),
+        ),
+    )
+    return sa.union_all(heartbeat, exhausted, approved, missing).subquery("recovery")
 
 
 def _recorded_passage_byte_expressions() -> tuple[Any, Any]:
@@ -788,18 +882,18 @@ class FlowRunRepository:
         rows = (await self.session.execute(stmt)).scalars().all()
         return [FlowRun.model_validate(row) for row in rows]
 
-    async def stale_running_sweep_boundary(self) -> tuple[datetime, UUID] | None:
+    async def recovery_sweep_boundary(self) -> tuple[datetime, UUID] | None:
+        candidates = _run_recovery_candidates_query()
         row = (
             await self.session.execute(
-                sa.select(FlowRuns.execution_heartbeat_at, FlowRuns.id)
-                .where(stale_running_flow_run_predicate())
-                .order_by(FlowRuns.execution_heartbeat_at.desc(), FlowRuns.id.desc())
+                sa.select(candidates.c.anchor_at, candidates.c.id)
+                .order_by(candidates.c.anchor_at.desc(), candidates.c.id.desc())
                 .limit(1)
             )
         ).first()
         return (row[0], row[1]) if row is not None else None
 
-    async def list_stale_running_runs(
+    async def list_recovery_candidates(
         self,
         *,
         tenant_id: UUID | None = None,
@@ -809,29 +903,34 @@ class FlowRunRepository:
     ) -> list[FlowRunRecoveryCandidate]:
         if limit < 1:
             return []
+        candidates = _run_recovery_candidates_query()
         stmt = (
-            sa.select(
-                FlowRuns.id,
-                FlowRuns.tenant_id,
-                FlowRuns.revision,
-                FlowRuns.execution_heartbeat_at,
-            )
-            .where(stale_running_flow_run_predicate())
-            .order_by(FlowRuns.execution_heartbeat_at.asc(), FlowRuns.id.asc())
+            sa.select(candidates)
+            .order_by(candidates.c.anchor_at.asc(), candidates.c.id.asc())
             .limit(limit)
         )
         if tenant_id is not None:
-            stmt = stmt.where(FlowRuns.tenant_id == tenant_id)
+            stmt = stmt.where(candidates.c.tenant_id == tenant_id)
         if after is not None:
             stmt = stmt.where(
-                sa.tuple_(FlowRuns.execution_heartbeat_at, FlowRuns.id) > after
+                sa.tuple_(candidates.c.anchor_at, candidates.c.id) > after
             )
         if through is not None:
             stmt = stmt.where(
-                sa.tuple_(FlowRuns.execution_heartbeat_at, FlowRuns.id) <= through
+                sa.tuple_(candidates.c.anchor_at, candidates.c.id) <= through
             )
         rows = (await self.session.execute(stmt)).all()
-        return [FlowRunRecoveryCandidate(*row) for row in rows]
+        return [
+            FlowRunRecoveryCandidate(
+                id=row.id,
+                tenant_id=row.tenant_id,
+                revision=row.revision,
+                anchor_at=row.anchor_at,
+                kind=FlowRunRecoveryKind(row.kind),
+                checkpoint_id=row.checkpoint_id,
+            )
+            for row in rows
+        ]
 
     async def renew_execution_heartbeats(
         self, *, owners: Sequence[FlowRunExecutionOwner]
@@ -1015,6 +1114,12 @@ class FlowRunRepository:
         if not accepted_or_outcome_unknown_exhaustion:
             return None
         assert current_dispatch_exhausted_at is not None
+        if row.dispatch_pending_since is not None:
+            require_flow_run_wait_before_deadline(
+                wait=FlowRunAbandonmentWait.EXHAUSTED_DISPATCH,
+                anchor_at=row.dispatch_pending_since,
+                now=max(now, datetime.now(timezone.utc)),
+            )
         if expected_dispatch_exhausted_at != current_dispatch_exhausted_at:
             return FlowRunDispatchRedriveGenerationConflict(
                 current_dispatch_exhausted_at=current_dispatch_exhausted_at
@@ -1151,6 +1256,55 @@ class FlowRunRepository:
         if failed is None:
             return None
         return FlowRun.model_validate(failed)
+
+    async def terminalize_abandoned_run_status(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        facts: FlowRunAbandonmentFacts,
+        error: FlowRunError,
+    ) -> FlowRun | None:
+        # Review decisions lock the parent before the checkpoint. Re-read eligibility
+        # in a new statement after that lock wait, including the dispatch epoch anchor.
+        await self.session.scalar(
+            sa.select(FlowRuns.id)
+            .where(FlowRuns.id == run_id, FlowRuns.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        stmt = sa.update(FlowRuns).where(
+            FlowRuns.id == run_id,
+            FlowRuns.tenant_id == tenant_id,
+            FlowRuns.revision == expected_revision,
+            sa.literal(facts.deadline) <= sa.func.statement_timestamp(),
+        )
+        if facts.wait == FlowRunAbandonmentWait.APPROVED_REVIEW:
+            stmt = stmt.where(
+                FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value,
+                sa.exists().where(
+                    FlowRunReviewCheckpoints.id == facts.checkpoint_id,
+                    FlowRunReviewCheckpoints.flow_run_id == FlowRuns.id,
+                    FlowRunReviewCheckpoints.tenant_id == FlowRuns.tenant_id,
+                    FlowRunReviewCheckpoints.state
+                    == FlowRunReviewCheckpointState.APPROVED.value,
+                    FlowRunReviewCheckpoints.approved_at == facts.anchor_at,
+                ),
+            )
+        else:
+            stmt = stmt.where(
+                FlowRuns.status == FlowRunStatus.QUEUED.value,
+                FlowRuns.dispatch_exhausted_at.is_not(None),
+                FlowRuns.dispatch_pending_since == facts.anchor_at,
+            )
+        row = await self.session.scalar(
+            stmt.values(
+                status=FlowRunStatus.FAILED.value,
+                error_json=dump_flow_run_error(error),
+                finished_at=sa.func.statement_timestamp(),
+            ).returning(FlowRuns)
+        )
+        return FlowRun.model_validate(row) if row is not None else None
 
     async def terminalize_run_status(
         self,

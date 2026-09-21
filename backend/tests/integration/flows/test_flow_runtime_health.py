@@ -338,7 +338,7 @@ async def test_recovery_and_health_share_webhook_protected_stale_running_family(
             )
         await session.flush()
 
-        recoverable = await run_repo.list_stale_running_runs(
+        recoverable = await run_repo.list_recovery_candidates(
             tenant_id=admin_user.tenant_id,
         )
         snapshot = await load_flow_runtime_health_snapshot(

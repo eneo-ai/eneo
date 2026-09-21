@@ -5028,7 +5028,7 @@ export interface paths {
      *     after this timestamp return `400` with code `flow_review_expired`; this endpoint may
      *     briefly show the checkpoint until the background reconciler marks the run cancelled.
      *     When approval happens before `expires_at`, resume remains valid after the deadline because
-     *     the human decision is already persisted.
+     *     the human decision is already persisted, but only for 30 days after `approved_at`.
      *
      *     Current visibility follows run-detail visibility: service-key principals can read only
      *     checkpoints for runs they own, while human callers follow the existing flow view policy.
@@ -5150,7 +5150,8 @@ export interface paths {
      *     stale approvals return `400` with code `flow_review_stale_revision`.
      *
      *     The approval must be submitted before the checkpoint `expires_at` deadline. After approval
-     *     is persisted, resume remains valid even if the original deadline has passed.
+     *     is persisted, resume remains valid for 30 days after `approved_at`, even if the original
+     *     review deadline has passed.
      *
      *     Service-key principals may approve checkpoints only for runs they own (key must have
      *     `resource_permissions.flows = write`).
@@ -5235,6 +5236,12 @@ export interface paths {
      *     Resume uses the approved checkpoint revision. It can run after the original `expires_at`
      *     deadline only when approval was already persisted before expiry; already expired checkpoints
      *     return `400` with code `flow_review_expired`.
+     *
+     *     Resume must occur within 30 days of `approved_at`. After that deadline this request returns
+     *     `400` with code `flow_run_abandoned` and writes no terminal state. The maintenance sweep
+     *     fails the run and cancels the checkpoint as a system transition, preserving its approval
+     *     timestamp and decision actor. Run history and files remain available; `retryable` is false
+     *     because earlier external effects may have occurred.
      *
      *     Service-key principals may resume approved checkpoints only for runs they own (key must have
      *     `resource_permissions.flows = write`).
@@ -16812,6 +16819,7 @@ export interface components {
       | "flow_task_timeout"
       | "flow_task_failure"
       | "flow_worker_stalled"
+      | "flow_run_abandoned"
       | "flow_run_error_payload_invalid"
       | "flow_run_evidence_forbidden"
       | "flow_run_evidence_raw_export_forbidden"
@@ -18969,6 +18977,27 @@ export interface components {
        */
       reasoning_effort?: string | null;
     };
+    /** FlowRunAbandonmentFacts */
+    FlowRunAbandonmentFacts: {
+      /**
+       * Anchor At
+       * Format: date-time
+       */
+      anchor_at: string;
+      /** Checkpoint Id */
+      checkpoint_id?: string | null;
+      /**
+       * Deadline
+       * Format: date-time
+       */
+      deadline: string;
+      wait: components["schemas"]["FlowRunAbandonmentWait"];
+    };
+    /**
+     * FlowRunAbandonmentWait
+     * @enum {string}
+     */
+    FlowRunAbandonmentWait: "approved_review" | "exhausted_dispatch";
     /** FlowRunArtifactResultPublic */
     FlowRunArtifactResultPublic: {
       /**
@@ -19896,6 +19925,21 @@ export interface components {
      * FlowRunError
      * @description Structured terminal run error. Clients should branch on `code`, not on the human-readable message.
      * @example {
+     *       "code": "flow_run_abandoned",
+     *       "details": {
+     *         "abandonment": {
+     *           "anchor_at": "2026-08-22T00:00:00Z",
+     *           "checkpoint_id": "00000000-0000-4000-8000-000000000001",
+     *           "deadline": "2026-09-21T00:00:00Z",
+     *           "wait": "approved_review"
+     *         }
+     *       },
+     *       "message": "Flow run exceeded its abandonment deadline.",
+     *       "retryable": false,
+     *       "schema_version": 1,
+     *       "source": "abandonment_reconciler"
+     *     }
+     * @example {
      *       "code": "typed_io_transcription_failed",
      *       "details": {
      *         "phase": "transcription",
@@ -19957,6 +20001,7 @@ export interface components {
         | "flow_review_open_step_result_incomplete_invariant"
         | "flow_review_policy_invalid"
         | "flow_review_rejected"
+        | "flow_run_abandoned"
         | "flow_run_cancelled"
         | "flow_run_error_payload_invalid"
         | "flow_run_input_exceeds_limit"
@@ -20050,6 +20095,8 @@ export interface components {
     };
     /** FlowRunErrorDetails */
     FlowRunErrorDetails: {
+      /** @description Wait and deadline that caused automatic abandonment; history and files are retained. */
+      abandonment?: components["schemas"]["FlowRunAbandonmentFacts"] | null;
       /** Ceiling Bytes */
       ceiling_bytes?: number | null;
       /**
@@ -21242,6 +21289,7 @@ export interface components {
       | "task_failure"
       | "missing_principal"
       | "stale_running_reconciler"
+      | "abandonment_reconciler"
       | "user_cancel"
       | "review_rejected"
       | "review_checkpoint_opened"
@@ -22669,6 +22717,7 @@ export interface components {
             | "flow_review_open_step_result_incomplete_invariant"
             | "flow_review_policy_invalid"
             | "flow_review_rejected"
+            | "flow_run_abandoned"
             | "flow_run_cancelled"
             | "flow_run_error_payload_invalid"
             | "flow_run_input_exceeds_limit"
@@ -23851,6 +23900,7 @@ export interface components {
             | "flow_review_open_step_result_incomplete_invariant"
             | "flow_review_policy_invalid"
             | "flow_review_rejected"
+            | "flow_run_abandoned"
             | "flow_run_cancelled"
             | "flow_run_error_payload_invalid"
             | "flow_run_input_exceeds_limit"

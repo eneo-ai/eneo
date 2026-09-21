@@ -19,6 +19,10 @@ from pydantic import (
     model_validator,
 )
 
+from eneo.flows.domain.flow_run_recovery_policy import (
+    FlowRunAbandonmentWait,
+    flow_run_abandonment_deadline,
+)
 from eneo.flows.domain.provider_call_evidence_gap import ProviderCallEvidenceGap
 from eneo.flows.enums import FlowRunLifecycleSource, FlowStepPhase
 from eneo.flows.flow_api_error_code import (
@@ -202,12 +206,35 @@ class FlowRunRecoveryFacts(BaseModel):
         return self
 
 
+class FlowRunAbandonmentFacts(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    wait: FlowRunAbandonmentWait
+    anchor_at: AwareDatetime
+    deadline: AwareDatetime
+    checkpoint_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _validate_wait(self) -> FlowRunAbandonmentFacts:
+        if self.deadline != flow_run_abandonment_deadline(self.anchor_at):
+            raise ValueError("Abandonment deadline must follow the shared wait policy.")
+        if (self.wait == FlowRunAbandonmentWait.APPROVED_REVIEW) != (
+            self.checkpoint_id is not None
+        ):
+            raise ValueError("Only an approved review wait requires a checkpoint id.")
+        return self
+
+
 class FlowRunErrorDetails(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     recovery: FlowRunRecoveryFacts | None = Field(
         default=None,
         description="Execution heartbeat facts used to recover a stalled worker.",
+    )
+    abandonment: FlowRunAbandonmentFacts | None = Field(
+        default=None,
+        description="Wait and deadline that caused automatic abandonment; history and files are retained.",
     )
 
     measured_bytes: int | None = Field(default=None, ge=0, strict=True)
@@ -339,6 +366,21 @@ class FlowRunError(BaseModel):
                 "not on the human-readable message."
             ),
             "examples": [
+                {
+                    "schema_version": 1,
+                    "code": FlowApiErrorCode.RUN_ABANDONED.value,
+                    "message": "Flow run exceeded its abandonment deadline.",
+                    "source": "abandonment_reconciler",
+                    "retryable": False,
+                    "details": {
+                        "abandonment": {
+                            "wait": "approved_review",
+                            "anchor_at": "2026-08-22T00:00:00Z",
+                            "deadline": "2026-09-21T00:00:00Z",
+                            "checkpoint_id": "00000000-0000-4000-8000-000000000001",
+                        }
+                    },
+                },
                 {
                     "schema_version": 1,
                     "code": FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value,

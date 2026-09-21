@@ -13,9 +13,13 @@ from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.database.database import sessionmanager
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+from eneo.flows.domain.flow_run_recovery_policy import (
+    FlowRunAbandonmentDeadlineExceeded,
+)
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.execution_backend import FlowExecutionDispatchRejected
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import flow_run_abandonment_refusal
 from eneo.flows.flow_run_dispatch_request import build_flow_run_dispatch_request
 from eneo.flows.flow_run_error import (
     FlowRunDispatchError,
@@ -269,6 +273,8 @@ async def redrive_flow_run_recoverably_after_commit(
     The audit and optional budget reset commit together before broker I/O.
     Automatic recovery never calls this path, so every rearmed epoch remains an
     explicit API action bounded by the standard dispatch budget.
+    An overdue epoch is only refused here: a raised refusal rolls back this
+    transaction, so the maintenance sweep alone writes abandonment.
     """
 
     try:
@@ -308,6 +314,8 @@ async def redrive_flow_run_recoverably_after_commit(
                         code=(FlowApiErrorCode.RUN_REDISPATCH_AUDIT_UNAVAILABLE.value),
                         context={"audit_required": True},
                     )
+    except FlowRunAbandonmentDeadlineExceeded as exc:
+        raise flow_run_abandonment_refusal(exc) from exc
     except (
         AuditLoggingUnavailableException,
         FlowRunDispatchExhaustionGenerationConflictError,

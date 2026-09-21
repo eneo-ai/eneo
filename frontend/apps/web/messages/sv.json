@@ -5312,6 +5312,7 @@
   "flow_error_flow_task_timeout": "Worker-uppgiften tog för lång tid när flödet kördes. Försök med mindre indata eller kontakta support om felet återkommer.",
   "flow_error_flow_webhook_delivery_failed": "Körningen slutfördes men webhook-leveransen misslyckades. Kontrollera webhook-konfigurationen och försök leverera igen om det går.",
   "flow_error_flow_worker_stalled": "Workern slutade uppdatera den här körningen. Försök igen, eller kontakta support med körnings-ID om det händer igen.",
+  "flow_error_flow_run_abandoned": "Körningen har väntat i 30 dagar på att fortsätta efter en godkänd granskning eller på att en worker ska ta över efter uttömda startförsök. Historiken finns kvar.",
   "flow_error_flow_review_already_resumed": "Granskningen har redan återupptagits. Läs om körningen för att se senaste status.",
   "flow_error_flow_review_cancelled": "Granskningen har avbrutits. Läs om körningen innan du fortsätter.",
   "flow_error_flow_review_checkpoint_not_found": "Granskningspunkten kunde inte hittas. Läs om körningen och försök igen.",

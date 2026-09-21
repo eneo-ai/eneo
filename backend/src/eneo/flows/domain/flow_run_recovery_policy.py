@@ -7,8 +7,11 @@ at the same time.
 
 from __future__ import annotations
 
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from enum import StrEnum
 from typing import TypedDict
+from uuid import UUID
 
 FLOW_QUEUED_REDISPATCH_AFTER_SECONDS = 30
 FLOW_DISPATCH_MAX_ATTEMPTS = 5
@@ -19,6 +22,42 @@ FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS = 180
 FLOW_EXECUTION_HEARTBEAT_MAX_FAILURES = 3
 FLOW_EXECUTION_HEARTBEAT_TRANSACTION_TIMEOUT_SECONDS = 10
 FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS = 60
+FLOW_RUN_ABANDONMENT_AFTER = timedelta(days=30)
+
+
+class FlowRunAbandonmentWait(StrEnum):
+    APPROVED_REVIEW = "approved_review"
+    EXHAUSTED_DISPATCH = "exhausted_dispatch"
+
+
+class FlowRunRecoveryKind(StrEnum):
+    EXECUTION_HEARTBEAT_EXPIRED = "execution_heartbeat_expired"
+    APPROVED_REVIEW = "approved_review"
+    EXHAUSTED_DISPATCH = "exhausted_dispatch"
+    MISSING_REVIEW_CHECKPOINT = "missing_review_checkpoint"
+
+
+def flow_run_abandonment_deadline(anchor_at: datetime) -> datetime:
+    return anchor_at + FLOW_RUN_ABANDONMENT_AFTER
+
+
+@dataclass(eq=False)
+class FlowRunAbandonmentDeadlineExceeded(Exception):
+    wait: FlowRunAbandonmentWait
+    anchor_at: datetime
+    checkpoint_id: UUID | None = None
+
+
+def require_flow_run_wait_before_deadline(
+    *,
+    wait: FlowRunAbandonmentWait,
+    anchor_at: datetime,
+    now: datetime,
+    checkpoint_id: UUID | None = None,
+) -> None:
+    if now >= flow_run_abandonment_deadline(anchor_at):
+        raise FlowRunAbandonmentDeadlineExceeded(wait, anchor_at, checkpoint_id)
+
 
 assert len(FLOW_DISPATCH_RETRY_BACKOFF_SECONDS) == FLOW_DISPATCH_MAX_ATTEMPTS - 1
 

@@ -77,6 +77,17 @@ The repository owns checkpoint locks and revision CAS. The service owns
 authorization and transition policy. The runtime opens/resumes checkpoints but
 does not write terminal run state directly.
 
+An approved checkpoint must be resumed within 30 days of `approved_at`. Approval
+may outlive the original review submission deadline, but it no longer permits an
+unbounded wait to resume. After 30 days, resume returns `flow_run_abandoned`
+without writing terminal state; the maintenance sweep owns that write.
+
+Automatic abandonment fails the run and cancels its approved checkpoint through
+the existing system cancellation path. The checkpoint keeps `approved_at` and
+the approval's `decided_by_*` fields, and the cancellation receives its own system
+audit entry. This preservation applies to automatic abandonment; it does not
+change how explicit user cancellation records its actor.
+
 ## Terminalization
 
 `FlowRunTerminalizer` is the only owner of terminal run transitions. The same
@@ -110,6 +121,24 @@ Open provider-call receipts become `outcome_unknown` with reason
 `stale_started`. Run history is retained. A run waiting for pending outbound
 delivery belongs to the delivery worker and is excluded from stalled-worker
 recovery and its health signal.
+
+The same finite sweep also handles approved reviews waiting to resume and queued
+runs whose dispatch attempts are exhausted. Both have a 30-day limit, measured
+from `approved_at` and `dispatch_pending_since` respectively. A backlog or an
+unavailable maintenance worker can delay terminalization. Resume and redrive
+refuse overdue waits even before the sweep reaches them.
+
+Abandonment locks the parent run and rechecks its revision, wait state, and exact
+anchor timestamp in the terminal update. A competing resume, redrive, or worker
+claim makes a stale candidate a no-op. The run fails with `flow_run_abandoned`;
+`details.abandonment` records `wait`, `anchor_at`, `deadline`, and the review's
+`checkpoint_id` when applicable. Heartbeat facts remain in `details.recovery`.
+
+An `awaiting_review` run with no active checkpoint is reported as
+`missing_review_checkpoint` and counted separately. It receives no invented
+deadline and is not terminalized. Abandonment never purges history or files,
+resumes a run, or replays provider work. Its error has `retryable: false` because
+neither wait proves that earlier work had no external effects.
 
 The migration initializes existing running heartbeats from `updated_at`;
 older running rows can therefore be recovered on the first sweep after

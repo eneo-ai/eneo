@@ -605,6 +605,13 @@ Response:
 
 Resume the run after approval so the worker can continue. `Idempotency-Key` is required here and nowhere else; send the same value on every retry of this one resume, because a different key against an already-resumed checkpoint returns `400 flow_review_already_resumed`.
 
+Resume within 30 days of `approved_at`. After that deadline, the request returns
+`400 flow_run_abandoned`, including the wait and deadline in `context.abandonment`.
+The maintenance sweep then fails the run and cancels the approved checkpoint as
+a system transition. Automatic abandonment preserves the approval timestamp,
+decision actor, history, and files. It never resumes the run automatically, and
+`retryable: false` means you must inspect earlier effects before submitting a new run.
+
 Request:
 
 ```text
@@ -1675,13 +1682,14 @@ This table checks workloads against the default limits. It does not establish pr
 | Allowed range          | 60 seconds to 90 days, default 14 days. It is set per step when the flow is authored, and no runtime endpoint changes it                                                         |
 | What expiry does       | A background reconciler runs every 60 seconds and, for a checkpoint still open past `expires_at`, marks it `expired` and cancels the run with `error.code` `flow_review_expired` |
 | Timing you can promise | The run flips to `cancelled` within roughly a minute of the deadline, not at the instant it passes                                                                               |
-| Late approval          | Resume still works after `expires_at` if the approval was persisted before it. An already-expired checkpoint returns `400 flow_review_expired`                                   |
+| Resume after review expiry | Approval persisted before `expires_at` remains resumable for 30 days after `approved_at`. An already-expired checkpoint returns `400 flow_review_expired` |
 
 ### Retries and recovery
 
 - **The runtime does not retry a failed provider call.** A model or transcription failure fails the step directly. The one exception is a single reissue when a provider rejects an unsupported response format, and it shares the original step deadline.
 - **Dispatch to the worker is retried up to 5 times**, with fixed delays of 30, 120, 300, and 900 seconds. A sweep looks for stale queued runs every 30 seconds. `dispatch_attempt_count`, `dispatch_next_attempt_at`, and `dispatch_exhausted_at` on the run report where that budget stands.
 - **`redispatch` is for a stale queued run only**, and needs the observed `dispatch_exhausted_at` echoed back as `expected_dispatch_exhausted_at`. A `redispatched_count` of `0` means nothing was eligible.
+- **Exhausted queued dispatches have a 30-day limit**, measured from `dispatch_pending_since`. After that deadline, redrive returns `400 flow_run_abandoned`; the maintenance sweep fails the run while keeping its history and files.
 - **`rerun` is for a completed or failed run**, re-executes one completed step, invalidates everything downstream, and requires a `reason`.
 - Never auto-retry a step whose provider work may have started. A rerun repeats every provider call in that step, including calls that already succeeded, and spends again.
 

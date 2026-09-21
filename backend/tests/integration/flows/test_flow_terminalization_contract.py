@@ -594,11 +594,14 @@ async def test_stale_running_query_excludes_awaiting_review_runs(
             )
         )
 
-        stale_runs = await run_repo.list_stale_running_runs(
+        stale_runs = await run_repo.list_recovery_candidates(
             tenant_id=admin_user.tenant_id,
         )
 
-    assert stale_runs == []
+    assert len(stale_runs) == 1
+    assert stale_runs[0].id == run.id
+    assert stale_runs[0].kind.value == "missing_review_checkpoint"
+    assert stale_runs[0].abandonment is None
 
 
 @pytest.mark.asyncio
@@ -640,7 +643,7 @@ async def test_pending_webhook_committed_after_stale_discovery_blocks_terminaliz
             run_repo = FlowRunRepository(session=recovery_session)
             terminalizer = _flow_run_terminalizer(run_repo)
             async with recovery_session.begin():
-                stale_runs = await run_repo.list_stale_running_runs(
+                stale_runs = await run_repo.list_recovery_candidates(
                     tenant_id=admin_user.tenant_id,
                 )
             assert [candidate.id for candidate in stale_runs] == [run_id]
@@ -1032,7 +1035,7 @@ async def test_long_work_renews_but_old_revision_and_expired_owner_cannot(
             ) - timedelta(seconds=10)
             assert run.id not in {
                 row.id
-                for row in await repo.list_stale_running_runs(tenant_id=run.tenant_id)
+                for row in await repo.list_recovery_candidates(tenant_id=run.tenant_id)
             }
     async with sessionmanager.session() as session, session.begin():
         await session.execute(

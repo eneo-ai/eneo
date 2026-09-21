@@ -22,6 +22,55 @@ from eneo.object_content.configuration import (
 _ALEMBIC_VERSION_NUM_LIMIT = 32
 
 
+def test_abandonment_indexes_match_models_and_downgrade_without_data_changes(
+    monkeypatch,
+):
+    from eneo.database.tables.flow_tables import FlowRunReviewCheckpoints, FlowRuns
+
+    migration = runpy.run_path(
+        str(
+            Path(__file__).parents[2]
+            / "alembic"
+            / "versions"
+            / "202609211000_flow_abandonment_indexes.py"
+        )
+    )
+    assert migration["down_revision"] == "202609201300"
+    operations = MagicMock()
+    operations.get_bind.return_value.execute.return_value.scalar.return_value = None
+    monkeypatch.setitem(migration["upgrade"].__globals__, "op", operations)
+    migration["upgrade"]()
+    expected_names = {
+        "ix_flow_runs_exhausted_dispatch_wait",
+        "ix_flow_runs_awaiting_review_created",
+        "ix_flow_review_approved_wait",
+    }
+    assert {c.args[0] for c in operations.create_index.call_args_list} == expected_names
+    models = {
+        i.name: i
+        for table in (FlowRuns, FlowRunReviewCheckpoints)
+        for i in table.__table__.indexes
+    }
+    for invocation in operations.create_index.call_args_list:
+        name, table, columns = invocation.args
+        index = models[name]
+        assert index.table.name == table
+        assert [c.name for c in index.columns] == columns
+        assert str(index.dialect_options["postgresql"]["where"]) == str(
+            invocation.kwargs["postgresql_where"]
+        )
+        assert tuple(index.dialect_options["postgresql"]["include"]) == tuple(
+            invocation.kwargs["postgresql_include"]
+        )
+        assert invocation.kwargs["postgresql_concurrently"] is True
+    operations.execute.assert_called_with("RESET lock_timeout")
+    operations.reset_mock()
+    migration["downgrade"]()
+    assert {c.args[0] for c in operations.drop_index.call_args_list} == expected_names
+    operations.drop_table.assert_not_called()
+    operations.drop_column.assert_not_called()
+
+
 def _accepted_job_migration():
     return runpy.run_path(
         str(

@@ -313,6 +313,7 @@ class FlowRunLifecycleSource(str, Enum):
     TASK_FAILURE = "task_failure"
     MISSING_PRINCIPAL = "missing_principal"
     STALE_RUNNING_RECONCILER = "stale_running_reconciler"
+    ABANDONMENT_RECONCILER = "abandonment_reconciler"
     USER_CANCEL = "user_cancel"
     REVIEW_REJECTED = "review_rejected"
     REVIEW_CHECKPOINT_OPENED = "review_checkpoint_opened"

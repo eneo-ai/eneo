@@ -154,6 +154,53 @@ def _service(
     )
 
 
+async def test_overdue_approved_resume_returns_typed_refusal_without_terminalizing(
+    user,
+):
+    from eneo.flows.domain.flow_run_recovery_policy import (
+        FlowRunAbandonmentDeadlineExceeded,
+        FlowRunAbandonmentWait,
+    )
+
+    checkpoint_repo, access_policy, terminalizer = AsyncMock(), AsyncMock(), AsyncMock()
+    run = _run(user=user, flow_id=uuid4())
+    access_policy.load_run.return_value = run
+    checkpoint_id = uuid4()
+    checkpoint_repo.resume_review_checkpoint.side_effect = (
+        FlowRunAbandonmentDeadlineExceeded(
+            wait=FlowRunAbandonmentWait.APPROVED_REVIEW,
+            anchor_at=datetime(2026, 8, 22, tzinfo=timezone.utc),
+            checkpoint_id=checkpoint_id,
+        )
+    )
+    service = _service(
+        user,
+        checkpoint_repo=checkpoint_repo,
+        access_policy=access_policy,
+        terminalizer=terminalizer,
+    )
+    with pytest.raises(BadRequestException) as caught:
+        await service.resume_review_checkpoint(
+            flow_id=run.flow_id,
+            run_id=run.id,
+            checkpoint_id=checkpoint_id,
+            expected_checkpoint_revision=2,
+            idempotency_key="resume",
+        )
+    assert caught.value.code == "flow_run_abandoned"
+    assert caught.value.context == {
+        "retryable": False,
+        "abandonment": {
+            "wait": "approved_review",
+            "anchor_at": "2026-08-22T00:00:00Z",
+            "deadline": "2026-09-21T00:00:00Z",
+            "checkpoint_id": str(checkpoint_id),
+        },
+    }
+    terminalizer.terminalize_run.assert_not_awaited()
+    terminalizer.terminalize_abandoned_run.assert_not_awaited()
+
+
 async def _edit(
     *,
     service: FlowRunReviewCheckpointService,

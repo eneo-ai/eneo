@@ -27,6 +27,7 @@ from eneo.flows.application.flow_webhook_delivery_policy import (
 from eneo.flows.domain.flow import FlowRunStatus
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS,
+    FlowRunRecoveryKind,
 )
 from eneo.flows.domain.mapped_execution_policy import (
     resolve_flow_mapped_execution_policy,
@@ -608,6 +609,8 @@ async def _reconcile_stale_running_runs_all_tenants(
 ) -> dict[str, int | str]:
     global _stale_running_cursor, _stale_running_window_end
     reconciled = 0
+    abandoned = 0
+    review_checkpoint_invariant_violations = 0
     skipped_tenant_ids: list[UUID] = []
     async with sessionmanager.session() as session:
         enable_autobegin_for_flow_task_session(session)
@@ -623,11 +626,9 @@ async def _reconcile_stale_running_runs_all_tenants(
                 _stale_running_cursor = None
                 _stale_running_window_end = None
             if _stale_running_window_end is None:
-                _stale_running_window_end = (
-                    await run_repo.stale_running_sweep_boundary()
-                )
+                _stale_running_window_end = await run_repo.recovery_sweep_boundary()
             stale_runs = (
-                await run_repo.list_stale_running_runs(
+                await run_repo.list_recovery_candidates(
                     limit=limit,
                     after=_stale_running_cursor,
                     through=_stale_running_window_end,
@@ -640,7 +641,28 @@ async def _reconcile_stale_running_runs_all_tenants(
                 _stale_running_window_end = None
         for run in stale_runs:
             try:
+                if run.kind == FlowRunRecoveryKind.MISSING_REVIEW_CHECKPOINT:
+                    review_checkpoint_invariant_violations += 1
+                    logger.error(
+                        "Awaiting-review Flow run has no active checkpoint",
+                        extra={
+                            "invariant": run.kind.value,
+                            "run_id": str(run.id),
+                            "tenant_id": str(run.tenant_id),
+                        },
+                    )
+                    continue
                 async with session.begin():
+                    if (facts := run.abandonment) is not None:
+                        result = await terminalizer.terminalize_abandoned_run(
+                            run_id=run.id,
+                            tenant_id=run.tenant_id,
+                            expected_revision=run.revision,
+                            facts=facts,
+                        )
+                        if result.did_transition:
+                            abandoned += 1
+                        continue
                     result = await terminalizer.terminalize_stale_running_run(
                         run_id=run.id,
                         tenant_id=run.tenant_id,
@@ -652,8 +674,8 @@ async def _reconcile_stale_running_runs_all_tenants(
                             details=FlowRunErrorDetails(
                                 recovery=FlowRunRecoveryFacts(
                                     reason="execution_heartbeat_expired",
-                                    heartbeat_at=run.execution_heartbeat_at,
-                                    expires_at=run.execution_heartbeat_at
+                                    heartbeat_at=run.anchor_at,
+                                    expires_at=run.anchor_at
                                     + timedelta(
                                         seconds=FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS
                                     ),
@@ -675,11 +697,16 @@ async def _reconcile_stale_running_runs_all_tenants(
                 )
             finally:
                 # Advance even after failure so one old run cannot starve other tenants.
-                _stale_running_cursor = (run.execution_heartbeat_at, run.id)
+                _stale_running_cursor = (run.anchor_at, run.id)
     _fail_task_if_tenants_were_skipped(
         task_name="flows.reconcile_running", skipped_tenant_ids=skipped_tenant_ids
     )
-    return {"status": "ok", "reconciled": reconciled}
+    return {
+        "status": "ok",
+        "reconciled": reconciled,
+        "abandoned": abandoned,
+        "review_checkpoint_invariant_violations": review_checkpoint_invariant_violations,
+    }
 
 
 async def _reconcile_expired_review_checkpoints_all_tenants(

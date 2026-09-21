@@ -80,19 +80,21 @@ async def test_stale_discovery_has_one_payload_free_global_budget() -> None:
     session.execute.return_value = rows
     repo = FlowRunRepository(session=session)
 
-    assert await repo.list_stale_running_runs(limit=3) == []
+    assert await repo.list_recovery_candidates(limit=3) == []
 
     statement = session.execute.await_args.args[0]
     assert list(statement.selected_columns.keys()) == [
         "id",
         "tenant_id",
         "revision",
-        "execution_heartbeat_at",
+        "anchor_at",
+        "kind",
+        "checkpoint_id",
     ]
     sql = str(statement.compile(dialect=postgresql.dialect()))
     assert "flow_runs.execution_heartbeat_at <= statement_timestamp() -" in sql
     assert "NOT (EXISTS" in sql
-    assert "ORDER BY flow_runs.execution_heartbeat_at ASC, flow_runs.id ASC" in sql
+    assert "ORDER BY recovery.anchor_at ASC, recovery.id ASC" in sql
     assert statement._limit_clause.value == 3
 
 

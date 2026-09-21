@@ -517,7 +517,7 @@ async def test_flow_webhook_delivery_claims_pending_rows_and_skips_stale_reconci
 
         stale_runs = await FlowRunRepository(
             session=session,
-        ).list_stale_running_runs(
+        ).list_recovery_candidates(
             tenant_id=admin_user.tenant_id,
         )
         claimed = await webhook_repo.claim_due_delivery_rows(

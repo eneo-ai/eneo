@@ -228,6 +228,55 @@ async def test_manual_redrive_commits_audit_with_rearm_before_dispatch(
     }
 
 
+async def test_overdue_redrive_is_typed_refusal_without_audit_dispatch_or_terminal_write(
+    monkeypatch,
+):
+    from eneo.flows.domain.flow_run_recovery_policy import (
+        FlowRunAbandonmentDeadlineExceeded,
+        FlowRunAbandonmentWait,
+    )
+    from eneo.flows.flow_api_exceptions import FlowBadRequestException
+
+    run = _run(flow_id=uuid4(), tenant_id=uuid4())
+    run_repo, terminalizer, audit_service = AsyncMock(), AsyncMock(), AsyncMock()
+    run_repo.rearm_exhausted_accepted_dispatch_for_redrive.side_effect = (
+        FlowRunAbandonmentDeadlineExceeded(
+            wait=FlowRunAbandonmentWait.EXHAUSTED_DISPATCH,
+            anchor_at=run.created_at,
+        )
+    )
+    _install_dispatch_dependencies(
+        monkeypatch,
+        run_repo=run_repo,
+        backend=MagicMock(),
+        terminalizer=terminalizer,
+        events=[],
+        audit_service=audit_service,
+    )
+    dispatch = AsyncMock()
+    monkeypatch.setattr(
+        flow_dispatch_module, "dispatch_flow_run_recoverably_after_commit", dispatch
+    )
+    with pytest.raises(FlowBadRequestException) as caught:
+        await redrive_flow_run_recoverably_after_commit(
+            run_id=run.id,
+            tenant_id=run.tenant_id,
+            expected_revision=run.revision,
+            actor_id=run.principal_user_id,
+            actor_type=ActorType.USER,
+            actor_api_key_id=None,
+            audit_metadata={},
+            expected_dispatch_exhausted_at=run.created_at,
+        )
+    assert caught.value.code == FlowApiErrorCode.RUN_ABANDONED
+    assert caught.value.context["retryable"] is False
+    assert caught.value.context["abandonment"]["wait"] == "exhausted_dispatch"
+    audit_service.log.assert_not_awaited()
+    terminalizer.terminalize_run.assert_not_awaited()
+    terminalizer.terminalize_abandoned_run.assert_not_awaited()
+    dispatch.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("audit_outcome", ["disabled", "error"])
 async def test_manual_redrive_rolls_back_and_skips_dispatch_when_audit_is_unavailable(
