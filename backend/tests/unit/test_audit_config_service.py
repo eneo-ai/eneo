@@ -25,16 +25,7 @@ ALL_CATEGORIES = [
     "audit_access",
 ]
 
-# Expected action counts per category
-EXPECTED_CATEGORY_COUNTS = {
-    "admin_actions": 59,
-    "user_actions": 48,
-    "security_events": 12,
-    "file_operations": 6,
-    "integration_events": 19,
-    "system_actions": 3,
-    "audit_access": 3,  # Includes AUDIT_SESSION_CREATED
-}
+from tests.audit_category_counts import EXPECTED_CATEGORY_COUNTS
 
 
 @pytest.fixture
@@ -634,10 +625,9 @@ class TestUpdateActionConfig:
 class TestAllCategoriesHaveCorrectActionCounts:
     """Verify each category has the expected number of actions mapped."""
 
-    def test_admin_actions_has_59_actions(self):
-        """Verify admin_actions has 59 action types."""
+    def test_admin_actions_count(self):
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "admin_actions")
-        assert count == 59
+        assert count == EXPECTED_CATEGORY_COUNTS["admin_actions"]
 
     def test_user_actions_has_48_actions(self):
         """Verify user_actions has 48 action types."""

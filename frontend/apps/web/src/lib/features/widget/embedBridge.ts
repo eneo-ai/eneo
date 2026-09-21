@@ -1,7 +1,13 @@
 /**
  * postMessage protocol between the embed page (inside the iframe) and the
- * loader on the host page. Versioned so the two can ship independently;
- * every message is origin-checked and carries no secrets.
+ * loader on the host page. Every message is origin-checked and carries no
+ * secrets or identifiers.
+ *
+ * Versioning: a receiver ignores messages above its own version, and pinned
+ * (SRI) loaders on customer sites can be years old. So `BRIDGE_VERSION` is
+ * bumped only for changes an old receiver could misread; new message types
+ * and new optional payload fields keep the version, since unknown types are
+ * ignored and unknown fields are dropped by the parsers on both sides.
  */
 
 export const BRIDGE_NAMESPACE = "eneo-widget";
@@ -12,7 +18,7 @@ import type { LauncherColors } from "./contrast";
 export type OutboundMessage =
   | { type: "ready"; payload?: { colors: LauncherColors } }
   | { type: "close" }
-  | { type: "conversation_started"; payload: { session_id: string } }
+  | { type: "conversation_started" }
   | { type: "unread"; payload: { count: number } };
 
 export type InboundMessage =
@@ -114,8 +120,8 @@ export function createEmbedBridge(options: {
     ready: (colors?: LauncherColors) =>
       post(colors ? { type: "ready", payload: { colors } } : { type: "ready" }),
     close: () => post({ type: "close" }),
-    conversationStarted: (sessionId: string) =>
-      post({ type: "conversation_started", payload: { session_id: sessionId } }),
+    /** The host only learns that a conversation began; the session id stays inside the frame. */
+    conversationStarted: () => post({ type: "conversation_started" }),
     destroy: unsubscribe
   };
 }

@@ -7,7 +7,7 @@ from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.assistants.assistant_service import AssistantService
-from eneo.authentication.auth_models import is_service_api_key
+from eneo.authentication.auth_models import is_service_api_key, is_widget_visitor
 from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.database.database import AsyncSession, sessionmanager
 from eneo.files.file_content_loader import FileContentLoader
@@ -200,7 +200,9 @@ class SessionService:
             yield
 
     def _never_persist(self) -> bool:
-        widget = getattr(self.user, "active_widget", None)
+        if not is_widget_visitor(self.user):
+            return False
+        widget = self.user.active_widget
         return widget is not None and widget.never_persist
 
     @asynccontextmanager
@@ -232,8 +234,9 @@ class SessionService:
 
         Exactly one principal (user, key, or widget+visitor) is non-None.
         """
-        widget = getattr(self.user, "active_widget", None)
-        if widget is not None:
+        if is_widget_visitor(self.user):
+            widget = self.user.active_widget
+            assert widget is not None  # guaranteed by is_widget_visitor
             return None, None, widget.widget_id, widget.visitor_id
         if is_service_api_key(self.user):
             key = self.user.active_api_key

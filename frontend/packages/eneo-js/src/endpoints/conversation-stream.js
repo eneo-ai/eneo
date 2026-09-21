@@ -5,6 +5,8 @@
  * endpoint, which stream the same events from different paths.
  */
 
+import { EneoError } from "../client/client.js";
+
 /**
  * @typedef {Object} ConversationStreamCallbacks
  * @property {(data: import("../types/resources").SSE.FirstChunk) => void} [onFirstChunk]
@@ -41,9 +43,13 @@ export async function readConversationStream(client, endpoint, args, callbacks, 
       },
       onMessage: (ev) => {
         if (ev.data == "") return;
+        let data;
         try {
-          const data = JSON.parse(ev.data);
-
+          data = JSON.parse(ev.data);
+        } catch (e) {
+          return;
+        }
+        {
           switch (ev.event) {
             case "first_chunk":
               response = data;
@@ -81,9 +87,24 @@ export async function readConversationStream(client, endpoint, args, callbacks, 
             case "tool_approval_timeout":
               callbacks?.onToolApprovalTimeout?.(data);
               break;
+
+            case "error":
+              // The backend reports a failed answer as its own event and then
+              // ends the stream normally; surface it so the caller does not
+              // treat a truncated answer as a completed one.
+              throw new EneoError(
+                typeof data.error === "string" && data.error ? data.error : "The answer failed.",
+                "SERVER",
+                200,
+                0,
+                {
+                  detail: {
+                    code: typeof data.error_code === "string" ? data.error_code : "stream_error",
+                    message: data.error
+                  }
+                }
+              );
           }
-        } catch (e) {
-          return;
         }
       }
     },

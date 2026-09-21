@@ -3194,7 +3194,7 @@ export interface paths {
     put?: never;
     /**
      * Link Widget Template
-     * @description Make the widget follow a template. Its texts, appearance and language are copied now; the template's locked groups then stay in step with every template save and cannot be edited on the widget.
+     * @description Make the widget follow a published template. Its texts, appearance and language are copied now; the release's locked groups are then written onto the widget with every publication and cannot be edited on the widget.
      */
     post: operations["link_widget_template_api_v1_widgets__id__link_template__post"];
     delete?: never;
@@ -22372,6 +22372,11 @@ export interface components {
        * @description Durable usage plus in-flight reservations for today's budget.
        */
       budget_used_today: number;
+      /**
+       * Activation Blockers
+       * @description Why the widget cannot be activated (or, for an active widget, why it is not serving): empty when it can.
+       */
+      activation_blockers?: string[];
     };
     /** WidgetOverviewPublic */
     WidgetOverviewPublic: {

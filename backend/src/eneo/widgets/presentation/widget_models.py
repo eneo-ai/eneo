@@ -217,6 +217,13 @@ class WidgetOverviewItem(BaseModel):
     budget_used_today: int = Field(
         description="Durable usage plus in-flight reservations for today's budget."
     )
+    activation_blockers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Why the widget cannot be activated (or, for an active widget, why"
+            " it is not serving): empty when it can."
+        ),
+    )
 
 
 class WidgetOverviewTotals(BaseModel):

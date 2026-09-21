@@ -29,8 +29,8 @@ Eneo('on', 'opened' | 'closed' | 'conversation_started' | 'ready', cb);
 Eneo('setContext', { page_url, page_title });   // phase 5, opt-in per widget
 ```
 
-5. `postMessage` protocol, versioned and origin-checked in both directions (`{ ns: 'eneo-widget', v: 1, type, payload }`): iframe → loader `ready`, `resize {height}`, `close`, `unread {count}`, `conversation_started`; loader → iframe `open`, `theme {scheme}`, `context`. The loader accepts messages only when `event.source === iframe.contentWindow && event.origin === <eneo origin>`; the embed page accepts only `event.origin === <origin param>`.
-6. Keyboard and focus: `Escape` inside the iframe posts `close`; the loader hides the panel and returns focus to the launcher. Opening moves focus into the iframe (`iframe.focus()` then the embed page focuses the composer on `open`). Launcher and panel respect `prefers-reduced-motion`.
+5. `postMessage` protocol, versioned and origin-checked in both directions (`{ ns: 'eneo-widget', v: 1, type, payload }`): iframe → loader `ready`, `resize {height}`, `close`, `unread {count}`, `conversation_started` (no payload: the host never learns a conversation id); loader → iframe `open`, `theme {scheme}`, `context`. The loader accepts messages only when `event.source === iframe.contentWindow && event.origin === <eneo origin>`; the embed page accepts only `event.origin === <origin param>`.
+6. Keyboard and focus: `Escape` anywhere inside the iframe (not only in the textarea) posts `close`; the loader hides the panel and returns focus to the launcher. Opening moves focus into the iframe (`iframe.focus()` then the embed page focuses the composer on `open`). Launcher and panel respect `prefers-reduced-motion`.
 7. Layout: fixed panel `min(400px, 100vw − 2rem)` × `min(700px, 100dvh − 6rem)`; below 640 px it becomes full-screen with `100dvh` and listens to `visualViewport` so the composer stays above the on-screen keyboard. `z-index` is a documented CSS custom property (`--eneo-widget-z`, default 2147483000) instead of a hard-coded max.
 
 ### Serving — `routes/widget/[version]/eneo.js/+server.ts`

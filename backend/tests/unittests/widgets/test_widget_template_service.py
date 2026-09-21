@@ -63,17 +63,26 @@ class _InMemoryWidgetRepo:
     async def get(self, widget_id):
         return self.rows.get(widget_id)
 
-    async def list_by_template(self, template_id):
-        return [w for w in self.rows.values() if w.template_id == template_id]
+    async def list_by_template(self, template_id, *, include_archived=False):
+        return [
+            w
+            for w in self.rows.values()
+            if w.template_id == template_id
+            and (include_archived or w.status != WidgetStatus.ARCHIVED)
+        ]
 
     async def count_by_template(self, tenant_id):
         counts: dict = {}
         for w in self.rows.values():
-            if w.tenant_id == tenant_id and w.template_id is not None:
+            if (
+                w.tenant_id == tenant_id
+                and w.template_id is not None
+                and w.status != WidgetStatus.ARCHIVED
+            ):
                 counts[w.template_id] = counts.get(w.template_id, 0) + 1
         return counts
 
-    async def update(self, widget):
+    async def update(self, widget, *, check_revision=True, only=None):
         self.updates += 1
         widget = widget.model_copy(update={"revision": widget.revision + 1})
         self.rows[widget.id] = widget
@@ -340,6 +349,23 @@ async def test_saving_edits_the_draft_and_publishing_updates_the_followers():
     # Publishing without changes reports no follower.
     assert (await service.publish_template(template.id)).synced_widgets == []
 
+    # A lock whose values already match still changes what the editor may
+    # touch, so the follower's revision moves and open editors reload.
+    before = (await widgets.get(linked.id)).revision
+    await service.update_template(
+        template.id,
+        {
+            "locked_groups": [
+                TemplateLockGroup.APPEARANCE,
+                TemplateLockGroup.WORDING,
+                TemplateLockGroup.LANGUAGE,
+            ]
+        },
+    )
+    result = await service.publish_template(template.id)
+    assert [w.id for w in result.synced_widgets] == [linked.id]
+    assert (await widgets.get(linked.id)).revision == before + 1
+
     with pytest.raises(BadRequestException):
         await service.update_template(
             template.id,
@@ -349,8 +375,38 @@ async def test_saving_edits_the_draft_and_publishing_updates_the_followers():
             },
         )
 
+    # The archived follower is history: it neither counts nor blocks.
     counts = await service.linked_widget_counts()
-    assert counts == {template.id: 2}
+    assert counts == {template.id: 1}
     with pytest.raises(WidgetTemplateInUseError) as in_use:
         await service.delete_template(template.id)
-    assert in_use.value.linked_widgets == 2
+    assert in_use.value.linked_widgets == 1
+
+
+async def test_archived_followers_never_block_deletion():
+    repo = _InMemoryRepo()
+    widgets = _InMemoryWidgetRepo()
+    admin = _user(Permission.ADMIN)
+    service = _template_service(admin, repo, widgets)
+    template = (
+        await service.publish_template(
+            (await service.create_template(name="Kommunblå")).id
+        )
+    ).template
+
+    follower = Widget.create(
+        tenant_id=admin.tenant_id, space_id=uuid4(), target_id=uuid4(), name="w"
+    )
+    follower.template_id = template.id
+    linked = await widgets.add(follower)
+
+    with pytest.raises(WidgetTemplateInUseError):
+        await service.delete_template(template.id)
+    assert (await service.linked_widget_counts()) == {template.id: 1}
+
+    # An archived widget cannot be detached, so it must not hold the template.
+    widgets.rows[linked.id] = linked.model_copy(
+        update={"status": WidgetStatus.ARCHIVED}
+    )
+    await service.delete_template(template.id)
+    assert await repo.get(template.id) is None

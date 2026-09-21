@@ -9,12 +9,14 @@
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
   import {
+    contrastRatio,
     contrastVerdict,
     DARK_SURFACE,
     DEFAULT_PRIMARY_COLOR,
     isHexColor,
     LIGHT_SURFACE,
-    normalizeHexColor
+    normalizeHexColor,
+    readableOn
   } from "../contrast";
 
   type Props = {
@@ -27,10 +29,17 @@
     clearable?: boolean;
     /** Show how the colour fares against the surface it will sit on. */
     checkContrast?: boolean;
+    /**
+     * Warn when neither white nor near-black text reaches 4.5:1 on the colour
+     * (mid-tone colours); the panel derives its text colour from it.
+     */
+    checkTextOn?: boolean;
     /** The surface behind the colour: the white page or the dark panel. */
     surface?: "light" | "dark";
     /** Read-only, e.g. when a template governs the appearance. */
     disabled?: boolean;
+    /** Extra ids for aria-describedby, e.g. the template lock hint. */
+    describedBy?: string;
   };
 
   let {
@@ -41,8 +50,10 @@
     onChange,
     clearable = false,
     checkContrast = false,
+    checkTextOn = checkContrast,
     surface = "light",
-    disabled = false
+    disabled = false,
+    describedBy = ""
   }: Props = $props();
 
   // What is typed stays local until it is a complete hex colour; the server
@@ -99,6 +110,19 @@
     }
   });
   const invalid = $derived(current !== "" && !isHexColor(current));
+  // The panel paints text in whatever reads best on the colour; for mid-tone
+  // colours that is still below the 4.5:1 the visitor's messages need.
+  const textOnRatio = $derived(
+    checkTextOn && isHexColor(current) ? contrastRatio(readableOn(current), current) : null
+  );
+  const textOnWarning = $derived(
+    textOnRatio !== null && textOnRatio < 4.5
+      ? m.widget_admin_contrast_text_on_fail({ ratio: textOnRatio.toFixed(1) })
+      : ""
+  );
+  const describedByIds = $derived(
+    [`${id}-description`, invalid ? `${id}-error` : "", describedBy].filter(Boolean).join(" ")
+  );
 </script>
 
 <Field.Field data-invalid={invalid || undefined}>
@@ -118,7 +142,7 @@
           "border-default h-8 w-12 cursor-pointer rounded-lg border bg-transparent p-0.5",
           clearable && !current && "opacity-0"
         ]}
-        aria-label={m.widget_admin_primary_color_picker()}
+        aria-label={`${label}: ${m.widget_admin_primary_color_picker()}`}
         value={pickerValue}
         {disabled}
         oninput={(event) => typed(event.currentTarget.value)}
@@ -131,7 +155,7 @@
       {disabled}
       placeholder={clearable ? m.widget_admin_header_color_none() : DEFAULT_PRIMARY_COLOR}
       aria-invalid={invalid}
-      aria-describedby={`${id}-description`}
+      aria-describedby={describedByIds}
       value={current}
       oninput={(event) => typed(event.currentTarget.value)}
       onblur={settle}
@@ -151,7 +175,10 @@
   </div>
   <Field.Description id={`${id}-description`}>{description}</Field.Description>
   {#if invalid}
-    <Field.Error>{m.widget_admin_contrast_invalid()}</Field.Error>
+    <Field.Error id={`${id}-error`}>{m.widget_admin_contrast_invalid()}</Field.Error>
+  {/if}
+  {#if textOnWarning}
+    <p class="text-warning-stronger text-sm" aria-live="polite">{textOnWarning}</p>
   {/if}
   {#if contrastLabel}
     <p

@@ -48,8 +48,8 @@
   }
 
   function onKeydown(event: KeyboardEvent) {
-    if (event.key === "Escape") {
-      onEscape?.();
+    if (event.key === "Escape" && onEscape) {
+      onEscape();
       return;
     }
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
@@ -62,7 +62,8 @@
 <div class="flex flex-col gap-2">
   {#if showSuggestions && suggestions.length > 0}
     <ul class="flex flex-wrap gap-2" aria-label={m.widget_suggested_questions()}>
-      {#each suggestions as suggestion (suggestion)}
+      <!-- Keyed by position: a repeated question must never take the panel down. -->
+      {#each suggestions as suggestion, index (index)}
         <li>
           <button
             type="button"

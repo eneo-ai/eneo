@@ -23,10 +23,12 @@ from eneo.widgets.domain.exceptions import (
     WidgetTemplateNotPublishedError,
 )
 from eneo.widgets.domain.widget import (
+    LIFECYCLE_FIELDS,
     Widget,
     WidgetLanguage,
     WidgetStatus,
     WidgetTargetType,
+    validation_messages,
 )
 from eneo.widgets.domain.widget_policy import WidgetPolicy
 from eneo.widgets.domain.widget_repo import WidgetRepo
@@ -87,14 +89,21 @@ class WidgetService:
         try:
             policy = WidgetPolicy.from_tenant(merged)
         except ValidationError as exc:
-            messages = "; ".join(str(e.get("msg", e)) for e in exc.errors())
-            raise BadRequestException(f"Invalid widget policy: {messages}") from exc
+            raise BadRequestException(
+                f"Invalid widget policy: {validation_messages(exc)}"
+            ) from exc
         tenant = await self.tenant_service.update_widget_policy(
             self.user.tenant_id, policy.model_dump(mode="json")
         )
         return WidgetPolicy.from_tenant(tenant.widget_policy)
 
     # --- helpers ----------------------------------------------------------
+
+    def _require_reader(self) -> None:
+        """Widget configuration (origins, limits, privacy) is for the people
+        who manage widgets, not for every space member."""
+        if Permission.ADMIN not in self.user.permissions:
+            validate_permission(self.user, Permission.WIDGETS)
 
     async def _space_for_edit(self, space_id: UUID) -> "Space":
         space = await self.space_service.get_space(space_id)
@@ -150,6 +159,7 @@ class WidgetService:
     # --- queries ----------------------------------------------------------
 
     async def list_widgets(self, space_id: UUID) -> list[WidgetView]:
+        self._require_reader()
         space = await self.space_service.get_space(space_id)
         widgets = await self.repo.list_by_space(space_id)
         templates = {
@@ -162,6 +172,7 @@ class WidgetService:
         ]
 
     async def get_widget(self, widget_id: UUID) -> WidgetView:
+        self._require_reader()
         widget = await self._owned_widget(widget_id)
         space = await self.space_service.get_space(widget.space_id)
         return await self._view_with_template(space, widget)
@@ -242,7 +253,10 @@ class WidgetService:
         widget = await self._owned_widget(widget_id)
         space = await self._space_for_edit(widget.space_id)
         changes = dict(changes)
-        if changes.pop("revision") != widget.revision:
+        revision = changes.pop("revision", None)
+        if revision is None:
+            raise BadRequestException("revision is required.")
+        if revision != widget.revision:
             raise WidgetRevisionConflictError()
         template = await self._template_of(widget)
         if template is not None and template.published is not None:
@@ -296,7 +310,9 @@ class WidgetService:
             validate_permission(self.user, Permission.WIDGETS)
             space = await self._space_for_edit(widget.space_id)
         widget.pause()
-        widget = await self.repo.update(widget)
+        widget = await self.repo.update(
+            widget, check_revision=False, only=LIFECYCLE_FIELDS
+        )
         return await self._view_with_template(space, widget)
 
     async def archive_widget(self, widget_id: UUID) -> WidgetView:
@@ -304,5 +320,7 @@ class WidgetService:
         widget = await self._owned_widget(widget_id)
         space = await self._space_as_admin(widget.space_id)
         widget.archive()
-        widget = await self.repo.update(widget)
+        widget = await self.repo.update(
+            widget, check_revision=False, only=LIFECYCLE_FIELDS
+        )
         return await self._view_with_template(space, widget)

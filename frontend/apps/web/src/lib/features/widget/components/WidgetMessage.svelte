@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ConversationMessage } from "@eneo/eneo-js";
   import { Markdown } from "@eneo/ui";
+  import { sanitizeLinkHref } from "@eneo/ui/components/markdown";
   import { m } from "$lib/paraglide/messages";
   import {
     messageSources,
@@ -55,13 +56,14 @@
           </h2>
           <ol class="flex flex-col gap-1 text-sm">
             {#each sources as source, sourceIndex (source.id)}
+              {@const href = source.url ? sanitizeLinkHref(source.url) : undefined}
               <li id={anchorFor(sourceIndex)} class="flex gap-2">
                 <span class="text-secondary tabular-nums">{sourceIndex + 1}.</span>
-                {#if source.url}
+                {#if href}
                   <!-- eslint-disable svelte/no-navigation-without-resolve -- external source URL from reference metadata -->
                   <a
                     class="text-accent-default break-words underline-offset-2 hover:underline"
-                    href={source.url}
+                    {href}
                     target="_blank"
                     rel="noopener noreferrer"
                   >

@@ -35,13 +35,15 @@ X-Content-Type-Options: nosniff
 Cache-Control: no-store
 ```
 
-`style-src 'unsafe-inline'` is only needed if the theme colour is injected as an inline style; the plan sets it through a `<style>` nonce from SvelteKit's CSP config instead, so the target is to drop `'unsafe-inline'` before Phase 4 closes. No third-party script, font or analytics ever loads inside the iframe.
+As implemented: `frame-ancestors` comes from the widget's allowed origins (validated as plain host sources on both the backend normaliser and `csp.ts`, so directive syntax can never reach the header), `img-src 'self' data: blob:` plus the origin of the configured logo, `connect-src 'self'` plus the API origin, `worker-src 'self' blob:` for ALTCHA, and `base-uri 'none'; object-src 'none'; form-action 'self'; frame-src 'none'`. Answer Markdown can therefore not load an image from a third party and carry the visitor's question with it. `style-src` stays unrestricted (D20): server-rendered `style:` attributes and ALTCHA's shadow styles are inline. A paused, archived or unknown widget renders a static notice with `frame-ancestors *`, so a host launcher opens a message rather than a blank panel; the notice carries no configuration. No third-party script, font or analytics ever loads inside the iframe.
+
+Rate limits are keyed per widget on the visitor id and on the client IP. The IP comes through the same trusted-proxy rules as API keys: behind a reverse proxy `TRUSTED_PROXY_COUNT` must be configured, otherwise all visitors share one bucket.
 
 ## Storage and cookies
 
 - The embed page sets **no cookies**. State is `localStorage` in the iframe: `visitor_id` with its server-issued `visitor_key`, the current token, last `session_id`, dismissed hints. The key is what makes the pseudonym unforgeable: without it the server issues a new id, so nobody can claim another visitor's conversations. Chrome 115+, Firefox and Safari partition this per top-level site, so it works across pages of `kommun.se` and cannot track a visitor across sites.
 - Nothing is written before the visitor sends a message (Lagen om elektronisk kommunikation: storage strictly necessary for a service the user requested). The admin page ships a ready-made sentence for the host site's cookie/storage notice.
-- The host page never receives visitor identifiers.
+- The host page never receives visitor or conversation identifiers: `conversation_started` carries no payload.
 
 ## GDPR
 

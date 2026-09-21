@@ -26,6 +26,7 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import { toastError } from "$lib/core/errors";
+  import { toastWidgetError } from "$lib/features/widget/admin/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import WidgetOverviewList from "$lib/features/widget/admin/WidgetOverviewList.svelte";
   import { urlTab } from "$lib/features/widget/admin/tabState.svelte";
@@ -55,7 +56,13 @@
       })
   );
 
-  beforeNavigate(() => {
+  beforeNavigate((navigation) => {
+    if (autosave.status === "error" || autosave.status === "conflict") {
+      if (autosave.hasPending && !confirm(m.widget_admin_unsaved_leave_confirm())) {
+        navigation.cancel();
+      }
+      return;
+    }
     void autosave.flush();
   });
 
@@ -65,9 +72,30 @@
     autosave.patch(update);
   }
 
-  function numberInput(event: Event, apply: (value: number) => void) {
+  // Committed when the field is left, never per keystroke, and kept local
+  // with an error while out of range instead of failing the save.
+  let rangeErrors = $state<Record<string, string>>({});
+  function commitNumber(
+    event: Event,
+    key: string,
+    min: number,
+    max: number,
+    apply: (value: number) => void
+  ) {
     const value = Number((event.currentTarget as HTMLInputElement).value);
-    if (Number.isFinite(value)) apply(value);
+    if (!Number.isInteger(value) || value < min || value > max) {
+      rangeErrors = {
+        ...rangeErrors,
+        [key]: m.widget_admin_value_out_of_range({
+          min: min.toLocaleString(),
+          max: max.toLocaleString()
+        })
+      };
+      return;
+    }
+    const { [key]: _cleared, ...rest } = rangeErrors;
+    rangeErrors = rest;
+    apply(value);
   }
 
   const statusLabel = $derived.by(() => {
@@ -124,7 +152,7 @@
       deleteOpen = false;
       templateToDelete = null;
     } catch (error) {
-      toastError(error, m.widget_admin_template_could_not_delete());
+      toastWidgetError(error, m.widget_admin_template_could_not_delete());
     }
   });
 
@@ -148,6 +176,12 @@
   const totals = $derived(data.overview.totals);
   const tab = urlTab(["widgets", "policy", "templates"] as const, "widgets");
 </script>
+
+<svelte:window
+  onbeforeunload={(event) => {
+    if (autosave.unsaved) event.preventDefault();
+  }}
+/>
 
 <svelte:head>
   <title>Eneo.ai – {m.admin()} – {m.widget_admin_nav()}</title>
@@ -186,48 +220,57 @@
 
         <Tabs.Content value="widgets" class="flex flex-col gap-6">
           <p class="text-secondary max-w-[72ch] text-sm">{m.widget_admin_overview_description()}</p>
-          <dl class="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Card.Root size="sm">
-              <Card.Content>
-                <dt class="text-secondary text-xs">{m.widget_admin_stat_widgets()}</dt>
-                <dd class="text-2xl font-semibold tabular-nums">
-                  {number.format(totals.widgets)}
-                  <span class="text-secondary text-sm font-normal">
-                    {m.widget_admin_stat_active({ count: number.format(totals.active) })}
-                  </span>
-                </dd>
-              </Card.Content>
-            </Card.Root>
-            <Card.Root size="sm">
-              <Card.Content>
-                <dt class="text-secondary text-xs">{m.widget_admin_overview_questions_30d()}</dt>
-                <dd class="text-2xl font-semibold tabular-nums">
-                  {number.format(totals.questions_30d)}
-                </dd>
-              </Card.Content>
-            </Card.Root>
-            <Card.Root size="sm">
-              <Card.Content>
-                <dt class="text-secondary text-xs">{m.widget_admin_overview_tokens_30d()}</dt>
-                <dd class="text-2xl font-semibold tabular-nums">
-                  {number.format(totals.tokens_30d)}
-                </dd>
-              </Card.Content>
-            </Card.Root>
-            <Card.Root size="sm">
-              <Card.Content>
-                <dt class="text-secondary text-xs">{m.widget_admin_overview_blocked_30d()}</dt>
-                <dd
-                  class={[
-                    "text-2xl font-semibold tabular-nums",
-                    totals.blocked_30d > 0 && "text-warning-stronger"
-                  ]}
-                >
-                  {number.format(totals.blocked_30d)}
-                </dd>
-              </Card.Content>
-            </Card.Root>
-          </dl>
+          <!-- Plain list: a dl may only wrap dt/dd in a single div, which the cards are not. -->
+          <ul class="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <li>
+              <Card.Root size="sm" class="h-full">
+                <Card.Content>
+                  <p class="text-secondary text-xs">{m.widget_admin_stat_widgets()}</p>
+                  <p class="text-2xl font-semibold tabular-nums">
+                    {number.format(totals.widgets)}
+                    <span class="text-secondary text-sm font-normal">
+                      {m.widget_admin_stat_active({ count: number.format(totals.active) })}
+                    </span>
+                  </p>
+                </Card.Content>
+              </Card.Root>
+            </li>
+            <li>
+              <Card.Root size="sm" class="h-full">
+                <Card.Content>
+                  <p class="text-secondary text-xs">{m.widget_admin_overview_questions_30d()}</p>
+                  <p class="text-2xl font-semibold tabular-nums">
+                    {number.format(totals.questions_30d)}
+                  </p>
+                </Card.Content>
+              </Card.Root>
+            </li>
+            <li>
+              <Card.Root size="sm" class="h-full">
+                <Card.Content>
+                  <p class="text-secondary text-xs">{m.widget_admin_overview_tokens_30d()}</p>
+                  <p class="text-2xl font-semibold tabular-nums">
+                    {number.format(totals.tokens_30d)}
+                  </p>
+                </Card.Content>
+              </Card.Root>
+            </li>
+            <li>
+              <Card.Root size="sm" class="h-full">
+                <Card.Content>
+                  <p class="text-secondary text-xs">{m.widget_admin_overview_blocked_30d()}</p>
+                  <p
+                    class={[
+                      "text-2xl font-semibold tabular-nums",
+                      totals.blocked_30d > 0 && "text-warning-stronger"
+                    ]}
+                  >
+                    {number.format(totals.blocked_30d)}
+                  </p>
+                </Card.Content>
+              </Card.Root>
+            </li>
+          </ul>
           <WidgetOverviewList overview={data.overview} eneo={data.eneo} />
         </Tabs.Content>
 
@@ -249,13 +292,21 @@
                     min={1000}
                     step={1000}
                     value={policy.max_daily_token_budget}
-                    aria-describedby="policy-max-budget-help"
-                    oninput={(event) =>
-                      numberInput(event, (value) => patch({ max_daily_token_budget: value }))}
+                    aria-invalid={!!rangeErrors.budget}
+                    aria-describedby={rangeErrors.budget
+                      ? "policy-max-budget-help policy-max-budget-error"
+                      : "policy-max-budget-help"}
+                    onchange={(event) =>
+                      commitNumber(event, "budget", 1000, 100_000_000, (value) =>
+                        patch({ max_daily_token_budget: value })
+                      )}
                   />
                   <Field.Description id="policy-max-budget-help"
                     >{m.widget_admin_policy_max_budget_description()}</Field.Description
                   >
+                  {#if rangeErrors.budget}
+                    <Field.Error id="policy-max-budget-error">{rangeErrors.budget}</Field.Error>
+                  {/if}
                 </Field.Field>
                 <Field.Field>
                   <Field.Label for="policy-retention-min" class="min-h-10 items-end"
@@ -267,13 +318,23 @@
                     min={0}
                     max={3650}
                     value={policy.min_retention_days}
-                    aria-describedby="policy-retention-help"
-                    oninput={(event) =>
-                      numberInput(event, (value) => patch({ min_retention_days: value }))}
+                    aria-invalid={!!rangeErrors["retention-min"]}
+                    aria-describedby={rangeErrors["retention-min"]
+                      ? "policy-retention-help policy-retention-min-error"
+                      : "policy-retention-help"}
+                    onchange={(event) =>
+                      commitNumber(event, "retention-min", 0, 3650, (value) =>
+                        patch({ min_retention_days: value })
+                      )}
                   />
                   <Field.Description id="policy-retention-help"
                     >{m.widget_admin_policy_retention_description()}</Field.Description
                   >
+                  {#if rangeErrors["retention-min"]}
+                    <Field.Error id="policy-retention-min-error"
+                      >{rangeErrors["retention-min"]}</Field.Error
+                    >
+                  {/if}
                 </Field.Field>
                 <Field.Field>
                   <Field.Label for="policy-retention-max" class="min-h-10 items-end"
@@ -285,10 +346,20 @@
                     min={0}
                     max={3650}
                     value={policy.max_retention_days}
-                    aria-describedby="policy-retention-help"
-                    oninput={(event) =>
-                      numberInput(event, (value) => patch({ max_retention_days: value }))}
+                    aria-invalid={!!rangeErrors["retention-max"]}
+                    aria-describedby={rangeErrors["retention-max"]
+                      ? "policy-retention-help policy-retention-max-error"
+                      : "policy-retention-help"}
+                    onchange={(event) =>
+                      commitNumber(event, "retention-max", 0, 3650, (value) =>
+                        patch({ max_retention_days: value })
+                      )}
                   />
+                  {#if rangeErrors["retention-max"]}
+                    <Field.Error id="policy-retention-max-error"
+                      >{rangeErrors["retention-max"]}</Field.Error
+                    >
+                  {/if}
                 </Field.Field>
                 <Field.Separator class="md:col-span-3" />
                 <Field.Field orientation="horizontal" class="md:col-span-3">

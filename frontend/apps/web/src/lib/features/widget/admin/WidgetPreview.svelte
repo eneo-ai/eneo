@@ -9,7 +9,7 @@
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { previewEmbedPath } from "../preview";
-  import { currentAppScheme } from "./appScheme";
+  import { watchAppScheme } from "./appScheme.svelte";
 
   type Scheme = "auto" | "light" | "dark";
 
@@ -25,6 +25,8 @@
   let failed = $state(false);
   let scheme = $state<Scheme>("auto");
   let mobile = $state(false);
+  // "Auto" follows what the admin sees in Eneo right now, also after a theme switch.
+  const appScheme = watchAppScheme();
 
   const lang = $derived(widget.language === "en" ? "en" : "sv");
   // A widget pinned to light or dark previews that way whatever the toggle says.
@@ -54,8 +56,7 @@
   const src = $derived.by(() => {
     if (!token) return null;
     const path = previewEmbedPath(widget.public_id, token, lang);
-    // "Auto" follows what the admin sees in Eneo right now.
-    const effective = pinnedScheme ?? (scheme === "auto" ? currentAppScheme() : scheme);
+    const effective = pinnedScheme ?? (scheme === "auto" ? appScheme.current : scheme);
     const query = `&scheme=${effective}`;
     // updated_at forces a reload after every saved change.
     return path.replace("#", `${query}&v=${encodeURIComponent(widget.updated_at)}#`);
@@ -108,10 +109,10 @@
         {m.widget_admin_preview_failed()}
       </p>
     {:else if src}
+      <!-- Same origin as this page: a sandbox attribute would be no barrier here, so none is pretended. -->
       <iframe
         {src}
         title={m.widget_admin_preview_frame_title()}
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
         class="border-default bg-primary rounded-lg border shadow"
         style:width={mobile ? "375px" : "100%"}
         style:height="600px"

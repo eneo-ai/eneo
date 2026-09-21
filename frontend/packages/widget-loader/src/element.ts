@@ -17,8 +17,9 @@ export const CONNECTED_EVENT = "eneo-widget:connected";
 
 const MOBILE_BREAKPOINT = 640;
 const CLOSE_ANIMATION_MS = 180;
-const SANDBOX =
-  "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
+// No `allow-forms`: the embed page submits nothing, its composer is a button
+// and fetch, and its CSP already pins form-action to itself.
+const SANDBOX = "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox";
 
 type Labels = { open: string; close: string; title: string; unread: (count: number) => string };
 
@@ -42,6 +43,16 @@ const CHAT_ICON =
   '<svg class="chat" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/></svg>';
 const CLOSE_ICON =
   '<svg class="close" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>';
+
+/** The value when it parses as an absolute http(s) URL, else null. */
+function httpUrl(value: string): string | null {
+  try {
+    const url = new URL(value, location.href);
+    return url.protocol === "http:" || url.protocol === "https:" ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 function reducedMotion(): boolean {
   return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -86,14 +97,17 @@ export class EneoWidgetElement extends HTMLElement {
   }
 
   get baseUrl(): string {
+    // Only an http(s) base may become the frame's address: a CMS that lets
+    // editors set data attributes must not get a `javascript:` frame out of it.
+    const attribute = this.getAttribute("base-url");
     const raw =
-      this.getAttribute("base-url") || EneoWidgetElement.defaultBaseUrl || location.origin;
+      (attribute && httpUrl(attribute)) || EneoWidgetElement.defaultBaseUrl || location.origin;
     return raw.replace(/\/+$/, "");
   }
 
   /** Only messages from this origin are accepted and only it receives ours. */
   get eneoOrigin(): string {
-    return new URL(this.baseUrl, location.href).origin;
+    return httpUrl(this.baseUrl) ? new URL(this.baseUrl, location.href).origin : location.origin;
   }
 
   get lang(): string {
@@ -321,7 +335,7 @@ export class EneoWidgetElement extends HTMLElement {
         this.emit("unread", message.payload);
         break;
       case "conversation_started":
-        this.emit("conversation_started", message.payload);
+        this.emit("conversation_started");
         break;
     }
   }

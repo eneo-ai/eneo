@@ -31,7 +31,10 @@ class AltchaService:
 
     The challenge is HMAC-signed with a key derived from the deployment's
     signing secret, so it needs no storage; a solved nonce is recorded in
-    Redis for the challenge's remaining lifetime to stop replays.
+    Redis for the challenge's remaining lifetime to stop replays. With
+    ``widget_rate_limit_fail_open`` a Redis outage skips that replay check
+    too, so the flag trades bot protection for availability, not only rate
+    limits.
     """
 
     def __init__(self, redis_client: Any, settings: Optional[Settings] = None) -> None:

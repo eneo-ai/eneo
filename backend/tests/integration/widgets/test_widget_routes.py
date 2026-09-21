@@ -558,6 +558,8 @@ async def test_widget_overview(
     active = by_name["Översikt A"]
     assert active["status"] == "active"
     assert active["assistant_name"] == "Kommunassistenten"
+    assert active["activation_blockers"] == []
+    assert by_name["Översikt B"]["activation_blockers"] == ["allowed_origins_empty"]
     assert active["space_name"]
     assert active["questions_7d"] == 3
     assert active["questions_30d"] == 8

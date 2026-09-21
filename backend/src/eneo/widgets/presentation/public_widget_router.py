@@ -18,9 +18,16 @@ from eneo.server.dependencies.widget_auth import (
 from eneo.server.protocol import responses
 from eneo.sessions.session import AskChatResponse, SessionFeedback, SessionPublic
 from eneo.sessions.session_protocol import to_session_public
-from eneo.widgets.domain.exceptions import ChallengeInvalidError
+from eneo.widgets.domain.exceptions import (
+    ChallengeInvalidError,
+    VisitorTokenInvalidError,
+)
 from eneo.widgets.domain.visitor import WidgetPrincipal
-from eneo.widgets.domain.widget import BotProtection, frame_ancestor_sources
+from eneo.widgets.domain.widget import (
+    BotProtection,
+    WidgetStatus,
+    frame_ancestor_sources,
+)
 from eneo.widgets.presentation.public_widget_models import (
     VisitorSession,
     VisitorSessionRequest,
@@ -54,7 +61,13 @@ async def get_widget_config(request: Request, response: Response, widget: Active
     assert widget.id is not None and widget.updated_at is not None
     etag = _etag(str(widget.id), widget.updated_at.isoformat(), widget.token_generation)
     response.headers["ETag"] = etag
-    response.headers["Cache-Control"] = "public, max-age=60"
+    # A draft or paused widget is only ever admitted by a preview token; its
+    # configuration must not land in a shared cache for anonymous callers.
+    response.headers["Cache-Control"] = (
+        "public, max-age=60"
+        if widget.status == WidgetStatus.ACTIVE
+        else "private, no-store"
+    )
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=dict(response.headers))
     return WidgetPublicConfig(
@@ -114,15 +127,17 @@ async def create_visitor_session(
     identity = container.widget_visitor_identity()
     await limiter.check_mint(widget, client_ip(request))
 
-    preview = False
     if body.previous_token is not None:
         claims = tokens.verify(
             body.previous_token,
             widget,
             grace_seconds=settings.widget_visitor_token_grace_seconds,
         )
+        # A preview token is minted by the admin page for one sitting and
+        # never rotated: a leaked one must not renew itself for ever.
+        if claims.preview:
+            raise VisitorTokenInvalidError("Preview tokens cannot be rotated.")
         visitor_id = claims.visitor_id
-        preview = claims.preview
     elif body.altcha is not None:
         await container.widget_altcha_service().verify(body.altcha)
         visitor_id = identity.resolve(widget, body.visitor_id, body.visitor_key)
@@ -133,7 +148,7 @@ async def create_visitor_session(
             "A solved challenge is required.", code="challenge_required"
         )
 
-    token, expires_in = tokens.mint(widget, visitor_id, preview=preview)
+    token, expires_in = tokens.mint(widget, visitor_id)
     return VisitorSession(
         token=token,
         expires_in=expires_in,

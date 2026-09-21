@@ -258,13 +258,18 @@ test.describe("embeddable widget", () => {
       .poll(() => page.evaluate(() => (window as never as { __events: string[] }).__events))
       .toContain("close");
 
-    // Pausing takes effect immediately: the public config disappears.
+    // Pausing takes effect immediately: the embed page turns into a notice
+    // that any host may still frame, so the launcher never opens a blank panel.
     await expectOk(
       await backendFetch(page, request, `/api/v1/widgets/${widget.id}/pause/`, { method: "POST" }),
       "pause widget"
     );
     const paused = await request.get(`${loaderOrigin}/embed/${widget.public_id}`);
-    expect(paused.status()).toBe(404);
+    expect(paused.status()).toBe(200);
+    expect(paused.headers()["content-security-policy"]).toContain("frame-ancestors *");
+    expect(await paused.text()).toContain("Chatten är pausad");
+    const config = await request.get(`${BACKEND_URL}/api/v1/widgets/${widget.public_id}/config/`);
+    expect(config.status()).toBe(404);
   });
 
   test("a site that is not on the allowed list cannot frame the widget", async ({

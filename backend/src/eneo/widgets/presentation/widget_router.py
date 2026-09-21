@@ -155,9 +155,10 @@ async def create_space_widget(
     "/{id}/link-template/",
     response_model=WidgetPublic,
     description=(
-        "Make the widget follow a template. Its texts, appearance and language"
-        " are copied now; the template's locked groups then stay in step with"
-        " every template save and cannot be edited on the widget."
+        "Make the widget follow a published template. Its texts, appearance"
+        " and language are copied now; the release's locked groups are then"
+        " written onto the widget with every publication and cannot be edited"
+        " on the widget."
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
@@ -426,11 +427,16 @@ async def update_widget_policy(body: WidgetPolicyUpdate, container: _ContainerWi
 async def get_widget_overview(container: _ContainerWithUser):
     user = container.user()
     validate_permission(user, Permission.ADMIN)
+    policy = container.widget_service().get_policy()
     rows = await container.widget_overview_repo().list_tenant(
         user.tenant_id, today=container.widget_budget().today()
     )
     items: list[WidgetOverviewItem] = []
     for row in rows:
+        blockers = row.widget.activation_blockers(
+            target_published=bool(row.target_published)
+        )
+        blockers.extend(policy.violations(row.widget))
         items.append(
             WidgetOverviewItem(
                 id=row.id,
@@ -455,6 +461,7 @@ async def get_widget_overview(container: _ContainerWithUser):
                 last_activity=row.last_activity,
                 daily_token_budget=row.daily_token_budget,
                 budget_used_today=row.budget_used_today,
+                activation_blockers=blockers,
             )
         )
     totals = WidgetOverviewTotals(

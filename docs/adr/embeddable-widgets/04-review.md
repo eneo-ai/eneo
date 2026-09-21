@@ -86,8 +86,24 @@ A self-review of the first draft of this plan against current practice (OpenAI C
 - **sv** — *Webbwidget: publicera en assistent på er webbplats.* Redaktörer skapar en chattwidget för en publicerad assistent, ser den i förhandsgranskning, testar den i Eneo och kopierar installationskoden. Administratörer sätter organisationens policy, aktiverar widgetar och underhåller mallar för husstilen. Besökare chattar anonymt utan kakor; botskydd, begränsningar och daglig budget ingår.
 - **en** — *Web widget: publish an assistant on your website.* Editors create a chat widget for a published assistant, preview it, test it inside Eneo and copy the install snippet. Admins set the organisation policy, activate widgets and maintain house-style templates. Visitors chat anonymously without cookies; bot protection, limits and a daily budget are built in.
 
+## Review fixes (2026-09-21)
+
+| # | Plan said | Implementation | Why |
+|---|---|---|---|
+| D29 | D19: templates are snapshots | Widgets **follow** a template: the row holds a draft and a published release; linking copies the release once, each publication writes the release's locked groups (appearance, language, legal_texts, wording) onto every active follower and refuses locked edits with `400 field_locked_by_template`; archived followers never block deletion; a publication that only changes locks still bumps the followers' revision | Max wanted house-style control over many widgets, with an explicit publish step. |
+| D30 | Embed page 404s when the widget is not active | The page renders a static "not available" notice with `frame-ancestors *` (the public config still 404s) | A refused frame is indistinguishable from a slow one for the loader, so the launcher opened a blank panel on every host site of a paused widget. |
+| D31 | `img-src 'self' data: blob:; connect-src 'self'` | Implemented, plus the logo origin and the API origin; host sources are validated on both sides before they reach any CSP directive | Answer Markdown could otherwise exfiltrate the visitor's question through an image URL, and an editor could inject CSP directives through `allowed_origins`. |
+| D32 | Preview tokens rotate like visitor tokens | Preview tokens never rotate (`401` on `previous_token`); draft/paused config answers `Cache-Control: private, no-store` | A leaked one-hour preview token must not renew itself for ever or land in a shared cache. |
+| D33 | Pause and archive go through the revision check | They write only their lifecycle columns without the check; the admin UI flushes pending edits before them | The kill switch must not lose to an autosave, and must not overwrite one either. |
+| D34 | An active widget serves as long as it is active | An unpublished assistant takes the widget offline (`404 widget_not_active`) and appears as `target_not_published` in the admin overview | The space actor denies viewers unpublished assistants, so the widget answered with a permission error the embed page could not explain. |
+| D35 | `conversation_started {session_id}` to the host page | No payload | ADR 03 promised the host never receives identifiers. |
+
+Also closed in the same pass: duplicate suggested questions are rejected (they crashed the embed page's keyed list), Escape closes the panel from anywhere inside it, `role="log"` no longer double-announces streamed chunks, a `429` disables the composer for its `Retry-After`, feedback refreshes the visitor token, the SSE `error` event is surfaced instead of ending as "answer complete", the loader accepts only http(s) `base-url` values, the sandbox drops `allow-forms`, and the admin editor validates numbers locally, guards `beforeunload`, treats a lock published underneath it as a conflict, and shows why a widget in the overview cannot be activated.
+
 ## Still open after review
 
 - Exact split of `ConversationView` dependencies on `(app)` context is unknown until the Phase 2 spike; the plan budgets it as a task, not a risk to the architecture.
-- `style-src 'unsafe-inline'` should be eliminated with a nonce before Phase 4 closes.
+- `style-src` is unrestricted (D20); a nonce would need patches in the SSR `style:` attributes and ALTCHA's shadow styles.
 - Whether Traefik's rate-limit middleware belongs in the deployment template as defence in depth (proposal: yes, on `/api/v1/widgets/` and `/embed/`, in Phase 5).
+- Template drafts have no revision (last save wins between two admins); widget/template `is_default` races surface as a database error.
+- Mid-stream provider errors are shown with the app's inline message; the widget cannot yet distinguish them from a completed answer beyond that text.

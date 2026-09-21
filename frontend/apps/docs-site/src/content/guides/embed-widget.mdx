@@ -100,13 +100,18 @@ The template page shows how many widgets follow it and whether the draft has unp
 
 ### Security properties
 
-- **Who may frame the chat** is enforced by the visitor's browser from the widget's allowed origins. A site that is not listed gets a blank frame.
+- **Who may frame the chat** is enforced by the visitor's browser from the widget's allowed origins. A site that is not listed gets a blank frame. A paused widget shows a short "not available" notice instead, on every site, so the chat button never opens an empty panel.
+- **Answers cannot phone home.** The chat page's Content Security Policy only allows images from Eneo and your logo's address and connections to the Eneo API, so an image link that ends up in an answer cannot carry the visitor's question to a third party.
 - **Visitor tokens** are JWTs bound to one widget and one pseudonymous visitor id, valid for 15 minutes and rotated silently. Pausing the widget or changing its origins, limits or privacy settings invalidates every outstanding token.
 - **ALTCHA** is a self-hosted proof of work; no CAPTCHA provider, no cookies, no fingerprinting. Widgets without it require the tenant policy to allow it.
 - **Limits fail closed by default.** Redis protects request rates and challenge replays. The daily token budget and in-flight reservations are stored in PostgreSQL, so losing Redis data does not reset that budget.
 - **Budget accounting** reserves tokens before a turn and replaces the reservation with that answer’s measured usage exactly once. A failure before streaming releases the reservation. If a stream or process stops with uncertain usage, its reservation remains charged for that day. The reservation size is an admission estimate, not a hard maximum for a model response; actual usage can exceed it.
 - **The loader** is served from your Eneo origin with `nosniff`, open CORS (required for `integrity`) and an ETag; the pinned variant is immutable.
 - The embed page sends `Referrer-Policy: strict-origin-when-cross-origin`, a restrictive `Permissions-Policy` and a CSP without `unsafe-inline` scripts.
+
+### Behind a reverse proxy
+
+The per-visitor limits are keyed on the visitor's IP address as Eneo sees it. Behind Traefik, Dokploy, nginx or any other reverse proxy that means the proxy's address unless the backend is told how many proxies stand in front of it: set `TRUSTED_PROXY_COUNT` (and, if your proxy uses another header than `X-Forwarded-For`, `TRUSTED_PROXY_HEADERS`) on the backend. Without it every visitor shares one bucket, and the whole site is throttled once the first visitors have used up the per-IP allowance.
 
 ### Personal data and cookies
 

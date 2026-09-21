@@ -52,6 +52,10 @@ TOKEN_GENERATION_FIELDS = frozenset(
     {"allowed_origins", "limits", "privacy", "bot_protection"}
 )
 
+# The columns pause and archive write. They never touch configuration, so
+# they bypass the revision check: a kill switch must not lose to an autosave.
+LIFECYCLE_FIELDS = frozenset({"status", "paused_at", "token_generation"})
+
 
 def generate_public_id() -> str:
     body = "".join(
@@ -108,6 +112,11 @@ def clean_text(value: str) -> str:
     return " ".join(value.split())
 
 
+def validation_messages(exc: ValidationError) -> str:
+    """Pydantic errors as one readable line for a 400 response."""
+    return "; ".join(str(e.get("msg", e)) for e in exc.errors())
+
+
 _clean = clean_text
 
 
@@ -151,6 +160,10 @@ class WidgetTexts(BaseModel):
             raise ValueError(
                 f"Suggested questions must be at most {MAX_SUGGESTED_QUESTION_LENGTH} characters."
             )
+        # The embed page keys the chips by their text; a repeated question
+        # would take the whole panel down for every visitor.
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("Suggested questions must be unique.")
         return cleaned
 
     @field_validator("footer_link_url")
@@ -415,8 +428,9 @@ class Widget(BaseModel):
             try:
                 setattr(self, field, value)
             except ValidationError as exc:
-                messages = "; ".join(str(e.get("msg", e)) for e in exc.errors())
-                raise BadRequestException(f"Invalid {field}: {messages}") from exc
+                raise BadRequestException(
+                    f"Invalid {field}: {validation_messages(exc)}"
+                ) from exc
             if field in TOKEN_GENERATION_FIELDS and getattr(self, field) != before:
                 bumped = True
         if bumped:

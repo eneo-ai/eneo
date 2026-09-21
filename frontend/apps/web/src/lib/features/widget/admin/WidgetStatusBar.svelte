@@ -12,6 +12,7 @@
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { blockerLabel } from "./blockers";
+  import { widgetErrorMessage } from "./errors";
   import type { WidgetAutosave } from "./widgetAutosave.svelte";
 
   type Props = {
@@ -78,7 +79,9 @@
       case "error":
         return m.widget_admin_save_failed();
       case "conflict":
-        return m.widget_admin_save_conflict();
+        // A lock published underneath the editor reads differently from
+        // another person's edit; both end in a reload.
+        return widgetErrorMessage(autosave.error) ?? m.widget_admin_save_conflict();
       default:
         return "";
     }

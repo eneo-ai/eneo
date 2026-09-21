@@ -64,6 +64,11 @@ async def get_active_widget(
     if widget is None:
         raise WidgetNotActiveError()
     if widget.status == WidgetStatus.ACTIVE:
+        # An assistant unpublished after activation takes its widget offline
+        # the same way a pause does, instead of answering with a permission
+        # error the embed page cannot explain.
+        if not await container.widget_repo().is_target_published(widget):
+            raise WidgetNotActiveError()
         return widget
     if widget.status != WidgetStatus.ARCHIVED and _holds_preview_token(
         request, widget, container

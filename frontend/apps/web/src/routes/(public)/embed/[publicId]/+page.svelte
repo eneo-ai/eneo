@@ -17,7 +17,7 @@
   const title = $derived(config ? config.texts.title || config.name : m.widget_preview_title());
 
   onMount(() => {
-    if (data.config) return;
+    if (data.config || data.unavailable) return;
     const token = readPreviewToken(location.hash);
     if (!token) {
       previewFailed = true;
@@ -56,6 +56,13 @@
     hostScheme={data.hostScheme}
     {previewToken}
   />
+{:else if data.unavailable}
+  <div
+    class="bg-primary text-primary fixed inset-0 flex flex-col items-center justify-center gap-2 p-6"
+  >
+    <h1 class="text-base font-semibold">{m.widget_not_available_title()}</h1>
+    <p class="text-secondary text-center text-sm">{m.widget_not_available_body()}</p>
+  </div>
 {:else if previewFailed}
   <div class="bg-primary text-secondary fixed inset-0 flex items-center justify-center p-6">
     <p class="text-center text-sm" role="alert">{m.widget_preview_unavailable()}</p>

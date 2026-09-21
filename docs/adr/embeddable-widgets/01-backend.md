@@ -45,7 +45,11 @@ One UUID receipt per admitted turn: widget, admission day, reserved token count 
 
 ### Concurrent changes and deletion ownership
 
-`widgets.revision` increments on every mutation. PATCH and apply-template require the revision read by the editor; the repository also compares it atomically before updating. A stale revision returns `409 widget_revision_conflict`. Autosave stops for an explicit reload, and a late response cannot replace a newer lifecycle response.
+`widgets.revision` increments on every mutation. PATCH, link-template and detach-template require the revision read by the editor; the repository also compares it atomically before updating. A stale revision returns `409 widget_revision_conflict`. Autosave stops for an explicit reload, and a late response cannot replace a newer lifecycle response. Pause and archive are the exception: they write only their lifecycle columns (`status`, `paused_at`, `token_generation`) without the revision check, so a kill switch never loses to a concurrent autosave and never overwrites one; the bumped revision then makes the stale editor's next save a 409.
+
+### Templates: draft, release and locks
+
+A template row holds the draft admins edit and, in `published`, the release widgets are held to. Linking (`POST /widgets/{id}/link-template/`, or `template_id` on create) requires a published template and copies the whole release onto the widget once. The release's `locked_groups` (`appearance`, `language`, `legal_texts`, `wording`) are written onto every active follower with each publication, in the same transaction and under `FOR UPDATE`; a publication whose locks changed bumps the followers' revision even when their values already match, so open editors reload and see the new locks. `PATCH /widgets/{id}/` answers `400 field_locked_by_template` when a locked field would change. Archived widgets keep their `template_id` as history but neither follow nor count as followers, so they never block `DELETE /admin/widget-templates/{id}/` (`409 template_in_use` otherwise). Suggested questions are never templated.
 
 A database trigger removes a question's model log when its last question owner is deleted, including FK cascades from sessions, assistants and spaces. It does not sweep historical orphan logs whose ownership is no longer identifiable.
 
@@ -98,7 +102,9 @@ Request-limit keys are namespaced `widget:<id>:…` and use `check_rate_limit` f
 
 Budget uses **reserve-then-settle** in PostgreSQL, with a default limit of 500,000 tokens per day in `WIDGET_BUDGET_TIMEZONE` (default `Europe/Stockholm`). The configured reservation (default 8,000 tokens) is an admission estimate; it does not bound the model's eventual consumption. Successful answers settle their own question's token counts against the admission day. Pre-stream failures release their reservation; interrupted streams retain their charge when usage is uncertain. Redis loss cannot reset the budget. `widget_rate_limit_fail_open` affects only request-rate and ALTCHA replay checks.
 
-Client IP comes from `resolve_client_ip` (same trusted-proxy rules as API keys). IP limits are a backstop, not the primary control — CGNAT and campus networks share IPs.
+Client IP comes from `resolve_client_ip` (same trusted-proxy rules as API keys). Behind Traefik, Dokploy or any other reverse proxy `TRUSTED_PROXY_COUNT` (and `TRUSTED_PROXY_HEADERS`) **must** be set, or every visitor resolves to the proxy's address and the per-IP message and mint limits throttle the whole site after the first visitor's share; the docs guide says so in the operator section. IP limits are a backstop, not the primary control — CGNAT and campus networks share IPs.
+
+An active widget whose assistant has been unpublished answers `404 widget_not_active` on the whole public surface (`get_active_widget` checks the target), the same as a pause; the admin overview lists the reason in `activation_blockers`.
 
 ### Ask path
 

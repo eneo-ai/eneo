@@ -16,10 +16,16 @@ from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.widget_usage_table import WidgetDailyUsage
 from eneo.database.tables.widgets_table import Widgets
+from eneo.widgets.domain.widget import Widget
+from eneo.widgets.infrastructure.widget_repo_impl import to_entity
 
 
 @dataclass(frozen=True)
 class WidgetOverviewRow:
+    widget: Widget
+    # Whether the assistant behind the widget is published; None when it no
+    # longer exists.
+    target_published: Optional[bool]
     id: UUID
     public_id: str
     name: str
@@ -93,6 +99,7 @@ class WidgetOverviewRepoImpl:
                 Widgets,
                 Spaces.name.label("space_name"),
                 Assistants.name.label("assistant_name"),
+                Assistants.published.label("assistant_published"),
                 aggregates.c.questions_7d,
                 aggregates.c.questions_30d,
                 aggregates.c.input_tokens_30d,
@@ -116,9 +123,11 @@ class WidgetOverviewRepoImpl:
         result: list[WidgetOverviewRow] = []
         for row in rows:
             widget: Widgets = row[0]
-            limits = widget.limits or {}
+            entity = to_entity(widget)
             result.append(
                 WidgetOverviewRow(
+                    widget=entity,
+                    target_published=row.assistant_published,
                     id=widget.id,
                     public_id=widget.public_id,
                     name=widget.name,
@@ -128,7 +137,7 @@ class WidgetOverviewRepoImpl:
                     target_id=widget.target_id,
                     assistant_name=row.assistant_name,
                     allowed_origins=list(widget.allowed_origins or []),
-                    daily_token_budget=int(limits.get("daily_token_budget", 500_000)),
+                    daily_token_budget=entity.limits.daily_token_budget,
                     budget_used_today=int(row.budget_used_today or 0),
                     activated_at=widget.activated_at,
                     paused_at=widget.paused_at,

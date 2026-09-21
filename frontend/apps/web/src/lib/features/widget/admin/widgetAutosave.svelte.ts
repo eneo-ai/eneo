@@ -1,5 +1,5 @@
 import type { Widget, WidgetTemplate, WidgetTemplateUpdate, WidgetUpdate } from "@eneo/eneo-js";
-import { EneoError } from "@eneo/eneo-js";
+import { isStaleEditorError } from "./errors";
 
 export type AutosaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
 
@@ -39,6 +39,11 @@ export class Autosave<Resource extends object, Update extends object> {
 
   get hasPending(): boolean {
     return Object.keys(this.#pending).length > 0;
+  }
+
+  /** Something would be lost if the page went away right now. */
+  get unsaved(): boolean {
+    return this.hasPending || this.status === "saving";
   }
 
   /** Merge a change into the widget and schedule a save. */
@@ -125,7 +130,9 @@ export class Autosave<Resource extends object, Update extends object> {
     } catch (error) {
       this.#pending = { ...update, ...this.#pending };
       this.error = error;
-      this.status = error instanceof EneoError && error.status === 409 ? "conflict" : "error";
+      // A conflict (or a lock published underneath the editor) means this
+      // copy is stale: automatic saves stop until the editor reloads.
+      this.status = isStaleEditorError(error) ? "conflict" : "error";
     }
   }
 }

@@ -13,7 +13,7 @@
   import { getChatService } from "$lib/features/chat/ChatService.svelte";
   import { IconEneo } from "@eneo/icons/eneo";
   import { launcherColors } from "../contrast";
-  import { linkHost } from "../urls";
+  import { isHttpUrl, linkHost } from "../urls";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { MessageSquarePlus, ThumbsDown, ThumbsUp, X } from "lucide-svelte";
   import { solveWithAltcha } from "../altcha";
@@ -47,6 +47,9 @@
   let announcement = $state("");
   let errorMessage = $state<string | null>(null);
   let unavailable = $state(false);
+  // A 429 with Retry-After: the composer stays closed until the window passes.
+  let coolingDown = $state(false);
+  let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
   let feedbackGiven = $state<Record<string, 1 | -1>>({});
   // Shown while the backend has not yet confirmed the question (first chunk).
   let pendingQuestion = $state<string | null>(null);
@@ -98,7 +101,10 @@
       // Restore the visitor's last conversation on this site, if any.
       void restore(session.sessionId);
     }
-    return () => bridge.destroy();
+    return () => {
+      if (cooldownTimer) clearTimeout(cooldownTimer);
+      bridge.destroy();
+    };
   });
 
   $effect(() => {
@@ -110,12 +116,40 @@
   async function restore(sessionId: string) {
     try {
       await session.ensureToken();
-      await chat.loadConversation({ id: sessionId });
+      // ChatService toasts and swallows load errors for the signed-in app;
+      // here a gone session must be forgotten, not announced.
+      await chat.loadConversation({ id: sessionId }, { rethrow: true });
     } catch (error) {
-      // A gone session (retention, pause) is not an error worth showing.
+      // A gone session (retention, a new visitor identity) is not worth showing.
       session.rememberSession(null);
       if (isWidgetUnavailable(error) && !isSessionError(error)) unavailable = true;
     }
+  }
+
+  /** Seconds from a 429's Retry-After header, or null when it carries none. */
+  function retryAfterSeconds(error: unknown): number | null {
+    if (!(error instanceof EneoError) || error.status !== 429) return null;
+    const raw = error.headers?.get("retry-after");
+    const seconds = raw ? Number.parseInt(raw, 10) : Number.NaN;
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+  }
+
+  function coolDown(seconds: number) {
+    coolingDown = true;
+    if (cooldownTimer) clearTimeout(cooldownTimer);
+    cooldownTimer = setTimeout(() => {
+      coolingDown = false;
+      errorMessage = null;
+    }, seconds * 1000);
+  }
+
+  // Escape closes the panel from anywhere inside it, not only the textarea;
+  // the confirm dialog handles its own Escape first and marks it as used.
+  function onWindowKeydown(event: KeyboardEvent) {
+    if (event.key !== "Escape" || event.defaultPrevented || confirmStartOver) return;
+    if (!bridge.embedded) return;
+    event.preventDefault();
+    bridge.close();
   }
 
   function isSessionError(error: unknown): boolean {
@@ -134,12 +168,15 @@
   }
 
   function describe(error: unknown): string {
+    const wait = retryAfterSeconds(error);
     switch (errorCode(error)) {
       case "rate_limited_visitor":
       case "rate_limited_ip":
       case "rate_limited_mint":
       case "rate_limited_challenge":
-        return m.widget_error_rate_limited();
+        return wait !== null && wait <= 600
+          ? m.widget_error_rate_limited_wait({ seconds: String(wait) })
+          : m.widget_error_rate_limited();
       case "budget_exhausted":
         return m.widget_error_budget();
       case "widget_not_active":
@@ -180,7 +217,8 @@
       const sessionId = chat.currentConversation.id;
       if (sessionId) {
         if (!singleTurn) session.rememberSession(sessionId);
-        if (wasNew) bridge.conversationStarted(sessionId);
+        // The host page only learns that a conversation began, never its id.
+        if (wasNew) bridge.conversationStarted();
       }
       announcement = m.widget_answer_complete();
     } catch (error) {
@@ -190,8 +228,10 @@
         return ask(question, true);
       }
       if (errorCode(error) === "widget_not_active") unavailable = true;
+      const wait = retryAfterSeconds(error);
+      if (wait !== null && wait <= 600) coolDown(wait);
+      // The alert below announces the error itself; no second live message.
       errorMessage = describe(error);
-      announcement = errorMessage;
     }
   }
 
@@ -207,10 +247,13 @@
     composer?.focus();
   }
 
-  async function feedback(value: 1 | -1) {
+  async function feedback(value: 1 | -1, retried = false): Promise<void> {
     const sessionId = chat.currentConversation.id;
     if (!sessionId || feedbackGiven[sessionId] === value) return;
     try {
+      // A vote often comes minutes after the answer: the token may have
+      // expired meanwhile, so it is refreshed like before a question.
+      await session.ensureToken();
       await client.conversations.leaveFeedback({
         conversation: { id: sessionId },
         feedback: { value }
@@ -218,10 +261,16 @@
       feedbackGiven = { ...feedbackGiven, [sessionId]: value };
       announcement = m.widget_feedback_thanks();
     } catch (error) {
+      if (isTokenRejected(error) && !retried) {
+        session.invalidate();
+        return feedback(value, true);
+      }
       errorMessage = describe(error);
     }
   }
 </script>
+
+<svelte:window onkeydown={onWindowKeydown} />
 
 <div class="bg-primary text-primary flex h-full min-h-0 flex-col" data-widget-chat>
   <header
@@ -231,7 +280,7 @@
     ]}
   >
     <div class="flex min-w-0 items-center gap-3">
-      {#if config.theme.logo_url}
+      {#if config.theme.logo_url && isHttpUrl(config.theme.logo_url)}
         <img
           class="h-8 w-8 shrink-0 rounded-md object-contain"
           src={config.theme.logo_url}
@@ -284,9 +333,11 @@
         <p class="text-primary text-base whitespace-pre-wrap">{config.texts.welcome}</p>
       {/if}
     {:else}
-      <!-- The list keeps its semantics; the live-region role sits on a wrapper so
-           list items stay inside a real list (axe: listitem). -->
-      <div role="log" aria-label={m.widget_conversation_log()}>
+      <!-- The list keeps its semantics; the log role sits on a wrapper so list
+           items stay inside a real list (axe: listitem). Its implicit polite
+           live region is switched off: streamed chunks would be read token by
+           token, and the announcement region below reports completion. -->
+      <div role="log" aria-live="off" aria-label={m.widget_conversation_log()}>
         <ol class="flex flex-col gap-6">
           {#each messages as message, index (index)}
             <WidgetMessage
@@ -380,17 +431,16 @@
       bind:this={composer}
       placeholder={config.texts.placeholder || m.widget_input_placeholder()}
       maxLength={config.max_question_chars}
-      disabled={unavailable || answered}
+      disabled={unavailable || answered || coolingDown}
       {busy}
       suggestions={config.texts.suggested_questions ?? []}
       showSuggestions={messages.length === 0}
       onSend={(question) => void send(question)}
-      onEscape={() => bridge.close()}
     />
     {#if config.texts.footer_text || config.texts.footer_link_url}
       <p class="text-secondary text-xs">
         {config.texts.footer_text}
-        {#if config.texts.footer_link_url}
+        {#if config.texts.footer_link_url && isHttpUrl(config.texts.footer_link_url)}
           <!-- eslint-disable svelte/no-navigation-without-resolve -- external link from widget configuration -->
           <a
             class="underline underline-offset-2"
@@ -478,8 +528,8 @@
     border-radius: var(--widget-radius);
     border-bottom-right-radius: 4px;
   }
+  /* Full opacity: the derived text colour is what passes the contrast check. */
   .widget-header-tinted .widget-header-muted {
     color: inherit;
-    opacity: 0.85;
   }
 </style>

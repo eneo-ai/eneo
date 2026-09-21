@@ -13,9 +13,14 @@ from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.users.user import UserInDB
 from eneo.widgets.domain.exceptions import WidgetTemplateInUseError
-from eneo.widgets.domain.widget import Widget, WidgetLanguage, WidgetStatus
+from eneo.widgets.domain.widget import (
+    Widget,
+    WidgetLanguage,
+    WidgetStatus,
+    validation_messages,
+)
 from eneo.widgets.domain.widget_repo import WidgetRepo
-from eneo.widgets.domain.widget_template import WidgetTemplate
+from eneo.widgets.domain.widget_template import TemplateLockGroup, WidgetTemplate
 from eneo.widgets.domain.widget_template_repo import WidgetTemplateRepo
 
 
@@ -93,7 +98,9 @@ class WidgetTemplateService:
         try:
             template.apply_update(changes)
         except ValidationError as exc:
-            raise BadRequestException(str(exc)) from exc
+            raise BadRequestException(
+                f"Invalid template: {validation_messages(exc)}"
+            ) from exc
         self._assert_locks_enforceable(template)
         if changes.get("is_default") is True:
             await self.repo.clear_default(self.user.tenant_id)
@@ -103,10 +110,18 @@ class WidgetTemplateService:
         validate_permission(self.user, Permission.ADMIN)
         template = await self._owned(template_id)
         self._assert_locks_enforceable(template)
+        previous_locks: set[TemplateLockGroup] = (
+            set(template.published.locked_groups) if template.published else set()
+        )
         template.publish(by=self.user.id)
         template = await self.repo.update(template)
+        assert template.published is not None
+        # New locks with unchanged values still change what the editor may
+        # touch; bump the followers so open editors reload and see them.
+        locks_changed = set(template.published.locked_groups) != previous_locks
         return TemplatePublishResult(
-            template=template, synced_widgets=await self._sync_followers(template)
+            template=template,
+            synced_widgets=await self._sync_followers(template, force=locks_changed),
         )
 
     @staticmethod
@@ -117,7 +132,9 @@ class WidgetTemplateService:
                 "Template locks cannot be enforced: " + ", ".join(violations)
             )
 
-    async def _sync_followers(self, template: WidgetTemplate) -> list[Widget]:
+    async def _sync_followers(
+        self, template: WidgetTemplate, *, force: bool = False
+    ) -> list[Widget]:
         assert template.id is not None and template.published is not None
         release = template.published
         synced: list[Widget] = []
@@ -125,7 +142,7 @@ class WidgetTemplateService:
             # Archived widgets are frozen history; nothing follows them.
             if widget.status == WidgetStatus.ARCHIVED:
                 continue
-            if release.project_onto(widget, release.locked_groups):
+            if release.project_onto(widget, release.locked_groups) or force:
                 synced.append(await self.widget_repo.update(widget))
         return synced
 
@@ -133,6 +150,8 @@ class WidgetTemplateService:
         validate_permission(self.user, Permission.ADMIN)
         template = await self._owned(template_id)
         assert template.id is not None
+        # Archived followers keep their link as history but never block
+        # deletion; the column is SET NULL when the template goes.
         linked = len(await self.widget_repo.list_by_template(template.id))
         if linked:
             raise WidgetTemplateInUseError(linked)

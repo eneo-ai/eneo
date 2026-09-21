@@ -9,6 +9,7 @@
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
+  import { blockerLabel } from "./blockers";
   import type { WidgetAutosave } from "./widgetAutosave.svelte";
 
   type Props = {
@@ -26,10 +27,35 @@
   function privacy(change: Partial<Widget["privacy"]>) {
     autosave.patch({ privacy: { ...widget.privacy, ...change } });
   }
-  function number(event: Event, apply: (value: number) => void) {
+  // Numbers are committed when the field is left, never per keystroke: a
+  // half-typed budget must not reach the API as "2". Out-of-range values
+  // stay in the field with an error instead of a failed save.
+  let rangeErrors = $state<Record<string, string>>({});
+  function commitNumber(
+    event: Event,
+    key: string,
+    min: number,
+    max: number,
+    apply: (value: number) => void
+  ) {
     const value = Number((event.currentTarget as HTMLInputElement).value);
-    if (Number.isFinite(value)) apply(value);
+    if (!Number.isInteger(value) || value < min || value > max) {
+      rangeErrors = {
+        ...rangeErrors,
+        [key]: m.widget_admin_value_out_of_range({
+          min: min.toLocaleString(),
+          max: max.toLocaleString()
+        })
+      };
+      return;
+    }
+    const { [key]: _cleared, ...rest } = rangeErrors;
+    rangeErrors = rest;
+    apply(value);
   }
+  const describedBy = (key: string, help: string) =>
+    rangeErrors[key] ? `${help} widget-${key}-error` : help;
+  const budgetMax = $derived(policy?.max_daily_token_budget ?? 100_000_000);
 
   // Local text so a trailing newline is not eaten while typing.
   let originsText = $state(untrack(() => (autosave.widget.allowed_origins ?? []).join("\n")));
@@ -57,7 +83,9 @@
           class="font-mono"
           placeholder={m.widget_admin_allowed_origins_placeholder()}
           aria-invalid={originsInvalid}
-          aria-describedby="widget-origins-help"
+          aria-describedby={originsInvalid
+            ? "widget-origins-help widget-origins-error"
+            : "widget-origins-help"}
           bind:value={originsText}
           onchange={() =>
             autosave.patch({
@@ -70,6 +98,11 @@
         <Field.Description id="widget-origins-help"
           >{m.widget_admin_allowed_origins_help()}</Field.Description
         >
+        {#if originsInvalid}
+          <Field.Error id="widget-origins-error"
+            >{blockerLabel("allowed_origins_empty")}</Field.Error
+          >
+        {/if}
       </Field.Field>
     </Card.Content>
   </Card.Root>
@@ -81,18 +114,25 @@
     </Card.Header>
     <Card.Content>
       <Field.Group class="grid gap-6 sm:grid-cols-2">
-        <Field.Field>
+        <Field.Field data-invalid={rangeErrors.budget ? true : undefined}>
           <Field.Label for="widget-budget">{m.widget_admin_daily_budget()}</Field.Label>
           <Input
             id="widget-budget"
             type="number"
             min={1000}
             step={1000}
-            max={policy?.max_daily_token_budget}
+            max={budgetMax}
             value={widget.limits.daily_token_budget}
-            aria-describedby="widget-budget-help"
-            oninput={(event) => number(event, (value) => limits({ daily_token_budget: value }))}
+            aria-invalid={!!rangeErrors.budget}
+            aria-describedby={describedBy("budget", "widget-budget-help")}
+            onchange={(event) =>
+              commitNumber(event, "budget", 1000, budgetMax, (value) =>
+                limits({ daily_token_budget: value })
+              )}
           />
+          {#if rangeErrors.budget}
+            <Field.Error id="widget-budget-error">{rangeErrors.budget}</Field.Error>
+          {/if}
           <Field.Description id="widget-budget-help">
             {policy
               ? m.widget_admin_daily_budget_description_policy({
@@ -101,7 +141,7 @@
               : m.widget_admin_daily_budget_description()}
           </Field.Description>
         </Field.Field>
-        <Field.Field>
+        <Field.Field data-invalid={rangeErrors["ip-rate"] ? true : undefined}>
           <Field.Label for="widget-ip-rate">{m.widget_admin_messages_per_ip()}</Field.Label>
           <Input
             id="widget-ip-rate"
@@ -109,14 +149,21 @@
             min={1}
             max={1000}
             value={widget.limits.messages_per_ip_hour}
-            aria-describedby="widget-ip-rate-help"
-            oninput={(event) => number(event, (value) => limits({ messages_per_ip_hour: value }))}
+            aria-invalid={!!rangeErrors["ip-rate"]}
+            aria-describedby={describedBy("ip-rate", "widget-ip-rate-help")}
+            onchange={(event) =>
+              commitNumber(event, "ip-rate", 1, 1000, (value) =>
+                limits({ messages_per_ip_hour: value })
+              )}
           />
+          {#if rangeErrors["ip-rate"]}
+            <Field.Error id="widget-ip-rate-error">{rangeErrors["ip-rate"]}</Field.Error>
+          {/if}
           <Field.Description id="widget-ip-rate-help"
             >{m.widget_admin_messages_per_ip_description()}</Field.Description
           >
         </Field.Field>
-        <Field.Field>
+        <Field.Field data-invalid={rangeErrors["question-chars"] ? true : undefined}>
           <Field.Label for="widget-question-chars"
             >{m.widget_admin_max_question_chars()}</Field.Label
           >
@@ -127,14 +174,23 @@
             max={8000}
             step={100}
             value={widget.limits.max_question_chars}
-            aria-describedby="widget-question-chars-help"
-            oninput={(event) => number(event, (value) => limits({ max_question_chars: value }))}
+            aria-invalid={!!rangeErrors["question-chars"]}
+            aria-describedby={describedBy("question-chars", "widget-question-chars-help")}
+            onchange={(event) =>
+              commitNumber(event, "question-chars", 100, 8000, (value) =>
+                limits({ max_question_chars: value })
+              )}
           />
+          {#if rangeErrors["question-chars"]}
+            <Field.Error id="widget-question-chars-error"
+              >{rangeErrors["question-chars"]}</Field.Error
+            >
+          {/if}
           <Field.Description id="widget-question-chars-help"
             >{m.widget_admin_max_question_chars_description()}</Field.Description
           >
         </Field.Field>
-        <Field.Field>
+        <Field.Field data-invalid={rangeErrors.turns ? true : undefined}>
           <Field.Label for="widget-turns">{m.widget_admin_max_turns()}</Field.Label>
           <Input
             id="widget-turns"
@@ -142,9 +198,14 @@
             min={1}
             max={100}
             value={widget.limits.max_session_turns}
-            aria-describedby="widget-turns-help"
-            oninput={(event) => number(event, (value) => limits({ max_session_turns: value }))}
+            aria-invalid={!!rangeErrors.turns}
+            aria-describedby={describedBy("turns", "widget-turns-help")}
+            onchange={(event) =>
+              commitNumber(event, "turns", 1, 100, (value) => limits({ max_session_turns: value }))}
           />
+          {#if rangeErrors.turns}
+            <Field.Error id="widget-turns-error">{rangeErrors.turns}</Field.Error>
+          {/if}
           <Field.Description id="widget-turns-help"
             >{m.widget_admin_max_turns_description()}</Field.Description
           >
@@ -160,7 +221,7 @@
     </Card.Header>
     <Card.Content>
       <Field.Group class="grid gap-6">
-        <Field.Field>
+        <Field.Field data-invalid={rangeErrors.retention ? true : undefined}>
           <Field.Label for="widget-retention">{m.widget_admin_retention()}</Field.Label>
           <Input
             id="widget-retention"
@@ -169,9 +230,20 @@
             min={policy?.min_retention_days ?? 0}
             max={policy?.max_retention_days ?? 3650}
             value={widget.privacy.retention_days}
-            aria-describedby="widget-retention-help"
-            oninput={(event) => number(event, (value) => privacy({ retention_days: value }))}
+            aria-invalid={!!rangeErrors.retention}
+            aria-describedby={describedBy("retention", "widget-retention-help")}
+            onchange={(event) =>
+              commitNumber(
+                event,
+                "retention",
+                policy?.min_retention_days ?? 0,
+                policy?.max_retention_days ?? 3650,
+                (value) => privacy({ retention_days: value })
+              )}
           />
+          {#if rangeErrors.retention}
+            <Field.Error id="widget-retention-error">{rangeErrors.retention}</Field.Error>
+          {/if}
           <Field.Description id="widget-retention-help">
             {policy
               ? m.widget_admin_retention_description_policy({

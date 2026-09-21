@@ -1,4 +1,13 @@
+import re
 from urllib.parse import ParseResult, urlparse
+
+# A DNS label sequence with an optional leading `*.` wildcard, ASCII only
+# (IDNs must be given in their punycode form, which is what browsers send).
+_HOST_RE = re.compile(
+    r"^(\*\.)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$",
+    re.IGNORECASE,
+)
+_IPV6_HOST_RE = re.compile(r"^[0-9a-f:.]+$", re.IGNORECASE)
 
 
 def _safe_port(parsed: ParseResult) -> int | None:
@@ -100,4 +109,19 @@ def normalize_origin_pattern(pattern: str) -> str:
         _safe_port(parsed)
         if parsed.port is None and ":" in parsed.netloc.rsplit("@", 1)[-1]:
             raise ValueError(f"Invalid origin '{pattern}': malformed port.")
+    # The pattern ends up verbatim in a CSP frame-ancestors header, so the
+    # host must be a plain DNS name (IDNA-encoded), an IP literal or a `*.`
+    # wildcard of one: no spaces, semicolons or other directive syntax.
+    # urlparse also drops tabs and newlines silently, so check the raw text.
+    if value != "".join(value.split()):
+        raise ValueError(f"Invalid origin '{pattern}': whitespace is not allowed.")
+    host = parsed.hostname
+    if "[" in parsed.netloc:
+        if not _IPV6_HOST_RE.match(host):
+            raise ValueError(f"Invalid origin '{pattern}': malformed host.")
+    elif not _HOST_RE.match(host):
+        raise ValueError(
+            f"Invalid origin '{pattern}': host may only contain letters, digits,"
+            " '.', '-' and a leading '*.' wildcard."
+        )
     return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"

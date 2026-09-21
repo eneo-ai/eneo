@@ -16,7 +16,7 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
-  import { toastError } from "$lib/core/errors";
+  import { toastWidgetError } from "$lib/features/widget/admin/errors";
   import { WidgetTemplateAutosave } from "$lib/features/widget/admin/widgetAutosave.svelte";
   import WidgetMockPreview from "$lib/features/widget/admin/WidgetMockPreview.svelte";
   import WidgetTextsFields from "$lib/features/widget/admin/WidgetTextsFields.svelte";
@@ -39,17 +39,36 @@
             update
           });
         } catch (error) {
-          toastError(error, m.widget_admin_save_failed());
+          toastWidgetError(error, m.widget_admin_save_failed());
           throw error;
         }
       })
   );
 
-  beforeNavigate(() => {
+  // SvelteKit reuses this component when only the id changes (history
+  // navigation between two templates); the form must follow the new data.
+  let loadedId = untrack(() => data.template.id);
+  $effect(() => {
+    if (data.template.id !== loadedId) {
+      loadedId = data.template.id;
+      autosave.reload(data.template);
+    }
+  });
+
+  beforeNavigate((navigation) => {
+    if (autosave.status === "error" || autosave.status === "conflict") {
+      if (autosave.hasPending && !confirm(m.widget_admin_unsaved_leave_confirm())) {
+        navigation.cancel();
+      }
+      return;
+    }
     void autosave.flush();
   });
 
   const template = $derived(autosave.widget);
+  // The legal-texts lock needs a subtitle to enforce; the API refuses the
+  // save otherwise, so the switch waits until there is one.
+  const hasSubtitle = $derived((template.texts.subtitle ?? "").trim().length > 0);
 
   const statusLabel = $derived(
     autosave.status === "saving"
@@ -125,7 +144,7 @@
       autosave.replace(await data.eneo.widgets.templates.publish({ id: data.template.id }));
       confirmPublish = false;
     } catch (error) {
-      toastError(error, m.widget_admin_template_could_not_publish());
+      toastWidgetError(error, m.widget_admin_template_could_not_publish());
     }
   });
 
@@ -138,6 +157,12 @@
 <svelte:head>
   <title>Eneo.ai – {m.admin()} – {m.widget_admin_templates()} – {template.name}</title>
 </svelte:head>
+
+<svelte:window
+  onbeforeunload={(event) => {
+    if (autosave.unsaved) event.preventDefault();
+  }}
+/>
 
 <Page.Root>
   <Page.Header>
@@ -152,15 +177,17 @@
     <Page.Flex>
       <span class="text-secondary text-sm" aria-live="polite" aria-atomic="true">{statusLabel}</span
       >
-      <Badge variant={template.has_unpublished_changes ? "default" : "secondary"}>
+      <Badge
+        id="template-publication-state"
+        variant={template.has_unpublished_changes ? "default" : "secondary"}
+      >
         {publicationLabel}
       </Badge>
+      <!-- The visible badge explains the state; a title on a disabled button would not. -->
       <Button
         onclick={requestPublish}
         disabled={publish.isLoading || !template.has_unpublished_changes}
-        title={template.has_unpublished_changes
-          ? m.widget_admin_template_publish_description()
-          : m.widget_admin_template_publish_up_to_date()}
+        aria-describedby="template-publication-state"
       >
         {m.widget_admin_template_publish()}
       </Button>
@@ -268,11 +295,23 @@
                     <Field.Description id={`template-lock-${group}-help`}
                       >{lockLabels[group].description}</Field.Description
                     >
+                    {#if group === "legal_texts" && !hasSubtitle && !template.locked_groups.includes(group)}
+                      <Field.Description
+                        id="template-lock-legal-texts-blocked"
+                        class="text-warning-stronger"
+                        >{m.widget_admin_template_lock_needs_subtitle()}</Field.Description
+                      >
+                    {/if}
                   </Field.Content>
                   <Switch
                     id={`template-lock-${group}`}
                     checked={template.locked_groups.includes(group)}
-                    aria-describedby={`template-lock-${group}-help`}
+                    disabled={group === "legal_texts" &&
+                      !hasSubtitle &&
+                      !template.locked_groups.includes(group)}
+                    aria-describedby={group === "legal_texts" && !hasSubtitle
+                      ? `template-lock-${group}-help template-lock-legal-texts-blocked`
+                      : `template-lock-${group}-help`}
                     onCheckedChange={(checked) => setLock(group, checked)}
                   />
                 </Field.Field>
@@ -339,9 +378,11 @@
   <AlertDialog.Content>
     <AlertDialog.Header>
       <AlertDialog.Title>
-        {m.widget_admin_template_publish_confirm_title({
-          count: String(template.linked_widgets)
-        })}
+        {template.linked_widgets === 1
+          ? m.widget_admin_template_publish_confirm_title_one()
+          : m.widget_admin_template_publish_confirm_title({
+              count: String(template.linked_widgets)
+            })}
       </AlertDialog.Title>
       <AlertDialog.Description>
         {m.widget_admin_template_publish_confirm_description()}

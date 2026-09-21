@@ -80,6 +80,11 @@
     const value = Number((event.currentTarget as HTMLInputElement).value);
     if (Number.isFinite(value)) apply(value);
   }
+
+  // The lock hint must reach every control; a describedby on the group's
+  // div is not exposed to assistive technology.
+  const lockRef = $derived(locked ? id("lock-hint") : "");
+  const describedBy = (help: string) => (lockRef ? `${id(help)} ${lockRef}` : id(help));
 </script>
 
 <!-- One native fieldset: disabling it freezes every control below at once. -->
@@ -87,7 +92,7 @@
   {#if locked}
     <p id={id("lock-hint")} class="text-secondary mb-4 text-sm">{lockHint}</p>
   {/if}
-  <Field.Group class="grid gap-6" aria-describedby={locked ? id("lock-hint") : undefined}>
+  <Field.Group class="grid gap-6">
     <ColorField
       id={id("primary-color")}
       label={m.widget_admin_primary_color()}
@@ -95,6 +100,7 @@
       value={theme.primary_color ?? null}
       checkContrast
       disabled={locked}
+      describedBy={lockRef}
       onChange={(value) => onChange({ primary_color: value ?? "" })}
     />
 
@@ -104,7 +110,9 @@
       description={m.widget_admin_header_color_description()}
       value={theme.header_color ?? null}
       clearable
+      checkTextOn
       disabled={locked}
+      describedBy={lockRef}
       onChange={(value) => onChange({ header_color: value })}
     />
 
@@ -138,6 +146,7 @@
             checkContrast
             surface="dark"
             disabled={locked}
+            describedBy={lockRef}
             onChange={(value) => onChange({ primary_color_dark: value })}
           />
           <ColorField
@@ -146,7 +155,9 @@
             description={m.widget_admin_header_color_dark_description()}
             value={theme.header_color_dark ?? null}
             clearable
+            checkTextOn
             disabled={locked}
+            describedBy={lockRef}
             onChange={(value) => onChange({ header_color_dark: value })}
           />
         </Field.Group>
@@ -179,7 +190,12 @@
           type="url"
           maxlength={500}
           aria-invalid={logoInvalid}
-          aria-describedby={id("logo-url-help")}
+          aria-describedby={[
+            describedBy("logo-url-help"),
+            logoInvalid || logoBroken ? id("logo-url-error") : ""
+          ]
+            .filter(Boolean)
+            .join(" ")}
           bind:value={logoDraft}
           onchange={commitLogo}
           onkeydown={(event) => {
@@ -194,9 +210,9 @@
         {theme.logo_url ? m.widget_admin_logo_url_description() : m.widget_admin_logo_url_default()}
       </Field.Description>
       {#if logoInvalid}
-        <Field.Error>{m.widget_admin_url_invalid()}</Field.Error>
+        <Field.Error id={id("logo-url-error")}>{m.widget_admin_url_invalid()}</Field.Error>
       {:else if logoBroken}
-        <Field.Error>{m.widget_admin_logo_broken()}</Field.Error>
+        <Field.Error id={id("logo-url-error")}>{m.widget_admin_logo_broken()}</Field.Error>
       {/if}
     </Field.Field>
 
@@ -211,7 +227,11 @@
           onValueChange={(value) =>
             onChange({ color_scheme: value as NonNullable<WidgetTheme["color_scheme"]> })}
         >
-          <Select.Trigger id={id("scheme")} class="w-full" aria-describedby={id("scheme-help")}>
+          <Select.Trigger
+            id={id("scheme")}
+            class="w-full"
+            aria-describedby={describedBy("scheme-help")}
+          >
             <span data-slot="select-value">{schemeLabels[theme.color_scheme ?? "auto"]}</span>
           </Select.Trigger>
           <Select.Content>
@@ -233,7 +253,11 @@
           onValueChange={(value) =>
             onChange({ position: value as NonNullable<WidgetTheme["position"]> })}
         >
-          <Select.Trigger id={id("position")} class="w-full" aria-describedby={id("position-help")}>
+          <Select.Trigger
+            id={id("position")}
+            class="w-full"
+            aria-describedby={describedBy("position-help")}
+          >
             <span data-slot="select-value">{positionLabels[theme.position ?? "bottom-right"]}</span>
           </Select.Trigger>
           <Select.Content>
@@ -257,7 +281,7 @@
           step={1}
           class="max-w-32"
           value={theme.radius ?? 12}
-          aria-describedby={id("radius-help")}
+          aria-describedby={describedBy("radius-help")}
           oninput={(event) =>
             number(event, (value) => onChange({ radius: Math.min(24, Math.max(0, value)) }))}
         />

@@ -8,6 +8,7 @@ from eneo.audit.infrastructure.audit_config_repository import (
 )
 from eneo.audit.schemas.audit_config_schemas import CategoryUpdate
 from eneo.worker.redis import get_redis
+from tests.audit_category_counts import EXPECTED_CATEGORY_COUNTS
 
 pytestmark = pytest.mark.integration
 
@@ -191,9 +192,7 @@ class TestAuditConfigService:
                 assert len(category_config.example_actions) > 0
                 assert len(category_config.example_actions) <= 3
 
-    async def test_get_config_admin_actions_has_59_actions(
-        self, db_session, seeded_tenant
-    ):
+    async def test_get_config_admin_actions_count(self, db_session, seeded_tenant):
         """Verify admin_actions category has correct action count."""
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
@@ -203,7 +202,9 @@ class TestAuditConfigService:
             admin_config = next(
                 c for c in response.categories if c.category == "admin_actions"
             )
-            assert admin_config.action_count == 59
+            assert (
+                admin_config.action_count == EXPECTED_CATEGORY_COUNTS["admin_actions"]
+            )
 
     async def test_update_config_single_category(self, db_session, seeded_tenant):
         """Test updating a single category."""

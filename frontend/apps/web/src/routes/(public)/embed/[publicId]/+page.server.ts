@@ -1,6 +1,5 @@
-import { error } from "@sveltejs/kit";
 import { createWidgetClient, EneoError } from "@eneo/eneo-js";
-import { frameAncestorsFor } from "$lib/core/csp";
+import { frameAncestorsFor, originSource } from "$lib/core/csp";
 import { getBackendUrl } from "$lib/core/environment.server";
 import { PREVIEW_QUERY } from "$lib/features/widget/preview";
 import type { PageServerLoad } from "./$types";
@@ -29,21 +28,39 @@ export const load: PageServerLoad = async ({ params, url, fetch, locals, setHead
   const preview = url.searchParams.get(PREVIEW_QUERY) === "1";
 
   let config = null;
+  // A paused, archived or unknown widget. The page still renders, as a
+  // notice, because the loader on the host site cannot tell a refused frame
+  // from a slow one and would otherwise open a blank panel.
+  let unavailable = false;
   if (!preview) {
     try {
       config = await client.config();
     } catch (e) {
       if (e instanceof EneoError && e.status === 404) {
-        error(404);
+        unavailable = true;
+      } else {
+        throw e;
       }
-      throw e;
     }
   }
 
   // The browser enforces where this page may render. The stand-alone page has
-  // no reason to be framed at all.
-  locals.frameAncestors =
-    standalone || !config ? "'self'" : frameAncestorsFor(config.frame_ancestors);
+  // no reason to be framed at all; the notice carries nothing worth protecting
+  // and the allowed origins are unknown for it, so any site may frame it.
+  locals.frameAncestors = unavailable
+    ? "*"
+    : standalone || !config
+      ? "'self'"
+      : frameAncestorsFor(config.frame_ancestors);
+  // The page fetches its API and the organisation's logo from other origins
+  // at most; answer Markdown must not be able to reach anything else. The
+  // preview has no configuration yet, so it accepts any https image.
+  const backendOrigin = originSource(baseUrl);
+  const logoOrigin = originSource(config?.theme.logo_url);
+  locals.embedSources = {
+    img: preview ? ["https:"] : logoOrigin ? [logoOrigin] : [],
+    connect: backendOrigin ? [backendOrigin] : []
+  };
 
   const hostScheme = parseScheme(url.searchParams.get("scheme"));
   const pinned = config?.theme.color_scheme;
@@ -63,6 +80,7 @@ export const load: PageServerLoad = async ({ params, url, fetch, locals, setHead
 
   return {
     config,
+    unavailable,
     publicId: params.publicId,
     baseUrl,
     hostOrigin: standalone ? null : parseHostOrigin(url.searchParams.get("origin")),

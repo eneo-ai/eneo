@@ -2,6 +2,11 @@
  * postMessage protocol between the loader (host page) and the embed page
  * (iframe). Mirrors `lib/features/widget/embedBridge.ts` in the web app; both
  * sides ignore anything outside the namespace or above their version.
+ *
+ * Pinned (SRI) copies of this loader live on customer sites for a long time,
+ * so `BRIDGE_VERSION` is bumped only for changes an old side could misread.
+ * New message types and optional payload fields keep the version: unknown
+ * types are ignored and unknown fields dropped by the parsers on both sides.
  */
 
 export const BRIDGE_NAMESPACE = "eneo-widget";
@@ -39,7 +44,7 @@ export function parseLauncherColors(raw: unknown): LauncherColors | null {
 export type FrameMessage =
   | { type: "ready"; payload?: { colors: LauncherColors } }
   | { type: "close" }
-  | { type: "conversation_started"; payload: { session_id: string } }
+  | { type: "conversation_started" }
   | { type: "unread"; payload: { count: number } };
 
 /** Messages the loader sends to the embed page. */
@@ -67,9 +72,8 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
     case "close":
       return { type: "close" };
     case "conversation_started":
-      return typeof payload.session_id === "string"
-        ? { type: "conversation_started", payload: { session_id: payload.session_id } }
-        : null;
+      // No payload by design: the host page never receives conversation ids.
+      return { type: "conversation_started" };
     case "unread":
       return typeof payload.count === "number" && payload.count >= 0
         ? { type: "unread", payload: { count: Math.floor(payload.count) } }

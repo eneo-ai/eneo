@@ -34,7 +34,12 @@ export function mountFromScript(script: HTMLScriptElement, doc: Document = docum
   const id = script.dataset.widgetId;
   if (!id) return;
   const mount = () => {
-    if (doc.querySelector(`eneo-widget[widget-id="${id}"]`)) return;
+    // Compared as attribute values, not interpolated into a selector: an id
+    // with a quote or bracket must not throw inside the host page.
+    const mounted = Array.from(doc.querySelectorAll("eneo-widget")).some(
+      (existing) => existing.getAttribute("widget-id") === id
+    );
+    if (mounted) return;
     const element = doc.createElement("eneo-widget") as EneoWidgetElement;
     for (const name of SCRIPT_ATTRIBUTES) {
       const value = script.getAttribute(`data-${name}`);

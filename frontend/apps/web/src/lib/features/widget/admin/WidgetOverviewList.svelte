@@ -12,7 +12,8 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
-  import { toastError } from "$lib/core/errors";
+  import { blockerLabel } from "./blockers";
+  import { toastWidgetError } from "./errors";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -38,7 +39,7 @@
       toPause = null;
       await invalidateAll();
     } catch (error) {
-      toastError(
+      toastWidgetError(
         error,
         action === "pause" ? m.widget_admin_could_not_pause() : m.widget_admin_could_not_activate()
       );
@@ -72,6 +73,11 @@
 
   function widgetHref(item: WidgetOverviewItem) {
     return localizeHref(`/spaces/${item.space_id}/assistants/${item.target_id}/widget`);
+  }
+
+  function blockedReason(item: WidgetOverviewItem): string {
+    const blockers = item.activation_blockers ?? [];
+    return blockers.length ? blockers.map(blockerLabel).join(", ") : "";
   }
 
   function budgetPercent(item: WidgetOverviewItem) {
@@ -228,10 +234,12 @@
                         {m.widget_admin_pause()}
                       </Button>
                     {:else}
+                      {@const reason = blockedReason(item)}
                       <Button
                         variant="outline"
                         size="sm"
-                        disabled={busyId === item.id}
+                        disabled={busyId === item.id || reason !== ""}
+                        aria-describedby={reason ? `widget-overview-blocked-${item.id}` : undefined}
                         onclick={() => run(item, "activate")}
                       >
                         <Play aria-hidden="true" data-icon="inline-start" />
@@ -239,6 +247,14 @@
                           ? m.widget_admin_resume()
                           : m.widget_admin_activate()}
                       </Button>
+                      {#if reason}
+                        <p
+                          id={`widget-overview-blocked-${item.id}`}
+                          class="text-warning-stronger mt-1 text-xs"
+                        >
+                          {m.widget_admin_overview_blocked({ reasons: reason })}
+                        </p>
+                      {/if}
                     {/if}
                   </div>
                 {/if}

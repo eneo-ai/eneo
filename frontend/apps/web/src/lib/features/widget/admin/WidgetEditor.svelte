@@ -16,7 +16,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
-  import { toastError } from "$lib/core/errors";
+  import { toastWidgetError } from "./errors";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import { ExternalLink, FileText, Palette, Rocket, SlidersHorizontal } from "lucide-svelte";
@@ -64,20 +64,31 @@
         try {
           return await eneo.widgets.update({ widget: { id: widget.id }, update });
         } catch (error) {
-          toastError(error, m.widget_admin_save_failed());
+          toastWidgetError(error, m.widget_admin_save_failed());
           throw error;
         }
       })
   );
 
-  beforeNavigate(() => {
+  // Leaving saves what is pending. When saving has already failed the edits
+  // would be lost for good, so the editor is asked before they are discarded.
+  beforeNavigate((navigation) => {
+    if (autosave.status === "error" || autosave.status === "conflict") {
+      if (autosave.hasPending && !confirm(m.widget_admin_unsaved_leave_confirm())) {
+        navigation.cancel();
+      }
+      return;
+    }
     void autosave.flush();
   });
 
   const current = $derived(autosave.widget);
   const tab = urlTab(["content", "appearance", "rules", "publish"] as const, "content");
 
+  // Pending edits are saved first so pause and archive never race the
+  // autosave; a save that fails does not stop the kill switch.
   const lifecycle = (action: (params: { id: string }) => Promise<Widget>) => async () => {
+    await autosave.flush();
     autosave.replace(await action({ id: widget.id }));
   };
 
@@ -117,7 +128,7 @@
       autosave.replace(await action());
       return true;
     } catch (error) {
-      toastError(error, failure());
+      toastWidgetError(error, failure());
       return false;
     } finally {
       applying = false;
@@ -157,7 +168,14 @@
   });
 
   const blockers = $derived(current.activation_blockers ?? []);
+  const showPreview = $derived(tab.value === "content" || tab.value === "appearance");
 </script>
+
+<svelte:window
+  onbeforeunload={(event) => {
+    if (autosave.unsaved) event.preventDefault();
+  }}
+/>
 
 <div class="flex flex-col gap-6">
   <WidgetStatusBar
@@ -383,11 +401,11 @@
         </Tabs.Content>
       </div>
 
-      {#if tab.value === "content" || tab.value === "appearance"}
-        <aside class="min-w-0 self-start xl:sticky xl:top-4">
-          <WidgetPreview widget={current} {eneo} />
-        </aside>
-      {/if}
+      <!-- Kept mounted across tabs so switching back does not mint a new
+           preview token and reload the frame. -->
+      <aside class="min-w-0 self-start xl:sticky xl:top-4" hidden={!showPreview}>
+        <WidgetPreview widget={current} {eneo} />
+      </aside>
     </div>
   </Tabs.Root>
 </div>

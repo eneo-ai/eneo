@@ -16,6 +16,7 @@ describe("parseFrameMessage", () => {
     expect(parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "close" })).toEqual({
       type: "close"
     });
+    // Whatever an embed page sends along, the host never gets an identifier.
     expect(
       parseFrameMessage({
         ns: BRIDGE_NAMESPACE,
@@ -23,7 +24,7 @@ describe("parseFrameMessage", () => {
         type: "conversation_started",
         payload: { session_id: "abc" }
       })
-    ).toEqual({ type: "conversation_started", payload: { session_id: "abc" } });
+    ).toEqual({ type: "conversation_started" });
     expect(
       parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "unread", payload: { count: 2.7 } })
     ).toEqual({ type: "unread", payload: { count: 2 } });
@@ -50,9 +51,6 @@ describe("parseFrameMessage", () => {
     ).toBeNull();
     expect(
       parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "unread", payload: { count: -1 } })
-    ).toBeNull();
-    expect(
-      parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "conversation_started", payload: {} })
     ).toBeNull();
   });
 

@@ -167,7 +167,9 @@
         maxlength={500}
         aria-invalid={linkInvalid}
         disabled={locked("footer_link_url")}
-        aria-describedby={describedBy("footer_link_url", "footer-link-help")}
+        aria-describedby={linkInvalid
+          ? `${describedBy("footer_link_url", "footer-link-help")} ${id("footer-link-error")}`
+          : describedBy("footer_link_url", "footer-link-help")}
         bind:value={linkDraft}
         onchange={commitLink}
         onkeydown={(event) => {
@@ -181,7 +183,7 @@
         >{m.widget_admin_text_footer_link_url_description()}</Field.Description
       >
       {#if linkInvalid}
-        <Field.Error>{m.widget_admin_url_invalid()}</Field.Error>
+        <Field.Error id={id("footer-link-error")}>{m.widget_admin_url_invalid()}</Field.Error>
       {/if}
     </Field.Field>
 

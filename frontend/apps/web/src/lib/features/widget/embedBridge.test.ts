@@ -61,7 +61,7 @@ describe("createEmbedBridge", () => {
     };
     bridge.ready();
     bridge.ready(colors);
-    bridge.conversationStarted("sess-1");
+    bridge.conversationStarted();
     expect(target.postMessage).toHaveBeenNthCalledWith(
       1,
       { ns: BRIDGE_NAMESPACE, v: 1, type: "ready" },
@@ -74,12 +74,7 @@ describe("createEmbedBridge", () => {
     );
     expect(target.postMessage).toHaveBeenNthCalledWith(
       3,
-      {
-        ns: BRIDGE_NAMESPACE,
-        v: 1,
-        type: "conversation_started",
-        payload: { session_id: "sess-1" }
-      },
+      { ns: BRIDGE_NAMESPACE, v: 1, type: "conversation_started" },
       "https://www.kommun.se"
     );
   });

@@ -62,7 +62,8 @@ loaded are replayed:
 Commands: `open`, `close`, `toggle`, `on(event, listener)`, `off(event, listener)`,
 `setContext({ page_url, page_title })`. Events: `ready`, `open`, `close`,
 `conversation_started`, `unread`. The same events are dispatched on the element
-as `eneo-widget:<event>` DOM events. `setContext` is accepted and parsed by the
+as `eneo-widget:<event>` DOM events. Events carry no visitor or conversation
+identifiers; `conversation_started` only says that one began. `setContext` is accepted and parsed by the
 embed page but not used by the chat yet, so no page context reaches Eneo.
 
 ## Accessibility

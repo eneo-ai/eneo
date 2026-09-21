@@ -148,19 +148,18 @@ async def test_preview_token_admits_draft_widgets(client, admin_token):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["public_id"] == public_id
+    # A draft's configuration must never be stored by a shared cache.
+    assert resp.headers["cache-control"] == "private, no-store"
 
-    # Rotation keeps the preview flag so the preview survives a token refresh.
+    # Preview tokens are minted for one sitting and never rotate: a leaked
+    # one cannot renew itself.
     resp = await client.post(
         f"/api/v1/widgets/{public_id}/visitor-sessions/",
         json={"previous_token": preview["token"]},
         headers=_auth(preview["token"]),
     )
-    assert resp.status_code == 200, resp.text
-    rotated = resp.json()["token"]
-    resp = await client.get(
-        f"/api/v1/widgets/{public_id}/config/", headers=_auth(rotated)
-    )
-    assert resp.status_code == 200
+    assert resp.status_code == 401, resp.text
+    assert resp.json()["detail"]["code"] == "visitor_token_invalid"
 
     # An ordinary (non-preview) token never admits a draft.
     resp = await client.get(
@@ -328,3 +327,32 @@ async def test_bot_protection_none_requires_policy(client, admin_token, active_w
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["visitor_id"] != known_visitor
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_unpublished_assistant_takes_its_widget_offline(
+    client, admin_token, active_widget
+):
+    public_id = active_widget["public_id"]
+    resp = await client.get(f"/api/v1/widgets/{public_id}/config/")
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "public, max-age=60"
+
+    resp = await client.post(
+        f"/api/v1/assistants/{active_widget['target_id']}/publish/",
+        params={"published": "false"},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Same answer as a pause: the embed page shows its unavailable state
+    # instead of a permission error from the ask pipeline.
+    resp = await client.get(f"/api/v1/widgets/{public_id}/config/")
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "widget_not_active"
+
+    resp = await client.get("/api/v1/admin/widgets/", headers=_auth(admin_token))
+    item = next(i for i in resp.json()["items"] if i["public_id"] == public_id)
+    assert item["status"] == "active"
+    assert item["activation_blockers"] == ["target_not_published"]

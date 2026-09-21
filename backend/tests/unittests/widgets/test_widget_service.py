@@ -32,8 +32,13 @@ class _InMemoryRepo:
     async def list_by_space(self, space_id):
         return [w for w in self.rows.values() if w.space_id == space_id]
 
-    async def list_by_template(self, template_id):
-        return [w for w in self.rows.values() if w.template_id == template_id]
+    async def list_by_template(self, template_id, *, include_archived=False):
+        return [
+            w
+            for w in self.rows.values()
+            if w.template_id == template_id
+            and (include_archived or w.status != WidgetStatus.ARCHIVED)
+        ]
 
     async def count_by_template(self, tenant_id):
         counts: dict = {}
@@ -42,7 +47,11 @@ class _InMemoryRepo:
                 counts[w.template_id] = counts.get(w.template_id, 0) + 1
         return counts
 
-    async def update(self, widget: Widget) -> Widget:
+    async def is_target_published(self, widget):
+        return True
+
+    async def update(self, widget: Widget, *, check_revision=True, only=None) -> Widget:
+        self.last_update = {"check_revision": check_revision, "only": only}
         self.rows[widget.id] = widget
         return widget
 
@@ -270,11 +279,49 @@ async def test_pause_is_allowed_for_editors_and_admins(assistant):
     # 1 from the allowed_origins update, 1 from the pause.
     assert paused.widget.token_generation == 2
 
+    # The kill switch bypasses the revision check and writes lifecycle columns
+    # only, so it can neither lose to an autosave nor overwrite one.
+    assert repo.last_update == {
+        "check_revision": False,
+        "only": frozenset({"status", "paused_at", "token_generation"}),
+    }
+
     viewer_user = _user()
     viewer_user.tenant_id = admin_user.tenant_id
     await admin.activate_widget(view.widget.id)
     with pytest.raises(UnauthorizedException):
         await _service(viewer_user, space, repo=repo).pause_widget(view.widget.id)
+
+
+async def test_reading_widget_configuration_needs_the_widgets_permission(assistant):
+    """Origins, limits and privacy are for widget managers, not every member."""
+    space, _ = _space(uuid4(), assistant)
+    repo = _InMemoryRepo()
+    owner = _user(Permission.WIDGETS)
+    view = await _service(owner, space, repo=repo).create_widget(
+        space_id=space.id, target_id=assistant.id, name="w"
+    )
+
+    member = _user()
+    member.tenant_id = owner.tenant_id
+    reader = _service(member, space, can_edit=False, repo=repo)
+    with pytest.raises(UnauthorizedException):
+        await reader.get_widget(view.widget.id)
+    with pytest.raises(UnauthorizedException):
+        await reader.list_widgets(space.id)
+
+    admin = _user(Permission.ADMIN)
+    admin.tenant_id = owner.tenant_id
+    assert (
+        await _service(admin, space, can_edit=False, repo=repo).get_widget(
+            view.widget.id
+        )
+    ).widget.id == view.widget.id
+
+    with pytest.raises(BadRequestException):
+        await _service(owner, space, repo=repo).update_widget(
+            view.widget.id, {"name": "no revision"}
+        )
 
 
 async def test_policy_update_merges_and_validates(assistant):

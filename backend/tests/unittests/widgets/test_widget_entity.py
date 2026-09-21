@@ -67,6 +67,12 @@ def test_allowed_origins_are_normalised_and_deduplicated(origins, expected):
         "https://www.kommun.se?x=1",
         "https://user@www.kommun.se",
         "https://",
+        # CSP directive syntax must never reach the frame-ancestors header.
+        "https://a.com; report-to grp",
+        "https://a.com b.com",
+        "https://a.com;default-src",
+        "https://a.com\ttab",
+        "https://exämple.se",
     ],
 )
 def test_invalid_allowed_origins_are_rejected(origin):
@@ -98,6 +104,9 @@ def test_texts_are_cleaned_and_bounded():
     ]
     with pytest.raises(ValueError):
         WidgetTexts(suggested_questions=["a", "b", "c", "d", "e"])
+    # The embed page keys the chips by text; a repeat would crash it.
+    with pytest.raises(ValueError):
+        WidgetTexts(suggested_questions=["Öppettider?", " Öppettider? "])
     with pytest.raises(ValueError):
         WidgetTexts(footer_link_url="kommun.se/integritet")
     assert WidgetTexts(footer_link_url="  ").footer_link_url is None

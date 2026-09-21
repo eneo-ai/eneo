@@ -467,7 +467,9 @@ class Settings(BaseSettings):
     widget_altcha_challenge_ttl_seconds: int = Field(default=300, gt=0)
     widget_challenge_rate_limit_per_minute: int = Field(default=60, gt=0)
     # Fail closed by default: an unmetered public LLM endpoint is a cost
-    # incident, so Redis loss blocks widget traffic unless overridden.
+    # incident, so Redis loss blocks widget traffic unless overridden. Open
+    # also skips the ALTCHA replay check, so one solved proof of work can be
+    # reused while Redis is down.
     widget_rate_limit_fail_open: bool = False
     widget_budget_timezone: str = "Europe/Stockholm"
     # Tokens reserved against the daily budget before a widget answer starts;

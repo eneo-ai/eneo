@@ -21,6 +21,8 @@ declare global {
       frameAncestors?: string;
       /** Colour scheme the embed page renders with; it never follows the app's saved theme. */
       embedScheme?: "light" | "dark" | "system";
+      /** Origins the embed page may load images from and connect to, beyond itself. */
+      embedSources?: { img: string[]; connect: string[] };
     }
     // interface PageData {}
     interface PageState {

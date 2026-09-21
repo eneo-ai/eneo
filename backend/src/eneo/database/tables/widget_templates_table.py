@@ -13,8 +13,10 @@ from eneo.database.tables.users_table import Users
 
 
 class WidgetTemplates(BasePublic):
-    """An organisation's house style for widgets: texts and appearance that
-    editors copy onto a new widget. A snapshot, never a live link."""
+    """An organisation's house style for widgets. The row holds the draft
+    admins edit and, in ``published``, the release widgets follow: linking
+    copies the release once, and each publication writes its locked groups
+    onto every follower."""
 
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
     name: Mapped[str] = mapped_column()
