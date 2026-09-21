@@ -1,6 +1,7 @@
 import asyncio
+import contextlib
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -11,7 +12,11 @@ from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,
 )
-from eneo.websites.domain.crawl_run import CrawlFailureCode, CrawlOutcome
+from eneo.websites.domain.crawl_run import (
+    CrawlFailureCode,
+    CrawlOrigin,
+    CrawlOutcome,
+)
 from eneo.worker.crawl_tasks import (
     _QUEUE_CLOSED,
     _build_embedding_model_spec,
@@ -20,6 +25,7 @@ from eneo.worker.crawl_tasks import (
     _crawl_counts_as_scheduled_run,
     _failure_code_for_crawl,
     _should_store_sitemap_state,
+    queue_website_crawls,
 )
 
 
@@ -231,3 +237,93 @@ async def test_embedding_provider_resolution_is_tenant_scoped() -> None:
     assert spec.provider_credentials == resolved.credentials
     assert spec.provider_config == resolved.config
     assert spec.litellm_model_name == "azure/municipal-embedding"
+
+
+class _FakeSession:
+    """Session stand-in whose only job is to be told apart from its siblings."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    @contextlib.asynccontextmanager
+    async def begin(self):
+        yield self
+
+
+async def test_queue_website_crawls_reads_owner_through_website_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each admission looks up the owner on its own transactional session.
+
+    The cron session has no transaction, so anything that queries through it
+    fails; the owner lookup and the crawl admission must both run on the
+    per-website session.
+    """
+    import eneo.database.database as database_module
+    import eneo.websites.application.crawl_dispatch as crawl_dispatch_module
+    import eneo.worker.crawl_tasks as crawl_tasks_module
+
+    query_session = _FakeSession("query")
+    website_session = _FakeSession("website")
+    sessions = iter([query_session, website_session])
+
+    @contextlib.asynccontextmanager
+    async def _open_session():
+        yield next(sessions)
+
+    monkeypatch.setattr(
+        database_module, "sessionmanager", SimpleNamespace(session=_open_session)
+    )
+
+    website = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        user_id=uuid4(),
+        url="https://example.invalid/",
+    )
+    owner = SimpleNamespace(id=website.user_id, tenant=object())
+
+    repo_sessions: list[object] = []
+
+    class _FakeUsersRepository:
+        def __init__(self, session: object) -> None:
+            repo_sessions.append(session)
+
+        async def get_user_by_id(self, user_id: object) -> SimpleNamespace:
+            assert user_id == website.user_id
+            return owner
+
+    monkeypatch.setattr(crawl_tasks_module, "UsersRepository", _FakeUsersRepository)
+
+    crawl = AsyncMock()
+    containers: list[Any] = []
+
+    class _FakeContainer:
+        def __init__(self, **providers_by_name: Any) -> None:
+            self.providers_by_name = providers_by_name
+            containers.append(self)
+
+        def crawl_service(self) -> SimpleNamespace:
+            return SimpleNamespace(crawl=crawl)
+
+    monkeypatch.setattr(crawl_tasks_module, "Container", _FakeContainer)
+    reconcile = AsyncMock()
+    monkeypatch.setattr(crawl_dispatch_module, "reconcile_crawl_work", reconcile)
+
+    scheduler = SimpleNamespace(
+        website_sparse_repo=SimpleNamespace(session=None),
+        get_websites_due_for_crawl=AsyncMock(return_value=[website]),
+    )
+    cron_container = SimpleNamespace(crawl_scheduler_service=lambda: scheduler)
+
+    assert await queue_website_crawls(container=cast(Any, cron_container)) is True
+
+    assert scheduler.website_sparse_repo.session is query_session
+    assert repo_sessions == [website_session]
+    assert containers[0].providers_by_name["session"]() is website_session
+    assert containers[0].providers_by_name["user"]() is owner
+    crawl.assert_awaited_once_with(
+        website, origin=CrawlOrigin.SCHEDULED, reconcile_after_commit=False
+    )
+    reconcile.assert_awaited_once()

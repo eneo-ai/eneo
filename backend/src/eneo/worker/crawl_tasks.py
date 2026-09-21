@@ -37,6 +37,7 @@ from eneo.model_providers.infrastructure.litellm_provider import (
     load_active_litellm_provider,
 )
 from eneo.tenants.crawler_settings_helper import get_crawler_setting
+from eneo.users.user_repo import UsersRepository
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
 from eneo.websites.domain.crawl_run import (
     CrawlFailureCode,
@@ -339,9 +340,12 @@ async def queue_website_crawls(container: Container):
                 sessionmanager.session() as website_session,
                 website_session.begin(),
             ):
-                user_repo = container.user_repo()
-                user_repo.session = website_session
-                user = await user_repo.get_user_by_id(website.user_id)
+                # Build the repository on the per-website session. The
+                # container-built repository keeps the cron session inside its
+                # delegate, and that session has no transaction here.
+                user = await UsersRepository(website_session).get_user_by_id(
+                    website.user_id
+                )
                 assert user is not None
                 website_container = Container(
                     session=providers.Object(website_session),
