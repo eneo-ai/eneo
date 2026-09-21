@@ -394,13 +394,14 @@ async def test_compressed_corruption_is_detected_when_lengths_match(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("length_delta", [0, -1])
 async def test_corrupt_conversion_row_is_rejected_without_blocking_completion(
-    object_content_database: DatabaseSessionManager,
+    object_content_database: DatabaseSessionManager, length_delta: int
 ) -> None:
     database = object_content_database
     payload = b"a" * 1_048_576
     ids = sorted([await _legacy_upload(database, payload) for _ in range(3)])
-    await _corrupt_payload(database, ids[1], b"b" * len(payload))
+    await _corrupt_payload(database, ids[1], b"b" * (len(payload) + length_delta))
     result = await ObjectContentReconciler(
         ObjectContentCoreSettings(_env_file=None, reconciliation_batch_size=3), database
     ).run_once()
@@ -419,6 +420,69 @@ async def test_corrupt_conversion_row_is_rejected_without_blocking_completion(
         assert progress.inline_conversion_completed_at is not None
         assert progress.inline_conversion_ready_at is None
     assert (await _physical_sizes(database, ids[1]))[0] < len(payload)
+
+
+@pytest.mark.asyncio
+async def test_length_corrupt_quarantine_keeps_fences_and_can_be_deleted(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    database = object_content_database
+    payload = b"a" * 1_048_576
+    content_id = await _legacy_upload(database, payload)
+    await _corrupt_payload(database, content_id, b"b" * (len(payload) - 1))
+    with pytest.raises(DBAPIError, match="inline payload size does not match"):
+        async with database.session() as session, session.begin():
+            await session.execute(
+                text(
+                    "UPDATE object_contents SET updated_at = updated_at WHERE id = :id"
+                ),
+                {"id": content_id},
+            )
+
+    result = await ObjectContentReconciler(
+        ObjectContentCoreSettings(_env_file=None), database
+    ).run_once()
+    assert result.inline_conversion.rejected == 1
+    with pytest.raises(DBAPIError, match="inline content payload is immutable"):
+        async with database.session() as session, session.begin():
+            await session.execute(
+                update(InlineContentPayloads)
+                .where(InlineContentPayloads.content_id == content_id)
+                .values(payload=payload)
+            )
+    with pytest.raises(DBAPIError, match="exactly one matching byte backend"):
+        async with database.session() as session, session.begin():
+            await session.execute(
+                delete(InlineContentPayloads).where(
+                    InlineContentPayloads.content_id == content_id
+                )
+            )
+    async with database.session() as session, session.begin():
+        await session.execute(
+            delete(FileContentReferences).where(
+                FileContentReferences.content_id == content_id
+            )
+        )
+    async with database.session() as session, session.begin():
+        assert (
+            await ObjectContentReconciliationRepository(
+                session
+            ).advance_local_lifecycle(limit=1, pending_stale_seconds=300)
+            == 1
+        )
+    async with database.session() as session, session.begin():
+        content = await session.get(ObjectContents, content_id)
+        assert content is not None and content.state == "delete_pending"
+        assert (
+            await ObjectContentReconciliationRepository(
+                session
+            ).tombstone_inline_deletions(limit=1)
+            == 1
+        )
+    async with database.session() as session, session.begin():
+        content = await session.get(ObjectContents, content_id)
+        assert content is not None and content.state == "tombstoned"
+        assert await session.get(InlineContentPayloads, content_id) is None
 
 
 @pytest.mark.asyncio
@@ -455,6 +519,73 @@ async def test_cancelled_conversion_rolls_back_only_the_uncommitted_row(
     assert result.inline_conversion.scanned == 2
     assert result.inline_conversion.converted == 2
     assert result.inline_conversion.ready
+
+
+@pytest.mark.asyncio
+async def test_quarantine_migration_is_transactional_idempotent_and_reversible(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    database = object_content_database
+    payload = b"a" * 1_048_576
+    content_id = await _legacy_upload(database, payload)
+    await _corrupt_payload(database, content_id, payload[:-1])
+    before = await _physical_sizes(database, content_id)
+    migration = runpy.run_path(
+        str(
+            Path(__file__).parents[3]
+            / "alembic/versions/202609211200_inline_corrupt_quarantine.py"
+        )
+    )
+
+    def apply(session, direction):
+        with Operations.context(MigrationContext.configure(session.connection())):
+            migration[direction]()
+
+    fence_sql = text(
+        "SELECT pg_get_functiondef('object_content_storage_owner_fence()'::regprocedure)"
+    )
+    identity_sql = text(
+        "SELECT pg_get_functiondef('inline_content_payload_identity_fence()'::regprocedure)"
+    )
+    quarantine = (
+        update(ObjectContents)
+        .where(ObjectContents.id == content_id)
+        .values(state="failed", failure_code="backend_corrupt")
+    )
+    async with database.session() as session, session.begin():
+        identity_before = await session.scalar(identity_sql)
+        await session.execute(text("SET LOCAL lock_timeout = '1ms'"))
+        await session.run_sync(apply, "downgrade")
+        assert (
+            await session.scalar(text("SHOW lock_timeout"))
+            == f"{INLINE_CONVERSION_LOCK_TIMEOUT_SECONDS}s"
+        )
+        original_fence = await session.scalar(fence_sql)
+        with pytest.raises(DBAPIError, match="inline payload size does not match"):
+            async with session.begin_nested():
+                await session.execute(quarantine)
+                await session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+        with pytest.raises(RuntimeError, match="interrupted migration"):
+            async with session.begin_nested():
+                await session.run_sync(apply, "upgrade")
+                assert await session.scalar(fence_sql) != original_fence
+                raise RuntimeError("interrupted migration")
+        assert await session.scalar(fence_sql) == original_fence
+        await session.execute(text("SET LOCAL lock_timeout = '1ms'"))
+        await session.run_sync(apply, "upgrade")
+        assert (
+            await session.scalar(text("SHOW lock_timeout"))
+            == f"{INLINE_CONVERSION_LOCK_TIMEOUT_SECONDS}s"
+        )
+        upgraded_fence = await session.scalar(fence_sql)
+        await session.run_sync(apply, "upgrade")
+        assert await session.scalar(fence_sql) == upgraded_fence
+        assert await session.scalar(identity_sql) == identity_before
+        await session.execute(quarantine)
+    async with database.session() as session, session.begin():
+        content = await session.get(ObjectContents, content_id)
+        assert content is not None and content.state == "failed"
+    assert await _physical_sizes(database, content_id) == before
 
 
 @pytest.mark.asyncio
@@ -803,6 +934,65 @@ async def test_corruption_recovery_releases_content_before_waiting_for_admission
         )
         assert campaign is not None and campaign.state == "halted"
         assert item is not None and item.state == "failed" and item.content_id is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("detached_state", ["retained", "delete_pending"])
+async def test_corruption_handoff_preserves_reference_detachment(
+    object_content_database: DatabaseSessionManager,
+    monkeypatch: pytest.MonkeyPatch,
+    detached_state: str,
+) -> None:
+    database = object_content_database
+    payload = b"a" * 1_048_576
+    content_id = await _legacy_upload(database, payload)
+    if detached_state == "retained":
+        async with database.session() as session, session.begin():
+            await session.execute(
+                update(ObjectContents)
+                .where(ObjectContents.id == content_id)
+                .values(minimum_retain_until=text("now() + interval '1 day'"))
+            )
+    await _corrupt_payload(database, content_id, b"b" * len(payload))
+    original = ObjectContentRepository.mark_backend_failure
+
+    async def detach_before_failure(repository, **kwargs):
+        async with database.session() as session, session.begin():
+            await session.execute(
+                delete(FileContentReferences).where(
+                    FileContentReferences.content_id == content_id
+                )
+            )
+            assert (
+                await session.scalar(
+                    select(ObjectContents.state).where(ObjectContents.id == content_id)
+                )
+                == detached_state
+            )
+        return await original(repository, **kwargs)
+
+    monkeypatch.setattr(
+        ObjectContentRepository, "mark_backend_failure", detach_before_failure
+    )
+    reconciler = ObjectContentReconciler(
+        ObjectContentCoreSettings(_env_file=None), database
+    )
+    result = await reconciler.run_once()
+    assert result.inline_conversion.rejected == 1
+    assert result.inline_conversion.sweep_completed
+    assert not result.inline_conversion.ready
+    async with database.session() as session, session.begin():
+        content = await session.get(ObjectContents, content_id)
+        assert content is not None and content.state == detached_state
+        assert content.reference_count == 0
+        assert content.delete_requested_at is not None
+        assert content.failure_code == (
+            "backend_corrupt" if detached_state == "retained" else None
+        )
+    if detached_state == "delete_pending":
+        resumed = await reconciler.run_once()
+        assert resumed.inline_deleted == 1
+        assert resumed.inline_conversion.ready
 
 
 @pytest.mark.asyncio
