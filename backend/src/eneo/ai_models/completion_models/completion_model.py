@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Protocol, Union, cast
@@ -156,6 +156,10 @@ class GeneratedImage:
 class Completion:
     reasoning_token_count: Optional[int] = 0
     text: Optional[str] = None
+    raw_text_bytes: Optional[int] = None
+    raw_text_sha256: Optional[str] = None
+    # Retained only for truncated responses until rejection sampling consumes it.
+    raw_text: Optional[str] = field(default=None, repr=False)
     reasoning_content: Optional[str] = None  # For REASONING events (thinking text)
     reference_chunks: Optional[list[InfoBlobChunkInDBWithScore]] = None
     tool_call: Optional[FunctionCall] = None

@@ -88,11 +88,17 @@ def build_rejected_output_payload(
 
 
 def sample_rejected_output(
-    text: str | None, *, max_inline_bytes: int
+    text: str | None,
+    *,
+    max_inline_bytes: int,
+    observed_bytes: int | None = None,
+    sha256: str | None = None,
 ) -> RejectedOutput | None:
     encoded = text.encode("utf-8") if text is not None else b""
-    observed_bytes = len(encoded) if text is not None else None
-    digest = hashlib.sha256(encoded).hexdigest() if text is not None else None
+    if observed_bytes is None and text is not None:
+        observed_bytes = len(encoded)
+    if sha256 is None and text is not None:
+        sha256 = hashlib.sha256(encoded).hexdigest()
     redacted = redact_string_with_reason(text, key=None) if text is not None else None
     redaction_applied = redacted is not None and redacted.reason is not None
     if redacted is not None:
@@ -105,21 +111,24 @@ def sample_rejected_output(
     while lower <= upper:
         budget = (lower + upper) // 2
         complete = len(encoded) <= budget
+        sampled = not complete or (
+            observed_bytes is not None and observed_bytes > max_inline_bytes
+        )
         head = encoded if complete else encoded[: budget // 2]
         tail = b"" if complete or budget == 0 else encoded[-(budget - budget // 2) :]
         output = RejectedOutput(
             text=head.decode("utf-8", errors="ignore"),
-            truncated_by_runtime=not complete,
+            truncated_by_runtime=sampled,
             evidence=RejectedOutputEvidence(
                 tail=tail.decode("utf-8", errors="ignore"),
                 observed_bytes=observed_bytes,
-                sha256=digest,
+                sha256=sha256,
                 redaction_applied=redaction_applied,
                 sampling_status=(
                     "unavailable"
                     if text is None
                     else "complete"
-                    if complete
+                    if not sampled
                     else "sampled"
                 ),
             ),

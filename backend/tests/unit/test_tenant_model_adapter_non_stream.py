@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -104,6 +105,29 @@ def _tool_call():
             arguments='{"q":"hello"}',
         ),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish_reason", ["length", "stop"])
+async def test_get_response_records_raw_content_before_normalization(finish_reason):
+    adapter = _make_adapter()
+    del adapter._strip_thinking_content
+    raw = '<think>hemligt å</think>  {"fact":"svar"}\n        '
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(
+            return_value=_response(
+                response_id="raw-response", content=raw, finish_reason=finish_reason
+            )
+        ),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(), model_kwargs={}
+        )
+    assert completion.text == '{"fact":"svar"}'
+    assert completion.raw_text_bytes == len(raw.encode())
+    assert completion.raw_text_sha256 == hashlib.sha256(raw.encode()).hexdigest()
+    assert completion.raw_text == (raw if finish_reason == "length" else None)
 
 
 @pytest.mark.asyncio

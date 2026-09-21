@@ -77,6 +77,18 @@ def test_rejection_samples_bound_utf8_and_json_escaping(unit: str) -> None:
     assert interpret_rejected_output(payload) == output
 
 
+def test_rejection_status_describes_raw_size_before_redaction() -> None:
+    text = "password=" + "x" * 204800
+    output = sample_rejected_output(text, max_inline_bytes=1024)
+    assert output is not None
+    assert output.evidence is not None
+    assert output.evidence.observed_bytes == 204809
+    assert output.evidence.sha256 == hashlib.sha256(text.encode()).hexdigest()
+    assert output.evidence.sampling_status == "sampled"
+    assert output.evidence.redaction_applied
+    assert "x" * 20 not in json.dumps(output.to_payload())
+
+
 def test_interpret_step_text_accepts_one_overflow_file_and_bounded_preview() -> None:
     file_id = uuid4()
 

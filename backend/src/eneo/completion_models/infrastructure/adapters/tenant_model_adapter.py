@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import binascii
+import hashlib
 import json
 import re
 import uuid
@@ -1688,6 +1689,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                     completion.generated_images = captured_images
                 if collected_tool_metadata:
                     completion.tool_calls_metadata = collected_tool_metadata
+                if msg.content is not None:
+                    raw_bytes = msg.content.encode("utf-8")
+                    completion.raw_text_bytes = len(raw_bytes)
+                    completion.raw_text_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+                    if choice.finish_reason == "length":
+                        completion.raw_text = msg.content
                 if msg.content:
                     completion.text = self._strip_thinking_content(msg.content)
                 completion.provider_response_id = extract_provider_response_id(response)
@@ -2048,6 +2055,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     self.has_tool_calls: bool = False
                     self.tool_calls_acc: dict[int, _AccumulatedToolCall] = {}
                     self.assistant_content: list[str] = []
+                    self.raw_text_bytes: int | None = None
+                    self.raw_text_hasher = hashlib.sha256()
+                    self.finish_reason: str | None = None
                     self.usage: TokenUsage | None = None
                     self.drained_a_stream: bool = False
                     self.cumulative_input_tokens = 0
@@ -2084,6 +2094,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                 res.has_tool_calls = False
                 res.tool_calls_acc = {}
                 res.assistant_content = []
+                res.raw_text_bytes = None
+                res.raw_text_hasher = hashlib.sha256()
+                res.finish_reason = None
                 res.reasoning_content = []
                 if res.usage is not None:
                     res.usage = res.usage.model_copy(
@@ -2106,6 +2119,8 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     delta = chunk.choices[0].delta
                     finish_reason = chunk.choices[0].finish_reason
+                    if finish_reason is not None:
+                        res.finish_reason = finish_reason
 
                     # Forward provider reasoning/thinking deltas (e.g. Anthropic
                     # extended thinking surfaced by LiteLLM as reasoning_content)
@@ -2180,8 +2195,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 )
 
                     # Handle text content with thinking-block stripping
-                    content = delta.content or ""
+                    content = delta.content
 
+                    if content is not None:
+                        raw_bytes = content.encode("utf-8")
+                        res.raw_text_bytes = (res.raw_text_bytes or 0) + len(raw_bytes)
+                        res.raw_text_hasher.update(raw_bytes)
                     if content:
                         res.assistant_content.append(content)
                         buffer += content
@@ -2929,6 +2948,19 @@ class TenantModelAdapter(CompletionModelAdapter):
             yield Completion(
                 text="",
                 stop=True,
+                finish_reason=result.finish_reason,
+                raw_text_bytes=result.raw_text_bytes,
+                raw_text_sha256=(
+                    result.raw_text_hasher.hexdigest()
+                    if result.raw_text_bytes is not None
+                    else None
+                ),
+                raw_text=(
+                    "".join(result.assistant_content)
+                    if result.finish_reason == "length"
+                    and result.raw_text_bytes is not None
+                    else None
+                ),
                 usage=final_usage,
                 input_token_estimate=(
                     result.cumulative_input_tokens

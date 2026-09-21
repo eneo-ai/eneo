@@ -1064,6 +1064,7 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
             1024,
         ),
         ("Partial", 128),
+        ('{"fact":"' + "x" * 489 + '"}' + "\n        " * 22755 + "     ", 1024),
     ],
     ids=[
         "sampled",
@@ -1073,6 +1074,7 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
         "redacted",
         "credential-boundary",
         "ceiling-128",
+        "raw-whitespace-runaway",
     ],
 )
 async def test_truncated_completion_retains_bounded_evidence_for_fresh_sessions(
@@ -1089,7 +1091,14 @@ async def test_truncated_completion_retains_bounded_evidence_for_fresh_sessions(
         get_response=AsyncMock(
             return_value=SimpleNamespace(
                 completion=Completion(
-                    text=text, finish_reason="length", provider_response_id="cut-off"
+                    text=text.strip() if text is not None else None,
+                    raw_text=text,
+                    raw_text_bytes=len(text.encode()) if text is not None else None,
+                    raw_text_sha256=hashlib.sha256(text.encode()).hexdigest()
+                    if text is not None
+                    else None,
+                    finish_reason="length",
+                    provider_response_id="cut-off",
                 ),
                 total_token_count=16384,
             )
@@ -1161,6 +1170,9 @@ async def test_truncated_completion_retains_bounded_evidence_for_fresh_sessions(
             assert evidence["tail"]
             assert redacted_text.startswith(payload["rejected_output"])
             assert redacted_text.endswith(evidence["tail"])
+            if text.endswith("     "):
+                assert evidence["observed_bytes"] == 205300
+                assert evidence["tail"].isspace()
         else:
             assert evidence["sampling_status"] == "complete"
             assert payload["rejected_output"] == text
@@ -1221,7 +1233,7 @@ async def test_truncated_completion_retains_bounded_evidence_for_fresh_sessions(
             assert review.failure.rejected_output is not None
             assert review.failure.rejected_output.to_payload() == exported_output
             rendered = render_review_evidence(review)
-            if text and len(text) > 1024:
+            if text and text.startswith("start å "):
                 assert "start å " in rendered
                 assert " end ö" in rendered
 

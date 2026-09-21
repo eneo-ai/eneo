@@ -1926,12 +1926,16 @@ async def _complete_step_execution(
         if isinstance(completion, Completion)
         else None,
         output=sample_rejected_output(
-            completion.text, max_inline_bytes=deps.max_inline_text_bytes
+            completion.raw_text,
+            max_inline_bytes=deps.max_inline_text_bytes,
+            observed_bytes=completion.raw_text_bytes,
+            sha256=completion.raw_text_sha256,
         )
         if isinstance(completion, Completion) and completion.finish_reason == "length"
         else None,
     )
     if isinstance(completion, Completion) and completion.finish_reason == "length":
+        completion.raw_text = None
         raise attach_typed_failure_context(
             StepOutputValidationException(
                 TypedIOValidationException(

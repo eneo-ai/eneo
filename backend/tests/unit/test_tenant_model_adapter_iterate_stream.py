@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -219,6 +220,47 @@ def _make_adapter() -> TenantModelAdapter:
         name="test-model", token_limit=8000, max_output_tokens=4000
     )
     return adapter
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish_reason", ["length", "stop"])
+async def test_iterate_stream_records_raw_content_before_normalization(finish_reason):
+    chunks = ["<think>hemligt å</think>  ", '{"fact":"svar"}', "\n        "]
+    stream = _AsyncChunkStream(
+        [
+            *[_text_chunk(text) for text in chunks],
+            _text_chunk("", finish_reason=finish_reason),
+        ]
+    )
+    completions = [
+        completion async for completion in _make_adapter().iterate_stream(stream)
+    ]
+    assert (
+        "".join(completion.text or "" for completion in completions)
+        == '{"fact":"svar"}\n        '
+    )
+    final = completions[-1]
+    raw = "".join(chunks)
+    assert final.raw_text_bytes == len(raw.encode())
+    assert final.raw_text_sha256 == hashlib.sha256(raw.encode()).hexdigest()
+    assert final.raw_text == (raw if finish_reason == "length" else None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", [None, ""])
+async def test_iterate_stream_distinguishes_missing_and_empty_raw_content(content):
+    completions = [
+        completion
+        async for completion in _make_adapter().iterate_stream(
+            _AsyncChunkStream([_text_chunk(content, finish_reason="length")])
+        )
+    ]
+    final = completions[-1]
+    assert final.raw_text == content
+    assert final.raw_text_bytes == (0 if content is not None else None)
+    assert final.raw_text_sha256 == (
+        hashlib.sha256(b"").hexdigest() if content is not None else None
+    )
 
 
 def test_build_tool_result_with_references_uses_self_describing_resource_blocks():

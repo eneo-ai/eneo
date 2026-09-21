@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import datetime, timezone
@@ -3911,6 +3912,13 @@ MODEL = "model-a"
     [
         ("length", "text", "Partial", 1_000_000),
         ("length", "json", '{"title":"A"}', 1_000_000),
+        pytest.param(
+            "length",
+            "json",
+            '{"fact":"' + "x" * 489 + '"}' + "\n        " * 22755 + "     ",
+            1024,
+            id="raw-whitespace-runaway",
+        ),
         ("length", "text", "Partial", 1),
         ("length", "text", "Partial", 128),
         ("stop", "text", "Done", 1_000_000),
@@ -4047,6 +4055,14 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
         if inline_ceiling == 1_000_000:
             assert rejected_completion.output.text == text
             assert rejected_completion.output.evidence.sampling_status == "complete"
+        elif inline_ceiling == 1024:
+            retained = rejected_completion.output
+            assert retained.evidence.observed_bytes == 205300
+            assert retained.evidence.sha256 == hashlib.sha256(text.encode()).hexdigest()
+            assert retained.evidence.sampling_status == "sampled"
+            assert retained.evidence.tail.isspace()
+            assert text.endswith(retained.evidence.tail)
+            assert text.startswith(retained.text)
         assert getattr(error, "rejected_output", None) is None
         process_output.assert_not_awaited()
         apply_cap.assert_not_awaited()
@@ -4069,7 +4085,7 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
             else 0
         )
         assert payload_bytes <= inline_ceiling
-        if inline_ceiling == 1_000_000:
+        if inline_ceiling >= 1024:
             assert payload == rejected_completion.output.to_payload()
         else:
             assert rejected_completion.output is None
