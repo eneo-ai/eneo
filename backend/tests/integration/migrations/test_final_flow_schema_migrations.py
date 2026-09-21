@@ -177,6 +177,18 @@ def test_final_constraints_reject_cross_owner_and_invalid_retention(
     conn.rollback()
 
 
+def test_migrated_audit_source_permits_abandonment(migration_db) -> None:
+    conn, cfg = migration_db
+    command.upgrade(cfg, "head")
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            "WHERE conrelid = 'flow_run_audit_outbox'::regclass "
+            "AND conname = 'ck_flow_run_audit_outbox_source'"
+        )
+        assert "'abandonment_reconciler'" in cur.fetchone()[0]
+
+
 def _seed_develop_shaped_data(conn) -> dict[str, object]:
     tenant_id = uuid4()
     user_id = uuid4()

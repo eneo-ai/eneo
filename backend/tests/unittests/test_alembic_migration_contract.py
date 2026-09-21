@@ -13,7 +13,10 @@ import sqlalchemy as sa
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from eneo.database.tables.flow_tables import FlowProviderCalls
+from eneo.database.tables.flow_tables import (
+    FLOW_RUN_LIFECYCLE_SOURCE_VALUES,
+    FlowProviderCalls,
+)
 from eneo.object_content.configuration import (
     DEFAULT_FILE_UPLOAD_LIMIT_BYTES,
     ObjectContentCoreSettings,
@@ -22,12 +25,8 @@ from eneo.object_content.configuration import (
 _ALEMBIC_VERSION_NUM_LIMIT = 32
 
 
-def test_abandonment_indexes_match_models_and_downgrade_without_data_changes(
-    monkeypatch,
-):
-    from eneo.database.tables.flow_tables import FlowRunReviewCheckpoints, FlowRuns
-
-    migration = runpy.run_path(
+def _abandonment_migration():
+    return runpy.run_path(
         str(
             Path(__file__).parents[2]
             / "alembic"
@@ -35,9 +34,131 @@ def test_abandonment_indexes_match_models_and_downgrade_without_data_changes(
             / "202609211000_flow_abandonment_indexes.py"
         )
     )
+
+
+def test_abandonment_audit_source_literals_match_model():
+    migration = _abandonment_migration()
+    actual = set(migration["_NEW_SOURCES"])
+    expected = set(FLOW_RUN_LIFECYCLE_SOURCE_VALUES)
+    assert actual == expected, (
+        "ck_flow_run_audit_outbox_source migration literals differ from the ORM: "
+        f"missing={sorted(expected - actual)}, unexpected={sorted(actual - expected)}. "
+        "Update the migration when lifecycle sources change."
+    )
+    assert set(migration["_OLD_SOURCES"]) == expected - {"abandonment_reconciler"}
+
+
+@pytest.mark.parametrize("direction", ["upgrade", "downgrade"])
+@pytest.mark.parametrize("existing", ["absent", "previous", "unvalidated", "validated"])
+def test_abandonment_audit_constraint_resumes_each_phase(
+    monkeypatch, direction, existing
+):
+    from eneo.database.tables.flow_tables import FlowRunAuditOutbox
+
+    migration = _abandonment_migration()
+    sources = migration["_NEW_SOURCES" if direction == "upgrade" else "_OLD_SOURCES"]
+    other = migration["_OLD_SOURCES" if direction == "upgrade" else "_NEW_SOURCES"]
+    values = ",".join(f"'{source}'" for source in sources)
+    definition = f"CHECK (source IN ({values}))"
+    operations = MagicMock()
+    result = operations.get_bind.return_value.execute.return_value
+    result.scalar.return_value = None
+    result.scalar_one.return_value = False
+    result.mappings.return_value.one_or_none.return_value = (
+        None
+        if existing == "absent"
+        else {
+            "convalidated": existing != "unvalidated",
+            "definition": (
+                f"CHECK (source IN ({','.join(repr(source) for source in other)}))"
+                if existing == "previous"
+                else definition
+            ),
+        }
+    )
+    monkeypatch.setitem(migration[direction].__globals__, "op", operations)
+    migration[direction]()
+    queries = [
+        str(c.args[0]) for c in operations.get_bind.return_value.execute.call_args_list
+    ]
+    assert any(
+        "pg_constraint" in sql and "pg_get_constraintdef" in sql for sql in queries
+    )
+    statements = [str(c.args[0]) for c in operations.execute.call_args_list]
+    additions = [sql for sql in statements if "ADD CONSTRAINT" in sql]
+    validations = [sql for sql in statements if "VALIDATE CONSTRAINT" in sql]
+    if existing in {"absent", "previous"}:
+        assert additions == [
+            "ALTER TABLE flow_run_audit_outbox ADD CONSTRAINT "
+            f"ck_flow_run_audit_outbox_source CHECK (source IN ({values})) NOT VALID"
+        ]
+        if direction == "upgrade":
+            constraint = next(
+                item
+                for item in FlowRunAuditOutbox.__table__.constraints
+                if item.name == "ck_flow_run_audit_outbox_source"
+            )
+            assert f"CHECK ({constraint.sqltext}) NOT VALID" in additions[0]
+        calls = operations.mock_calls
+        assert calls.index(call.execute(additions[0])) < calls.index(
+            call.get_context().autocommit_block().__enter__()
+        )
+    else:
+        assert additions == []
+    if existing == "previous":
+        operations.drop_constraint.assert_called_once_with(
+            "ck_flow_run_audit_outbox_source", "flow_run_audit_outbox", type_="check"
+        )
+    else:
+        operations.drop_constraint.assert_not_called()
+    assert len(validations) == (0 if existing == "validated" else 1)
+    operations.execute.assert_called_with("RESET lock_timeout")
+
+
+@pytest.mark.parametrize("direction", ["upgrade", "downgrade"])
+def test_abandonment_audit_validation_failure_resets_lock_timeout(
+    monkeypatch, direction
+):
+    migration = _abandonment_migration()
+    operations = MagicMock()
+    result = operations.get_bind.return_value.execute.return_value
+    result.mappings.return_value.one_or_none.return_value = None
+    result.scalar_one.return_value = False
+
+    def execute(sql):
+        if "VALIDATE CONSTRAINT" in str(sql):
+            raise RuntimeError("lock unavailable")
+
+    operations.execute.side_effect = execute
+    monkeypatch.setitem(migration[direction].__globals__, "op", operations)
+    with pytest.raises(RuntimeError, match="lock unavailable"):
+        migration[direction]()
+    operations.execute.assert_called_with("RESET lock_timeout")
+
+
+def test_abandonment_downgrade_preserves_audit_evidence(monkeypatch):
+    migration = _abandonment_migration()
+    operations = MagicMock()
+    operations.get_bind.return_value.execute.return_value.scalar_one.return_value = True
+    monkeypatch.setitem(migration["downgrade"].__globals__, "op", operations)
+    with pytest.raises(RuntimeError, match="Refusing to downgrade.*abandonment"):
+        migration["downgrade"]()
+    operations.drop_constraint.assert_not_called()
+    operations.drop_index.assert_not_called()
+
+
+def test_abandonment_indexes_match_models_and_downgrade_without_data_changes(
+    monkeypatch,
+):
+    from eneo.database.tables.flow_tables import FlowRunReviewCheckpoints, FlowRuns
+
+    migration = _abandonment_migration()
     assert migration["down_revision"] == "202609201300"
     operations = MagicMock()
-    operations.get_bind.return_value.execute.return_value.scalar.return_value = None
+    result = operations.get_bind.return_value.execute.return_value
+    result.scalar.return_value = None
+    result.scalar_one.return_value = False
+    result.mappings.return_value.one_or_none.return_value = None
     monkeypatch.setitem(migration["upgrade"].__globals__, "op", operations)
     migration["upgrade"]()
     expected_names = {

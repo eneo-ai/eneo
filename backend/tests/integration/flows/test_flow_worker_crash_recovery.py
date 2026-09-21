@@ -136,7 +136,12 @@ async def test_hard_exited_worker_stale_recovery_converges(
         task_name="flows.reconcile_running",
         timeout_seconds=30,
     )
-    assert first_recovery == {"status": "ok", "reconciled": 1}
+    assert first_recovery == {
+        "status": "ok",
+        "reconciled": 1,
+        "abandoned": 0,
+        "review_checkpoint_invariant_violations": 0,
+    }
 
     (
         failed_run,
@@ -156,7 +161,12 @@ async def test_hard_exited_worker_stale_recovery_converges(
         task_name="flows.reconcile_running",
         timeout_seconds=30,
     )
-    assert second_recovery == {"status": "ok", "reconciled": 0}
+    assert second_recovery == {
+        "status": "ok",
+        "reconciled": 0,
+        "abandoned": 0,
+        "review_checkpoint_invariant_violations": 0,
+    }
 
     final_evidence_response = await client.get(
         f"/api/v1/flows/{flow.flow_id}/runs/{run_id}/evidence/",
