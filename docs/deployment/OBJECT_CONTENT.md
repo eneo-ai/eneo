@@ -594,7 +594,7 @@ duration, connection-pool pressure, and the documented inline admission
 ceiling. Reads are linear in payload size and use bounded chunks after the
 database driver returns the bounded BYTEA value.
 
-Before deploying migration `202609211100`, stop or drain every worker that runs
+Before deploying migration `202609211200`, stop or drain every worker that runs
 the `reconcile_object_content` cron (for the Compose worker, use
 `docker compose stop worker`, including all replicas). Upgrade every backend
 and worker that writes inline content before restarting those cron workers.

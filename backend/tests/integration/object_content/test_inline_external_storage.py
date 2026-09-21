@@ -533,7 +533,7 @@ async def test_quarantine_migration_is_transactional_idempotent_and_reversible(
     migration = runpy.run_path(
         str(
             Path(__file__).parents[3]
-            / "alembic/versions/202609211200_inline_corrupt_quarantine.py"
+            / "alembic/versions/202609211300_inline_corrupt_quarantine.py"
         )
     )
 
@@ -599,7 +599,7 @@ async def test_external_migration_is_transactional_idempotent_and_metadata_only(
     migration = runpy.run_path(
         str(
             Path(__file__).parents[3]
-            / "alembic/versions/202609211100_inline_external_storage.py"
+            / "alembic/versions/202609211200_inline_external_storage.py"
         )
     )
 
