@@ -769,7 +769,7 @@ class RemoteFlowTranscriber:
         record_step_phase(FlowStepPhase.TRANSCRIPTION)
         if not AudioMimeTypes.has_value(file.mimetype):
             raise ValueError("File needs to be an audio file")
-        audio_seconds = file.duration_seconds
+        audio_seconds = await file.measure_duration()
         job_id, call_id = await self._submit_job(
             file_id=file_id,
             file_path=file.path,
@@ -802,6 +802,7 @@ class RemoteFlowTranscriber:
                     deadline=asyncio.get_running_loop().time()
                     + self.client.result_timeout_seconds,
                 )
+            await file.aclose()
             waiting_for_result = True
             result = await self.client.wait_for_result(
                 job_id, run_cancelled=current_run_cancel_probe()

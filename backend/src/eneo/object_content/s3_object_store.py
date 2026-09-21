@@ -8,10 +8,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
+from pathlib import Path
 from secrets import token_hex
-from tempfile import SpooledTemporaryFile
+from tempfile import NamedTemporaryFile, SpooledTemporaryFile
 from time import monotonic
-from typing import TYPE_CHECKING, BinaryIO, Final, Mapping, TypeVar, cast
+from typing import IO, TYPE_CHECKING, BinaryIO, Final, Mapping, TypeVar, cast
 from uuid import UUID
 
 from botocore.config import Config
@@ -738,6 +739,7 @@ class S3ObjectStore:
         verification_chunk_size_bytes: int | None = None,
         verification_chunk_count: int | None = None,
         verification_chunk_sha256: Sequence[bytes] = (),
+        require_local_path: bool = False,
     ) -> AsyncGenerator[ContentRead, None]:
         """Verify canonical full bytes or every chunk covering a byte range."""
         if len(expected_sha256) != _SHA256_BYTES:
@@ -766,10 +768,14 @@ class S3ObjectStore:
                 yield opened
             return
 
-        spool = SpooledTemporaryFile(
-            max_size=self._settings.spool_memory_bytes,
-            mode="w+b",
+        spool = (
+            NamedTemporaryFile(mode="w+b", delete=False)
+            if require_local_path
+            else SpooledTemporaryFile(
+                max_size=self._settings.spool_memory_bytes, mode="w+b"
+            )
         )
+        verified_path = Path(spool.name) if require_local_path else None
         digest = sha256()
         try:
             async with self.open_read(
@@ -798,11 +804,16 @@ class S3ObjectStore:
                     content_length=expected_size_bytes,
                     media_type=expected_media_type,
                     content_range=None,
+                    verified_path=verified_path,
                 )
             finally:
                 await chunks.aclose()
         finally:
-            await asyncio.to_thread(spool.close)
+            try:
+                await asyncio.to_thread(spool.close)
+            finally:
+                if verified_path is not None:
+                    verified_path.unlink(missing_ok=True)
 
     @asynccontextmanager
     async def _open_verified_range(
@@ -998,7 +1009,7 @@ class S3ObjectStore:
 
     async def _stream_file(
         self,
-        source: SpooledTemporaryFile[bytes],
+        source: IO[bytes],
         *,
         expected_length: int,
     ) -> AsyncGenerator[bytes, None]:

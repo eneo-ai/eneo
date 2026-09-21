@@ -1,18 +1,19 @@
-"""Own one measured audio spool for a flow transcription attempt.
+"""Own one original audio file for a flow transcription attempt.
 
-Object-store downloads stream to disk; inline downloads hydrate once within the
-deployment's inline ceiling and release their payload before transcription.
+Object-store audio reuses the verified download's named disk file; inline audio
+is hydrated once within the deployment's inline ceiling, written once to disk,
+and released before transcription. Both reuse the download's verified digest.
+Only remote submission measures and caches duration; local transcription applies
+its decode limits during its own decode. Remote acceptance releases the original.
 Signed-URL submission awaits verification of the Vemsa-to-Eneo route in eneo-hy7c.
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import tempfile
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeAlias
 from uuid import UUID
@@ -26,14 +27,39 @@ OpenAudioDownload: TypeAlias = Callable[[UUID], Awaitable[FileDownload]]
 @dataclass(frozen=True, slots=True)
 class SpooledAudio:
     path: Path
-    duration_seconds: float
     digest: str
     byte_size: int
     mimetype: str
     filename: str
+    _duration: asyncio.Task[float] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    async def measure_duration(self) -> float:
+        task = self._duration
+        if task is None:
+            task = asyncio.create_task(audio.measure_duration(str(self.path)))
+            object.__setattr__(self, "_duration", task)
+        return await task
 
     async def aclose(self) -> None:
+        task = self._duration
+        cancelled = False
+        if task is not None:
+            if not task.done():
+                task.cancel()
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    cancelled = True
+                except Exception:
+                    break
+            if not task.cancelled():
+                task.exception()
         self.path.unlink(missing_ok=True)
+        if cancelled:
+            raise asyncio.CancelledError
 
 
 async def _close_download(download: FileDownload) -> None:
@@ -64,33 +90,39 @@ async def spool_audio(
         try:
             mimetype = download.media_type
             filename = download.filename
+            digest = download.sha256.hex()
+            verified_path = download.verified_path
             if not audio.AudioMimeTypes.has_value(mimetype):
                 raise ValueError("File needs to be an audio file")
             with tempfile.NamedTemporaryFile(
-                delete=False, suffix=Path(filename).suffix or ".audio"
+                delete=False,
+                suffix=Path(filename).suffix or ".audio",
+                dir=verified_path.parent if verified_path is not None else None,
             ) as target:
                 path = Path(target.name)
-                byte_size = 0
-                async for chunk in download.chunks:
-                    byte_size += len(chunk)
-                    if byte_size > download.content_length:
-                        raise ValueError("Audio download exceeds its declared length")
-                    target.write(chunk)
-                    del chunk
-                if byte_size != download.content_length:
-                    raise ValueError(
-                        "Audio download does not match its declared length"
-                    )
+                byte_size = download.content_length
+                if verified_path is None:
+                    byte_size = 0
+                    async for chunk in download.chunks:
+                        byte_size += len(chunk)
+                        if byte_size > download.content_length:
+                            raise ValueError(
+                                "Audio download exceeds its declared length"
+                            )
+                        target.write(chunk)
+                        del chunk
+                    if byte_size != download.content_length:
+                        raise ValueError(
+                            "Audio download does not match its declared length"
+                        )
+            if verified_path is not None:
+                verified_path.replace(path)
         finally:
             await _close_download(download)
             del download
 
-        duration_seconds = await audio.measure_duration(str(path))
-        # Wait for the file reader on cancellation before removing its spool.
-        digest = await _measure_digest(path)
         return SpooledAudio(
             path=path,
-            duration_seconds=duration_seconds,
             digest=digest,
             byte_size=byte_size,
             mimetype=mimetype,
@@ -100,24 +132,3 @@ async def spool_audio(
         if path is not None:
             path.unlink(missing_ok=True)
         raise
-
-
-async def _measure_digest(path: Path) -> str:
-    worker = asyncio.create_task(asyncio.to_thread(_digest_file, path))
-    try:
-        return await asyncio.shield(worker)
-    except asyncio.CancelledError:
-        while not worker.done():
-            with suppress(asyncio.CancelledError, Exception):
-                await asyncio.shield(worker)
-        if not worker.cancelled():
-            worker.exception()
-        raise
-
-
-def _digest_file(file_path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(file_path, "rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()

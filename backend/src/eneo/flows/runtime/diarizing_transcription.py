@@ -55,13 +55,12 @@ class RegistryFlowTranscriber:
         observer: ProviderCallObserver | None = None,
         max_speakers: int | None = None,
     ) -> TranscribedAudio:
-        transcribed = await self.transcriber.transcribe_from_filepath(
+        return await self.transcriber.transcribe_from_filepath(
             filepath=file.path,
             transcription_model=transcription_model,
             language=language,
             observer=observer,
         )
-        return replace(transcribed, duration_seconds=file.duration_seconds)
 
 
 class DiarizingFlowTranscriber(RegistryFlowTranscriber):

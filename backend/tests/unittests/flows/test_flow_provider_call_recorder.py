@@ -203,31 +203,27 @@ async def test_interrupted_cancel_after_stalled_acceptance_keeps_gap_identity(
         release.set()
 
 
-async def test_remote_keeps_caller_spool_and_receipt_after_acceptance(
+async def test_remote_releases_spool_after_acceptance_before_polling(
     accepted_call_recorder, monkeypatch, spool_contract
 ):
-    from pathlib import Path
-
     from eneo.main.exceptions import OpenAIException
 
     recorder, row, _, commits = accepted_call_recorder
     transcriber, file, requests = await _accepted_transcriber(
         recorder, row, monkeypatch, spool_contract
     )
-    transcriber.client.wait_for_result = AsyncMock(
-        side_effect=OpenAIException("provider failure")
-    )
 
-    def fail_unlink(path, *args, **kwargs):
-        raise AssertionError("Only the caller can remove its spool")
+    async def wait_for_result(*args, **kwargs):
+        assert commits == ["job-1"]
+        assert not file.path.exists()
+        raise OpenAIException("provider failure")
 
-    with monkeypatch.context() as patch:
-        patch.setattr(Path, "unlink", fail_unlink)
-        with pytest.raises(OpenAIException):
-            await transcriber.transcribe(
-                file, SimpleNamespace(), file_id=row.id, observer=recorder
-            )
-    assert file.path.exists()
+    transcriber.client.wait_for_result = wait_for_result
+    with pytest.raises(OpenAIException):
+        await transcriber.transcribe(
+            file, SimpleNamespace(), file_id=row.id, observer=recorder
+        )
+    assert not file.path.exists()
     assert row.provider_response_id == "job-1"
     assert row.status == "outcome_unknown"
     assert commits == ["job-1", "job-1"]
@@ -360,3 +356,31 @@ async def test_non_transient_persistence_failure_fails_closed_without_retry() ->
     assert str(exc_info.value) == (
         "The provider-call outcome could not be persisted after bounded retries."
     )
+
+
+async def test_release_failure_after_acceptance_preserves_receipt_and_cancels_job(
+    accepted_call_recorder, monkeypatch, spool_contract
+):
+    from pathlib import Path
+
+    recorder, row, _, commits = accepted_call_recorder
+    transcriber, file, requests = await _accepted_transcriber(
+        recorder, row, monkeypatch, spool_contract
+    )
+    wait_for_result = AsyncMock()
+    transcriber.client.wait_for_result = wait_for_result
+
+    def fail_unlink(*args, **kwargs):
+        raise OSError("cannot remove original")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", fail_unlink)
+        with pytest.raises(OSError, match="cannot remove original"):
+            await transcriber.transcribe(
+                file, SimpleNamespace(), file_id=row.id, observer=recorder
+            )
+    wait_for_result.assert_not_awaited()
+    assert row.provider_response_id == "job-1"
+    assert row.status == "outcome_unknown"
+    assert commits == ["job-1", "job-1"]
+    assert requests == ["POST", "DELETE"]

@@ -200,7 +200,9 @@ def _legacy_metadata(*, file_type: FileType = FileType.TEXT) -> FileMetadata:
 
 
 @pytest.mark.parametrize("owned", [False, True])
-async def test_audio_download_checks_owner_before_opening_original(service, owned):
+async def test_audio_download_checks_owner_before_opening_original(
+    service, owned, tmp_path
+):
     metadata = _legacy_metadata(file_type=FileType.AUDIO).model_copy(
         update={
             "tenant_id": service.user.tenant_id,
@@ -227,12 +229,14 @@ async def test_audio_download_checks_owner_before_opening_original(service, owne
     service.repo.get_by_id.return_value = metadata
     service.repo.get_content_references.return_value = [reference]
     events = []
+    verified_path = tmp_path / "verified.audio"
 
     @asynccontextmanager
-    async def open_content(grant, *, range_header):
+    async def open_content(grant, *, range_header, require_local_path):
         assert grant.tenant_id == metadata.tenant_id
         assert grant.content_id == reference.content_id
         assert range_header is None
+        assert require_local_path is True
         events.append("opened")
 
         async def chunks():
@@ -240,7 +244,9 @@ async def test_audio_download_checks_owner_before_opening_original(service, owne
             yield payload[4:]
 
         try:
-            yield ContentRead(chunks(), len(payload), "audio/mpeg", None)
+            yield ContentRead(
+                chunks(), len(payload), "audio/mpeg", None, verified_path=verified_path
+            )
         finally:
             events.append("closed")
 
@@ -248,6 +254,8 @@ async def test_audio_download_checks_owner_before_opening_original(service, owne
     if owned:
         download = await service.get_audio_download(metadata.id)
         try:
+            assert download.verified_path == verified_path
+            assert download.sha256 == reference.sha256
             assert b"".join([chunk async for chunk in download.chunks]) == payload
         finally:
             await download.aclose()

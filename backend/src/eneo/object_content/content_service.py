@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable, 
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from secrets import token_hex
 from time import monotonic
 from uuid import UUID
@@ -100,6 +101,7 @@ class DetachedContentRead:
     media_type: str
     content_range: str | None
     _close: Callable[[], Awaitable[None]] = field(repr=False)
+    verified_path: Path | None = None
 
     async def aclose(self) -> None:
         await self._close()
@@ -145,6 +147,7 @@ async def detach_content_read(
         media_type=opened.media_type,
         content_range=opened.content_range,
         _close=close,
+        verified_path=opened.verified_path,
     )
 
 
@@ -707,6 +710,7 @@ class ObjectContentService:
         grant: ContentReadGrant,
         *,
         range_header: str | None = None,
+        require_local_path: bool = False,
     ) -> AsyncGenerator[ContentRead]:
         for attempt in range(2):
             async with self._database.session() as session, session.begin():
@@ -727,6 +731,7 @@ class ObjectContentService:
                 async with self._open_readable_source(
                     source,
                     byte_range=byte_range,
+                    require_local_path=require_local_path,
                 ) as opened:
                     yielded = True
                     yield opened
@@ -741,6 +746,7 @@ class ObjectContentService:
         source: ReadableContentSource,
         *,
         byte_range: ByteRange | None = None,
+        require_local_path: bool = False,
     ) -> AsyncGenerator[ContentRead]:
         content = source.content
         match content.storage_kind:
@@ -775,6 +781,7 @@ class ObjectContentService:
                         source,
                         lease=lease,
                         byte_range=byte_range,
+                        require_local_path=require_local_path,
                     ) as opened:
                         yield opened
 
@@ -785,6 +792,7 @@ class ObjectContentService:
         *,
         lease: ObjectStoreLease,
         byte_range: ByteRange | None,
+        require_local_path: bool = False,
     ) -> AsyncGenerator[ContentRead]:
         content = source.content
         descriptor = source.object_store_descriptor
@@ -818,6 +826,7 @@ class ObjectContentService:
                 ),
                 verification_chunk_count=descriptor.verification_chunk_count,
                 verification_chunk_sha256=verification_chunk_sha256,
+                require_local_path=require_local_path,
             ) as opened:
                 yield opened
         except (ValueError, ObjectContentStateError) as error:

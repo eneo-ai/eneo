@@ -495,20 +495,26 @@ async def test_submission_key_is_stable_and_scoped_to_operation(spool_contract, 
     )
     observer = RecordingObserver()
     transcriber = RemoteFlowTranscriber(make_client(service))
-    file = await audio_file(spool_contract)
     file_id = UUID(int=1)
     await transcriber.transcribe(
-        file, SimpleNamespace(), observer=observer, file_id=file_id
+        await audio_file(spool_contract),
+        SimpleNamespace(),
+        observer=observer,
+        file_id=file_id,
     )
     await transcriber.transcribe(
-        file, SimpleNamespace(), observer=observer, file_id=file_id
+        await audio_file(spool_contract),
+        SimpleNamespace(),
+        observer=observer,
+        file_id=file_id,
     )
     if change == "scope":
         observer.operation_scope = "other-tenant/run/step/attempt-2"
     elif change == "file_id":
         file_id = uuid4()
-    elif change == "digest":
-        file = await audio_file(spool_contract, b"different audio")
+    file = await audio_file(
+        spool_contract, b"different audio" if change == "digest" else b"fake-mp3-bytes"
+    )
     if change == "task":
         await transcriber.label_speakers(
             file,

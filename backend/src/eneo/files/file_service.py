@@ -2,6 +2,7 @@ from collections import defaultdict
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -82,6 +83,7 @@ class FileDownload:
     content_range: str | None
     range_supported: bool
     _close: Callable[[], Awaitable[None]] = field(repr=False)
+    verified_path: Path | None = None
 
     async def aclose(self) -> None:
         await self._close()
@@ -758,7 +760,9 @@ class FileService:
         original = self._first_reference(references, FileContentVariant.ORIGINAL)
         if original is None:
             return await self._open_legacy_audio_download(metadata, range_header=None)
-        return await self._open_download(metadata, original, range_header=None)
+        return await self._open_download(
+            metadata, original, range_header=None, require_local_path=True
+        )
 
     async def get_owned_file_for_key_share(
         self,
@@ -938,6 +942,7 @@ class FileService:
         reference: FileContentReferenceRecord | LegacyFileContentRecord,
         *,
         range_header: str | None,
+        require_local_path: bool = False,
     ) -> FileDownload:
         if range_header is not None and metadata.file_type is not FileType.AUDIO:
             raise BadRequestException("Range is only supported for audio files")
@@ -957,6 +962,7 @@ class FileService:
             self._object_content.open_content(
                 grant,
                 range_header=range_header,
+                require_local_path=require_local_path,
             )
         )
 
@@ -975,6 +981,7 @@ class FileService:
             content_range=opened.content_range,
             range_supported=metadata.file_type is FileType.AUDIO,
             _close=opened.aclose,
+            verified_path=opened.verified_path,
         )
 
     def _open_legacy_download(

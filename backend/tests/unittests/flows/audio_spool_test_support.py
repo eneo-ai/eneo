@@ -1,4 +1,5 @@
 from collections import Counter
+from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
@@ -47,7 +48,7 @@ class AudioDownloads:
             content_length=len(payload),
             media_type=file.mimetype,
             filename=file.name,
-            sha256=b"",
+            sha256=sha256(payload).digest(),
             content_range=None,
             range_supported=True,
             _close=close,
@@ -62,8 +63,7 @@ class SpoolContract:
     def __init__(self):
         self.duration_seconds = 42.0
         self.duration_calls = Counter()
-        self.measured = set()
-        self.digest_calls = Counter()
+        self.paths = []
         self.sources = []
         self.owned_spools = []
 
@@ -80,23 +80,20 @@ class SpoolContract:
         return spool
 
     def assert_finished(self):
-        assert sum(len(source.streams) for source in self.sources) == len(
-            self.duration_calls
-        )
+        assert sum(len(source.streams) for source in self.sources) == len(self.paths)
         for source in self.sources:
             source.assert_finished()
-        for path, count in self.duration_calls.items():
-            assert count == 1
-            assert self.digest_calls[path] == (1 if path in self.measured else 0)
+        for path in self.paths:
+            assert self.duration_calls[path] <= 1
             assert not path.exists(), f"Spool was not closed: {path}"
-        assert set(self.digest_calls) <= self.measured
+        assert set(self.duration_calls) <= set(self.paths)
 
 
 @pytest.fixture
 async def spool_contract(monkeypatch):
     contract = SpoolContract()
     measure = audio_spool.audio.measure_duration
-    digest = audio_spool._digest_file
+    acquire = audio_spool.spool_audio
 
     async def measure_once(filepath, **kwargs):
         path = Path(filepath)
@@ -107,16 +104,18 @@ async def spool_contract(monkeypatch):
             if contract.duration_seconds is None
             else contract.duration_seconds
         )
-        contract.measured.add(path)
         return value
 
-    def digest_once(path):
-        contract.digest_calls[path] += 1
-        assert contract.digest_calls[path] == 1
-        return digest(path)
+    async def acquire_spool(*args, **kwargs):
+        spool = await acquire(*args, **kwargs)
+        contract.paths.append(spool.path)
+        return spool
+
+    from eneo.flows.runtime import transcription
 
     monkeypatch.setattr(audio_spool.audio, "measure_duration", measure_once)
-    monkeypatch.setattr(audio_spool, "_digest_file", digest_once)
+    monkeypatch.setattr(audio_spool, "spool_audio", acquire_spool)
+    monkeypatch.setattr(transcription, "spool_audio", acquire_spool)
     yield contract
     for spool in contract.owned_spools:
         await spool.aclose()

@@ -1017,3 +1017,54 @@ async def test_stream_checksum_failure_remains_an_integrity_error() -> None:
             _ = b"".join([chunk async for chunk in opened.chunks])
 
     assert client.body.closed
+
+
+@pytest.mark.parametrize("require_local_path", [False, True])
+@pytest.mark.parametrize("corrupt", [False, True])
+async def test_verified_path_is_opt_in_and_owned_by_read(
+    tmp_path, monkeypatch, require_local_path, corrupt
+):
+    from eneo.object_content import s3_object_store
+    from eneo.object_content.content_service import detach_content_read
+
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    payload = b"verified audio"
+    client = _DownloadClient(payload)
+    store = S3ObjectStore(_settings(), client=cast("S3Client", client))
+    memory_spools = []
+    original = s3_object_store.SpooledTemporaryFile
+
+    def memory_spool(*args, **kwargs):
+        spool = original(*args, **kwargs)
+        memory_spools.append(spool)
+        return spool
+
+    monkeypatch.setattr(s3_object_store, "SpooledTemporaryFile", memory_spool)
+    context = store.open_verified_read(
+        new_object_key(_settings()),
+        expected_sha256=sha256(b"corrupt" if corrupt else payload).digest(),
+        expected_size_bytes=len(payload),
+        expected_media_type="application/octet-stream",
+        require_local_path=require_local_path,
+    )
+    if corrupt:
+        with pytest.raises(ObjectStoreIntegrityError, match="canonical SHA-256"):
+            await detach_content_read(context)
+    else:
+        opened = await detach_content_read(context)
+        try:
+            if require_local_path:
+                assert opened.verified_path is not None
+                assert opened.verified_path.read_bytes() == payload
+                assert memory_spools == []
+                assert list(tmp_path.iterdir()) == [opened.verified_path]
+            else:
+                assert opened.verified_path is None
+                assert len(memory_spools) == 1
+                assert memory_spools[0]._rolled is False
+                assert list(tmp_path.iterdir()) == []
+            assert b"".join([chunk async for chunk in opened.chunks]) == payload
+        finally:
+            await opened.aclose()
+    assert len(client.requests) == 1
+    assert list(tmp_path.iterdir()) == []

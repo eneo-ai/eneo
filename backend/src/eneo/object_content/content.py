@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from hashlib import sha256
+from pathlib import Path
 from tempfile import SpooledTemporaryFile
 from typing import BinaryIO, cast
 from uuid import UUID
@@ -274,6 +275,8 @@ class ContentRead:
     content_length: int
     media_type: str
     content_range: str | None
+    # Valid until close; rename to transfer ownership without copying the bytes.
+    verified_path: Path | None = None
 
 
 def content_request_fingerprint(

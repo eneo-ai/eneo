@@ -153,3 +153,38 @@ def test_audio_refusal_has_non_retryable_typed_taxonomy():
     assert entry.handling_phase == "Run execution"
     assert "split" in entry.consumer_action.lower()
     assert "administrator" in entry.consumer_action.lower()
+
+
+async def test_local_preparation_decodes_once(recording, ffmpeg, monkeypatch):
+    from types import SimpleNamespace
+
+    from eneo.flows.runtime.diarizing_transcription import RegistryFlowTranscriber
+    from tests.unittests.flows.audio_spool_test_support import AudioDownloads
+
+    source, _, temp_dir = recording
+    decode = AsyncMock(wraps=audio._decode_audio)
+    monkeypatch.setattr(audio, "_decode_audio", decode)
+    provider = AsyncMock(return_value=SimpleNamespace(text="hello"))
+    monkeypatch.setattr(TRANSPORT, provider)
+    registry = Transcriber(file_service=AsyncMock())
+    adapter = _adapter()
+    monkeypatch.setattr(registry, "_get_adapter", AsyncMock(return_value=adapter))
+    file = _audio_file(name="recording.wav")
+    download = AudioDownloads([file], payload=source.read_bytes())
+
+    result = await transcribe_audio_input(
+        files=[file],
+        transcriber=RegistryFlowTranscriber(registry),
+        transcription_model=adapter.model,
+        language="auto",
+        step_order=1,
+        max_files=1,
+        max_inline_text_bytes=1024,
+        open_audio_download=download,
+    )
+
+    assert "hello" in result.text
+    assert decode.await_count == 1
+    provider.assert_awaited_once()
+    download.assert_finished()
+    assert list(temp_dir.iterdir()) == []
