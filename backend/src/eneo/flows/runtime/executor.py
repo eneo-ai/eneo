@@ -75,7 +75,6 @@ from eneo.flows.domain.step_output import (
 )
 from eneo.flows.domain.text_processing import SummarizationProvenance
 from eneo.flows.domain.transcript_source import (
-    TranscriptSource,
     TranscriptSourceReference,
     with_transcript_source_reference,
 )
@@ -232,7 +231,10 @@ from eneo.flows.runtime.step_result_builder import (
 from eneo.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
 )
-from eneo.flows.runtime.transcription import TranscriptionFailure
+from eneo.flows.runtime.transcription import (
+    TranscriptionFailure,
+    TranscriptSourcePreparation,
+)
 from eneo.flows.runtime.transcription_runtime import (
     persist_transcription_on_run_input,
 )
@@ -588,7 +590,8 @@ class FlowRunExecutor:
         self.flow_run_repo = flow_run_repo
         self.transcript_words_repo = transcript_words_repo
         self._pending_transcript_sources: dict[
-            tuple[UUID, UUID, int], tuple[TranscriptSourceReference, TranscriptSource]
+            tuple[UUID, UUID, int],
+            tuple[TranscriptSourceReference, TranscriptSourcePreparation],
         ] = {}
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
         self.flow_run_terminalizer = flow_run_terminalizer
@@ -1629,6 +1632,14 @@ class FlowRunExecutor:
         grouping = _group_attempt_resolved_inputs(
             *(prepared.prepared.resolved_input_edges for prepared in prepared_steps)
         )
+        pending_source = self._pending_transcript_sources.get(
+            (run.id, step.step_id, attempt_no)
+        )
+        if pending_source is not None:
+            for prepared_step in prepared_steps:
+                metadata = prepared_step.prepared.step_input.transcription_metadata
+                if metadata is not None:
+                    metadata["source"] = pending_source[0].model_dump(mode="json")
         completion_configuration, execution_inputs = _attempt_completion_evidence(
             prepared_steps
         )
@@ -2492,12 +2503,17 @@ class FlowRunExecutor:
         )
 
     def _stage_transcript_source(
-        self, reference: TranscriptSourceReference, source: TranscriptSource
+        self, reference: TranscriptSourceReference, source: TranscriptSourcePreparation
     ) -> None:
         key = (reference.run_id, reference.step_id, reference.attempt_no)
-        if key in self._pending_transcript_sources:
-            raise FlowRuntimeInvariantError(
-                "A transcription attempt produced more than one source."
+        pending = self._pending_transcript_sources.get(key)
+        if pending is not None:
+            source = pending[1].append(source)
+            reference = reference.model_copy(
+                update={
+                    "source_hash": source.source.source_hash,
+                    "bounds": source.source.bounds,
+                }
             )
         self._pending_transcript_sources[key] = (reference, source)
 
@@ -2525,7 +2541,10 @@ class FlowRunExecutor:
         if pending is not None:
             reference, source = pending
             await FlowTranscriptSourceRepository(session=self.session).insert(
-                tenant_id=tenant_id, flow_id=flow_id, reference=reference, source=source
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+                reference=reference,
+                source=source.source,
             )
 
     async def _resolve_step_input(

@@ -6,6 +6,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import cached_property
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
@@ -317,6 +318,65 @@ def serialize_segment_words(
 
 
 @dataclass(frozen=True)
+class TranscriptSourcePreparation:
+    files_count: int
+    segments: list[dict[str, Any]]
+    speaker_review: dict[str, Any] | None
+    words: list[dict[str, Any]]
+    words_omitted_reason: str | None
+
+    @cached_property
+    def source(self) -> TranscriptSource:
+        return capture_transcript_source(
+            segments=self.segments,
+            speaker_review=self.speaker_review,
+            words=self.words,
+            words_omitted_reason=self.words_omitted_reason,
+        )
+
+    def append(
+        self, following: TranscriptSourcePreparation
+    ) -> TranscriptSourcePreparation:
+        segments = (
+            [
+                *self.segments,
+                *(
+                    {**segment, "file_index": segment["file_index"] + self.files_count}
+                    for segment in following.segments
+                ),
+            ]
+            if self.segments and following.segments
+            else []
+        )
+        review_files = [
+            *(self.speaker_review or {}).get("files", []),
+            *(
+                {**review, "file_index": review["file_index"] + self.files_count}
+                for review in (following.speaker_review or {}).get("files", [])
+            ),
+        ]
+        words = [
+            *self.words,
+            *(
+                {**entry, "segment_index": entry["segment_index"] + len(self.segments)}
+                for entry in following.words
+            ),
+        ]
+        _, words_omitted_reason = _cap_words(words, segments_kept=True)
+        # The legacy words row is replaced for each preparation and cannot
+        # anchor the combined segment array.
+        if words and words_omitted_reason is None:
+            words_omitted_reason = WORDS_OMITTED_NO_SEGMENTS
+        return TranscriptSourcePreparation(
+            files_count=self.files_count + following.files_count,
+            segments=segments,
+            speaker_review={"files": review_files} if review_files else None,
+            words=words,
+            words_omitted_reason=words_omitted_reason,
+        )
+
+
+@dataclass(frozen=True)
 class FlowTranscriptionResult:
     text: str
     file_ids: list[UUID]
@@ -329,7 +389,7 @@ class FlowTranscriptionResult:
     elapsed_ms: int
     files_count: int
     near_inline_limit: bool
-    source: TranscriptSource
+    source_preparation: TranscriptSourcePreparation
     # None: no speaker labels requested. "external": labelled by the external
     # service. "skipped:<reason>": requested but not produced.
     diarization: str | None = None
@@ -350,6 +410,10 @@ class FlowTranscriptionResult:
     words: list[dict[str, Any]] | None = None
     words_omitted_reason: str | None = None
     speaker_review: dict[str, Any] | None = None
+
+    @property
+    def source(self) -> TranscriptSource:
+        return self.source_preparation.source
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -631,11 +695,6 @@ async def transcribe_audio_input(
     near_inline_limit = transcript_bytes >= threshold
     estimated_tokens = count_tokens(combined)
     elapsed_ms = int((time.monotonic() - transcription_started) * 1000)
-    source = capture_transcript_source(
-        segments=segments if every_file_segmented else [],
-        speaker_review={"files": review_files} if review_files else None,
-        words=words,
-    )
     kept_segments, segments_omitted_reason = _cap_segments(
         segments if every_file_segmented else []
     )
@@ -665,6 +724,13 @@ async def transcribe_audio_input(
     kept_words, words_omitted_reason = _cap_words(
         words, segments_kept=kept_segments is not None
     )
+    source_preparation = TranscriptSourcePreparation(
+        files_count=len(files),
+        segments=segments if every_file_segmented else [],
+        speaker_review={"files": review_files} if review_files else None,
+        words=words,
+        words_omitted_reason=words_omitted_reason,
+    )
 
     return FlowTranscriptionResult(
         text=combined,
@@ -678,7 +744,7 @@ async def transcribe_audio_input(
         elapsed_ms=elapsed_ms,
         files_count=len(files),
         near_inline_limit=near_inline_limit,
-        source=source,
+        source_preparation=source_preparation,
         diarization=_combine_diarization_outcomes(diarization_outcomes),
         diarization_elapsed_ms=sum(diarization_elapsed)
         if diarization_elapsed
@@ -699,6 +765,7 @@ def capture_transcript_source(
     segments: list[dict[str, Any]],
     speaker_review: dict[str, Any] | None,
     words: list[dict[str, Any]],
+    words_omitted_reason: str | None,
 ) -> TranscriptSource:
     segments_bytes = (
         len(json.dumps(segments, ensure_ascii=False).encode("utf-8")) if segments else 0
@@ -724,10 +791,8 @@ def capture_transcript_source(
         else None
     )
     words_reason = (
-        TranscriptSourceOmissionReason.TOO_LARGE
-        if words_bytes > MAX_WORDS_BYTES
-        else TranscriptSourceOmissionReason.SEGMENTS_UNAVAILABLE
-        if words and segments_reason is not None
+        TranscriptSourceOmissionReason[words_omitted_reason.upper()]
+        if words_omitted_reason is not None
         else None
     )
     return TranscriptSource(

@@ -56,6 +56,113 @@ async def test_transcription_stages_an_exact_attempt_reference(spool_contract, u
     assert reference["bounds"]["segments_omitted_reason"] == 2
 
 
+async def test_per_source_audio_publishes_one_combined_attempt_source(
+    spool_contract, user, monkeypatch
+):
+    from eneo.files.text import TEXT_EXTRACTION_WARNINGS
+    from eneo.flows.domain.transcript_corrections import segments_content_hash
+    from eneo.flows.infrastructure.flow_transcript_source_repo import (
+        FlowTranscriptSourceRepository,
+    )
+    from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+        TranscriptSegment,
+    )
+
+    executor, repo, run, files, assistant = _case(user, "Transcript.", spool_contract)
+    second = _audio_file(name="second.wav")
+    files[second.id] = second
+    repo.list_step_input_file_ids.return_value = list(files)
+    executor.file_service.get_audio_download = spool_contract.downloads(
+        list(files.values())
+    )
+    executor.transcriber.transcribe.side_effect = [
+        TranscribedAudio(
+            text, 10.0, transcript_segments=(TranscriptSegment(text, 0, 10),)
+        )
+        for text in ("First transcript.", "Second transcript.")
+    ]
+    assistant.get_response.side_effect = [
+        SimpleNamespace(
+            completion='{"documents":[{"title":"First"}]}', total_token_count=11
+        ),
+        SimpleNamespace(
+            completion='{"documents":[{"title":"Second"}]}', total_token_count=13
+        ),
+    ]
+    insert = AsyncMock()
+    monkeypatch.setattr(FlowTranscriptSourceRepository, "insert", insert)
+    step = _runtime_step(
+        input_type="file",
+        output_type="json",
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "audio",
+                "execution_mode": "per_source",
+                "max_files": 2,
+            }
+        },
+        output_contract={
+            "type": "object",
+            "required": ["documents"],
+            "additionalProperties": False,
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": [
+                            "source_label",
+                            "source_file_id",
+                            "extraction_warnings",
+                            "title",
+                        ],
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                                },
+                            },
+                        },
+                    },
+                }
+            },
+        },
+    )
+    await executor._execute_step(
+        step=step,
+        run=run,
+        state=_state(),
+        attempt_no=3,
+        version_metadata=_metadata(executor),
+    )
+    assert executor.transcriber.transcribe.await_count == 2
+    assert assistant.get_response.await_count == 2
+    insert.assert_awaited_once()
+    source = insert.await_args.kwargs["source"]
+    assert [segment["text"] for segment in source.segments] == [
+        "First transcript.",
+        "Second transcript.",
+    ]
+    assert [segment["file_index"] for segment in source.segments] == [0, 1]
+    assert source.source_hash == segments_content_hash(source.segments)
+    assert source.bounds.segments_bytes == len(
+        json.dumps(source.segments, ensure_ascii=False).encode("utf-8")
+    )
+    activated = repo.activate_step_attempt.await_args.kwargs[
+        "attempt_input"
+    ].to_payload()
+    reference = activated["resolved_input"]["transcription"]["source"]
+    assert reference["source_hash"] == source.source_hash
+    assert reference["bounds"] == source.bounds.model_dump(mode="json")
+
+
 def _case(user, text, spool_contract):
     executor, _, repo, _ = _build_executor(user, max_inline_text_bytes=2048)
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})

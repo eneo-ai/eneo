@@ -102,4 +102,15 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("SET LOCAL lock_timeout = '5s'")
+    op.execute("LOCK TABLE flow_step_transcript_sources IN ACCESS EXCLUSIVE MODE")
+    retained = (
+        op.get_bind()
+        .execute(sa.text("SELECT EXISTS (SELECT 1 FROM flow_step_transcript_sources)"))
+        .scalar_one()
+    )
+    if retained:
+        raise RuntimeError(
+            "Refusing to downgrade 202609211100: authoritative transcript sources "
+            "are still referenced by step attempts."
+        )
     op.drop_table("flow_step_transcript_sources")

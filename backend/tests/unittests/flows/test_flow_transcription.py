@@ -1108,10 +1108,16 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
     _patch_run_input_payload(flow_run_repo, run)
     context = {"flow_input": {}}
 
-    from eneo.flows.runtime.transcription import capture_transcript_source
+    from eneo.flows.runtime.transcription import TranscriptSourcePreparation
 
     transcription_result = FlowTranscriptionResult(
-        source=capture_transcript_source(segments=[], speaker_review=None, words=[]),
+        source_preparation=TranscriptSourcePreparation(
+            files_count=1,
+            segments=[],
+            speaker_review=None,
+            words=[],
+            words_omitted_reason=None,
+        ),
         text="transcribed text",
         file_ids=[uuid4()],
         model_id=uuid4(),
@@ -1188,10 +1194,16 @@ async def test_resolve_transcribe_attach_swallow_audit_errors(
     _patch_run_input_payload(flow_run_repo, run)
     context = {"flow_input": {}}
 
-    from eneo.flows.runtime.transcription import capture_transcript_source
+    from eneo.flows.runtime.transcription import TranscriptSourcePreparation
 
     transcription_result = FlowTranscriptionResult(
-        source=capture_transcript_source(segments=[], speaker_review=None, words=[]),
+        source_preparation=TranscriptSourcePreparation(
+            files_count=1,
+            segments=[],
+            speaker_review=None,
+            words=[],
+            words_omitted_reason=None,
+        ),
         text="transcribed text",
         file_ids=[uuid4()],
         model_id=uuid4(),

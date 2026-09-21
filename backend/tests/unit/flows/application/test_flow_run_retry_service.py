@@ -205,6 +205,7 @@ async def test_retry_import_copies_bounded_consumed_material_alias(context):
     assert seed.results[1].input_payload_json == payload
 
     session = AsyncMock()
+    session.scalar.return_value = None
     session.execute.return_value = Mock()
     await FlowRunRepository(session=session).seed_validated_prefix(
         run=SimpleNamespace(

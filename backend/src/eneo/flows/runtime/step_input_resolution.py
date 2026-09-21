@@ -41,7 +41,6 @@ from eneo.flows.domain.step_output import (
 )
 from eneo.flows.domain.text_processing import text_processing_config
 from eneo.flows.domain.transcript_source import (
-    TranscriptSource,
     TranscriptSourceReference,
 )
 from eneo.flows.enums import FlowStepPhase
@@ -105,6 +104,7 @@ if TYPE_CHECKING:
     from eneo.files.file_models import File, FileInfo
     from eneo.files.file_service import FileService
     from eneo.flows.runtime.step_execution_runtime import ApplyOutputCapFn
+    from eneo.flows.runtime.transcription import TranscriptSourcePreparation
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
     )
@@ -122,7 +122,7 @@ class StepInputResolutionDeps:
     apply_output_cap: ApplyOutputCapFn
     commit: Callable[[], Awaitable[None]]
     stage_transcript_source: Callable[
-        [TranscriptSourceReference, TranscriptSource], None
+        [TranscriptSourceReference, TranscriptSourcePreparation], None
     ]
     variable_resolver: Any
     resolve_http_input_source_text: Callable[..., Awaitable[FlowHttpInputResolution]]

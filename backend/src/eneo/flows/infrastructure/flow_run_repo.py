@@ -683,7 +683,24 @@ class FlowRunRepository:
             if source.id is None or source.current_attempt_no is None:
                 raise ValueError("Imported step results require a persisted attempt.")
             input_payload = source.input_payload_json
-            reference = transcript_source_reference(input_payload)
+            parent_attempt = await self.get_step_attempt(
+                run_id=seed.source_run_id,
+                step_id=source.step_id,
+                attempt_no=source.current_attempt_no,
+                tenant_id=run.tenant_id,
+            )
+            reference = transcript_source_reference(
+                parent_attempt.input_payload_json
+                if parent_attempt is not None
+                else None
+            )
+            if (
+                reference is None
+                and transcript_source_reference(input_payload) is not None
+            ):
+                raise ValueError(
+                    "Imported transcript reference is missing from its source attempt."
+                )
             if reference is not None:
                 if (reference.run_id, reference.step_id, reference.attempt_no) != (
                     seed.source_run_id,

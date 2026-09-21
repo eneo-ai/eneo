@@ -109,7 +109,7 @@ async def test_source_is_immutable_and_retry_has_its_own_row(source_scenario):
     session, scenario, user = source_scenario
     repo = FlowTranscriptSourceRepository(session=session)
     source = transcription.capture_transcript_source(
-        segments=SEGMENTS, speaker_review=None, words=[]
+        segments=SEGMENTS, speaker_review=None, words=[], words_omitted_reason=None
     )
     first = _reference(scenario, source)
     await _attempt(session, scenario, first)
@@ -156,6 +156,7 @@ async def test_independent_bounds_survive_storage_and_reader(
         segments=[] if component == "no_segments" else SEGMENTS,
         speaker_review={"files": [{"overlaps": [{"id": "one"}]}]},
         words=[{"segment_index": 0, "words": [{"word": "Vi", "start": 0, "end": 1}]}],
+        words_omitted_reason="too_large" if component == "words" else None,
     )
     reference = _reference(scenario, source)
     await _attempt(session, scenario, reference)
@@ -192,14 +193,17 @@ async def test_pre_row_attempt_is_explicitly_unavailable(source_scenario):
 async def test_marker_without_row_raises_typed_integrity_failure(source_scenario):
     session, scenario, user = source_scenario
     source = transcription.capture_transcript_source(
-        segments=SEGMENTS, speaker_review=None, words=[]
+        segments=SEGMENTS, speaker_review=None, words=[], words_omitted_reason=None
     )
     await _attempt(session, scenario, _reference(scenario, source))
     with pytest.raises(MissingTranscriptSourceError):
         await _read(session, scenario, user)
 
 
-async def test_regenerated_child_resolves_after_parent_is_deleted(source_scenario):
+@pytest.mark.parametrize("reference_on_result", [False, True])
+async def test_regenerated_child_resolves_after_parent_is_deleted(
+    source_scenario, reference_on_result
+):
     from eneo.database.tables.flow_tables import FlowRuns
     from eneo.flows.domain.flow import FlowStepResultStatus
     from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
@@ -210,7 +214,10 @@ async def test_regenerated_child_resolves_after_parent_is_deleted(source_scenari
 
     session, scenario, user = source_scenario
     source = transcription.capture_transcript_source(
-        segments=SEGMENTS, speaker_review={"files": []}, words=[]
+        segments=SEGMENTS,
+        speaker_review={"files": []},
+        words=[],
+        words_omitted_reason=None,
     )
     reference = _reference(scenario, source, attempt_no=3)
     await _attempt(session, scenario, reference)
@@ -232,7 +239,9 @@ async def test_regenerated_child_resolves_after_parent_is_deleted(source_scenari
             "status": FlowStepResultStatus.COMPLETED,
             "input_payload_json": with_transcript_source_reference(
                 parent_result.input_payload_json, reference
-            ),
+            )
+            if reference_on_result
+            else {"runtime_input": {"execution_mode": "per_source"}},
         }
     )
     child = await runs.create(
@@ -279,7 +288,7 @@ async def test_regenerated_child_resolves_after_parent_is_deleted(source_scenari
     assert state.source == source
 
 
-async def _publication_case(session, scenario, user, source=None):
+async def _publication_case(session, scenario, user, preparation=None):
     from dataclasses import replace
 
     from eneo.database.tables.flow_tables import FlowRuns, FlowStepResults
@@ -334,10 +343,15 @@ async def _publication_case(session, scenario, user, source=None):
     executor, _, _, _ = _build_executor(user, max_inline_text_bytes=2048)
     executor.session = session
     executor.flow_run_repo = runs
-    source = source or transcription.capture_transcript_source(
-        segments=SEGMENTS, speaker_review=None, words=[]
+    preparation = preparation or transcription.TranscriptSourcePreparation(
+        files_count=1,
+        segments=SEGMENTS,
+        speaker_review=None,
+        words=[],
+        words_omitted_reason=None,
     )
-    executor._stage_transcript_source(_reference(scenario, source), source)
+    source = preparation.source
+    executor._stage_transcript_source(_reference(scenario, source), preparation)
     return executor, run, step, result, source
 
 
@@ -461,6 +475,101 @@ async def test_publication_commits_reference_and_row_together(
         assert state.source == source
 
 
+@pytest.mark.parametrize("limited_component", [None, "segments", "detail", "words"])
+async def test_multiple_preparations_publish_one_bounded_source(
+    source_scenario, monkeypatch, limited_component
+):
+    import json
+
+    from eneo.database.database import sessionmanager
+    from eneo.flows.domain.transcript_corrections import segments_content_hash
+
+    parts = [
+        transcription.TranscriptSourcePreparation(
+            files_count=1,
+            segments=[{**SEGMENTS[0], "file_index": 0, "text": text}],
+            speaker_review={
+                "files": [{"file_index": 0, "file_id": str(uuid4()), "overlaps": []}]
+            },
+            words=[
+                {"segment_index": 0, "words": [{"word": text, "start": 0, "end": 1}]}
+            ],
+            words_omitted_reason=None,
+        )
+        for text in ("First transcript.", "Second transcript.")
+    ]
+    expected_segments = [
+        {**part.segments[0], "file_index": index} for index, part in enumerate(parts)
+    ]
+    expected_detail = {
+        "files": [
+            {**part.speaker_review["files"][0], "file_index": index}
+            for index, part in enumerate(parts)
+        ]
+    }
+    if limited_component:
+        bound = (
+            max(
+                len(
+                    json.dumps(
+                        {
+                            "segments": part.segments,
+                            "detail": part.speaker_review,
+                            "words": part.words,
+                        }[limited_component],
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                )
+                for part in parts
+            )
+            + 1
+        )
+        monkeypatch.setattr(
+            transcription, f"MAX_{limited_component.upper()}_BYTES", bound
+        )
+    session, scenario, user = source_scenario
+    executor, run, step, result, _ = await _publication_case(
+        session, scenario, user, parts[0]
+    )
+    executor._stage_transcript_source(_reference(scenario, parts[1].source), parts[1])
+    await _publish(executor, run, step, result, "activation")
+    async with sessionmanager.session() as fresh, fresh.begin():
+        source = await FlowTranscriptSourceRepository(session=fresh).get_for_attempt(
+            tenant_id=run.tenant_id, run_id=run.id, step_id=step.step_id, attempt_no=1
+        )
+        assert source.source_hash == segments_content_hash(expected_segments)
+        assert source.bounds.segments_count == 2
+        assert source.bounds.words_count == 2
+        assert source.bounds.segments_bytes == len(
+            json.dumps(expected_segments, ensure_ascii=False).encode("utf-8")
+        )
+        assert source.bounds.detail_bytes == len(
+            json.dumps(expected_detail, ensure_ascii=False).encode("utf-8")
+        )
+        assert source.segments == (
+            None if limited_component == "segments" else expected_segments
+        )
+        assert source.speaker_review == (
+            None if limited_component == "detail" else expected_detail
+        )
+        state = await _read(fresh, scenario, user)
+        if limited_component == "segments":
+            assert state.status == "omitted"
+            assert state.reason == TranscriptSourceOmissionReason.TOO_LARGE
+        else:
+            assert state.status == "present"
+            assert state.component_omissions.detail == (
+                TranscriptSourceOmissionReason.TOO_LARGE
+                if limited_component == "detail"
+                else None
+            )
+            assert state.component_omissions.words == (
+                TranscriptSourceOmissionReason.TOO_LARGE
+                if limited_component == "words"
+                else TranscriptSourceOmissionReason.SEGMENTS_UNAVAILABLE
+            )
+
+
 async def test_fenced_out_publication_writes_neither_row_nor_reference(source_scenario):
     from eneo.database.database import sessionmanager
     from eneo.database.tables.flow_tables import FlowRuns
@@ -511,8 +620,13 @@ async def test_large_producer_source_survives_publication(
 ):
     from eneo.database.database import sessionmanager
     from eneo.files.transcriber import TranscribedAudio
+    from eneo.flows.infrastructure.flow_transcript_words_repo import (
+        FlowTranscriptWordsRepository,
+    )
+    from eneo.flows.runtime.transcription_runtime import persist_transcript_words
     from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
         TranscriptSegment,
+        TranscriptWord,
     )
     from tests.unit.flows.runtime.test_transcription_speaker_inventory import (
         _file,
@@ -533,7 +647,14 @@ async def test_large_producer_source_survives_publication(
             TranscribedAudio(
                 "Transcript.",
                 18_000.0,
-                transcript_segments=(TranscriptSegment(text, 0.0, 18_000.0),),
+                transcript_segments=(
+                    TranscriptSegment(
+                        text,
+                        0.0,
+                        18_000.0,
+                        words=(TranscriptWord("Hej", 0.0, 1.0),),
+                    ),
+                ),
                 speaker_review=detail,
             )
         ),
@@ -542,7 +663,13 @@ async def test_large_producer_source_survives_publication(
     assert transcribed.segments_omitted_reason == "too_large"
     session, scenario, user = source_scenario
     executor, run, step, result, source = await _publication_case(
-        session, scenario, user, transcribed.source
+        session, scenario, user, transcribed.source_preparation
+    )
+    await persist_transcript_words(
+        transcript_words_repo=FlowTranscriptWordsRepository(session=session),
+        run=run,
+        step_id=step.step_id,
+        result=transcribed,
     )
     result = result.model_copy(
         update={"input_payload_json": {"transcription": transcribed.to_metadata()}}
@@ -552,6 +679,17 @@ async def test_large_producer_source_survives_publication(
         state = await _read(fresh, scenario, user)
         assert state.source == transcribed.source
         assert state.source.segments[0]["text"] == text
+        assert state.source.bounds.words_count == 1
+        assert (
+            state.component_omissions.words
+            == TranscriptSourceOmissionReason.SEGMENTS_UNAVAILABLE
+        )
+        assert (
+            await FlowTranscriptWordsRepository(session=fresh).get_for_step(
+                run_id=run.id, step_id=step.step_id, tenant_id=run.tenant_id
+            )
+            is None
+        )
         attempt = await FlowRunRepository(session=fresh).get_step_attempt(
             run_id=run.id, tenant_id=run.tenant_id, step_id=step.step_id, attempt_no=1
         )

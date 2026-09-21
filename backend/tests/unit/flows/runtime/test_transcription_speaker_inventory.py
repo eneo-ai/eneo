@@ -15,6 +15,7 @@ from eneo.flows.domain.transcript_corrections import (
     apply_to_rendered_transcript,
     validate_speaker_edits,
 )
+from eneo.flows.domain.transcript_source import TranscriptSourceOmissionReason
 from eneo.flows.runtime import transcription
 from eneo.flows.runtime.remote_transcription import _parse_result_segments
 from eneo.flows.runtime.transcription import transcribe_audio_input
@@ -300,6 +301,10 @@ async def test_words_are_dropped_with_the_segments_they_anchor_to(
     assert result.segments is None
     assert result.words is None
     assert result.to_metadata()["words_omitted_reason"] == "segments_unavailable"
+    assert (
+        result.source.bounds.words_omitted_reason
+        == TranscriptSourceOmissionReason.SEGMENTS_UNAVAILABLE
+    )
 
 
 async def test_oversized_words_are_omitted_but_segments_kept(
@@ -317,6 +322,10 @@ async def test_oversized_words_are_omitted_but_segments_kept(
     assert result.segments is not None
     assert result.words is None
     assert result.to_metadata()["words_omitted_reason"] == "too_large"
+    assert (
+        result.source.bounds.words_omitted_reason
+        == TranscriptSourceOmissionReason.TOO_LARGE
+    )
 
 
 # Pinned upstream contract: eneo-ai/vemsa@97096dcacb919ed8f8258552f807b39d5bdc4ddb
