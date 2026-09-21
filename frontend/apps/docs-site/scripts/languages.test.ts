@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createIndex, close } from "pagefind";
 import {
@@ -263,4 +264,51 @@ test("installation guides create the external network before any compose command
       `${guide}: "${commands[compose]}" joins the external network before it is created`,
     );
   }
+});
+
+// Same value as `git hash-object <file>`, so a recorded revision can also be
+// checked with plain git.
+function blobHash(content: Buffer): string {
+  return createHash("sha1")
+    .update(`blob ${content.length}\0`)
+    .update(content)
+    .digest("hex")
+    .slice(0, 12);
+}
+
+function frontmatterField(mdx: string, field: string): string | undefined {
+  const block = /^---\n([\s\S]*?)\n---/.exec(mdx)?.[1] ?? "";
+  const line = block.split("\n").find((entry) => entry.startsWith(`${field}:`));
+  return line?.slice(field.length + 1).trim();
+}
+
+test("every Swedish page records the English revision it was translated from", () => {
+  const content = new URL("../src/content/", import.meta.url);
+  const pages = readdirSync(new URL("sv/", content), { recursive: true })
+    .map(String)
+    .filter((file) => file.endsWith(".mdx"))
+    .sort();
+  assert.ok(pages.length > 0);
+  const problems: string[] = [];
+  for (const page of pages) {
+    const recorded = frontmatterField(
+      readFileSync(new URL(`sv/${page}`, content), "utf8"),
+      "translationSource",
+    );
+    let english: Buffer;
+    try {
+      english = readFileSync(new URL(page, content));
+    } catch {
+      problems.push(
+        `sv/${page}: the English page ${page} no longer exists; delete the translation or restore the page`,
+      );
+      continue;
+    }
+    const expected = `${page}@${blobHash(english)}`;
+    if (recorded !== expected)
+      problems.push(
+        `sv/${page}: translationSource is ${recorded ?? "missing"} but the English page is now ${expected}. Update the translation for the English change (or delete it to fall back to English) and record the new revision.`,
+      );
+  }
+  assert.deepEqual(problems, []);
 });

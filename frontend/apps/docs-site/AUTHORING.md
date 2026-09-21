@@ -98,3 +98,18 @@ excluded from Swedish search. Never copy an untranslated English page into
 may link to still-untranslated detail pages; make its scope clear to readers.
 When changing English behaviour, update its existing translation in the same PR
 or remove that translation until it is current, allowing the marked fallback.
+
+This is enforced, not just expected. Every Swedish page records the English
+revision it was translated from in its frontmatter:
+
+```yaml
+translationSource: guides/deployment.mdx@0e64ce9832eb
+```
+
+The value is the English file's git blob hash
+(`git hash-object src/content/guides/deployment.mdx | cut -c1-12`). As soon as
+the English page changes without that value changing,
+`bun test scripts/languages.test.ts` fails locally and in the docs workflow, and
+the failure message prints the value to record. Update the translation and the
+recorded revision together; bumping only the revision is the explicit way to
+say that an English change, such as a typo fix, needs no translation change.

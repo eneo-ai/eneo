@@ -86,13 +86,17 @@ Swedish lives **inside the same version build**, at `/vX.Y/sv/guides/deployment`
 and `/dev/sv/guides/deployment`. Root aliases include `/sv/` and continue to
 follow stable. The workflow still builds once per version, not once per language.
 
-The catch-all root layout owns the HTML language and localized site chrome.
+`DocsShell`, rendered by the catch-all layout, owns the HTML language and localized site chrome.
 `src/lib/languages.ts` owns route, source and fallback selection;
 `src/lib/navigation.ts` translates the selected ref's navigation without adding
 pages or changing its order. `src/lib/content.ts` reads Nextra's source inventory.
 The English inventory defines which pages exist in a version. Swedish source
 pages under `src/content/sv/` replace their English equivalents incrementally.
-A translation without an English counterpart is not published.
+A translation without an English counterpart is not published. Each Swedish
+page records the English revision it matches (`translationSource` in its
+frontmatter, see AUTHORING.md); `scripts/languages.test.ts` fails the docs
+workflow when the English page has changed since, so stale translations stop
+the build instead of being published.
 
 An untranslated page displays the selected ref's English text inside a Swedish
 shell, with a visible notice, `lang="en"` on its body, and `noindex` for search
