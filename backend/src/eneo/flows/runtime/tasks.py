@@ -641,6 +641,8 @@ async def _reconcile_stale_running_runs_all_tenants(
                 _stale_running_window_end = None
         for run in stale_runs:
             try:
+                if run.kind == FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION:
+                    continue
                 if run.kind == FlowRunRecoveryKind.MISSING_REVIEW_CHECKPOINT:
                     review_checkpoint_invariant_violations += 1
                     logger.error(
@@ -697,7 +699,7 @@ async def _reconcile_stale_running_runs_all_tenants(
                 )
             finally:
                 # Advance even after failure so one old run cannot starve other tenants.
-                _stale_running_cursor = (run.anchor_at, run.id)
+                _stale_running_cursor = run.cursor
     _fail_task_if_tenants_were_skipped(
         task_name="flows.reconcile_running", skipped_tenant_ids=skipped_tenant_ids
     )

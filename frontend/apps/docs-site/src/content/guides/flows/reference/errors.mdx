@@ -78,10 +78,12 @@ The terminal error has `retryable: false` and `details.abandonment` containing
 heartbeat recovery. Inspect earlier external effects before submitting a new
 run; abandonment does not establish that repeating the work is safe.
 
-Resume and redrive requests past their deadline return `400 flow_run_abandoned`
-with the same facts in `context.abandonment`. They do not terminalize the run;
-the sweep performs that transition, so the run may briefly retain its waiting
-status after a refusal.
+Before the sweep processes an overdue wait, resume and redrive requests return
+`400 flow_run_abandoned` with the same facts in `context.abandonment`. They do not
+terminalize the run; the sweep performs that transition, so the run may briefly
+retain its waiting status after a refusal. After the sweep fails a run waiting
+for review and cancels its approved checkpoint, resume returns
+`400 flow_review_cancelled`.
 
 ## Codes that are not `FlowApiErrorCode`
 

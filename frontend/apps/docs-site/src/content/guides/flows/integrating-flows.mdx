@@ -605,10 +605,11 @@ Response:
 
 Resume the run after approval so the worker can continue. `Idempotency-Key` is required here and nowhere else; send the same value on every retry of this one resume, because a different key against an already-resumed checkpoint returns `400 flow_review_already_resumed`.
 
-Resume within 30 days of `approved_at`. After that deadline, the request returns
-`400 flow_run_abandoned`, including the wait and deadline in `context.abandonment`.
-The maintenance sweep then fails the run and cancels the approved checkpoint as
-a system transition. Automatic abandonment preserves the approval timestamp,
+Resume within 30 days of `approved_at`. After that deadline, an approval the
+sweep has not yet processed refuses resume with `400 flow_run_abandoned`,
+including the wait and deadline in `context.abandonment`. Once the maintenance
+sweep has failed the run and cancelled the checkpoint, resume returns
+`400 flow_review_cancelled`. Automatic abandonment preserves the approval timestamp,
 decision actor, history, and files. It never resumes the run automatically, and
 `retryable: false` means you must inspect earlier effects before submitting a new run.
 

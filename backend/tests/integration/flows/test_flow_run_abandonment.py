@@ -234,11 +234,22 @@ async def test_approved_abandonment_keeps_approval_payload_and_attempt_history(
         )
 
 
+@pytest.mark.parametrize(
+    ("resume_order", "refusal"),
+    [
+        ("before_sweep", FlowRunAbandonmentDeadlineExceeded),
+        ("after_sweep", FlowReviewCheckpointCancelledError),
+        (
+            "concurrent",
+            (FlowRunAbandonmentDeadlineExceeded, FlowReviewCheckpointCancelledError),
+        ),
+    ],
+)
 async def test_overdue_resume_and_two_sweeps_commit_one_terminal_transition(
-    approved_wait, admin_user
+    approved_wait, admin_user, resume_order, refusal
 ):
     run, checkpoint, facts = approved_wait
-    barrier = asyncio.Barrier(3)
+    barrier = asyncio.Barrier(3 if resume_order == "concurrent" else 2)
 
     async def recover():
         async with sessionmanager.session() as session, session.begin():
@@ -253,11 +264,10 @@ async def test_overdue_resume_and_two_sweeps_commit_one_terminal_transition(
             )
 
     async def resume():
-        with pytest.raises(
-            (FlowRunAbandonmentDeadlineExceeded, FlowReviewCheckpointCancelledError)
-        ):
+        with pytest.raises(refusal):
             async with sessionmanager.session() as session, session.begin():
-                await barrier.wait()
+                if resume_order == "concurrent":
+                    await barrier.wait()
                 repo = FlowRunRepository(session=session)
                 await _review_checkpoint_repo(
                     session=session, run_repo=repo
@@ -271,9 +281,18 @@ async def test_overdue_resume_and_two_sweeps_commit_one_terminal_transition(
                     principal=FlowPrincipal.from_user(admin_user),
                 )
 
-    first, second, _ = await asyncio.wait_for(
-        asyncio.gather(recover(), recover(), resume()), timeout=5
-    )
+    if resume_order == "concurrent":
+        first, second, _ = await asyncio.wait_for(
+            asyncio.gather(recover(), recover(), resume()), timeout=5
+        )
+    else:
+        if resume_order == "before_sweep":
+            await resume()
+        first, second = await asyncio.wait_for(
+            asyncio.gather(recover(), recover()), timeout=5
+        )
+        if resume_order == "after_sweep":
+            await resume()
     assert sum(result.did_transition for result in (first, second)) == 1
     async with sessionmanager.session() as session, session.begin():
         for action in (

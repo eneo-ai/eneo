@@ -79,8 +79,10 @@ does not write terminal run state directly.
 
 An approved checkpoint must be resumed within 30 days of `approved_at`. Approval
 may outlive the original review submission deadline, but it no longer permits an
-unbounded wait to resume. After 30 days, resume returns `flow_run_abandoned`
-without writing terminal state; the maintenance sweep owns that write.
+unbounded wait to resume. After 30 days, an approval the sweep has not yet
+processed refuses resume with `flow_run_abandoned` without writing terminal
+state. The maintenance sweep owns that write. After it fails the run and
+cancels the checkpoint, resume returns `flow_review_cancelled`.
 
 Automatic abandonment fails the run and cancels its approved checkpoint through
 the existing system cancellation path. The checkpoint keeps `approved_at` and
@@ -126,7 +128,10 @@ The same finite sweep also handles approved reviews waiting to resume and queued
 runs whose dispatch attempts are exhausted. Both have a 30-day limit, measured
 from `approved_at` and `dispatch_pending_since` respectively. A backlog or an
 unavailable maintenance worker can delay terminalization. Resume and redrive
-refuse overdue waits even before the sweep reaches them.
+refuse overdue waits even before the sweep reaches them. Review inspection
+pages awaiting-review parents by creation time within the global sweep budget,
+then reads checkpoints only for that page. Healthy parents advance the cursor
+too; approval deadlines remain anchored at `approved_at`.
 
 Abandonment locks the parent run and rechecks its revision, wait state, and exact
 anchor timestamp in the terminal update. A competing resume, redrive, or worker

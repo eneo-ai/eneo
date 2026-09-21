@@ -93,7 +93,7 @@ async def test_stale_discovery_has_one_payload_free_global_budget() -> None:
     ]
     sql = str(statement.compile(dialect=postgresql.dialect()))
     assert "flow_runs.execution_heartbeat_at <= statement_timestamp() -" in sql
-    assert "NOT (EXISTS" in sql
+    assert "flow_run_review_checkpoints" not in sql
     assert "ORDER BY recovery.anchor_at ASC, recovery.id ASC" in sql
     assert statement._limit_clause.value == 3
 

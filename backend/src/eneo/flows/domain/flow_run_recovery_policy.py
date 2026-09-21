@@ -35,6 +35,7 @@ class FlowRunRecoveryKind(StrEnum):
     APPROVED_REVIEW = "approved_review"
     EXHAUSTED_DISPATCH = "exhausted_dispatch"
     MISSING_REVIEW_CHECKPOINT = "missing_review_checkpoint"
+    REVIEW_CHECKPOINT_INSPECTION = "review_checkpoint_inspection"
 
 
 def flow_run_abandonment_deadline(anchor_at: datetime) -> datetime:

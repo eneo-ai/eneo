@@ -2142,6 +2142,9 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
     assert "Idempotency-Key" in resume_description
     assert "approved checkpoint revision" in resume_description
     assert "after the original `expires_at`" in resume_description
+    assert "flow_run_abandoned" in resume_description
+    assert "flow_review_cancelled" in resume_description
+    assert "writes no terminal" in resume_description
     assert "resource_permissions.flows = write" in resume_description
     assert "committed before the response" in resume_description
 

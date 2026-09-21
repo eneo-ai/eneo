@@ -5237,11 +5237,12 @@ export interface paths {
      *     deadline only when approval was already persisted before expiry; already expired checkpoints
      *     return `400` with code `flow_review_expired`.
      *
-     *     Resume must occur within 30 days of `approved_at`. After that deadline this request returns
-     *     `400` with code `flow_run_abandoned` and writes no terminal state. The maintenance sweep
-     *     fails the run and cancels the checkpoint as a system transition, preserving its approval
-     *     timestamp and decision actor. Run history and files remain available; `retryable` is false
-     *     because earlier external effects may have occurred.
+     *     Resume must occur within 30 days of `approved_at`. Before the sweep processes an overdue
+     *     approval, this request returns `400` with code `flow_run_abandoned` and writes no terminal
+     *     state. After the sweep fails the run and cancels its checkpoint, this request returns `400`
+     *     with code `flow_review_cancelled`. Automatic abandonment is a system transition that
+     *     preserves the approval timestamp and decision actor. Run history and files remain available;
+     *     `retryable` is false because earlier external effects may have occurred.
      *
      *     Service-key principals may resume approved checkpoints only for runs they own (key must have
      *     `resource_permissions.flows = write`).

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence, TypedDict, cast
 from uuid import UUID, uuid4
@@ -150,6 +150,11 @@ class FlowRunRecoveryCandidate:
     anchor_at: datetime
     kind: FlowRunRecoveryKind
     checkpoint_id: UUID | None = None
+    cursor_at: datetime | None = None
+
+    @property
+    def cursor(self) -> tuple[datetime, UUID]:
+        return (self.cursor_at or self.anchor_at, self.id)
 
     @property
     def abandonment(self) -> FlowRunAbandonmentFacts | None:
@@ -188,52 +193,18 @@ def _run_recovery_candidates_query() -> sa.Subquery:
         FlowRuns.dispatch_exhausted_at.is_not(None),
         FlowRuns.dispatch_pending_since <= deadline_anchor,
     )
-    approved = (
-        sa.select(
-            FlowRuns.id,
-            FlowRuns.tenant_id,
-            FlowRuns.revision,
-            FlowRunReviewCheckpoints.approved_at.label("anchor_at"),
-            sa.literal(FlowRunRecoveryKind.APPROVED_REVIEW.value).label("kind"),
-            FlowRunReviewCheckpoints.id.label("checkpoint_id"),
-        )
-        .join(
-            FlowRunReviewCheckpoints,
-            sa.and_(
-                FlowRunReviewCheckpoints.flow_run_id == FlowRuns.id,
-                FlowRunReviewCheckpoints.tenant_id == FlowRuns.tenant_id,
-            ),
-        )
-        .where(
-            FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value,
-            FlowRunReviewCheckpoints.state
-            == FlowRunReviewCheckpointState.APPROVED.value,
-            FlowRunReviewCheckpoints.approved_at <= deadline_anchor,
-        )
-    )
-    missing = sa.select(
+    reviews = sa.select(
         FlowRuns.id,
         FlowRuns.tenant_id,
         FlowRuns.revision,
-        # Creation time orders the invariant report; it is never an abandonment anchor.
+        # Page parents before inspecting checkpoints, including healthy reviews.
         FlowRuns.created_at.label("anchor_at"),
-        sa.literal(FlowRunRecoveryKind.MISSING_REVIEW_CHECKPOINT.value).label("kind"),
-        sa.cast(sa.null(), sa.Uuid()).label("checkpoint_id"),
-    ).where(
-        FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value,
-        ~sa.exists().where(
-            FlowRunReviewCheckpoints.flow_run_id == FlowRuns.id,
-            FlowRunReviewCheckpoints.tenant_id == FlowRuns.tenant_id,
-            FlowRunReviewCheckpoints.state.in_(
-                (
-                    FlowRunReviewCheckpointState.AWAITING_REVIEW.value,
-                    FlowRunReviewCheckpointState.EDITED.value,
-                    FlowRunReviewCheckpointState.APPROVED.value,
-                )
-            ),
+        sa.literal(FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION.value).label(
+            "kind"
         ),
-    )
-    return sa.union_all(heartbeat, exhausted, approved, missing).subquery("recovery")
+        sa.cast(sa.null(), sa.Uuid()).label("checkpoint_id"),
+    ).where(FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value)
+    return sa.union_all(heartbeat, exhausted, reviews).subquery("recovery")
 
 
 def _recorded_passage_byte_expressions() -> tuple[Any, Any]:
@@ -920,8 +891,51 @@ class FlowRunRepository:
                 sa.tuple_(candidates.c.anchor_at, candidates.c.id) <= through
             )
         rows = (await self.session.execute(stmt)).all()
-        return [
-            FlowRunRecoveryCandidate(
+        review_keys = [
+            (row.id, row.tenant_id)
+            for row in rows
+            if row.kind == FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION.value
+        ]
+        checkpoints = {}
+        if review_keys:
+            checkpoint_rows = await self.session.execute(
+                sa.select(
+                    FlowRunReviewCheckpoints.id,
+                    FlowRuns.id.label("flow_run_id"),
+                    FlowRuns.tenant_id,
+                    FlowRunReviewCheckpoints.state,
+                    FlowRunReviewCheckpoints.approved_at,
+                    (
+                        FlowRunReviewCheckpoints.approved_at
+                        <= sa.func.statement_timestamp() - FLOW_RUN_ABANDONMENT_AFTER
+                    ).label("abandonment_due"),
+                )
+                .select_from(FlowRuns)
+                .outerjoin(
+                    FlowRunReviewCheckpoints,
+                    sa.and_(
+                        FlowRunReviewCheckpoints.flow_run_id == FlowRuns.id,
+                        FlowRunReviewCheckpoints.tenant_id == FlowRuns.tenant_id,
+                        FlowRunReviewCheckpoints.state.in_(
+                            (
+                                FlowRunReviewCheckpointState.AWAITING_REVIEW.value,
+                                FlowRunReviewCheckpointState.EDITED.value,
+                                FlowRunReviewCheckpointState.APPROVED.value,
+                            )
+                        ),
+                    ),
+                )
+                .where(
+                    sa.tuple_(FlowRuns.id, FlowRuns.tenant_id).in_(review_keys),
+                    FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value,
+                )
+            )
+            checkpoints = {
+                (row.flow_run_id, row.tenant_id): row for row in checkpoint_rows.all()
+            }
+        result: list[FlowRunRecoveryCandidate] = []
+        for row in rows:
+            candidate = FlowRunRecoveryCandidate(
                 id=row.id,
                 tenant_id=row.tenant_id,
                 revision=row.revision,
@@ -929,8 +943,26 @@ class FlowRunRepository:
                 kind=FlowRunRecoveryKind(row.kind),
                 checkpoint_id=row.checkpoint_id,
             )
-            for row in rows
-        ]
+            if candidate.kind == FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION:
+                checkpoint = checkpoints.get((row.id, row.tenant_id))
+                if checkpoint is not None and checkpoint.id is None:
+                    candidate = replace(
+                        candidate, kind=FlowRunRecoveryKind.MISSING_REVIEW_CHECKPOINT
+                    )
+                elif (
+                    checkpoint is not None
+                    and checkpoint.state == FlowRunReviewCheckpointState.APPROVED.value
+                    and checkpoint.abandonment_due
+                ):
+                    candidate = replace(
+                        candidate,
+                        kind=FlowRunRecoveryKind.APPROVED_REVIEW,
+                        anchor_at=checkpoint.approved_at,
+                        checkpoint_id=checkpoint.id,
+                        cursor_at=row.anchor_at,
+                    )
+            result.append(candidate)
+        return result
 
     async def renew_execution_heartbeats(
         self, *, owners: Sequence[FlowRunExecutionOwner]

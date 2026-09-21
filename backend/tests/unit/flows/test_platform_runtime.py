@@ -438,11 +438,16 @@ async def test_reconciler_wraps_finite_window_despite_newer_arrivals(
                 kind=FlowRunRecoveryKind(recovery_kind),
                 checkpoint_id=uuid4() if recovery_kind == "approved_review" else None,
                 anchor_at=anchor + timedelta(seconds=number),
+                cursor_at=(
+                    anchor - timedelta(days=5) + timedelta(seconds=number)
+                    if recovery_kind == "approved_review"
+                    else None
+                ),
             )
         )
 
     def key(row):
-        return row.anchor_at, row.id
+        return row.cursor
 
     append_run(1)
     append_run(2)

@@ -220,39 +220,209 @@ async def test_approved_resume_past_deadline_is_refused_without_terminal_writes(
     session.execute.assert_not_awaited()
 
 
-async def test_shared_recovery_discovery_includes_both_waits_and_missing_checkpoint_without_payloads():
-    from sqlalchemy.dialects import postgresql
+async def test_shared_recovery_bounds_checkpoint_inspection_and_advances_healthy_parents(
+    monkeypatch,
+):
+    from contextlib import asynccontextmanager
+    from datetime import timedelta
+    from uuid import UUID
 
+    import sqlalchemy as sa
+
+    from eneo.database.tables.flow_tables import FlowRuns, FlowRunWebhookDeliveries
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+    from eneo.flows.runtime import tasks
+
+    inspected = set()
+
+    def inspect_checkpoint(run_id, state):
+        inspected.add(run_id)
+        return state
+
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    parents = sa.Table(
+        "flow_runs",
+        metadata,
+        *[
+            sa.Column(name, FlowRuns.__table__.c[name].type.as_generic())
+            for name in (
+                "id",
+                "tenant_id",
+                "revision",
+                "status",
+                "created_at",
+                "execution_heartbeat_at",
+                "dispatch_pending_since",
+                "dispatch_exhausted_at",
+            )
+        ],
+    )
+    sa.Table(
+        "flow_run_webhook_deliveries",
+        metadata,
+        *[
+            sa.Column(
+                name, FlowRunWebhookDeliveries.__table__.c[name].type.as_generic()
+            )
+            for name in ("id", "tenant_id", "flow_run_id", "delivery_status")
+        ],
+    )
+    checkpoints = sa.Table(
+        "checkpoint_rows",
+        metadata,
+        sa.Column("id", sa.Uuid, primary_key=True),
+        sa.Column("flow_run_id", sa.Uuid, index=True),
+        sa.Column("tenant_id", sa.Uuid),
+        sa.Column("state", sa.String),
+        sa.Column("approved_at", sa.DateTime),
+    )
+    metadata.create_all(engine)
+    tenant_id = uuid4()
+    anchor = datetime(2026, 8, 1)
+    backlog, page_size = 1000, 7
+    with engine.connect() as connection:
+        connection.connection.driver_connection.create_function(
+            "statement_timestamp", 0, lambda: "2026-09-21 00:00:00"
+        )
+        connection.connection.driver_connection.create_function(
+            "inspect_checkpoint", 2, inspect_checkpoint
+        )
+        connection.exec_driver_sql(
+            "CREATE VIEW flow_run_review_checkpoints AS "
+            "SELECT id, flow_run_id, tenant_id, approved_at, "
+            "inspect_checkpoint(flow_run_id, state) AS state FROM checkpoint_rows"
+        )
+        connection.execute(
+            parents.insert(),
+            [
+                dict(
+                    id=UUID(int=i),
+                    tenant_id=tenant_id,
+                    revision=1,
+                    status="awaiting_review",
+                    created_at=anchor + timedelta(seconds=i),
+                )
+                for i in range(1, backlog + 1)
+            ],
+        )
+        connection.execute(
+            checkpoints.insert(),
+            [
+                dict(
+                    id=uuid4(),
+                    flow_run_id=UUID(int=i),
+                    tenant_id=tenant_id,
+                    state="awaiting_review",
+                )
+                for i in range(1, backlog + 1)
+            ],
+        )
+        session = MagicMock()
+        session.execute = AsyncMock(side_effect=connection.execute)
+        repo = FlowRunRepository(session=session)
+        boundary = await repo.recovery_sweep_boundary()
+        assert inspected == set(), "Boundary discovery must not inspect checkpoints"
+        assert boundary == (anchor + timedelta(seconds=backlog), UUID(int=backlog))
+        terminalizer = AsyncMock()
+        container = SimpleNamespace(
+            flow_run_repo=lambda: repo,
+            flow_run_terminalizer=lambda: terminalizer,
+            flow_provider_call_repo=lambda: AsyncMock(),
+        )
+
+        @asynccontextmanager
+        async def session_context():
+            yield session
+
+        monkeypatch.setattr(tasks.sessionmanager, "session", session_context)
+        monkeypatch.setattr(
+            tasks, "enable_autobegin_for_flow_task_session", lambda _: None
+        )
+        monkeypatch.setattr(tasks, "Container", lambda **_: container)
+        monkeypatch.setattr(tasks, "_stale_running_cursor", None)
+        monkeypatch.setattr(tasks, "_stale_running_window_end", boundary)
+        for page in range(2):
+            inspected.clear()
+            result = await tasks._reconcile_stale_running_runs_all_tenants(
+                limit=page_size
+            )
+            assert inspected == {
+                UUID(int=i).hex
+                for i in range(page * page_size + 1, (page + 1) * page_size + 1)
+            }
+            last = (page + 1) * page_size
+            assert tasks._stale_running_cursor == (
+                anchor + timedelta(seconds=last),
+                UUID(int=last),
+            )
+            assert result["review_checkpoint_invariant_violations"] == 0
+            assert result["abandoned"] == result["reconciled"] == 0
+        terminalizer.terminalize_abandoned_run.assert_not_awaited()
+        terminalizer.terminalize_stale_running_run.assert_not_awaited()
+    engine.dispose()
+
+
+async def test_review_page_keeps_cursor_separate_from_approval_deadline():
+    from eneo.flows.domain.flow_run_recovery_policy import FlowRunRecoveryKind
     from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 
-    session = AsyncMock()
-    session.execute.return_value = MagicMock(all=lambda: [])
-    repo = FlowRunRepository(session=session)
-    after = (datetime(2026, 8, 1, tzinfo=timezone.utc), uuid4())
-    through = (datetime(2026, 8, 22, tzinfo=timezone.utc), uuid4())
-    assert (
-        await repo.list_recovery_candidates(limit=3, after=after, through=through) == []
-    )
-    stmt = session.execute.await_args.args[0]
-    sql = str(
-        stmt.compile(
-            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+    facts = _facts("approved_review")
+    created_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    tenant_id = uuid4()
+    parents = [
+        SimpleNamespace(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            revision=2,
+            anchor_at=created_at,
+            kind="review_checkpoint_inspection",
+            checkpoint_id=None,
         )
+        for _ in range(4)
+    ]
+    approved = SimpleNamespace(
+        id=facts.checkpoint_id,
+        flow_run_id=parents[0].id,
+        tenant_id=tenant_id,
+        state="approved",
+        approved_at=facts.anchor_at,
+        abandonment_due=True,
     )
-    assert "dispatch_exhausted_at IS NOT NULL" in sql
-    assert "approved_at <= statement_timestamp()" in sql
-    assert (
-        "flow_run_review_checkpoints.state IN ('awaiting_review', 'edited', 'approved')"
-        in sql
+    healthy = SimpleNamespace(
+        id=uuid4(),
+        flow_run_id=parents[1].id,
+        tenant_id=tenant_id,
+        state="approved",
+        approved_at=datetime(2026, 9, 20, tzinfo=timezone.utc),
+        abandonment_due=False,
     )
-    assert "missing_review_checkpoint" in sql
-    assert "NOT (EXISTS" in sql
-    assert "execution_heartbeat_at <= statement_timestamp()" in sql
-    assert "UNION ALL" in sql
-    assert "input_payload_json" not in sql
-    assert "current_payload_json" not in sql
-    assert "LIMIT 3" in sql
-    assert " > " in sql and " <= " in sql
+    missing = SimpleNamespace(
+        id=None,
+        flow_run_id=parents[2].id,
+        tenant_id=tenant_id,
+        state=None,
+        approved_at=None,
+        abandonment_due=False,
+    )
+    session = AsyncMock()
+    session.execute.side_effect = [
+        MagicMock(all=lambda: parents),
+        MagicMock(all=lambda: [approved, healthy, missing]),
+    ]
+    candidates = await FlowRunRepository(session=session).list_recovery_candidates(
+        limit=4
+    )
+    assert candidates[0].abandonment == facts
+    assert candidates[0].cursor == (created_at, parents[0].id)
+    assert candidates[1].kind == FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION
+    assert candidates[1].abandonment is None
+    assert candidates[2].kind == FlowRunRecoveryKind.MISSING_REVIEW_CHECKPOINT
+    assert candidates[2].abandonment is None
+    assert candidates[2].cursor == (created_at, parents[2].id)
+    # The last parent stopped awaiting review between page discovery and inspection.
+    assert candidates[3].kind == FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION
+    assert candidates[3].abandonment is None
 
 
 async def test_shared_sweep_reports_missing_checkpoint_without_inventing_deadline(
