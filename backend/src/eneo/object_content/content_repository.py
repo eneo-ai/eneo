@@ -233,7 +233,8 @@ class ObjectContentRepository:
                     select(
                         literal(row.id),
                         literal(StorageKind.POSTGRES_INLINE.value),
-                        matching_source.c.payload,
+                        # EXTERNAL alone preserves a copied compressed datum.
+                        matching_source.c.payload.op("||")(literal(b"")),
                     ),
                 )
             )
@@ -787,12 +788,18 @@ class ObjectContentRepository:
         missing_before: datetime | None = None,
         observed_at: datetime | None = None,
         observed_size_bytes: int | None = None,
+        observed_inline_sha256: bytes | None = None,
     ) -> bool:
         if failure_code not in {
             ContentFailureCode.BACKEND_MISSING,
             ContentFailureCode.BACKEND_CORRUPT,
         }:
             raise ValueError("mark_backend_failure requires a backend failure code")
+        if observed_inline_sha256 is not None and (
+            observed_storage_kind is not StorageKind.POSTGRES_INLINE
+            or failure_code is not ContentFailureCode.BACKEND_CORRUPT
+        ):
+            raise ValueError("An inline checksum requires an inline corrupt failure")
         if (observed_storage_kind is StorageKind.OBJECT_STORE) != (
             observed_object_key is not None
         ):
@@ -831,6 +838,7 @@ class ObjectContentRepository:
                         missing_before=missing_before,
                         observed_at=observed_at,
                         observed_size_bytes=observed_size_bytes,
+                        observed_inline_sha256=observed_inline_sha256,
                     )
                     if changed:
                         await self._session.flush()
@@ -867,6 +875,7 @@ class ObjectContentRepository:
             missing_before=missing_before,
             observed_at=observed_at,
             observed_size_bytes=observed_size_bytes,
+            observed_inline_sha256=observed_inline_sha256,
         )
         if changed:
             if completed_items and row.state == ContentState.FAILED.value:
@@ -889,9 +898,18 @@ class ObjectContentRepository:
         missing_before: datetime | None,
         observed_at: datetime | None,
         observed_size_bytes: int | None,
+        observed_inline_sha256: bytes | None,
     ) -> bool:
         if row.storage_kind != observed_storage_kind.value:
             return False
+        if observed_inline_sha256 is not None:
+            current_sha256 = await self._session.scalar(
+                select(func.sha256(InlineContentPayloads.payload)).where(
+                    InlineContentPayloads.content_id == row.id
+                )
+            )
+            if current_sha256 != observed_inline_sha256:
+                return False
         if observed_storage_kind is StorageKind.OBJECT_STORE:
             descriptor = await self._session.scalar(
                 select(ObjectStoreObjects)

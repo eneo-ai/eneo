@@ -10,6 +10,7 @@ from eneo.object_content.file_icon_backfill import (
     FileIconBackfillState,
 )
 from eneo.object_content.reconciliation import ReconciliationResult
+from eneo.object_content.reconciliation_repository import InlineConversionResult
 from eneo.object_content.runtime import ObjectContentRuntime
 from eneo.worker import object_content_tasks
 from eneo.worker.object_content_tasks import (
@@ -33,6 +34,14 @@ async def test_worker_task_returns_only_bounded_sanitized_counts() -> None:
             object_cycle_completed=True,
             multipart_aborted=6,
             orphan_objects_deleted=7,
+            inline_conversion=InlineConversionResult(
+                scanned=10,
+                converted=8,
+                rejected=1,
+                skipped=1,
+                sweep_completed=True,
+                ready=False,
+            ),
         )
     )
 
@@ -49,6 +58,12 @@ async def test_worker_task_returns_only_bounded_sanitized_counts() -> None:
         "object_cycle_completed": True,
         "multipart_aborted": 6,
         "orphan_objects_deleted": 7,
+        "inline_conversion_scanned": 10,
+        "inline_conversion_converted": 8,
+        "inline_conversion_rejected": 1,
+        "inline_conversion_skipped": 1,
+        "inline_conversion_sweep_completed": True,
+        "inline_conversion_ready": False,
     }
     runtime.reconcile_once.assert_awaited_once_with()
 

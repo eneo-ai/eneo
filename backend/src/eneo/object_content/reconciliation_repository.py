@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -19,6 +19,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -39,13 +40,28 @@ from eneo.object_content.content import (
     ContentOwner,
     ContentState,
     ObjectContentBusyError,
+    ObjectContentIntegrityError,
     ObjectContentStateError,
     StorageKind,
 )
+from eneo.object_content.content_repository import ObjectContentRepository
 from eneo.object_content.s3_object_store import (
     MultipartUpload,
     RemoteObject,
 )
+
+INLINE_CONVERSION_LOCK_TIMEOUT_SECONDS = 5
+
+
+@dataclass(frozen=True, slots=True)
+class InlineConversionResult:
+    scanned: int = 0
+    converted: int = 0
+    rejected: int = 0
+    skipped: int = 0
+    sweep_completed: bool = False
+    ready: bool = False
+    has_more: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +186,152 @@ class ObjectContentReconciliationRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def convert_next_inline_payload(self) -> InlineConversionResult:
+        """Advance one keyset page of one row, atomically with its outcome.
+
+        Reconstructing and hashing a payload needs whole-value memory in
+        PostgreSQL. This maintenance operation is not chunk-bounded.
+        The caller commits each row separately. Locked rows advance the
+        cursor but force another sweep; successful rows are never rewritten
+        on those retries. Corrected writers must be deployed before readiness
+        establishes a stable uncompressed-storage invariant.
+        """
+        await self._session.execute(
+            select(
+                func.set_config(
+                    "lock_timeout", f"{INLINE_CONVERSION_LOCK_TIMEOUT_SECONDS}s", True
+                )
+            )
+        )
+        state = await self._session.scalar(
+            select(ObjectContentReconciliationState)
+            .where(ObjectContentReconciliationState.id == 1)
+            .with_for_update(skip_locked=True)
+        )
+        if state is None:
+            return InlineConversionResult()
+        if state.inline_conversion_ready_at is not None:
+            return InlineConversionResult(sweep_completed=True, ready=True)
+        upper_id = state.inline_conversion_upper_id
+        if upper_id is None:
+            state.inline_conversion_rejected = 0
+            state.inline_conversion_skipped = 0
+            upper_id = (
+                await self._session.scalars(
+                    select(InlineContentPayloads.content_id)
+                    .order_by(InlineContentPayloads.content_id.desc())
+                    .limit(1)
+                )
+            ).one_or_none()
+            state.inline_conversion_upper_id = upper_id
+        candidate = select(InlineContentPayloads.content_id).order_by(
+            InlineContentPayloads.content_id
+        )
+        if state.inline_conversion_cursor_id is not None:
+            candidate = candidate.where(
+                InlineContentPayloads.content_id > state.inline_conversion_cursor_id
+            )
+        content_id = (
+            None
+            if upper_id is None
+            else await self._session.scalar(
+                candidate.where(InlineContentPayloads.content_id <= upper_id).limit(1)
+            )
+        )
+        if content_id is None:
+            result = InlineConversionResult()
+        else:
+            try:
+                async with self._session.begin_nested():
+                    result = await self._convert_inline_payload(content_id)
+            except DBAPIError as exc:
+                if getattr(exc.orig, "sqlstate", None) != "55P03":
+                    raise
+                result = InlineConversionResult(scanned=1, skipped=1)
+            state.inline_conversion_cursor_id = content_id
+            state.inline_conversion_scanned += result.scanned
+            state.inline_conversion_converted += result.converted
+            state.inline_conversion_rejected += result.rejected
+            state.inline_conversion_skipped += result.skipped
+
+        has_more = content_id is not None and content_id != upper_id
+        if not has_more:
+            completed = state.inline_conversion_skipped == 0
+            now = await self._database_now()
+            if completed:
+                state.inline_conversion_completed_at = now
+                if state.inline_conversion_rejected == 0:
+                    state.inline_conversion_ready_at = now
+            state.inline_conversion_cursor_id = None
+            state.inline_conversion_upper_id = None
+            result = replace(
+                result,
+                sweep_completed=completed,
+                ready=state.inline_conversion_ready_at is not None,
+            )
+        await self._session.flush()
+        return replace(result, has_more=has_more)
+
+    async def _convert_inline_payload(self, content_id: UUID) -> InlineConversionResult:
+        async with self._session.begin_nested() as observation:
+            content = await self._session.scalar(
+                select(ObjectContents)
+                .where(ObjectContents.id == content_id)
+                .with_for_update(nowait=True)
+            )
+            if content is None or content.storage_kind != StorageKind.POSTGRES_INLINE:
+                return InlineConversionResult(scanned=1)
+            payload = (
+                await self._session.execute(
+                    select(
+                        func.pg_column_size(InlineContentPayloads.payload),
+                        func.octet_length(InlineContentPayloads.payload),
+                    )
+                    .where(InlineContentPayloads.content_id == content_id)
+                    .with_for_update(nowait=True)
+                )
+            ).one_or_none()
+            if payload is None:
+                return InlineConversionResult(scanned=1)
+            stored_size, logical_size = payload
+            if logical_size == content.size_bytes and stored_size >= logical_size:
+                return InlineConversionResult(scanned=1)
+            digest = await self._session.scalar(
+                select(func.sha256(InlineContentPayloads.payload)).where(
+                    InlineContentPayloads.content_id == content_id
+                )
+            )
+            if logical_size != content.size_bytes or digest != content.sha256:
+                # The failure owner takes admission/campaign locks before content.
+                await observation.rollback()
+            else:
+                rewritten_sha256 = await self._session.scalar(
+                    update(InlineContentPayloads)
+                    .where(InlineContentPayloads.content_id == content_id)
+                    .values(
+                        payload=InlineContentPayloads.payload.op("||")(literal(b""))
+                    )
+                    .returning(func.sha256(InlineContentPayloads.payload))
+                )
+                if rewritten_sha256 != content.sha256:
+                    raise ObjectContentIntegrityError(
+                        "Reconstructed inline bytes do not match canonical SHA-256"
+                    )
+                return InlineConversionResult(scanned=1, converted=1)
+
+        await ObjectContentRepository(self._session).mark_backend_failure(
+            content_id=content_id,
+            failure_code=ContentFailureCode.BACKEND_CORRUPT,
+            observed_storage_kind=StorageKind.POSTGRES_INLINE,
+            observed_inline_sha256=digest,
+        )
+        still_corrupt = await self._session.scalar(
+            select(func.sha256(InlineContentPayloads.payload) == digest).where(
+                InlineContentPayloads.content_id == content_id
+            )
+        )
+        return InlineConversionResult(scanned=1, rejected=int(bool(still_corrupt)))
 
     async def advance_local_lifecycle(
         self,

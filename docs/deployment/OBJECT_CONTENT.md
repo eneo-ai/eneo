@@ -594,6 +594,46 @@ duration, connection-pool pressure, and the documented inline admission
 ceiling. Reads are linear in payload size and use bounded chunks after the
 database driver returns the bounded BYTEA value.
 
+Before deploying migration `202609211100`, stop or drain every worker that runs
+the `reconcile_object_content` cron (for the Compose worker, use
+`docker compose stop worker`, including all replicas). Upgrade every backend
+and worker that writes inline content before restarting those cron workers.
+Completion establishes a stable uncompressed-storage invariant only when every
+database-copy writer runs the corrected code throughout the sweep. The migration
+sets `inline_content_payloads.payload` to EXTERNAL without rewriting the table;
+the local reconciliation phase then converts existing compressed values at
+startup and every minute, including deployments without S3. To pause conversion,
+stop or drain all those workers again. Their other scheduled and queued jobs
+also wait until they resume. The move pause and File/Icon campaign pause do not
+pause conversion. Restarting the workers resumes committed progress.
+
+Conversion discovers one row per keyset page and commits one row per transaction,
+with a five-second lock timeout. `OBJECT_CONTENT_RECONCILIATION_BATCH_SIZE`
+limits rows examined per tick, including unchanged, locked, and rejected rows.
+Locked rows force another sweep without rewriting successful conversions.
+The worker summary reports `inline_conversion_scanned`, `converted`, `rejected`,
+`skipped`, `sweep_completed`, and `ready` (each with the `inline_conversion_`
+prefix). Durable evidence is in the singleton
+`object_content_reconciliation_state`: `inline_conversion_cursor_id` and
+`inline_conversion_upper_id` delimit the active sweep; scanned/converted counts
+are cumulative, while rejected/skipped counts describe the current or most
+recent sweep. `inline_conversion_completed_at` records the last sweep without
+skipped rows, even if corrupt rows were rejected. Only
+`inline_conversion_ready_at` establishes readiness for subsequent bounded
+inline-read work; rejected corrupt rows keep it unset and follow the existing
+backend-failure recovery path.
+
+Plan disk, WAL, backup, and replica headroom before restarting conversion.
+On the PostgreSQL 13 integration fixture, one compressible 1,048,576-byte payload
+occupied 12,009 bytes before reconstruction and 1,048,576 bytes afterward
+(`pg_column_size`); the isolated reconstruction UPDATE reported 1,118,865 WAL
+bytes through `EXPLAIN (ANALYZE, BUFFERS, WAL)`, excluding progress-record writes
+and subsequent vacuum work. These are fixture measurements, not capacity
+ceilings; measure representative deployment rows and replica lag. Reconstruction
+and hash verification require whole-value memory in PostgreSQL for each row,
+so this maintenance operation is not chunk-bounded. Old row versions also consume
+space until vacuum can reclaim them. The download path is unchanged.
+
 For the bundled single-node reference, durable capacity is the
 `eneo_object_content_data` volume. Change `SEAWEEDFS_VOLUME_SIZE_LIMIT_MB` and
 `SEAWEEDFS_GARBAGE_THRESHOLD` in `.env` when measured operations justify it;

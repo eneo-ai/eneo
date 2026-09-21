@@ -592,6 +592,26 @@ class ObjectContentReconciliationState(BaseCrossReference):
     last_multipart_cycle_completed_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True)
     )
+    inline_conversion_cursor_id: Mapped[Optional[UUID]] = mapped_column()
+    inline_conversion_upper_id: Mapped[Optional[UUID]] = mapped_column()
+    inline_conversion_scanned: Mapped[int] = mapped_column(
+        BigInteger, server_default=text("0"), nullable=False
+    )
+    inline_conversion_converted: Mapped[int] = mapped_column(
+        BigInteger, server_default=text("0"), nullable=False
+    )
+    inline_conversion_rejected: Mapped[int] = mapped_column(
+        BigInteger, server_default=text("0"), nullable=False
+    )
+    inline_conversion_skipped: Mapped[int] = mapped_column(
+        BigInteger, server_default=text("0"), nullable=False
+    )
+    inline_conversion_completed_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    inline_conversion_ready_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
 
 
 Index(

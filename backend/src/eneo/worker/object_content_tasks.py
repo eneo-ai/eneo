@@ -18,6 +18,12 @@ class ObjectContentReconciliationSummary(TypedDict):
     object_cycle_completed: bool
     multipart_aborted: int
     orphan_objects_deleted: int
+    inline_conversion_scanned: int
+    inline_conversion_converted: int
+    inline_conversion_rejected: int
+    inline_conversion_skipped: int
+    inline_conversion_sweep_completed: bool
+    inline_conversion_ready: bool
 
 
 class FileIconBackfillSummary(TypedDict):
@@ -46,6 +52,12 @@ async def reconcile_object_content_task(
         "object_cycle_completed": result.object_cycle_completed,
         "multipart_aborted": result.multipart_aborted,
         "orphan_objects_deleted": result.orphan_objects_deleted,
+        "inline_conversion_scanned": result.inline_conversion.scanned,
+        "inline_conversion_converted": result.inline_conversion.converted,
+        "inline_conversion_rejected": result.inline_conversion.rejected,
+        "inline_conversion_skipped": result.inline_conversion.skipped,
+        "inline_conversion_sweep_completed": result.inline_conversion.sweep_completed,
+        "inline_conversion_ready": result.inline_conversion.ready,
     }
 
 
