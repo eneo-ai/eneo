@@ -102,16 +102,14 @@ async def test_admin_creates_updates_and_swaps_default():
     assert first.is_default is True
     assert second.texts.subtitle != first.texts.subtitle  # english default
 
-    updated = (
-        await service.update_template(
-            second.id,
-            {
-                "is_default": True,
-                "theme": WidgetTheme(primary_color="#123456"),
-                "description": "  house   style ",
-            },
-        )
-    ).template
+    updated = await service.update_template(
+        second.id,
+        {
+            "is_default": True,
+            "theme": WidgetTheme(primary_color="#123456"),
+            "description": "  house   style ",
+        },
+    )
     assert updated.is_default is True
     assert updated.theme.primary_color == "#123456"
     assert updated.description == "house style"
@@ -257,12 +255,36 @@ def test_locking_legal_texts_requires_a_disclosure():
     assert template.lock_violations() == ["subtitle_required_for_legal_texts_lock"]
 
 
-async def test_saving_a_template_updates_the_widgets_that_follow_it():
+def test_publishing_freezes_the_draft_into_a_release():
+    template = _house_style()
+    assert template.published is None
+    assert template.has_unpublished_changes is True
+
+    template.publish(by=uuid4())
+    assert template.published is not None
+    assert template.published.theme.primary_color == "#ABCDEF"
+    assert template.published.locked_groups == template.locked_groups
+    assert template.has_unpublished_changes is False
+
+    # Editing the draft leaves the release untouched until the next publication.
+    template.theme = WidgetTheme(primary_color="#000000")
+    assert template.published.theme.primary_color == "#ABCDEF"
+    assert template.has_unpublished_changes is True
+    template.locked_groups = [TemplateLockGroup.WORDING]
+    template.publish(by=uuid4())
+    assert template.published.theme.primary_color == "#000000"
+    assert template.published.locked_groups == [TemplateLockGroup.WORDING]
+
+
+async def test_saving_edits_the_draft_and_publishing_updates_the_followers():
     repo = _InMemoryRepo()
     widgets = _InMemoryWidgetRepo()
     admin = _user(Permission.ADMIN)
     service = _template_service(admin, repo, widgets)
     template = await service.create_template(name="Kommunblå")
+    assert (await repo.get(template.id)).published is None
+    template = (await service.publish_template(template.id)).template
+    assert template.published is not None and template.published_by_user_id == admin.id
 
     def follower(**overrides):
         widget = Widget.create(
@@ -281,13 +303,23 @@ async def test_saving_a_template_updates_the_widgets_that_follow_it():
         )
     )
 
-    result = await service.update_template(
+    # A save changes the draft only.
+    draft = await service.update_template(
         template.id,
         {
             "theme": WidgetTheme(primary_color="#123456"),
             "texts": template.texts.model_copy(update={"title": "Fråga oss"}),
         },
     )
+    assert draft.has_unpublished_changes is True
+    assert draft.published is not None
+    assert draft.published.theme.primary_color != "#123456"
+    assert (await widgets.get(linked.id)).theme.primary_color != "#123456"
+    assert widgets.updates == 0
+
+    # Publishing writes the locked groups onto the active followers.
+    result = await service.publish_template(template.id)
+    assert result.template.has_unpublished_changes is False
     assert [w.id for w in result.synced_widgets] == [linked.id]
     synced = await widgets.get(linked.id)
     assert synced.theme.primary_color == "#123456"
@@ -297,15 +329,16 @@ async def test_saving_a_template_updates_the_widgets_that_follow_it():
     assert (await widgets.get(archived.id)).theme.primary_color != "#123456"
     assert (await widgets.get(stranger.id)).theme.primary_color != "#123456"
 
-    # Locking a further group writes it onto the followers at once.
-    result = await service.update_template(
+    # Locking a further group takes effect with the publication that carries it.
+    await service.update_template(
         template.id,
         {"locked_groups": [TemplateLockGroup.APPEARANCE, TemplateLockGroup.WORDING]},
     )
+    assert (await widgets.get(linked.id)).texts.title == ""
+    await service.publish_template(template.id)
     assert (await widgets.get(linked.id)).texts.title == "Fråga oss"
-    # A save that changes nothing on the followers reports none.
-    result = await service.update_template(template.id, {"description": "x"})
-    assert result.synced_widgets == []
+    # Publishing without changes reports no follower.
+    assert (await service.publish_template(template.id)).synced_widgets == []
 
     with pytest.raises(BadRequestException):
         await service.update_template(

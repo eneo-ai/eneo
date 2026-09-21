@@ -40,6 +40,7 @@ CATEGORY_MAPPINGS = {
     ActionType.WIDGET_TEMPLATE_CREATED.value: "admin_actions",
     ActionType.WIDGET_TEMPLATE_UPDATED.value: "admin_actions",
     ActionType.WIDGET_TEMPLATE_DELETED.value: "admin_actions",
+    ActionType.WIDGET_TEMPLATE_PUBLISHED.value: "admin_actions",
     ActionType.CREDENTIALS_UPDATED.value: "admin_actions",
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",

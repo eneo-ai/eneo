@@ -40,6 +40,9 @@ function template(overrides: Partial<WidgetTemplate> = {}): WidgetTemplate {
     is_default: false,
     locked_groups: ["appearance", "language"],
     linked_widgets: 3,
+    published_at: "2026-09-21T10:00:00Z",
+    published_by_user_id: null,
+    has_unpublished_changes: false,
     created_at: "2026-09-21T10:00:00Z",
     updated_at: "2026-09-21T10:00:00Z",
     ...overrides
@@ -49,61 +52,60 @@ function template(overrides: Partial<WidgetTemplate> = {}): WidgetTemplate {
 function renderPage(current: WidgetTemplate) {
   const update = vi.fn(async ({ update: patch }: { update: Partial<WidgetTemplate> }) => ({
     ...current,
-    ...patch
+    ...patch,
+    has_unpublished_changes: true
+  }));
+  const publish = vi.fn(async () => ({
+    ...current,
+    has_unpublished_changes: false,
+    published_at: "2026-09-21T12:00:00Z"
   }));
   render(TemplatePage, {
-    data: { template: current, eneo: { widgets: { templates: { update } } } } as never
+    data: { template: current, eneo: { widgets: { templates: { update, publish } } } } as never
   });
-  return update;
+  return { update, publish };
 }
 
-describe("widget template page locks", () => {
-  test("locking a part with followers asks first, then saves the canonical lock list", async () => {
-    const update = renderPage(template());
+const click = (locator: { element: () => Element }) => (locator.element() as HTMLElement).click();
+
+describe("widget template page", () => {
+  test("a lock toggle only edits the draft and marks it unpublished", async () => {
+    const { update, publish } = renderPage(template());
     await expect.element(page.getByText("widget_admin_template_linked_count")).toBeVisible();
+    const publishButton = page.getByRole("button", { name: "widget_admin_template_publish" });
+    await expect.element(publishButton).toBeDisabled();
 
-    const wording = page.getByRole("switch", { name: "widget_admin_template_lock_wording" });
-    await expect.element(wording).not.toBeChecked();
-    (wording.element() as HTMLElement).click();
-    const confirm = page.getByRole("button", { name: "widget_admin_template_lock_confirm_action" });
-    await expect.element(confirm).toBeVisible();
-    expect(update).not.toHaveBeenCalled();
-    (confirm.element() as HTMLElement).click();
-
+    click(page.getByRole("switch", { name: "widget_admin_template_lock_wording" }));
     await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
     expect(update).toHaveBeenLastCalledWith({
       template: { id: "t1" },
       update: { locked_groups: ["appearance", "language", "wording"] }
     });
-    await expect.element(wording).toBeChecked();
+    expect(publish).not.toHaveBeenCalled();
+    await expect.element(page.getByText("widget_admin_template_unpublished_changes")).toBeVisible();
+    await expect.element(publishButton).toBeEnabled();
   });
 
-  test("unlocking never asks and drops only that part", async () => {
-    const update = renderPage(template());
-    (
-      page
-        .getByRole("switch", { name: "widget_admin_template_lock_language" })
-        .element() as HTMLElement
-    ).click();
-    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
-    expect(update).toHaveBeenLastCalledWith({
-      template: { id: "t1" },
-      update: { locked_groups: ["appearance"] }
-    });
+  test("publishing to followers asks first and then shows the release as current", async () => {
+    const { publish } = renderPage(template({ has_unpublished_changes: true }));
+    click(page.getByRole("button", { name: "widget_admin_template_publish" }));
+    await expect
+      .element(page.getByText("widget_admin_template_publish_confirm_title"))
+      .toBeVisible();
+    expect(publish).not.toHaveBeenCalled();
+    const dialogButtons = page.getByRole("button", { name: "widget_admin_template_publish" });
+    click(dialogButtons.nth(1));
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    await expect.element(page.getByText("widget_admin_template_published_at")).toBeVisible();
   });
 
-  test("a template nobody follows locks without a question", async () => {
-    const update = renderPage(template({ linked_widgets: 0, locked_groups: [] }));
-    await expect.element(page.getByText("widget_admin_template_linked_none")).toBeVisible();
-    (
-      page
-        .getByRole("switch", { name: "widget_admin_template_lock_appearance" })
-        .element() as HTMLElement
-    ).click();
-    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
-    expect(update).toHaveBeenLastCalledWith({
-      template: { id: "t1" },
-      update: { locked_groups: ["appearance"] }
-    });
+  test("a template nobody follows publishes without a question", async () => {
+    const { publish } = renderPage(
+      template({ linked_widgets: 0, published_at: null, has_unpublished_changes: true })
+    );
+    await expect.element(page.getByText("widget_admin_template_unpublished")).toBeVisible();
+    click(page.getByRole("button", { name: "widget_admin_template_publish" }));
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
   });
 });

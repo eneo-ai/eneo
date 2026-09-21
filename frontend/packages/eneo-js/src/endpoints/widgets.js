@@ -238,6 +238,21 @@ export function initWidgets(client) {
       },
 
       /**
+       * Publish the draft: it becomes the release widgets link to, and the
+       * locked parts are written onto every widget that follows the template.
+       * @param {{id: string}} template
+       * @returns {Promise<WidgetTemplate>}
+       * @throws {EneoError}
+       */
+      publish: async ({ id }) => {
+        const res = await client.fetch("/api/v1/admin/widget-templates/{id}/publish/", {
+          method: "post",
+          params: { path: { id } }
+        });
+        return res;
+      },
+
+      /**
        * @param {{id: string}} template
        * @returns status 204 on success; should throw on error
        * @throws {EneoError}

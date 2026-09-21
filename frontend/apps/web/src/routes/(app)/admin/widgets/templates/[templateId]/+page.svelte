@@ -8,6 +8,7 @@
   import { Page } from "$lib/components/layout";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -20,8 +21,10 @@
   import WidgetMockPreview from "$lib/features/widget/admin/WidgetMockPreview.svelte";
   import WidgetTextsFields from "$lib/features/widget/admin/WidgetTextsFields.svelte";
   import WidgetThemeFields from "$lib/features/widget/admin/WidgetThemeFields.svelte";
+  import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { LOCK_GROUPS } from "$lib/features/widget/admin/templateLocks";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
   import { FileText, Palette } from "lucide-svelte";
   import { untrack } from "svelte";
 
@@ -98,18 +101,37 @@
     });
   }
 
-  // Locking a part writes the template's values onto every follower at once,
-  // replacing what editors set there; with followers that deserves a question.
-  let lockToConfirm = $state<(typeof LOCK_GROUPS)[number] | null>(null);
+  // Saving edits the draft; publishing is the deliberate step that reaches
+  // the widgets. With followers it asks first, since their values change.
+  const dateFormat = new Intl.DateTimeFormat(getLocale(), {
+    dateStyle: "medium",
+    timeStyle: "short"
+  });
+  const publicationLabel = $derived(
+    template.published_at == null
+      ? m.widget_admin_template_unpublished()
+      : template.has_unpublished_changes
+        ? m.widget_admin_template_unpublished_changes()
+        : m.widget_admin_template_published_at({
+            date: dateFormat.format(new Date(template.published_at))
+          })
+  );
+  let confirmPublish = $state(false);
 
-  function requestLock(group: (typeof LOCK_GROUPS)[number], locked: boolean) {
-    if (locked && template.linked_widgets > 0) lockToConfirm = group;
-    else setLock(group, locked);
-  }
+  const publish = createAsyncState(async () => {
+    try {
+      await autosave.flush();
+      if (autosave.hasPending) return;
+      autosave.replace(await data.eneo.widgets.templates.publish({ id: data.template.id }));
+      confirmPublish = false;
+    } catch (error) {
+      toastError(error, m.widget_admin_template_could_not_publish());
+    }
+  });
 
-  function confirmLock() {
-    if (lockToConfirm) setLock(lockToConfirm, true);
-    lockToConfirm = null;
+  function requestPublish() {
+    if (template.linked_widgets > 0) confirmPublish = true;
+    else void publish();
   }
 </script>
 
@@ -130,6 +152,18 @@
     <Page.Flex>
       <span class="text-secondary text-sm" aria-live="polite" aria-atomic="true">{statusLabel}</span
       >
+      <Badge variant={template.has_unpublished_changes ? "default" : "secondary"}>
+        {publicationLabel}
+      </Badge>
+      <Button
+        onclick={requestPublish}
+        disabled={publish.isLoading || !template.has_unpublished_changes}
+        title={template.has_unpublished_changes
+          ? m.widget_admin_template_publish_description()
+          : m.widget_admin_template_publish_up_to_date()}
+      >
+        {m.widget_admin_template_publish()}
+      </Button>
     </Page.Flex>
   </Page.Header>
   <Page.Main>
@@ -147,6 +181,13 @@
               </Badge>
             </Card.Action>
           </Card.Header>
+          <Card.Content>
+            <p class="text-secondary text-sm">
+              {template.published_at == null
+                ? m.widget_admin_template_not_published_help()
+                : m.widget_admin_template_publish_description()}
+            </p>
+          </Card.Content>
           <Card.Content>
             <Field.Group class="grid gap-6 sm:grid-cols-2">
               <Field.Field>
@@ -232,7 +273,7 @@
                     id={`template-lock-${group}`}
                     checked={template.locked_groups.includes(group)}
                     aria-describedby={`template-lock-${group}-help`}
-                    onCheckedChange={(checked) => requestLock(group, checked)}
+                    onCheckedChange={(checked) => setLock(group, checked)}
                   />
                 </Field.Field>
               {/each}
@@ -294,30 +335,27 @@
   </Page.Main>
 </Page.Root>
 
-<AlertDialog.Root
-  open={lockToConfirm !== null}
-  onOpenChange={(open) => {
-    if (!open) lockToConfirm = null;
-  }}
->
+<AlertDialog.Root bind:open={confirmPublish}>
   <AlertDialog.Content>
     <AlertDialog.Header>
       <AlertDialog.Title>
-        {m.widget_admin_template_lock_confirm_title({
-          part: lockToConfirm ? lockLabels[lockToConfirm].label : ""
+        {m.widget_admin_template_publish_confirm_title({
+          count: String(template.linked_widgets)
         })}
       </AlertDialog.Title>
       <AlertDialog.Description>
-        {m.widget_admin_template_lock_confirm_description({
-          count: String(template.linked_widgets)
-        })}
+        {m.widget_admin_template_publish_confirm_description()}
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action onclick={confirmLock}>
-        {m.widget_admin_template_lock_confirm_action()}
-      </AlertDialog.Action>
+      <AlertDialog.Cancel disabled={publish.isLoading}>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action
+        disabled={publish.isLoading}
+        onclick={(event) => {
+          event.preventDefault();
+          void publish();
+        }}>{m.widget_admin_template_publish()}</AlertDialog.Action
+      >
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>

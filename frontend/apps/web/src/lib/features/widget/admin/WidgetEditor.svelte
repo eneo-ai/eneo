@@ -46,7 +46,17 @@
     templates?: WidgetTemplate[];
   };
 
-  let { widget, assistant, eneo, isAdmin, policy, release, templates = [] }: Props = $props();
+  let {
+    widget,
+    assistant,
+    eneo,
+    isAdmin,
+    policy,
+    release,
+    templates: allTemplates = []
+  }: Props = $props();
+  // Widgets follow a template's published release, so drafts are not offered.
+  const templates = $derived(allTemplates.filter((t) => t.published_at != null));
 
   const autosave = untrack(
     () =>

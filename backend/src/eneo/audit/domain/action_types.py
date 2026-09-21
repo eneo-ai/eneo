@@ -175,3 +175,4 @@ class ActionType(str, Enum):
     WIDGET_TEMPLATE_CREATED = "widget_template_created"
     WIDGET_TEMPLATE_UPDATED = "widget_template_updated"
     WIDGET_TEMPLATE_DELETED = "widget_template_deleted"
+    WIDGET_TEMPLATE_PUBLISHED = "widget_template_published"

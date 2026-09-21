@@ -21,7 +21,9 @@
 
   let widget = $state<Widget | null>(untrack(() => data.widget));
   let name = $state(untrack(() => data.assistant.name));
-  let templateId = $state(untrack(() => data.templates.find((t) => t.is_default)?.id ?? ""));
+  // Widgets follow a template's published release, so drafts are not offered.
+  const templates = $derived(data.templates.filter((t) => t.published_at != null));
+  let templateId = $state(untrack(() => templates.find((t) => t.is_default)?.id ?? ""));
 
   const create = createAsyncState(async () => {
     try {
@@ -64,7 +66,7 @@
             isAdmin={data.isAdmin}
             policy={data.policy}
             release={data.release}
-            templates={data.templates}
+            {templates}
           />
         {/key}
       {:else}
@@ -94,12 +96,12 @@
                   >{m.widget_admin_name_description()}</Field.Description
                 >
               </Field.Field>
-              {#if data.templates.length > 0}
+              {#if templates.length > 0}
                 <Field.Field>
                   <Field.Title>{m.widget_admin_template()}</Field.Title>
                   <Field.Description>{m.widget_admin_template_create_help()}</Field.Description>
                   <TemplatePicker
-                    templates={data.templates}
+                    {templates}
                     bind:value={templateId}
                     includeNone
                     legend={m.widget_admin_template()}

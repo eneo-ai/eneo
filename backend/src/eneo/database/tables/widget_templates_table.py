@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
@@ -26,9 +27,19 @@ class WidgetTemplates(BasePublic):
     )
     language: Mapped[str] = mapped_column(server_default="auto")
     is_default: Mapped[bool] = mapped_column(server_default=sa.false())
-    # TemplateLockGroup values the linked widgets follow.
+    # Draft lock groups (TemplateLockGroup values); followers are held to the
+    # published copy below.
     locked_groups: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")
+    )
+    # The published release: texts, theme, language and locked_groups as of
+    # the last publication. NULL until the template is published.
+    published: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    published_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
     )
     created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="SET NULL"), nullable=True

@@ -131,3 +131,14 @@ class WidgetTemplateInUseError(WidgetPublicError):
             " Detach them before deleting it."
         )
         self.linked_widgets = linked_widgets
+
+
+class WidgetTemplateNotPublishedError(WidgetPublicError):
+    status_code = 400
+    code = "template_not_published"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The template has not been published yet; publish it before"
+            " widgets can follow it."
+        )

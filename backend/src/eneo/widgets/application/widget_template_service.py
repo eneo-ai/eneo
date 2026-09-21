@@ -20,18 +20,19 @@ from eneo.widgets.domain.widget_template_repo import WidgetTemplateRepo
 
 
 @dataclass(frozen=True)
-class TemplateUpdateResult:
+class TemplatePublishResult:
     template: WidgetTemplate
-    # Linked widgets whose locked groups changed with this save.
+    # Followers whose locked groups changed with this publication.
     synced_widgets: list[Widget]
 
 
 class WidgetTemplateService:
     """Admins own the templates; editors with the widgets permission read them.
 
-    A template save is written onto every widget that follows it, in the same
-    transaction, so a widget row is always what its visitors see and the
-    template is never "ahead" of its widgets.
+    Saving a template only changes its draft. Publishing turns the draft into
+    the release followers are held to and writes the locked groups onto every
+    follower in the same transaction, so a widget row is always what its
+    visitors see and a release is never "ahead" of its widgets.
     """
 
     def __init__(
@@ -85,33 +86,46 @@ class WidgetTemplateService:
 
     async def update_template(
         self, template_id: UUID, changes: dict[str, Any]
-    ) -> TemplateUpdateResult:
+    ) -> WidgetTemplate:
+        """Edit the draft. Followers are untouched until the next publication."""
         validate_permission(self.user, Permission.ADMIN)
         template = await self._owned(template_id)
         try:
             template.apply_update(changes)
         except ValidationError as exc:
             raise BadRequestException(str(exc)) from exc
+        self._assert_locks_enforceable(template)
+        if changes.get("is_default") is True:
+            await self.repo.clear_default(self.user.tenant_id)
+        return await self.repo.update(template)
+
+    async def publish_template(self, template_id: UUID) -> TemplatePublishResult:
+        validate_permission(self.user, Permission.ADMIN)
+        template = await self._owned(template_id)
+        self._assert_locks_enforceable(template)
+        template.publish(by=self.user.id)
+        template = await self.repo.update(template)
+        return TemplatePublishResult(
+            template=template, synced_widgets=await self._sync_followers(template)
+        )
+
+    @staticmethod
+    def _assert_locks_enforceable(template: WidgetTemplate) -> None:
         violations = template.lock_violations()
         if violations:
             raise BadRequestException(
                 "Template locks cannot be enforced: " + ", ".join(violations)
             )
-        if changes.get("is_default") is True:
-            await self.repo.clear_default(self.user.tenant_id)
-        template = await self.repo.update(template)
-        return TemplateUpdateResult(
-            template=template, synced_widgets=await self._sync_linked(template)
-        )
 
-    async def _sync_linked(self, template: WidgetTemplate) -> list[Widget]:
-        assert template.id is not None
+    async def _sync_followers(self, template: WidgetTemplate) -> list[Widget]:
+        assert template.id is not None and template.published is not None
+        release = template.published
         synced: list[Widget] = []
         for widget in await self.widget_repo.list_by_template(template.id):
             # Archived widgets are frozen history; nothing follows them.
             if widget.status == WidgetStatus.ARCHIVED:
                 continue
-            if template.project_onto(widget, template.locked_groups):
+            if release.project_onto(widget, release.locked_groups):
                 synced.append(await self.widget_repo.update(widget))
         return synced
 

@@ -3574,9 +3574,29 @@ export interface paths {
     head?: never;
     /**
      * Update Widget Template
-     * @description Update a widget template. Setting `is_default` clears the previous default. The template's locked groups are written onto every widget that follows it, in the same transaction.
+     * @description Update a widget template's draft. Setting `is_default` clears the previous default. Followers are unchanged until the template is published.
      */
     patch: operations["update_widget_template_api_v1_admin_widget_templates__id___patch"];
+    trace?: never;
+  };
+  "/api/v1/admin/widget-templates/{id}/publish/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Publish Widget Template
+     * @description Publish the draft. The release is what widgets link to; its locked groups are written onto every widget that follows the template, in the same transaction.
+     */
+    post: operations["publish_widget_template_api_v1_admin_widget_templates__id__publish__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/allowed-origins/": {
@@ -9052,7 +9072,8 @@ export interface components {
       | "widget_budget_exhausted"
       | "widget_template_created"
       | "widget_template_updated"
-      | "widget_template_deleted";
+      | "widget_template_deleted"
+      | "widget_template_published";
     /**
      * ActionUpdate
      * @description Represents an action-level configuration change request.
@@ -22571,7 +22592,11 @@ export interface components {
        */
       locked_groups: components["schemas"]["TemplateLockGroup"][];
     };
-    /** WidgetTemplatePublic */
+    /**
+     * WidgetTemplatePublic
+     * @description The draft (texts, theme, language, locked_groups) plus its publication
+     *     state. Followers are linked to and locked by the published release.
+     */
     WidgetTemplatePublic: {
       /**
        * Id
@@ -22594,6 +22619,18 @@ export interface components {
        * @description Widgets that follow this template right now.
        */
       linked_widgets: number;
+      /**
+       * Published At
+       * @description None until the template is first published.
+       */
+      published_at?: string | null;
+      /** Published By User Id */
+      published_by_user_id?: string | null;
+      /**
+       * Has Unpublished Changes
+       * @description The draft differs from the published release.
+       */
+      has_unpublished_changes: boolean;
       /** Created By User Id */
       created_by_user_id?: string | null;
       /**
@@ -22620,7 +22657,7 @@ export interface components {
       is_default?: boolean | null;
       /**
        * Locked Groups
-       * @description Parts every linked widget follows. Adding a group writes the template's values onto the linked widgets at once.
+       * @description Parts every follower is held to once this draft is published.
        */
       locked_groups?: components["schemas"]["TemplateLockGroup"][] | null;
     };
@@ -36901,6 +36938,64 @@ export interface operations {
         "application/json": components["schemas"]["WidgetTemplateUpdate"];
       };
     };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetTemplatePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  publish_widget_template_api_v1_admin_widget_templates__id__publish__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
     responses: {
       /** @description Successful Response */
       200: {

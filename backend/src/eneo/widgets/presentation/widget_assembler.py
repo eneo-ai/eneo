@@ -20,10 +20,11 @@ class WidgetAssembler:
         assert widget.created_at is not None and widget.updated_at is not None
         template = None
         if view.template is not None and view.template.id is not None:
+            release = view.template.published
             template = WidgetTemplateLinkPublic(
                 id=view.template.id,
                 name=view.template.name,
-                locked_groups=list(view.template.locked_groups),
+                locked_groups=list(release.locked_groups) if release else [],
             )
         return WidgetPublic(
             id=widget.id,

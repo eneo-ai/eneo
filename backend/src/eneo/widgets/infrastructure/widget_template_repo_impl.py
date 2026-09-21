@@ -12,7 +12,11 @@ from eneo.database.database import AsyncSession
 from eneo.database.tables.widget_templates_table import WidgetTemplates
 from eneo.main.exceptions import NotFoundException
 from eneo.widgets.domain.widget import WidgetLanguage, WidgetTexts, WidgetTheme
-from eneo.widgets.domain.widget_template import TemplateLockGroup, WidgetTemplate
+from eneo.widgets.domain.widget_template import (
+    TemplateLockGroup,
+    TemplateRelease,
+    WidgetTemplate,
+)
 
 
 def _to_entity(row: WidgetTemplates) -> WidgetTemplate:
@@ -26,6 +30,11 @@ def _to_entity(row: WidgetTemplates) -> WidgetTemplate:
         language=WidgetLanguage(row.language),
         is_default=bool(row.is_default),
         locked_groups=[TemplateLockGroup(group) for group in (row.locked_groups or [])],
+        published=(
+            TemplateRelease.model_validate(row.published) if row.published else None
+        ),
+        published_at=row.published_at,
+        published_by_user_id=row.published_by_user_id,
         created_by_user_id=row.created_by_user_id,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -42,6 +51,11 @@ def _to_values(template: WidgetTemplate) -> dict[str, Any]:
         "language": template.language.value,
         "is_default": template.is_default,
         "locked_groups": [group.value for group in template.locked_groups],
+        "published": (
+            template.published.model_dump(mode="json") if template.published else None
+        ),
+        "published_at": template.published_at,
+        "published_by_user_id": template.published_by_user_id,
         "created_by_user_id": template.created_by_user_id,
     }
 

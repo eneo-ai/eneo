@@ -352,6 +352,13 @@
                           {#if template.is_default}
                             <Badge>{m.widget_admin_template_default()}</Badge>
                           {/if}
+                          {#if template.published_at == null}
+                            <Badge variant="outline">{m.widget_admin_template_unpublished()}</Badge>
+                          {:else if template.has_unpublished_changes}
+                            <Badge variant="outline">
+                              {m.widget_admin_template_unpublished_changes()}
+                            </Badge>
+                          {/if}
                           {#if template.linked_widgets > 0}
                             <Badge variant="secondary">
                               {template.linked_widgets === 1

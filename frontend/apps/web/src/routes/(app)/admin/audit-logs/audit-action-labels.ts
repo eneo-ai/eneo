@@ -609,6 +609,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_widget_template_updated,
     description: m.audit_action_widget_template_updated_description
   },
+  widget_template_published: {
+    name: m.audit_action_widget_template_published,
+    description: m.audit_action_widget_template_published_description
+  },
   widget_template_deleted: {
     name: m.audit_action_widget_template_deleted,
     description: m.audit_action_widget_template_deleted_description

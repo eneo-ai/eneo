@@ -4,7 +4,7 @@
 
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 from uuid import UUID
@@ -76,79 +76,31 @@ def _as_theme(value: Any) -> WidgetTheme:
     )
 
 
-class WidgetTemplate(BaseModel):
-    """House style admins maintain and widgets can follow.
+class TemplateContent(BaseModel):
+    """What a template governs on a widget, and the rules for governing it.
 
     Only the visitor-facing look and wording (texts, theme, language) are
     templated. Limits, privacy and protection stay per widget under the
     tenant policy, so a template can never loosen what the policy sets.
 
-    A linked widget follows the template's locked groups: every template save
-    is written onto the widget and the editor cannot change those parts. The
-    unlocked groups are copied once when the widget is linked and are free
-    afterwards.
+    The same content exists twice on a template: the draft admins edit and
+    the published release followers are held to.
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
-    id: Optional[UUID] = None
-    tenant_id: UUID
-    name: str = Field(min_length=1, max_length=100)
-    description: str = Field(default="", max_length=500)
     texts: WidgetTexts = Field(default_factory=WidgetTexts)
     theme: WidgetTheme = Field(default_factory=WidgetTheme)
     language: WidgetLanguage = WidgetLanguage.AUTO
-    is_default: bool = False
     locked_groups: list[TemplateLockGroup] = Field(
         default_factory=list[TemplateLockGroup]
     )
-    created_by_user_id: Optional[UUID] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-
-    @field_validator("name")
-    @classmethod
-    def _name(cls, value: str) -> str:
-        cleaned = clean_text(value)
-        if not cleaned:
-            raise ValueError("name must not be empty.")
-        return cleaned
-
-    @field_validator("description")
-    @classmethod
-    def _description(cls, value: str) -> str:
-        return clean_text(value)
 
     @field_validator("locked_groups")
     @classmethod
     def _locked_groups(cls, value: list[TemplateLockGroup]) -> list[TemplateLockGroup]:
         chosen = set(value)
         return [group for group in ALL_LOCK_GROUPS if group in chosen]
-
-    @classmethod
-    def create(
-        cls,
-        *,
-        tenant_id: UUID,
-        name: str,
-        language: WidgetLanguage = WidgetLanguage.AUTO,
-        created_by_user_id: Optional[UUID] = None,
-    ) -> "WidgetTemplate":
-        disclosure_lang = "en" if language == WidgetLanguage.EN else "sv"
-        return cls(
-            tenant_id=tenant_id,
-            name=name,
-            language=language,
-            texts=WidgetTexts(subtitle=DEFAULT_AI_DISCLOSURE[disclosure_lang]),
-            locked_groups=list(DEFAULT_LOCK_GROUPS),
-            created_by_user_id=created_by_user_id,
-        )
-
-    def apply_update(self, changes: dict[str, Any]) -> None:
-        for field, value in changes.items():
-            if field not in TEMPLATE_FIELDS or value is None:
-                continue
-            setattr(self, field, value)
 
     def lock_violations(self) -> list[str]:
         """Why the locks cannot be enforced as configured.
@@ -221,3 +173,86 @@ class WidgetTemplate(BaseModel):
                     if getattr(new_texts, field) != getattr(widget.texts, field):
                         violations.append(f"texts.{field}")
         return violations
+
+
+class TemplateRelease(TemplateContent):
+    """The published state of a template: what followers are linked to, kept
+    in step with and locked by. Only publishing replaces it."""
+
+
+class WidgetTemplate(TemplateContent):
+    """House style admins maintain and widgets can follow.
+
+    The template's own content fields are the draft: autosaved, previewed,
+    never pushed. Publishing turns the draft into ``published``; that release
+    is copied onto widgets when they are linked and its locked groups are
+    written onto every follower with each later publication.
+    """
+
+    id: Optional[UUID] = None
+    tenant_id: UUID
+    name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=500)
+    is_default: bool = False
+    published: Optional[TemplateRelease] = None
+    published_at: Optional[datetime] = None
+    published_by_user_id: Optional[UUID] = None
+    created_by_user_id: Optional[UUID] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, value: str) -> str:
+        cleaned = clean_text(value)
+        if not cleaned:
+            raise ValueError("name must not be empty.")
+        return cleaned
+
+    @field_validator("description")
+    @classmethod
+    def _description(cls, value: str) -> str:
+        return clean_text(value)
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        tenant_id: UUID,
+        name: str,
+        language: WidgetLanguage = WidgetLanguage.AUTO,
+        created_by_user_id: Optional[UUID] = None,
+    ) -> "WidgetTemplate":
+        disclosure_lang = "en" if language == WidgetLanguage.EN else "sv"
+        return cls(
+            tenant_id=tenant_id,
+            name=name,
+            language=language,
+            texts=WidgetTexts(subtitle=DEFAULT_AI_DISCLOSURE[disclosure_lang]),
+            locked_groups=list(DEFAULT_LOCK_GROUPS),
+            created_by_user_id=created_by_user_id,
+        )
+
+    def apply_update(self, changes: dict[str, Any]) -> None:
+        for field, value in changes.items():
+            if field not in TEMPLATE_FIELDS or value is None:
+                continue
+            setattr(self, field, value)
+
+    def draft_release(self) -> TemplateRelease:
+        """The draft as it would be published."""
+        return TemplateRelease(
+            texts=self.texts.model_copy(deep=True),
+            theme=self.theme.model_copy(deep=True),
+            language=self.language,
+            locked_groups=list(self.locked_groups),
+        )
+
+    @property
+    def has_unpublished_changes(self) -> bool:
+        return self.published != self.draft_release()
+
+    def publish(self, *, by: Optional[UUID], now: Optional[datetime] = None) -> None:
+        self.published = self.draft_release()
+        self.published_at = now or datetime.now(timezone.utc)
+        self.published_by_user_id = by

@@ -489,6 +489,9 @@ def _template_public(
         is_default=template.is_default,
         locked_groups=list(template.locked_groups),
         linked_widgets=linked_widgets,
+        published_at=template.published_at,
+        published_by_user_id=template.published_by_user_id,
+        has_unpublished_changes=template.has_unpublished_changes,
         created_by_user_id=template.created_by_user_id,
         created_at=template.created_at,
         updated_at=template.updated_at,
@@ -503,6 +506,9 @@ def _template_snapshot(template: WidgetTemplate) -> dict[str, Any]:
         "locked_groups": [group.value for group in template.locked_groups],
         "texts": template.texts.model_dump(mode="json"),
         "theme": template.theme.model_dump(mode="json"),
+        "published_at": (
+            template.published_at.isoformat() if template.published_at else None
+        ),
     }
 
 
@@ -585,9 +591,9 @@ async def get_widget_template(id: UUID, container: _ContainerWithUser):
     "/{id}/",
     response_model=WidgetTemplatePublic,
     description=(
-        "Update a widget template. Setting `is_default` clears the previous"
-        " default. The template's locked groups are written onto every widget"
-        " that follows it, in the same transaction."
+        "Update a widget template's draft. Setting `is_default` clears the"
+        " previous default. Followers are unchanged until the template is"
+        " published."
     ),
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -596,8 +602,7 @@ async def update_widget_template(
 ):
     service = container.widget_template_service()
     before = await service.get_template(id)
-    result = await service.update_template(id, body.model_dump(exclude_unset=True))
-    template = result.template
+    template = await service.update_template(id, body.model_dump(exclude_unset=True))
     await _audit_template(
         container,
         action=ActionType.WIDGET_TEMPLATE_UPDATED,
@@ -606,17 +611,46 @@ async def update_widget_template(
         changes={
             "old": _template_snapshot(before),
             "new": _template_snapshot(template),
+        },
+    )
+    linked = await service.linked_widget_counts()
+    return _template_public(template, linked)
+
+
+@admin_templates_router.post(
+    "/{id}/publish/",
+    response_model=WidgetTemplatePublic,
+    description=(
+        "Publish the draft. The release is what widgets link to; its locked"
+        " groups are written onto every widget that follows the template, in"
+        " the same transaction."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def publish_widget_template(id: UUID, container: _ContainerWithUser):
+    service = container.widget_template_service()
+    result = await service.publish_template(id)
+    template = result.template
+    await _audit_template(
+        container,
+        action=ActionType.WIDGET_TEMPLATE_PUBLISHED,
+        template=template,
+        description=f"Published widget template '{template.name}'",
+        changes={
+            "new": _template_snapshot(template),
             "synced_widget_ids": [str(w.id) for w in result.synced_widgets],
         },
     )
-    # Each followed widget gets its own trail entry: its editors ask "who
-    # changed my widget?", not "what happened to the template?".
+    # Each follower gets its own trail entry: its editors ask "who changed my
+    # widget?", not "what happened to the template?".
     for widget in result.synced_widgets:
         await _audit(
             container,
             action=ActionType.WIDGET_UPDATED,
             view=WidgetView(widget=widget, activation_blockers=[], template=template),
-            description=(f"Template '{template.name}' updated widget '{widget.name}'"),
+            description=(
+                f"Template '{template.name}' was published onto widget '{widget.name}'"
+            ),
             changes={"template_id": str(template.id)},
         )
     linked = await service.linked_widget_counts()

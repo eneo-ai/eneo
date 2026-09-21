@@ -155,14 +155,14 @@ class WidgetTemplateUpdate(BaseModel):
     is_default: Optional[bool] = None
     locked_groups: Optional[list[TemplateLockGroup]] = Field(
         default=None,
-        description=(
-            "Parts every linked widget follows. Adding a group writes the"
-            " template's values onto the linked widgets at once."
-        ),
+        description=("Parts every follower is held to once this draft is published."),
     )
 
 
 class WidgetTemplatePublic(BaseModel):
+    """The draft (texts, theme, language, locked_groups) plus its publication
+    state. Followers are linked to and locked by the published release."""
+
     id: UUID
     name: str
     description: str
@@ -173,6 +173,13 @@ class WidgetTemplatePublic(BaseModel):
     locked_groups: list[TemplateLockGroup]
     linked_widgets: int = Field(
         description="Widgets that follow this template right now."
+    )
+    published_at: Optional[datetime] = Field(
+        default=None, description="None until the template is first published."
+    )
+    published_by_user_id: Optional[UUID] = None
+    has_unpublished_changes: bool = Field(
+        description="The draft differs from the published release."
     )
     created_by_user_id: Optional[UUID] = None
     created_at: datetime

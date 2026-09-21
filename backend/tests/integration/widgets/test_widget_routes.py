@@ -328,8 +328,37 @@ async def test_widget_templates(
     assert resp.status_code == 200
     assert [t["name"] for t in resp.json()["items"]] == ["Kommunblå"]
 
-    # A widget created from a template follows it: appearance and language are
-    # locked by default, wording and legal texts are copied once.
+    # Nothing follows a template until it is published.
+    assert template["published_at"] is None
+    assert template["has_unpublished_changes"] is True
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/widgets/",
+        json={
+            "target_id": assistant_id,
+            "name": "Chatt",
+            "template_id": template["id"],
+        },
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["code"] == "template_not_published"
+
+    resp = await client.post(
+        f"/api/v1/admin/widget-templates/{template['id']}/publish/",
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    published = resp.json()
+    assert published["published_at"] is not None
+    assert published["has_unpublished_changes"] is False
+    resp = await client.post(
+        f"/api/v1/admin/widget-templates/{template['id']}/publish/",
+        headers=_auth(regular_user_token),
+    )
+    assert resp.status_code == 403
+
+    # A widget created from a published template follows it: appearance and
+    # language are locked by default, wording and legal texts are copied once.
     resp = await client.post(
         f"/api/v1/spaces/{space_id}/widgets/",
         json={
@@ -355,14 +384,26 @@ async def test_widget_templates(
         )
         return current.json()["revision"]
 
-    # A template save is written onto the follower in the same request.
+    # Saving the template edits its draft only.
     resp = await client.patch(
         f"/api/v1/admin/widget-templates/{template['id']}/",
         json={"theme": {**template["theme"], "primary_color": "#654321"}},
         headers=_auth(admin_token),
     )
     assert resp.status_code == 200, resp.text
+    assert resp.json()["has_unpublished_changes"] is True
     assert resp.json()["linked_widgets"] == 1
+    resp = await client.get(
+        f"/api/v1/widgets/{widget['id']}/", headers=_auth(admin_token)
+    )
+    assert resp.json()["theme"]["primary_color"] == "#123456"
+
+    # Publishing writes the locked groups onto the follower in the same request.
+    resp = await client.post(
+        f"/api/v1/admin/widget-templates/{template['id']}/publish/",
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
     resp = await client.get(
         f"/api/v1/widgets/{widget['id']}/", headers=_auth(admin_token)
     )
@@ -421,7 +462,7 @@ async def test_widget_templates(
     )
     assert resp.status_code == 200, resp.text
 
-    # Linking again takes the template's values back.
+    # Linking again takes the published release back.
     resp = await client.post(
         f"/api/v1/widgets/{widget['id']}/link-template/",
         json={"revision": await revision(widget["id"]), "template_id": template["id"]},

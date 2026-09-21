@@ -20,6 +20,7 @@ from eneo.widgets.application.visitor_token_service import VisitorTokenService
 from eneo.widgets.domain.exceptions import (
     WidgetFieldLockedError,
     WidgetRevisionConflictError,
+    WidgetTemplateNotPublishedError,
 )
 from eneo.widgets.domain.widget import (
     Widget,
@@ -195,14 +196,16 @@ class WidgetService:
 
     @staticmethod
     def _link(widget: Widget, template: WidgetTemplate) -> None:
-        """Make the widget follow the template.
+        """Make the widget follow the template's published release.
 
-        Every templated group is copied now; from here on the template's
-        locked groups are kept in step on each template save and the editor
+        Every templated group is copied now; from here on the release's
+        locked groups are kept in step with each publication and the editor
         cannot change them. Suggested questions stay the widget's own.
         """
+        if template.published is None:
+            raise WidgetTemplateNotPublishedError()
         widget.template_id = template.id
-        template.project_onto(widget, ALL_LOCK_GROUPS)
+        template.published.project_onto(widget, ALL_LOCK_GROUPS)
 
     async def _widget_for_change(
         self, widget_id: UUID, revision: int
@@ -242,8 +245,8 @@ class WidgetService:
         if changes.pop("revision") != widget.revision:
             raise WidgetRevisionConflictError()
         template = await self._template_of(widget)
-        if template is not None:
-            locked = template.locked_changes(widget, changes)
+        if template is not None and template.published is not None:
+            locked = template.published.locked_changes(widget, changes)
             if locked:
                 raise WidgetFieldLockedError(locked)
         widget.apply_update(changes)

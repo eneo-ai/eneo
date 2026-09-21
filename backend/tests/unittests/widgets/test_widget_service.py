@@ -312,6 +312,7 @@ async def _linked_setup(assistant):
         TemplateLockGroup.APPEARANCE,
         TemplateLockGroup.LEGAL_TEXTS,
     ]
+    template.publish(by=user.id)
     template = await template_repo.add(template)
     service = _service(user, space, template_repo=template_repo)
     view = await service.create_widget(
@@ -400,3 +401,31 @@ async def test_detaching_keeps_values_and_frees_every_part(assistant):
     )
     assert relinked.widget.template_id == template.id
     assert relinked.widget.theme.primary_color == "#123456"
+
+
+async def test_widgets_follow_only_published_templates(assistant):
+    from eneo.widgets.domain.exceptions import WidgetTemplateNotPublishedError
+    from eneo.widgets.domain.widget import WidgetTheme
+    from eneo.widgets.domain.widget_template import WidgetTemplate
+
+    user = _user(Permission.WIDGETS)
+    space, _ = _space(uuid4(), assistant)
+    template_repo = _InMemoryTemplateRepo()
+    draft = await template_repo.add(
+        WidgetTemplate.create(tenant_id=user.tenant_id, name="Utkast")
+    )
+    service = _service(user, space, template_repo=template_repo)
+
+    with pytest.raises(WidgetTemplateNotPublishedError):
+        await service.create_widget(
+            space_id=space.id, target_id=assistant.id, name="w", template=draft
+        )
+
+    # Linking takes the published release, not the draft being edited.
+    draft.theme = WidgetTheme(primary_color="#123456")
+    draft.publish(by=user.id)
+    draft.theme = WidgetTheme(primary_color="#000000")
+    view = await service.create_widget(
+        space_id=space.id, target_id=assistant.id, name="w", template=draft
+    )
+    assert view.widget.theme.primary_color == "#123456"
