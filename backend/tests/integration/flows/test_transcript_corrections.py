@@ -1472,7 +1472,10 @@ async def test_regeneration_snapshots_saved_review_and_keeps_original_output(
         "expected_correction_revision": 1,
         "segments_hash": segments_content_hash(segments),
     }
-    response = await client.post(path, headers=headers, json=body)
+    bind = session.sync_session.bind
+    assert bind is not None
+    with _capture_queries(bind) as queries:
+        response = await client.post(path, headers=headers, json=body)
     if audit_failure:
         assert response.status_code == 503, response.text
         async with db_container() as container:
@@ -1485,6 +1488,12 @@ async def test_regeneration_snapshots_saved_review_and_keeps_original_output(
         dispatch.assert_not_awaited()
         return
     assert response.status_code == 201, response.text
+    source_reads = [
+        query
+        for query in queries
+        if "flow_step_transcript_sources.segments_json" in query.sql
+    ]
+    assert len(source_reads) == 1
     child_id = UUID(response.json()["run"]["id"])
     assert response.json()["first_regenerated_step_id"] == str(scenario.plain_step_id)
     dispatch.assert_awaited_once()

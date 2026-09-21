@@ -1,17 +1,20 @@
 """Insert-only transcript snapshots; the caller owns their publication transaction."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.database.tables.flow_tables import FlowStepTranscriptSources
+from eneo.database.tables.flow_tables import FlowStepAttempts, FlowStepTranscriptSources
 from eneo.flows.domain.transcript_source import (
     TranscriptSource,
     TranscriptSourceBounds,
     TranscriptSourceExportRow,
     TranscriptSourceReference,
+    transcript_source_reference,
 )
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 
@@ -23,9 +26,106 @@ class TranscriptSourceExportMeasurement:
     logical_json_bytes: int
 
 
+@dataclass(frozen=True, slots=True)
+class TranscriptSourceAttemptReference:
+    step_id: UUID
+    attempt_no: int
+    reference: TranscriptSourceReference
+    stored_reference: TranscriptSourceReference | None
+
+
 class FlowTranscriptSourceRepository:
     def __init__(self, *, session: AsyncSession):
         self.session = session
+
+    async def get_references_for_attempts(
+        self,
+        *,
+        tenant_id: UUID,
+        run_id: UUID,
+        step_attempts: Sequence[tuple[UUID, int]],
+    ) -> list[TranscriptSourceAttemptReference]:
+        if not step_attempts:
+            return []
+        payload = FlowStepAttempts.input_payload_json
+        transcription = sa.cast(
+            sa.case(
+                (
+                    payload["schema_version"].astext == "flow-step-attempt-input.v1",
+                    payload["resolved_input"]["transcription"],
+                ),
+                else_=payload["transcription"],
+            ),
+            JSONB,
+        )
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepAttempts.step_id,
+                    FlowStepAttempts.attempt_no,
+                    transcription["source"].label("reference"),
+                    FlowStepTranscriptSources.id.label("source_id"),
+                    FlowStepTranscriptSources.source_hash,
+                    *(
+                        getattr(FlowStepTranscriptSources, name)
+                        for name in TranscriptSourceBounds.model_fields
+                    ),
+                )
+                .select_from(FlowStepAttempts)
+                .outerjoin(
+                    FlowStepTranscriptSources,
+                    sa.and_(
+                        FlowStepTranscriptSources.tenant_id
+                        == FlowStepAttempts.tenant_id,
+                        FlowStepTranscriptSources.flow_run_id
+                        == FlowStepAttempts.flow_run_id,
+                        FlowStepTranscriptSources.step_id == FlowStepAttempts.step_id,
+                        FlowStepTranscriptSources.attempt_no
+                        == FlowStepAttempts.attempt_no,
+                    ),
+                )
+                .where(
+                    FlowStepAttempts.tenant_id == tenant_id,
+                    FlowStepAttempts.flow_run_id == run_id,
+                    sa.tuple_(
+                        FlowStepAttempts.step_id, FlowStepAttempts.attempt_no
+                    ).in_(step_attempts),
+                    sa.func.jsonb_typeof(transcription) == "object",
+                    transcription.has_key("source"),
+                )
+            )
+        ).mappings()
+        references: list[TranscriptSourceAttemptReference] = []
+        for row in rows:
+            reference = transcript_source_reference(
+                {"transcription": {"source": row["reference"]}}
+            )
+            assert reference is not None
+            stored = (
+                TranscriptSourceReference(
+                    run_id=run_id,
+                    step_id=row["step_id"],
+                    attempt_no=row["attempt_no"],
+                    source_hash=row["source_hash"],
+                    bounds=TranscriptSourceBounds.model_validate(
+                        {
+                            name: row[name]
+                            for name in TranscriptSourceBounds.model_fields
+                        }
+                    ),
+                )
+                if row["source_id"] is not None
+                else None
+            )
+            references.append(
+                TranscriptSourceAttemptReference(
+                    step_id=row["step_id"],
+                    attempt_no=row["attempt_no"],
+                    reference=reference,
+                    stored_reference=stored,
+                )
+            )
+        return references
 
     async def count_for_export(
         self, *, tenant_id: UUID, run_id: UUID, ceiling: int

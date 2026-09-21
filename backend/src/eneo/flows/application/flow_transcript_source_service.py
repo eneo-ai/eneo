@@ -125,24 +125,33 @@ class FlowTranscriptSourceService:
         await self.access_policy.load_run(
             run_id=run_id, flow_id=flow_id, access_kind="content"
         )
+        projections = await self.transcript_source_repo.get_references_for_attempts(
+            run_id=run_id,
+            tenant_id=self.user.tenant_id,
+            step_attempts=[
+                (result.step_id, result.current_attempt_no)
+                for result in step_results
+                if result.current_attempt_no is not None
+            ],
+        )
         references: dict[UUID, TranscriptSourceReference] = {}
-        for result in step_results:
-            if result.current_attempt_no is None:
-                continue
-            attempt = await self.flow_run_repo.get_step_attempt(
-                run_id=run_id,
-                tenant_id=self.user.tenant_id,
-                step_id=result.step_id,
-                attempt_no=result.current_attempt_no,
-            )
-            if attempt is None:
-                continue
-            reference = await resolve_transcript_source_reference(
-                attempt=attempt, transcript_source_repo=self.transcript_source_repo
-            )
-            if reference is None:
-                continue
-            references[result.step_id] = reference
+        for projection in projections:
+            reference = projection.reference
+            if (reference.run_id, reference.step_id, reference.attempt_no) != (
+                run_id,
+                projection.step_id,
+                projection.attempt_no,
+            ):
+                raise ValueError(
+                    "Transcript source reference does not belong to its attempt."
+                )
+            if projection.stored_reference is None:
+                raise MissingTranscriptSourceError(reference)
+            if projection.stored_reference != reference:
+                raise ValueError(
+                    "Transcript source does not match its immutable reference."
+                )
+            references[projection.step_id] = reference
         return references
 
     async def _load_attempt(

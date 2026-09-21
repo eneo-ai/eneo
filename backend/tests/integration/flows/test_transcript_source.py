@@ -106,6 +106,168 @@ async def _read(session, scenario, user, attempt_no=1):
     )
 
 
+@pytest.mark.parametrize("step_count", [1, 50])
+async def test_step_listing_batches_reference_only_attempt_reads(
+    source_scenario, client, db_container, patch_auth_service_jwt, step_count
+):
+    import re
+
+    from eneo.database.tables.flow_tables import FlowStepResults
+    from eneo.database.tables.spaces_table import SpacesUsers
+    from eneo.spaces.api.space_models import SpaceRoleValue
+    from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
+        _capture_queries,
+    )
+
+    session, scenario, user = source_scenario
+    await session.execute(
+        sa.update(FlowStepResults)
+        .where(FlowStepResults.flow_run_id == scenario.flow_run_id)
+        .values(current_attempt_no=None, input_payload_json={})
+    )
+    for index in range(step_count):
+        identity = dict(
+            flow_run_id=scenario.flow_run_id,
+            flow_id=scenario.flow_id,
+            tenant_id=user.tenant_id,
+            step_id=uuid4(),
+            step_order=index + 3,
+        )
+        session.add(FlowStepResults(**identity, status="running", current_attempt_no=1))
+        session.add(
+            FlowStepAttempts(
+                **identity,
+                attempt_no=1,
+                status="started",
+                started_at=sa.func.now(),
+                input_payload_json={
+                    "schema_version": "flow-step-attempt-input.v1",
+                    "resolved_input": {"text": "input" * 1000},
+                },
+                output_payload_json={"text": "output" * 1000},
+                provenance_json={"payload": "provenance" * 1000},
+            )
+        )
+    flow = await FlowRepository(session=session).get(scenario.flow_id, user.tenant_id)
+    session.add(
+        SpacesUsers(space_id=flow.space_id, user_id=user.id, role=SpaceRoleValue.EDITOR)
+    )
+    await session.commit()
+    async with db_container() as container:
+        token = container.auth_service().create_access_token_for_user(user)
+    bind = session.sync_session.bind
+    assert bind is not None
+    with _capture_queries(bind) as queries:
+        response = await client.get(
+            f"/api/v1/flows/{scenario.flow_id}/runs/{scenario.flow_run_id}/steps/",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert response.status_code == 200, response.text
+    assert len(response.json()) == step_count + 2
+    attempts = [query.sql for query in queries if "flow_step_attempts" in query.sql]
+    assert len(attempts) == 1
+    assert "output_payload_json" not in attempts[0]
+    assert "provenance_json" not in attempts[0]
+    assert not re.search(
+        r"flow_step_attempts\.input_payload_json(?:\s+AS\s+\w+)?(?:,|\s+FROM)",
+        attempts[0],
+    )
+    assert "segments_json" not in attempts[0]
+    assert "detail_json" not in attempts[0]
+
+
+@pytest.mark.parametrize("envelope", [False, True])
+@pytest.mark.parametrize(
+    "state", ["present", "omitted", "missing_row", "hash", "bounds", "identity", "null"]
+)
+async def test_batched_references_validate_canonical_current_attempt(
+    source_scenario, envelope, state
+):
+    from eneo.database.tables.flow_tables import FlowStepResults
+    from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
+        _capture_queries,
+    )
+
+    session, scenario, user = source_scenario
+    source = transcription.capture_transcript_source(
+        segments=[] if state == "omitted" else SEGMENTS,
+        speaker_review={"files": []},
+        words=[],
+        words_omitted_reason=None,
+    )
+    reference = _reference(scenario, source, attempt_no=2)
+    await _attempt(session, scenario, _reference(scenario, source))
+    await _attempt(session, scenario, reference)
+    if state != "missing_row":
+        await FlowTranscriptSourceRepository(session=session).insert(
+            tenant_id=user.tenant_id,
+            flow_id=scenario.flow_id,
+            reference=reference,
+            source=source,
+        )
+    marker = reference.model_dump(mode="json")
+    if state == "hash":
+        marker["source_hash"] = "b" * 64
+    elif state == "bounds":
+        marker["bounds"]["detail_bytes"] += 1
+    elif state == "identity":
+        marker["attempt_no"] = 1
+    elif state == "null":
+        marker = None
+    payload = {"transcription": {"source": marker}}
+    if envelope:
+        payload = {
+            "schema_version": "flow-step-attempt-input.v1",
+            "resolved_input": payload,
+            "transcription": {"source": "ignored outside the envelope"},
+        }
+    await session.execute(
+        sa.update(FlowStepAttempts)
+        .where(
+            FlowStepAttempts.flow_run_id == scenario.flow_run_id,
+            FlowStepAttempts.attempt_no == 2,
+        )
+        .values(input_payload_json=payload)
+    )
+    await session.execute(
+        sa.update(FlowStepResults)
+        .where(
+            FlowStepResults.flow_run_id == scenario.flow_run_id,
+            FlowStepResults.step_id == scenario.transcription_step_id,
+        )
+        .values(current_attempt_no=2, input_payload_json={})
+    )
+    result = await FlowRunRepository(session=session).get_step_result(
+        run_id=scenario.flow_run_id,
+        tenant_id=user.tenant_id,
+        step_id=scenario.transcription_step_id,
+    )
+    bind = session.sync_session.bind
+    assert bind is not None
+    with _capture_queries(bind) as queries:
+        call = _service(session, user).get_references_for_step_results(
+            flow_id=scenario.flow_id, run_id=scenario.flow_run_id, step_results=[result]
+        )
+        if state in ("present", "omitted"):
+            assert await call == {scenario.transcription_step_id: reference}
+        else:
+            with pytest.raises(
+                MissingTranscriptSourceError if state == "missing_row" else ValueError
+            ):
+                await call
+    assert (
+        len(
+            [
+                query
+                for query in queries
+                if "flow_step_attempts" in query.sql
+                or "flow_step_transcript_sources" in query.sql
+            ]
+        )
+        == 1
+    )
+
+
 async def test_detail_route_pages_absolute_indexes_and_whole_source_hash(
     source_scenario, client, db_container, patch_auth_service_jwt, monkeypatch
 ):

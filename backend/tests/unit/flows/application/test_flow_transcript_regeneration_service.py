@@ -184,6 +184,9 @@ async def test_naming_snapshot_preserves_confirmed_unresolved_and_provisional(co
     )
     assert args["expected_flow_version"] == 1
     assert seed.provenance["correction_revision"] == 4
+    assert seed.transcript_sources[context.request["step_id"]] is (
+        context.service.transcript_source_service.get_for_attempt.return_value.source
+    )
     context.service.corrections_repo.copy_snapshot.assert_awaited_once()
     assert context.service.audit_service.log.await_args.kwargs["required"] is True
 

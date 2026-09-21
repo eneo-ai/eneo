@@ -694,9 +694,10 @@ class FlowRunRepository:
                 if parent_attempt is not None
                 else None
             )
-            if (
-                reference is None
-                and transcript_source_reference(input_payload) is not None
+            snapshot = seed.transcript_sources.get(source.step_id)
+            if reference is None and (
+                snapshot is not None
+                or transcript_source_reference(input_payload) is not None
             ):
                 raise ValueError(
                     "Imported transcript reference is missing from its source attempt."
@@ -711,12 +712,13 @@ class FlowRunRepository:
                         "Imported transcript reference does not belong to the source attempt."
                     )
                 sources = FlowTranscriptSourceRepository(session=self.session)
-                snapshot = await sources.get_for_attempt(
-                    tenant_id=run.tenant_id,
-                    run_id=reference.run_id,
-                    step_id=reference.step_id,
-                    attempt_no=reference.attempt_no,
-                )
+                if snapshot is None:
+                    snapshot = await sources.get_for_attempt(
+                        tenant_id=run.tenant_id,
+                        run_id=reference.run_id,
+                        step_id=reference.step_id,
+                        attempt_no=reference.attempt_no,
+                    )
                 if snapshot is None:
                     raise MissingTranscriptSourceError(reference)
                 child_reference = reference.model_copy(

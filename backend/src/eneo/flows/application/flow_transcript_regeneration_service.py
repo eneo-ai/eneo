@@ -332,6 +332,7 @@ class FlowTranscriptRegenerationService:
                 transcript=reviewed,
                 provenance=provenance,
                 results=tuple(prefix),
+                transcript_sources={step_id: transcript.source},
                 review_established_step_ids=frozenset(
                     step.step_id
                     for step in prefix_steps
