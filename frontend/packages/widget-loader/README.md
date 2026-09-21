@@ -35,7 +35,10 @@ Optional `data-*` attributes (also usable as attributes on a hand-written
 | `preview`      | preview token from the admin page (draft widgets) | none                        |
 
 The launcher takes the widget's primary colour (and its dark-mode colour when
-the page is dark) as soon as the embed page reports ready. CSS custom
+the page is dark) as soon as the embed page reports ready. On screens
+narrower than 640px the panel fills the viewport; the launcher then stays on
+top of it as the close button until the embed page has reported ready and
+the chat's own header can close the panel. CSS custom
 properties on the element or `:root` override it: `--eneo-widget-color`,
 `--eneo-widget-on-color`, `--eneo-widget-radius`, `--eneo-widget-z`,
 `--eneo-widget-offset-x`, `--eneo-widget-offset-y`. Parts: `launcher`, `panel`.

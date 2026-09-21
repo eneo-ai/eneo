@@ -74,10 +74,18 @@ class WidgetTemplateRepoImpl:
         assert row is not None
         return _to_entity(row)
 
-    async def get(self, template_id: UUID) -> WidgetTemplate | None:
-        row = await self.session.scalar(
-            sa.select(WidgetTemplates).where(WidgetTemplates.id == template_id)
-        )
+    async def get(
+        self, template_id: UUID, *, for_update: bool = False
+    ) -> WidgetTemplate | None:
+        """``for_update`` holds the row for the rest of the transaction. A
+        template write carries the draft and the release alike, and a widget
+        about to follow the release must get the one a publication in flight
+        leaves behind, so every template mutation and every link reads it
+        locked; a publication takes this lock before its followers'."""
+        stmt = sa.select(WidgetTemplates).where(WidgetTemplates.id == template_id)
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = await self.session.scalar(stmt)
         return _to_entity(row) if row is not None else None
 
     async def list_by_tenant(self, tenant_id: UUID) -> list[WidgetTemplate]:

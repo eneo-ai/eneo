@@ -95,7 +95,11 @@ export const styles = `
     height: 100%;
     border-radius: 0;
   }
-  :host([open]) .launcher { display: none; }
+  /* The chat's own header closes the panel once the embed page is ready.
+     Until then (loading, a paused notice, a page that never loads) the
+     launcher stays on top of the full-screen panel as the way out. */
+  :host([open]) .launcher { z-index: 1; }
+  :host([open][ready]) .launcher { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .launcher, .panel { transition: none; }

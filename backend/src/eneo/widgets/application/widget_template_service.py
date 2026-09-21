@@ -47,8 +47,10 @@ class WidgetTemplateService:
         self.repo = repo
         self.widget_repo = widget_repo
 
-    async def _owned(self, template_id: UUID) -> WidgetTemplate:
-        template = await self.repo.get(template_id)
+    async def _owned(
+        self, template_id: UUID, *, for_update: bool = False
+    ) -> WidgetTemplate:
+        template = await self.repo.get(template_id, for_update=for_update)
         if template is None or template.tenant_id != self.user.tenant_id:
             raise NotFoundException("Widget template not found.")
         return template
@@ -94,7 +96,9 @@ class WidgetTemplateService:
     ) -> WidgetTemplate:
         """Edit the draft. Followers are untouched until the next publication."""
         validate_permission(self.user, Permission.ADMIN)
-        template = await self._owned(template_id)
+        # Locked: the write carries the release too, and a publication that
+        # commits in between must not be written back over.
+        template = await self._owned(template_id, for_update=True)
         try:
             template.apply_update(changes)
         except ValidationError as exc:
@@ -108,7 +112,9 @@ class WidgetTemplateService:
 
     async def publish_template(self, template_id: UUID) -> TemplatePublishResult:
         validate_permission(self.user, Permission.ADMIN)
-        template = await self._owned(template_id)
+        # The template lock comes before the followers' (taken while syncing)
+        # and before any widget that links meanwhile.
+        template = await self._owned(template_id, for_update=True)
         self._assert_locks_enforceable(template)
         previous_locks: set[TemplateLockGroup] = (
             set(template.published.locked_groups) if template.published else set()
@@ -148,7 +154,7 @@ class WidgetTemplateService:
 
     async def delete_template(self, template_id: UUID) -> WidgetTemplate:
         validate_permission(self.user, Permission.ADMIN)
-        template = await self._owned(template_id)
+        template = await self._owned(template_id, for_update=True)
         assert template.id is not None
         # Archived widgets never block deletion; the foreign key clears
         # their link when the template goes, so only the audit log records it.

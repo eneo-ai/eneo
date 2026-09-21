@@ -14,9 +14,12 @@ from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.widgets_table import Widgets
+from eneo.main.exceptions import BadRequestException
+from eneo.widgets.application.visitor_token_service import VisitorTokenService
 from eneo.widgets.application.widget_limits import BudgetReservation, WidgetBudget
 from eneo.widgets.application.widget_retention import purge_expired_widget_sessions
 from eneo.widgets.domain.exceptions import (
+    VisitorTokenStaleError,
     WidgetBudgetExhaustedError,
     WidgetRevisionConflictError,
 )
@@ -101,6 +104,163 @@ async def test_stale_writer_cannot_undo_pause_or_revive_tokens(active_widget):
     assert saved.status == WidgetStatus.PAUSED
     assert saved.token_generation == active_widget["token_generation"] + 1
     assert saved.name != "Stale edit"
+
+
+async def _wait_until_blocked(session, racer: "asyncio.Task") -> None:
+    """Return once the racer waits for a row lock held by ``session``'s
+    transaction, so that transaction is released only after the racer has
+    lined up behind it. (The racer's query text is not visible here: asyncpg
+    reports the statement it is blocked in as the transaction's BEGIN.)"""
+    for _ in range(200):
+        if racer.done():
+            raise AssertionError(
+                f"racer finished before the lock was released: {racer.exception()!r}"
+            )
+        blocked = await session.scalar(
+            sa.text(
+                "SELECT count(*) FROM pg_stat_activity"
+                " WHERE datname = current_database()"
+                " AND pid <> pg_backend_pid()"
+                " AND wait_event_type = 'Lock'"
+            )
+        )
+        if blocked:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"the racer never waited for the lock: {racer!r}")
+
+
+async def _pause_via_service(db_container, widget_id: UUID) -> Widget:
+    async with db_container() as container:
+        return (await container.widget_service().pause_widget(widget_id)).widget
+
+
+async def test_pause_revokes_tokens_minted_after_a_concurrent_rules_change(
+    db_container, active_widget
+):
+    # A rules save commits while the pause is in flight. The pause must bump
+    # the generation that save left, not write the same one back, or the
+    # visitor tokens minted after the save would survive the pause and be
+    # accepted again once the widget is resumed.
+    widget_id = UUID(active_widget["id"])
+    tokens = VisitorTokenService()
+    async with db_container() as editor:
+        edited = (
+            await editor.widget_service().update_widget(
+                widget_id,
+                {
+                    "revision": active_widget["revision"],
+                    "allowed_origins": ["https://www.kommun.se", "https://e.kommun.se"],
+                },
+            )
+        ).widget
+        assert edited.token_generation == active_widget["token_generation"] + 1
+        visitor_token, _ = tokens.mint(edited, uuid4())
+        pause = asyncio.create_task(_pause_via_service(db_container, widget_id))
+        await _wait_until_blocked(editor.session(), pause)
+        assert not pause.done()
+    paused = await pause
+    assert paused.status == WidgetStatus.PAUSED
+    assert paused.token_generation == edited.token_generation + 1
+
+    async with db_container() as admin:
+        resumed = (await admin.widget_service().activate_widget(widget_id)).widget
+    assert resumed.token_generation == paused.token_generation
+    with pytest.raises(VisitorTokenStaleError):
+        tokens.verify(visitor_token, resumed)
+
+
+async def test_pause_cannot_overwrite_a_committed_archive(db_container, active_widget):
+    widget_id = UUID(active_widget["id"])
+    async with db_container() as admin:
+        archived = (await admin.widget_service().archive_widget(widget_id)).widget
+        pause = asyncio.create_task(_pause_via_service(db_container, widget_id))
+        await _wait_until_blocked(admin.session(), pause)
+        assert not pause.done()
+    # The pause sees the archive once it gets the row and refuses it.
+    with pytest.raises(BadRequestException):
+        await pause
+    saved = await _load_widget(active_widget["id"])
+    assert saved.status == WidgetStatus.ARCHIVED
+    assert saved.token_generation == archived.token_generation
+
+
+async def test_draft_save_cannot_roll_back_a_concurrent_publication(db_container):
+    async with db_container() as container:
+        template = await container.widget_template_service().create_template(
+            name="Kommunblå"
+        )
+    assert template.id is not None
+
+    async def save_draft():
+        async with db_container() as container:
+            return await container.widget_template_service().update_template(
+                template.id, {"description": "Färger för kommunens sajter"}
+            )
+
+    async with db_container() as publisher:
+        published = (
+            await publisher.widget_template_service().publish_template(template.id)
+        ).template
+        save = asyncio.create_task(save_draft())
+        await _wait_until_blocked(publisher.session(), save)
+        assert not save.done()
+    saved = await save
+    assert saved.description == "Färger för kommunens sajter"
+    assert saved.published == published.published
+    assert saved.published_at is not None
+
+    async with db_container() as reader:
+        stored = await reader.widget_template_service().get_template(template.id)
+    assert stored.published == published.published
+    assert stored.description == saved.description
+
+
+@pytest.mark.parametrize("how", ["link", "create"])
+async def test_following_a_template_during_its_publication_takes_that_release(
+    db_container, active_widget, how
+):
+    async with db_container() as container:
+        templates = container.widget_template_service()
+        template = await templates.create_template(name="Kommunblå")
+        template = (await templates.publish_template(template.id)).template
+    assert template.id is not None
+    template_id = template.id
+
+    async def follow() -> Widget:
+        async with db_container() as container:
+            service = container.widget_service()
+            if how == "link":
+                view = await service.link_template(
+                    UUID(active_widget["id"]),
+                    template_id,
+                    revision=active_widget["revision"],
+                )
+            else:
+                view = await service.create_widget(
+                    space_id=UUID(active_widget["space_id"]),
+                    target_id=UUID(active_widget["target_id"]),
+                    name="Ny webbchatt",
+                    template_id=template_id,
+                )
+            return view.widget
+
+    async with db_container() as publisher:
+        service = publisher.widget_template_service()
+        await service.update_template(
+            template_id,
+            {"texts": template.texts.model_copy(update={"title": "Fråga kommunen"})},
+        )
+        release = (await service.publish_template(template_id)).template.published
+        follower = asyncio.create_task(follow())
+        await _wait_until_blocked(publisher.session(), follower)
+        assert not follower.done()
+    widget = await follower
+    assert release is not None
+    assert widget.template_id == template_id
+    assert widget.texts.title == "Fråga kommunen"
+    assert widget.texts.subtitle == release.texts.subtitle
+    assert widget.theme == release.theme
 
 
 async def test_stale_http_revision_is_rejected(client, admin_token, active_widget):

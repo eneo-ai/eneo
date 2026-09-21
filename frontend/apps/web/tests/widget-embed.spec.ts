@@ -272,6 +272,40 @@ test.describe("embeddable widget", () => {
     expect(config.status()).toBe(404);
   });
 
+  test("on a phone a paused widget can still be dismissed from the launcher", async ({
+    page,
+    request,
+    baseURL
+  }) => {
+    const widget = await createActiveWidget(page, request);
+    const loaderOrigin = baseURL!.replace(/\/$/, "");
+    await expectOk(
+      await backendFetch(page, request, `/api/v1/widgets/${widget.id}/pause/`, { method: "POST" }),
+      "pause widget"
+    );
+
+    await page.setViewportSize({ width: 375, height: 812 });
+    hostHtml = hostPage(loaderOrigin, widget.public_id);
+    await page.goto(`${HOST_ORIGIN}/index.html`);
+
+    const launcher = page.locator("eneo-widget button.launcher");
+    await launcher.click();
+    await expect(launcher).toHaveAttribute("aria-expanded", "true");
+    const frame = page.frameLocator("eneo-widget iframe");
+    await expect(frame.getByText("Chatten är pausad")).toBeVisible({ timeout: 20_000 });
+
+    // The notice has no chat and so no close button of its own; the launcher
+    // stays on top of the full-screen panel as the way out.
+    await expect(launcher).toBeVisible();
+    await expect(launcher).toHaveAccessibleName("Stäng chatt");
+    await launcher.click();
+    await expect(launcher).toHaveAttribute("aria-expanded", "false");
+    await expect(launcher).toHaveAccessibleName("Öppna chatt");
+    await expect(page.locator("eneo-widget .panel")).toBeHidden();
+    // The host page is usable again: a click reaches its own content.
+    await page.getByRole("heading", { name: "Testkommun" }).click();
+  });
+
   test("a site that is not on the allowed list cannot frame the widget", async ({
     page,
     request,

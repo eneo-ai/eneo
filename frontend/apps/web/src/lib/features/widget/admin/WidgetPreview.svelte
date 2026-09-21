@@ -37,12 +37,22 @@
   );
 
   async function mint(): Promise<void> {
+    // A token is minted for the generation current when it was requested. A
+    // rules save can advance the generation (and start another mint) before
+    // this one answers; a late answer is then stale and the backend would
+    // reject it, so it must neither replace the current token nor be
+    // recorded as covering the new generation.
+    const requested = { id: widget.id, generation: widget.token_generation };
+    const current = () =>
+      requested.id === widget.id && requested.generation === widget.token_generation;
     failed = false;
     try {
-      const minted = await eneo.widgets.previewToken({ id: widget.id });
+      const minted = await eneo.widgets.previewToken({ id: requested.id });
+      if (!current()) return;
       token = minted.token;
-      tokenGeneration = widget.token_generation;
+      tokenGeneration = requested.generation;
     } catch (error) {
+      if (!current()) return;
       failed = true;
       toastError(error, m.widget_admin_preview_failed());
     }

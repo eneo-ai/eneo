@@ -17,13 +17,16 @@ from eneo.widgets.domain.widget import Widget, WidgetStatus
 class _InMemoryRepo:
     def __init__(self) -> None:
         self.rows: dict = {}
+        self.locked_reads: list = []
 
     async def add(self, widget: Widget) -> Widget:
         widget = widget.model_copy(update={"id": uuid4()})
         self.rows[widget.id] = widget
         return widget
 
-    async def get(self, widget_id):
+    async def get(self, widget_id, *, for_update=False):
+        if for_update:
+            self.locked_reads.append(widget_id)
         return self.rows.get(widget_id)
 
     async def get_by_public_id(self, public_id):
@@ -59,13 +62,16 @@ class _InMemoryRepo:
 class _InMemoryTemplateRepo:
     def __init__(self) -> None:
         self.rows: dict = {}
+        self.locked_reads: list = []
 
     async def add(self, template):
         template = template.model_copy(update={"id": uuid4()})
         self.rows[template.id] = template
         return template
 
-    async def get(self, template_id):
+    async def get(self, template_id, *, for_update=False):
+        if for_update:
+            self.locked_reads.append(template_id)
         return self.rows.get(template_id)
 
     async def list_by_tenant(self, tenant_id):
@@ -252,10 +258,13 @@ async def test_admin_runs_the_lifecycle_outside_their_own_spaces(assistant):
     )
     activated = await outsider.activate_widget(view.widget.id)
     assert activated.widget.status == WidgetStatus.ACTIVE
+    assert repo.locked_reads == []
     paused = await outsider.pause_widget(view.widget.id)
     assert paused.widget.status == WidgetStatus.PAUSED
     archived = await outsider.archive_widget(view.widget.id)
     assert archived.widget.status == WidgetStatus.ARCHIVED
+    # Both write past the revision check, so both decide on a locked row.
+    assert repo.locked_reads == [view.widget.id, view.widget.id]
 
 
 async def test_pause_is_allowed_for_editors_and_admins(assistant):
@@ -363,8 +372,10 @@ async def _linked_setup(assistant):
     template = await template_repo.add(template)
     service = _service(user, space, template_repo=template_repo)
     view = await service.create_widget(
-        space_id=space.id, target_id=assistant.id, name="w", template=template
+        space_id=space.id, target_id=assistant.id, name="w", template_id=template.id
     )
+    # The release is read under lock so a publication cannot slip in between.
+    assert template_repo.locked_reads == [template.id]
     return service, view, template
 
 
@@ -444,10 +455,11 @@ async def test_detaching_keeps_values_and_frees_every_part(assistant):
     assert updated.widget.theme.primary_color == "#000000"
 
     relinked = await service.link_template(
-        updated.widget.id, template, revision=updated.widget.revision
+        updated.widget.id, template.id, revision=updated.widget.revision
     )
     assert relinked.widget.template_id == template.id
     assert relinked.widget.theme.primary_color == "#123456"
+    assert service.template_repo.locked_reads == [template.id, template.id]
 
 
 async def test_widgets_follow_only_published_templates(assistant):
@@ -465,7 +477,7 @@ async def test_widgets_follow_only_published_templates(assistant):
 
     with pytest.raises(WidgetTemplateNotPublishedError):
         await service.create_widget(
-            space_id=space.id, target_id=assistant.id, name="w", template=draft
+            space_id=space.id, target_id=assistant.id, name="w", template_id=draft.id
         )
 
     # Linking takes the published release, not the draft being edited.
@@ -473,6 +485,15 @@ async def test_widgets_follow_only_published_templates(assistant):
     draft.publish(by=user.id)
     draft.theme = WidgetTheme(primary_color="#000000")
     view = await service.create_widget(
-        space_id=space.id, target_id=assistant.id, name="w", template=draft
+        space_id=space.id, target_id=assistant.id, name="w", template_id=draft.id
     )
     assert view.widget.theme.primary_color == "#123456"
+
+    # A template of another organisation cannot be followed, whatever its id.
+    foreign = await template_repo.add(
+        WidgetTemplate.create(tenant_id=uuid4(), name="Främmande")
+    )
+    with pytest.raises(NotFoundException):
+        await service.create_widget(
+            space_id=space.id, target_id=assistant.id, name="w", template_id=foreign.id
+        )

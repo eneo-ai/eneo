@@ -1,3 +1,4 @@
+import { page } from "@vitest/browser/context";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { EneoWidgetElement } from "./element";
 import { BRIDGE_NAMESPACE } from "./protocol";
@@ -166,6 +167,57 @@ describe("opening", () => {
     const element = mount({ "auto-open": "true" });
     expect(element.open).toBe(true);
     expect(frameOf(element)).not.toBeNull();
+  });
+});
+
+describe("small screens", () => {
+  /** Run `body` at the given viewport and put the test page back afterwards. */
+  async function atViewport(width: number, height: number, body: () => void): Promise<void> {
+    const before = { width: window.innerWidth, height: window.innerHeight };
+    await page.viewport(width, height);
+    try {
+      body();
+    } finally {
+      await page.viewport(before.width, before.height);
+    }
+  }
+
+  function hitAtCenter(element: EneoWidgetElement, target: Element): Element | null {
+    const box = target.getBoundingClientRect();
+    return element.shadowRoot!.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  }
+
+  it("keeps the launcher on top of the full-screen panel as the close control until the chat is up", async () => {
+    await atViewport(375, 812, () => {
+      const element = mount();
+      element.openPanel();
+      const launcher = launcherOf(element);
+      // A paused notice or a page that never loads sends no ready message:
+      // the launcher is visible, labelled as the close control and is what
+      // a tap on it reaches, not the panel covering the page.
+      expect(getComputedStyle(launcher).display).not.toBe("none");
+      expect(launcher.getAttribute("aria-label")).toBe("Stäng chatt");
+      expect(launcher.contains(hitAtCenter(element, launcher))).toBe(true);
+      launcher.click();
+      expect(element.open).toBe(false);
+
+      // Once the embed page is ready its own header closes the panel.
+      element.openPanel();
+      deliver(element, frameMessage("ready"));
+      expect(element.hasAttribute("ready")).toBe(true);
+      expect(getComputedStyle(launcher).display).toBe("none");
+    });
+  });
+
+  it("leaves the launcher beside the panel on wide screens whatever the frame reports", async () => {
+    await atViewport(1024, 768, () => {
+      const element = mount();
+      element.openPanel();
+      const launcher = launcherOf(element);
+      expect(getComputedStyle(launcher).display).not.toBe("none");
+      deliver(element, frameMessage("ready"));
+      expect(getComputedStyle(launcher).display).not.toBe("none");
+    });
   });
 });
 

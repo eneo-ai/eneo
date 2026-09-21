@@ -91,10 +91,14 @@ class WidgetRepoImpl:
         assert row is not None
         return to_entity(row)
 
-    async def get(self, widget_id: UUID) -> Widget | None:
-        row = await self.session.scalar(
-            sa.select(Widgets).where(Widgets.id == widget_id)
-        )
+    async def get(self, widget_id: UUID, *, for_update: bool = False) -> Widget | None:
+        """``for_update`` holds the row for the rest of the transaction. The
+        lifecycle commands decide on what they read and write past the
+        revision check, so the row must not move in between."""
+        stmt = sa.select(Widgets).where(Widgets.id == widget_id)
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = await self.session.scalar(stmt)
         return to_entity(row) if row is not None else None
 
     async def get_by_public_id(self, public_id: str) -> Widget | None:

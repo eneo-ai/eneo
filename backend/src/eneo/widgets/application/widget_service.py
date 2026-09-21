@@ -119,11 +119,22 @@ class WidgetService:
         # in spaces they are not members of, so no space-level read check.
         return await self.space_service.repo.one(space_id)
 
-    async def _owned_widget(self, widget_id: UUID) -> Widget:
-        widget = await self.repo.get(widget_id)
+    async def _owned_widget(
+        self, widget_id: UUID, *, for_update: bool = False
+    ) -> Widget:
+        widget = await self.repo.get(widget_id, for_update=for_update)
         if widget is None or widget.tenant_id != self.user.tenant_id:
             raise NotFoundException("Widget not found.")
         return widget
+
+    async def _template_to_follow(self, template_id: UUID) -> WidgetTemplate:
+        """The template a widget is about to follow, locked for the rest of
+        the transaction so a publication cannot slip in between reading the
+        release and persisting the widget that copies it."""
+        template = await self.template_repo.get(template_id, for_update=True)
+        if template is None or template.tenant_id != self.user.tenant_id:
+            raise NotFoundException("Widget template not found.")
+        return template
 
     @staticmethod
     def _target_published(space: "Space", widget: Widget) -> bool:
@@ -186,12 +197,17 @@ class WidgetService:
         target_id: UUID,
         name: str,
         language: WidgetLanguage = WidgetLanguage.AUTO,
-        template: Optional[WidgetTemplate] = None,
+        template_id: Optional[UUID] = None,
     ) -> WidgetView:
         validate_permission(self.user, Permission.WIDGETS)
         space = await self._space_for_edit(space_id)
         # Raises NotFound when the assistant is not part of this space.
         space.get_assistant(target_id)
+        template = (
+            await self._template_to_follow(template_id)
+            if template_id is not None
+            else None
+        )
         widget = Widget.create(
             tenant_id=self.user.tenant_id,
             space_id=space_id,
@@ -230,10 +246,11 @@ class WidgetService:
         return widget, space
 
     async def link_template(
-        self, widget_id: UUID, template: WidgetTemplate, *, revision: int
+        self, widget_id: UUID, template_id: UUID, *, revision: int
     ) -> WidgetView:
         validate_permission(self.user, Permission.WIDGETS)
         widget, space = await self._widget_for_change(widget_id, revision)
+        template = await self._template_to_follow(template_id)
         self._link(widget, template)
         widget = await self.repo.update(widget)
         return self._view(space, widget, template)
@@ -301,7 +318,9 @@ class WidgetService:
         return self.token_service.mint(widget, uuid4(), preview=True)
 
     async def pause_widget(self, widget_id: UUID) -> WidgetView:
-        widget = await self._owned_widget(widget_id)
+        # Read locked: the write below skips the revision check, so the
+        # status and generation it writes must be the row's current ones.
+        widget = await self._owned_widget(widget_id, for_update=True)
         # Pausing is the kill switch: any space editor with the widgets
         # permission may stop a widget, not only tenant admins.
         if Permission.ADMIN in self.user.permissions:
@@ -317,7 +336,7 @@ class WidgetService:
 
     async def archive_widget(self, widget_id: UUID) -> WidgetView:
         validate_permission(self.user, Permission.ADMIN)
-        widget = await self._owned_widget(widget_id)
+        widget = await self._owned_widget(widget_id, for_update=True)
         space = await self._space_as_admin(widget.space_id)
         widget.archive()
         widget = await self.repo.update(

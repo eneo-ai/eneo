@@ -130,17 +130,12 @@ async def create_space_widget(
 ):
     service = container.widget_service()
     assembler = container.widget_assembler()
-    template = None
-    if body.template_id is not None:
-        template = await container.widget_template_service().get_template(
-            body.template_id
-        )
     view = await service.create_widget(
         space_id=space_id,
         target_id=body.target_id,
         name=body.name,
         language=body.language,
-        template=template,
+        template_id=body.template_id,
     )
     await _audit(
         container,
@@ -168,13 +163,15 @@ async def link_widget_template(
 ):
     service = container.widget_service()
     assembler = container.widget_assembler()
-    template = await container.widget_template_service().get_template(body.template_id)
-    view = await service.link_template(id, template, revision=body.revision)
+    view = await service.link_template(id, body.template_id, revision=body.revision)
+    assert view.template is not None
     await _audit(
         container,
         action=ActionType.WIDGET_UPDATED,
         view=view,
-        description=f"Linked widget '{view.widget.name}' to template '{template.name}'",
+        description=(
+            f"Linked widget '{view.widget.name}' to template '{view.template.name}'"
+        ),
         changes={"new": _widget_snapshot(view)},
     )
     return assembler.from_view(view)

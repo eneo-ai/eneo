@@ -313,6 +313,9 @@ export class EneoWidgetElement extends HTMLElement {
     switch (message.type) {
       case "ready":
         this.frameReady = true;
+        // Reflected for the styles: on small screens the launcher stays on top
+        // of the full-screen panel as the close control until the chat is up.
+        this.setAttribute("ready", "");
         this.colors = message.payload?.colors ?? null;
         this.paintLauncher();
         this.sendTheme();

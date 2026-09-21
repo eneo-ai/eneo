@@ -22,13 +22,15 @@ from eneo.widgets.domain.widget_template import (
 class _InMemoryRepo:
     def __init__(self) -> None:
         self.rows: dict = {}
+        self.locked_reads = 0
 
     async def add(self, template):
         template = template.model_copy(update={"id": uuid4()})
         self.rows[template.id] = template
         return template
 
-    async def get(self, template_id):
+    async def get(self, template_id, *, for_update=False):
+        self.locked_reads += for_update
         return self.rows.get(template_id)
 
     async def list_by_tenant(self, tenant_id):
@@ -60,7 +62,7 @@ class _InMemoryWidgetRepo:
         self.rows[widget.id] = widget
         return widget
 
-    async def get(self, widget_id):
+    async def get(self, widget_id, *, for_update=False):
         return self.rows.get(widget_id)
 
     async def list_by_template(self, template_id, *, include_archived=False):
@@ -294,6 +296,9 @@ async def test_saving_edits_the_draft_and_publishing_updates_the_followers():
     assert (await repo.get(template.id)).published is None
     template = (await service.publish_template(template.id)).template
     assert template.published is not None and template.published_by_user_id == admin.id
+    # Reads stay lock-free; every template write starts from a locked row.
+    await service.get_template(template.id)
+    assert repo.locked_reads == 1
 
     def follower(**overrides):
         widget = Widget.create(
@@ -323,6 +328,7 @@ async def test_saving_edits_the_draft_and_publishing_updates_the_followers():
     assert draft.has_unpublished_changes is True
     assert draft.published is not None
     assert draft.published.theme.primary_color != "#123456"
+    assert repo.locked_reads == 2
     assert (await widgets.get(linked.id)).theme.primary_color != "#123456"
     assert widgets.updates == 0
 
@@ -378,9 +384,11 @@ async def test_saving_edits_the_draft_and_publishing_updates_the_followers():
     # The archived follower is history: it neither counts nor blocks.
     counts = await service.linked_widget_counts()
     assert counts == {template.id: 1}
+    locked_before_delete = repo.locked_reads
     with pytest.raises(WidgetTemplateInUseError) as in_use:
         await service.delete_template(template.id)
     assert in_use.value.linked_widgets == 1
+    assert repo.locked_reads == locked_before_delete + 1
 
 
 async def test_archived_followers_never_block_deletion():
