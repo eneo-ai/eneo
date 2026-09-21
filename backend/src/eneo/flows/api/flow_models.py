@@ -1797,6 +1797,7 @@ class FlowRunDebugStep(BaseModel):
     step_id: str | None = None
     step_order: int | None = None
     assistant_id: str | None = None
+    status: str | None = None
     io_types: FlowRunDebugIoTypes
     input: FlowRunDebugInput
     output: FlowRunDebugOutput
@@ -1890,6 +1891,7 @@ class FlowRunDebugRunSummary(BaseModel):
     steps_count: int
     completed_steps: int
     failed_steps: int
+    not_run_steps: int
     attempts_count: int
     artifacts_count: int
     duration_ms: int | None = None
@@ -1980,6 +1982,7 @@ class FlowRunDebugExport(BaseModel):
                         "steps_count": 1,
                         "completed_steps": 1,
                         "failed_steps": 0,
+                        "not_run_steps": 0,
                         "attempts_count": 1,
                         "artifacts_count": 0,
                         "duration_ms": 5240,
@@ -2024,6 +2027,7 @@ FLOW_RUN_DEBUG_EXPORT_EXAMPLE: dict[str, Any] = {
             "steps_count": 1,
             "completed_steps": 1,
             "failed_steps": 0,
+            "not_run_steps": 0,
             "attempts_count": 1,
             "artifacts_count": 0,
             "duration_ms": 5240,
@@ -2355,7 +2359,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
             "example": {
                 "schema_version": "flow-evidence-export.v17",
                 "generated_at": "2026-03-31T12:00:00Z",
-                "content_hash": "cfaa0ed0fa2dbeabba04329209f05abddb718dff0366da67fc078f382021ed73",
+                "content_hash": "e66736c443a4e643e6c96219794d20973c17376047c8754bf57b7bd48e255cb7",
                 "manifest": {
                     "schema_version": "flow-evidence-export.v17",
                     "app_version": "DEV",
@@ -2367,7 +2371,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
                     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
                     "flow_version": 3,
-                    "content_hash": "cfaa0ed0fa2dbeabba04329209f05abddb718dff0366da67fc078f382021ed73",
+                    "content_hash": "e66736c443a4e643e6c96219794d20973c17376047c8754bf57b7bd48e255cb7",
                     "content_hash_input": "redacted",
                     "exported_at": "2026-03-31T12:00:00Z",
                     "actor": {
@@ -2418,6 +2422,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "steps_count": 1,
                     "completed_steps": 1,
                     "failed_steps": 0,
+                    "not_run_steps": 0,
                     "attempts_count": 1,
                     "artifacts_count": 1,
                     "artifact_names": ["case-summary.pdf"],

@@ -208,6 +208,98 @@ def _evidence_run_and_version() -> tuple[FlowRun, FlowVersion]:
     return run, version
 
 
+@pytest.mark.parametrize(
+    ("run_status", "expected"),
+    [("failed", (2, 1, 14)), ("cancelled", (2, 0, 14)), ("completed", (17, 0, 0))],
+)
+def test_execution_projection_reports_unclaimed_steps_across_exports(
+    run_status, expected
+):
+    run, _ = _evidence_run_and_version()
+    run = run.model_copy(update={"status": FlowRunStatus(run_status)})
+    step_ids = [uuid4() for _ in range(17)]
+    version = _evidence_version_with_steps(run, step_ids=step_ids)
+    results = [
+        FlowStepResult(
+            flow_run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_id=step_id,
+            step_order=index,
+            status="completed"
+            if index <= 2 or run_status == "completed"
+            else run_status,
+            current_attempt_no=1,
+            started_at=run.created_at
+            if index <= 3 or run_status == "completed"
+            else None,
+            created_at=run.created_at,
+            updated_at=run.updated_at,
+        )
+        for index, step_id in enumerate(step_ids, 1)
+    ]
+    exported = _render_raw_export(run, version, step_results=results, step_attempts=[])
+    debug = exported["bundle"]["debug_export"]
+    for summary in (debug["run"]["summary"], exported["summary"]):
+        assert (
+            summary["completed_steps"],
+            summary["failed_steps"],
+            summary["not_run_steps"],
+        ) == expected
+    expected_statuses = (
+        ["completed"] * 17
+        if run_status == "completed"
+        else ["completed", "completed", run_status] + ["not_run"] * 14
+    )
+    assert [step["status"] for step in debug["steps"]] == expected_statuses
+    assert [
+        step["status"] for step in exported["summary"]["step_overview"]
+    ] == expected_statuses
+
+
+@pytest.mark.parametrize(
+    "marker", ["claimed", "current_attempt", "attempt_row", "unclaimed"]
+)
+def test_execution_projection_uses_result_claim_timestamp(marker):
+    run, version = _evidence_run_and_version()
+    run = run.model_copy(update={"status": FlowRunStatus.FAILED})
+    step_id = UUID(version.definition_json["steps"][0]["step_id"])
+    result = FlowStepResult(
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=step_id,
+        step_order=1,
+        status="failed",
+        started_at=run.created_at if marker == "claimed" else None,
+        current_attempt_no=1 if marker == "current_attempt" else None,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
+    )
+    attempt = FlowStepAttempt(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=step_id,
+        step_order=1,
+        attempt_no=1,
+        status="failed",
+        started_at=run.created_at,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
+    )
+    debug = build_debug_export(
+        run=run,
+        version=version,
+        step_results=[result],
+        step_attempts=[attempt] if marker == "attempt_row" else [],
+    )
+    expected = "failed" if marker == "claimed" else "not_run"
+    assert debug["steps"][0]["status"] == expected
+    assert debug["run"]["summary"]["failed_steps"] == (expected == "failed")
+
+
 def test_evidence_marks_canonical_snapshot_verified() -> None:
     run, version = _evidence_run_and_version()
 
@@ -689,6 +781,7 @@ def _step_result_for_run(
         num_tokens_input=None,
         num_tokens_output=None,
         status=FlowStepResultStatus.COMPLETED,
+        started_at=now,
         flow_step_execution_hash=None,
         created_at=now,
         updated_at=now,
@@ -1438,6 +1531,7 @@ def test_evidence_keeps_source_names_in_review_and_counts_in_debug_export() -> N
         num_tokens_input=None,
         num_tokens_output=None,
         status=FlowStepResultStatus.COMPLETED,
+        started_at=now,
         flow_step_execution_hash=None,
         created_at=now,
         updated_at=now,
@@ -2438,6 +2532,7 @@ def test_evidence_export_summary_is_single_typed_contract() -> None:
         "steps_count",
         "completed_steps",
         "failed_steps",
+        "not_run_steps",
         "attempts_count",
         "artifacts_count",
         "artifact_names",

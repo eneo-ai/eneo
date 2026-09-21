@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from dependency_injector import providers
 
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import (
@@ -53,6 +54,7 @@ from eneo.flows.runtime.step_execution_result import (
     WebhookPayloadRef,
 )
 from eneo.main.config import get_settings
+from eneo.main.container.container import Container
 from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
@@ -115,8 +117,9 @@ def _build_flow(
     space_id: UUID,
     user_id: UUID,
     assistant_id: UUID,
+    step_count: int = 2,
 ) -> Flow:
-    return Flow(
+    flow = Flow(
         id=None,
         tenant_id=tenant_id,
         space_id=space_id,
@@ -168,6 +171,13 @@ def _build_flow(
             ),
         ],
     )
+    flow.steps.extend(
+        flow.steps[-1].model_copy(
+            update={"step_order": order, "user_description": f"Step {order}"}
+        )
+        for order in range(3, step_count + 1)
+    )
+    return flow
 
 
 async def _create_running_run(
@@ -178,6 +188,7 @@ async def _create_running_run(
     space_factory,
     assistant_factory,
     start_attempt=True,
+    step_count=2,
 ):
     model = await completion_model_factory(session, "gpt-4o-mini")
     space = await space_factory(session, "Terminalization contract space", [model.id])
@@ -195,6 +206,7 @@ async def _create_running_run(
             space_id=space.id,
             user_id=admin_user.id,
             assistant_id=assistant.id,
+            step_count=step_count,
         ),
         tenant_id=admin_user.tenant_id,
     )
@@ -256,6 +268,103 @@ async def _create_running_run(
         dispatch_task_id="terminalization-contract",
     )
     return run, flow, run_repo
+
+
+async def test_terminal_evidence_keeps_started_steps_when_attempt_page_is_omitted(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+    object_content_runtime_ready,
+):
+    async with sessionmanager.session() as session, session.begin():
+        run, flow, repo = await _create_running_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            start_attempt=False,
+            step_count=17,
+        )
+        await repo.record_evidence_classification_level(
+            run_id=run.id, tenant_id=admin_user.tenant_id, level=0
+        )
+        for step in flow.steps[:3]:
+            result = await repo.claim_step_result(
+                run_id=run.id, step_id=step.id, tenant_id=admin_user.tenant_id
+            )
+            assert result is not None
+            await repo.create_or_get_attempt_started(
+                run_id=run.id,
+                flow_id=flow.id,
+                tenant_id=admin_user.tenant_id,
+                step_id=step.id,
+                step_order=step.step_order,
+                attempt_no=1,
+                dispatch_task_id="evidence-contract",
+            )
+            if step.step_order < 3:
+                await repo.finish_attempt(
+                    run_id=run.id,
+                    step_id=step.id,
+                    attempt_no=1,
+                    tenant_id=admin_user.tenant_id,
+                    status=FlowStepAttemptStatus.COMPLETED,
+                )
+                await repo.save_step_result(
+                    flow_run_id=run.id,
+                    tenant_id=admin_user.tenant_id,
+                    attempt_no=1,
+                    result=result.model_copy(
+                        update={"status": FlowStepResultStatus.COMPLETED}
+                    ),
+                )
+        await _flow_run_terminalizer(repo).terminalize_run(
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.EXECUTOR_FAILED,
+                code=FlowApiErrorCode.LLM_OUTPUT_TRUNCATED,
+                message="Truncated output.",
+            ),
+        )
+        await session.commit()
+
+    monkeypatch.setattr(
+        "eneo.flows.application.flow_run_evidence_service.RUN_VIEW_MAX_LOADED_ATTEMPTS",
+        0,
+    )
+    async with sessionmanager.session() as session, session.begin():
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+            tenant=providers.Object(test_tenant),
+        )
+        service = container.flow_run_evidence_service()
+        view = await service.get_redacted_evidence_bundle(run_id=run.id)
+        assert view.step_attempts == ()
+        exported = await service.export_evidence_json(run_id=run.id)
+        for summary in (
+            view.debug_export["run"]["summary"],
+            exported["summary"],
+            exported["bundle"]["debug_export"]["run"]["summary"],
+        ):
+            assert (
+                summary["completed_steps"],
+                summary["failed_steps"],
+                summary["not_run_steps"],
+            ) == (2, 1, 14)
+        assert [step["status"] for step in exported["summary"]["step_overview"]] == [
+            "completed",
+            "completed",
+            "failed",
+        ] + ["not_run"] * 14
 
 
 @pytest.mark.asyncio

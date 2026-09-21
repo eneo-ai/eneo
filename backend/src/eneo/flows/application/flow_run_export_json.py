@@ -301,7 +301,6 @@ def _build_summary_payload(
     review_checkpoint_summary: EvidenceReviewCheckpointSummary,
 ) -> EvidenceExportSummary:
     run = _as_json_object_or_empty(bundle_payload.get("run"))
-    step_results = _as_json_object_list(bundle_payload.get("step_results"))
     step_attempts = _as_json_object_list(bundle_payload.get("step_attempts"))
     result_files = _result_file_records(bundle_payload)
     debug_export = _as_json_object_or_empty(bundle_payload.get("debug_export"))
@@ -330,26 +329,11 @@ def _build_summary_payload(
     return EvidenceExportSummary(
         status=_str_or_none(run.get("status")),
         trace_id=_str_or_none(run.get("trace_id")),
-        steps_count=_strict_int_or_default(
-            debug_summary.get("steps_count", len(step_results))
-        ),
-        completed_steps=_strict_int_or_default(
-            debug_summary.get(
-                "completed_steps",
-                sum(
-                    1 for result in step_results if result.get("status") == "completed"
-                ),
-            )
-        ),
-        failed_steps=_strict_int_or_default(
-            debug_summary.get(
-                "failed_steps",
-                sum(1 for result in step_results if result.get("status") == "failed"),
-            )
-        ),
-        attempts_count=_strict_int_or_default(
-            debug_summary.get("attempts_count", len(step_attempts))
-        ),
+        steps_count=_strict_int_or_default(debug_summary.get("steps_count")),
+        completed_steps=_strict_int_or_default(debug_summary.get("completed_steps")),
+        failed_steps=_strict_int_or_default(debug_summary.get("failed_steps")),
+        not_run_steps=_strict_int_or_default(debug_summary.get("not_run_steps")),
+        attempts_count=_strict_int_or_default(debug_summary.get("attempts_count")),
         artifacts_count=len(artifact_items),
         artifact_names=artifact_names,
         artifact_details=artifact_items,
@@ -675,6 +659,11 @@ def _build_step_overview_payload(
     )
     if not raw_steps:
         return []
+    debug_export = _as_json_object_or_empty(bundle_payload.get("debug_export"))
+    execution_statuses = {
+        step.get("step_order"): _str_or_none(step.get("status"))
+        for step in _as_json_object_list(debug_export.get("steps"))
+    }
     result_files_by_step_order = _latest_attempt_result_files_by_step_order(
         _result_file_records(bundle_payload)
     )
@@ -745,7 +734,7 @@ def _build_step_overview_payload(
             step_order=step_order,
             step_id=_str_or_none(step.get("step_id")),
             user_description=_str_or_none(step.get("user_description")),
-            status=_str_or_none(result.get("status")),
+            status=execution_statuses.get(step_order),
             attempts_count=len(attempts),
             retries=max(len(attempts) - 1, 0),
             duration_ms=_sum_attempt_durations(attempts),

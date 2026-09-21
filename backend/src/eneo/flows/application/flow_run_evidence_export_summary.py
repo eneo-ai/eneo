@@ -155,6 +155,7 @@ class EvidenceExportSummary(BaseModel):
     steps_count: int
     completed_steps: int
     failed_steps: int
+    not_run_steps: int
     attempts_count: int
     artifacts_count: int
     artifact_names: list[str]

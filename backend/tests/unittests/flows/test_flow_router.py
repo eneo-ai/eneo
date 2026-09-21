@@ -216,6 +216,7 @@ def _evidence_export_payload(
             "steps_count": 0,
             "completed_steps": 0,
             "failed_steps": 0,
+            "not_run_steps": 0,
             "attempts_count": 0,
             "artifacts_count": 0,
             "artifact_names": [],

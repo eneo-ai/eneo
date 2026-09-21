@@ -3728,6 +3728,7 @@ def test_openapi_flow_evidence_export_documents_single_typed_summary(
         "steps_count",
         "completed_steps",
         "failed_steps",
+        "not_run_steps",
         "attempts_count",
         "artifacts_count",
         "artifact_names",

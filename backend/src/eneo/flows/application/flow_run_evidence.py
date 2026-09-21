@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Sequence
 from copy import deepcopy
 from datetime import datetime
@@ -11,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
+    FlowRunStatus,
     FlowRunTokenUsage,
     FlowRunTranscriptionUsage,
     FlowStepAttempt,
@@ -31,6 +33,7 @@ from eneo.flows.enums import (
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
+    is_terminal_flow_run_status,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import normalize_rag_payload
@@ -143,6 +146,7 @@ class DebugStepProjection(BaseModel):
     step_id: str | None
     step_order: int | None
     assistant_id: str | None
+    status: str | None = None
     io_types: JsonObject
     input: JsonObject
     output: JsonObject
@@ -175,6 +179,7 @@ class DebugRunSummaryProjection(BaseModel):
     steps_count: int
     completed_steps: int
     failed_steps: int
+    not_run_steps: int
     attempts_count: int
     artifacts_count: int
     duration_ms: int | None
@@ -185,6 +190,14 @@ class DebugRunSummaryProjection(BaseModel):
     omissions: list[RunViewEvidenceOmission] = Field(
         default_factory=_empty_run_view_evidence_omissions
     )
+
+
+def project_step_execution_status(
+    *, run_status: FlowRunStatus, result: FlowStepResult
+) -> str:
+    if is_terminal_flow_run_status(run_status) and result.started_at is None:
+        return "not_run"
+    return result.status.value
 
 
 def build_debug_export(
@@ -219,6 +232,15 @@ def build_debug_export(
             normalize_debug_attempt(attempt)
         )
 
+    execution_statuses = {
+        result.step_order: project_step_execution_status(
+            run_status=run.status,
+            result=result,
+        )
+        for result in step_results or []
+    }
+    counts = Counter(execution_statuses.values())
+
     raw_steps = definition_snapshot.get("steps")
     normalized_steps: list[dict[str, Any]] = []
     if isinstance(raw_steps, list):
@@ -234,20 +256,14 @@ def build_debug_export(
                         raw_step_dict,
                         rag_metadata=rag_by_step_order.get(step_order),
                         attempts=attempts_by_step_order.get(step_order, []),
+                        status=execution_statuses.get(step_order),
                     )
                 )
     summary = DebugRunSummaryProjection(
         steps_count=len(normalized_steps),
-        completed_steps=sum(
-            1
-            for result in step_results or []
-            if _normalize_status(result.status) == "completed"
-        ),
-        failed_steps=sum(
-            1
-            for result in step_results or []
-            if _normalize_status(result.status) == "failed"
-        ),
+        completed_steps=counts["completed"],
+        failed_steps=counts["failed"],
+        not_run_steps=counts["not_run"],
         attempts_count=sum(
             len(attempts) for attempts in attempts_by_step_order.values()
         ),
@@ -320,6 +336,7 @@ def normalize_debug_step(
     *,
     rag_metadata: dict[str, Any] | None = None,
     attempts: list[DebugAttemptProjection] | None = None,
+    status: str | None = None,
 ) -> dict[str, Any]:
     input_type = step.get("input_type")
     if (
@@ -340,6 +357,7 @@ def normalize_debug_step(
     if not isinstance(mode, str) or mode not in FlowOutputMode._value2member_map_:
         mode = None
     return DebugStepProjection(
+        status=status,
         step_id=_diagnostic_uuid(step.get("step_id")),
         step_order=parse_step_order(step.get("step_order")),
         assistant_id=_diagnostic_uuid(step.get("assistant_id")),
