@@ -4417,6 +4417,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/attempts/{attempt_no}/transcript-source/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get transcript source detail for one attempt
+     * @description Returns up to 200 segments with absolute indexes and the complete source hash. Follow next_segment_index until null. Send source_hash unchanged as segments_hash when saving corrections or regenerating. Speaker review detail is included only at start_segment_index=0. Component omissions describe production evidence, not the current availability of word timings. Content authorization and a committed access audit are required.
+     */
+    get: operations["get_flow_run_transcript_source"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/": {
     parameters: {
       query?: never;
@@ -5403,9 +5423,8 @@ export interface paths {
      * Get flow run transcript word timings
      * @description Word timings behind one transcription step's structured transcript lines.
      *
-     *     Each entry addresses a segment by its index in `transcription.segments` (from the
-     *     step's `input_payload_json` in the steps listing) and lists that segment's words in
-     *     order with `start`/`end` seconds relative to the segment's audio file. `probability`
+     *     Each entry addresses a segment by its absolute index in the attempt's transcript
+     *     source and lists that segment's words in order with `start`/`end` seconds relative to the segment's audio file. `probability`
      *     is the service's placement confidence; its meaning follows `alignment`: on the
      *     `forced` rung a word scored exactly `0.0` was interpolated over its window rather
      *     than found in the audio and should be shown as uncertain.
@@ -17374,6 +17393,7 @@ export interface components {
         | "review_checkpoints"
         | "review_checkpoint_edits"
         | "transcript_correction_revisions"
+        | "transcript_sources"
         | "webhook_deliveries"
         | "provider_calls"
         | "whole_bundle";
@@ -24672,6 +24692,7 @@ export interface components {
      *           "segment_index": 4
      *         }
      *       ],
+     *       "segments_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
      *       "speaker_edits": [
      *         {
      *           "original_speaker": "SPEAKER_00",
@@ -24699,7 +24720,7 @@ export interface components {
        */
       schema_version?: 2 | 3;
       /** Segments Hash */
-      segments_hash?: string | null;
+      segments_hash: string;
       /**
        * Speaker Edits
        * @description The full replacement list of speaker reassignments for this step (replace-style, like `occurrences`). Omit or send an empty list to clear them.
@@ -28013,6 +28034,28 @@ export interface components {
        */
       items: components["schemas"]["FlowSparsePublic"][];
     };
+    /** OmittedTranscriptSourcePage */
+    OmittedTranscriptSourcePage: {
+      /** Attempt No */
+      attempt_no: number;
+      bounds: components["schemas"]["TranscriptSourceBounds"];
+      reason: components["schemas"]["TranscriptSourceOmissionReason"];
+      /**
+       * Run Id
+       * Format: uuid
+       */
+      run_id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      status: "omitted";
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+    };
     /** OpenIdConnectLogin */
     OpenIdConnectLogin: {
       /** Client Id */
@@ -29708,6 +29751,44 @@ export interface components {
        */
       skill_context_tokens?: number;
     };
+    /** PresentTranscriptSourcePage */
+    PresentTranscriptSourcePage: {
+      /** Attempt No */
+      attempt_no: number;
+      bounds: components["schemas"]["TranscriptSourceBounds"];
+      component_omissions: components["schemas"]["TranscriptComponentOmissions"];
+      /** Max Response Bytes */
+      max_response_bytes: number;
+      /** Next Segment Index */
+      next_segment_index: number | null;
+      /** Page Size */
+      page_size: number;
+      /**
+       * Run Id
+       * Format: uuid
+       */
+      run_id: string;
+      /** Segments */
+      segments: components["schemas"]["TranscriptSourceSegmentPublic"][];
+      /** Source Hash */
+      source_hash: string;
+      /** Speaker Review */
+      speaker_review?: {
+        [key: string]: unknown;
+      } | null;
+      /** Start Segment Index */
+      start_segment_index: number;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      status: "present";
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+    };
     /** PreviousObjectStoreDestination */
     PreviousObjectStoreDestination: {
       /**
@@ -30834,6 +30915,7 @@ export interface components {
         | "review_checkpoints"
         | "review_checkpoint_edits"
         | "transcript_correction_revisions"
+        | "transcript_sources"
         | "webhook_deliveries"
         | "provider_calls"
         | "whole_bundle";
@@ -30866,6 +30948,7 @@ export interface components {
         | "review_checkpoints"
         | "review_checkpoint_edits"
         | "transcript_correction_revisions"
+        | "transcript_sources"
         | "webhook_deliveries"
         | "provider_calls"
         | "whole_bundle";
@@ -30898,6 +30981,7 @@ export interface components {
         | "review_checkpoints"
         | "review_checkpoint_edits"
         | "transcript_correction_revisions"
+        | "transcript_sources"
         | "webhook_deliveries"
         | "provider_calls"
         | "whole_bundle";
@@ -34766,6 +34850,11 @@ export interface components {
        */
       rejected_tools?: components["schemas"]["MCPServerToolPublic"][];
     };
+    /** TranscriptComponentOmissions */
+    TranscriptComponentOmissions: {
+      detail: components["schemas"]["TranscriptSourceOmissionReason"] | null;
+      words: components["schemas"]["TranscriptSourceOmissionReason"] | null;
+    };
     /**
      * TranscriptCorrectionOccurrencePublic
      * @example {
@@ -34816,6 +34905,34 @@ export interface components {
       speaker_attribution?: string | null;
       /** Words */
       words: components["schemas"]["TranscriptWordPublic"][];
+    };
+    /** TranscriptSourceBounds */
+    TranscriptSourceBounds: {
+      /** Detail Bytes */
+      detail_bytes: number;
+      detail_omitted_reason?: components["schemas"]["TranscriptSourceOmissionReason"] | null;
+      /** Segments Bytes */
+      segments_bytes: number;
+      /** Segments Count */
+      segments_count: number;
+      segments_omitted_reason?: components["schemas"]["TranscriptSourceOmissionReason"] | null;
+      /** Words Bytes */
+      words_bytes: number;
+      /** Words Count */
+      words_count: number;
+      words_omitted_reason?: components["schemas"]["TranscriptSourceOmissionReason"] | null;
+    };
+    /**
+     * TranscriptSourceOmissionReason
+     * @enum {integer}
+     */
+    TranscriptSourceOmissionReason: 1 | 2 | 3;
+    /** TranscriptSourceSegmentPublic */
+    TranscriptSourceSegmentPublic: {
+      /** Segment Index */
+      segment_index: number;
+    } & {
+      [key: string]: unknown;
     };
     /**
      * TranscriptSpeakerEditPublic
@@ -35126,6 +35243,26 @@ export interface components {
        * Format: uuid
        */
       target_space_id: string;
+    };
+    /** UnavailableTranscriptSourcePage */
+    UnavailableTranscriptSourcePage: {
+      /** Attempt No */
+      attempt_no: number;
+      /**
+       * Run Id
+       * Format: uuid
+       */
+      run_id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      status: "unavailable_pre_row";
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
     };
     /**
      * UnderstandingPayload
@@ -53009,6 +53146,123 @@ export interface operations {
            *       },
            *       "eneo_error_code": 9001,
            *       "message": "API key space scope does not match requested flow."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_flow_run_transcript_source: {
+    parameters: {
+      query?: {
+        start_segment_index?: number;
+      };
+      header?: never;
+      path: {
+        flow_id: string;
+        run_id: string;
+        step_id: string;
+        attempt_no: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "attempt_no": 1,
+           *       "run_id": "00000000-0000-0000-0000-000000000301",
+           *       "status": "unavailable_pre_row",
+           *       "step_id": "00000000-0000-0000-0000-000000000101"
+           *     }
+           */
+          "application/json":
+            | components["schemas"]["PresentTranscriptSourcePage"]
+            | components["schemas"]["OmittedTranscriptSourcePage"]
+            | components["schemas"]["UnavailableTranscriptSourcePage"];
+        };
+      };
+      /** @description The caller cannot access this run's content. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "API key space scope does not match requested flow."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The run or named step attempt does not exist. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow run step attempt not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The encoded detail response exceeds its byte limit. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "file_too_large",
+           *       "eneo_error_code": 9015,
+           *       "message": "Transcript source detail exceeds the response size limit."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Required access audit logging is unavailable. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_evidence_audit_logging_failed",
+           *       "context": {
+           *         "audit_required": true
+           *       },
+           *       "eneo_error_code": 9024,
+           *       "message": "Evidence audit logging is unavailable."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
