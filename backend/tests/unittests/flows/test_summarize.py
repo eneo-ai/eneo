@@ -461,7 +461,7 @@ def test_summarization_receipt_migration_preserves_existing_evidence(
         )
     )
     assert migration["revision"] == "202609211100"
-    assert migration["down_revision"] == "202609201300"
+    assert migration["down_revision"] == "202609211000"
     operations = MagicMock()
     for name in ("execute", "add_column", "drop_column", "get_bind"):
         monkeypatch.setattr(
