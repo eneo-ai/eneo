@@ -24,11 +24,11 @@ anything a user can see or do differently after the change:
   pass `tour="<anchor>"` to its `<Page.Title>`; the check script recognises
   both spellings.
 
-CI fails a PR that changes files under `frontend/apps/web/src` or its message
-catalogues without a filled-in section (`.github/scripts/check-user-facing.mjs`).
-Backend-only changes are not forced, but the section is still where the
-release notes come from: a crawler fix or a permission fix that users notice
-belongs there too.
+CI fails any pull request whose section is missing or empty
+(`.github/scripts/check-user-facing.mjs`); `No` is enough. The rule is the
+same for backend-only changes because only the author knows whether users
+notice them — a crawler fix or a permission fix belongs here too. Bot
+authors (dependency updates) are exempt.
 
 **When does an entry deserve Show me?** When the user would otherwise ask
 "where is that?": a new admin page, a new section on a settings page, a

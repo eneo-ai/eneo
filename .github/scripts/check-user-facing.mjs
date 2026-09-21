@@ -1,45 +1,41 @@
 #!/usr/bin/env node
 
-// A pull request that changes what users see must say so in the PR
-// template's "## User-facing" section (a sentence or "No"). Release notes are
-// drafted from those sections (scripts/collect_user_facing.mjs), so an empty
-// one is a gap in the next release's What's new page. See
-// frontend/packages/whats-new/PLAYBOOK.md.
+// Every pull request must say what changes for users in the PR template's
+// "## User-facing" section: one or two sentences from the user's point of
+// view, or "No". Release notes are drafted from those sections
+// (scripts/collect_user_facing.mjs), so a missing one is a gap in the next
+// release's What's new page — and only the author knows whether a backend
+// change is something users notice. Bot authors (dependency updates) are
+// exempt. See frontend/packages/whats-new/PLAYBOOK.md.
 //
-// Usage: check-user-facing.mjs --files <changed-files.txt> --body-file <pr-body.md>
-// Exit 1 when a user-visible change has no filled-in section.
+// Usage: check-user-facing.mjs --body-file <pr-body.md> [--author-type User|Bot]
+// Exit 1 when the section is missing or empty.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 
-export function evaluate({ files, body }) {
-  const touched = files
-    .map((f) => f.trim())
-    .filter(Boolean)
-    .filter(isUserVisibleFile);
-  const section = userFacingSection(body);
+export function evaluate({ body, authorType }) {
   const messages = [];
-
-  if (touched.length === 0) {
-    messages.push(
-      "No user-visible files changed; User-facing section not required.",
-    );
+  if (authorType === "Bot") {
+    messages.push("Bot author; User-facing section not required.");
     return { ok: true, messages };
   }
 
-  const sample = `${touched.slice(0, 3).join(", ")}${touched.length > 3 ? ", …" : ""}`;
+  const section = userFacingSection(body);
   if (section === null) {
     messages.push(
-      `::error::This PR changes user-visible files (${sample}) but has no "## User-facing" section. ` +
-        'Add it from the PR template with one or two sentences from the user\'s point of view, or "No".',
+      '::error::This PR has no "## User-facing" section. Add it from the PR template ' +
+        'with one or two sentences from the user\'s point of view, or "No" — ' +
+        "release notes are drafted from it (frontend/packages/whats-new/PLAYBOOK.md).",
     );
     return { ok: false, messages };
   }
   if (section === "") {
     messages.push(
-      `::error::"## User-facing" is empty but this PR changes user-visible files (${sample}). ` +
-        'Write one or two sentences from the user\'s point of view, or "No".',
+      '::error::"## User-facing" is empty. Write one or two sentences from the ' +
+        'user\'s point of view, or "No" — release notes are drafted from it ' +
+        "(frontend/packages/whats-new/PLAYBOOK.md).",
     );
     return { ok: false, messages };
   }
@@ -51,20 +47,6 @@ export function evaluate({ files, body }) {
 
   messages.push(`User-facing: ${section.split("\n")[0]}`);
   return { ok: true, messages };
-}
-
-export function isUserVisibleFile(file) {
-  const path = file.replaceAll("\\", "/").replace(/^\.\//, "");
-  if (!path.startsWith("frontend/apps/web/")) return false;
-  if (!(
-    path.startsWith("frontend/apps/web/src/") ||
-    path.startsWith("frontend/apps/web/messages/")
-  ))
-    return false;
-  if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(path)) return false;
-  if (/(^|\/)(__screenshots__|__tests__|__mocks__)\//.test(path)) return false;
-  if (path.startsWith("frontend/apps/web/src/lib/paraglide/")) return false;
-  return true;
 }
 
 /** The trimmed text of "## User-facing"; "" when empty, null when absent. */
@@ -103,44 +85,37 @@ function main() {
     runSelfTest();
     return 0;
   }
-  const files = fs.readFileSync(getArgValue("--files"), "utf8").split("\n");
   const body = fs.readFileSync(getArgValue("--body-file"), "utf8");
-  const result = evaluate({ files, body });
+  const authorType = getArgValue("--author-type", "User");
+  const result = evaluate({ body, authorType });
   for (const line of result.messages) console.log(line);
   return result.ok ? 0 : 1;
 }
 
 function runSelfTest() {
-  const ui = ["frontend/apps/web/src/routes/(app)/account/+page.svelte"];
   const withSection = (text) =>
     `## Changes\nx\n\n## User-facing\n<!-- hint -->\n${text}\n\n## Testing\ny\n`;
 
-  assert.equal(evaluate({ files: ["backend/src/eneo/x.py"], body: "" }).ok, true);
-  assert.equal(
-    evaluate({ files: ["frontend/apps/web/src/lib/a.test.ts"], body: "" }).ok,
-    true,
-  );
-  assert.equal(
-    evaluate({ files: ["frontend/apps/web/package.json"], body: "" }).ok,
-    true,
-  );
+  // The rule does not depend on which files changed: a backend-only fix that
+  // users notice must be described too.
+  assert.equal(evaluate({ body: "## Changes\nx\n" }).ok, false);
+  assert.equal(evaluate({ body: "" }).ok, false);
+  assert.equal(evaluate({ body: withSection("") }).ok, false);
+  assert.equal(evaluate({ body: withSection("No") }).ok, true);
+  assert.equal(evaluate({ body: withSection("Nej.") }).ok, true);
 
-  assert.equal(evaluate({ files: ui, body: "## Changes\nx\n" }).ok, false);
-  assert.equal(evaluate({ files: ui, body: withSection("") }).ok, false);
-  assert.equal(evaluate({ files: ui, body: withSection("No") }).ok, true);
-  assert.equal(evaluate({ files: ui, body: withSection("Nej.") }).ok, true);
-
-  const filled = evaluate({
-    files: ui,
-    body: withSection("You can now change your password."),
-  });
+  const filled = evaluate({ body: withSection("You can now change your password.") });
   assert.equal(filled.ok, true);
   assert.deepEqual(filled.messages, [
     "User-facing: You can now change your password.",
   ]);
 
+  // Dependency bots do not fill in the template.
+  assert.equal(evaluate({ body: "", authorType: "Bot" }).ok, true);
+  assert.equal(evaluate({ body: withSection(""), authorType: "User" }).ok, false);
+
   // Section last in the body, without a following heading.
-  assert.equal(evaluate({ files: ui, body: "## User-facing\nNo\n" }).ok, true);
+  assert.equal(evaluate({ body: "## User-facing\nNo\n" }).ok, true);
   assert.equal(userFacingSection("## User-facing\n<!-- c -->\n\n## Testing\n"), "");
   assert.equal(userFacingSection("## Changes\nx\n"), null);
   assert.equal(isNegative(" n/a "), true);
