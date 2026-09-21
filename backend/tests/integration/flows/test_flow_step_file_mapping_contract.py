@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from dependency_injector import providers
 from sqlalchemy.exc import IntegrityError
 
 from eneo.database.database import sessionmanager
+from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowRunStepInputFiles,
@@ -19,11 +24,13 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
+    InlineContentPayloads,
     ObjectContents,
 )
 from eneo.files.file_models import FileContentVariant, FileInfo, FileType
 from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
 from eneo.files.file_service import FileService
+from eneo.files.transcriber import TranscribedAudio
 from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.domain.flow import (
@@ -34,17 +41,33 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
     FlowStepResultStatus,
 )
+from eneo.flows.domain.step_output import FileBackedStepText, interpret_step_text
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_step_result_file import FlowStepResultFileReference
-from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunExecutionOwner,
+    FlowRunRepository,
+    flow_run_execution_owner,
+)
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
 from eneo.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
+from eneo.flows.runtime.step_execution_runtime import build_output_payload
+from eneo.flows.runtime.step_input_resolution import resolve_step_input
+from eneo.flows.runtime.step_result_builder import build_completed_step_result
+from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
+from eneo.main.container.container import Container
 from eneo.object_content.content import ContentFailureCode, ContentState
 from tests.flow_snapshot_fixtures import assistant_snapshot
+from tests.unittests.flows.test_flow_transcription import _SpaceStub, _state
+from tests.unittests.flows.test_typed_io_executor import (
+    _build_executor,
+    _mock_assistant_for_execute_step,
+    _runtime_step,
+)
 
 
 def _flow(
@@ -206,6 +229,7 @@ async def _create_running_step_file_flow(
     completion_model_factory,
     space_factory,
     assistant_factory,
+    additional_step=False,
 ):
     model = await completion_model_factory(session, "gpt-4o-mini")
     space = await space_factory(session, "Flows terminal guard files", [model.id])
@@ -216,13 +240,18 @@ async def _create_running_step_file_flow(
         space_id=space.id,
     )
     flow_repo = FlowRepository(session=session)
+    definition = _flow(
+        tenant_id=admin_user.tenant_id,
+        space_id=space.id,
+        user_id=admin_user.id,
+        assistant_id=assistant.id,
+    )
+    if additional_step:
+        definition.steps.append(
+            definition.steps[0].model_copy(update={"step_order": 3})
+        )
     flow = await flow_repo.create(
-        flow=_flow(
-            tenant_id=admin_user.tenant_id,
-            space_id=space.id,
-            user_id=admin_user.id,
-            assistant_id=assistant.id,
-        ),
+        flow=definition,
         tenant_id=admin_user.tenant_id,
     )
     await _create_version(
@@ -248,6 +277,7 @@ async def _create_running_step_file_flow(
                 "assistant_id": step.assistant_id,
                 "step_order": step.step_order,
             }
+            for step in flow.steps
         ],
     )
     assert await run_repo.mark_running_if_claimable(
@@ -1247,3 +1277,381 @@ async def test_late_step_result_save_after_terminalization_preserves_result_file
     assert result_row.error_message == f"Run was terminalized as {target_status.value}."
     assert attempt_status == target_attempt_status.value
     assert file_rows == []
+
+
+@pytest.fixture(params=["inline_completion", "transformed_output"])
+async def transcript_spill_runtime(
+    request,
+    db_container,
+    object_content_runtime_ready,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    text = ("Å long meeting transcript.\n" * 200).strip()
+    async with db_container(user=admin_user) as container:
+        session = container.session()
+        flow, source, run, _ = await _create_running_step_file_flow(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            additional_step=True,
+        )
+        audio = await container.file_service(user=admin_user).save_prepared_file(
+            PreparedFileUpload(
+                name="meeting.wav",
+                file_type=FileType.AUDIO,
+                display_media_type="audio/wav",
+                contents=(
+                    PendingFileContent(
+                        variant=FileContentVariant.ORIGINAL,
+                        chunks=_bytes(b"audio supplied to the transcription provider"),
+                        declared_media_type="audio/wav",
+                        verified_media_type="audio/wav",
+                    ),
+                ),
+            )
+        )
+        await _bind_runtime_uploaded_files(
+            session=session,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            uploaded_for_step_id=source.id,
+            file_ids=[audio.id],
+        )
+        session.add(
+            FlowRunStepInputFiles(
+                flow_run_id=run.id,
+                flow_id=flow.id,
+                tenant_id=admin_user.tenant_id,
+                step_id=source.id,
+                step_order=source.step_order,
+                attempt_no=1,
+                file_id=audio.id,
+                ordinal=0,
+            )
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run.id)
+            .values(execution_heartbeat_at=datetime.now(timezone.utc))
+        )
+
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+            tenant=providers.Object(test_tenant),
+        )
+        executor, _, _, _ = _build_executor(admin_user, max_inline_text_bytes=2048)
+        executor.session = session
+        executor.flow_run_repo = container.flow_run_repo()
+        executor.file_service = container.file_service(user=admin_user)
+        executor.file_repo = container.file_repo()
+        executor.flow_run_terminalizer = container.flow_run_terminalizer()
+        model = SimpleNamespace(
+            id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+        )
+        executor.space_repo.get_space_by_assistant.return_value = _SpaceStub(
+            [model], model
+        )
+        executor.transcriber = SimpleNamespace(
+            transcribe=AsyncMock(
+                return_value=TranscribedAudio(text=text, duration_seconds=15000)
+            )
+        )
+        assistant = _mock_assistant_for_execute_step()
+        assistant.get_prompt_text.return_value = ""
+        executor._load_assistant = AsyncMock(return_value=assistant)
+        step = replace(
+            _runtime_step(
+                input_type="audio",
+                output_mode=(
+                    "transcribe_only"
+                    if request.param == "transformed_output"
+                    else "pass_through"
+                ),
+                input_bindings={"question": "Meeting notes\n{{step_input.text}}"},
+            ),
+            step_id=source.id,
+            step_order=source.step_order,
+            assistant_id=source.assistant_id,
+        )
+        run = await executor.flow_run_repo.get(run_id=run.id, tenant_id=run.tenant_id)
+        owner_token = flow_run_execution_owner.set(
+            FlowRunExecutionOwner(
+                run_id=run.id, tenant_id=run.tenant_id, revision=run.revision
+            )
+        )
+        try:
+            yield SimpleNamespace(
+                executor=executor,
+                run=run,
+                step=step,
+                following_step=flow.steps[1],
+                text=text,
+                transformed=request.param == "transformed_output",
+                metadata={
+                    "wizard": {
+                        "transcription_enabled": True,
+                        "transcription_model": {"id": str(model.id)},
+                    }
+                },
+            )
+        finally:
+            flow_run_execution_owner.reset(owner_token)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "failure_at", ["ownership_registration", "reference_persistence"]
+)
+async def test_transcript_spill_rolls_back_bytes_and_ownership(
+    transcript_spill_runtime, monkeypatch, failure_at
+):
+    case = transcript_spill_runtime
+    executor = case.executor
+    repo = executor.flow_run_repo
+    columns = (
+        Files.id,
+        ObjectContents.id,
+        InlineContentPayloads.content_id,
+        FileContentReferences.content_id,
+        FlowRunStepResultFiles.id,
+    )
+    before = [
+        set(await executor.session.scalars(sa.select(column))) for column in columns
+    ]
+    claimed = await repo.get_step_result(
+        run_id=case.run.id, step_id=case.step.step_id, tenant_id=case.run.tenant_id
+    )
+    method = (
+        "_replace_step_result_file_rows"
+        if failure_at == "ownership_registration"
+        else "update_input_payload"
+    )
+    original = getattr(repo, method)
+    written = []
+
+    async def fail_after_bytes(**kwargs):
+        rows = (
+            await executor.session.execute(
+                sa.select(Files.id, InlineContentPayloads.payload)
+                .join(FileContentReferences, FileContentReferences.file_id == Files.id)
+                .join(
+                    InlineContentPayloads,
+                    InlineContentPayloads.content_id
+                    == FileContentReferences.content_id,
+                )
+                .where(Files.id.not_in(before[0]))
+            )
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].payload == case.text.encode("utf-8")
+        written.append(rows[0].id)
+        if failure_at == "reference_persistence":
+            await original(**kwargs)
+            assert (
+                await executor.session.scalar(
+                    sa.select(FlowRunStepResultFiles.file_id).where(
+                        FlowRunStepResultFiles.flow_run_id == case.run.id
+                    )
+                )
+                == rows[0].id
+            )
+        raise RuntimeError("Injected transcript persistence failure")
+
+    monkeypatch.setattr(repo, method, fail_after_bytes)
+    with pytest.raises(
+        RuntimeError, match="Injected transcript persistence failure"
+    ) as caught:
+        await executor._execute_step(
+            step=case.step, run=case.run, attempt_no=1, version_metadata=case.metadata
+        )
+    assert len(written) == 1
+    await executor._handle_generic_step_failure(
+        run_id=case.run.id,
+        tenant_id=case.run.tenant_id,
+        step=case.step,
+        attempt_no=1,
+        claimed=claimed,
+        exc=caught.value,
+    )
+    async with sessionmanager.session() as fresh, fresh.begin():
+        after = [set(await fresh.scalars(sa.select(column))) for column in columns]
+        assert after == before
+        saved_run = await FlowRunRepository(fresh).get(
+            run_id=case.run.id, tenant_id=case.run.tenant_id
+        )
+        assert saved_run.status == FlowRunStatus.FAILED
+        assert "transkribering" not in saved_run.input_payload_json
+
+
+async def _read_committed_transcript(*, case, db_container, admin_user):
+    async with db_container(user=admin_user) as container:
+        repo = container.flow_run_repo()
+        run = await repo.get(run_id=case.run.id, tenant_id=case.run.tenant_id)
+        reference = FileBackedStepText.model_validate(
+            run.input_payload_json["transkribering"]
+        )
+        owned = await repo.get_result_file(
+            run_id=run.id, tenant_id=run.tenant_id, file_id=reference.file_id
+        )
+        assert owned is not None
+        assert await container.session().scalar(
+            sa.select(InlineContentPayloads.payload)
+            .join(
+                FileContentReferences,
+                FileContentReferences.content_id == InlineContentPayloads.content_id,
+            )
+            .where(FileContentReferences.file_id == reference.file_id)
+        ) == case.text.encode("utf-8")
+        deps = replace(
+            case.executor._build_step_input_resolution_deps(),
+            file_service=container.file_service(user=admin_user),
+            flow_run_repo=repo,
+        )
+        value = await resolve_step_input(
+            step=_runtime_step(
+                step_order=4, input_bindings={"question": "{{transkribering}}"}
+            ),
+            context={"flow_input": run.input_payload_json},
+            run=run,
+            prior_results=await repo.list_step_results(
+                run_id=run.id, tenant_id=run.tenant_id
+            ),
+            deps=deps,
+        )
+        assert value.text == case.text
+        assert [material.file_id for material in value.materials] == [reference.file_id]
+        return reference
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("later_event", ["step_failure", "output_replacement"])
+async def test_committed_transcript_survives_failure_and_output_replacement(
+    transcript_spill_runtime, db_container, admin_user, later_event
+):
+    case = transcript_spill_runtime
+    executor = case.executor
+    repo = executor.flow_run_repo
+    claimed = await repo.get_step_result(
+        run_id=case.run.id, step_id=case.step.step_id, tenant_id=case.run.tenant_id
+    )
+    state = _state()
+    execution = await executor._execute_step(
+        step=case.step,
+        run=case.run,
+        state=state,
+        attempt_no=1,
+        version_metadata=case.metadata,
+    )
+    output = execution.output
+    result = build_completed_step_result(
+        claimed=claimed,
+        run_id=case.run.id,
+        flow_id=case.run.flow_id,
+        tenant_id=case.run.tenant_id,
+        step=case.step,
+        output=output,
+        output_payload_json=build_output_payload(output),
+        execution_hash="transcript-spill",
+    )
+    assert (
+        await executor._persist_successful_step(
+            run_id=case.run.id,
+            tenant_id=case.run.tenant_id,
+            step=case.step,
+            output=output,
+            step_result=result,
+            attempt_no=1,
+            attempt_start=state.attempt_start_by_step[case.step.step_id],
+        )
+        is not None
+    )
+    reference = await _read_committed_transcript(
+        case=case, db_container=db_container, admin_user=admin_user
+    )
+    if case.transformed:
+        assert output.full_text == "Meeting notes\n" + case.text
+        assert (
+            interpret_step_text(result.output_payload_json).file_id != reference.file_id
+        )
+    else:
+        assert result.output_payload_json["text"] == "ok"
+        assert output.generated_file_ids == []
+
+    if later_event == "step_failure":
+        following = replace(
+            _runtime_step(step_order=case.following_step.step_order),
+            step_id=case.following_step.id,
+            assistant_id=case.following_step.assistant_id,
+        )
+        claimed = await repo.claim_step_result(
+            run_id=case.run.id, step_id=following.step_id, tenant_id=case.run.tenant_id
+        )
+        await repo.create_or_get_attempt_started(
+            run_id=case.run.id,
+            flow_id=case.run.flow_id,
+            tenant_id=case.run.tenant_id,
+            step_id=following.step_id,
+            step_order=following.step_order,
+            attempt_no=1,
+            dispatch_task_id="later-step-failure",
+        )
+        await executor.session.commit()
+        failed = await executor._handle_generic_step_failure(
+            run_id=case.run.id,
+            tenant_id=case.run.tenant_id,
+            step=following,
+            attempt_no=1,
+            claimed=claimed,
+            exc=RuntimeError("Later completion failed"),
+        )
+        assert failed["status"] == "failed"
+    else:
+        replacement = "Replacement output.\n" * 200
+        (
+            output.persisted_text,
+            output.generated_file_ids,
+        ) = await executor._apply_output_cap(
+            text=replacement, run=case.run, step=case.step
+        )
+        output.full_text = replacement
+        result.output_payload_json = build_output_payload(output)
+        assert (
+            await executor._persist_successful_step(
+                run_id=case.run.id,
+                tenant_id=case.run.tenant_id,
+                step=case.step,
+                output=output,
+                step_result=result,
+                attempt_no=1,
+                attempt_start=state.attempt_start_by_step[case.step.step_id],
+            )
+            is not None
+        )
+        async with db_container(user=admin_user) as container:
+            ids = set(
+                await container.session().scalars(
+                    sa.select(FlowRunStepResultFiles.file_id).where(
+                        FlowRunStepResultFiles.flow_run_id == case.run.id
+                    )
+                )
+            )
+            assert ids == {reference.file_id, *output.generated_file_ids}
+
+    assert (
+        await _read_committed_transcript(
+            case=case, db_container=db_container, admin_user=admin_user
+        )
+        == reference
+    )

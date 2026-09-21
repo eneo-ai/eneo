@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.files.file_models import FileContentVariant, FileInfo, FileType
 from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.domain.flow import FlowRunStatus
@@ -152,6 +153,28 @@ def _metadata(executor):
             "transcription_model": {"id": str(model.id)},
         }
     }
+
+
+@pytest.mark.parametrize("oversized", [False, True])
+async def test_transcript_audit_records_produced_character_count(user, oversized):
+    text = "Å long meeting transcript.\n" * (200 if oversized else 2)
+    executor, _, run, _, _ = _case(user, text)
+    executor.audit_service = AsyncMock()
+    await executor._execute_step(
+        step=_runtime_step(input_type="audio", output_mode="transcribe_only"),
+        run=run,
+        state=_state(),
+        attempt_no=1,
+        version_metadata=_metadata(executor),
+    )
+    audits = [
+        call.kwargs
+        for call in executor.audit_service.log_async.await_args_list
+        if call.kwargs["action"] == ActionType.FLOW_RUN_AUDIO_TRANSCRIBED
+    ]
+    assert len(audits) == 1
+    assert audits[0]["metadata"]["extra"]["text_length"] == len(text.strip())
+    assert isinstance(run.input_payload_json["transkribering"], dict) == oversized
 
 
 @pytest.mark.parametrize("oversized", [False, True])

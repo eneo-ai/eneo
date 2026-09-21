@@ -171,6 +171,7 @@ async def log_audio_transcribed_audit(
     step_order: int,
     step_id: UUID,
     metadata: dict[str, Any],
+    text_length: int,
 ) -> None:
     if audit_service is None:
         return
@@ -194,13 +195,7 @@ async def log_audio_transcribed_audit(
                     "file_ids": metadata.get("file_ids"),
                     "model": metadata.get("model"),
                     "language": metadata.get("language"),
-                    "text_length": len(
-                        str(
-                            run.input_payload_json.get(FLOW_INPUT_TRANSCRIPTION_KEY, "")
-                        )
-                    )
-                    if isinstance(run.input_payload_json, dict)
-                    else 0,
+                    "text_length": text_length,
                     "elapsed_ms": metadata.get("elapsed_ms"),
                     "files_count": metadata.get("files_count"),
                 },
@@ -280,6 +275,7 @@ async def resolve_transcribe_and_attach_audio_input(
         step_order=request.step.step_order,
         step_id=request.step.step_id,
         metadata=metadata,
+        text_length=len(transcription_result.text),
     )
 
     near_limit_message = None
