@@ -43,7 +43,9 @@ def _transcriber(*results: TranscribedAudio) -> SimpleNamespace:
     return SimpleNamespace(transcribe=AsyncMock(side_effect=list(results)))
 
 
-async def _run(spool_contract, files, transcriber, max_speakers=None):
+async def _run(
+    spool_contract, files, transcriber, max_speakers=None, source_preparation=None
+):
     return await transcribe_audio_input(
         max_speakers=max_speakers,
         files=files,
@@ -54,7 +56,152 @@ async def _run(spool_contract, files, transcriber, max_speakers=None):
         max_files=5,
         max_inline_text_bytes=100_000,
         open_audio_download=spool_contract.downloads(files),
+        source_preparation=source_preparation,
     )
+
+
+@pytest.mark.parametrize("component", ["segments", "detail", "words"])
+def test_preparation_releases_omitted_component_payloads(monkeypatch, component):
+    import weakref
+
+    class Payload(str):
+        pass
+
+    monkeypatch.setattr(transcription, f"MAX_{component.upper()}_BYTES", 1024)
+    payload = Payload("å" * 1024)
+    retained = weakref.ref(payload)
+    preparation = transcription.TranscriptSourcePreparation(
+        files_count=1,
+        segments=[
+            {
+                "file_index": 0,
+                "start": 0,
+                "end": 1,
+                "speaker": None,
+                "text": payload if component == "segments" else "Transcript.",
+            }
+        ],
+        speaker_review={"files": [{"file_index": 0, "overlaps": [payload]}]}
+        if component == "detail"
+        else None,
+        words=[{"segment_index": 0, "words": [{"word": payload}]}]
+        if component == "words"
+        else [],
+        words_omitted_reason="too_large" if component == "words" else None,
+    )
+    del payload
+    assert getattr(preparation.source.bounds, f"{component}_bytes") > 1024
+    assert retained() is None
+
+
+def test_preparation_append_accounts_for_new_payloads_without_reserializing_prefix(
+    monkeypatch,
+):
+    monkeypatch.setattr(transcription, "MAX_SEGMENTS_BYTES", 200)
+    monkeypatch.setattr(transcription, "MAX_DETAIL_BYTES", 200)
+    monkeypatch.setattr(transcription, "MAX_WORDS_BYTES", 400)
+    encode = json.dumps
+    serialized_prefix = 0
+
+    def tracked_encode(value, **kwargs):
+        nonlocal serialized_prefix
+        result = encode(value, **kwargs)
+        if "first-payload" in result:
+            serialized_prefix += 1
+        return result
+
+    monkeypatch.setattr(transcription.json, "dumps", tracked_encode)
+    preparation = transcription.TranscriptSourcePreparation()
+    expected_segments = []
+    expected_detail = {"files": []}
+    expected_words = []
+    prefix_visits = 0
+    for index in range(12):
+        text = "first-payload" if index == 0 else f"Transcript {index}"
+        segment = {
+            "file_index": 0,
+            "start": 0.0,
+            "end": 1.0,
+            "speaker": None,
+            "text": text,
+        }
+        review = {"file_index": 0, "file_id": str(index), "overlaps": []}
+        word_entry = {"segment_index": 0, "words": [{"word": text}]}
+        preparation.append(
+            files_count=1,
+            segments=[segment],
+            speaker_review={"files": [review]},
+            words=[word_entry],
+            words_omitted_reason=None,
+        )
+        if index == 0:
+            prefix_visits = serialized_prefix
+        else:
+            assert serialized_prefix == prefix_visits
+        expected_segments.append({**segment, "file_index": index})
+        expected_detail["files"].append({**review, "file_index": index})
+        expected_words.append({**word_entry, "segment_index": index})
+    from eneo.flows.domain.transcript_corrections import segments_content_hash
+
+    source = preparation.source
+    assert source.segments is None
+    assert source.speaker_review is None
+    assert source.source_hash == segments_content_hash(expected_segments)
+    assert source.bounds.segments_count == source.bounds.words_count == 12
+    assert source.bounds.segments_bytes == len(
+        encode(expected_segments, ensure_ascii=False).encode("utf-8")
+    )
+    assert source.bounds.detail_bytes == len(
+        encode(expected_detail, ensure_ascii=False).encode("utf-8")
+    )
+    assert source.bounds.words_bytes == len(
+        encode(expected_words, ensure_ascii=False).encode("utf-8")
+    )
+
+
+@pytest.mark.parametrize("omit_segments", [False, True])
+async def test_preparations_share_speaker_normalization_with_bounded_state(
+    spool_contract, monkeypatch, omit_segments
+):
+    if omit_segments:
+        monkeypatch.setattr(transcription, "MAX_SEGMENTS_BYTES", 1)
+    preparation = transcription.TranscriptSourcePreparation()
+    results = []
+    for index in range(2):
+        result = await _run(
+            spool_contract,
+            [_file(f"{index}.mp3")],
+            _transcriber(
+                TranscribedAudio(
+                    "Hello.",
+                    1.0,
+                    diarization="external",
+                    transcript_segments=(
+                        TranscriptSegment("Hello.", 0, 1, speaker="SPEAKER_00"),
+                    ),
+                    speaker_review={
+                        "overlaps": [
+                            {"id": "overlap_0000", "detected_speaker_count": 1}
+                        ]
+                    },
+                )
+            ),
+            source_preparation=preparation,
+        )
+        assert f"SPEAKER_{index:02d}: Hello." in result.text
+        assert result.to_metadata()["speakers"][0]["label"] == f"SPEAKER_{index:02d}"
+        results.append(result)
+    from eneo.flows.domain.transcript_corrections import segments_content_hash
+
+    expected = [
+        {**result.segments[0], "file_index": index}
+        for index, result in enumerate(results)
+    ]
+    assert preparation.source_hash == segments_content_hash(expected)
+    assert preparation.source.segments == (None if omit_segments else expected)
+    assert [
+        review["file_index"] for review in preparation.source.speaker_review["files"]
+    ] == [0, 1]
 
 
 async def test_labels_are_unique_across_files_and_inventoried(spool_contract) -> None:

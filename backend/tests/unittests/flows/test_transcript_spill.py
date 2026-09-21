@@ -77,7 +77,10 @@ async def test_per_source_audio_publishes_one_combined_attempt_source(
     )
     executor.transcriber.transcribe.side_effect = [
         TranscribedAudio(
-            text, 10.0, transcript_segments=(TranscriptSegment(text, 0, 10),)
+            text,
+            10.0,
+            diarization="external",
+            transcript_segments=(TranscriptSegment(text, 0, 10, speaker="SPEAKER_00"),),
         )
         for text in ("First transcript.", "Second transcript.")
     ]
@@ -151,6 +154,15 @@ async def test_per_source_audio_publishes_one_combined_attempt_source(
         "Second transcript.",
     ]
     assert [segment["file_index"] for segment in source.segments] == [0, 1]
+    assert [segment["speaker"] for segment in source.segments] == [
+        "SPEAKER_00",
+        "SPEAKER_01",
+    ]
+    questions = [
+        call.kwargs["question"] for call in assistant.get_response.await_args_list
+    ]
+    assert "SPEAKER_00: First transcript." in questions[0]
+    assert "SPEAKER_01: Second transcript." in questions[1]
     assert source.source_hash == segments_content_hash(source.segments)
     assert source.bounds.segments_bytes == len(
         json.dumps(source.segments, ensure_ascii=False).encode("utf-8")

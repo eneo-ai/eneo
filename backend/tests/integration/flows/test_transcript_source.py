@@ -485,7 +485,7 @@ async def test_multiple_preparations_publish_one_bounded_source(
     from eneo.flows.domain.transcript_corrections import segments_content_hash
 
     parts = [
-        transcription.TranscriptSourcePreparation(
+        dict(
             files_count=1,
             segments=[{**SEGMENTS[0], "file_index": 0, "text": text}],
             speaker_review={
@@ -499,11 +499,11 @@ async def test_multiple_preparations_publish_one_bounded_source(
         for text in ("First transcript.", "Second transcript.")
     ]
     expected_segments = [
-        {**part.segments[0], "file_index": index} for index, part in enumerate(parts)
+        {**part["segments"][0], "file_index": index} for index, part in enumerate(parts)
     ]
     expected_detail = {
         "files": [
-            {**part.speaker_review["files"][0], "file_index": index}
+            {**part["speaker_review"]["files"][0], "file_index": index}
             for index, part in enumerate(parts)
         ]
     }
@@ -513,9 +513,9 @@ async def test_multiple_preparations_publish_one_bounded_source(
                 len(
                     json.dumps(
                         {
-                            "segments": part.segments,
-                            "detail": part.speaker_review,
-                            "words": part.words,
+                            "segments": part["segments"],
+                            "detail": part["speaker_review"],
+                            "words": part["words"],
                         }[limited_component],
                         ensure_ascii=False,
                     ).encode("utf-8")
@@ -527,11 +527,15 @@ async def test_multiple_preparations_publish_one_bounded_source(
         monkeypatch.setattr(
             transcription, f"MAX_{limited_component.upper()}_BYTES", bound
         )
+    preparation = transcription.TranscriptSourcePreparation(**parts[0])
     session, scenario, user = source_scenario
     executor, run, step, result, _ = await _publication_case(
-        session, scenario, user, parts[0]
+        session, scenario, user, preparation
     )
-    executor._stage_transcript_source(_reference(scenario, parts[1].source), parts[1])
+    preparation.append(**parts[1])
+    executor._stage_transcript_source(
+        _reference(scenario, preparation.source), preparation
+    )
     await _publish(executor, run, step, result, "activation")
     async with sessionmanager.session() as fresh, fresh.begin():
         source = await FlowTranscriptSourceRepository(session=fresh).get_for_attempt(

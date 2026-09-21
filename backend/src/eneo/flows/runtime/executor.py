@@ -2478,7 +2478,10 @@ class FlowRunExecutor:
         )
 
     def _build_step_input_resolution_deps(
-        self, transcription_call_observer: "ProviderCallObserver | None" = None
+        self,
+        transcription_call_observer: "ProviderCallObserver | None" = None,
+        *,
+        transcript_source_preparation: TranscriptSourcePreparation | None = None,
     ) -> StepInputResolutionDeps:
         return StepInputResolutionDeps(
             apply_output_cap=self._apply_output_cap,
@@ -2500,6 +2503,7 @@ class FlowRunExecutor:
             max_speakers_hint=self.max_speakers_hint,
             transcript_words_repo=self.transcript_words_repo,
             stage_transcript_source=self._stage_transcript_source,
+            transcript_source_preparation=transcript_source_preparation,
         )
 
     def _stage_transcript_source(
@@ -2507,13 +2511,9 @@ class FlowRunExecutor:
     ) -> None:
         key = (reference.run_id, reference.step_id, reference.attempt_no)
         pending = self._pending_transcript_sources.get(key)
-        if pending is not None:
-            source = pending[1].append(source)
-            reference = reference.model_copy(
-                update={
-                    "source_hash": source.source.source_hash,
-                    "bounds": source.source.bounds,
-                }
+        if pending is not None and pending[1] is not source:
+            raise FlowRuntimeInvariantError(
+                "A transcription attempt must share its preparation state."
             )
         self._pending_transcript_sources[key] = (reference, source)
 
@@ -2562,7 +2562,13 @@ class FlowRunExecutor:
         step_input_override: StepInputValue | None = None,
         attempt_no: int = 1,
     ) -> StepInputValue:
-        deps = self._build_step_input_resolution_deps(transcription_call_observer)
+        pending = self._pending_transcript_sources.get(
+            (run.id, step.step_id, attempt_no)
+        )
+        deps = self._build_step_input_resolution_deps(
+            transcription_call_observer,
+            transcript_source_preparation=pending[1] if pending is not None else None,
+        )
         return await resolve_step_input_runtime(
             attempt_no=attempt_no,
             step=step,

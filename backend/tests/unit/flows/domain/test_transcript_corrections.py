@@ -22,6 +22,32 @@ from eneo.flows.domain.transcript_corrections import (
 from eneo.flows.domain.transcript_words import LocatedWord, locate_words
 
 
+def test_incremental_segment_hash_preserves_canonical_hash():
+    from eneo.flows.domain import transcript_corrections
+
+    segments = [
+        {"text": "Å\n", "speaker": None, "start": 0.0},
+        {"text": '雪"', "speaker": "SPEAKER_01", "start": 1.5},
+    ]
+    digest = transcript_corrections.SegmentsContentHash()
+    assert (
+        digest.hexdigest()
+        == segments_content_hash([])
+        == "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    )
+    expected = [
+        "21dda26aace79546f5991ce12ce1c6a8d6ae5eb6b186bec5a219e81c0800dbae",
+        "ea22a749c3090faa17902c70c39329e50de80ff6185ff75049a61a09b16601c8",
+    ]
+    for index, segment in enumerate(segments, start=1):
+        digest.append(segment)
+        assert (
+            digest.hexdigest()
+            == segments_content_hash(segments[:index])
+            == expected[index - 1]
+        )
+
+
 def _segment(text: str, *, speaker: str | None = "SPEAKER_00") -> dict:
     return {
         "file_index": 1,

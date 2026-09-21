@@ -140,6 +140,7 @@ class StepInputResolutionDeps:
     transcription_call_observer: "ProviderCallObserver | None" = None
     max_speakers_hint: int | None = None
     transcript_words_repo: Any | None = None
+    transcript_source_preparation: TranscriptSourcePreparation | None = None
 
 
 @dataclass(frozen=True)
@@ -296,6 +297,7 @@ async def resolve_step_input(
                 max_audio_files=deps.max_audio_files,
                 max_inline_text_bytes=deps.max_inline_text_bytes,
                 max_speakers=deps.max_speakers_hint,
+                source_preparation=deps.transcript_source_preparation,
             )
             audio_deps = AudioRuntimeDeps(
                 apply_output_cap=deps.apply_output_cap,

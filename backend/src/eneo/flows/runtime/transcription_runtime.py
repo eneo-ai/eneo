@@ -76,6 +76,7 @@ class AudioRuntimeRequest:
     attempt_no: int = 1
     # Diarization bound from the participants form field, when known.
     max_speakers: int | None = None
+    source_preparation: TranscriptSourcePreparation | None = None
 
 
 @dataclass(frozen=True)
@@ -235,14 +236,15 @@ async def resolve_transcribe_and_attach_audio_input(
         open_audio_download=deps.open_audio_download,
         transcription_call_observer=deps.transcription_call_observer,
         max_speakers=request.max_speakers,
+        source_preparation=request.source_preparation,
     )
     metadata = transcription_result.to_metadata()
     reference = TranscriptSourceReference(
         run_id=request.run.id,
         step_id=request.step.step_id,
         attempt_no=request.attempt_no,
-        source_hash=transcription_result.source.source_hash,
-        bounds=transcription_result.source.bounds,
+        source_hash=transcription_result.source_preparation.source_hash,
+        bounds=transcription_result.source_preparation.bounds,
     )
     deps.stage_transcript_source(reference, transcription_result.source_preparation)
     metadata["source"] = reference.model_dump(mode="json")

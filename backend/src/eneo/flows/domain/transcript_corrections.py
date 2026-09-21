@@ -199,19 +199,39 @@ class FlowTranscriptCorrectionSet(BaseModel):
         ]
 
 
+class SegmentsContentHash:
+    """Canonical array hash that can continue after segment data is omitted."""
+
+    def __init__(self) -> None:
+        self._digest = hashlib.sha256(b"[")
+        self._has_segments = False
+
+    def append(self, segment: dict[str, Any]) -> None:
+        if self._has_segments:
+            self._digest.update(b",")
+        self._digest.update(
+            json.dumps(
+                segment, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+        )
+        self._has_segments = True
+
+    def hexdigest(self) -> str:
+        digest = self._digest.copy()
+        digest.update(b"]")
+        return digest.hexdigest()
+
+
 def segments_content_hash(raw_segments: list[dict[str, Any]]) -> str:
     """Staleness token for a stored segment array.
 
     Canonical JSON so key order and whitespace never change the hash; any
     re-transcription that changes a single character invalidates anchors.
     """
-    canonical = json.dumps(
-        raw_segments,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    digest = SegmentsContentHash()
+    for segment in raw_segments:
+        digest.append(segment)
+    return digest.hexdigest()
 
 
 def sort_occurrences(
