@@ -68,9 +68,12 @@ Behåll mallarnas `POSTGRES_USER=postgres` och `POSTGRES_DB=eneo` om du inte ock
 anpassar alla anslutningar.
 
 För att spara AI-leverantörernas autentiseringsuppgifter krävs en
-`ENCRYPTION_KEY`. Generera den med samma backendavbildning som ska köras:
+`ENCRYPTION_KEY`. Backend-containern ansluter till det externa nätverket
+`proxy_tier`, så skapa nätverket först och generera sedan nyckeln med samma
+backendavbildning som ska köras:
 
 ```bash
+docker network create proxy_tier
 docker compose run --rm --no-deps backend python -m eneo.cli.generate_encryption_key
 ```
 
@@ -104,7 +107,6 @@ start, stopp, uppgradering och återställning.
 ### Starta och kontrollera
 
 ```bash
-docker network create proxy_tier
 docker compose up -d
 docker compose ps
 docker compose logs --tail=100 backend worker db-init

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createIndex, close } from "pagefind";
 import {
@@ -215,6 +216,34 @@ test("translated MDX and historical JSX links compile through the language adapt
     await compileMdx(
       readFileSync(new URL(file.toString(), translations), "utf8"),
       { staticImage: false, mdxOptions: { remarkPlugins: [localizeMdxLinks] } },
+    );
+  }
+});
+
+// Commands inside fenced code blocks; prose that merely mentions one is ignored.
+function shellCommands(mdx: string): string[] {
+  const commands: string[] = [];
+  let fenced = false;
+  for (const line of mdx.split("\n")) {
+    if (/^\s*```/.test(line)) fenced = !fenced;
+    else if (fenced) commands.push(line.trim());
+  }
+  return commands;
+}
+
+test("installation guides create the external network before any compose command needs it", () => {
+  for (const guide of ["guides/deployment.mdx", "sv/guides/deployment.mdx"]) {
+    const commands = shellCommands(
+      readFileSync(new URL(`../src/content/${guide}`, import.meta.url), "utf8"),
+    );
+    const network = commands.indexOf("docker network create proxy_tier");
+    const compose = commands.findIndex((command) =>
+      /^docker compose (run|up|create|start)\b/.test(command),
+    );
+    assert.ok(network >= 0 && compose >= 0, guide);
+    assert.ok(
+      network < compose,
+      `${guide}: "${commands[compose]}" joins the external network before it is created`,
     );
   }
 });
