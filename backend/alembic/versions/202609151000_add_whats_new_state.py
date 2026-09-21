@@ -1,7 +1,7 @@
 """add whats_new_state
 
 Revision ID: 202609151000
-Revises: 202608271000
+Revises: 202609101000
 Create Date: 2026-09-15 10:00:00.000000
 """
 
@@ -15,7 +15,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "202609151000"
-down_revision: str | None = "202608271000"
+down_revision: str | None = "202609101000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
