@@ -1,0 +1,132 @@
+import { Callout } from "nextra/components";
+
+# Building flows that are efficient and robust
+
+A flow is a chain of steps, and every step is a request to a model. The flows
+that run cheaply and rarely fail share a few habits: each step does one job,
+steps hand each other fixed-format answers, expensive steps wait for a human,
+and the author reads the run evidence before scaling up. This page collects
+those habits from the author's point of view.
+
+## One job per step
+
+Give each step one verb: transcribe, register, group, check, write. A step that
+both extracts facts and writes the final text tends to do neither well, and when
+it fails you cannot tell which half failed. Splitting it costs one more request
+and saves every rerun after that.
+
+A good test: can you name the step in three words? "Register facts", "Group by
+area", "Write plan". If the name needs "and", split the step.
+
+## Short instructions that say what, not how
+
+Tell the model what to extract or write, in what format, and what to leave out.
+Do not tell it how to think. Compare:
+
+- Weak: "Read carefully and consider all aspects before deciding which
+  statements might be relevant to the plan."
+- Strong: "Register every statement about the person's needs, goals, or
+  agreements. One item per statement. Quote the source sentence."
+
+A short instruction is also cheaper. It is sent with every request the step
+makes, so in a step that reads long material it is sent many times.
+
+## Fixed-format answers between steps, text at the end
+
+Set **Svar i fast format** (JSON) on every step whose answer another step reads.
+A fixed format gives the next step named fields instead of prose to parse, keeps
+the answer compact, and lets the flow refuse a malformed answer instead of
+passing it on. Use free text only for the step that writes the document the
+reader sees.
+
+Keep the schema small. Every optional field is a field the model may fill with
+guesses; every long free-text field is output that counts against the model's
+output limit.
+
+## Choose the underlag deliberately
+
+Each step reads what its **Underlag** says: the previous step, the flow's input,
+an uploaded file, or a named set of earlier steps. The default, the previous
+step, is right most of the time. Avoid "all previous steps" when one step is
+enough: it sends every earlier answer again, and the model has to find the
+relevant part in a pile of text it has already processed.
+
+When a step needs two earlier results, name them. A named underlag is cheaper
+than everything, and it documents the flow's data path for the next author.
+
+## Keep knowledge out of transforming steps
+
+Knowledge sources and websites are for steps that answer questions or write
+with background. A step that only transforms material (registers, groups,
+checks, reformats) should not have knowledge attached. Retrieval adds tokens to
+every request and gives the model a second source to confuse with the material.
+Give background once, to the step that writes.
+
+## Review checkpoints before expensive steps
+
+Add a review checkpoint (**Granskning**) after the step that establishes the
+facts and before the steps that build on them. A wrong register corrected by a
+person costs one pause; a wrong register carried through eight writing steps
+costs eight reruns. Place the checkpoint where a human can judge the answer at a
+glance: a list, not a finished document.
+
+## Test with a small real input first
+
+Run the flow on a short, real input before a long one: five minutes of
+recording, two pages of document. Every step's answer is then small enough to
+read in full, and a bad instruction shows in seconds instead of after an hour.
+Only when every step's answer looks right on the short input, run the long one.
+
+## Read the run evidence
+
+Every run keeps evidence per step: tokens in and out, requests made, sections
+read, refusals, and the answer each step produced. When a run is slow, expensive,
+or wrong, the evidence names the step. Look for:
+
+- One step that uses most of the tokens. Usually an underlag that is larger than
+  it needs to be, or an instruction that asks for long output per item.
+- A step with many requests. Expected for a step that reads section by section;
+  otherwise a sign of retries.
+- A refusal or a cut-off answer. The step's error names the cause.
+
+## Failure modes to watch for
+
+**The answer is cut off by the model's output limit.** The model may write only
+so many tokens in one reply. A step that asks for a long list, long free text
+per item, or a big document in one go stops mid-answer and fails. Ask for
+less per request: fewer fields, shorter text, or section-by-section reading.
+
+**Invented ids and references.** A model asked to give ids will invent ones that
+look right, and a later step will trust them. Give ids a fixed pattern in the
+instruction, and when a step reads section by section, prefix them with the
+section number so two sections cannot mint the same id.
+
+**Lists that must merge.** When several steps or sections each produce a list,
+decide where the lists become one. Section-by-section reading merges its own
+lists in order; several parallel steps do not, and a later step must combine
+them explicitly.
+
+**Material silently dropped.** A step whose material is larger than the model
+can read in one request cannot silently read part of it: the flow refuses the
+step instead. That refusal is the signal to switch the step to reading section by
+section, which covers the complete material and fails loudly if any section
+cannot be processed.
+
+## Long material: read it section by section
+
+A step that pulls facts, tasks, or decisions out of a transcript or document of
+several hours or hundreds of pages should read the material **Del för del**.
+The material is split into sections that each fit the model, every section is
+read with the same instruction, and the resulting lists are merged in order.
+Short material is still read in one request, so the setting is safe to leave on.
+
+It is the wrong choice for summaries, assessments, and anything that depends on
+the whole. It also gives up knowledge retrieval and reasoning across sections.
+Setup, id numbering with `section_index`, and how to check the result are in
+[Process long material section by section](/docs/flows-long-material).
+
+<Callout type="info">
+  The pattern that scales: one early step reads the long material section by
+  section and produces a compact register; every later step reads that register
+  in one request.
+</Callout>

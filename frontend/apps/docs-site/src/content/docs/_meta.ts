@@ -6,6 +6,8 @@ const meta: MetaRecord = {
   architecture: "Architecture",
   "authentication-architecture": "Authentication Architecture",
   flows: "Eneo Flows",
+  "flows-best-practices": "Building Flows Well",
+  "flows-long-material": "Long Material in Flows",
   "flows-for-developers": "Flows for Developers",
   "module-authentication": "Module Authentication",
   "knowledge-retrieval-and-mcp": "Knowledge Retrieval and MCP",

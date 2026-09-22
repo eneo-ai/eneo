@@ -1,0 +1,111 @@
+import { Callout } from "nextra/components";
+
+# Process long material section by section
+
+A step that reads a long transcript or document can hit the model's limits in
+two ways: the material does not fit in the model's context window, or the answer
+becomes longer than the model may write in one reply. Reading the material
+section by section fixes both for one kind of step: a step that pulls things out
+of the text as it reads.
+
+This page explains when to choose it, how to set it up in the flow editor, and
+what to expect from the result. It is one part of
+[Building flows that are efficient and robust](/docs/flows-best-practices); for
+the exact runtime rules, see the
+[section processing reference](/docs/flows#process-long-material-section-by-section).
+
+## When to choose it
+
+Choose **Del för del** when the step extracts facts, tasks, decisions, quotes,
+or actions from long material and each item stands on its own. Typical cases:
+
+- A recording of several hours, transcribed, where every statement about a
+  person's needs, goals, or agreements must be registered.
+- A long document where every requirement, deadline, or deviation must be listed.
+- Meeting notes where every decision and action point must be captured.
+
+Keep **Allt på en gång** (the default) when the answer depends on the whole:
+
+- A summary, an overall assessment, a recommendation, or a ranking.
+- A step that compares the beginning of the material with the end.
+- A step that reads several materials at once.
+
+If the answer for a short material is the same in both modes, the step is a good
+candidate. If the answer changes when the reader cannot see the whole text, it is not.
+
+## Set it up in the flow editor
+
+1. Open the step under **Bearbetningssteg** and expand **Underlag**.
+2. Under **Så läser AI:n underlaget**, choose **Del för del**.
+3. Give the step a fixed answer format: **Svar i fast format** with one list in
+   the schema, one object per item. Every section fills that same list. The lists
+   from all sections are merged into one, in section order.
+4. Write the instruction as if the AI reads one part of the material at a time:
+   "register every statement about ..." rather than "summarize the meeting".
+
+The choice is visible only where it can apply: an AI step that passes its answer
+on in a fixed format, without running per file or per record. In **Enkel** mode
+the row is hidden on other steps; in **Avancerad** mode it is shown greyed out
+with the reason.
+
+**Avancerad** also offers **Sammanfatta stegvis**, which summarizes each
+section and then merges the summaries. Use it only when the step must produce
+one record from material that does not fit, and the loss of detail is acceptable.
+
+<Callout type="info">
+  Short material is not affected. When the whole text fits in one request the
+  step makes one call, exactly as before. Choosing section by section is safe
+  for a step that sometimes receives short and sometimes very long material.
+</Callout>
+
+## Numbering items across sections
+
+Each section is read without knowledge of the others, so ids the AI invents
+restart in every section: two sections can both produce `F1`. If a later step
+refers to items by id, give each section its own prefix. In **Avancerad** mode
+the instruction can use the variable `section_index`, the 1-based number of the
+current section:
+
+```text
+Give every registered fact the id S{{ section_index }}-F1, S{{ section_index }}-F2, and so on.
+```
+
+The variable exists only on a step that reads section by section. On other steps
+the prompt editor marks it as unavailable and explains why.
+
+## What the step gives up
+
+- **Knowledge and websites.** Retrieval is not used while a step reads section
+  by section. Put background material in the instruction, or in an earlier step.
+- **Reasoning across sections.** A statement that begins in one section and is
+  corrected in a later one produces two items. Ask for corrections to be
+  registered as their own items, and let a later step reconcile them.
+- **Deduplication.** The runtime merges the lists as they are. If the same fact
+  is stated twice in different sections, it appears twice. Add a later step that
+  merges duplicates if the flow needs a clean register.
+- **One material per step.** The step reads one previous-step text or one
+  uploaded file. Combine several materials in an earlier step first.
+
+Sections are cut at line breaks where practical, so a sentence is rarely split.
+A single very long line without breaks can still be split mid-sentence.
+
+## Check the result
+
+After a run, open the run's evidence for the step. A step that read section by
+section shows how many sections it produced and which part of the material each
+section covered, so a missing item can be traced to the section that should have
+produced it. The merged list is the step's result; later steps read it as one list.
+
+If a section's answer still exceeds what the model may write in one reply, the
+step fails instead of returning a partial answer. The usual causes are an
+instruction that asks for long free text per item, or an item schema with many
+optional fields. Shorten the per-item output before retrying.
+
+## A worked example
+
+A care plan flow receives a transcript of a four-hour conversation. Step 1 reads
+it **Del för del** and registers every statement as a fact with a source quote
+and a `S{{ section_index }}-` id prefix. Step 2 reads the merged register **Allt
+på en gång**, groups the facts by area, and writes the plan. The long reading
+happens once, in the step built for it; every later step works on a compact
+register that fits in one request.
