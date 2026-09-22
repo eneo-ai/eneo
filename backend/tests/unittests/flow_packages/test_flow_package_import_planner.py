@@ -89,6 +89,8 @@ from tests.unittests.flows.test_resolved_input_runtime import (
         "text",
         "scalar_leaf",
         "object_leaf",
+        "wildcard_prefix_items",
+        "leaf_prefix_items",
         "two_wildcards",
         "trailing_wildcard",
         "non_array",
@@ -108,6 +110,14 @@ async def test_wildcard_projection_planner_publish_runtime_parity(case):
         }
     elif case == "non_array":
         source["properties"]["sektioner"]["type"] = "object"
+    elif case in {"wildcard_prefix_items", "leaf_prefix_items"}:
+        array_schema = source["properties"]["sektioner"]
+        if case == "leaf_prefix_items":
+            array_schema = array_schema["items"]["properties"]["underlag"][
+                "properties"
+            ]["krav"]["properties"]["uppgifter"]
+            array_schema["items"] = False
+        array_schema["prefixItems"] = [{"type": "string"}]
     elif case == "two_wildcards":
         bindings["source_refs"][0]["field_path"] = "sektioner.*.underlag.*.uppgifter"
     elif case == "trailing_wildcard":

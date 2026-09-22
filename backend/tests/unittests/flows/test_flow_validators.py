@@ -1274,10 +1274,35 @@ def test_wildcard_projection_refuses_text_consumers(output_mode, publish_strict)
             ),
         ],
         expected_type=FlowStepValidationError,
-        match="field_path .* is absent",
+        match="wildcards require a structured JSON projection",
         code="flow_input_binding_unsupported_key",
         step_order=2,
         require_complete_template_fill_config=publish_strict,
+    )
+
+
+@pytest.mark.parametrize("field_path", ["sections.*", "sections.*.rows.*.values"])
+def test_runtime_input_preserves_wildcard_binding_error_code(field_path):
+    bindings, source, _ = _wildcard_projection_case()
+    bindings["source_refs"][0]["field_path"] = field_path
+    _assert_validate_steps_rejects(
+        [
+            _step(1, output_contract=source),
+            _step(
+                2,
+                input_type="text",
+                output_type="text",
+                input_bindings=bindings,
+                input_config={
+                    "runtime_input": {"enabled": True, "input_format": "document"}
+                },
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="field_path",
+        code="flow_input_binding_unsupported_key",
+        step_order=2,
+        require_complete_template_fill_config=True,
     )
 
 

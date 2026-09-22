@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+import jsonschema
 import pytest
 
 from eneo.flows.input_binding_contract_rules import (
@@ -87,14 +88,42 @@ def test_wildcard_projection_schema_uses_suffix_and_unconstrained_aggregate() ->
     )
 
 
+@pytest.mark.parametrize("array_node", ["wildcard", "leaf"])
+def test_wildcard_projection_rejects_prefix_items(array_node: str) -> None:
+    bindings, source, _ = _wildcard_projection_case()
+    array_schema = source["properties"]["sektioner"]
+    if array_node == "leaf":
+        array_schema = array_schema["items"]["properties"]["underlag"]["properties"][
+            "krav"
+        ]["properties"]["uppgifter"]
+        array_schema["items"] = False
+    array_schema["prefixItems"] = [{"type": "string"}]
+    jsonschema.Draft202012Validator(array_schema).validate(["A"])
+
+    with pytest.raises(InputBindingContractError, match="does not support prefixItems"):
+        derive_structured_projection_contract(
+            input_bindings=bindings,
+            source_contracts_by_step_ref={"step_1": source},
+        )
+
+
 @pytest.mark.parametrize(
-    "field_path", ["sektioner.*.underlag.*.uppgifter", "sektioner.*"]
+    ("field_path", "message"),
+    [
+        (
+            "sektioner.*.underlag.*.uppgifter",
+            "may contain at most one wildcard segment",
+        ),
+        ("sektioner.*", "wildcard must be followed by an explicit suffix"),
+    ],
 )
-def test_wildcard_projection_rejects_invalid_grammar(field_path: str) -> None:
+def test_wildcard_projection_rejects_invalid_grammar(
+    field_path: str, message: str
+) -> None:
     bindings, _, _ = _wildcard_projection_case()
     bindings["source_refs"][0]["field_path"] = field_path
 
-    with pytest.raises(InputBindingContractError, match="field_path .* is absent"):
+    with pytest.raises(InputBindingContractError, match=message):
         source_ref_bindings(bindings)
 
 

@@ -62,6 +62,7 @@ from eneo.flows.flow_run_input_envelope import (
     read_semantic_flow_input_payload,
 )
 from eneo.flows.flow_run_provenance import (
+    FLOW_RESOLVED_INPUT_MAX_EDGES,
     FlowResolvedInputEdge,
     FlowResolvedInputFlowInputSource,
     FlowResolvedInputJsonPath,
@@ -1056,6 +1057,11 @@ def _resolve_structured_source_refs_input(
             result=result,
             consuming_step_order=step.step_order,
         ):
+            if len(edges) >= FLOW_RESOLVED_INPUT_MAX_EDGES:
+                raise TypedIOValidationException(
+                    "Resolved step input evidence exceeded its bounded runtime contract.",
+                    code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+                )
             if "*" in ref.field_path:
                 value.extend(selected_value)
             else:

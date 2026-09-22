@@ -300,6 +300,11 @@ def _schema_at_projection_path(
     current = source_contract
     for segment in field_path:
         if segment == "*":
+            if "prefixItems" in current:
+                raise InputBindingContractError(
+                    f"source_ref field_path '{'.'.join(field_path)}' does not support "
+                    "prefixItems on the wildcard array."
+                )
             items = current.get("items")
             if current.get("type") != "array" or not isinstance(items, Mapping):
                 raise source_ref_field_path_error(
@@ -326,6 +331,11 @@ def _schema_at_projection_path(
             )
         current = cast(Mapping[str, Any], next_schema)
     if "*" in field_path:
+        if "prefixItems" in current:
+            raise InputBindingContractError(
+                f"source_ref field_path '{'.'.join(field_path)}' does not support "
+                "prefixItems on the selected array."
+            )
         if current.get("type") != "array":
             raise source_ref_field_path_error(
                 field_path=field_path, source_step_ref=source_step_ref
@@ -516,8 +526,16 @@ def _field_path(value: object, *, index: int, step_ref: str) -> tuple[str, ...]:
         raise InputBindingContractError(
             f"input_bindings.source_refs[{index}].field_path must not contain templates."
         )
-    if parts.count("*") > 1 or parts[-1] == "*":
-        raise source_ref_field_path_error(field_path=parts, source_step_ref=step_ref)
+    if parts.count("*") > 1:
+        raise InputBindingContractError(
+            f"source_ref field_path '{'.'.join(parts)}' for '{step_ref}' "
+            "may contain at most one wildcard segment."
+        )
+    if parts[-1] == "*":
+        raise InputBindingContractError(
+            f"source_ref field_path '{'.'.join(parts)}' for '{step_ref}': "
+            "wildcard must be followed by an explicit suffix."
+        )
     return parts
 
 

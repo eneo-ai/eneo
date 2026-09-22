@@ -81,7 +81,6 @@ from eneo.flows.input_binding_contract_rules import (
     item_template_field_names,
     question_binding,
     source_ref_bindings,
-    source_ref_field_path_error,
     unsupported_input_binding_key,
     validate_source_refs_binding,
 )
@@ -1548,11 +1547,9 @@ def _validate_source_ref_contracts(
 
     for ref in source_refs:
         if "*" in ref.field_path:
-            error = source_ref_field_path_error(
-                field_path=ref.field_path, source_step_ref=ref.step_ref
-            )
             raise FlowStepValidationError(
-                f"Step {step.step_order}: {error}",
+                f"Step {step.step_order}: source_ref field_path '{'.'.join(ref.field_path)}': "
+                "wildcards require a structured JSON projection.",
                 code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
                 context={"field": "input_bindings", "key": "source_refs"},
                 step_order=step.step_order,
@@ -1767,7 +1764,10 @@ def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> No
     if bindings is None:
         return
 
-    question_binding = effective_question_binding(bindings)
+    try:
+        question_binding = effective_question_binding(bindings)
+    except InputBindingContractError:
+        return
     if question_binding is not None:
         references = analyze_template(
             question_binding,

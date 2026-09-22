@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock, create_autospec
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileContentVariant, FileType
@@ -36,6 +35,7 @@ from eneo.flows.flow_run_provenance import (
     group_resolved_input_edges,
 )
 from eneo.flows.flow_validators import validate_steps
+from eneo.flows.runtime import step_input_resolution
 from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
 from eneo.flows.runtime.step_definition_parser import parse_runtime_steps
 from eneo.flows.runtime.step_execution_runtime import (
@@ -777,21 +777,54 @@ async def test_wildcard_projection_runtime_requires_array(sections):
         )
 
 
+@pytest.mark.parametrize("reference_count", [1, 2])
+@pytest.mark.parametrize("overflow", [False, True])
 @pytest.mark.asyncio
-async def test_wildcard_projection_edges_obey_existing_ceiling():
+async def test_wildcard_projection_bounds_edge_expansion(
+    monkeypatch, reference_count, overflow
+):
+    bindings, _, projected = _wildcard_projection_case()
+    if reference_count == 2:
+        bindings["source_refs"].append(
+            {
+                "step_ref": "step_1",
+                "output": "structured",
+                "field_path": "sektioner.*.gemensamt",
+            }
+        )
+        projected["properties"]["gemensamt"] = {
+            "type": "array",
+            "items": {"type": "string"},
+        }
+        projected["required"].append("gemensamt")
+    section_count = FLOW_RESOLVED_INPUT_MAX_EDGES // reference_count
+    if overflow:
+        section_count = 10_000 if reference_count == 1 else section_count + 1
     sections = [
-        {"underlag": {"krav": {"uppgifter": []}}}
-        for _ in range(FLOW_RESOLVED_INPUT_MAX_EDGES + 1)
+        {"underlag": {"krav": {"uppgifter": []}}, "gemensamt": []}
+        for _ in range(section_count)
     ]
-    resolved = await resolve_step_input(
-        step=_wildcard_runtime_step(),
+    build_edge = MagicMock(wraps=step_input_resolution.build_resolved_input_edge)
+    monkeypatch.setattr(step_input_resolution, "build_resolved_input_edge", build_edge)
+    resolution = resolve_step_input(
+        step=replace(
+            _wildcard_runtime_step(), input_bindings=bindings, input_contract=projected
+        ),
         context={},
         run=_run(),
         prior_results=[_result(output_payload={"structured": {"sektioner": sections}})],
         deps=_resolution_deps(),
     )
-    with pytest.raises(ValidationError, match="at most 2048 items"):
-        group_resolved_input_edges(resolved.edges)
+    if overflow:
+        with pytest.raises(
+            TypedIOValidationException, match="bounded runtime contract"
+        ) as exc:
+            await resolution
+        assert exc.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    else:
+        resolved = await resolution
+        assert len(resolved.edges) == FLOW_RESOLVED_INPUT_MAX_EDGES
+    assert build_edge.call_count == FLOW_RESOLVED_INPUT_MAX_EDGES
 
 
 def test_aliases_record_the_same_flow_input_selection() -> None:
