@@ -24,6 +24,9 @@ from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
     count_tokens,
 )
+from eneo.completion_models.infrastructure.stream_collector import (
+    ProviderJsonWhitespaceAbort,
+)
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     get_supported_openai_params,
     schema_response_format,
@@ -52,6 +55,7 @@ from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
     RejectedCompletion,
     StepMaterialIdentity,
+    StepOutputAbortedException,
     StepOutputValidationException,
     build_text_overflow_metadata,
     sample_rejected_output,
@@ -854,6 +858,16 @@ async def call_assistant_with_timeout(
                         "Run was cancelled during step execution."
                     )
                 cancel_watcher = None
+    except ProviderJsonWhitespaceAbort as exc:
+        raise attach_typed_failure_context(
+            StepOutputAbortedException(
+                rejected_output=sample_rejected_output(
+                    exc.raw_text, max_inline_bytes=deps.max_inline_text_bytes
+                )
+            ),
+            input_payload_for_result=prepared.input_payload_for_result,
+            effective_prompt=prompt_override,
+        ) from exc
     except asyncio.CancelledError:
         await _cancel_llm_task_with_grace()
         raise

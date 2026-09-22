@@ -33,6 +33,9 @@ from eneo.completion_models.infrastructure.completion_service import CompletionS
 from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
 )
+from eneo.completion_models.infrastructure.stream_collector import (
+    ProviderJsonWhitespaceAbort,
+)
 from eneo.flows.citation_sidecar import (
     CITATION_MODE_INLINE_INREF_SIDECAR,
     CITATION_MODE_OFF,
@@ -2240,6 +2243,81 @@ async def test_complete_step_execution_times_out_llm_request():
     assert getattr(exc_info.value, "effective_prompt") == "Prompt"
     failed_input_payload = getattr(exc_info.value, "input_payload_json")
     assert failed_input_payload["input_source"] == "all_previous_steps"
+
+
+@pytest.mark.asyncio
+async def test_whitespace_abort_is_a_typed_failure_with_sampled_raw_output():
+    from eneo.flows.runtime.executor import _typed_io_failure_code
+
+    raw = '{"fact":"å"}' + "\n        " * 114
+    assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
+    assistant.completion_model_kwargs = ModelKwargs()
+    assistant.get_response = AsyncMock(side_effect=ProviderJsonWhitespaceAbort(raw))
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello", source_text="hello", input_source="flow_input"
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={"text": "hello"},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1024,
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(return_value=([], None, [])),
+        process_typed_output=AsyncMock(),
+        apply_output_cap=AsyncMock(),
+    )
+    step, run = _step(output_type="text"), _run()
+    with pytest.raises(TypedIOValidationException) as caught:
+        await complete_step_execution(
+            step=step, run=run, state=_state(), prepared=prepared, deps=deps
+        )
+    error = caught.value
+    assert error.code == "flow_llm_output_whitespace_abort"
+    assert _typed_io_failure_code(error.code).value == error.code
+    assert not isinstance(error, StepOutputValidationException)
+    assert getattr(error, "rejected_completion", None) is None
+    evidence = error.rejected_output.evidence
+    assert evidence.observed_bytes == len(raw.encode())
+    assert evidence.sha256 == hashlib.sha256(raw.encode()).hexdigest()
+    assert evidence.sampling_status == "sampled"
+    assert raw.startswith(error.rejected_output.text)
+    assert raw.endswith(evidence.tail)
+    assert evidence.tail.isspace()
+    assert error.context == {"finish_reason": None}
+    assistant.get_response.assert_awaited_once()
+    deps.process_typed_output.assert_not_awaited()
+    claimed = FlowStepResult(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=step.step_id,
+        step_order=step.step_order,
+        assistant_id=step.assistant_id,
+        status=FlowStepResultStatus.RUNNING,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
+    )
+    failure = build_typed_failure_plan(
+        claimed=claimed,
+        error_code=FlowApiErrorCode(error.code),
+        error_message=str(error),
+        rejected_output=error.rejected_output,
+        max_inline_text_bytes=1024,
+    )
+    assert failure.failed_result.status == FlowStepResultStatus.FAILED
+    assert (
+        failure.failed_result.output_payload_json == error.rejected_output.to_payload()
+    )
 
 
 @pytest.mark.asyncio

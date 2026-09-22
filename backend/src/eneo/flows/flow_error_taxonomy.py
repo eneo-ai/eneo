@@ -770,6 +770,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Do not consume the incomplete output or automatically retry the completed provider call.",
         user_action="Reduce the input or requested output, or ask an administrator to review the model token limits before starting a new run.",
     ),
+    FlowApiErrorCode.LLM_OUTPUT_WHITESPACE_ABORT: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The native JSON response reached the whitespace progress limit outside JSON strings.",
+        consumer_action="Inspect the retained partial output before retrying because the provider outcome is unknown and a new request can incur additional cost.",
+        user_action="Ask an administrator to review the model's JSON output before starting a new run.",
+    ),
     FlowApiErrorCode.LLM_REQUEST_TIMEOUT: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",

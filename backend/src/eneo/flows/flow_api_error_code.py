@@ -96,6 +96,7 @@ class FlowApiErrorCode(str, Enum):
     EVIDENCE_EXPORT_TOO_LARGE = "flow_evidence_export_too_large"
     MODEL_CAPACITY_UNDECLARED = "flow_model_capacity_undeclared"
     LLM_OUTPUT_TRUNCATED = "flow_llm_output_truncated"
+    LLM_OUTPUT_WHITESPACE_ABORT = "flow_llm_output_whitespace_abort"
     LLM_REQUEST_TIMEOUT = "flow_llm_request_timeout"
     STEP_TIMEOUT = "flow_step_timeout"
     RUNTIME_INPUT_NOT_CONSUMED = "flow_runtime_input_not_consumed"
@@ -216,6 +217,7 @@ FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT,
         FlowApiErrorCode.MODEL_CAPACITY_UNDECLARED,
         FlowApiErrorCode.LLM_OUTPUT_TRUNCATED,
+        FlowApiErrorCode.LLM_OUTPUT_WHITESPACE_ABORT,
         FlowApiErrorCode.LLM_REQUEST_TIMEOUT,
         FlowApiErrorCode.STEP_TIMEOUT,
         FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED,

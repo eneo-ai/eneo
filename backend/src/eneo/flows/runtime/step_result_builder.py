@@ -17,6 +17,7 @@ from eneo.flows.domain.rag_evidence import (
 from eneo.flows.domain.runtime import RuntimeStep, StepExecutionOutput
 from eneo.flows.domain.step_output import (
     RejectedCompletion,
+    RejectedOutput,
     ResolvedStepMaterial,
     build_rejected_output_payload,
     build_step_material_aliases,
@@ -141,7 +142,7 @@ def build_failed_step_result(
     error_message: str,
     input_payload_json: dict[str, Any] | None = None,
     effective_prompt: str | None = None,
-    rejected_output: str | None = None,
+    rejected_output: str | RejectedOutput | None = None,
     rejected_completion: RejectedCompletion | None = None,
     max_inline_text_bytes: int | None = None,
 ) -> FlowStepResult:
@@ -153,6 +154,8 @@ def build_failed_step_result(
             rejected_completion.output.to_payload()
             if rejected_completion is not None
             and rejected_completion.output is not None
+            else rejected_output.to_payload()
+            if isinstance(rejected_output, RejectedOutput)
             else build_rejected_output_payload(
                 rejected_output, max_inline_bytes=max_inline_text_bytes
             )

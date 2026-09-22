@@ -31,7 +31,7 @@ def test_flow_run_error_from_source_requires_public_error_code() -> None:
 
 
 def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
-    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 88
+    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 89
     assert FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[FlowApiErrorCode.RUN_ABANDONED] is False
     assert set(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == FLOW_RUN_TERMINAL_ERROR_CODES
     assert {
@@ -66,6 +66,9 @@ def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
     ]
     assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
         FlowApiErrorCode.LLM_OUTPUT_TRUNCATED
+    ]
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.LLM_OUTPUT_WHITESPACE_ABORT
     ]
     assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
         FlowApiErrorCode.TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT

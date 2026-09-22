@@ -87,6 +87,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   EVIDENCE_EXPORT_TOO_LARGE: "flow_evidence_export_too_large";
   MODEL_CAPACITY_UNDECLARED: "flow_model_capacity_undeclared";
   LLM_OUTPUT_TRUNCATED: "flow_llm_output_truncated";
+  LLM_OUTPUT_WHITESPACE_ABORT: "flow_llm_output_whitespace_abort";
   LLM_REQUEST_TIMEOUT: "flow_llm_request_timeout";
   STEP_TIMEOUT: "flow_step_timeout";
   RUNTIME_INPUT_NOT_CONSUMED: "flow_runtime_input_not_consumed";
@@ -268,6 +269,7 @@ export type FlowApiErrorCode =
   | "flow_evidence_export_too_large"
   | "flow_model_capacity_undeclared"
   | "flow_llm_output_truncated"
+  | "flow_llm_output_whitespace_abort"
   | "flow_llm_request_timeout"
   | "flow_step_timeout"
   | "flow_runtime_input_not_consumed"

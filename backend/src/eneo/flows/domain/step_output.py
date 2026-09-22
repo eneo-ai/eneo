@@ -81,6 +81,18 @@ class StepOutputValidationException(TypedIOValidationException):
         self.contract_validation = cause.contract_validation
 
 
+class StepOutputAbortedException(TypedIOValidationException):
+    """Observed partial output, with no received completion or usage receipt."""
+
+    def __init__(self, *, rejected_output: RejectedOutput | None) -> None:
+        super().__init__(
+            "The model's JSON response exceeded the whitespace progress limit.",
+            code=FlowApiErrorCode.LLM_OUTPUT_WHITESPACE_ABORT.value,
+            context={"finish_reason": None},
+        )
+        self.rejected_output = rejected_output
+
+
 def utf8_prefix(text: str, *, max_bytes: int) -> str:
     return text.encode("utf-8")[: max(0, max_bytes)].decode("utf-8", errors="ignore")
 

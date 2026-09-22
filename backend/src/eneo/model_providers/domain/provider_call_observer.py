@@ -187,7 +187,7 @@ def build_provider_call_request_facts(
                 "provider": provider,
                 "messages": list(messages),
                 "controls": controls,
-                "stream": False,
+                "stream": request_kwargs.get("stream", False),
             },
             ensure_ascii=False,
             sort_keys=True,

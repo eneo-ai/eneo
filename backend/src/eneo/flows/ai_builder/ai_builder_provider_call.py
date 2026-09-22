@@ -37,24 +37,25 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import contextlib
-import inspect
 import json
 import math
-import unittest.mock
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Literal, Protocol, cast
 
 import httpx
-import litellm
 from litellm.exceptions import BadRequestError
 
+from eneo.completion_models.infrastructure.stream_collector import (
+    ProviderStreamCollector,
+)
+from eneo.completion_models.infrastructure.stream_collector import (
+    ProviderStreamIncomplete as ProviderStreamIncomplete,
+)
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
 
-_STREAM_CLOSE_SECONDS = 5.0
 _MAX_PROVIDER_ERROR_BODY_BYTES = 65_536
 # Provider error codes that state one named request field was refused.
 _UNSUPPORTED_PARAMETER_CODES = frozenset({"unsupported_parameter", "unsupported_value"})
@@ -103,14 +104,6 @@ class ProviderCallCeilingExpired(TimeoutError):
     """The whole provider call exceeded its ceiling while still producing."""
 
 
-class ProviderStreamIncomplete(Exception):
-    """The stream ended without a terminal finish reason.
-
-    Whatever arrived may parse, but the provider never said it was done, so
-    the outcome is unknown.
-    """
-
-
 async def complete_with_silence_deadline(
     litellm_client: CompletionClient,
     *,
@@ -149,85 +142,62 @@ async def complete_with_silence_deadline(
         "stream_options": {"include_usage": True},
         "timeout": silence_deadline_seconds,
     }
-    chunks: list[Any] = []
     response: Any = None
     ceiling = asyncio.timeout(ceiling_seconds)
-    try:
-        async with ceiling:
-            try:
-                if observe_sdk_input is not None:
-                    observe_sdk_input(outbound)
-                response = await _under_silence(
-                    litellm_client.acompletion(**outbound), silence_deadline_seconds
-                )
-            except BadRequestError as error:
-                rejection = provider_error_fields(error)
-                parameter = rejected_sampling_parameter(rejection)
-                if (
-                    parameter is None
-                    or parameter not in outbound
-                    or retry_without_refused_control is None
-                    or not retry_without_refused_control(parameter, error)
-                ):
-                    raise
-                logger.warning(
-                    "ai_builder_provider_sampling_parameter_rejected",
-                    extra={
-                        "parameter": parameter,
-                        "model": outbound.get("model"),
-                        "provider_error_code": rejection.code,
-                        "provider_extraction_source": rejection.source,
-                        "provider_extraction_status": rejection.status,
-                        "provider_correlation_id": rejection.correlation_id,
-                        "provider_correlation_source": rejection.correlation_source,
-                    },
-                )
-                outbound = {
-                    key: value for key, value in outbound.items() if key != parameter
-                }
-                if observe_sdk_input is not None:
-                    observe_sdk_input(outbound)
-                response = await _under_silence(
-                    litellm_client.acompletion(**outbound), silence_deadline_seconds
-                )
-            if not _is_stream(response):
-                return response
-            stream: AsyncIterator[Any] = response.__aiter__()
-            while True:
+    async with ProviderStreamCollector() as collector:
+        try:
+            async with ceiling:
                 try:
-                    chunk = await _under_silence(
-                        stream.__anext__(), silence_deadline_seconds
+                    if observe_sdk_input is not None:
+                        observe_sdk_input(outbound)
+                    response = await _under_silence(
+                        litellm_client.acompletion(**outbound), silence_deadline_seconds
                     )
-                except StopAsyncIteration:
-                    break
-                chunks.append(chunk)
-    except TimeoutError as error:
-        if isinstance(error, ProviderSilenceExpired):
+                except BadRequestError as error:
+                    rejection = provider_error_fields(error)
+                    parameter = rejected_sampling_parameter(rejection)
+                    if (
+                        parameter is None
+                        or parameter not in outbound
+                        or retry_without_refused_control is None
+                        or not retry_without_refused_control(parameter, error)
+                    ):
+                        raise
+                    logger.warning(
+                        "ai_builder_provider_sampling_parameter_rejected",
+                        extra={
+                            "parameter": parameter,
+                            "model": outbound.get("model"),
+                            "provider_error_code": rejection.code,
+                            "provider_extraction_source": rejection.source,
+                            "provider_extraction_status": rejection.status,
+                            "provider_correlation_id": rejection.correlation_id,
+                            "provider_correlation_source": rejection.correlation_source,
+                        },
+                    )
+                    outbound = {
+                        key: value
+                        for key, value in outbound.items()
+                        if key != parameter
+                    }
+                    if observe_sdk_input is not None:
+                        observe_sdk_input(outbound)
+                    response = await _under_silence(
+                        litellm_client.acompletion(**outbound), silence_deadline_seconds
+                    )
+
+                async def next_chunk(stream: AsyncIterator[Any]) -> Any:
+                    return await _under_silence(anext(stream), silence_deadline_seconds)
+
+                return await collector.collect(
+                    response, request=outbound, next_chunk=next_chunk
+                )
+        except TimeoutError as error:
+            if isinstance(error, ProviderSilenceExpired):
+                raise
+            if ceiling.expired():
+                raise ProviderCallCeilingExpired(ceiling_seconds) from error
             raise
-        if ceiling.expired():
-            raise ProviderCallCeilingExpired(ceiling_seconds) from error
-        raise
-    finally:
-        # Cleanup runs outside both request timers and is shielded from the
-        # cancellation that ended them, within its own bound, so a stream is
-        # released whichever way the call ended and the cause is preserved.
-        if response is not None and _is_stream(response):
-            await asyncio.shield(_close_stream(response))
-    if not _provider_finished(response, chunks):
-        raise ProviderStreamIncomplete(
-            "The provider stream ended before a finish reason was received"
-        )
-    builder = cast(Callable[..., Any], getattr(litellm, "stream_chunk_builder"))
-    built = builder(chunks, messages=outbound.get("messages"))
-    if built is None:
-        raise ProviderStreamIncomplete("The provider stream could not be rebuilt")
-    # The SDK's rebuilt usage is its own count whenever the provider's usage
-    # did not travel as a separate usage-only chunk (it fills one in when the
-    # provider sent none, and recounts when usage rode on the final choice).
-    # The provider's own figures, combined across its chunks, replace it; when
-    # there are none, the existing estimate contract takes over.
-    built.usage = _native_usage(response, chunks)
-    return built
 
 
 def rejected_sampling_parameter(rejection: ProviderRejection) -> str | None:
@@ -439,69 +409,6 @@ def _select_rejection(
     return current
 
 
-def _provider_finished(response: object, chunks: list[Any]) -> bool:
-    """Whether the provider itself said the answer was complete.
-
-    LiteLLM's stream wrapper records the finish reason the provider actually
-    sent (`received_finish_reason`) and synthesizes one on a plain end of
-    stream; only the recorded one is evidence. A bare async iterator (a
-    provider adapter without the wrapper, a test double) is judged by the
-    finish reasons its chunks carry.
-    """
-
-    if isinstance(response, litellm.CustomStreamWrapper):
-        return getattr(response, "received_finish_reason", None) is not None
-    return any(
-        getattr(choice, "finish_reason", None)
-        for chunk in chunks
-        for choice in getattr(chunk, "choices", None) or ()
-    )
-
-
-def _native_usage(response: object, chunks: list[Any]) -> litellm.Usage | None:
-    """The usage the provider itself sent, combined across its chunks, or None.
-
-    LiteLLM's wrapper keeps the chunks the provider sent in ``chunks`` and
-    builds its final usage chunk separately; only usage present in the
-    provider's own chunks is evidence. A provider reports its counts as
-    running totals, and may report the components in different events
-    (Anthropic sends input tokens with the first event and output tokens with
-    the last), so each component is the largest value any chunk reported for
-    it. A bare async iterator is judged by the chunks it yielded.
-    """
-
-    provider_chunks: Any = (
-        getattr(response, "chunks", None)
-        if isinstance(response, litellm.CustomStreamWrapper)
-        else chunks
-    )
-    prompt_tokens: int | None = None
-    completion_tokens: int | None = None
-    for chunk in provider_chunks or ():
-        usage = getattr(chunk, "usage", None)
-        if usage is None:
-            continue
-        prompt_tokens = _largest(prompt_tokens, getattr(usage, "prompt_tokens", None))
-        completion_tokens = _largest(
-            completion_tokens, getattr(usage, "completion_tokens", None)
-        )
-    if prompt_tokens is None and completion_tokens is None:
-        return None
-    prompt_tokens = prompt_tokens or 0
-    completion_tokens = completion_tokens or 0
-    return litellm.Usage(
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=prompt_tokens + completion_tokens,
-    )
-
-
-def _largest(current: int | None, reported: object) -> int | None:
-    if not isinstance(reported, int) or isinstance(reported, bool):
-        return current
-    return reported if current is None else max(current, reported)
-
-
 async def _under_silence(awaitable: Awaitable[Any], seconds: float) -> Any:
     """Await under the silence deadline; only that timer's own expiry is silence.
 
@@ -517,31 +424,3 @@ async def _under_silence(awaitable: Awaitable[Any], seconds: float) -> Any:
         if silence.expired():
             raise ProviderSilenceExpired(seconds) from error
         raise
-
-
-async def _close_stream(response: object) -> None:
-    """Release the provider connection; bounded, and never masking the cause."""
-
-    aclose = getattr(response, "aclose", None)
-    if not callable(aclose):
-        return
-    close = cast(Callable[[], Awaitable[Any]], aclose)
-    with contextlib.suppress(Exception):
-        async with asyncio.timeout(_STREAM_CLOSE_SECONDS):
-            await close()
-
-
-def _is_stream(response: object) -> bool:
-    """A LiteLLM stream or any async iterator; a whole answer is neither.
-
-    Mock doubles are excluded explicitly: a mock answers every attribute,
-    including ``__anext__``, and would otherwise pass as an empty stream.
-    """
-
-    if isinstance(response, litellm.CustomStreamWrapper) or inspect.isasyncgen(
-        response
-    ):
-        return True
-    if isinstance(response, unittest.mock.NonCallableMock):
-        return False
-    return callable(getattr(type(response), "__anext__", None))

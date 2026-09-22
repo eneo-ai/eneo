@@ -5406,6 +5406,7 @@
   "flow_error_typed_io_contract_violation": "The step output does not have the required format. Check the output and step instructions in the step details.",
   "flow_error_flow_model_capacity_undeclared": "The selected model is missing an input or output token limit. Ask an administrator to configure both limits before starting a new run.",
   "flow_error_flow_llm_output_truncated": "The model reached its output limit before finishing. Reduce the input or requested output, or ask an administrator to review the model token limits before starting a new run.",
+  "flow_error_flow_llm_output_whitespace_abort": "The model kept writing whitespace in its JSON response and the request was stopped. The model's outcome is unknown. Ask an administrator to review the model's JSON output before starting a new run.",
   "flow_error_flow_llm_request_timeout": "The model request timed out, but provider work may still have completed. Check the run before retrying because a retry can duplicate provider work and spend.",
   "flow_error_flow_step_timeout": "The step did not finish within its time budget. Check the run before retrying: if the step called a model, the provider may still have completed the work. Raise the step's time budget or reduce the input.",
   "flow_error_flow_provider_rate_limited": "The AI provider is temporarily rate-limiting requests. Wait before starting a new run.",

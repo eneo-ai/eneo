@@ -74,6 +74,12 @@ from eneo.completion_models.infrastructure.provider_response_ids import (
 from eneo.completion_models.infrastructure.static_prompts import (
     MCP_TOOL_REFERENCES_INSTRUCTION,
 )
+from eneo.completion_models.infrastructure.stream_collector import (
+    ProviderJsonWhitespaceAbort,
+    ProviderStreamCollector,
+    ProviderStreamError,
+    native_json_request,
+)
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputCapabilityDecision,
     normalize_reasoning_effort,
@@ -1717,7 +1723,11 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
             return completion
 
-        except (ProviderCallObserverError, TypedIOValidationException):
+        except (
+            ProviderCallObserverError,
+            TypedIOValidationException,
+            ProviderStreamError,
+        ):
             raise
         except Exception as exc:
             logger.exception(
@@ -1788,31 +1798,53 @@ class TenantModelAdapter(CompletionModelAdapter):
         retry_without_capability_safe: bool,
     ) -> _LiteLLMResponse:
         litellm_kwargs = self._prepare_dispatch_kwargs(messages, litellm_kwargs)
+        stream = native_json_request(litellm_kwargs) and "stream" in (
+            _get_supported_openai_params(self.litellm_model) or ()
+        )
+        if stream:
+            litellm_kwargs = {
+                **litellm_kwargs,
+                "stream_options": {"include_usage": True},
+            }
         call_id: UUID | None = None
         if observer is not None:
             request = build_provider_call_request_facts(
                 requested_model=self.litellm_model,
                 provider=self.provider_type,
                 messages=cast("list[dict[str, object]]", messages),
-                request_kwargs=cast("dict[str, object]", litellm_kwargs),
+                request_kwargs=cast(
+                    "dict[str, object]", {**litellm_kwargs, "stream": stream}
+                ),
                 reason=reason,
             )
             call_id = await observer.started(request)
 
         try:
-            response = cast(
-                _LiteLLMResponse,
-                await self._request_completion(
+            async with ProviderStreamCollector() as collector:
+                received = await self._request_completion(
                     phase="completion",
                     retry_without_capability_safe=retry_without_capability_safe,
                     model=self.litellm_model,
                     messages=messages,
-                    stream=False,
+                    stream=stream,
                     drop_params=True,
                     **litellm_kwargs,
-                ),
-            )
+                )
+                response = cast(
+                    _LiteLLMResponse,
+                    await collector.collect(received, request=litellm_kwargs)
+                    if stream
+                    else received,
+                )
+            if stream:
+                settle_provider_request(known=True)
+        except ProviderJsonWhitespaceAbort:
+            settle_provider_request(known=False)
+            if observer is not None and call_id is not None:
+                await observer.outcome_unknown(call_id, "request_cancelled")
+            raise
         except asyncio.CancelledError:
+            settle_provider_request(known=False)
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "request_cancelled")
             raise
@@ -1831,6 +1863,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 await observer.rejected(call_id, "provider_rejected")
             raise
         except Exception:
+            settle_provider_request(known=False)
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "provider_error")
             raise

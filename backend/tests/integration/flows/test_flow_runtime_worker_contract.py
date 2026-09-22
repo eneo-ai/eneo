@@ -20,12 +20,14 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 )
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import (
+    FlowProviderCalls,
     FlowRunAuditOutbox,
     FlowRuns,
     FlowRunWebhookDeliveries,
     FlowStepAttempts,
     FlowStepResults,
 )
+from eneo.database.tables.token_usage_table import ProviderTokenUsages
 from eneo.flows.assistant_execution_snapshot import build_assistant_execution_snapshot
 from eneo.flows.domain.flow import (
     Flow,
@@ -57,8 +59,119 @@ from eneo.flows.runtime.step_attempt_runtime import (
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
+from tests.unit.test_tenant_model_adapter_json_stream import (
+    _Body,
+    _event,
+)
+from tests.unit.test_tenant_model_adapter_json_stream import (
+    stream_route as _stream_route_fixture,
+)
+
+stream_route = _stream_route_fixture
 
 pytestmark = pytest.mark.usefixtures("object_content_runtime_ready")
+
+
+@pytest.mark.asyncio
+async def test_whitespace_abort_persists_raw_evidence_without_a_completion(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    stream_route,
+):
+    route = stream_route
+    raw = '{"fact":"å"}' + "\n        " * 114
+    body = _Body([_event(raw), _event(None, "stop")])
+    route.serve(body)
+
+    async def get_response(**kwargs):
+        observer = kwargs["provider_call_observer"]
+        for name in ("started", "completed", "rejected", "outcome_unknown"):
+            getattr(route.observer, name).side_effect = getattr(observer, name)
+        completion = await route.adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            provider_call_observer=route.observer,
+        )
+        return SimpleNamespace(completion=completion, total_token_count=0)
+
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(side_effect=get_response)
+    )
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+        )
+        context.executor.max_inline_text_bytes = 1024
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"whitespace-abort-{uuid4()}",
+            retry_count=0,
+        )
+    assert result["status"] == "failed"
+    _, step, attempts, _ = await _failure_state_from_fresh_session(
+        run_id=context.run_id, tenant_id=context.tenant_id
+    )
+    assert len(attempts) == 1
+    attempt = attempts[0]
+    assert attempt.error_code == "flow_llm_output_whitespace_abort"
+    assert attempt.finish_reason is None
+    assert attempt.num_tokens_input is None
+    assert attempt.num_tokens_output is None
+    assert step.error_code == attempt.error_code
+    assert attempt.output_payload_json == step.output_payload_json
+    output = attempt.output_payload_json
+    evidence = output["rejection_evidence"]
+    assert raw.startswith(output["rejected_output"])
+    assert raw.endswith(evidence["tail"])
+    assert evidence["tail"].isspace()
+    assert evidence["observed_bytes"] == len(raw.encode())
+    assert evidence["sha256"] == hashlib.sha256(raw.encode()).hexdigest()
+    assert evidence["sampling_status"] == "sampled"
+    assert len(json.dumps(output, ensure_ascii=False).encode()) <= 1024
+    assert _PROVIDER_RESPONSE_RECEIVED_DISCLOSURE not in attempt.error_message
+    assert _PROVIDER_WORK_AMBIGUITY_DISCLOSURE in attempt.error_message
+    completion_service.get_response.assert_awaited_once()
+    route.observer.completed.assert_not_awaited()
+    route.observer.rejected.assert_not_awaited()
+    route.observer.outcome_unknown.assert_awaited_once()
+    assert route.observer.outcome_unknown.await_args.args[1] == "request_cancelled"
+    assert len(route.requests) == 1
+    assert body.closed
+    async with sessionmanager.session() as session, session.begin():
+        receipts = list(
+            await session.scalars(
+                sa.select(FlowProviderCalls).where(
+                    FlowProviderCalls.flow_step_attempt_id == attempt.id
+                )
+            )
+        )
+        assert len(receipts) == 1
+        receipt = receipts[0]
+        assert receipt.status == "outcome_unknown"
+        assert receipt.num_tokens_input is None
+        assert receipt.num_tokens_output is None
+        assert receipt.outcome_reason == "request_cancelled"
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(ProviderTokenUsages)
+                .where(ProviderTokenUsages.source_id == receipt.id)
+            )
+            == 0
+        )
 
 
 @dataclass(frozen=True, slots=True)
