@@ -1,4 +1,5 @@
 import type { FlowStep } from "@eneo/eneo-js";
+import { getTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
 import { m } from "$lib/paraglide/messages";
 import {
   getFlowFormFieldVariableExpression,
@@ -44,12 +45,15 @@ export function buildContext(
     if (name) knownStepNames.set(step.step_order, name);
     stepOutputTypes.set(step.step_order, step.output_type);
   }
+  const currentStep = steps.find((step) => step.step_order === currentStepOrder);
   return {
     knownFieldNames,
     knownStepNames,
     stepOutputTypes,
     transcriptionEnabled,
-    currentStepOrder
+    currentStepOrder,
+    sectionVariablesAvailable:
+      currentStep !== undefined && getTextProcessingMode(currentStep) === "process_each_section"
   };
 }
 
@@ -91,6 +95,14 @@ export function buildAvailableVariables(
       token: "transkribering",
       label: "transkribering",
       description: m.flow_variable_transcription(),
+      category: "system"
+    });
+  }
+  if (ctx.sectionVariablesAvailable) {
+    suggestions.push({
+      token: "section_index",
+      label: "section_index",
+      description: m.flow_variable_section_index(),
       category: "system"
     });
   }

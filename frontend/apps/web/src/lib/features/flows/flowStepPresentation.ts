@@ -1,4 +1,5 @@
 import type { FlowStep } from "@eneo/eneo-js";
+import { getTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
 import { getFlowStepUnderlag } from "./flowInputBindings";
 import type { SelectableInputTypeOption } from "./flowStepTypes";
 
@@ -9,7 +10,8 @@ type OutputType = FlowStep["output_type"];
 export type FlowPresentationStepLike = Pick<
   FlowStep,
   "step_order" | "input_source" | "input_type" | "output_type" | "output_mode" | "user_description"
->;
+> &
+  Partial<Pick<FlowStep, "input_config">>;
 
 export type FlowSourceHintKind =
   | "flow_input"
@@ -37,6 +39,8 @@ export type FlowStepSummaryModel = {
   usesInputTemplate: boolean;
   hasKnowledge: boolean;
   hasAttachments: boolean;
+  /** The step reads its material section by section (input_config.text_processing). */
+  readsInSections: boolean;
 };
 
 const DISPLAY_PRIORITY_BY_SOURCE: Partial<Record<FlowSourceHintKind, InputType[]>> = {
@@ -188,7 +192,9 @@ export function getStepSummaryModel(params: {
     downstreamKind: getDownstreamKindForOutput(step.output_type),
     usesInputTemplate: hasInputTemplateOverride,
     hasKnowledge,
-    hasAttachments
+    hasAttachments,
+    readsInSections:
+      getTextProcessingMode({ input_config: step.input_config ?? null }) === "process_each_section"
   };
 }
 

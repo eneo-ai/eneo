@@ -8,6 +8,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
+  import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
@@ -25,6 +26,11 @@
     type FlowRuntimeInputConfigValue
   } from "$lib/features/flows/flowRuntimeInputConfig";
   import type { FlowSourceHintKind } from "$lib/features/flows/flowStepPresentation";
+  import {
+    getSectionProcessingEligibility,
+    getTextProcessingMode,
+    type FlowTextProcessingMode
+  } from "$lib/features/flows/flowTextProcessingConfig";
   import { getFlowStepUnderlag } from "$lib/features/flows/flowInputBindings";
   import HttpConfigPanel from "./http/HttpConfigPanel.svelte";
   import { parseHttpAuthoredConfig, type HttpAuthoredConfig } from "./http/httpConfigTypes";
@@ -50,6 +56,8 @@
     onInputSourceChange,
     onInputTypeChange,
     onRuntimeInputChange,
+    onTextProcessingChange,
+    hasKnowledge = false,
     onHttpConfigChange,
     onOpenTranscriptionSettings,
     speakerMappingStepOffered = false,
@@ -81,6 +89,8 @@
     onInputSourceChange?: (detail: { value: string }) => void;
     onInputTypeChange?: (detail: { value: string }) => void;
     onRuntimeInputChange?: (detail: { patch: Partial<FlowRuntimeInputConfigValue> }) => void;
+    onTextProcessingChange?: (detail: { mode: FlowTextProcessingMode | null }) => void;
+    hasKnowledge?: boolean;
     onHttpConfigChange?: (detail: { config: HttpAuthoredConfig }) => void;
     onOpenTranscriptionSettings?: () => void;
     speakerMappingStepOffered?: boolean;
@@ -114,6 +124,47 @@
   );
 
   let showRuntimeInputAdvanced = $state(false);
+
+  // How the step reads its material. Enkel shows the choice only where it can
+  // apply; Avancerad always shows it and explains why it is unavailable.
+  const textProcessingMode = $derived(getTextProcessingMode(step));
+  const sectionEligibility = $derived(getSectionProcessingEligibility(step));
+  const readingModeValue = $derived(textProcessingMode ?? "whole");
+  const showReadingMode = $derived(
+    !isHttpSource && (isAdvancedMode || sectionEligibility.eligible || textProcessingMode !== null)
+  );
+  const readingModeOptions = $derived.by(() => {
+    const options: Array<{
+      value: "whole" | FlowTextProcessingMode;
+      label: string;
+      description: string;
+    }> = [
+      {
+        value: "whole",
+        label: m.flow_reading_mode_whole(),
+        description: m.flow_reading_mode_whole_desc()
+      },
+      {
+        value: "process_each_section",
+        label: m.flow_reading_mode_sections(),
+        description: m.flow_reading_mode_sections_desc()
+      }
+    ];
+    if (isAdvancedMode || textProcessingMode === "summarize") {
+      options.push({
+        value: "summarize",
+        label: m.flow_reading_mode_summarize(),
+        description: m.flow_reading_mode_summarize_desc()
+      });
+    }
+    return options;
+  });
+  function selectReadingMode(value: string) {
+    if (value === readingModeValue) return;
+    onTextProcessingChange?.({
+      mode: value === "process_each_section" || value === "summarize" ? value : null
+    });
+  }
 
   function updateRuntimeInputSettings(patch: Partial<FlowRuntimeInputConfigValue>) {
     onRuntimeInputChange?.({ patch });
@@ -209,6 +260,67 @@
           <p class="text-warning-stronger text-xs leading-relaxed" aria-live="polite">
             {inputTypeValidationMessage ?? inputTypeFeedback}
           </p>
+        {/if}
+      </div>
+    </Settings.Row>
+  {/if}
+
+  {#if showReadingMode}
+    <Settings.Row
+      title={m.flow_reading_mode_title()}
+      description={m.flow_reading_mode_description()}
+      fullWidth={true}
+      density="compact"
+    >
+      <div class="flex flex-col gap-3">
+        <RadioGroup.Root
+          value={readingModeValue}
+          onValueChange={selectReadingMode}
+          disabled={isPublished || !sectionEligibility.eligible}
+          aria-label={m.flow_reading_mode_title()}
+          class="gap-2"
+        >
+          {#each readingModeOptions as option (option.value)}
+            <label
+              class="bg-primary flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 transition-colors has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 {readingModeValue ===
+              option.value
+                ? 'border-accent-default/40 bg-accent-default/5'
+                : 'border-default hover:bg-hover-dimmer'}"
+            >
+              <RadioGroup.Item value={option.value} class="mt-0.5" />
+              <span class="min-w-0">
+                <span class="block text-sm font-medium">{option.label}</span>
+                <span class="text-muted mt-1 block text-xs leading-relaxed"
+                  >{option.description}</span
+                >
+              </span>
+            </label>
+          {/each}
+        </RadioGroup.Root>
+        {#if !sectionEligibility.eligible}
+          <p class="text-muted text-xs leading-relaxed">
+            {sectionEligibility.reason === "mapped"
+              ? m.flow_reading_mode_unavailable_mapped()
+              : m.flow_reading_mode_unavailable_output()}
+          </p>
+        {:else if textProcessingMode !== null}
+          <Alert.Root class="border-accent-default/15 bg-accent-default/5" role="note">
+            <Alert.Description class="text-secondary flex flex-col gap-1 text-xs leading-relaxed">
+              <span>{m.flow_reading_mode_sections_output_note()}</span>
+              {#if isAdvancedMode && textProcessingMode === "process_each_section"}
+                <span
+                  >{m.flow_reading_mode_sections_variable_note({
+                    token: "{{ section_index }}"
+                  })}</span
+                >
+              {/if}
+              {#if hasKnowledge}
+                <span class="text-warning-stronger"
+                  >{m.flow_reading_mode_sections_knowledge_note()}</span
+                >
+              {/if}
+            </Alert.Description>
+          </Alert.Root>
         {/if}
       </div>
     </Settings.Row>

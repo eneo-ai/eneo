@@ -2,6 +2,7 @@
   import type { FlowStep } from "@eneo/eneo-js";
   import { IconTrash } from "@eneo/icons/trash";
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import { getTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { m } from "$lib/paraglide/messages";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
@@ -131,6 +132,7 @@
   // Explicit underlag is the whole step input; the input source describes
   // only a step without it.
   const underlag = $derived(getFlowStepUnderlag(step));
+  const readsInSections = $derived(getTextProcessingMode(step) === "process_each_section");
   const sourceSummary = $derived.by(() => {
     if (step.output_mode === "template_fill") {
       return getTemplateFillTemplateName(step) ?? m.flow_template_fill_card_secondary();
@@ -236,8 +238,16 @@
         </div>
       {/if}
 
-      {#if step.output_mode === "template_fill" || step.output_mode === "transcribe_only"}
+      {#if step.output_mode === "template_fill" || step.output_mode === "transcribe_only" || readsInSections}
         <div class="mt-0.5 flex flex-wrap items-center gap-1.5">
+          {#if readsInSections}
+            <Badge
+              variant="secondary"
+              class="bg-accent-dimmer text-accent-stronger h-5 px-1.5 text-xs font-semibold"
+            >
+              {m.flow_reading_mode_sections()}
+            </Badge>
+          {/if}
           {#if step.output_mode === "template_fill"}
             <Badge
               variant="secondary"
@@ -255,7 +265,7 @@
                 {templateReadiness.matched}/{templateReadiness.total || 0}
               </Badge>
             {/if}
-          {:else}
+          {:else if step.output_mode === "transcribe_only"}
             <Badge
               variant="secondary"
               class="bg-accent-dimmer text-accent-stronger h-5 px-1.5 text-xs font-semibold"

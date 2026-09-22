@@ -1,7 +1,8 @@
 import {
   isFlowFormFieldBareAliasSafe,
   PRIMARY_FLOW_INPUT_KEYS,
-  RESERVED_RUNTIME_VARIABLES
+  RESERVED_RUNTIME_VARIABLES,
+  SECTION_RUNTIME_VARIABLES
 } from "./flowFormSchema";
 
 const TEMPLATE_TOKEN_PATTERN_SOURCE = String.raw`\{\{\s*([^{}]+)\s*\}\}`;
@@ -169,6 +170,8 @@ export type VariableClassificationContext = {
   stepOutputTypes: Map<number, string>;
   transcriptionEnabled: boolean;
   currentStepOrder: number;
+  /** True when the current step reads section by section, which exposes `section_index`. */
+  sectionVariablesAvailable?: boolean;
 };
 
 export function classifyVariable(
@@ -257,6 +260,11 @@ function analyzeTemplateToken(
   }
 
   if (SYSTEM_VARIABLE_NAMES.has(token)) return { token, kind: "valid", category: "system" };
+  if (SECTION_RUNTIME_VARIABLES.has(token)) {
+    return context.sectionVariablesAvailable
+      ? { token, kind: "valid", category: "system" }
+      : { token, kind: "invalid", category: "unknown", reason: "section_variable_unavailable" };
+  }
 
   if (context.knownFieldNames.has(token) && isFlowFormFieldBareAliasSafe(token)) {
     return { token, kind: "valid", category: "field" };
@@ -313,7 +321,12 @@ export function parsePromptSegments(
 
 export type TemplateValidationIssue = {
   token: string;
-  reason: "unknown_variable" | "unavailable_step" | "deleted_step" | "non_json_output";
+  reason:
+    | "unknown_variable"
+    | "unavailable_step"
+    | "deleted_step"
+    | "non_json_output"
+    | "section_variable_unavailable";
   stepOrder?: number;
 };
 

@@ -463,3 +463,23 @@ describe("getChipClasses", () => {
     expect(getChipClasses("unknown")).toContain("label-red");
   });
 });
+
+describe("section_index classification", () => {
+  const base = {
+    knownFieldNames: new Set<string>(),
+    knownStepNames: new Map<number, string>(),
+    stepOutputTypes: new Map<number, string>(),
+    transcriptionEnabled: false,
+    currentStepOrder: 2
+  };
+
+  it("is a system variable on a sectioned step and a named refusal elsewhere", () => {
+    expect(classifyVariable("section_index", { ...base, sectionVariablesAvailable: true })).toBe(
+      "system"
+    );
+    expect(classifyVariable("section_index", base)).toBe("unknown");
+    expect(analyzeTemplateTokens("S{{ section_index }}-", base)).toMatchObject([
+      { token: "section_index", kind: "invalid", reason: "section_variable_unavailable" }
+    ]);
+  });
+});

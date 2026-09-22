@@ -15,6 +15,7 @@ from eneo.flows.flow_run_input_envelope import (
 
 class FlowVariableDefinitionManifest(TypedDict):
     reservedRuntimeVariables: list[str]
+    sectionRuntimeVariables: list[str]
     formFieldNamespaceHeads: list[str]
     primaryFlowInputKeys: list[str]
     reservedFormFieldInputKeys: list[str]
@@ -184,6 +185,7 @@ def flow_variable_definition_manifest(
 ) -> FlowVariableDefinitionManifest:
     return {
         "reservedRuntimeVariables": sorted(runtime_variables_for_step(input_config)),
+        "sectionRuntimeVariables": sorted(SECTION_VARIABLE_SHAPES),
         "formFieldNamespaceHeads": sorted(FORM_FIELD_NAMESPACE_HEADS),
         "primaryFlowInputKeys": sorted(PRIMARY_FLOW_INPUT_KEYS),
         "reservedFormFieldInputKeys": sorted(RESERVED_FORM_FIELD_INPUT_KEYS),

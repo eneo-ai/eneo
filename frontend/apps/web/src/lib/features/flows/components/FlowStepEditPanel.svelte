@@ -57,6 +57,7 @@
     getRuntimeInputConfig,
     type FlowRuntimeInputConfigValue
   } from "$lib/features/flows/flowRuntimeInputConfig";
+  import { updateTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
   import { getFlowStepUxCopy } from "$lib/features/flows/flowStepUxCopy";
   import {
     collectTemplateStepReferenceOrders,
@@ -1093,6 +1094,10 @@
             onInputTypeChange={(detail) =>
               handleInputTypeChange(detail.value as FlowStep["input_type"])}
             onRuntimeInputChange={(detail) => updateRuntimeInputSettings(detail.patch)}
+            onTextProcessingChange={(detail) =>
+              activeStep &&
+              updateStep("input_config", updateTextProcessingMode(activeStep, detail.mode))}
+            hasKnowledge={hasKnowledgeSelections}
             onHttpConfigChange={(detail) => updateStep("input_config", detail.config)}
             onOpenTranscriptionSettings={() => onOpenTranscriptionSettings?.()}
             {speakerMappingStepOffered}

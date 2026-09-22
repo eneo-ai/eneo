@@ -44,3 +44,29 @@ describe("buildAvailableVariables", () => {
     expect(advanced.some((v) => v.token === "step_2.output.text")).toBe(true);
   });
 });
+
+describe("section_index", () => {
+  const sectioned = {
+    ...step(2, "Plocka ut uppgifter", "json"),
+    input_config: { text_processing: { mode: "process_each_section" } }
+  } as unknown as FlowStep;
+
+  it("is offered only while the current step reads section by section", () => {
+    const steps = [step(1, "Transkribera"), sectioned];
+    const withSections = buildContext(steps, undefined, false, 2);
+    expect(withSections.sectionVariablesAvailable).toBe(true);
+    expect(
+      buildAvailableVariables(withSections, steps, false).some((v) => v.token === "section_index")
+    ).toBe(true);
+    const plain = buildContext(
+      [step(1, "Transkribera"), step(2, "Sammanfatta", "json")],
+      undefined,
+      false,
+      2
+    );
+    expect(plain.sectionVariablesAvailable).toBe(false);
+    expect(
+      buildAvailableVariables(plain, steps, true).some((v) => v.token === "section_index")
+    ).toBe(false);
+  });
+});

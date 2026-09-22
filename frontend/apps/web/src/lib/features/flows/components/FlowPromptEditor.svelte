@@ -187,7 +187,8 @@
     deleted_step: m.flow_template_issue_deleted_step,
     unavailable_step: m.flow_template_issue_unavailable_step,
     non_json_output: m.flow_template_issue_non_json_output,
-    unknown_variable: m.flow_template_issue_unknown_variable
+    unknown_variable: m.flow_template_issue_unknown_variable,
+    section_variable_unavailable: m.flow_template_issue_section_variable_unavailable
   };
 
   function getTemplateValidationIssueText(issue: TemplateValidationIssue): string {

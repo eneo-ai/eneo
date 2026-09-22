@@ -1,4 +1,5 @@
 import type { FlowStep, SecurityClassification } from "@eneo/eneo-js";
+import { getTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
 import { m } from "$lib/paraglide/messages";
 import { describeUnderlag, getFlowStepUnderlag } from "$lib/features/flows/flowInputBindings";
 import { OUTPUT_MODES } from "$lib/features/flows/flowStepTypes";
@@ -68,7 +69,8 @@ export function getChapterInputStatus({
   hasKnowledge,
   hasAttachments
 }: {
-  step: Pick<FlowStep, "input_source" | "step_order" | "input_bindings">;
+  step: Pick<FlowStep, "input_source" | "step_order" | "input_bindings"> &
+    Partial<Pick<FlowStep, "input_config">>;
   previousStep?: Pick<FlowStep, "step_order" | "user_description"> | null;
   hasKnowledge: boolean;
   hasAttachments: boolean;
@@ -92,7 +94,11 @@ export function getChapterInputStatus({
     hasKnowledge || hasAttachments
       ? m.flow_chapter_input_extra_active()
       : m.flow_chapter_input_extra_none();
-  return `${source} · ${extra}`;
+  const reading =
+    getTextProcessingMode({ input_config: step.input_config ?? null }) === "process_each_section"
+      ? ` · ${m.flow_reading_mode_sections()}`
+      : "";
+  return `${source}${reading} · ${extra}`;
 }
 
 export function getTechnicalSettingsCount(step: FlowStep): number {

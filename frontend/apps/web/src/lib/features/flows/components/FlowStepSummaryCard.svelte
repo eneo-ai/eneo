@@ -24,6 +24,7 @@
     summaryModel: {
       usesInputTemplate?: boolean;
       downstreamKind?: string;
+      readsInSections?: boolean;
     } | null;
     previousStep: FlowStep | undefined | null;
     isAdvancedMode: boolean;
@@ -79,7 +80,9 @@
 >
   <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm leading-snug">
     <span class="text-secondary min-w-0 truncate" title={source}>
-      <span class="text-primary font-medium">{source}</span> · {getInputTypeLabel(step.input_type)}
+      <span class="text-primary font-medium">{source}</span> · {getInputTypeLabel(
+        step.input_type
+      )}{#if summaryModel?.readsInSections}{" · "}{m.flow_step_summary_reads_in_sections()}{/if}
     </span>
 
     <span class="text-muted" aria-hidden="true">&rarr;</span>
