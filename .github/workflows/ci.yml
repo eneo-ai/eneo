@@ -182,7 +182,18 @@ jobs:
         run: uv run pyright
 
   backend-tests:
-    name: Backend tests
+    name: Backend tests (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        include:
+          - { name: unit, suite: unit, shard: 0 }
+          - { name: integration-1, suite: integration, shard: 1 }
+          - { name: integration-2, suite: integration, shard: 2 }
+          - { name: integration-3, suite: integration, shard: 3 }
+          - { name: integration-4, suite: integration, shard: 4 }
+          - { name: migrations, suite: migrations, shard: 0 }
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
@@ -232,26 +243,33 @@ jobs:
         run: uv sync --python 3.11 --frozen --all-groups
 
       - name: Run unit tests
-        run: uv run pytest -v -n 4 -m "not integration" tests/
+        if: matrix.suite == 'unit'
+        run: uv run pytest -v -n 4 --durations=25 -m "not integration" tests/
 
       - name: Run integration tests
-        # -n 4: public-repo ubuntu-latest runners have 4 vCPUs, and each xdist
-        # worker gets its own session-scoped Postgres testcontainer.
-        run: uv run pytest -v -n 4 -m integration tests/integration/
+        if: matrix.suite == 'integration'
+        # Four standard runners, each with four workers and isolated databases.
+        # Partition files, not node IDs, so module fixtures stay in one shard.
+        run: |
+          python3 ../scripts/backend_test_shard.py --index "$SHARD_INDEX" --count 4 > "$RUNNER_TEMP/integration-files.txt"
+          mapfile -t test_files < "$RUNNER_TEMP/integration-files.txt"
+          uv run pytest -v -n 4 --durations=25 -m integration "${test_files[@]}"
         env:
+          SHARD_INDEX: ${{ matrix.shard }}
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
       - name: Verify File/Icon upgrade and optional cleanup on PostgreSQL 13
+        if: matrix.suite == 'migrations'
         # Migration tests are opt-in and run outside the parallel suite. The
         # restore rehearsal needs its own application/database session.
         working-directory: backend
         timeout-minutes: 10
         run: |
-          uv run pytest -v -m migration_isolation \
+          uv run pytest -v --durations=25 -m migration_isolation \
             tests/integration/migrations/test_file_icon_preflight.py \
             tests/integration/migrations/test_file_icon_legacy_cleanup.py
-          uv run pytest -v -o faulthandler_timeout=180 -m migration_isolation \
+          uv run pytest -v --durations=25 -o faulthandler_timeout=180 -m migration_isolation \
             tests/integration/migrations/test_file_icon_bridge_rehearsal.py
         env:
           ENEO_FILE_ICON_REHEARSAL_PROFILE: smoke
