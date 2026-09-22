@@ -276,7 +276,16 @@ jobs:
           node .github/scripts/ensure-project-fields.mjs --self-test
           node .github/scripts/project-intake.mjs --self-test
           node .github/scripts/ci-change-scope.mjs --self-test
+          node .github/scripts/check-user-facing.mjs --self-test
+          node scripts/collect_user_facing.mjs --self-test
           node scripts/export_github_roadmap.mjs --self-test
+
+  # Preserve the existing required CI gate during rollout. Remove this caller
+  # and its aggregate references once the standalone User-facing section check
+  # is required in GitHub (see the What's new PLAYBOOK).
+  user-facing:
+    name: User-facing section (CI transition)
+    uses: ./.github/workflows/user-facing.yml
 
   route-metadata:
     name: Route metadata
@@ -322,6 +331,12 @@ jobs:
           python3 apps/web/scripts/check-i18n-duplicates.py
           python3 apps/web/scripts/check-i18n-parity.py
 
+      # User-facing release notes: schema, sv+en parity, newest-first order and
+      # that every "Show me" anchor still exists in the web app.
+      - name: Check What's new release notes
+        working-directory: .
+        run: python3 scripts/check_whats_new.py --repo-root .
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
@@ -344,6 +359,7 @@ jobs:
         run: |
           FORCE_COLOR=1 bun run --filter '@eneo/eslint-plugin' test
           FORCE_COLOR=1 bun run --filter '@eneo/eneo-js' test
+          FORCE_COLOR=1 bun run --filter '@eneo/whats-new' test
 
       # Component tests run in a real Chromium via Vitest browser mode, so the
       # matching Playwright browser must be on the runner. Pin the playwright
@@ -614,6 +630,7 @@ jobs:
       - backend-tests
       - script-tests
       - route-metadata
+      - user-facing
       - no-intric
       - frontend
       - frontend-e2e
@@ -629,6 +646,7 @@ jobs:
           BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
           SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
           ROUTE_METADATA_RESULT: ${{ needs.route-metadata.result }}
+          USER_FACING_RESULT: ${{ needs.user-facing.result }}
           NO_INTRIC_RESULT: ${{ needs.no-intric.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           FRONTEND_E2E_RESULT: ${{ needs.frontend-e2e.result }}
@@ -658,6 +676,7 @@ jobs:
           check_result "Backend tests" "$BACKEND_TESTS_RESULT"
           check_result "Script tests" "$SCRIPT_TESTS_RESULT"
           check_result "Route metadata" "$ROUTE_METADATA_RESULT"
+          check_result "User-facing section" "$USER_FACING_RESULT"
           check_result "No intric references" "$NO_INTRIC_RESULT"
           check_result "Frontend" "$FRONTEND_RESULT"
           check_result "Frontend E2E" "$FRONTEND_E2E_RESULT"

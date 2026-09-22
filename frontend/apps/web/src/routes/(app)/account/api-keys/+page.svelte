@@ -175,7 +175,7 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.my_api_keys()} />
+    <Page.Title title={m.my_api_keys()} tour="account-api-keys" />
     <div class="flex items-center gap-3">
       <Button variant="ghost" onclick={loadKeys}>
         <RefreshCw class={loading ? "animate-spin" : ""} />

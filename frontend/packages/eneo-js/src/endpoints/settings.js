@@ -74,6 +74,20 @@ export function initSettings(client) {
     },
 
     /**
+     * Toggle the What's new page, release announcement and menu indicator for the tenant
+     * @param {boolean} enabled
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').Settings>}
+     */
+    updateWhatsNew: async (enabled) => {
+      const res = await client.fetch("/api/v1/settings/whats-new", {
+        method: "patch",
+        requestBody: { "application/json": { enabled } }
+      });
+      return res;
+    },
+
+    /**
      * Update API key expiry notifications setting for the tenant
      * @param {boolean} enabled Whether to enable API key expiry notifications
      * @throws {EneoError}

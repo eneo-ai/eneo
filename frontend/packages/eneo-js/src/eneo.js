@@ -16,6 +16,7 @@ import { initSpaces } from "./endpoints/spaces.js";
 import { initUserGroups } from "./endpoints/user-groups.js";
 import { initUser } from "./endpoints/users.js";
 import { initVersion } from "./endpoints/version.js";
+import { initWhatsNew } from "./endpoints/whats-new.js";
 import { initWebsites } from "./endpoints/websites.js";
 import { initPrompts } from "./endpoints/prompts.js";
 import { initApps } from "./endpoints/apps.js";
@@ -63,6 +64,7 @@ export function createEneo(args) {
     assistants: initAssistants(client),
     services: initServices(client),
     version: initVersion(client),
+    whatsNew: initWhatsNew(client),
     analytics: initAnalytics(client),
     logging: initLogging(client),
     jobs: initJobs(client),

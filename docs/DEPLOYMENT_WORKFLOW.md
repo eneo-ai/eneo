@@ -121,6 +121,14 @@ Once merged to develop:
 
 Every release goes through at least one RC tag for testing. See [Release Stabilization (RC Process)](#release-stabilization-rc-process) for the full flow.
 
+Before tagging, make sure the user-facing release notes are on the release branch: `frontend/packages/whats-new/releases.json` must have an entry for the version with `date` set, reviewed by the release owner. The entry is drafted from the `## User-facing` sections of merged PRs — see [`frontend/packages/whats-new/PLAYBOOK.md`](../frontend/packages/whats-new/PLAYBOOK.md). It ships inside the frontend image as the in-app **What's new** page and is published on docs.eneo.ai; the GitHub release notes below remain the developer/operator-facing changelog.
+
+Run the tag rule locally before creating the release, so a missing date is caught before a GitHub release exists whose image build then fails:
+
+```bash
+python3 scripts/check_whats_new.py --repo-root . --release-tag vX.Y.Z
+```
+
 Once the RC is stable, create the final release via GitHub UI:
 
 1. Go to **Releases** → **Draft a new release**

@@ -385,7 +385,7 @@ def get_application():
 
         # Build error response
         settings = get_settings()
-        is_dev = settings.environment in ("development", "local", "dev")
+        is_dev = settings.is_development
 
         error_content: dict[str, Any] = {
             "error": "Internal server error",
@@ -467,7 +467,7 @@ def get_application():
 
         # Build error response
         settings = get_settings()
-        is_dev = settings.environment in ("development", "local", "dev")
+        is_dev = settings.is_development
 
         error_content: dict[str, Any] = {
             "error": "Internal server error",

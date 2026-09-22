@@ -397,3 +397,27 @@ async def update_api_key_expiry_notifications_setting(
     return await service.update_api_key_expiry_notifications_setting(
         enabled=data.enabled
     )
+
+
+@settings_admin_router.patch(
+    "/whats-new",
+    response_model=SettingsPublic,
+    responses=responses.get_responses([403]),
+    summary="Toggle the What's new feature",
+    description="""
+Toggle the What's new page, release announcement and menu indicator for your tenant.
+
+**Admin Only:** Requires admin permissions.
+
+**Behavior:**
+- Updates the `whats_new_enabled` feature flag for your tenant
+- When disabled: the page, the one-time release announcement and the menu indicator are hidden for every user in the tenant
+- Change takes effect on the next page load
+    """,
+)
+async def update_whats_new_setting(
+    data: ToggleSettingUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.settings_service()
+    return await service.update_whats_new_setting(enabled=data.enabled)
