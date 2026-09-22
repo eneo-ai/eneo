@@ -45,7 +45,7 @@
     const modelId = model?.id;
     const promptText = prompt ?? "";
     // Each attachment's mode is read here so a flip re-meters: one marked
-    // "open with tool" is sent as a signed URL and costs nothing.
+    // "open with tool" omits the file body from this estimate.
     const attachmentInputs = attachments.map((a) => ({
       id: a.id,
       inline_text: a.inline_text ?? true
@@ -106,7 +106,7 @@
 </script>
 
 {#if show}
-  <div class="border-default flex flex-col gap-1.5 border-b px-4 py-3">
+  <div class="border-default mb-6 flex flex-col gap-1.5 border-b px-4 py-3">
     <div class="flex items-center justify-between gap-3">
       <span class="text-default text-sm font-medium">{m.config_attachment_meter_label()}</span>
       <span class="text-sm tabular-nums {textClass}">
@@ -127,6 +127,7 @@
     >
       <ContextMeterFill widthPct={Math.min(percent, 100)} class={barClass} />
     </div>
+    <p class="text-secondary text-sm">{m.config_attachment_meter_scope()}</p>
     {#if tone === "over"}
       <p
         class="text-negative-stronger flex items-start gap-1.5 text-xs leading-snug"
