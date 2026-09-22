@@ -66,6 +66,26 @@ def _section_preflight(token_count, **kwargs):
     return replace(preview, preferred=package, fallback=fallback)
 
 
+def _byte_budget_preflight(budget, **kwargs):
+    overhead = len(kwargs["prompt_override"].encode()) + 37
+    measured = overhead + len(kwargs["question"].encode())
+    reserve = kwargs["useful_output_reserve_tokens"]
+    capacity = overhead + reserve + budget
+    preview = _section_preflight(measured, **kwargs)
+    package = replace(preview.preferred, output_cap_tokens=capacity - measured)
+    return replace(
+        preview,
+        capacity=ModelCapacity(capacity, capacity),
+        preferred=package,
+        fallback=(
+            replace(preview.fallback, output_cap_tokens=capacity - measured)
+            if preview.fallback is not None
+            else None
+        ),
+        refusal=None if package.fits else "current_request_input_does_not_fit",
+    )
+
+
 def _case(
     user,
     *,
@@ -1179,6 +1199,36 @@ async def test_section_boundaries_do_not_dispatch_blank_leading_whitespace(
         assert all(content.strip() for content in contents)
 
 
+async def test_sections_refuse_forced_blank_raw_cut(user):
+    executor, repo, assistant, run, state, step, _, _, _, _ = _case(
+        user, text="\r𐀀000000"
+    )
+    assistant.preflight_response_context = AsyncMock(
+        side_effect=lambda **kwargs: _byte_budget_preflight(4, **kwargs)
+    )
+    base = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+    blank, _ = await prepare_text_processing_call(
+        step=step, run=run, state=state, base=base, section_text="\r"
+    )
+    assert blank.prepared.completion_call.selected_package.fits
+    with pytest.raises(TypedIOValidationException) as no_fit:
+        await prepare_text_processing_call(
+            step=step, run=run, state=state, base=base, section_text="\r𐀀"
+        )
+    assert (
+        no_fit.value.code == FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW.value
+    )
+
+    with pytest.raises(TypedIOValidationException) as empty:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert empty.value.code == FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value
+    repo.activate_step_attempt.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
 @pytest.mark.parametrize("variant", ["primary", "fallback"])
 async def test_sections_refuse_missing_message_text_even_with_schema_and_tool_decoys(
     user, variant
@@ -1295,6 +1345,9 @@ def _section_cases(draw):
 
 @given(case=_section_cases())
 @example(case=("猫Å🙂" * 500, 512))
+@example(case=("\r𐀀000000", 4))
+@example(case=("0000\r𐀀000", 4))
+@example(case=("\r0000000", 4))
 async def test_section_builder_round_trip(case):
     text, budget = case
     tenant = TenantInDB(id=uuid4(), name="test_tenant", quota_limit=0, quota_used=0)
@@ -1308,38 +1361,56 @@ async def test_section_builder_round_trip(case):
         tenant=tenant,
         state="active",
     )
-    executor, _, assistant, run, state, step, _, _, _, _ = _case(user, text=text)
+    executor, repo, assistant, run, state, step, _, _, _, _ = _case(
+        user, text=text, prompt="{{ section_index }}"
+    )
+    fitting_sections = {}
 
     async def preflight(**kwargs):
-        overhead = len(kwargs["prompt_override"].encode()) + 37
-        measured = overhead + len(kwargs["question"].encode())
-        reserve = kwargs["useful_output_reserve_tokens"]
-        capacity = overhead + reserve + budget
-        preview = _section_preflight(measured, **kwargs)
-        package = replace(preview.preferred, output_cap_tokens=capacity - measured)
-        return replace(
-            preview,
-            capacity=ModelCapacity(capacity, capacity),
-            preferred=package,
-            fallback=(
-                replace(preview.fallback, output_cap_tokens=capacity - measured)
-                if preview.fallback is not None
-                else None
-            ),
-            refusal=None if package.fits else "current_request_input_does_not_fit",
-        )
+        preview = _byte_budget_preflight(budget, **kwargs)
+        if kwargs["question"] and all(
+            package.fits
+            and len(kwargs["question"].encode()) <= package.output_cap_tokens
+            for package in preview.packages
+        ):
+            ordinal = int(kwargs["prompt_override"].splitlines()[0])
+            fitting_sections[ordinal] = kwargs
+        return preview
 
     assistant.preflight_response_context = AsyncMock(side_effect=preflight)
     base = await executor._preview_assistant_step(
         step=step, run=run, state=state, version_metadata=None, attempt_no=1
     )
-    prepared = await prepare_text_sections(
-        step=step,
-        run=run,
-        state=state,
-        base=base,
-        policy=FlowMappedExecutionPolicy(),
-    )
+    try:
+        prepared = await prepare_text_sections(
+            step=step,
+            run=run,
+            state=state,
+            base=base,
+            policy=FlowMappedExecutionPolicy(),
+        )
+    except TypedIOValidationException as exc:
+        ordinal = max(fitting_sections)
+        start = sum(
+            len(fitting_sections[index]["question"]) for index in range(1, ordinal)
+        )
+        measured = fitting_sections[ordinal]
+        prefix = measured["question"]
+        assert not prefix.strip()
+        assert text[start : start + len(prefix)] == prefix
+        for end in range(start + len(prefix) + 1, len(text) + 1):
+            extension = text[start:end]
+            preview = _byte_budget_preflight(
+                budget, **{**measured, "question": extension}
+            )
+            assert any(
+                not package.fits or len(extension.encode()) > package.output_cap_tokens
+                for package in preview.packages
+            )
+        assert exc.code == FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value
+        repo.activate_step_attempt.assert_not_awaited()
+        assistant.get_response.assert_not_awaited()
+        return
     manifest = prepared.manifest
     questions = tuple(call.prepared.step_input.text for call in prepared.calls)
     assert len(questions) > 1
@@ -1353,6 +1424,7 @@ async def test_section_builder_round_trip(case):
     for index, (section, call) in enumerate(
         zip(manifest.sections, prepared.calls, strict=True)
     ):
+        assert call.prepared.step_input.source_text.strip()
         assert section.output_index == index
         assert section.core.start_char == start
         assert section.core.end_char > start
