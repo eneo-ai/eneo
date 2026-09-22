@@ -4,6 +4,7 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { embeddingModelLabel } from "../modelLabels";
   import { toast } from "$lib/components/toast";
 
   // Id of currently selected Embedding Model
@@ -19,10 +20,8 @@
   const triggerId = useId();
 
   function getModelDisplayName(model: EmbeddingModel) {
-    if (model.open_source) {
-      return `${model.name} (Open Source)`;
-    }
-    return model.name;
+    const label = embeddingModelLabel(model);
+    return model.open_source ? `${label} (${m.model_label_open_source()})` : label;
   }
 
   if (value) {

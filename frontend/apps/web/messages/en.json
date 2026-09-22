@@ -1397,6 +1397,8 @@
   "personal_space": "Personal space",
   "organization_space": "Organization space",
   "change_space_or_create": "Change space or create a new one",
+  "embedding_model_disabled_by_admin": "Disabled by administrator",
+  "embedding_model_not_in_space": "Not enabled in this space",
   "embedding_model_no_longer_supported": "This collection's embedding model is no longer supported. Please change it in the assistants settings.",
   "stable_embedding_models": "Stable Embedding models",
   "experimental_embedding_models": "Experimental Embedding models",

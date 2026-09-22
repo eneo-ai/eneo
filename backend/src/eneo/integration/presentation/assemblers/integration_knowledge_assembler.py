@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
-from eneo.ai_models.embedding_models.embedding_model import (
-    EmbeddingModelPublicLegacy,
+from eneo.embedding_models.presentation.embedding_model_models import (
+    EmbeddingModelPublic,
 )
 from eneo.integration.presentation.models import (
     IntegrationKnowledgeMetaData,
@@ -21,9 +21,7 @@ class IntegrationKnowledgeAssembler:
         cls,
         item: "IntegrationKnowledge",
     ) -> IntegrationKnowledgePublic:
-        embedding_model = EmbeddingModelPublicLegacy.model_validate(
-            item.embedding_model
-        )
+        embedding_model = EmbeddingModelPublic.from_domain(item.embedding_model)
         integration_type = (
             item.user_integration.tenant_integration.integration.integration_type
         )
