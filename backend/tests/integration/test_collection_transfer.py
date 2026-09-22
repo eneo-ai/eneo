@@ -1,8 +1,8 @@
 """Integration tests for collection ownership transfer.
 
-After a transfer, the destination space owns the collection, it is the only
-space the collection is distributed to, and no assistant or service holds a
-binding to a collection its own space cannot see.
+After a transfer, the destination space owns the collection and the source
+space no longer owns it or has it distributed directly to it. Independent
+shares and bindings remain intact; reads resolve only visible collections.
 """
 
 from __future__ import annotations
@@ -10,19 +10,23 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 from dataclasses import dataclass
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from eneo.database.tables.assistant_table import AssistantsGroups
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.category_mappings import CATEGORY_MAPPINGS
+from eneo.database.tables.assistant_table import Assistants, AssistantsGroups
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.groups_spaces_table import GroupsSpaces
 from eneo.database.tables.info_blobs_table import InfoBlobs
-from eneo.database.tables.service_table import ServicesGroups
+from eneo.database.tables.service_table import Services, ServicesGroups
 from eneo.database.tables.spaces_table import Spaces, SpacesEmbeddingModels, SpacesUsers
-from eneo.main.exceptions import UnauthorizedException
+from eneo.groups_legacy.group_repo import GroupRepository
+from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.main.models import ModelId
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.users.user import UserAdd, UserState
@@ -169,24 +173,30 @@ async def test_collection_transfer_persists_owner_and_visible_bindings(
     collection = transfer_collection
     destination = collection.organization if to_organization else collection.destination
     before = await _collection_state(db_container, collection.id)
+    async with db_container() as container:
+        assistant, _ = await container.assistant_service().get_assistant(
+            collection.assistants[collection.source]
+        )
+        assert collection.id in {group.id for group in assistant.collections}
     response = await _transfer(client, admin_token, collection, destination)
     assert response.status_code == 204, response.text
     after = await _collection_state(db_container, collection.id)
     assert after["collection"][0]["space_id"] == destination
     assert len(before["documents"]) == 2
     assert after["documents"] == before["documents"]
-    assert [row["space_id"] for row in after["distribution"]] == [destination]
-    visible_spaces = (
-        {collection.source, collection.destination, collection.other}
-        if to_organization
-        else {destination}
-    )
-    assert {row["assistant_id"] for row in after["assistants"]} == {
-        collection.assistants[space_id] for space_id in visible_spaces
-    }
-    assert {row["service_id"] for row in after["services"]} == {
-        collection.services[space_id] for space_id in visible_spaces
-    }
+    distributed_spaces = {row["space_id"] for row in after["distribution"]}
+    assert collection.source not in distributed_spaces
+    assert destination in distributed_spaces
+    assert collection.other in distributed_spaces
+    async with db_container() as container:
+        for space_id, assistant_id in collection.assistants.items():
+            assistant, _ = await container.assistant_service().get_assistant(
+                assistant_id
+            )
+            resolved = {group.id for group in assistant.collections}
+            assert (collection.id in resolved) == (
+                to_organization or space_id != collection.source
+            )
     for space_id in (collection.source, destination):
         response = await client.get(
             f"/api/v1/spaces/{space_id}/knowledge/",
@@ -203,7 +213,13 @@ async def test_collection_transfer_persists_owner_and_visible_bindings(
 
 @pytest.mark.parametrize("denied_space", ["source", "destination"])
 async def test_collection_transfer_denied_permission_preserves_all_rows(
-    client, db_container, admin_user, admin_token, transfer_collection, denied_space
+    client,
+    db_container,
+    admin_user,
+    admin_token,
+    transfer_collection,
+    denied_space,
+    monkeypatch,
 ):
     collection = transfer_collection
     async with db_container() as container:
@@ -215,9 +231,15 @@ async def test_collection_transfer_denied_permission_preserves_all_rows(
             )
             .values(role=SpaceRoleValue.VIEWER.value)
         )
+    # Policy rejection precedes writes; the injected post-write failure below tests rollback.
     before = await _collection_state(db_container, collection.id)
+    lock = AsyncMock(
+        side_effect=AssertionError("Denied transfer must not lock the collection")
+    )
+    monkeypatch.setattr(GroupRepository, "lock_group_space_for_update", lock)
     response = await _transfer(client, admin_token, collection, collection.destination)
     assert response.status_code == 403, response.text
+    lock.assert_not_awaited()
     assert await _collection_state(db_container, collection.id) == before
 
 
@@ -231,6 +253,7 @@ async def test_collection_transfer_missing_embedding_model_preserves_all_rows(
                 SpacesEmbeddingModels.space_id == collection.destination
             )
         )
+    # Model rejection precedes writes; the injected post-write failure below tests rollback.
     before = await _collection_state(db_container, collection.id)
     response = await _transfer(client, admin_token, collection, collection.destination)
     assert response.status_code == 400, response.text
@@ -311,12 +334,112 @@ async def test_concurrent_collection_transfer_authorizes_the_locked_owner(
                 await task
     after = await _collection_state(db_container, collection.id)
     assert after["collection"][0]["space_id"] == collection.destination
-    assert [row["space_id"] for row in after["distribution"]] == [
-        collection.destination
-    ]
-    assert {row["assistant_id"] for row in after["assistants"]} == {
-        collection.assistants[collection.destination]
-    }
-    assert {row["service_id"] for row in after["services"]} == {
-        collection.services[collection.destination]
-    }
+    distributed_spaces = {row["space_id"] for row in after["distribution"]}
+    assert collection.source not in distributed_spaces
+    assert collection.destination in distributed_spaces
+    assert collection.other in distributed_spaces
+    async with db_container() as container:
+        assistant, _ = await container.assistant_service().get_assistant(
+            collection.assistants[collection.source]
+        )
+        assert collection.id not in {group.id for group in assistant.collections}
+
+
+async def test_collection_transfer_rolls_back_after_distribution_write(
+    client, db_container, admin_token, transfer_collection, monkeypatch
+):
+    collection = transfer_collection
+    before = await _collection_state(db_container, collection.id)
+    link_group_to_space = GroupRepository.link_group_to_space
+    wrote = False
+
+    async def fail_after_link(repo, group_id, space_id):
+        nonlocal wrote
+        await link_group_to_space(repo, group_id, space_id)
+        assert (
+            await repo.session.scalar(
+                sa.select(CollectionsTable.space_id).where(
+                    CollectionsTable.id == group_id
+                )
+            )
+            == collection.destination
+        )
+        wrote = True
+        raise BadRequestException("Injected failure after distribution write")
+
+    monkeypatch.setattr(GroupRepository, "link_group_to_space", fail_after_link)
+    response = await _transfer(client, admin_token, collection, collection.destination)
+    assert response.status_code == 400, response.text
+    assert wrote
+    assert await _collection_state(db_container, collection.id) == before
+
+
+async def test_collection_transfer_preserves_bindings_without_an_owning_space(
+    client, db_container, admin_token, transfer_collection
+):
+    collection = transfer_collection
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(Assistants)
+            .where(Assistants.id == collection.assistants[collection.other])
+            .values(space_id=None)
+        )
+        await container.session().execute(
+            sa.update(Services)
+            .where(Services.id == collection.services[collection.other])
+            .values(space_id=None)
+        )
+    before = await _collection_state(db_container, collection.id)
+    response = await _transfer(client, admin_token, collection, collection.destination)
+    assert response.status_code == 204, response.text
+    after = await _collection_state(db_container, collection.id)
+    assert after["assistants"] == before["assistants"]
+    assert after["services"] == before["services"]
+
+
+async def test_collection_transfer_does_not_block_document_ingest(
+    db_container, admin_user, transfer_collection
+):
+    collection = transfer_collection
+    document_id = uuid4()
+
+    async def insert_document():
+        async with db_container() as container:
+            await container.session().execute(
+                sa.insert(InfoBlobs).values(
+                    id=document_id,
+                    text="Concurrent document",
+                    size=19,
+                    source_id=uuid4(),
+                    version_state="active",
+                    user_id=admin_user.id,
+                    tenant_id=admin_user.tenant_id,
+                    group_id=collection.id,
+                )
+            )
+
+    async with db_container() as container:
+        await container.resource_mover_service().move_collection_to_space(
+            collection.id, collection.destination
+        )
+        await asyncio.wait_for(insert_document(), timeout=5)
+    after = await _collection_state(db_container, collection.id)
+    assert document_id in {row["id"] for row in after["documents"]}
+
+
+async def test_collection_transfer_emits_audit_entry(
+    client, admin_user, admin_token, transfer_collection, monkeypatch
+):
+    collection = transfer_collection
+    log = AsyncMock()
+    monkeypatch.setattr(AuditService, "log_async", log)
+    response = await _transfer(client, admin_token, collection, collection.destination)
+    assert response.status_code == 204, response.text
+    log.assert_awaited_once()
+    entry = log.await_args.kwargs
+    assert entry["action"].value == "collection_transferred"
+    assert CATEGORY_MAPPINGS[entry["action"].value] == "user_actions"
+    assert entry["entity_type"].value == "collection"
+    assert entry["entity_id"] == collection.id
+    assert entry["tenant_id"] == admin_user.tenant_id
+    assert entry["metadata"]["extra"]["target_space_id"] == str(collection.destination)

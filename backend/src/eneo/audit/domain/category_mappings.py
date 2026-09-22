@@ -77,6 +77,7 @@ CATEGORY_MAPPINGS = {
     ActionType.COLLECTION_CREATED.value: "user_actions",
     ActionType.COLLECTION_UPDATED.value: "user_actions",
     ActionType.COLLECTION_DELETED.value: "user_actions",
+    ActionType.COLLECTION_TRANSFERRED.value: "user_actions",
     ActionType.TEMPLATE_CREATED.value: "user_actions",
     ActionType.TEMPLATE_UPDATED.value: "user_actions",
     ActionType.TEMPLATE_DELETED.value: "user_actions",

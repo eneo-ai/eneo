@@ -267,11 +267,7 @@ class GroupService:
         group_id: UUID,
         space_id: UUID,
     ):
-        source_space_id = await self.repo.lock_group_space_for_update(group_id)
-        if source_space_id is None:
-            raise NotFoundException()
-        source_space = await self.space_repo.one(source_space_id)
-        group = source_space.get_collection(collection_id=group_id)
+        source_space = await self.space_service.get_space_by_collection(group_id)
         source_actor = self.actor_manager.get_space_actor_from_space(source_space)
         target_space = await self.space_service.get_space(space_id)
         target_actor = self.actor_manager.get_space_actor_from_space(target_space)
@@ -296,6 +292,23 @@ class GroupService:
                     "auth_layer": "domain_policy",
                 },
             )
+        source_space_id = await self.repo.lock_group_space_for_update(group_id)
+        if source_space_id is None:
+            raise NotFoundException()
+        source_space = await self.space_service.get_space(source_space_id)
+        source_actor = self.actor_manager.get_space_actor_from_space(source_space)
+        if not source_actor.can_delete_collections():
+            raise UnauthorizedException(
+                "User does not have permissions to move group from space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "move",
+                    "auth_layer": "domain_policy",
+                },
+            )
+
+        group = source_space.get_collection(collection_id=group_id)
         if not target_space.is_embedding_model_in_space(group.embedding_model.id):
             raise BadRequestException(
                 f"Space does not have embedding model {group.embedding_model.name} enabled."
@@ -307,12 +320,10 @@ class GroupService:
             group_id=group_id, new_owner_space_id=space_id
         )
 
-        await self.repo.unlink_group_from_all_spaces(group_id=group_id)
-        await self.repo.link_group_to_space(group_id=group_id, space_id=space_id)
-
-        await self.repo.remove_group_bindings_without_access(
-            group_id=group_id, tenant_id=self.user.tenant_id
+        await self.repo.unlink_group_from_space(
+            group_id=group_id, space_id=source_space_id
         )
+        await self.repo.link_group_to_space(group_id=group_id, space_id=space_id)
 
         return group_in_db
 
