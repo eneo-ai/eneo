@@ -1,6 +1,37 @@
 TITLE = "Eneo"
 
-SUMMARY = "General AI framework"
+SUMMARY = """General AI framework.
+
+## Errors
+
+Every error response uses the same JSON envelope:
+
+```json
+{
+  "message": "Flow must be published before creating runs.",
+  "eneo_error_code": 9007,
+  "code": "flow_not_published",
+  "context": {"flow_id": "..."},
+  "request_id": "..."
+}
+```
+
+Branch on the string `code`. The numeric `eneo_error_code` is a coarse category
+kept for older clients, and `message` is written for people and may be reworded.
+Quote `request_id`, or `error_id` on a `500`, when you contact support. Each
+operation lists the codes it can return.
+
+Request validation is the one exception: a `422` answers with
+`{"detail": [...]}` rather than the envelope.
+
+### Errors that no operation lists
+
+A request whose `Origin` header is not allowed is rejected before routing, so it
+can reach any endpoint regardless of the responses listed for it. It answers
+`400` with the code `disallowed_cors_origin`. A server-side caller should not
+forward the browser `Origin` header; a browser caller needs its origin allowed
+for the tenant, or on an active public API key.
+"""
 
 TAGS_METADATA = [
     {
