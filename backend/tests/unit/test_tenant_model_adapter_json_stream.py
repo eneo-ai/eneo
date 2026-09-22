@@ -41,6 +41,23 @@ def _event(content, finish=None, usage=None):
     return ("data: " + json.dumps(event) + "\n\n").encode()
 
 
+def _usage_event():
+    return (
+        "data: "
+        + json.dumps(
+            {
+                "id": "raw-response",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "test-model",
+                "choices": [],
+                "usage": {"prompt_tokens": 12, "completion_tokens": 9},
+            }
+        )
+        + "\n\n"
+    ).encode()
+
+
 class _Body(httpx.AsyncByteStream):
     def __init__(self, chunks, delay=0, cleanup_delay=0):
         self.chunks = chunks
@@ -48,12 +65,14 @@ class _Body(httpx.AsyncByteStream):
         self.cleanup_delay = cleanup_delay
         self.onset = None
         self.closed = False
+        self.consumed = 0
 
     async def __aiter__(self):
         for index, chunk in enumerate(self.chunks):
             if index == 1:
                 self.onset = asyncio.get_running_loop().time()
             await asyncio.sleep(self.delay)
+            self.consumed += 1
             yield chunk
 
     async def aclose(self):
@@ -132,7 +151,6 @@ async def test_http_whitespace_abort_closes_within_two_seconds_without_a_receipt
             provider_call_observer=route.observer,
         )
     assert caught.value.raw_text == prefix + " " * 1024
-    assert caught.value.finish_reason is None
     assert len(route.requests) == 1
     assert route.requests[0]["stream"] is True
     assert body.closed
@@ -301,6 +319,95 @@ async def test_http_stream_failures_keep_their_cause_and_never_complete(
     route.observer.outcome_unknown.assert_awaited_once_with(
         route.call_id,
         "request_cancelled" if cause in {"deadline", "cancelled"} else "provider_error",
+    )
+
+
+@pytest.mark.asyncio
+async def test_litellm_reads_native_events_from_completion_stream(
+    stream_route, monkeypatch
+):
+    route = stream_route
+    request_completion = route.adapter._request_completion
+    observed = []
+
+    async def capture_stream(**kwargs):
+        response = await request_completion(**kwargs)
+        assert isinstance(response, litellm.CustomStreamWrapper)
+        native_stream = response.completion_stream
+        assert callable(native_stream.__aiter__)
+        assert callable(native_stream.__anext__)
+        observed.append(await anext(native_stream))
+        return response
+
+    monkeypatch.setattr(route.adapter, "_request_completion", capture_stream)
+    route.serve(_Body([_event("prefix"), _event("{}"), _event(None, "stop")]))
+    response = await route.adapter.get_response(
+        context=SimpleNamespace(),
+        model_kwargs={},
+        provider_call_observer=route.observer,
+    )
+    assert len(observed) == 1
+    assert observed[0].choices[0].delta.content == "prefix"
+    assert response.text == "{}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bound", ["event_count", "retained_bytes"])
+@pytest.mark.parametrize("cleanup_delay", [0, 10])
+@pytest.mark.filterwarnings("ignore::pydantic.warnings.PydanticDeprecatedSince211")
+async def test_http_suppressed_usage_hits_each_bound_during_consumption(
+    stream_route, monkeypatch, bound, cleanup_delay
+):
+    from eneo.completion_models.infrastructure import stream_collector
+
+    route = stream_route
+    monkeypatch.setattr(
+        stream_collector, "STREAM_EVENT_LIMIT", 4 if bound == "event_count" else 1000
+    )
+    monkeypatch.setattr(
+        stream_collector,
+        "STREAM_RETAINED_BYTES_LIMIT",
+        4096 if bound == "retained_bytes" else 1_000_000,
+    )
+    body = _Body(
+        [_event("{}")]
+        + [_usage_event()] * 100
+        + [_event(None, "stop"), b"data: [DONE]\n\n"],
+        cleanup_delay=cleanup_delay,
+    )
+    route.serve(body)
+    request_completion = route.adapter._request_completion
+    responses = []
+
+    async def capture_stream(**kwargs):
+        response = await request_completion(**kwargs)
+        assert isinstance(response, litellm.CustomStreamWrapper)
+        responses.append(response)
+        return response
+
+    monkeypatch.setattr(route.adapter, "_request_completion", capture_stream)
+    with pytest.raises(ProviderStreamBoundExceeded) as caught:
+        await route.adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            provider_call_observer=route.observer,
+        )
+    assert caught.value.bound == bound
+    assert caught.value.limit == (4 if bound == "event_count" else 4096)
+    assert body.consumed < len(body.chunks)
+    assert body.closed
+    assert asyncio.get_running_loop().time() - body.onset < 2.0
+    retained = responses[0].chunks
+    assert len(retained) <= stream_collector.STREAM_EVENT_LIMIT
+    assert (
+        sum(len(chunk.model_dump_json().encode()) for chunk in retained)
+        <= stream_collector.STREAM_RETAINED_BYTES_LIMIT
+    )
+    assert len(route.requests) == 1
+    route.observer.completed.assert_not_awaited()
+    route.observer.rejected.assert_not_awaited()
+    route.observer.outcome_unknown.assert_awaited_once_with(
+        route.call_id, "provider_error"
     )
 
 

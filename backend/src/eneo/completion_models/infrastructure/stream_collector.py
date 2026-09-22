@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import json
 import unittest.mock
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -39,7 +40,87 @@ class ProviderJsonWhitespaceAbort(ProviderStreamError):
     def __init__(self, raw_text: str) -> None:
         super().__init__("Provider JSON whitespace progress limit reached")
         self.raw_text = raw_text
-        self.finish_reason: None = None
+
+
+@dataclass
+class _StreamBounds:
+    events: int = 0
+    retained_bytes: int = 0
+    failure: ProviderStreamBoundExceeded | None = None
+
+    def retain(self, chunk: Any) -> None:
+        if self.events >= STREAM_EVENT_LIMIT:
+            self.failure = ProviderStreamBoundExceeded(
+                "event_count", STREAM_EVENT_LIMIT
+            )
+            raise self.failure
+        if isinstance(chunk, bytes):
+            size = len(chunk)
+        else:
+            if isinstance(chunk, str):
+                serialized = chunk
+            elif callable(getattr(chunk, "model_dump_json", None)):
+                serialized = chunk.model_dump_json()
+            else:
+                serialized = json.dumps(chunk, default=str)
+            size = len(serialized.encode("utf-8"))
+        if self.retained_bytes + size > STREAM_RETAINED_BYTES_LIMIT:
+            self.failure = ProviderStreamBoundExceeded(
+                "retained_bytes", STREAM_RETAINED_BYTES_LIMIT
+            )
+            raise self.failure
+        self.events += 1
+        self.retained_bytes += size
+
+
+class _BoundedNativeStream:
+    def __init__(self, stream: Any, bounds: _StreamBounds) -> None:
+        self._stream = stream
+        self._iterator: Any = None
+        self._bounds = bounds
+
+    def __aiter__(self) -> _BoundedNativeStream:
+        self._iterator = (
+            aiter(self._stream)
+            if callable(getattr(self._stream, "__aiter__", None))
+            else iter(self._stream)
+        )
+        return self
+
+    async def __anext__(self) -> Any:
+        if callable(getattr(self._iterator, "__anext__", None)):
+            chunk = await anext(self._iterator)
+        else:
+            exhausted = object()
+            chunk = await asyncio.to_thread(next, self._iterator, exhausted)
+            if chunk is exhausted:
+                raise StopAsyncIteration
+        self._bounds.retain(chunk)
+        return chunk
+
+    async def aclose(self) -> None:
+        close = getattr(self._stream, "aclose", None) or getattr(
+            self._stream, "close", None
+        )
+        if callable(close):
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+
+
+async def _bounded_wrapper_stream(
+    response: Any, bounds: _StreamBounds
+) -> AsyncIterator[Any]:
+    if response.completion_stream is None:
+        await response.fetch_stream()
+    native_stream = response.completion_stream
+    if callable(getattr(native_stream, "__aiter__", None)) or callable(
+        getattr(native_stream, "__next__", None)
+    ):
+        # LiteLLM retains usage-only events without yielding them to us.
+        response.completion_stream = _BoundedNativeStream(native_stream, bounds)
+    async for chunk in response:
+        yield chunk
 
 
 @dataclass
@@ -133,11 +214,17 @@ async def _collect_provider_stream(
     if not is_provider_stream(response):
         return response
     chunks: list[Any] = []
-    retained_bytes = 0
+    bounds = _StreamBounds()
+    native_bounds: _StreamBounds | None = None
+    stream: AsyncIterator[Any]
+    if isinstance(response, litellm.CustomStreamWrapper):
+        native_bounds = _StreamBounds()
+        stream = _bounded_wrapper_stream(response, native_bounds)
+    else:
+        stream = response.__aiter__()
     progress: dict[int, _JsonProgress] = {}
     content: dict[int, list[str]] = {}
     detect_whitespace = native_json_request(request)
-    stream: AsyncIterator[Any] = response.__aiter__()
     while True:
         try:
             chunk = await (
@@ -145,14 +232,12 @@ async def _collect_provider_stream(
             )
         except StopAsyncIteration:
             break
-        if len(chunks) >= STREAM_EVENT_LIMIT:
-            raise ProviderStreamBoundExceeded("event_count", STREAM_EVENT_LIMIT)
-        encoded = chunk.model_dump_json().encode("utf-8")
-        retained_bytes += len(encoded)
-        if retained_bytes > STREAM_RETAINED_BYTES_LIMIT:
-            raise ProviderStreamBoundExceeded(
-                "retained_bytes", STREAM_RETAINED_BYTES_LIMIT
-            )
+        except Exception:
+            # LiteLLM maps native iterator failures into provider exceptions.
+            if native_bounds is not None and native_bounds.failure is not None:
+                raise native_bounds.failure from None
+            raise
+        bounds.retain(chunk)
         chunks.append(chunk)
         if detect_whitespace:
             for choice in getattr(chunk, "choices", None) or ():

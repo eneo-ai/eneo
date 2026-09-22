@@ -62,6 +62,7 @@ from eneo.main.exceptions import NotFoundException
 from tests.unit.test_tenant_model_adapter_json_stream import (
     _Body,
     _event,
+    _usage_event,
 )
 from tests.unit.test_tenant_model_adapter_json_stream import (
     stream_route as _stream_route_fixture,
@@ -164,6 +165,103 @@ async def test_whitespace_abort_persists_raw_evidence_without_a_completion(
         assert receipt.num_tokens_input is None
         assert receipt.num_tokens_output is None
         assert receipt.outcome_reason == "request_cancelled"
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(ProviderTokenUsages)
+                .where(ProviderTokenUsages.source_id == receipt.id)
+            )
+            == 0
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bound", ["event_count", "retained_bytes"])
+@pytest.mark.filterwarnings("ignore::pydantic.warnings.PydanticDeprecatedSince211")
+async def test_stream_bounds_record_unknown_without_a_usage_row(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    stream_route,
+    monkeypatch,
+    bound,
+):
+    from eneo.completion_models.infrastructure import stream_collector
+
+    monkeypatch.setattr(
+        stream_collector, "STREAM_EVENT_LIMIT", 4 if bound == "event_count" else 1000
+    )
+    monkeypatch.setattr(
+        stream_collector,
+        "STREAM_RETAINED_BYTES_LIMIT",
+        4096 if bound == "retained_bytes" else 1_000_000,
+    )
+    route = stream_route
+    body = _Body([_event("{}")] + [_usage_event()] * 100 + [_event(None, "stop")])
+    route.serve(body)
+
+    async def get_response(**kwargs):
+        observer = kwargs["provider_call_observer"]
+        for name in ("started", "completed", "rejected", "outcome_unknown"):
+            getattr(route.observer, name).side_effect = getattr(observer, name)
+        completion = await route.adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            provider_call_observer=route.observer,
+        )
+        return SimpleNamespace(completion=completion, total_token_count=0)
+
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(side_effect=get_response)
+    )
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+        )
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"stream-bound-{uuid4()}",
+            retry_count=0,
+        )
+    assert result["status"] == "failed"
+    _, _, attempts, _ = await _failure_state_from_fresh_session(
+        run_id=context.run_id, tenant_id=context.tenant_id
+    )
+    assert len(attempts) == 1
+    completion_service.get_response.assert_awaited_once()
+    route.observer.completed.assert_not_awaited()
+    route.observer.rejected.assert_not_awaited()
+    route.observer.outcome_unknown.assert_awaited_once()
+    assert route.observer.outcome_unknown.await_args.args[1] == "provider_error"
+    assert len(route.requests) == 1
+    assert body.consumed < len(body.chunks)
+    assert body.closed
+    async with sessionmanager.session() as session, session.begin():
+        receipts = list(
+            await session.scalars(
+                sa.select(FlowProviderCalls).where(
+                    FlowProviderCalls.flow_step_attempt_id == attempts[0].id
+                )
+            )
+        )
+        assert len(receipts) == 1
+        receipt = receipts[0]
+        assert receipt.status == "outcome_unknown"
+        assert receipt.outcome_reason == "provider_error"
+        assert receipt.num_tokens_input is None
+        assert receipt.num_tokens_output is None
         assert (
             await session.scalar(
                 sa.select(sa.func.count())

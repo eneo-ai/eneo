@@ -1,8 +1,9 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+import litellm
 import pytest
 from litellm.types.utils import ModelResponseStream, Usage
 
@@ -14,8 +15,29 @@ from eneo.completion_models.infrastructure.stream_collector import (
     ProviderStreamIncomplete,
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
+    ProviderSilenceExpired,
     complete_with_silence_deadline,
 )
+
+
+@pytest.mark.asyncio
+async def test_lazy_native_stream_setup_keeps_the_builder_silence_deadline():
+    async def never(**kwargs):
+        await asyncio.Event().wait()
+
+    response = litellm.CustomStreamWrapper(
+        completion_stream=None,
+        model="gpt-test",
+        logging_obj=MagicMock(model_call_details={}),
+        make_call=AsyncMock(side_effect=never),
+    )
+    with pytest.raises(ProviderSilenceExpired):
+        await complete_with_silence_deadline(
+            SimpleNamespace(acompletion=AsyncMock(return_value=response)),
+            silence_deadline_seconds=0.01,
+            ceiling_seconds=0.1,
+            request={"model": "gpt-test", "messages": []},
+        )
 
 
 @pytest.mark.asyncio
@@ -97,7 +119,6 @@ async def test_incident_aborts_at_1024_under_different_chunking(sizes):
     with pytest.raises(ProviderJsonWhitespaceAbort) as caught:
         await _collect(chunks)
     assert caught.value.raw_text == prefix + padding
-    assert caught.value.finish_reason is None
     response = await _collect([_chunk(prefix + padding[:-1])])
     assert response.choices[0].message.content == prefix + padding[:-1]
 
