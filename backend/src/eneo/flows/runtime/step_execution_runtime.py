@@ -228,6 +228,8 @@ class VariableResolverProtocol(Protocol):
         step_ref_mapping: dict[str, int] | None = None,
         current_step_input: dict[str, Any] | None = None,
         resolved_file_text: Mapping[StepMaterialIdentity, str] | None = None,
+        input_config: dict[str, Any] | None = None,
+        section_index: int = 1,
     ) -> FlowVariableContext: ...
 
     def interpolate_with_evidence(
@@ -1306,6 +1308,7 @@ async def prepare_step_execution(
         step_names_by_order=state.step_names_by_order,
         step_ref_mapping=state.step_ref_mapping,
         current_step_input=step_input.runtime_input_metadata,
+        input_config=step.input_config,
         resolved_file_text={
             material.identity: material.text for material in step_input.materials
         },

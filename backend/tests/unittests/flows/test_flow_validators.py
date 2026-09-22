@@ -105,6 +105,42 @@ def test_text_processing_requires_an_authored_array_of_records(mode):
         )
 
 
+@pytest.mark.parametrize("mode", [None, "summarize", "process_each_section"])
+def test_section_index_scope_at_existing_authoring_variable_validation(mode):
+    from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+    from eneo.flows.ai_builder.ai_builder_validation_references import (
+        validate_variable_references,
+    )
+    from eneo.flows.flow_authoring_spec import (
+        AssistantSpec,
+        FlowDraftSpecCore,
+        StepSpec,
+    )
+    from eneo.flows.flow_variable_definitions import flow_variable_definition_manifest
+
+    step = StepSpec(
+        plan_step_ref="step_a",
+        name="Extract",
+        assistant_spec=AssistantSpec(instructions="S{{ section_index }}-"),
+        input_source="flow_input",
+        input_config={"text_processing": {"mode": mode}} if mode else None,
+    )
+    result = SpecValidationResult()
+    validate_variable_references(
+        FlowDraftSpecCore(flow_name="Sections", steps=[step]), result
+    )
+    variables = flow_variable_definition_manifest(step.input_config)[
+        "reservedRuntimeVariables"
+    ]
+    assert ("section_index" in variables) == (mode == "process_each_section")
+
+    if mode == "process_each_section":
+        assert result.valid
+    else:
+        assert [error.code for error in result.errors] == ["unknown_variable_reference"]
+        assert "'section_index'" in result.errors[0].message
+
+
 def _form_metadata(*field_names: str) -> dict:
     return {
         "form_schema": {

@@ -1580,6 +1580,7 @@ async def _resolve_step_materials(
         step_names_by_order=state.step_names_by_order if state else None,
         step_ref_mapping=state.step_ref_mapping if state else None,
         resolved_file_text=empty_material,
+        input_config=step.input_config,
         current_step_input=(
             step_input_override.runtime_input_metadata
             if step_input_override is not None

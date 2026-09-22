@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from hashlib import sha256
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -10,7 +11,10 @@ import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
-from eneo.completion_models.domain.model_capacity import ModelCapacity
+from eneo.completion_models.domain.model_capacity import (
+    ModelCapacity,
+    ModelCapacityNoFit,
+)
 from eneo.flows.domain.flow import FlowRunStatus
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.runtime import RunExecutionState
@@ -38,6 +42,25 @@ from tests.unittests.flows.test_typed_io_executor import (
     _run,
     _runtime_step,
 )
+
+
+def _section_preflight(token_count, **kwargs):
+    preview = _context_preflight(token_count)
+    question = {"role": "user", "content": kwargs["question"]}
+    package = replace(
+        preview.preferred,
+        messages=[{"role": "system", "content": kwargs["prompt_override"]}, question],
+    )
+    fallback_prompt = kwargs.get("capability_fallback_prompt")
+    fallback = (
+        replace(
+            package,
+            messages=[{"role": "system", "content": fallback_prompt}, dict(question)],
+        )
+        if fallback_prompt is not None
+        else None
+    )
+    return replace(preview, preferred=package, fallback=fallback)
 
 
 def _case(
@@ -75,13 +98,17 @@ def _case(
             + len(kwargs["prompt_override"].encode())
             + 37
         )
-        preview = _context_preflight(measured)
+        preview = _section_preflight(measured, **kwargs)
         package = replace(preview.preferred, output_cap_tokens=1300 - measured)
         return replace(
             preview,
             capacity=ModelCapacity(1300, 1300),
             preferred=package,
-            fallback=package,
+            fallback=(
+                replace(preview.fallback, output_cap_tokens=1300 - measured)
+                if preview.fallback is not None
+                else None
+            ),
             refusal=None if package.fits else "current_request_input_does_not_fit",
         )
 
@@ -193,6 +220,350 @@ async def test_longer_prompt_reduces_section_size(user):
         await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
         sizes.append(max(len(question.encode()) for question in questions))
     assert sizes[1] < sizes[0]
+
+
+@pytest.mark.parametrize(
+    "window,declared,fixed,caller_cap,fallback_fixed,mode,expected_calls",
+    [
+        (4096, 600, 100, None, None, "process_each_section", 3),
+        (4096, 2048, 2400, None, None, "process_each_section", 3),
+        (4096, 2048, 100, 300, None, "process_each_section", 6),
+        (4096, 2048, 100, None, 3000, "process_each_section", 4),
+        (4096, 2048, 100, None, 3800, "process_each_section", 45),
+        (4096, 2048, 3000, None, 100, "process_each_section", None),
+        (8192, 2048, 100, None, None, "process_each_section", 1),
+        (4096, 600, 100, None, None, "summarize", 1),
+    ],
+)
+async def test_sections_bound_material_by_resolved_output_cap(
+    user, window, declared, fixed, caller_cap, fallback_fixed, mode, expected_calls
+):
+    executor, _, assistant, run, state, step, text, _, questions, _ = _case(
+        user, text="x" * 1800
+    )
+
+    step = replace(step, input_config={"text_processing": {"mode": mode}})
+
+    async def preflight(**kwargs):
+        measured = fixed + len(kwargs["question"])
+        preview = _section_preflight(measured, **kwargs)
+        capacity = ModelCapacity(window, declared)
+        cap = capacity.resolve_output_cap(
+            input_tokens=measured, safety_tokens=0, caller_cap=caller_cap
+        )
+        package = replace(
+            preview.preferred,
+            output_cap_tokens=None if isinstance(cap, ModelCapacityNoFit) else cap,
+        )
+        fallback = None
+        if fallback_fixed is not None:
+            assert kwargs["capability_fallback_prompt"] is not None
+            fallback_tokens = fallback_fixed + len(kwargs["question"])
+            fallback_cap = capacity.resolve_output_cap(
+                input_tokens=fallback_tokens, safety_tokens=0, caller_cap=caller_cap
+            )
+            fallback = replace(
+                preview.fallback,
+                input_reserve=replace(package.input_reserve, tokens=fallback_tokens),
+                output_cap_tokens=(
+                    None
+                    if isinstance(fallback_cap, ModelCapacityNoFit)
+                    else fallback_cap
+                ),
+            )
+        return replace(
+            preview,
+            capacity=capacity,
+            preferred=package,
+            fallback=fallback,
+            refusal=(
+                None
+                if package.fits or (fallback is not None and fallback.fits)
+                else "current_request_input_does_not_fit"
+            ),
+        )
+
+    assistant.preflight_response_context.side_effect = preflight
+    base = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+    prepared = await prepare_text_sections(
+        step=step, run=run, state=state, base=base, policy=FlowMappedExecutionPolicy()
+    )
+
+    if expected_calls is not None:
+        assert len(prepared.calls) == expected_calls
+    questions = [call.prepared.step_input.text for call in prepared.calls]
+    manifest = prepared.manifest
+    assert manifest.resplit(text) == tuple(questions)
+    assert "".join(questions) == text
+    for call in prepared.calls:
+        completion = call.prepared.completion_call
+        packages = completion.preflight.packages
+        for package, overhead in zip(packages, [fixed, fallback_fixed]):
+            if (
+                package is not completion.selected_package
+                and package is not completion.preflight.fallback
+            ):
+                continue
+            assert package.fits
+            if mode == "process_each_section":
+                assert (
+                    package.input_reserve.tokens - overhead <= package.output_cap_tokens
+                )
+    assistant.get_response.assert_not_awaited()
+
+
+async def test_section_sizing_pairs_package_baselines_instead_of_aggregate_maxima(user):
+    executor, _, assistant, run, state, step, text, _, _, _ = _case(
+        user, text="x" * 600
+    )
+    previews = []
+
+    async def preflight(**kwargs):
+        material = len(kwargs["question"])
+        preview = _section_preflight(1000 + material // 2, **kwargs)
+        assert preview.fallback is not None
+        preferred = replace(preview.preferred, output_cap_tokens=300)
+        fallback = replace(
+            preview.fallback,
+            input_reserve=replace(
+                preview.fallback.input_reserve, tokens=100 + material
+            ),
+            output_cap_tokens=300,
+        )
+        preview = replace(preview, preferred=preferred, fallback=fallback)
+        previews.append((material, preview))
+        return preview
+
+    assistant.preflight_response_context.side_effect = preflight
+    base = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+    prepared = await prepare_text_sections(
+        step=step, run=run, state=state, base=base, policy=FlowMappedExecutionPolicy()
+    )
+    empty = next(p for material, p in previews if material == 0)
+    whole = next(p for material, p in previews if material == 600)
+    assert (
+        whole.admission_input_reserve_tokens - empty.admission_input_reserve_tokens
+        == 300
+    )
+    assert (
+        whole.fallback.input_reserve.tokens - empty.fallback.input_reserve.tokens == 600
+    )
+    assert len(prepared.calls) == 2
+    assert "".join(prepared.manifest.resplit(text)) == text
+    for call in prepared.calls:
+        for package, baseline in zip(
+            call.prepared.completion_call.preflight.packages,
+            empty.packages,
+            strict=True,
+        ):
+            assert (
+                package.input_reserve.tokens - baseline.input_reserve.tokens
+                <= package.output_cap_tokens
+            )
+
+
+@pytest.mark.parametrize(
+    "declared,tokens_per_character,expected_code",
+    [
+        (None, 1, FlowApiErrorCode.MODEL_CAPACITY_UNDECLARED),
+        (300, 301, FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW),
+    ],
+)
+async def test_section_capacity_refuses_before_provider_calls(
+    user, declared, tokens_per_character, expected_code
+):
+    executor, _, assistant, run, state, step, _, _, _, _ = _case(user, text="x" * 8)
+
+    async def preflight(**kwargs):
+        measured = 100 + tokens_per_character * len(kwargs["question"])
+        capacity = ModelCapacity(4096, declared)
+        cap = capacity.resolve_output_cap(input_tokens=measured, safety_tokens=0)
+        preview = _section_preflight(measured, **kwargs)
+        package = replace(preview.preferred, output_cap_tokens=cap)
+        return replace(preview, capacity=capacity, preferred=package, fallback=None)
+
+    assistant.preflight_response_context.side_effect = preflight
+    with pytest.raises(TypedIOValidationException) as caught:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert caught.value.code == expected_code.value
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.parametrize("section_count", [3, 10])
+async def test_section_ordinals_are_rendered_before_each_measurement(
+    user, section_count
+):
+    executor, _, assistant, run, state, step, text, _, _, _ = _case(
+        user, prompt="S{{ section_index }}-", text="x" * (300 * section_count)
+    )
+    measured = []
+
+    async def preflight(**kwargs):
+        prompt = kwargs["prompt_override"]
+        preview = _section_preflight(len(prompt) + len(kwargs["question"]), **kwargs)
+        package = replace(preview.preferred, output_cap_tokens=300)
+        measured.append((prompt, kwargs["question"], package))
+        return replace(
+            preview,
+            capacity=ModelCapacity(100_000, 300),
+            preferred=package,
+            fallback=None,
+        )
+
+    assistant.preflight_response_context.side_effect = preflight
+    base = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+    assert base.prepared.effective_prompt.startswith("S1-")
+    prepared = await prepare_text_sections(
+        step=step, run=run, state=state, base=base, policy=FlowMappedExecutionPolicy()
+    )
+
+    assert len(prepared.calls) == section_count
+    assert "".join(prepared.manifest.resplit(text)) == text
+    for index, call in enumerate(prepared.calls, start=1):
+        completion = call.prepared.completion_call
+        assert completion.effective_prompt.startswith(f"S{index}-")
+        assert any(
+            prompt == completion.effective_prompt
+            and question == call.prepared.step_input.text
+            and package is completion.selected_package
+            for prompt, question, package in measured
+        )
+        assert any(
+            prompt == completion.effective_prompt and question == ""
+            for prompt, question, _ in measured
+        )
+        assert len(call.prepared.step_input.text) == 300
+        edges = [
+            edge
+            for edge in call.prepared.resolved_input_edges
+            if edge.binding_ref == "assistant_prompt:section_index"
+        ]
+        assert len(edges) == 1
+        assert edges[0].source.name == "section_index"
+        assert edges[0].selection.sha256 == sha256(str(index).encode()).hexdigest()
+    if section_count == 10:
+        ninth = prepared.calls[8].prepared.completion_call.selected_package
+        tenth = prepared.calls[9].prepared.completion_call.selected_package
+        assert tenth.input_reserve.tokens == ninth.input_reserve.tokens + 1
+
+
+@pytest.mark.parametrize("mode", [None, "summarize"])
+async def test_section_ordinal_is_unavailable_during_other_step_preparation(user, mode):
+    executor, repo, assistant, run, state, step, _, _, _, _ = _case(
+        user, text="A short material.", prompt="S{{ section_index }}-"
+    )
+    step = replace(
+        step, input_config={"text_processing": {"mode": mode}} if mode else None
+    )
+    with pytest.raises(
+        TypedIOValidationException, match="Unknown variable reference: 'section_index'"
+    ) as caught:
+        await executor._preview_assistant_step(
+            step=step, run=run, state=state, version_metadata=None, attempt_no=1
+        )
+    assert (
+        caught.value.code == FlowApiErrorCode.TYPED_IO_VARIABLE_RESOLUTION_FAILED.value
+    )
+    repo.activate_step_attempt.assert_not_awaited()
+    assistant.preflight_response_context.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "text,expected_end",
+    [
+        ("a" * 180 + "\n" + "b" * 90 + " " + "c" * 400, 181),
+        ("a" * 149 + "\n" + "b" * 120 + " " + "c" * 400, 271),
+        ("a" * 150 + "\n" + "b" * 120 + " " + "c" * 400, 151),
+        ("a" * 179 + "\r\n" + "b" * 90 + " " + "c" * 400, 181),
+        ("a" * 270 + " " + "b" * 29_729, 271),
+        ("猫e\u0301" * 60 + "\n" + "🙂" * 90 + " " + "Å" * 400, 181),
+        ("a" * 600, 300),
+    ],
+    ids=[
+        "late-newline",
+        "early-newline",
+        "half-window",
+        "crlf",
+        "long-line",
+        "unicode",
+        "raw-cut",
+    ],
+)
+async def test_section_boundaries_prefer_late_newlines_and_remeasure(
+    user, text, expected_end
+):
+    executor, _, assistant, run, state, step, _, _, _, _ = _case(user, text=text)
+
+    async def preflight(**kwargs):
+        preview = _section_preflight(100 + len(kwargs["question"]), **kwargs)
+        package = replace(preview.preferred, output_cap_tokens=300)
+        return replace(
+            preview,
+            capacity=ModelCapacity(100_000, 300),
+            preferred=package,
+            fallback=None,
+        )
+
+    assistant.preflight_response_context.side_effect = preflight
+    base = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+    prepared = await prepare_text_sections(
+        step=step, run=run, state=state, base=base, policy=FlowMappedExecutionPolicy()
+    )
+
+    assert prepared.manifest.sections[0].core.end_char == expected_end
+    sections = prepared.manifest.resplit(text)
+    assert "".join(sections).encode() == text.encode()
+    assert sections == tuple(
+        call.prepared.step_input.source_text for call in prepared.calls
+    )
+    measured = [
+        args.kwargs["question"]
+        for args in assistant.preflight_response_context.await_args_list
+    ]
+    assert text[:expected_end] in measured
+    if expected_end < 300:
+        assert measured.index(text[:300]) < len(measured) - 1 - measured[::-1].index(
+            text[:expected_end]
+        )
+
+
+async def test_section_boundary_keeps_measured_cut_when_shorter_prefix_costs_more(user):
+    text = "a" * 180 + "\n" + "b" * 90 + " " + "c" * 400
+    executor, _, assistant, run, state, step, _, _, _, _ = _case(user, text=text)
+    measured = []
+
+    async def preflight(**kwargs):
+        question = kwargs["question"]
+        material_tokens = 450 if question == text[:181] else len(question)
+        preview = _section_preflight(100 + material_tokens, **kwargs)
+        package = replace(preview.preferred, output_cap_tokens=300)
+        measured.append(question)
+        return replace(preview, preferred=package, fallback=None)
+
+    assistant.preflight_response_context.side_effect = preflight
+    base = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+    prepared = await prepare_text_sections(
+        step=step, run=run, state=state, base=base, policy=FlowMappedExecutionPolicy()
+    )
+    assert text[:181] in measured
+    assert prepared.manifest.sections[0].core.end_char == 300
+    assert "".join(prepared.manifest.resplit(text)) == text
+    assert (
+        prepared.calls[0].prepared.completion_call.selected_package.input_reserve.tokens
+        == 400
+    )
 
 
 @pytest.mark.parametrize("inline", [False, True])
@@ -517,6 +888,132 @@ async def test_sections_use_complete_single_file_text_without_source_wrappers(us
         assert call.kwargs["prompt_override"].split("\nDone.")[0] == "Read " + section
 
 
+async def test_sections_refuse_metadata_only_request_before_activation(user):
+    executor, repo, assistant, run, state, step, _, file, _, _ = _case(
+        user, text="Sentence for coverage.\n" * 20
+    )
+    state.prior_results.clear()
+    state.completed_by_order.clear()
+    step = replace(
+        step,
+        step_order=1,
+        input_source="flow_input",
+        input_bindings={"question": "{{step_input.input_format}}"},
+        input_config={
+            **step.input_config,
+            "runtime_input": {"enabled": True, "input_format": "document"},
+        },
+    )
+    executor._list_step_input_file_ids = AsyncMock(return_value=[file.id])
+    executor.flow_run_repo.list_retained_input_file_ids.return_value = []
+    executor.file_service.get_files_by_ids.return_value = [file]
+    preflight = assistant.preflight_response_context.side_effect
+
+    async def without_material(**kwargs):
+        preview = await preflight(**kwargs)
+        package = replace(
+            preview.preferred,
+            messages=[{"role": "user", "content": kwargs["question"]}],
+        )
+        return replace(preview, preferred=package, fallback=package)
+
+    assistant.preflight_response_context.side_effect = without_material
+    with pytest.raises(TypedIOValidationException) as caught:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert caught.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    repo.activate_step_attempt.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.parametrize("inline", [False, True])
+@pytest.mark.parametrize("placement", ["default", "question", "prompt"])
+@pytest.mark.parametrize("content_blocks", [False, True])
+async def test_sections_cover_material_in_prepared_primary_and_fallback_messages(
+    user, inline, placement, content_blocks
+):
+    executor, _, assistant, run, state, step, text, _, _, _ = _case(
+        user,
+        text="Å coverage e\u0301.\n" * 90,
+        inline=inline,
+        prompt="{{step_1.output.text}}"
+        if placement == "prompt"
+        else "Extract a record.",
+    )
+    if placement == "question":
+        step = replace(step, input_bindings={"question": "{{step_1.output.text}}"})
+    elif placement == "prompt":
+        step = replace(step, input_source="flow_input")
+        run = run.model_copy(
+            update={"input_payload_json": {"text": "Extract records."}}
+        )
+    previews = []
+    preflight = assistant.preflight_response_context.side_effect
+
+    async def packaged(**kwargs):
+        preview = await preflight(**kwargs)
+        if content_blocks:
+            for package in preview.packages:
+                for message in package.messages:
+                    message["content"] = [{"type": "text", "text": message["content"]}]
+        previews.append(preview)
+        return preview
+
+    assistant.preflight_response_context.side_effect = packaged
+    result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    manifest = SectionManifest.model_validate(
+        result.output.output_payload_extensions["section_manifest"]
+    )
+    sections = manifest.resplit(text)
+    assert "".join(sections).encode() == text.encode()
+    for core, dispatched in zip(
+        sections, assistant.get_response.await_args_list, strict=True
+    ):
+        selected = dispatched.kwargs["prepared_request"]
+        preview = next(
+            p for p in previews if selected is p.preferred or selected is p.fallback
+        )
+        assert preview.fallback is not None
+        for package in preview.packages:
+            contents = [
+                message["content"][0]["text"] if content_blocks else message["content"]
+                for message in package.messages
+            ]
+            assert any(core in content for content in contents)
+
+
+@pytest.mark.parametrize("variant", ["primary", "fallback"])
+async def test_sections_refuse_missing_message_text_even_with_schema_and_tool_decoys(
+    user, variant
+):
+    executor, repo, assistant, run, state, step, text, _, _, _ = _case(
+        user, text="The complete section must reach the model."
+    )
+    preflight = assistant.preflight_response_context.side_effect
+
+    async def omitted(**kwargs):
+        preview = await preflight(**kwargs)
+        assert preview.fallback is not None
+        missing = replace(
+            preview.preferred if variant == "primary" else preview.fallback,
+            messages=[
+                {"role": "user", "content": [{"type": "image_url", "text": text}]}
+            ],
+            response_format={"type": "json_schema", "description": text},
+            tools=[{"type": "function", "function": {"description": text}}],
+        )
+        return replace(
+            preview, **{"preferred" if variant == "primary" else "fallback": missing}
+        )
+
+    assistant.preflight_response_context.side_effect = omitted
+    with pytest.raises(TypedIOValidationException) as caught:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    assert caught.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    repo.activate_step_attempt.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
 async def test_sections_stop_on_the_shared_step_deadline(user, monkeypatch):
     from eneo.flows.runtime import step_deadline
 
@@ -621,13 +1118,17 @@ async def test_section_builder_round_trip(case):
         measured = overhead + len(kwargs["question"].encode())
         reserve = kwargs["useful_output_reserve_tokens"]
         capacity = overhead + reserve + budget
-        preview = _context_preflight(measured)
+        preview = _section_preflight(measured, **kwargs)
         package = replace(preview.preferred, output_cap_tokens=capacity - measured)
         return replace(
             preview,
             capacity=ModelCapacity(capacity, capacity),
             preferred=package,
-            fallback=package,
+            fallback=(
+                replace(preview.fallback, output_cap_tokens=capacity - measured)
+                if preview.fallback is not None
+                else None
+            ),
             refusal=None if package.fits else "current_request_input_does_not_fit",
         )
 

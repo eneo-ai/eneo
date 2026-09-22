@@ -34,7 +34,10 @@ from eneo.flows.flow_run_provenance import (
     build_resolved_input_edge,
     merge_resolved_input_edges,
 )
-from eneo.flows.flow_variable_definitions import can_expose_form_field_bare_alias
+from eneo.flows.flow_variable_definitions import (
+    can_expose_form_field_bare_alias,
+    runtime_variables_for_step,
+)
 from eneo.main.exceptions import TypedIOValidationException
 
 _TEMPLATE_VAR_PATTERN = re.compile(r"\{\{\s*([^{}]+)\s*\}\}")
@@ -148,6 +151,8 @@ class FlowVariableResolver:
         step_ref_mapping: dict[str, int] | None = None,
         current_step_input: dict[str, Any] | None = None,
         resolved_file_text: Mapping[StepMaterialIdentity, str] | None = None,
+        input_config: dict[str, Any] | None = None,
+        section_index: int = 1,
     ) -> FlowVariableContext:
         normalized_flow_input = dict(flow_input or {})
         transcript_source = self._extract_transcript_source(
@@ -170,6 +175,14 @@ class FlowVariableResolver:
             ("datum",),
             _VariableSourceDescriptor(kind="system_value", system_name="datum"),
         )
+        if "section_index" in runtime_variables_for_step(input_config):
+            context["section_index"] = section_index
+            context.register_source(
+                ("section_index",),
+                _VariableSourceDescriptor(
+                    kind="system_value", system_name="section_index"
+                ),
+            )
 
         # Friendly input field aliases (for example {{Namn på brukare}})
         for key, value in normalized_flow_input.items():

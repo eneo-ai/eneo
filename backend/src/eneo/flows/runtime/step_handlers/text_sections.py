@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from hashlib import sha256
+from typing import Any, cast
 
+from eneo.completion_models.domain.request_preflight import CompletionRequestPackage
 from eneo.flows.domain.flow import FlowRun, FlowStepResultStatus
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
@@ -10,12 +12,20 @@ from eneo.flows.domain.step_output import (
     FileBackedStepText,
     build_step_material_aliases,
 )
-from eneo.flows.domain.text_processing import SectionManifest, SectionRange, TextSection
+from eneo.flows.domain.text_processing import (
+    SectionManifest,
+    SectionRange,
+    TextProcessingMode,
+    TextSection,
+    text_processing_config,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_provenance import merge_resolved_input_edges
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
 from eneo.flows.runtime.step_deadline import require_step_budget
 from eneo.flows.runtime.step_execution_runtime import (
+    PreparedCompletionCall,
     build_prepared_completion_call,
     preview_step_execution_context,
 )
@@ -35,6 +45,37 @@ class PreparedTextSections:
     calls: tuple[PreparedAssistantStep, ...]
 
 
+def _dispatchable_packages(
+    completion: PreparedCompletionCall,
+) -> tuple[CompletionRequestPackage, ...]:
+    assert completion.preflight is not None
+    return tuple(
+        package
+        for package in completion.preflight.packages
+        if package is completion.selected_package
+        or (
+            package is completion.preflight.fallback
+            and completion.capability_fallback_model_kwargs is not None
+        )
+    )
+
+
+def _message_text(message: dict[str, Any]) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for raw_part in cast(list[object], content):
+            if isinstance(raw_part, dict):
+                part = cast(dict[str, object], raw_part)
+                text = part.get("text")
+                if part.get("type") == "text" and isinstance(text, str):
+                    text_parts.append(text)
+        return "".join(text_parts)
+    return ""
+
+
 async def prepare_text_processing_call(
     *,
     step: RuntimeStep,
@@ -42,6 +83,7 @@ async def prepare_text_processing_call(
     state: RunExecutionState,
     base: PreparedAssistantStep,
     section_text: str,
+    section_index: int = 1,
 ) -> tuple[PreparedAssistantStep, int]:
     step_input = base.prepared.step_input
     material = step_input.materials[0] if step_input.materials else None
@@ -69,6 +111,8 @@ async def prepare_text_processing_call(
         step_names_by_order=state.step_names_by_order,
         step_ref_mapping=state.step_ref_mapping,
         current_step_input=runtime_metadata,
+        input_config=step.input_config,
+        section_index=section_index,
         resolved_file_text=(
             {material.identity: section_text} if material is not None else {}
         ),
@@ -120,6 +164,14 @@ async def prepare_text_processing_call(
     prepared = replace(
         base.prepared,
         effective_prompt=prompt,
+        resolved_input_edges=merge_resolved_input_edges(
+            tuple(
+                edge
+                for edge in base.prepared.resolved_input_edges
+                if not edge.binding_ref.startswith("assistant_prompt:")
+            ),
+            interpolation.edges,
+        ),
         step_input=replace(
             base.prepared.step_input,
             text=question,
@@ -187,11 +239,49 @@ async def prepare_text_sections(
     completion = base.prepared.completion_call
     if completion is None:
         raise RuntimeError("Section processing requires a packaged completion call.")
+    processing = text_processing_config(step.input_config)
+    bound_output = (
+        processing is not None
+        and processing.mode == TextProcessingMode.PROCESS_EACH_SECTION
+    )
+    empty_completion: PreparedCompletionCall | None = None
+    section_index = 1
 
     async def measure(start: int, end: int) -> tuple[PreparedAssistantStep, int]:
-        return await prepare_text_processing_call(
-            step=step, run=run, state=state, base=base, section_text=text[start:end]
+        call, estimate = await prepare_text_processing_call(
+            step=step,
+            run=run,
+            state=state,
+            base=base,
+            section_text=text[start:end],
+            section_index=section_index,
         )
+        if bound_output and empty_completion is not None:
+            candidate = call.prepared.completion_call
+            assert candidate is not None and candidate.preflight is not None
+            assert empty_completion.preflight is not None
+            for package in _dispatchable_packages(candidate):
+                empty_package = (
+                    empty_completion.preflight.preferred
+                    if package is candidate.preflight.preferred
+                    else empty_completion.preflight.fallback
+                )
+                assert empty_package is not None
+                # Conservative sizing leaves room for output proportional to material;
+                # framing, reasoning and provider tokenization can still exceed it.
+                material_tokens = (
+                    package.input_reserve.tokens - empty_package.input_reserve.tokens
+                )
+                if (
+                    not package.fits
+                    or package.output_cap_tokens is None
+                    or material_tokens > package.output_cap_tokens
+                ):
+                    raise TypedIOValidationException(
+                        "Section material exceeds the request's available output capacity.",
+                        code=FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW.value,
+                    )
+        return call, estimate
 
     # Prove that the prompt, schema and output reserve fit before splitting text.
     empty_call, _ = await measure(0, 0)
@@ -212,8 +302,15 @@ async def prepare_text_sections(
     start = 0
     previous_size = max(1, section_budget)
     while start < len(text):
+        section_index = len(sections) + 1
+        if bound_output and sections:
+            empty_completion = None
+            empty_call, _ = await measure(0, 0)
+            empty_completion = empty_call.prepared.completion_call
         low = start
         high = min(len(text), start + previous_size)
+        # Token counts and package selection can change non-monotonically;
+        # only measured fitting candidates may be retained.
         best: tuple[PreparedAssistantStep, int] | None = None
         while True:
             try:
@@ -248,13 +345,18 @@ async def prepare_text_sections(
             raise RuntimeError("Section preflight did not produce a fitting package.")
         end = low
         if end < len(text):
-            whitespace_end = next(
-                (
-                    index + 1
-                    for index in range(end - 1, start - 1, -1)
-                    if text[index].isspace()
-                ),
-                end,
+            newline_index = text.rfind("\n", start + (end - start) // 2, end)
+            whitespace_end = (
+                newline_index + 1
+                if newline_index >= 0
+                else next(
+                    (
+                        index + 1
+                        for index in range(end - 1, start - 1, -1)
+                        if text[index].isspace()
+                    ),
+                    end,
+                )
             )
             if whitespace_end != end:
                 try:
@@ -268,6 +370,17 @@ async def prepare_text_sections(
                 else:
                     end, best = whitespace_end, candidate
         call, estimate = best
+        prepared_completion = call.prepared.completion_call
+        assert prepared_completion is not None
+        core_text = text[start:end]
+        for package in _dispatchable_packages(prepared_completion):
+            if not any(
+                core_text in _message_text(message) for message in package.messages
+            ):
+                raise TypedIOValidationException(
+                    "Section processing requires the complete section text in every dispatched request.",
+                    code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+                )
         calls.append(call)
         estimates.append(estimate)
         sections.append(

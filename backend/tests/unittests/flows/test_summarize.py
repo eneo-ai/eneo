@@ -360,13 +360,14 @@ async def test_fold_inputs_commit_before_provider_dispatch(
 async def test_fold_cannot_spend_the_section_stage_budget_twice(user):
     executor, _, _, run, state, step, section_questions, _ = _fold_case(user)
     await executor._execute_step(
-        step=replace(
-            step, input_config={"text_processing": {"mode": "process_each_section"}}
-        ),
+        step=step,
         run=run,
         state=state,
         attempt_no=1,
     )
+    section_questions = [
+        q for q in section_questions if not q.startswith('{"records":')
+    ]
     executor, _, _, run, state, step, questions, _ = _fold_case(user)
     executor.mapped_execution_policy = FlowMappedExecutionPolicy(
         max_provider_calls_per_mapped_step=len(section_questions) + 1

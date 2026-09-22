@@ -14,7 +14,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.flow_variable_definitions import RESERVED_RUNTIME_VARIABLES
+from eneo.flows.flow_variable_definitions import runtime_variables_for_step
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     TemplateReferenceKind,
@@ -30,24 +30,18 @@ def validate_variable_references(
     steps_by_plan_ref = {
         step.plan_step_ref: (index + 1, step) for index, step in enumerate(spec.steps)
     }
-    allowed_roots = {
-        *RESERVED_RUNTIME_VARIABLES,
-        *(
-            field.name.strip()
-            for field in (spec.form_fields or [])
-            if field.name.strip()
-        ),
-    }
     form_field_names = {
         field.name.strip() for field in (spec.form_fields or []) if field.name.strip()
     }
 
     for index, step in enumerate(spec.steps, start=1):
+        runtime_variables = runtime_variables_for_step(step.input_config)
+        allowed_roots = {*runtime_variables, *form_field_names}
         for expression in iter_step_template_expressions(step):
             reference = _parse_reference_expression(
                 expression,
                 steps_by_plan_ref,
-                allowed_roots=allowed_roots,
+                runtime_variables=runtime_variables,
                 form_field_names=form_field_names,
             )
             if reference.kind is TemplateReferenceKind.UNKNOWN:
@@ -209,13 +203,14 @@ def _parse_reference_expression(
     expression: str,
     steps_by_plan_ref: dict[str, tuple[int, StepSpec]],
     *,
-    allowed_roots: set[str],
+    runtime_variables: frozenset[str],
     form_field_names: set[str],
 ) -> TemplateReference:
     return analyze_template(
         f"{{{{ {expression} }}}}",
         step_refs={root: order for root, (order, _) in steps_by_plan_ref.items()},
         form_field_names=form_field_names,
+        runtime_variables=runtime_variables,
     )[0]
 
 

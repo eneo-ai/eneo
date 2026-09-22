@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import TypedDict
+from typing import Any, TypedDict
 
+from eneo.flows.domain.text_processing import TextProcessingMode, text_processing_config
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS,
@@ -90,11 +91,27 @@ STEP_INPUT_KEY_SHAPES: dict[str, VariableShape] = {
     "input_format": VariableShape.SCALAR,
 }
 
+SECTION_VARIABLE_SHAPES: dict[str, VariableShape] = {
+    "section_index": VariableShape.SCALAR,
+}
+
+
+def runtime_variables_for_step(
+    input_config: dict[str, Any] | None = None,
+) -> frozenset[str]:
+    processing = text_processing_config(input_config)
+    if (
+        processing is not None
+        and processing.mode == TextProcessingMode.PROCESS_EACH_SECTION
+    ):
+        return RESERVED_RUNTIME_VARIABLES | frozenset(SECTION_VARIABLE_SHAPES)
+    return RESERVED_RUNTIME_VARIABLES
+
 
 def runtime_variable_shape(root: str) -> VariableShape | None:
     if root == "step_input":
         return VariableShape.MAPPING
-    return RUNTIME_VARIABLE_SHAPES.get(root)
+    return RUNTIME_VARIABLE_SHAPES.get(root) or SECTION_VARIABLE_SHAPES.get(root)
 
 
 def step_input_key_shape(key: str) -> VariableShape | None:
@@ -157,9 +174,11 @@ def template_placeholder_form_field_name(placeholder: str) -> str | None:
     return candidate if can_expose_form_field_bare_alias(candidate) else None
 
 
-def flow_variable_definition_manifest() -> FlowVariableDefinitionManifest:
+def flow_variable_definition_manifest(
+    input_config: dict[str, Any] | None = None,
+) -> FlowVariableDefinitionManifest:
     return {
-        "reservedRuntimeVariables": sorted(RESERVED_RUNTIME_VARIABLES),
+        "reservedRuntimeVariables": sorted(runtime_variables_for_step(input_config)),
         "formFieldNamespaceHeads": sorted(FORM_FIELD_NAMESPACE_HEADS),
         "primaryFlowInputKeys": sorted(PRIMARY_FLOW_INPUT_KEYS),
         "reservedFormFieldInputKeys": sorted(RESERVED_FORM_FIELD_INPUT_KEYS),

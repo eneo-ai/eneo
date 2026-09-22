@@ -236,12 +236,31 @@ materials in one step is planned for a later release. Sections cover the materia
 complete text, preserving whitespace and Unicode characters. Each reference to the
 material in the prompt or input template receives the current section, including
 when the material is referenced only in the prompt.
+The complete section must appear in the message content of every request that can
+be dispatched, including a capability fallback. A binding that includes only
+metadata is refused before any section runs.
+Line boundaries are preferred when practical; long lines may still split.
 
 Section sizes depend on the measured model request, including the rendered prompt,
-schema and output reserve, starting from the empty-section package. Calls run
+schema and output reserve, starting from the empty-section package. Conservative
+sizing bounds sections by both the model window and the request's resolved output
+allowance, which cannot exceed the model's declared maximum output. The allowance
+also accounts for the fixed prompt, any caller cap, and possible fallback requests.
+This leaves room for output proportional to the section's material; JSON framing,
+annotations, translation, reasoning and tokenizer differences can still make an
+answer exceed the cap. A response stopped by the output limit fails the step.
+The bounded search can choose smaller sections when token counts or the selected
+request package change; each accepted section has a measured fit.
+
+In section prompts, `{{ section_index }}` is the section's 1-based ordinal. For
+example, `S{{ section_index }}-F1` gives each section a distinct fact-ID prefix.
+This variable is unavailable in ordinary steps and summarization.
+
+Calls run
 sequentially under the step's shared deadline, without passing earlier section
 responses into later calls. The existing mapped-call policy and structured-output
-size limit still apply. A failed section fails the step, with completed and total
+size limit still apply; additional sections spend call, token and deadline budgets.
+A failed section fails the step, with completed and total
 section counts in the error details.
 
 The run contract lists these steps in `text_processing_steps`, including their

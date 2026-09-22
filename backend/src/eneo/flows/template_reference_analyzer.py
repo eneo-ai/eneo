@@ -51,6 +51,7 @@ def analyze_template(
     *,
     step_refs: dict[str, int],
     form_field_names: set[str],
+    runtime_variables: frozenset[str] = RESERVED_RUNTIME_VARIABLES,
 ) -> list[TemplateReference]:
     references: list[TemplateReference] = []
     for expression in iter_template_expressions(template):
@@ -59,6 +60,7 @@ def analyze_template(
                 expression=expression,
                 step_refs=step_refs,
                 form_field_names=form_field_names,
+                runtime_variables=runtime_variables,
             )
         )
     return references
@@ -110,6 +112,7 @@ def _analyze_expression(
     expression: str,
     step_refs: dict[str, int],
     form_field_names: set[str],
+    runtime_variables: frozenset[str],
 ) -> TemplateReference:
     if "." in expression:
         raw_head, raw_tail = expression.split(".", maxsplit=1)
@@ -126,7 +129,7 @@ def _analyze_expression(
             step_ref=head,
             step_order=step_refs[head],
         )
-    if head in RESERVED_RUNTIME_VARIABLES:
+    if head in runtime_variables:
         return _build_runtime_reference(
             expression=expression,
             head=head,
