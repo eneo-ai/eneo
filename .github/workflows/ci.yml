@@ -185,7 +185,6 @@ jobs:
     name: Backend tests (${{ matrix.name }})
     strategy:
       fail-fast: false
-      max-parallel: 6
       matrix:
         include:
           - { name: unit, suite: unit, shard: 0 }
@@ -263,7 +262,6 @@ jobs:
         if: matrix.suite == 'migrations'
         # Migration tests are opt-in and run outside the parallel suite. The
         # restore rehearsal needs its own application/database session.
-        working-directory: backend
         timeout-minutes: 10
         run: |
           uv run pytest -v --durations=25 -m migration_isolation \
