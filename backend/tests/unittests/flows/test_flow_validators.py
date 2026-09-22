@@ -141,6 +141,49 @@ def test_section_index_scope_at_existing_authoring_variable_validation(mode):
         assert "'section_index'" in result.errors[0].message
 
 
+@pytest.mark.parametrize(
+    "processing",
+    [
+        {"mode": "invalid"},
+        {"mode": "process_each_section", "section_count": 3},
+    ],
+)
+def test_malformed_section_config_returns_structured_authoring_error(processing):
+    from eneo.flows.ai_builder.ai_builder_validator import validate_spec
+    from eneo.flows.flow_authoring_spec import (
+        AssistantSpec,
+        FlowDraftSpecCore,
+        StepSpec,
+    )
+    from eneo.flows.flow_variable_definitions import (
+        RESERVED_RUNTIME_VARIABLES,
+        runtime_variables_for_step,
+    )
+
+    input_config = {"text_processing": processing}
+    spec = FlowDraftSpecCore(
+        flow_name="Sections",
+        steps=[
+            StepSpec(
+                plan_step_ref="extract",
+                name="Extract records",
+                assistant_spec=AssistantSpec(
+                    instructions="Extract {{ flow_input.text }}."
+                ),
+                input_source="flow_input",
+                input_config=input_config,
+            )
+        ],
+    )
+
+    result = validate_spec(spec)
+
+    assert not result.valid
+    assert [error.code for error in result.errors] == ["flow_step_invalid"]
+    assert result.errors[0].step_ref == "extract"
+    assert runtime_variables_for_step(input_config) == RESERVED_RUNTIME_VARIABLES
+
+
 def _form_metadata(*field_names: str) -> dict:
     return {
         "form_schema": {

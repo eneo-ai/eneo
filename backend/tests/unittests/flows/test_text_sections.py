@@ -33,6 +33,7 @@ from eneo.main.exceptions import (
 )
 from eneo.tenants.tenant import TenantInDB
 from eneo.users.user import UserInDB
+from tests.unittests.flows import test_step_execution_runtime
 from tests.unittests.flows.test_resolved_input_runtime import _file_backed_material
 from tests.unittests.flows.test_typed_io_executor import (
     _build_executor,
@@ -42,6 +43,8 @@ from tests.unittests.flows.test_typed_io_executor import (
     _run,
     _runtime_step,
 )
+
+preflight_dispatch = test_step_execution_runtime.preflight_dispatch
 
 
 def _section_preflight(token_count, **kwargs):
@@ -888,7 +891,72 @@ async def test_sections_use_complete_single_file_text_without_source_wrappers(us
         assert call.kwargs["prompt_override"].split("\nDone.")[0] == "Read " + section
 
 
-async def test_sections_refuse_metadata_only_request_before_activation(user):
+@pytest.mark.parametrize("also_in_prompt", [False, True])
+async def test_section_ordinal_question_binding_is_rejected_at_all_stages(
+    user, also_in_prompt
+):
+    from eneo.flows.ai_builder.ai_builder_validator import validate_spec
+    from eneo.flows.flow_authoring_spec import (
+        AssistantSpec,
+        FlowDraftSpecCore,
+        StepSpec,
+    )
+    from eneo.flows.flow_authoring_variable_rewriting import (
+        flow_step_validation_views_from_draft_spec,
+    )
+    from eneo.flows.flow_validators import validate_step_graph
+    from eneo.main.exceptions import BadRequestException
+
+    prompt = "S{{ section_index }}-" if also_in_prompt else "Extract a record."
+    executor, repo, assistant, run, state, step, _, _, _, _ = _case(user, prompt=prompt)
+    spec = FlowDraftSpecCore(
+        flow_name="Sections",
+        steps=[
+            StepSpec(
+                plan_step_ref="source",
+                name="Read source",
+                assistant_spec=AssistantSpec(instructions="Read the material."),
+                input_source="flow_input",
+            ),
+            StepSpec(
+                plan_step_ref="extract",
+                name="Extract records",
+                assistant_spec=AssistantSpec(instructions=prompt),
+                input_source="previous_step",
+                input_config=step.input_config,
+                output_type="json",
+                output_contract=step.output_contract,
+                input_bindings={
+                    "question": "Section {{ section_index }}: {{ source.output.text }}"
+                },
+            ),
+        ],
+    )
+    authored = spec.steps[1]
+    builder_result = validate_spec(spec)
+    with pytest.raises(BadRequestException) as published:
+        validate_step_graph(
+            flow_step_validation_views_from_draft_spec(spec.steps),
+            require_complete_template_fill_config=True,
+        )
+    assert published.value.code == "flow_input_binding_invalid_step_reference"
+
+    state.step_ref_mapping = {"source": 1, "extract": 2}
+    step = replace(step, input_bindings=authored.input_bindings)
+    with pytest.raises(TypedIOValidationException) as executed:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    assert executed.value.code == "typed_io_variable_resolution_failed"
+    repo.activate_step_attempt.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+    assert [error.code for error in builder_result.errors] == [
+        "unknown_variable_reference"
+    ]
+    assert "'section_index'" in builder_result.errors[0].message
+
+
+async def test_sections_refuse_metadata_only_request_before_activation(
+    user, preflight_dispatch
+):
     executor, repo, assistant, run, state, step, _, file, _, _ = _case(
         user, text="Sentence for coverage.\n" * 20
     )
@@ -907,34 +975,34 @@ async def test_sections_refuse_metadata_only_request_before_activation(user):
     executor._list_step_input_file_ids = AsyncMock(return_value=[file.id])
     executor.flow_run_repo.list_retained_input_file_ids.return_value = []
     executor.file_service.get_files_by_ids.return_value = [file]
-    preflight = assistant.preflight_response_context.side_effect
-
-    async def without_material(**kwargs):
-        preview = await preflight(**kwargs)
-        package = replace(
-            preview.preferred,
-            messages=[{"role": "user", "content": kwargs["question"]}],
-        )
-        return replace(preview, preferred=package, fallback=package)
-
-    assistant.preflight_response_context.side_effect = without_material
+    h = preflight_dispatch
+    executor.completion_service = h.service
+    assistant.completion_model = h.model
+    assistant.preflight_response_context.side_effect = (
+        h.assistant.preflight_response_context
+    )
+    assistant.get_response.side_effect = h.assistant.get_response
     with pytest.raises(TypedIOValidationException) as caught:
         await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
 
     assert caught.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
     repo.activate_step_attempt.assert_not_awaited()
     assistant.get_response.assert_not_awaited()
+    h.transport.assert_not_awaited()
 
 
 @pytest.mark.parametrize("inline", [False, True])
 @pytest.mark.parametrize("placement", ["default", "question", "prompt"])
-@pytest.mark.parametrize("content_blocks", [False, True])
+@pytest.mark.parametrize("separator", ["\n", "\r\n", " "])
+@pytest.mark.parametrize("mode", ["process_each_section", "summarize"])
 async def test_sections_cover_material_in_prepared_primary_and_fallback_messages(
-    user, inline, placement, content_blocks
+    user, inline, placement, separator, mode, preflight_dispatch, monkeypatch
 ):
     executor, _, assistant, run, state, step, text, _, _, _ = _case(
         user,
-        text="Å coverage e\u0301.\n" * 90,
+        text=" \t"
+        + ("Å coverage e\u0301.\tInterior  spaces." + separator) * 90
+        + " \t",
         inline=inline,
         prompt="{{step_1.output.text}}"
         if placement == "prompt"
@@ -947,15 +1015,44 @@ async def test_sections_cover_material_in_prepared_primary_and_fallback_messages
         run = run.model_copy(
             update={"input_payload_json": {"text": "Extract records."}}
         )
+    step = replace(step, input_config={"text_processing": {"mode": mode}})
+    h = preflight_dispatch
+    h.model.max_input_tokens = 1800
+    h.model.max_output_tokens = 300
+    executor._persist_summarization = AsyncMock()
+    executor.completion_service = h.service
+    assistant.completion_model = h.model
+    assistant.get_response.side_effect = h.assistant.get_response
+    h.transport.return_value.choices[
+        0
+    ].message.content = '{"records":[{"value":"fact"}]}'
+
+    from eneo.tokens.token_utils import TokenCount, TokenCountSource
+
+    def measure(messages, tools, route, *, response_format=None):
+        return TokenCount(
+            tokens=len(json.dumps(messages, ensure_ascii=False).encode()),
+            source=TokenCountSource.LITELLM,
+        )
+
+    monkeypatch.setattr(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+        measure,
+    )
     previews = []
-    preflight = assistant.preflight_response_context.side_effect
+    observer = SimpleNamespace(
+        started=AsyncMock(return_value=uuid4()),
+        completed=AsyncMock(),
+        rejected=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "eneo.flows.runtime.executor.FlowProviderCallRecorder",
+        lambda **kwargs: observer,
+    )
 
     async def packaged(**kwargs):
-        preview = await preflight(**kwargs)
-        if content_blocks:
-            for package in preview.packages:
-                for message in package.messages:
-                    message["content"] = [{"type": "text", "text": message["content"]}]
+        preview = await h.assistant.preflight_response_context(**kwargs)
         previews.append(preview)
         return preview
 
@@ -965,9 +1062,12 @@ async def test_sections_cover_material_in_prepared_primary_and_fallback_messages
         result.output.output_payload_extensions["section_manifest"]
     )
     sections = manifest.resplit(text)
+    assert len(sections) > 1
     assert "".join(sections).encode() == text.encode()
+    assert sections[0].startswith(" \t")
+    assert any(core.endswith(separator) for core in sections[:-1])
     for core, dispatched in zip(
-        sections, assistant.get_response.await_args_list, strict=True
+        sections, assistant.get_response.await_args_list[: len(sections)], strict=True
     ):
         selected = dispatched.kwargs["prepared_request"]
         preview = next(
@@ -976,10 +1076,21 @@ async def test_sections_cover_material_in_prepared_primary_and_fallback_messages
         assert preview.fallback is not None
         for package in preview.packages:
             contents = [
-                message["content"][0]["text"] if content_blocks else message["content"]
+                message["content"]
+                if isinstance(message["content"], str)
+                else "".join(part["text"] for part in message["content"])
                 for message in package.messages
             ]
-            assert any(core in content for content in contents)
+            assert any(core.strip() in content for content in contents)
+        assert selected.fits
+    if mode == "summarize":
+        assert len(h.transport.await_args_list) > len(sections)
+    else:
+        assert len(h.transport.await_args_list) == len(sections)
+    for dispatched, sent in zip(
+        assistant.get_response.await_args_list, h.transport.await_args_list, strict=True
+    ):
+        assert sent.kwargs["messages"] == dispatched.kwargs["prepared_request"].messages
 
 
 @pytest.mark.parametrize("variant", ["primary", "fallback"])

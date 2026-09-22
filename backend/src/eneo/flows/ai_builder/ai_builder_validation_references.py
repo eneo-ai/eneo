@@ -35,9 +35,23 @@ def validate_variable_references(
     }
 
     for index, step in enumerate(spec.steps, start=1):
-        runtime_variables = runtime_variables_for_step(step.input_config)
-        allowed_roots = {*runtime_variables, *form_field_names}
-        for expression in iter_step_template_expressions(step):
+        prompt_variables = runtime_variables_for_step(step.input_config)
+        expressions = [
+            (expression, prompt_variables)
+            for expression in iter_template_expressions(
+                step.assistant_spec.instructions
+            )
+        ]
+        expressions.extend(
+            (expression, runtime_variables_for_step())
+            for payload in (step.input_bindings, step.output_config)
+            if payload is not None
+            for expression in iter_template_expressions(
+                _stringify_template_payload(payload)
+            )
+        )
+        for expression, runtime_variables in expressions:
+            allowed_roots = {*runtime_variables, *form_field_names}
             reference = _parse_reference_expression(
                 expression,
                 steps_by_plan_ref,

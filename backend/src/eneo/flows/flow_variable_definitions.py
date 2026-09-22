@@ -4,6 +4,8 @@ import re
 from enum import Enum
 from typing import Any, TypedDict
 
+from pydantic import ValidationError
+
 from eneo.flows.domain.text_processing import TextProcessingMode, text_processing_config
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
@@ -99,7 +101,10 @@ SECTION_VARIABLE_SHAPES: dict[str, VariableShape] = {
 def runtime_variables_for_step(
     input_config: dict[str, Any] | None = None,
 ) -> frozenset[str]:
-    processing = text_processing_config(input_config)
+    try:
+        processing = text_processing_config(input_config)
+    except ValidationError:
+        return RESERVED_RUNTIME_VARIABLES
     if (
         processing is not None
         and processing.mode == TextProcessingMode.PROCESS_EACH_SECTION

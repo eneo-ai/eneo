@@ -237,7 +237,9 @@ complete text, preserving whitespace and Unicode characters. Each reference to t
 material in the prompt or input template receives the current section, including
 when the material is referenced only in the prompt.
 The complete section must appear in the message content of every request that can
-be dispatched, including a capability fallback. A binding that includes only
+be dispatched, including a capability fallback. This check ignores leading and
+trailing whitespace removed during request construction; interior whitespace and
+the manifest's exact ranges are preserved. A binding that includes only
 metadata is refused before any section runs.
 Line boundaries are preferred when practical; long lines may still split.
 
@@ -254,7 +256,7 @@ request package change; each accepted section has a measured fit.
 
 In section prompts, `{{ section_index }}` is the section's 1-based ordinal. For
 example, `S{{ section_index }}-F1` gives each section a distinct fact-ID prefix.
-This variable is unavailable in ordinary steps and summarization.
+This variable is unavailable in input bindings, ordinary steps and summarization.
 
 Calls run
 sequentially under the step's shared deadline, without passing earlier section

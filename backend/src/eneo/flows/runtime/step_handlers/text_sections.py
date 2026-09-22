@@ -372,7 +372,8 @@ async def prepare_text_sections(
         call, estimate = best
         prepared_completion = call.prepared.completion_call
         assert prepared_completion is not None
-        core_text = text[start:end]
+        # Request construction strips boundary whitespace; the manifest retains it.
+        core_text = text[start:end].strip()
         for package in _dispatchable_packages(prepared_completion):
             if not any(
                 core_text in _message_text(message) for message in package.messages
