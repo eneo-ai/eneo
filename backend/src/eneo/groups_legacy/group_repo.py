@@ -7,13 +7,16 @@ from sqlalchemy.orm import selectinload
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
-from eneo.database.tables.assistant_table import AssistantsGroups
+from eneo.database.tables.assistant_table import Assistants, AssistantsGroups
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.groups_spaces_table import GroupsSpaces
 from eneo.database.tables.info_blobs_table import InfoBlobs, active_info_blob_version
-from eneo.database.tables.service_table import ServicesGroups
+from eneo.database.tables.service_table import Services, ServicesGroups
+from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.users_table import Users
 from eneo.groups_legacy.api.group_models import Group, GroupCreate, GroupUpdate
+from eneo.spaces.space_repo import COLLECTION_SOURCE
+from eneo.spaces.utils.space_utils import effective_space_ids_for
 
 
 class GroupRepository:
@@ -76,6 +79,13 @@ class GroupRepository:
         )
         return affected_row_count(result)
 
+    async def lock_group_space_for_update(self, group_id: UUID) -> UUID | None:
+        return await self.session.scalar(
+            sa.select(CollectionsTable.space_id)
+            .where(CollectionsTable.id == group_id)
+            .with_for_update()
+        )
+
     async def move_group_owner(
         self, group_id: UUID, new_owner_space_id: UUID
     ) -> Group | None:
@@ -87,31 +97,56 @@ class GroupRepository:
         )
         return await self.delegate.get_model_from_query(query)
 
-    async def remove_group_from_all_assistants(
-        self, group_id: UUID, assistant_ids: list[UUID]
-    ):
-        stmt = (
-            sa.delete(AssistantsGroups)
+    async def remove_group_bindings_without_access(
+        self, group_id: UUID, tenant_id: UUID
+    ) -> None:
+        source_space_ids = set(
+            await self.session.scalars(
+                COLLECTION_SOURCE.spaces_seeing(group_id, tenant_id)
+            )
+        )
+        bound_space_ids = (
+            sa.select(Assistants.space_id)
+            .join(AssistantsGroups, AssistantsGroups.assistant_id == Assistants.id)
             .where(AssistantsGroups.group_id == group_id)
-            .where(
-                AssistantsGroups.assistant_id.not_in(assistant_ids),
+            .union(
+                sa.select(Services.space_id)
+                .join(ServicesGroups, ServicesGroups.service_id == Services.id)
+                .where(ServicesGroups.group_id == group_id)
             )
         )
-
-        await self.session.execute(stmt)
-
-    async def remove_group_from_all_services(
-        self, group_id: UUID, service_ids: list[UUID]
-    ):
-        stmt = (
-            sa.delete(ServicesGroups)
-            .where(ServicesGroups.group_id == group_id)
-            .where(
-                ServicesGroups.service_id.not_in(service_ids),
+        spaces = await self.session.execute(
+            sa.select(Spaces.id, Spaces.tenant_space_id).where(
+                Spaces.id.in_(bound_space_ids), Spaces.tenant_id == tenant_id
             )
         )
-
-        await self.session.execute(stmt)
+        visible_space_ids = [
+            space_id
+            for space_id, tenant_space_id in spaces
+            if source_space_ids.intersection(
+                effective_space_ids_for(space_id, tenant_space_id)
+            )
+        ]
+        await self.session.execute(
+            sa.delete(AssistantsGroups).where(
+                AssistantsGroups.group_id == group_id,
+                AssistantsGroups.assistant_id.not_in(
+                    sa.select(Assistants.id).where(
+                        Assistants.space_id.in_(visible_space_ids)
+                    )
+                ),
+            )
+        )
+        await self.session.execute(
+            sa.delete(ServicesGroups).where(
+                ServicesGroups.group_id == group_id,
+                ServicesGroups.service_id.not_in(
+                    sa.select(Services.id).where(
+                        Services.space_id.in_(visible_space_ids)
+                    )
+                ),
+            )
+        )
 
     async def get_groups_by_space(self, space_id: UUID) -> list[Group]:
         query = (
