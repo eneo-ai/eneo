@@ -170,6 +170,7 @@ async def test_ask_streams_then_settles_budget_and_records_usage():
     assert kwargs["stream"] is True
     assert kwargs["version"] == 2
     assert kwargs["num_chunks_override"] == 30
+    assert kwargs["prompt_addendum"] == module.WIDGET_STYLE_PROMPT
     assert response.completion_model is None
 
     deps.budget.reserve.assert_awaited_once_with(widget, 8_000)

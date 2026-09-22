@@ -54,6 +54,17 @@ class SessionNotOwnedError(WidgetPublicError):
         super().__init__("Session not found.")
 
 
+# Appended to the assistant's prompt for widget turns only: the answer lands
+# in a narrow panel on someone else's website, read by a visitor who did not
+# choose the assistant. Tone, length and the assistant's own instructions stay
+# the editor's.
+WIDGET_STYLE_PROMPT = (
+    "You are answering inside a small chat window embedded on a public website. "
+    "Keep answers brief and in plain prose. Use a list only for a genuine "
+    "enumeration, avoid headings, and do not restate the question."
+)
+
+
 class WidgetAskService:
     """Runs the ordinary assistant ask pipeline for an anonymous visitor.
 
@@ -190,6 +201,7 @@ class WidgetAskService:
                 # only cited documents come back as references.
                 version=2,
                 num_chunks_override=self.settings.widget_retrieval_chunks,
+                prompt_addendum=WIDGET_STYLE_PROMPT,
                 # The assistant as configured: its MCP servers and capabilities
                 # serve visitors too. Approval is never requested for visitors.
                 allow_tools=True,

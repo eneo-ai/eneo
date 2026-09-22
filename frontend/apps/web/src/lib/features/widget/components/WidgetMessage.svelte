@@ -3,7 +3,7 @@
   import { Markdown } from "@eneo/ui";
   import { sanitizeLinkHref } from "@eneo/ui/components/markdown";
   import { tick } from "svelte";
-  import { Check, ChevronRight, Copy, ExternalLink, FileText, X } from "lucide-svelte";
+  import { Check, ChevronRight, Copy, ExternalLink, FileText } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import {
     messageSources,
@@ -13,9 +13,9 @@
     type WidgetSource
   } from "../widgetMessageContext";
   import { linkHost } from "../urls";
-  import { stepServers, widgetToolSteps } from "../widgetToolSteps";
+  import { widgetToolSteps } from "../widgetToolSteps";
   import WidgetInref from "./WidgetInref.svelte";
-  import InternalToolStep from "$lib/features/chat/components/conversation/InternalToolStep.svelte";
+  import WidgetToolActivity from "./WidgetToolActivity.svelte";
   import TypingIndicator from "$lib/features/chat/components/conversation/TypingIndicator.svelte";
 
   type Props = {
@@ -91,20 +91,11 @@
   const stepsWorking = $derived(
     waiting || steps.some((step) => step.status === "preparing" || step.status === "running")
   );
-  const stepsFailed = $derived(
-    steps.some((step) => step.status === "failed" || step.status === "denied")
-  );
-  const foldedSteps = $derived(!stepsWorking && steps.length > 1);
-  const visibleSteps = $derived(stepsWorking ? steps.slice(-1) : steps);
-  let stepsOpen = $state(false);
-  const stepsSummary = $derived(
-    `${stepServers(steps).join(" · ")} · ${m.internal_tool_steps_count({ count: steps.length })}`
-  );
 </script>
 
 <li class="flex flex-col gap-3">
   <div class="flex justify-end">
-    <p class="widget-bubble max-w-[85%] rounded-br-sm px-4 py-2 text-base whitespace-pre-wrap">
+    <p class="widget-bubble max-w-[85%] rounded-br-sm px-3.5 py-2 text-sm whitespace-pre-wrap">
       <span class="sr-only">{m.widget_you()}: </span>{message.question}
     </p>
   </div>
@@ -112,48 +103,20 @@
   <div class="flex flex-col gap-2">
     <span class="sr-only">{m.widget_assistant()}: </span>
     {#if steps.length > 0}
-      <div class="flex flex-col gap-0.5" aria-label={m.widget_activity()} role="group">
-        {#if foldedSteps}
-          <button
-            type="button"
-            class="text-secondary hover:text-primary focus-visible:ring-accent-default flex w-fit max-w-full items-center gap-1.5 rounded-md text-sm leading-tight focus-visible:ring-2 focus-visible:outline-none"
-            aria-expanded={stepsOpen}
-            onclick={() => (stepsOpen = !stepsOpen)}
-          >
-            <ChevronRight
-              class={`size-3.5 shrink-0 transition-transform ${stepsOpen ? "rotate-90" : ""}`}
-              aria-hidden="true"
-            />
-            {#if stepsFailed}
-              <X class="text-negative-default size-3.5 shrink-0" aria-hidden="true" />
-            {/if}
-            <span class="truncate">{stepsSummary}</span>
-          </button>
-        {/if}
-        {#if !foldedSteps || stepsOpen}
-          <div class={`flex flex-col gap-0.5 ${foldedSteps ? "pl-5" : ""}`}>
-            {#each visibleSteps as step, stepIndex (step.toolCallId ?? stepIndex)}
-              <InternalToolStep
-                runningLabel={step.toolName}
-                doneLabel={step.doneLabel}
-                serverName={step.serverName}
-                detail={step.detail}
-                args={step.args}
-                status={step.status}
-              />
-            {/each}
-          </div>
-        {/if}
+      <div aria-label={m.widget_activity()} role="group">
+        <WidgetToolActivity {steps} working={stepsWorking} />
       </div>
     {/if}
     {#if waiting && steps.length === 0}
       <TypingIndicator />
     {:else if !waiting}
-      <Markdown
-        class="text-primary max-w-none text-base"
-        source={message.answer}
-        customRenderers={{ inref: WidgetInref }}
-      />
+      <div class="widget-answer">
+        <Markdown
+          class="text-primary max-w-none"
+          source={message.answer}
+          customRenderers={{ inref: WidgetInref }}
+        />
+      </div>
       {#if sources.length > 0}
         <section aria-label={m.widget_references()} class="border-default mt-1 border-t pt-2">
           <button
@@ -244,6 +207,32 @@
 </li>
 
 <style>
+  /* A narrow panel on someone else's page: 14px body, tight lists, quiet headings. */
+  .widget-answer :global(.prose) {
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+  .widget-answer :global(.prose > * + *) {
+    margin-top: 0.5rem;
+  }
+  .widget-answer :global(.prose :is(ul, ol)) {
+    padding-left: 1.125rem;
+    margin-top: 0.25rem;
+  }
+  .widget-answer :global(.prose li) {
+    margin: 0.125rem 0;
+  }
+  .widget-answer :global(.prose li > p) {
+    margin: 0;
+  }
+  .widget-answer :global(.prose :is(h1, h2, h3, h4)) {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    margin-top: 0.75rem;
+  }
+  .widget-answer :global(.prose :is(code, pre)) {
+    font-size: 0.8125rem;
+  }
   .widget-bubble {
     background: var(--widget-accent);
     color: var(--widget-on-accent);

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ConversationMessage } from "@eneo/eneo-js";
-import { stepServers, widgetToolSteps } from "./widgetToolSteps";
+import {
+  argumentDetail,
+  groupToolSteps,
+  humanizeToolName,
+  stepServers,
+  widgetToolSteps
+} from "./widgetToolSteps";
 
 vi.mock("$lib/paraglide/messages", () => ({
   m: new Proxy<Record<string, (params?: Record<string, unknown>) => string>>(
@@ -22,29 +28,65 @@ function message(calls: Record<string, unknown>[], runtime = false): Conversatio
   } as unknown as ConversationMessage;
 }
 
+const time = (id: string, timezone: string, extra: Record<string, unknown> = {}) => ({
+  server_name: "TimeMCP",
+  tool_name: "get_current_time",
+  arguments: { timezone },
+  tool_call_id: id,
+  result_status: "completed",
+  ...extra
+});
+
 const search = (extra: Record<string, unknown> = {}) => ({
   server_name: "Safe Search",
   tool_name: "search",
   purpose: "web_search",
   arguments: { query: "bygglov" },
-  tool_call_id: "c1",
+  tool_call_id: "s1",
+  result_status: "completed",
   ...extra
 });
 
+describe("humanizeToolName", () => {
+  it("prefers the catalog title and otherwise spells the tool name out", () => {
+    expect(humanizeToolName("get_current_time", "Aktuell tid")).toBe("Aktuell tid");
+    expect(humanizeToolName("get_current_time")).toBe("Get current time");
+    expect(humanizeToolName("convertTime")).toBe("Convert time");
+  });
+});
+
+describe("argumentDetail", () => {
+  it("picks the telling argument and shortens long ones", () => {
+    expect(argumentDetail({ format: "24h", timezone: "Asia/Tokyo" })).toBe("Asia/Tokyo");
+    expect(argumentDetail({ limit: 5 })).toBeNull();
+    expect(argumentDetail({ query: "x".repeat(80) })?.length).toBe(48);
+    expect(argumentDetail(null)).toBeNull();
+  });
+});
+
 describe("widgetToolSteps", () => {
-  it("labels capability calls by purpose and keeps the provider as detail", () => {
-    const [step] = widgetToolSteps(message([search({ result_status: "completed" })]), {
+  it("labels external tools by name with one argument as detail", () => {
+    const [step] = widgetToolSteps(message([time("c1", "Asia/Tokyo")]), {
       streaming: false,
       working: false
     });
-    expect(step.toolName).toContain("tool_web_search_query");
-    expect(step.doneLabel).toContain("tool_web_search_query_done");
-    expect(step.detail).toBe("Safe Search");
-    expect(step.status).toBe("complete");
+    expect(step).toMatchObject({
+      label: "Get current time",
+      detail: "Asia/Tokyo",
+      serverName: "TimeMCP",
+      status: "complete"
+    });
   });
 
-  it("prefers the streaming runtime list over the persisted one", () => {
-    const steps = widgetToolSteps(message([search(), search({ tool_call_id: "c2" })], true), {
+  it("labels capability calls by purpose, query included, without a detail chip", () => {
+    const [step] = widgetToolSteps(message([search()]), { streaming: false, working: false });
+    expect(step.label).toContain("tool_web_search_query_done");
+    expect(step.detail).toBeNull();
+    expect(step.serverName).not.toBe("Safe Search");
+  });
+
+  it("prefers the streaming runtime list and marks the last call as running", () => {
+    const steps = widgetToolSteps(message([time("c1", "UTC"), time("c2", "Europe/Oslo")], true), {
       streaming: true,
       working: true
     });
@@ -53,45 +95,36 @@ describe("widgetToolSteps", () => {
   });
 
   it("shows a pending call as failed once the stream has ended", () => {
-    const [live] = widgetToolSteps(message([search({ result_status: "pending" })]), {
-      streaming: true,
-      working: false
-    });
-    const [dead] = widgetToolSteps(message([search({ result_status: "pending" })]), {
-      streaming: false,
-      working: false
-    });
-    expect(live.status).toBe("preparing");
-    expect(dead.status).toBe("failed");
+    const pending = time("c1", "UTC", { result_status: "pending" });
+    expect(widgetToolSteps(message([pending]), { streaming: true, working: false })[0].status).toBe(
+      "preparing"
+    );
+    expect(
+      widgetToolSteps(message([pending]), { streaming: false, working: false })[0].status
+    ).toBe("failed");
   });
 
   it("marks denied and failed calls", () => {
     const steps = widgetToolSteps(
       message([
-        search({ approved: false }),
-        search({ tool_call_id: "c2", result_status: "failed" })
+        time("c1", "UTC", { approved: false }),
+        time("c2", "UTC", { result_status: "failed" })
       ]),
       { streaming: false, working: false }
     );
     expect(steps.map((step) => step.status)).toEqual(["denied", "failed"]);
   });
+});
 
-  it("lists distinct servers in first-seen order", () => {
+describe("groupToolSteps", () => {
+  it("folds consecutive calls of the same tool and keeps the order of servers", () => {
     const steps = widgetToolSteps(
-      message([
-        search({ result_status: "completed" }),
-        {
-          server_name: "Tid",
-          tool_name: "get_current_time",
-          tool_call_id: "c2",
-          result_status: "completed"
-        },
-        search({ tool_call_id: "c3", result_status: "completed" })
-      ]),
+      message([time("c1", "UTC"), time("c2", "Asia/Tokyo"), search(), time("c3", "Europe/London")]),
       { streaming: false, working: false }
     );
-    // The capability call is labelled by purpose, not by its provider.
-    expect(steps[0].serverName).not.toBe("Safe Search");
-    expect(stepServers(steps)).toEqual([steps[0].serverName, "Tid"]);
+    const groups = groupToolSteps(steps);
+    expect(groups.map((group) => group.steps.length)).toEqual([2, 1, 1]);
+    expect(groups[0].steps.map((step) => step.detail)).toEqual(["UTC", "Asia/Tokyo"]);
+    expect(stepServers(steps)).toEqual(["TimeMCP", steps[2].serverName]);
   });
 });

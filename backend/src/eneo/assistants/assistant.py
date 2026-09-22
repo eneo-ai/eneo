@@ -51,6 +51,14 @@ UNAUTHORIZED_EXCEPTION_MESSAGE = "Unauthorized. User has no permissions to acces
 _KnowledgeItemList = Sequence[Union["Collection", "Website", "IntegrationKnowledge"]]
 
 
+def _with_addendum(prompt: str, addendum: str | None) -> str:
+    """The turn's prompt with a surface-specific instruction appended, so a
+    caller such as the widget can shape tone without editing the assistant."""
+    if not addendum:
+        return prompt
+    return f"{prompt}\n\n{addendum}" if prompt else addendum
+
+
 class Assistant(Entity):
     def __init__(
         self,
@@ -472,6 +480,7 @@ class Assistant(Entity):
         model_kwargs_override: ModelKwargs | None = None,
         mcp_servers_override: Optional[list["MCPServer"]] = None,
         prompt_override: str | None = None,
+        prompt_addendum: str | None = None,
         completion_prompt_files: list["File"] | None = None,
         knowledge_mcp_server: Optional["MCPServer"] = None,
         internal_mcp_servers: Sequence["MCPServer"] = (),
@@ -563,9 +572,12 @@ class Assistant(Entity):
             model=completion_model,
             text_input=question,
             files=completion_message_files,
-            prompt=prompt_override
-            if prompt_override is not None
-            else self.get_prompt_text(),
+            prompt=_with_addendum(
+                prompt_override
+                if prompt_override is not None
+                else self.get_prompt_text(),
+                prompt_addendum,
+            ),
             prompt_files=prompt_files_for_completion,
             info_blob_chunks=datastore_result.chunks,
             session=session,

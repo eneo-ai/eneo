@@ -109,32 +109,35 @@ describe("WidgetMessage sources", () => {
     expect(page.getByRole("link", { name: /widget_citation_label/ }).elements()).toHaveLength(0);
   });
 
-  test("folds finished tool activity into one line that opens to the steps", async () => {
-    const call = (id: string, tool: string) => ({
-      server_name: "Tid",
-      tool_name: tool,
+  test("folds finished tool activity into one line that opens to a timeline", async () => {
+    const call = (id: string, timezone: string) => ({
+      server_name: "TimeMCP",
+      tool_name: "get_current_time",
+      arguments: { timezone },
       tool_call_id: id,
       result_status: "completed"
     });
     render(WidgetMessage, {
       message: {
         ...message("Klockan är 14:02."),
-        tool_calls: [call("c1", "get_current_time"), call("c2", "convert_time")]
+        tool_calls: [call("c1", "Europe/Stockholm"), call("c2", "Asia/Tokyo")]
       } as unknown as ConversationMessage,
       index: 0,
       isLast: true,
       isLoading: false
     });
 
-    const summary = page.getByRole("button", { name: /internal_tool_steps_count/ });
+    const summary = page.getByRole("button", { name: /Get current time/ });
     await expect.element(summary).toHaveAttribute("aria-expanded", "false");
-    await expect.element(summary).toHaveTextContent("Tid");
-    expect(page.getByText("convert_time").elements()).toHaveLength(0);
+    await expect.element(summary).toHaveTextContent("internal_tool_steps_count");
+    expect(page.getByText("Asia/Tokyo").elements()).toHaveLength(0);
+    expect(page.getByText("get_current_time").elements()).toHaveLength(0);
 
     await summary.click();
 
-    await expect.element(page.getByText("get_current_time")).toBeVisible();
-    await expect.element(page.getByText("convert_time")).toBeVisible();
+    await expect.element(page.getByText("Europe/Stockholm")).toBeVisible();
+    await expect.element(page.getByText("Asia/Tokyo")).toBeVisible();
+    await expect.element(page.getByText(/widget_activity_via/)).toHaveTextContent("TimeMCP");
   });
 
   test("shows only the latest step while the assistant is still working", async () => {
@@ -143,14 +146,16 @@ describe("WidgetMessage sources", () => {
         ...message(""),
         mcp_tool_calls: [
           {
-            server_name: "Tid",
+            server_name: "TimeMCP",
             tool_name: "get_current_time",
+            arguments: { timezone: "UTC" },
             tool_call_id: "c1",
             result_status: "completed"
           },
           {
-            server_name: "Tid",
+            server_name: "TimeMCP",
             tool_name: "convert_time",
+            arguments: { timezone: "Asia/Tokyo" },
             tool_call_id: "c2",
             result_status: "pending"
           }
@@ -161,8 +166,8 @@ describe("WidgetMessage sources", () => {
       isLoading: true
     });
 
-    await expect.element(page.getByText("convert_time")).toBeVisible();
-    expect(page.getByText("get_current_time").elements()).toHaveLength(0);
+    await expect.element(page.getByText("Convert time: Asia/Tokyo…")).toBeVisible();
+    expect(page.getByText("UTC").elements()).toHaveLength(0);
     expect(page.getByRole("button", { name: /internal_tool_steps_count/ }).elements()).toHaveLength(
       0
     );
