@@ -22,7 +22,6 @@ from eneo.database.tables.questions_table import Questions
 from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.main.logging import get_logger
-from eneo.mcp_servers.domain.entities.mcp_server import CAPABILITY_PURPOSES
 from eneo.sessions.session import SessionFeedback, SessionInDB
 from eneo.widgets.application.widget_limits import (
     BudgetReservation,
@@ -191,12 +190,9 @@ class WidgetAskService:
                 # only cited documents come back as references.
                 version=2,
                 num_chunks_override=self.settings.widget_retrieval_chunks,
-                # The assistant as configured, unless the widget keeps visitors
-                # to knowledge only. Approval is never requested for visitors.
-                allow_tools=widget.tools_enabled,
-                disabled_capabilities=(
-                    None if widget.tools_enabled else list(CAPABILITY_PURPOSES)
-                ),
+                # The assistant as configured: its MCP servers and capabilities
+                # serve visitors too. Approval is never requested for visitors.
+                allow_tools=True,
             )
         except BaseException:
             # No stream owns the reservation yet. Cleanup must also run on a

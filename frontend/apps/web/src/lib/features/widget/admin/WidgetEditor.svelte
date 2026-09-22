@@ -305,21 +305,6 @@
                     onCheckedChange={(checked) => autosave.patch({ show_sources: checked })}
                   />
                 </Field.Field>
-                <Field.Field orientation="horizontal" class="sm:col-span-2">
-                  <Field.Content>
-                    <Field.Label for="widget-tools-enabled"
-                      >{m.widget_admin_tools_enabled()}</Field.Label
-                    >
-                    <Field.Description
-                      >{m.widget_admin_tools_enabled_description()}</Field.Description
-                    >
-                  </Field.Content>
-                  <Switch
-                    id="widget-tools-enabled"
-                    checked={current.tools_enabled ?? true}
-                    onCheckedChange={(checked) => autosave.patch({ tools_enabled: checked })}
-                  />
-                </Field.Field>
               </Field.Group>
             </Card.Content>
           </Card.Root>
@@ -454,13 +439,9 @@
                 <p class="text-secondary text-sm">{m.widget_admin_visitor_access_description()}</p>
                 <ul class="mt-1 list-disc pl-5 text-sm">
                   <li>{m.widget_admin_visitor_access_knowledge()}</li>
-                  {#if current.tools_enabled ?? true}
-                    {#each visitorTools as tool (tool)}
-                      <li>{tool}</li>
-                    {/each}
-                  {:else}
-                    <li>{m.widget_admin_visitor_access_tools_off()}</li>
-                  {/if}
+                  {#each visitorTools as tool (tool)}
+                    <li>{tool}</li>
+                  {/each}
                 </ul>
               </section>
             </Card.Content>

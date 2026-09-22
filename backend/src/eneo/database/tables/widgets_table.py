@@ -51,7 +51,6 @@ class Widgets(BasePublic):
     )
     bot_protection: Mapped[str] = mapped_column(server_default="altcha")
     show_sources: Mapped[bool] = mapped_column(server_default=sa.true())
-    tools_enabled: Mapped[bool] = mapped_column(server_default=sa.true())
 
     # The template the widget follows. The service refuses to delete a
     # template that is still followed; SET NULL is the safety net.
