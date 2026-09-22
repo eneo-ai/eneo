@@ -5758,7 +5758,7 @@
   "flow_reading_mode_knowledge_lead": "Körningen stoppas.",
   "flow_reading_mode_sections_knowledge_note": "Steget har kunskap kopplad, och kunskap kan inte användas när AI:n läser del för del. Ta bort kunskapen eller välj Allt på en gång, annars stoppas körningen i det här steget.",
   "flow_variable_section_index": "Delens nummer, när AI:n läser del för del",
-  "flow_template_issue_section_variable_unavailable": "Delens nummer finns bara när AI:n läser underlaget del för del. Ändra under Underlag.",
+  "flow_template_issue_section_variable_unavailable": "Delens nummer finns bara i instruktionen till AI:n, och bara när steget läser underlaget del för del. Flytta variabeln till instruktionen.",
   "flow_step_summary_reads_in_sections": "del för del",
   "flow_save_status_saved": "Sparad",
   "flow_save_status_saving": "Sparar…",

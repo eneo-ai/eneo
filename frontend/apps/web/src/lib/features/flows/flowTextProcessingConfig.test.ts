@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getSectionProcessingEligibility,
   getTextProcessingMode,
+  shouldShowReadingMode,
   updateTextProcessingMode
 } from "./flowTextProcessingConfig";
 
@@ -50,5 +51,17 @@ describe("flowTextProcessingConfig", () => {
     expect(getSectionProcessingEligibility(jsonStep({ item_map: { enabled: true } })).reason).toBe(
       "mapped"
     );
+  });
+
+  it("keeps the reading choice reachable while a mode is saved, even on an HTTP source", () => {
+    const base = { eligible: false, isAdvancedMode: false, isHttpSource: true };
+    expect(shouldShowReadingMode({ ...base, mode: "process_each_section" })).toBe(true);
+    expect(shouldShowReadingMode({ ...base, mode: null })).toBe(false);
+    expect(
+      shouldShowReadingMode({ ...base, isHttpSource: false, eligible: true, mode: null })
+    ).toBe(true);
+    expect(
+      shouldShowReadingMode({ ...base, isHttpSource: false, isAdvancedMode: true, mode: null })
+    ).toBe(true);
   });
 });

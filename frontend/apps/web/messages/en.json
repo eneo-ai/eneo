@@ -5758,7 +5758,7 @@
   "flow_reading_mode_knowledge_lead": "The run will stop.",
   "flow_reading_mode_sections_knowledge_note": "This step has knowledge attached, and knowledge cannot be used when the AI reads section by section. Remove the knowledge or choose All at once, or the run stops at this step.",
   "flow_variable_section_index": "Section number, when the AI reads section by section",
-  "flow_template_issue_section_variable_unavailable": "The section number only exists when the AI reads the material section by section. Change it under Input.",
+  "flow_template_issue_section_variable_unavailable": "The section number exists only in the AI instruction, and only when the step reads its material section by section. Move the variable to the instruction.",
   "flow_step_summary_reads_in_sections": "section by section",
   "flow_save_status_saved": "Saved",
   "flow_save_status_saving": "Saving...",

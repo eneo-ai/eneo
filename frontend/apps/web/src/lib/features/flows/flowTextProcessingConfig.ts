@@ -46,6 +46,20 @@ export function getSectionProcessingEligibility(
   return { eligible: true, reason: null };
 }
 
+/**
+ * Whether the editor shows the reading-mode choice. A persisted mode always
+ * shows it, whatever the source, so the default stays reachable to clear it.
+ */
+export function shouldShowReadingMode(params: {
+  mode: FlowTextProcessingMode | null;
+  eligible: boolean;
+  isAdvancedMode: boolean;
+  isHttpSource: boolean;
+}): boolean {
+  if (params.mode !== null) return true;
+  return !params.isHttpSource && (params.isAdvancedMode || params.eligible);
+}
+
 export function updateTextProcessingMode(
   step: Pick<FlowStep, "input_config">,
   mode: FlowTextProcessingMode | null

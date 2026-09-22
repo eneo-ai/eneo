@@ -29,6 +29,7 @@
   import {
     getSectionProcessingEligibility,
     getTextProcessingMode,
+    shouldShowReadingMode,
     type FlowTextProcessingMode
   } from "$lib/features/flows/flowTextProcessingConfig";
   import { getFlowStepUnderlag } from "$lib/features/flows/flowInputBindings";
@@ -131,7 +132,12 @@
   const sectionEligibility = $derived(getSectionProcessingEligibility(step));
   const readingModeValue = $derived(textProcessingMode ?? "whole");
   const showReadingMode = $derived(
-    !isHttpSource && (isAdvancedMode || sectionEligibility.eligible || textProcessingMode !== null)
+    shouldShowReadingMode({
+      mode: textProcessingMode,
+      eligible: sectionEligibility.eligible,
+      isAdvancedMode,
+      isHttpSource
+    })
   );
   const readingModeOptions = $derived.by(() => {
     const options: Array<{
