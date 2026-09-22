@@ -141,6 +141,7 @@ from eneo.main.config import Settings, reset_settings, set_settings
 from eneo.main.container.container import Container
 from eneo.server.main import get_application
 from init_db import add_tenant_user, create_salt_and_hashed_password
+from tests.database_reset import reset_populated_tables
 from tests.fixtures import mint_v2_api_key
 
 # Detect if we're in a devcontainer environment
@@ -546,38 +547,21 @@ async def cleanup_database(
     seed_default_tenant_user: Callable[[PostgresConnection], None],
 ):
     """
-    Automatically truncate all tables and reseed after each test.
+    Automatically empty all tables and reseed after each test.
 
-    This isolates row data, not everything: TRUNCATE resets pg_class but leaves
-    pg_statistic behind, so a test that runs ANALYZE hands its planner
-    statistics to whichever test runs next in the same worker. Tests that assert
-    on a query plan must measure statistics inside a rolled-back savepoint —
-    see tests/integration/skills/test_skill_adoption_projection.py.
+    This isolates row data, not everything: planner statistics survive, so a
+    test that runs ANALYZE hands them to whichever test runs next in the same
+    worker. Tests that assert on a query plan must measure statistics inside a
+    rolled-back savepoint — see
+    tests/integration/skills/test_skill_adoption_projection.py.
 
-    Optimized for speed:
-    - Single TRUNCATE statement for all tables (instead of one per table)
-    - Models are NOT seeded here - seed_default_models fixture handles that
+    Models are NOT seeded here - seed_default_models fixture handles that.
     """
     yield
 
-    # Clean up after each test - truncate everything in ONE statement
     async with sessionmanager.session() as session:
         async with session.begin():
-            # Get all tables except alembic_version
-            result = await session.execute(
-                text("""
-                SELECT string_agg('"' || tablename || '"', ', ')
-                FROM pg_tables
-                WHERE schemaname = 'public' AND tablename != 'alembic_version'
-            """)
-            )
-            tables_csv = result.scalar()
-
-            if tables_csv:
-                # Single TRUNCATE for all tables - much faster than one-by-one!
-                await session.execute(
-                    text(f"TRUNCATE TABLE {tables_csv} RESTART IDENTITY CASCADE")
-                )
+            await reset_populated_tables(session)
 
     # Reseed tenant/user using existing helper function
     conn = psycopg2.connect(
