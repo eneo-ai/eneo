@@ -11,6 +11,7 @@
   import WrapperNameCell from "./WrapperNameCell.svelte";
   import { integrationData } from "$lib/features/integrations/IntegrationData";
   import { m } from "$lib/paraglide/messages";
+  import { embeddingModelGroupTitle } from "$lib/features/ai-models/modelLabels";
   import { SvelteMap } from "svelte/reactivity";
 
   interface Props {
@@ -200,18 +201,6 @@
     );
   });
 
-  const disabledModelInUse = derived(embeddingModels, ($embeddingModels) => {
-    return [...$embeddingModels].findIndex((model) => model.inSpace === false) > -1;
-  });
-
-  const useEmbeddingModelGroups = derived(
-    [embeddingModels, currentSpace, disabledModelInUse],
-    ([$embeddingModels, $currentSpace, $disabledModelInUse]) =>
-      $embeddingModels.length > 1 ||
-      $currentSpace.embedding_models.length > 1 ||
-      $disabledModelInUse
-  );
-
   // --- Table setup ---
 
   const table = Table.createWithStore(displayItems);
@@ -304,16 +293,10 @@
 </script>
 
 <Table.Root {viewModel} resourceName="integration">
-  {#if $useEmbeddingModelGroups}
-    {#each $embeddingModels as embeddingModel (embeddingModel.id)}
-      <Table.Group
-        title={embeddingModel.inSpace
-          ? embeddingModel.name
-          : embeddingModel.name + ` (${m.disabled()})`}
-        filterFn={createModelFilter(embeddingModel.id)}
-      ></Table.Group>
-    {/each}
-  {:else}
-    <Table.Group></Table.Group>
-  {/if}
+  {#each $embeddingModels as embeddingModel (embeddingModel.id)}
+    <Table.Group
+      title={embeddingModelGroupTitle(embeddingModel, embeddingModel.inSpace)}
+      filterFn={createModelFilter(embeddingModel.id)}
+    ></Table.Group>
+  {/each}
 </Table.Root>

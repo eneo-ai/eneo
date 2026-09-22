@@ -13815,7 +13815,7 @@ export interface components {
        * Format: uuid
        */
       user_integration_id: string;
-      embedding_model: components["schemas"]["EmbeddingModelPublicLegacy"];
+      embedding_model: components["schemas"]["EmbeddingModelPublic"];
       /** Site Id */
       site_id?: string | null;
       /** Drive Id */
