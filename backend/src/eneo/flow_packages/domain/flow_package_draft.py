@@ -18,6 +18,7 @@ from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageValidationError,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowRuntimeInputConfig
+from eneo.flows.domain.text_processing import TextProcessingMode
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, StepSpec
 
 
@@ -34,13 +35,20 @@ class FlowPackageItemMapConfig(BaseModel):
     max_items: Annotated[StrictInt, Field(gt=0)] | None = None
 
 
+class FlowPackageTextProcessingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    mode: TextProcessingMode
+
+
 class FlowPackageStepInputConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     runtime_input: FlowPackageRuntimeInputConfig | None = None
     item_map: FlowPackageItemMapConfig | None = None
+    text_processing: FlowPackageTextProcessingConfig | None = None
 
-    @field_validator("runtime_input", "item_map", mode="before")
+    @field_validator("runtime_input", "item_map", "text_processing", mode="before")
     @classmethod
     def normalize_disabled_literal(cls, value: object) -> object:
         return None if value is False else value

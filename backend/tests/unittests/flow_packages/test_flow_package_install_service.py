@@ -960,7 +960,11 @@ async def test_install_normalizes_literal_disabled_config_without_changing_envel
     step = original_envelope.spec.steps[0].model_copy(
         update={
             "input_type": InputType.DOCUMENT,
-            "input_config": {"runtime_input": False, "item_map": False},
+            "input_config": {
+                "runtime_input": False,
+                "item_map": False,
+                "text_processing": False,
+            },
         }
     )
     envelope = FlowPackageEnvelope.build_for_export(

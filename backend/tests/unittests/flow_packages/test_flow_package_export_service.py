@@ -11,6 +11,8 @@ from eneo.flow_packages.application.flow_package_export_service import (
     FlowPackageExportService,
     build_flow_package_export_envelope,
 )
+from eneo.flow_packages.domain.flow_package_checksum import canonical_json_bytes
+from eneo.flow_packages.domain.flow_package_draft import normalize_flow_package_spec
 from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageExportError,
     FlowPackageExportErrorCode,
@@ -174,6 +176,8 @@ async def test_export_service_records_persisted_flow_mcp_as_one_typed_omission()
         {"item_map": {"enabled": True, "max_items": 3}},
         {"runtime_input": {"enabled": False, "unknown": "secret"}},
         {"item_map": {"enabled": False, "unknown": "secret"}},
+        {"text_processing": {"mode": "unknown"}},
+        {"text_processing": {"mode": "process_each_section", "max_items": 3}},
         {"auth": {"mode": "none"}},
         {"auth": {"mode": "bearer_token", "token": "secret"}},
         {"runtime_input": {"enabled": False, "description": {"$secret": "stored"}}},
@@ -335,6 +339,42 @@ def test_export_preserves_only_strict_mode_relevant_portable_config() -> None:
     reparsed = read_flow_package(write_flow_package(envelope))
     assert reparsed == envelope
     assert reparsed.content_checksum == envelope.content_checksum
+
+
+@pytest.mark.parametrize("mode", ["process_each_section", "summarize"])
+def test_export_text_processing_round_trip(mode: str) -> None:
+    assistant_id = uuid4()
+    input_config: FlowPersistedJsonObject = {"text_processing": {"mode": mode}}
+    envelope = _build_envelope(
+        flow=_flow(
+            steps=[
+                _step(
+                    1,
+                    assistant_id=assistant_id,
+                    input_config=input_config,
+                    output_type="json",
+                    output_contract={
+                        "type": "object",
+                        "properties": {
+                            "items": {"type": "array", "items": {"type": "object"}}
+                        },
+                    },
+                )
+            ]
+        ),
+        assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+        resource_bindings=tuple(),
+    )
+
+    assert envelope.spec.steps[0].input_config == input_config
+    imported = read_flow_package(write_flow_package(envelope))
+    normalized = normalize_flow_package_spec(imported.spec)
+    assert normalized.steps[0].input_config == input_config
+    assert canonical_json_bytes(normalized.steps[0].input_config) == (
+        canonical_json_bytes(input_config)
+    )
+    assert imported == envelope
+    assert write_flow_package(imported) == write_flow_package(envelope)
 
 
 @pytest.mark.parametrize("max_items", [0, -1, True, "12"])
@@ -1481,7 +1521,11 @@ def test_export_omits_literal_disabled_input_blocks(input_type: str) -> None:
                     1,
                     assistant_id=assistant_id,
                     input_type=input_type,
-                    input_config={"runtime_input": False, "item_map": False},
+                    input_config={
+                        "runtime_input": False,
+                        "item_map": False,
+                        "text_processing": False,
+                    },
                 )
             ]
         ),

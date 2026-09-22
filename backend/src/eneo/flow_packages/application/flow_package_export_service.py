@@ -408,6 +408,8 @@ def _portable_input_config(step: FlowStep) -> FlowPersistedJsonObject | None:
                 mode="json",
                 exclude_unset=True,
             )
+    if parsed.text_processing is not None:
+        portable["text_processing"] = parsed.text_processing.model_dump(mode="json")
     return portable or None
 
 

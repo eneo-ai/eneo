@@ -20,7 +20,10 @@ from eneo.flow_packages.domain.flow_package_checksum import (
     json_object_from_model,
     sha256_hex,
 )
-from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_draft import (
+    FlowPackageFlowDraft,
+    normalize_flow_package_spec,
+)
 from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageErrorCode,
     FlowPackageValidationError,
@@ -839,6 +842,11 @@ def _zip_infos(entries: list[tuple[zipfile.ZipInfo, bytes]]) -> bytes:
     [
         ("input_config", {"runtime_input": {"enabled": False, "unknown": "secret"}}),
         ("input_config", {"item_map": {"enabled": False, "unknown": "secret"}}),
+        ("input_config", {"text_processing": {"mode": "unknown"}}),
+        (
+            "input_config",
+            {"text_processing": {"mode": "process_each_section", "max_items": 3}},
+        ),
         ("input_config", {"runtime_input": 0}),
         ("input_config", {"runtime_input": "false"}),
         ("input_config", {"item_map": True}),
@@ -856,18 +864,28 @@ def test_package_intake_rejects_nonportable_config(
     with pytest.raises(FlowPackageValidationError) as exc_info:
         reader.read_flow_package(_package_bytes(spec=spec))
     assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+    assert "not portable" in str(exc_info.value)
+    assert exc_info.value.context == {
+        "plan_step_ref": "extract",
+        "config_field": config_field,
+    }
 
 
 def test_package_validation_preserves_literal_disabled_spec_identity() -> None:
     spec = _flow_spec()
     spec.steps[0] = spec.steps[0].model_copy(
         update={
-            "input_config": {"runtime_input": False, "item_map": False},
+            "input_config": {
+                "runtime_input": False,
+                "item_map": False,
+                "text_processing": False,
+            },
         }
     )
     envelope = reader.read_flow_package(_package_bytes(spec=spec))
     assert envelope.spec == spec
     assert envelope.spec_hash == spec.spec_hash()
+    assert normalize_flow_package_spec(envelope.spec).steps[0].input_config is None
 
 
 def test_checksum_mismatch_precedes_portable_config_validation() -> None:

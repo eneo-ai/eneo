@@ -45,6 +45,8 @@ from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementSet,
     FlowPackageTemplateAssetRequirement,
 )
+from eneo.flow_packages.infrastructure.flow_package_zip_reader import read_flow_package
+from eneo.flow_packages.infrastructure.flow_package_zip_writer import write_flow_package
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.flow_step_validation import (
     FlowGraphIssueCode,
@@ -67,7 +69,11 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotKind,
     ResourceSlotRef,
 )
-from eneo.flows.flow_validators import collect_step_graph_issues, validate_steps
+from eneo.flows.flow_validators import (
+    collect_step_graph_issues,
+    validate_step_graph,
+    validate_steps,
+)
 from eneo.flows.runtime.step_input_resolution import resolve_step_input
 from tests.unittests.flows.test_input_binding_contract_rules import (
     _wildcard_projection_case,
@@ -217,6 +223,63 @@ async def test_wildcard_projection_planner_publish_runtime_parity(case):
             "krav": {"uppgifter": [{"text": "A"}, {"text": "A"}, {"text": "B"}]}
         }
     }
+
+
+@pytest.mark.parametrize("with_item_map", [False, True])
+def test_imported_section_processing_planner_publish_parity(
+    with_item_map: bool,
+) -> None:
+    bindings, source, projected = _wildcard_projection_case()
+    bindings["source_refs"][0]["step_ref"] = "extract"
+    input_config: FlowPersistedJsonObject = {
+        "text_processing": {"mode": "process_each_section"}
+    }
+    if with_item_map:
+        input_config["item_map"] = {"enabled": True, "max_items": 3}
+    original = _envelope(
+        requirements=[],
+        input_config=input_config,
+        extra_steps=[
+            StepSpec(
+                plan_step_ref="consume",
+                name="Consume",
+                assistant_spec=AssistantSpec(instructions="Use the projected facts."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                input_bindings=bindings,
+                input_contract=projected,
+            )
+        ],
+    )
+    original.spec.steps[0].output_type = OutputType.JSON
+    original.spec.steps[0].output_contract = source
+    envelope = FlowPackageEnvelope.build_for_export(
+        manifest_metadata=original.manifest,
+        draft=original.draft,
+        requirements=original.requirements,
+        provenance=original.provenance,
+    )
+    imported = read_flow_package(write_flow_package(envelope))
+    published = flow_step_validation_views_from_draft_spec(imported.spec.steps)
+
+    if with_item_map:
+        message = "Section processing cannot be nested with item_map or per_source."
+        with pytest.raises(FlowPackageValidationError, match=message) as planned:
+            build_flow_package_import_plan(
+                imported, candidates=FlowPackageImportPlannerCandidates()
+            )
+        assert planned.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+        assert planned.value.context == {"reason": "flow_step_invalid"}
+        with pytest.raises(FlowStepValidationError, match=message) as rejected:
+            validate_step_graph(published, require_complete_template_fill_config=True)
+        assert rejected.value.code == "flow_step_invalid"
+    else:
+        plan = build_flow_package_import_plan(
+            imported, candidates=FlowPackageImportPlannerCandidates()
+        )
+        assert plan.can_install_as_draft
+        assert plan.can_publish_after_import
+        validate_step_graph(published, require_complete_template_fill_config=True)
 
 
 def test_planner_returns_unresolved_required_when_no_matching_model_exists() -> None:

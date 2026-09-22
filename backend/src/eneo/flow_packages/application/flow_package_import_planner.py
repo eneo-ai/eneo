@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from eneo.flow_packages.application.flow_package_model_matching import (
     resolve_model_requirement,
 )
+from eneo.flow_packages.domain.flow_package_draft import normalize_flow_package_spec
 from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
 from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageErrorCode,
@@ -159,17 +160,18 @@ def _validate_installable_draft(
     *,
     default_transcription_model_id: UUID | None,
 ) -> None:
-    if not envelope.spec.steps:
+    spec = normalize_flow_package_spec(envelope.spec)
+    if not spec.steps:
         raise _invalid_flow_draft(
             "no_executable_steps",
             "Flow package draft must contain at least one step.",
         )
     try:
-        steps = flow_step_validation_views_from_draft_spec(envelope.spec.steps)
+        steps = flow_step_validation_views_from_draft_spec(spec.steps)
     except InputBindingContractError as exc:
         raise _invalid_flow_draft(FLOW_INPUT_BINDING_UNSUPPORTED_KEY, str(exc)) from exc
     metadata_json = build_flow_draft_metadata_json(
-        spec=envelope.spec,
+        spec=spec,
         current_flow=None,
         default_transcription_model_id=default_transcription_model_id,
     )
