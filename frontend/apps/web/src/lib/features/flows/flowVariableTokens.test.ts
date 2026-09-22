@@ -482,4 +482,12 @@ describe("section_index classification", () => {
       { token: "section_index", kind: "invalid", reason: "section_variable_unavailable" }
     ]);
   });
+
+  it("keeps an authored form field named section_index valid outside section context", () => {
+    const withField = { ...base, knownFieldNames: new Set(["section_index"]) };
+    expect(classifyVariable("section_index", withField)).toBe("field");
+    expect(
+      classifyVariable("section_index", { ...withField, sectionVariablesAvailable: true })
+    ).toBe("system");
+  });
 });

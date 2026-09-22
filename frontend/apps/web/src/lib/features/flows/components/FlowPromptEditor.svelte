@@ -32,6 +32,7 @@
     formSchema,
     transcriptionEnabled,
     isAdvancedMode = false,
+    allowSectionVariables = false,
     invalid = false,
     ariaDescribedby,
     focusOnMount = false,
@@ -64,6 +65,8 @@
       | undefined;
     transcriptionEnabled: boolean;
     isAdvancedMode?: boolean;
+    /** The editor holds the step's AI instruction, which is rendered once per section. */
+    allowSectionVariables?: boolean;
     toolbar?: Snippet;
     onChange?: (value: string) => void;
     onCommit?: (value: string) => void;
@@ -150,7 +153,7 @@
 
   // Build classification context
   const classificationContext = $derived.by(() =>
-    buildContext(steps, formSchema, transcriptionEnabled, currentStepOrder)
+    buildContext(steps, formSchema, transcriptionEnabled, currentStepOrder, allowSectionVariables)
   );
 
   // Parse segments for mirror rendering

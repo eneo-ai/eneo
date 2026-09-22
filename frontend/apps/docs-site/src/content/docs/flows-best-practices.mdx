@@ -102,9 +102,10 @@ instruction, and when a step reads section by section, prefix them with the
 section number so two sections cannot mint the same id.
 
 **Lists that must merge.** When several steps or sections each produce a list,
-decide where the lists become one. Section-by-section reading merges its own
-lists in order; several parallel steps do not, and a later step must combine
-them explicitly.
+decide where the lists become one. Section-by-section reading returns one entry
+per section, in order, and a later step can read the items of every entry at
+once; several parallel steps do not, and a later step must combine them
+explicitly.
 
 **Material silently dropped.** A step whose material is larger than the model
 can read in one request cannot silently read part of it: the flow refuses the
@@ -117,11 +118,13 @@ cannot be processed.
 A step that pulls facts, tasks, or decisions out of a transcript or document of
 several hours or hundreds of pages should read the material **Del för del**.
 The material is split into sections that each fit the model, every section is
-read with the same instruction, and the resulting lists are merged in order.
-Short material is still read in one request, so the setting is safe to leave on.
+read with the same instruction, and the answer is a list with one entry per
+section, in order. Short material is read in one request and returns the same
+shape with a single entry, so the setting is safe to leave on.
 
 It is the wrong choice for summaries, assessments, and anything that depends on
-the whole. It also gives up knowledge retrieval and reasoning across sections.
+the whole. It also cannot use knowledge (the run stops if knowledge is attached)
+and does not reason across sections.
 Setup, id numbering with `section_index`, and how to check the result are in
 [Process long material section by section](/docs/flows-long-material).
 

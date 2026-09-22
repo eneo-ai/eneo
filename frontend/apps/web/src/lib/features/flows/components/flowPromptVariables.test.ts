@@ -53,7 +53,9 @@ describe("section_index", () => {
 
   it("is offered only while the current step reads section by section", () => {
     const steps = [step(1, "Transkribera"), sectioned];
-    const withSections = buildContext(steps, undefined, false, 2);
+    // An input template is not rendered per section, so only the instruction editor opts in.
+    expect(buildContext(steps, undefined, false, 2).sectionVariablesAvailable).toBe(false);
+    const withSections = buildContext(steps, undefined, false, 2, true);
     expect(withSections.sectionVariablesAvailable).toBe(true);
     expect(
       buildAvailableVariables(withSections, steps, false).some((v) => v.token === "section_index")

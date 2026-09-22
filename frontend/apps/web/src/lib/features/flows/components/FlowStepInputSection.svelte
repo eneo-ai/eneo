@@ -273,24 +273,33 @@
       density="compact"
     >
       <div class="flex flex-col gap-3">
+        <!-- The default stays selectable on every editable step, so a step that
+             can no longer read in sections can always be switched back. -->
         <RadioGroup.Root
           value={readingModeValue}
           onValueChange={selectReadingMode}
-          disabled={isPublished || !sectionEligibility.eligible}
+          disabled={isPublished}
           aria-label={m.flow_reading_mode_title()}
-          class="gap-2"
+          class="grid gap-2 lg:grid-cols-2"
         >
           {#each readingModeOptions as option (option.value)}
+            {@const optionDisabled =
+              option.value !== "whole" &&
+              option.value !== readingModeValue &&
+              !sectionEligibility.eligible}
             <label
-              class="bg-primary flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 transition-colors has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 {readingModeValue ===
-              option.value
-                ? 'border-accent-default/40 bg-accent-default/5'
-                : 'border-default hover:bg-hover-dimmer'}"
+              class="flex items-start gap-3 rounded-[10px] border p-3 motion-safe:transition-colors motion-safe:duration-(--duration-quick) {optionDisabled
+                ? 'border-default cursor-not-allowed'
+                : 'cursor-pointer'} {readingModeValue === option.value
+                ? 'border-accent-default bg-accent-default/7 ring-accent-default ring-1 ring-inset'
+                : optionDisabled
+                  ? ''
+                  : 'border-default hover:border-stronger hover:bg-hover-dimmer'}"
             >
-              <RadioGroup.Item value={option.value} class="mt-0.5" />
-              <span class="min-w-0">
-                <span class="block text-sm font-medium">{option.label}</span>
-                <span class="text-muted mt-1 block text-xs leading-relaxed"
+              <RadioGroup.Item value={option.value} disabled={optionDisabled} class="mt-0.5" />
+              <span class="min-w-0 {optionDisabled ? 'opacity-70' : ''}">
+                <span class="text-primary block text-sm font-medium">{option.label}</span>
+                <span class="text-secondary mt-1 block text-xs leading-relaxed"
                   >{option.description}</span
                 >
               </span>
@@ -298,27 +307,22 @@
           {/each}
         </RadioGroup.Root>
         {#if !sectionEligibility.eligible}
-          <p class="text-muted text-xs leading-relaxed">
+          <p class="text-secondary text-xs leading-relaxed">
             {sectionEligibility.reason === "mapped"
               ? m.flow_reading_mode_unavailable_mapped()
               : m.flow_reading_mode_unavailable_output()}
           </p>
-        {:else if textProcessingMode !== null}
-          <Alert.Root class="border-accent-default/15 bg-accent-default/5" role="note">
-            <Alert.Description class="text-secondary flex flex-col gap-1 text-xs leading-relaxed">
-              <span>{m.flow_reading_mode_sections_output_note()}</span>
-              {#if isAdvancedMode && textProcessingMode === "process_each_section"}
-                <span
-                  >{m.flow_reading_mode_sections_variable_note({
-                    token: "{{ section_index }}"
-                  })}</span
-                >
-              {/if}
-              {#if hasKnowledge}
-                <span class="text-warning-stronger"
-                  >{m.flow_reading_mode_sections_knowledge_note()}</span
-                >
-              {/if}
+        {/if}
+        {#if textProcessingMode === "process_each_section"}
+          <p class="text-secondary text-xs leading-relaxed">
+            {m.flow_reading_mode_sections_output_note()}
+          </p>
+        {/if}
+        {#if textProcessingMode !== null && hasKnowledge}
+          <Alert.Root class="border-warning-default/30 bg-warning-dimmer rounded-[9px]" role="note">
+            <Alert.Description class="text-warning-stronger text-xs leading-relaxed">
+              <span class="font-semibold">{m.flow_reading_mode_knowledge_lead()}</span>
+              {m.flow_reading_mode_sections_knowledge_note()}
             </Alert.Description>
           </Alert.Root>
         {/if}

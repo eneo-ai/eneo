@@ -58,6 +58,14 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 | `backend/src/eneo/skills/**`, skill permissions in `roles/**`, `frontend/apps/web/src/routes/(app)/admin/skills/**`                             | `guides/skills.mdx`                                              |
 | `backend/src/eneo/integration/**` (SharePoint) , `frontend/apps/web/src/routes/(app)/admin/integrations/**`                                     | `guides/sharepoint-integration.mdx`                              |
 
+## Flows
+
+| Code                                                                                                                                                                                                                                                                          | Pages                                                                             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `backend/src/eneo/flows/**` (runtime, validators, public API models), `backend/src/eneo/flow_packages/**`                                                                                                                                                                     | `docs/flows.mdx`, `docs/flows-for-developers.mdx`                                 |
+| `backend/src/eneo/flows/runtime/step_handlers/text_sections.py`, `mapped_completion.py`, `summarize.py`, `backend/src/eneo/flows/domain/text_processing.py`, `frontend/apps/web/src/lib/features/flows/flowTextProcessingConfig.ts`, `components/FlowStepInputSection.svelte` | `docs/flows-long-material.mdx`, `docs/flows-best-practices.mdx`, `docs/flows.mdx` |
+| `frontend/apps/web/src/lib/features/flows/**`, `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/**` (editor labels, Enkel and Avancerad)                                                                                                                            | `docs/flows-best-practices.mdx`, `docs/flows-long-material.mdx`                   |
+
 ## Storage, workers and operations
 
 | Code                                                                                                                                                    | Pages                                                                                                                   |

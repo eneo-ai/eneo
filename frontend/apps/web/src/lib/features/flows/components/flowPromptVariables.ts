@@ -31,7 +31,9 @@ export function buildContext(
   steps: FlowStep[],
   formSchema: PromptFormSchema,
   transcriptionEnabled: boolean,
-  currentStepOrder: number
+  currentStepOrder: number,
+  /** Only the step's AI instruction is rendered per section; an input template is not. */
+  allowSectionVariables = false
 ): VariableClassificationContext {
   const knownFieldNames = new Set<string>();
   for (const field of formSchema?.fields ?? []) {
@@ -53,7 +55,9 @@ export function buildContext(
     transcriptionEnabled,
     currentStepOrder,
     sectionVariablesAvailable:
-      currentStep !== undefined && getTextProcessingMode(currentStep) === "process_each_section"
+      allowSectionVariables &&
+      currentStep !== undefined &&
+      getTextProcessingMode(currentStep) === "process_each_section"
   };
 }
 

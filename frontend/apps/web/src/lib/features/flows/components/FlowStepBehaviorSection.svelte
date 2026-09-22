@@ -186,6 +186,7 @@
           placeholder={stepUxCopy.instructionsPlaceholder}
           minHeight={isAdvancedMode ? 160 : 144}
           maxHeight={360}
+          allowSectionVariables
           {steps}
           currentStepOrder={step.step_order}
           {formSchema}

@@ -260,10 +260,8 @@ function analyzeTemplateToken(
   }
 
   if (SYSTEM_VARIABLE_NAMES.has(token)) return { token, kind: "valid", category: "system" };
-  if (SECTION_RUNTIME_VARIABLES.has(token)) {
-    return context.sectionVariablesAvailable
-      ? { token, kind: "valid", category: "system" }
-      : { token, kind: "invalid", category: "unknown", reason: "section_variable_unavailable" };
+  if (SECTION_RUNTIME_VARIABLES.has(token) && context.sectionVariablesAvailable) {
+    return { token, kind: "valid", category: "system" };
   }
 
   if (context.knownFieldNames.has(token) && isFlowFormFieldBareAliasSafe(token)) {
@@ -280,6 +278,9 @@ function analyzeTemplateToken(
     return { token, kind: "valid", category: "technical" };
   }
 
+  if (SECTION_RUNTIME_VARIABLES.has(token)) {
+    return { token, kind: "invalid", category: "unknown", reason: "section_variable_unavailable" };
+  }
   return { token, kind: "invalid", category: "unknown", reason: "unknown_variable" };
 }
 

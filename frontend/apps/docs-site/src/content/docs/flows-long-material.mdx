@@ -30,16 +30,31 @@ Keep **Allt på en gång** (the default) when the answer depends on the whole:
 - A step that compares the beginning of the material with the end.
 - A step that reads several materials at once.
 
-If the answer for a short material is the same in both modes, the step is a good
-candidate. If the answer changes when the reader cannot see the whole text, it is not.
+A good test: would a person reading the material one chapter at a time, noting what
+each chapter contains, end up with the answer you need? Then the step is a good
+candidate. If the answer depends on seeing the whole text at once, it is not.
 
 ## Set it up in the flow editor
 
 1. Open the step under **Bearbetningssteg** and expand **Underlag**.
 2. Under **Så läser AI:n underlaget**, choose **Del för del**.
-3. Give the step a fixed answer format: **Svar i fast format** with one list in
-   the schema, one object per item. Every section fills that same list. The lists
-   from all sections are merged into one, in section order.
+3. Give the step a fixed answer format: **Svar i fast format** with exactly one
+   list in the schema, where each entry describes one section. Every section fills
+   in exactly one entry, and the step's result is that list with one entry per
+   section, in section order. Put what the step extracts inside the entry, for
+   example a list of facts:
+
+   ```json
+   {
+     "sektioner": [
+       { "uppgifter": [{ "id": "S1-F1", "text": "...", "citat": "..." }] }
+     ]
+   }
+   ```
+
+   A later step can read all extracted items across the sections at once, for
+   example `sektioner.*.uppgifter`.
+
 4. Write the instruction as if the AI reads one part of the material at a time:
    "register every statement about ..." rather than "summarize the meeting".
 
@@ -53,9 +68,10 @@ section and then merges the summaries. Use it only when the step must produce
 one record from material that does not fit, and the loss of detail is acceptable.
 
 <Callout type="info">
-  Short material is not affected. When the whole text fits in one request the
-  step makes one call, exactly as before. Choosing section by section is safe
-  for a step that sometimes receives short and sometimes very long material.
+  Short material is read in one request, as one section. The answer still has
+  the section shape: a list with a single entry. Later steps read the same shape
+  whether the material was short or long, so the setting is safe for a step that
+  sometimes receives short and sometimes very long material.
 </Callout>
 
 ## Numbering items across sections
@@ -75,14 +91,16 @@ the prompt editor marks it as unavailable and explains why.
 
 ## What the step gives up
 
-- **Knowledge and websites.** Retrieval is not used while a step reads section
-  by section. Put background material in the instruction, or in an earlier step.
+- **Knowledge and websites.** A step that reads section by section cannot use
+  knowledge. If knowledge or websites are attached, the run stops at that step,
+  and the editor warns about it. Remove them, or put the background in the
+  instruction or in an earlier step.
 - **Reasoning across sections.** A statement that begins in one section and is
   corrected in a later one produces two items. Ask for corrections to be
   registered as their own items, and let a later step reconcile them.
-- **Deduplication.** The runtime merges the lists as they are. If the same fact
-  is stated twice in different sections, it appears twice. Add a later step that
-  merges duplicates if the flow needs a clean register.
+- **Deduplication.** The sections are collected as they are. If the same fact
+  is stated in two sections, it appears twice. Add a later step that merges
+  duplicates if the flow needs a clean register.
 - **One material per step.** The step reads one previous-step text or one
   uploaded file. Combine several materials in an earlier step first.
 
@@ -94,7 +112,7 @@ A single very long line without breaks can still be split mid-sentence.
 After a run, open the run's evidence for the step. A step that read section by
 section shows how many sections it produced and which part of the material each
 section covered, so a missing item can be traced to the section that should have
-produced it. The merged list is the step's result; later steps read it as one list.
+produced it. The list of section entries is the step's result.
 
 If a section's answer still exceeds what the model may write in one reply, the
 step fails instead of returning a partial answer. The usual causes are an
@@ -105,7 +123,8 @@ optional fields. Shorten the per-item output before retrying.
 
 A care plan flow receives a transcript of a four-hour conversation. Step 1 reads
 it **Del för del** and registers every statement as a fact with a source quote
-and a `S{{ section_index }}-` id prefix. Step 2 reads the merged register **Allt
-på en gång**, groups the facts by area, and writes the plan. The long reading
+and a `S{{ section_index }}-` id prefix. Step 2 reads the register **Allt på en
+gång**, the facts from every section together, groups them by area, and writes
+the plan. The long reading
 happens once, in the step built for it; every later step works on a compact
 register that fits in one request.
