@@ -25,8 +25,9 @@ a `500`, when you contact support.
 
 Some failures answer in another shape, so treat the envelope as the common case
 rather than a guarantee: request validation answers `422` with
-`{"detail": [...]}`, some HTTP errors keep a legacy `{"detail": "..."}`, and an
-unexpected `500` answers with `error`, `error_id` and `message`.
+`{"detail": [...]}`; some HTTP errors keep a legacy `{"detail": ...}` whose
+value is a string or an object, such as the report `/api/healthz` returns with
+`503`; and an unexpected `500` answers with `error`, `error_id` and `message`.
 
 ### Errors that no operation lists
 
