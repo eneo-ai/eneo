@@ -130,7 +130,10 @@ jobs:
   checks:
     name: Checks (${{ matrix.check }})
     needs: changes
-    if: needs.changes.outputs.checks != '[]'
+    if: >-
+      !cancelled() &&
+      needs.changes.result == 'success' &&
+      needs.changes.outputs.checks != '[]'
     strategy:
       # This matrix owns every expensive CI check, so a failed check cancels
       # queued and running siblings, including their reusable-workflow jobs.
