@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@1f6dacd3bbcd
+translationSource: guides/embed-widget.mdx@312fd90eb87d
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -38,9 +38,11 @@ Du behöver behörigheten för webbwidgetar och rätt att redigera assistenten.
    namn, språk, titel, välkomsttext, upp till fyra föreslagna frågor,
    beskrivningen under titeln och en sidfot med valfri länk. Beskrivningen är
    obligatorisk och informerar som standard om att besökaren möter AI.
-4. Under **Utseende** väljer du färger, logotyp, färgschema, placering och
-   hörnradie. Textfärg väljs automatiskt för kontrast, och färgväljaren visar
-   om kontrasten blir för låg. Mörkt läge kan ha egna primär- och rubrikfärger;
+4. Under **Utseende** kan du koppla widgeten till en av organisationens
+   mallar; de delar mallen låser är då skrivskyddade tills du kopplar loss den.
+   Här väljer du också färger, logotyp, färgschema, placering och hörnradie.
+   Textfärg väljs automatiskt för kontrast, och färgväljaren visar om
+   kontrasten blir för låg. Mörkt läge kan ha egna primär- och rubrikfärger;
    tomma värden återanvänder färgerna för ljust läge.
 5. Under **Regler** anger du tillåtna webbplatser, gränser, lagringstid och
    botskydd. Minst en tillåten origin krävs, exempelvis `https://www.kommun.se`.
@@ -141,9 +143,39 @@ Policybrott visas som aktiveringshinder. Varje aktivering är ett
 administratörsbeslut.
 
 Mallar innehåller organisationens texter, färger, logotyp, form och språk.
-Högst en mall kan vara standard. En mall kopieras när den tillämpas; senare
-malländringar påverkar inte en aktiv widget. Föreslagna frågor hör till den
-enskilda assistenten och ingår inte i mallen.
+Högst en mall kan vara standard. En mall har ett utkast och en **publicerad**
+version. Att spara ändrar utkastet, som förhandsvisas på mallsidan; **Publicera**
+gör utkastet till den version widgetar kopplas till. En widget **följer** den
+mall den skapades från eller kopplades till: kopplingen kopierar de publicerade
+texterna, utseendet och språket till widgeten en gång. Mallens **låsta delar**
+hålls sedan i takt: varje publicering skriver dem till alla widgetar som följer
+mallen, i samma anrop, och delarna är skrivskyddade i widgetredigeraren. Innan
+en publicering når följande widgetar visas en bekräftelse som listar vilka delar
+som ersätts, vilka lås som tillkommer eller släpps och vilka ändrade delar som
+är olåsta och därför behåller redaktörernas värden. Olåsta delar är startvärden
+som redaktörer får ändra. Delar som kan låsas är utseende, språk, beskrivning
+och sidfot samt formuleringar (titel, välkomsttext, platshållare); nya mallar
+låser utseende och språk. Beskrivningen kan bara låsas om mallen har en, så en
+aktiv widget kan aldrig förlora sin AI-information via en mall. Föreslagna
+frågor hör till den enskilda assistenten och ingår aldrig i mallen.
+
+Mallsidan visar hur många widgetar som följer mallen och om utkastet har
+opublicerade ändringar; mallistan markerar mallar som ännu inte är publicerade.
+Bara publicerade mallar erbjuds när en widget skapas eller kopplas, och
+väljaren förhandsvisar den publicerade versionen, inte ett utkast som kan ligga
+före. En widget kan när som helst **tillämpa mallen igen**, vilket kopierar den
+publicerade versionen på nytt, även olåsta delar, eller **kopplas loss**; en
+lös widget behåller sina värden och alla delar blir redigerbara. En mall som
+widgetar följer kan inte tas bort. Redaktörer med en öppen widgetsida uppmanas
+att ladda om när mallen ändrat deras widget.
+
+Vilka webbplatser som får rama in chatten avgörs av besökarens webbläsare
+utifrån widgetens tillåtna origins; en webbplats som inte är listad får en tom
+ram. En pausad widget visar i stället ett kort meddelande om att chatten inte
+är tillgänglig, på alla webbplatser, så att knappen aldrig öppnar en tom panel.
+Chattsidans Content Security Policy tillåter bara bilder från Eneo och
+logotypens adress samt anslutningar till Eneos API, så en bildlänk som hamnar
+i ett svar kan inte skicka besökarens fråga vidare till tredje part.
 
 Besökartoken är knutna till widget och besökaridentitet, gäller i 15 minuter och
 förnyas automatiskt. Paus eller ändringar av tillåtna origins, gränser och
@@ -155,6 +187,16 @@ och reservationer lagras i PostgreSQL. Före ett svar reserveras token och efter
 svaret avräknas uppmätt användning en gång. Osäker användning efter avbrott
 förblir debiterad för dagen. Reservationen är en uppskattning för att avgöra
 om ett anrop kan starta, inte ett hårt tak för modellens svar.
+
+### Bakom en omvänd proxy [#behind-a-reverse-proxy]
+
+Gränserna per besökare bygger på besökarens IP-adress så som Eneo ser den.
+Bakom Traefik, Dokploy, nginx eller någon annan omvänd proxy är det proxyns
+adress, om inte backend får veta hur många proxyer som står framför den: sätt
+`TRUSTED_PROXY_COUNT` (och `TRUSTED_PROXY_HEADERS` om proxyn använder en annan
+rubrik än `X-Forwarded-For`) på backend. Utan det delar alla besökare på en
+och samma kvot, och hela webbplatsen stryps så snart de första besökarna har
+förbrukat tilldelningen per IP-adress.
 
 ### Personuppgifter och lagring [#personal-data-and-cookies]
 
