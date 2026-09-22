@@ -129,6 +129,14 @@ class SkillRemovalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     skill_ids: list[UUID] = Field(min_length=1, max_length=MAX_SKILL_REMOVAL_BATCH_SIZE)
+    detach_bindings: bool = Field(
+        default=False,
+        description=(
+            "Also delete every Assistant, App and Personal Chat binding of the "
+            "selected Skills in the same transaction. Without it, a bound Skill "
+            "refuses the whole batch."
+        ),
+    )
 
     @field_validator("skill_ids")
     @classmethod
@@ -138,10 +146,21 @@ class SkillRemovalRequest(BaseModel):
         return value
 
 
+class SkillDetachmentTotalsPublic(BaseModel):
+    """Distinct resources that lost a binding in one removal batch."""
+
+    assistant_count: int
+    app_count: int
+    personal_chat_count: int = Field(
+        description="Personal Chat policies that lost at least one selected Skill."
+    )
+
+
 class SkillRemovalPublic(BaseModel):
     removed_ids: list[UUID] = Field(
         description="Selected Skills confirmed removed, including previously removed Skills."
     )
+    detached: SkillDetachmentTotalsPublic
 
 
 class SkillUsageCountsPublic(BaseModel):

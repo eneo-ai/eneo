@@ -27,6 +27,8 @@ vi.mock("$app/navigation", () => ({
 import OrganizationSkillsPage from "./+page.svelte";
 import { formatSkillUsage } from "$lib/features/skills/skillUsage";
 
+const NOTHING_DETACHED = { assistant_count: 0, app_count: 0, personal_chat_count: 0 };
+
 function skill(
   id: string,
   publicationState: OrganizationSkillSummaryPublic["publication_state"],
@@ -69,7 +71,10 @@ describe("organisation Skill catalogue page", () => {
   test("removes an unused published skill after confirming retained history", async () => {
     const published = skill("published", "published");
     const unpublished = skill("unpublished", "unpublished");
-    const removeMany = vi.fn(async () => ({ removed_ids: [published.id] }));
+    const removeMany = vi.fn(async () => ({
+      removed_ids: [published.id],
+      detached: NOTHING_DETACHED
+    }));
     render(OrganizationSkillsPage, {
       data: {
         search: "",
@@ -97,7 +102,9 @@ describe("organisation Skill catalogue page", () => {
     await page
       .getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
       .click();
-    await vi.waitFor(() => expect(removeMany).toHaveBeenCalledWith({ skill_ids: [published.id] }));
+    await vi.waitFor(() =>
+      expect(removeMany).toHaveBeenCalledWith({ skill_ids: [published.id], detach_bindings: false })
+    );
     await expect
       .element(page.getByText(published.display_name, { exact: true }))
       .not.toBeInTheDocument();
@@ -149,11 +156,19 @@ describe("organisation Skill catalogue page", () => {
 
     await expect.element(page.getByText(m.eneo_error_9051())).toBeVisible();
     await expect.element(page.getByText(m.organization_skills_remove_new_binding())).toBeVisible();
+    // The binding the server found is now an explicit, pre-ticked choice.
     await expect
-      .element(
-        page.getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
-      )
-      .toBeDisabled();
+      .element(page.getByRole("checkbox", { name: m.organization_skills_remove_detach_label() }))
+      .toBeChecked();
+    await page
+      .getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
+      .click();
+    await vi.waitFor(() =>
+      expect(deleteSkill).toHaveBeenLastCalledWith({
+        skill_ids: [draft.id],
+        detach_bindings: true
+      })
+    );
     // The shared collision code this conflict used to travel under is generic,
     // but its localized copy is about AI model display names.
     await expect.element(page.getByText(m.eneo_error_9017())).not.toBeInTheDocument();
@@ -162,7 +177,7 @@ describe("organisation Skill catalogue page", () => {
       .toBeVisible();
   });
 
-  test("bulk removal requires excluding skills in use and preserves the reviewed selection", async () => {
+  test("bulk removal detaches skills in use by default and announces what was detached", async () => {
     const free = skill("free", "published");
     const used = {
       ...skill("used", "published"),
@@ -173,7 +188,63 @@ describe("organisation Skill catalogue page", () => {
         personal_chat_pinned: true
       }
     };
-    const removeMany = vi.fn(async () => ({ removed_ids: [free.id] }));
+    const removeMany = vi.fn(async () => ({
+      removed_ids: [free.id, used.id],
+      detached: { assistant_count: 2, app_count: 1, personal_chat_count: 1 }
+    }));
+    render(OrganizationSkillsPage, {
+      data: {
+        search: "",
+        removed: false,
+        page: { items: [free, used], count: 2, limit: 25, next_cursor: null },
+        eneo: { skills: { organization: { removeMany, list: vi.fn() } } }
+      } as never
+    });
+    await page
+      .getByRole("checkbox", { name: m.organization_skills_select_shown({ count: "2" }) })
+      .click();
+    await page.getByRole("button", { name: m.organization_skills_remove_selected() }).click();
+    await expect
+      .element(page.getByText(m.organization_skills_remove_blocked_title()))
+      .toBeVisible();
+    const detach = page.getByRole("checkbox", {
+      name: m.organization_skills_remove_detach_label()
+    });
+    await expect.element(detach).toBeChecked();
+    const confirm = page.getByRole("button", {
+      name: m.organization_skills_remove_confirm({ count: "2" }),
+      exact: true
+    });
+    await expect.element(confirm).toBeEnabled();
+    await confirm.click();
+    await vi.waitFor(() =>
+      expect(removeMany).toHaveBeenCalledWith({
+        skill_ids: [free.id, used.id],
+        detach_bindings: true
+      })
+    );
+    await expect.element(page.getByText(used.display_name)).not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          `${m.organization_skills_removed_detached_success({ count: "2", assistants: "2", apps: "1" })} ${m.organization_skills_removed_personal_chat_updated()}`
+        )
+      )
+      .toBeVisible();
+  });
+
+  test("unticking detach keeps the strict path and lets the admin exclude skills in use", async () => {
+    const free = skill("free", "published");
+    const used = {
+      ...skill("used", "published"),
+      usage: {
+        assistant_count: 2,
+        app_count: 1,
+        distinct_space_count: 2,
+        personal_chat_pinned: true
+      }
+    };
+    const removeMany = vi.fn(async () => ({ removed_ids: [free.id], detached: NOTHING_DETACHED }));
     render(OrganizationSkillsPage, {
       data: {
         search: "",
@@ -193,9 +264,7 @@ describe("organisation Skill catalogue page", () => {
       .getByRole("checkbox", { name: m.organization_skills_select_shown({ count: "2" }) })
       .click();
     await page.getByRole("button", { name: m.organization_skills_remove_selected() }).click();
-    await expect
-      .element(page.getByText(m.organization_skills_remove_blocked_title()))
-      .toBeVisible();
+    await page.getByRole("checkbox", { name: m.organization_skills_remove_detach_label() }).click();
     await expect
       .element(
         page.getByRole("button", {
@@ -211,7 +280,9 @@ describe("organisation Skill catalogue page", () => {
     await page
       .getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
       .click();
-    await vi.waitFor(() => expect(removeMany).toHaveBeenCalledWith({ skill_ids: [free.id] }));
+    await vi.waitFor(() =>
+      expect(removeMany).toHaveBeenCalledWith({ skill_ids: [free.id], detach_bindings: false })
+    );
     await expect.element(page.getByText(used.display_name)).toBeVisible();
     await expect.element(page.getByText(free.display_name)).not.toBeInTheDocument();
   });
@@ -372,7 +443,10 @@ describe("organisation Skill catalogue page", () => {
 
   test("keeps a deleted Skill removed when refreshing the page data fails", async () => {
     const draft = skill("draft", "draft");
-    const deleteSkill = vi.fn(async () => ({ removed_ids: [draft.id] }));
+    const deleteSkill = vi.fn(async () => ({
+      removed_ids: [draft.id],
+      detached: NOTHING_DETACHED
+    }));
     invalidate.mockRejectedValueOnce(new Error("Refresh failed"));
 
     render(OrganizationSkillsPage, {

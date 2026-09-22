@@ -37,6 +37,7 @@ from eneo.skills.presentation.skill_models import (
     PublishedSkillSummaryPagePublic,
     SkillAdoptionProjectionPagePublic,
     SkillCreateRequest,
+    SkillDetachmentTotalsPublic,
     SkillPublishRequest,
     SkillRemovalPublic,
     SkillRemovalRequest,
@@ -609,27 +610,50 @@ async def unpublish_organization_skill(
 @router.delete(
     "/organization/{skill_id}/",
     status_code=204,
-    description="Remove an unused organisation Skill while retaining its history.",
+    description=(
+        "Remove an organisation Skill while retaining its history. "
+        "With detach_bindings, its Assistant, App and Personal Chat bindings "
+        "are deleted in the same transaction."
+    ),
     responses=responses.get_responses([403, 404, 409]),
 )
 async def delete_organization_skill(
     skill_id: UUID,
     container: _ContainerWithUser,
+    detach_bindings: bool = False,
 ) -> None:
-    await container.organization_skill_service().delete(skill_id=skill_id)
+    await container.organization_skill_service().delete(
+        skill_id=skill_id, detach_bindings=detach_bindings
+    )
 
 
 @router.post(
     "/organization/remove/",
     response_model=SkillRemovalPublic,
-    description="Remove up to 100 unused organisation Skills atomically, retaining history.",
+    description=(
+        "Remove up to 100 organisation Skills atomically, retaining history. "
+        "With detach_bindings, their Assistant, App and Personal Chat bindings "
+        "are deleted in the same transaction; otherwise a bound Skill refuses "
+        "the whole batch."
+    ),
     responses=responses.get_responses([400, 403, 404, 409]),
 )
 async def remove_organization_skills(
     payload: SkillRemovalRequest,
     container: _ContainerWithUser,
 ) -> SkillRemovalPublic:
-    skills = await container.organization_skill_service().remove_many(
-        skill_ids=payload.skill_ids
+    outcomes = await container.organization_skill_service().remove_many(
+        skill_ids=payload.skill_ids, detach_bindings=payload.detach_bindings
     )
-    return SkillRemovalPublic(removed_ids=[skill.id for skill in skills])
+    # One Assistant can hold several selected Skills; count resources, not rows.
+    assistants = {id for outcome in outcomes for id in outcome.detached.assistant_ids}
+    apps = {id for outcome in outcomes for id in outcome.detached.app_ids}
+    policies = {id for outcome in outcomes for id in outcome.detached.policy_ids}
+    return SkillRemovalPublic(
+        removed_ids=[outcome.skill.id for outcome in outcomes],
+        detached=SkillDetachmentTotalsPublic(
+            assistant_count=len(assistants),
+            app_count=len(apps),
+            personal_chat_count=len(policies),
+        ),
+    )

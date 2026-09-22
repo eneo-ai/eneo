@@ -217,7 +217,10 @@ describe("organisation Skill detail page", () => {
 
   test("removal keeps the current instructions and history read-only even when refreshing fails", async () => {
     const data = publicationLifecycleData();
-    const removeMany = vi.fn(async () => ({ removed_ids: [data.skill.id] }));
+    const removeMany = vi.fn(async () => ({
+      removed_ids: [data.skill.id],
+      detached: { assistant_count: 0, app_count: 0, personal_chat_count: 0 }
+    }));
     const renderedData = {
       ...data,
       eneo: {
@@ -236,7 +239,12 @@ describe("organisation Skill detail page", () => {
       .getByRole("alertdialog")
       .getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
       .click();
-    await vi.waitFor(() => expect(removeMany).toHaveBeenCalledWith({ skill_ids: [data.skill.id] }));
+    await vi.waitFor(() =>
+      expect(removeMany).toHaveBeenCalledWith({
+        skill_ids: [data.skill.id],
+        detach_bindings: false
+      })
+    );
     await expect.element(page.getByText(m.organization_skills_removed_description())).toBeVisible();
     await expect
       .element(page.getByRole("button", { name: m.save(), exact: true }))

@@ -636,3 +636,75 @@ async def test_bulk_removal_reports_a_live_database_lock_as_retryable_conflict(
     )
     assert retry.status_code == 200, retry.text
     assert retry.json()["removed_ids"] == [skill["id"]]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_detaching_removal_removes_bound_skill_and_reports_totals(
+    client, admin_token, db_container
+):
+    bound = await _create_organization_skill(
+        client, token=admin_token, slug="detach-me"
+    )
+    published = await client.post(
+        f"/api/v1/skills/organization/{bound['id']}/publish/",
+        json={"expected_revision_id": bound["current_revision"]["id"]},
+        headers=_auth(admin_token),
+    )
+    assert published.status_code == 200, published.text
+    space_id = await _create_space(client, token=admin_token)
+    assistant_id = await _create_assistant(client, token=admin_token, space_id=space_id)
+    attach = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={
+            "skill_bindings": [
+                {
+                    "skill_id": bound["id"],
+                    "skill_revision_id": bound["current_revision"]["id"],
+                }
+            ]
+        },
+        headers=_auth(admin_token),
+    )
+    assert attach.status_code == 200, attach.text
+
+    removed = await client.post(
+        "/api/v1/skills/organization/remove/",
+        json={"skill_ids": [bound["id"]], "detach_bindings": True},
+        headers=_auth(admin_token),
+    )
+    assert removed.status_code == 200, removed.text
+    assert removed.json() == {
+        "removed_ids": [bound["id"]],
+        "detached": {"assistant_count": 1, "app_count": 0, "personal_chat_count": 0},
+    }
+    async with db_container() as container:
+        assert (
+            await container.skill_repo().list_assistant_bindings(
+                assistant_id=assistant_id
+            )
+            == []
+        )
+        audit = await container.session().scalar(
+            sa.select(AuditLog).where(
+                AuditLog.entity_id == bound["id"],
+                AuditLog.action == ActionType.SKILL_DELETED.value,
+            )
+        )
+        assert audit is not None
+        assert audit.log_metadata["extra"]["detached"]["assistant_ids"] == [
+            assistant_id
+        ]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_single_removal_accepts_the_detach_query_parameter(client, admin_token):
+    skill = await _create_organization_skill(
+        client, token=admin_token, slug="detach-one"
+    )
+    response = await client.delete(
+        f"/api/v1/skills/organization/{skill['id']}/?detach_bindings=true",
+        headers=_auth(admin_token),
+    )
+    assert response.status_code == 204, response.text

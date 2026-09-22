@@ -31,9 +31,11 @@ from eneo.skills.domain.skill import (
     SkillAdoptionRevisionCount,
     SkillAdoptionSummary,
     SkillBlockedForBindingError,
+    SkillDetachment,
     SkillHasBindingsError,
     SkillNotPublishedForBindingError,
     SkillPublicationChange,
+    SkillRemovalOutcome,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionConflictError,
@@ -576,6 +578,65 @@ async def test_bound_skill_cannot_be_removed():
 
     with pytest.raises(SkillHasBindingsError):
         await service.delete(skill_id=uuid4())
+
+
+async def test_detaching_removal_forwards_the_flag_and_audits_every_detached_resource():
+    organization = _organization()
+    skill = SimpleNamespace(
+        id=uuid4(),
+        slug="payroll",
+        display_name="Payroll",
+        current_revision_id=uuid4(),
+        current_revision_number=2,
+        content_digest="a" * 64,
+        published_revision_number=1,
+        removed_at=None,
+    )
+    assistant_id, app_id, policy_id = uuid4(), uuid4(), uuid4()
+    repo = AsyncMock()
+    repo.remove_organization_many.return_value = [
+        SkillRemovalOutcome(
+            skill=skill,
+            detached=SkillDetachment(
+                assistant_ids=(assistant_id,),
+                app_ids=(app_id,),
+                policy_ids=(policy_id,),
+            ),
+        )
+    ]
+    service = _service(
+        organization=organization, permissions={Permission.ADMIN}, repo=repo
+    )
+
+    outcomes = await service.remove_many(skill_ids=[skill.id], detach_bindings=True)
+
+    assert outcomes == repo.remove_organization_many.return_value
+    repo.remove_organization_many.assert_awaited_once_with(
+        tenant_id=organization.tenant_id, skill_ids=[skill.id], detach_bindings=True
+    )
+    service.audit_service.log.assert_awaited_once()
+    metadata = service.audit_service.log.await_args.kwargs["metadata"]
+    assert metadata["detached"] == {
+        "assistant_count": 1,
+        "app_count": 1,
+        "personal_chat_count": 1,
+        "assistant_ids": [str(assistant_id)],
+        "app_ids": [str(app_id)],
+        "personal_chat_policy_ids": [str(policy_id)],
+    }
+
+
+async def test_removal_defaults_to_refusing_bound_skills():
+    organization = _organization()
+    repo = AsyncMock()
+    repo.remove_organization_many.return_value = []
+    service = _service(
+        organization=organization, permissions={Permission.ADMIN}, repo=repo
+    )
+
+    await service.remove_many(skill_ids=[uuid4()])
+
+    assert repo.remove_organization_many.await_args.kwargs["detach_bindings"] is False
 
 
 async def test_missing_tenant_skill_is_not_exposed():

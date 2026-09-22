@@ -6,7 +6,8 @@
     type OrganizationSkillPublic,
     type SkillAdoptionProjectionPagePublic,
     type SkillExecutionBlockState,
-    type SkillRevisionRestorePublic
+    type SkillRevisionRestorePublic,
+    type SkillRemovalResult
   } from "@eneo/eneo-js";
   import { beforeNavigate, invalidate } from "$app/navigation";
   import { Page } from "$lib/components/layout";
@@ -22,6 +23,7 @@
   import SkillRevisionHistory from "$lib/features/skills/SkillRevisionHistory.svelte";
   import SkillPreview from "$lib/features/skills/SkillPreview.svelte";
   import SkillRemovalDialog from "$lib/features/skills/SkillRemovalDialog.svelte";
+  import { removalAnnouncement } from "$lib/features/skills/skillUsage";
   import { publishedSkillPreview } from "$lib/features/skills/skillBindingCatalog";
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
   import { getErrorMessage, SKILL_EXECUTION_BLOCK_CONFLICT } from "$lib/core/errors";
@@ -52,6 +54,7 @@
   let formDirty = $state(false);
   let removalOpen = $state(false);
   let removedAtOverride = $state<string | null>(null);
+  let removalStatus = $state("");
   const removedAt = $derived(data.skill.removed_at ?? removedAtOverride);
   let publicationAction = $state<PublicationAction | null>(null);
   let publicationSaving = $state(false);
@@ -521,9 +524,10 @@
     executionReason = "";
   }
 
-  async function removedSkill(ids: string[]) {
-    if (!ids.includes(data.skill.id) || !componentActive) return;
+  async function removedSkill(result: SkillRemovalResult) {
+    if (!result.removed_ids.includes(data.skill.id) || !componentActive) return;
     removedAtOverride = new Date().toISOString();
+    removalStatus = removalAnnouncement(result);
     await refreshOrganizationSkills(data.skill.id);
   }
 
@@ -803,7 +807,12 @@
               time: formatExecutionDate(removedAt)
             })}</Alert.Title
           >
-          <Alert.Description>{m.organization_skills_removed_description()}</Alert.Description>
+          <Alert.Description>
+            {m.organization_skills_removed_description()}
+            {#if removalStatus}
+              <span class="mt-1 block" role="status">{removalStatus}</span>
+            {/if}
+          </Alert.Description>
         </Alert.Root>
         <SkillPreview
           preview={{
@@ -1133,7 +1142,7 @@
 {#if removalOpen}
   <SkillRemovalDialog
     skills={[data.skill]}
-    onRemove={(ids) => data.eneo.skills.organization.removeMany({ skill_ids: ids })}
+    onRemove={(request) => data.eneo.skills.organization.removeMany(request)}
     onRemoved={removedSkill}
     onClose={() => (removalOpen = false)}
     onExclude={() => (removalOpen = false)}

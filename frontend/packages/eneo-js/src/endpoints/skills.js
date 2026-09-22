@@ -210,14 +210,16 @@ export function initSkills(client) {
 
       /**
        * Remove a bounded selection atomically while retaining version history.
+       * With `detach_bindings`, every Assistant, App and Personal Chat binding of
+       * the selected Skills is deleted in the same transaction.
        * @param {import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/remove/">} params
        * @returns {Promise<import('../types/resources').SkillRemovalResult>}
        * @throws {EneoError}
        */
-      removeMany: async ({ skill_ids }) => {
+      removeMany: async ({ skill_ids, detach_bindings = false }) => {
         return await client.fetch("/api/v1/skills/organization/remove/", {
           method: "post",
-          requestBody: { "application/json": { skill_ids } }
+          requestBody: { "application/json": { skill_ids, detach_bindings } }
         });
       },
 

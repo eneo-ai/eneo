@@ -475,6 +475,27 @@ class SkillSummary:
 
 
 @dataclass(frozen=True)
+class SkillDetachment:
+    """Bindings deleted together with a Skill; empty when nothing was detached."""
+
+    assistant_ids: tuple[UUID, ...] = ()
+    app_ids: tuple[UUID, ...] = ()
+    policy_ids: tuple[UUID, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.assistant_ids or self.app_ids or self.policy_ids)
+
+
+@dataclass(frozen=True)
+class SkillRemovalOutcome:
+    """One reviewed Skill after a removal batch, with what was detached for it."""
+
+    skill: SkillSummary
+    detached: SkillDetachment = SkillDetachment()
+
+
+@dataclass(frozen=True)
 class OrganizationSkillSummaryProjection:
     skill: SkillSummary
     execution_blocked: bool

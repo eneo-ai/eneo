@@ -1,12 +1,14 @@
 from collections.abc import Sequence
 from dataclasses import replace
-from typing import TypeVar
+from typing import Any, TypeVar
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
+from sqlalchemy import Result
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import aliased
+from sqlalchemy.sql import Executable
 from sqlalchemy.sql.elements import ColumnElement
 
 from eneo.assistants.assistant_repo import AssistantRepository
@@ -59,6 +61,7 @@ from eneo.skills.domain.skill import (
     SkillBindingSource,
     SkillBlockedForBindingError,
     SkillCatalogEntry,
+    SkillDetachment,
     SkillExecutionBlock,
     SkillExecutionBlockChange,
     SkillExecutionBlockConflictError,
@@ -67,6 +70,7 @@ from eneo.skills.domain.skill import (
     SkillNotPublishedForBindingError,
     SkillPublicationChange,
     SkillRemovalBusyError,
+    SkillRemovalOutcome,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionConflictError,
@@ -2096,61 +2100,19 @@ class SkillRepoImpl:
         skill = self._to_skill(row[0], row[1])
         return await self._delete_locked_skill(skill=skill)
 
-    async def remove_organization_many(
-        self, *, tenant_id: UUID, skill_ids: Sequence[UUID]
-    ) -> list[SkillSummary] | None:
-        """Remove the entire reviewed batch, retaining revisions and audit history.
-
-        NOWAIT avoids lock cycles with binding saves, which resolve retained and
-        new references in separate steps. The request transaction rolls back on
-        any refusal; callers may retry after the concurrent operation finishes.
-        """
+    async def _execute_nowait(self, statement: Executable) -> Result[Any]:
+        """Run a NOWAIT lock statement, mapping lock contention to a retryable refusal."""
         try:
-            rows = await self.session.execute(
-                self._summary_query(published=False)
-                .where(*self._organization_scope(tenant_id), Skills.id.in_(skill_ids))
-                .order_by(Skills.id)
-                .with_for_update(of=Skills, nowait=True)
-            )
+            return await self.session.execute(statement)
         except DBAPIError as error:
             if _is_lock_not_available(error):
                 raise SkillRemovalBusyError from error
             raise
-        summaries = [
-            self._to_summary(
-                skill=skill,
-                revision_id=revision_id,
-                display_name=name,
-                description=description,
-                content_digest=digest,
-            )
-            for skill, revision_id, name, description, digest in rows.tuples()
-        ]
-        if len(summaries) != len(set(skill_ids)):
-            return None
-        current_ids = [skill.id for skill in summaries if skill.removed_at is None]
-        if not current_ids:
-            return summaries
 
-        bound = await self.session.scalars(
-            sa.union(
-                *[
-                    sa.select(binding.skill_id).where(binding.skill_id.in_(current_ids))
-                    for binding in (
-                        AssistantSkillBindings,
-                        AppSkillBindings,
-                        GovernancePolicySkillBindings,
-                    )
-                ]
-            )
-        )
-        bound_ids = list(bound)
-        if bound_ids:
-            raise SkillHasBindingsError(skill_ids=bound_ids)
-
+    async def _refuse_active_app_runs(self, skill_ids: Sequence[UUID]) -> None:
         active_runs = await self.session.scalars(
             sa.select(Skills.id).where(
-                Skills.id.in_(current_ids),
+                Skills.id.in_(skill_ids),
                 sa.exists()
                 .where(
                     AppRuns.job_id == Jobs.id,
@@ -2170,17 +2132,150 @@ class SkillRepoImpl:
         if active_run_ids:
             raise SkillHasActiveAppRunsError(skill_ids=active_run_ids)
 
-        await self.session.execute(
-            sa.update(Skills)
-            .where(Skills.id.in_(current_ids))
-            .values(
-                removed_at=sa.func.now(),
-                is_active=False,
-                published_revision_number=None,
-                updated_at=sa.func.now(),
-            )
+    async def _detach_skill_bindings(
+        self, *, tenant_id: UUID, skill_ids: Sequence[UUID]
+    ) -> dict[UUID, SkillDetachment]:
+        """Delete every Assistant, App and Personal Chat binding of the given Skills.
+
+        The caller already holds ``FOR UPDATE`` on the Skill rows. Binding saves
+        lock their parent first and then share-lock the Skill rows, so each
+        affected parent is locked here with NOWAIT before any delete: a save
+        that already holds its parent fails us fast (retryable 409) instead of
+        waiting on our Skill lock while we wait on its parent. Parents are
+        touched once so their row versions invalidate staged pin updates.
+        """
+        detached: dict[UUID, dict[str, list[UUID]]] = {
+            skill_id: {"assistant_ids": [], "app_ids": [], "policy_ids": []}
+            for skill_id in skill_ids
+        }
+        kinds = (
+            (
+                "assistant_ids",
+                Assistants,
+                AssistantSkillBindings,
+                AssistantSkillBindings.assistant_id,
+            ),
+            ("app_ids", Apps, AppSkillBindings, AppSkillBindings.app_id),
+            (
+                "policy_ids",
+                GovernancePolicies,
+                GovernancePolicySkillBindings,
+                GovernancePolicySkillBindings.policy_id,
+            ),
         )
-        return summaries
+        for key, parent, binding, parent_column in kinds:
+            scope = (binding.tenant_id == tenant_id, binding.skill_id.in_(skill_ids))
+            parent_ids = list(
+                await self.session.scalars(
+                    sa.select(parent_column).where(*scope).distinct()
+                )
+            )
+            if not parent_ids:
+                continue
+            await self._execute_nowait(
+                sa.select(parent.id)
+                .where(parent.id.in_(parent_ids))
+                .with_for_update(nowait=True)
+            )
+            deleted = await self.session.execute(
+                sa.delete(binding)
+                .where(*scope)
+                .returning(binding.skill_id, parent_column)
+            )
+            for skill_id, parent_id in deleted.tuples():
+                detached[skill_id][key].append(parent_id)
+            await self.session.execute(
+                sa.update(parent)
+                .where(parent.id.in_(parent_ids))
+                .values(updated_at=sa.func.now())
+            )
+        return {
+            skill_id: SkillDetachment(
+                assistant_ids=tuple(ids["assistant_ids"]),
+                app_ids=tuple(ids["app_ids"]),
+                policy_ids=tuple(ids["policy_ids"]),
+            )
+            for skill_id, ids in detached.items()
+        }
+
+    async def remove_organization_many(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_ids: Sequence[UUID],
+        detach_bindings: bool = False,
+    ) -> list[SkillRemovalOutcome] | None:
+        """Remove the entire reviewed batch, retaining revisions and audit history.
+
+        NOWAIT avoids lock cycles with binding saves, which resolve retained and
+        new references in separate steps. With ``detach_bindings`` the batch
+        also deletes every binding of the selected Skills in the same
+        transaction; without it, a bound Skill refuses the whole batch. Queued or
+        running App jobs refuse either way. The request transaction rolls back
+        on any refusal; callers may retry after the concurrent operation finishes.
+        """
+        rows = await self._execute_nowait(
+            self._summary_query(published=False)
+            .where(*self._organization_scope(tenant_id), Skills.id.in_(skill_ids))
+            .order_by(Skills.id)
+            .with_for_update(of=Skills, nowait=True)
+        )
+        summaries = [
+            self._to_summary(
+                skill=skill,
+                revision_id=revision_id,
+                display_name=name,
+                description=description,
+                content_digest=digest,
+            )
+            for skill, revision_id, name, description, digest in rows.tuples()
+        ]
+        if len(summaries) != len(set(skill_ids)):
+            return None
+        current_ids = [skill.id for skill in summaries if skill.removed_at is None]
+        detached: dict[UUID, SkillDetachment] = {}
+        if current_ids:
+            if detach_bindings:
+                await self._refuse_active_app_runs(current_ids)
+                detached = await self._detach_skill_bindings(
+                    tenant_id=tenant_id, skill_ids=current_ids
+                )
+            else:
+                bound = await self.session.scalars(
+                    sa.union(
+                        *[
+                            sa.select(binding.skill_id).where(
+                                binding.skill_id.in_(current_ids)
+                            )
+                            for binding in (
+                                AssistantSkillBindings,
+                                AppSkillBindings,
+                                GovernancePolicySkillBindings,
+                            )
+                        ]
+                    )
+                )
+                bound_ids = list(bound)
+                if bound_ids:
+                    raise SkillHasBindingsError(skill_ids=bound_ids)
+                await self._refuse_active_app_runs(current_ids)
+
+            await self.session.execute(
+                sa.update(Skills)
+                .where(Skills.id.in_(current_ids))
+                .values(
+                    removed_at=sa.func.now(),
+                    is_active=False,
+                    published_revision_number=None,
+                    updated_at=sa.func.now(),
+                )
+            )
+        return [
+            SkillRemovalOutcome(
+                skill=skill, detached=detached.get(skill.id, SkillDetachment())
+            )
+            for skill in summaries
+        ]
 
     async def get_active_execution_block(
         self,
@@ -2842,7 +2937,7 @@ class SkillRepoImpl:
     ) -> list[ResolvedSkillBinding]:
         rows = await self.session.execute(
             self._resolved_query(AppSkillBindings)
-            .where(AppSkillBindings.app_id == app_id)
+            .where(AppSkillBindings.app_id == app_id, Skills.removed_at.is_(None))
             .order_by(AppSkillBindings.position)
             .with_for_update(read=True, of=Skills)
         )

@@ -2,6 +2,7 @@
   import {
     EneoError,
     type OrganizationSkillSummaryPublic,
+    type SkillRemovalRequest,
     type SkillRemovalResult
   } from "@eneo/eneo-js";
   import { resolve } from "$app/paths";
@@ -9,6 +10,8 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
   import { getErrorMessage, SKILL_STILL_ATTACHED } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { formatSkillUsage } from "./skillUsage";
@@ -24,8 +27,8 @@
     onExclude
   }: {
     skills: Target[];
-    onRemove: (ids: string[]) => Promise<SkillRemovalResult>;
-    onRemoved: (ids: string[]) => Promise<void>;
+    onRemove: (request: SkillRemovalRequest) => Promise<SkillRemovalResult>;
+    onRemoved: (result: SkillRemovalResult) => Promise<void>;
     onClose: () => void;
     onExclude: (ids: string[]) => void;
   } = $props();
@@ -33,6 +36,10 @@
   let saving = $state(false);
   let error = $state<string | null>(null);
   let serverBlockers = $state<string[]>([]);
+  // On by default: an admin removing a Skill nearly always wants it gone
+  // everywhere, and cannot edit other users' personal spaces by hand.
+  let detachBindings = $state(true);
+  const detachCheckboxId = "skill-removal-detach";
   let restoreFocus = true;
   const previousFocus = typeof document === "undefined" ? null : document.activeElement;
   const focusFallback =
@@ -56,15 +63,22 @@
     )
   );
   const isBlocked = $derived((skill: Target) => blockers.some((item) => item.id === skill.id));
+  const personalChatAffected = $derived(blockers.some((skill) => skill.usage.personal_chat_pinned));
+  const canRemove = $derived(skills.length > 0 && (blockers.length === 0 || detachBindings));
 
   async function remove(event: MouseEvent) {
     event.preventDefault();
-    if (saving || blockers.length > 0 || skills.length === 0) return;
+    if (saving || !canRemove) return;
     saving = true;
     error = null;
     let result: SkillRemovalResult;
     try {
-      result = await onRemove(skills.map((skill) => skill.id));
+      // Only authorise detaching bindings the admin has seen listed; a
+      // binding the server discovers later surfaces here first (9051).
+      result = await onRemove({
+        skill_ids: skills.map((skill) => skill.id),
+        detach_bindings: blockers.length > 0 && detachBindings
+      });
     } catch (cause) {
       error = getErrorMessage(cause, m.organization_skills_remove_error());
       // App-run conflicts remain retryable after the job finishes; only bindings
@@ -80,7 +94,7 @@
     }
     saving = false;
     onClose();
-    await onRemoved(result.removed_ids);
+    await onRemoved(result);
   }
 
   function excludeBlockers() {
@@ -153,8 +167,27 @@
         </Alert.Title>
         <Alert.Description>
           {m.organization_skills_remove_blocked_description()}
-          {#if blockers.length < skills.length}
-            <div class="mt-2">
+          <Field.Field orientation="horizontal" class="mt-3">
+            <Checkbox
+              id={detachCheckboxId}
+              bind:checked={detachBindings}
+              disabled={saving}
+              aria-describedby={`${detachCheckboxId}-description`}
+            />
+            <Field.Content>
+              <Field.Label for={detachCheckboxId} class="text-foreground">
+                {m.organization_skills_remove_detach_label()}
+              </Field.Label>
+              <Field.Description id={`${detachCheckboxId}-description`}>
+                {m.organization_skills_remove_detach_description()}
+                {#if personalChatAffected}
+                  {m.organization_skills_usage_personal_chat()}.
+                {/if}
+              </Field.Description>
+            </Field.Content>
+          </Field.Field>
+          {#if !detachBindings && blockers.length < skills.length}
+            <div class="mt-3">
               <Button variant="outline" size="sm" onclick={excludeBlockers}>
                 {m.organization_skills_remove_exclude_blocked({ count: String(blockers.length) })}
               </Button>
@@ -171,11 +204,7 @@
     {/if}
     <AlertDialog.Footer>
       <AlertDialog.Cancel disabled={saving}>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action
-        variant="destructive"
-        disabled={saving || blockers.length > 0}
-        onclick={remove}
-      >
+      <AlertDialog.Action variant="destructive" disabled={saving || !canRemove} onclick={remove}>
         {saving
           ? m.organization_skills_removing()
           : skills.length === 1

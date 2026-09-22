@@ -1,4 +1,4 @@
-import type { SkillUsageCounts } from "@eneo/eneo-js";
+import type { SkillRemovalResult, SkillUsageCounts } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
 /** Whether any Assistant, App or Personal Chat still references the Skill. */
@@ -30,4 +30,21 @@ export function formatSkillUsage(usage: SkillUsageCounts): string | null {
       ? m.organization_skills_usage_spaces(count(1))
       : m.organization_skills_usage_spaces_plural(count(usage.distinct_space_count))
   ].join(" · ");
+}
+
+/** Status line after a removal batch, naming what was detached when anything was. */
+export function removalAnnouncement(result: SkillRemovalResult): string {
+  const count = String(result.removed_ids.length);
+  const { assistant_count, app_count, personal_chat_count } = result.detached;
+  const base =
+    assistant_count > 0 || app_count > 0
+      ? m.organization_skills_removed_detached_success({
+          count,
+          assistants: String(assistant_count),
+          apps: String(app_count)
+        })
+      : m.organization_skills_removed_success({ count });
+  return personal_chat_count > 0
+    ? `${base} ${m.organization_skills_removed_personal_chat_updated()}`
+    : base;
 }

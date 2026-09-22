@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { OrganizationSkillSummaryPublic } from "@eneo/eneo-js";
+  import type { OrganizationSkillSummaryPublic, SkillRemovalResult } from "@eneo/eneo-js";
   import { invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { Page } from "$lib/components/layout";
@@ -10,7 +10,7 @@
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import SkillRemovalDialog from "$lib/features/skills/SkillRemovalDialog.svelte";
-  import { formatSkillUsage } from "$lib/features/skills/skillUsage";
+  import { formatSkillUsage, removalAnnouncement } from "$lib/features/skills/skillUsage";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -125,10 +125,11 @@
     }
   }
 
-  async function removedSkills(ids: string[]) {
+  async function removedSkills(result: SkillRemovalResult) {
+    const ids = result.removed_ids;
     if (!data.removed) items = items.filter((skill) => !ids.includes(skill.id));
     selectedIds = [];
-    announcement = m.organization_skills_removed_success({ count: String(ids.length) });
+    announcement = removalAnnouncement(result);
     await refreshOrganizationSkills();
   }
 
@@ -492,7 +493,7 @@
 {#if removalTargets.length > 0}
   <SkillRemovalDialog
     skills={removalTargets}
-    onRemove={(skill_ids) => data.eneo.skills.organization.removeMany({ skill_ids })}
+    onRemove={(request) => data.eneo.skills.organization.removeMany(request)}
     onRemoved={removedSkills}
     onClose={() => (removalTargets = [])}
     onExclude={(ids) => {

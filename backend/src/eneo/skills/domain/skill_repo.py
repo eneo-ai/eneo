@@ -21,6 +21,7 @@ from eneo.skills.domain.skill import (
     SkillExecutionBlock,
     SkillExecutionBlockChange,
     SkillPublicationChange,
+    SkillRemovalOutcome,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionSummary,
@@ -81,8 +82,12 @@ class SkillRepo(Protocol):
     ) -> dict[UUID, SkillUsageCounts]: ...
 
     async def remove_organization_many(
-        self, *, tenant_id: UUID, skill_ids: Sequence[UUID]
-    ) -> list[SkillSummary] | None: ...
+        self,
+        *,
+        tenant_id: UUID,
+        skill_ids: Sequence[UUID],
+        detach_bindings: bool = False,
+    ) -> list[SkillRemovalOutcome] | None: ...
 
     async def get_organization_for_tenant(
         self,

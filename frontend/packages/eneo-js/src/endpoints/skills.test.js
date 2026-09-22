@@ -570,7 +570,10 @@ test("Assistant binding list and configuration preserve their independent contra
 
 test("organization removal sends one bounded batch and returns removed IDs", async () => {
   const calls = [];
-  const result = { removed_ids: ["skill-1", "skill-2"] };
+  const result = {
+    removed_ids: ["skill-1", "skill-2"],
+    detached: { assistant_count: 0, app_count: 0, personal_chat_count: 0 }
+  };
   const skills = initSkills({
     fetch: async (endpoint, request) => {
       calls.push({ endpoint, request });
@@ -578,12 +581,27 @@ test("organization removal sends one bounded batch and returns removed IDs", asy
     }
   });
   assert.equal(await skills.organization.removeMany({ skill_ids: result.removed_ids }), result);
+  assert.equal(
+    await skills.organization.removeMany({ skill_ids: result.removed_ids, detach_bindings: true }),
+    result
+  );
   assert.deepEqual(calls, [
     {
       endpoint: "/api/v1/skills/organization/remove/",
       request: {
         method: "post",
-        requestBody: { "application/json": { skill_ids: result.removed_ids } }
+        requestBody: {
+          "application/json": { skill_ids: result.removed_ids, detach_bindings: false }
+        }
+      }
+    },
+    {
+      endpoint: "/api/v1/skills/organization/remove/",
+      request: {
+        method: "post",
+        requestBody: {
+          "application/json": { skill_ids: result.removed_ids, detach_bindings: true }
+        }
       }
     }
   ]);

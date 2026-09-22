@@ -44,13 +44,13 @@ from eneo.skills.domain.skill import (
     SkillBlockedForBindingError,
     SkillNotPublishedForBindingError,
     SkillPublicationChange,
+    SkillRemovalOutcome,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionConflictError,
     SkillRevisionPage,
     SkillRevisionRestore,
     SkillRuntimeResolution,
-    SkillSummary,
     SkillUsageCounts,
     parse_skill_revision_cursor,
     validate_skill_slug,
@@ -1015,24 +1015,36 @@ class OrganizationSkillService:
             )
         return outcome
 
-    async def delete(self, *, skill_id: UUID) -> SkillSummary:
-        return (await self.remove_many(skill_ids=[skill_id]))[0]
+    async def delete(
+        self, *, skill_id: UUID, detach_bindings: bool = False
+    ) -> SkillRemovalOutcome:
+        return (
+            await self.remove_many(
+                skill_ids=[skill_id], detach_bindings=detach_bindings
+            )
+        )[0]
 
-    async def remove_many(self, *, skill_ids: list[UUID]) -> list[SkillSummary]:
+    async def remove_many(
+        self, *, skill_ids: list[UUID], detach_bindings: bool = False
+    ) -> list[SkillRemovalOutcome]:
         self._require_admin()
         valid_size = 1 <= len(skill_ids) <= MAX_SKILL_REMOVAL_BATCH_SIZE
         if not valid_size or len(set(skill_ids)) != len(skill_ids):
             raise BadRequestException(
                 f"Select between 1 and {MAX_SKILL_REMOVAL_BATCH_SIZE} distinct Skills"
             )
-        skills = await self.repo.remove_organization_many(
-            tenant_id=self.user.tenant_id, skill_ids=skill_ids
+        outcomes = await self.repo.remove_organization_many(
+            tenant_id=self.user.tenant_id,
+            skill_ids=skill_ids,
+            detach_bindings=detach_bindings,
         )
-        if skills is None:
+        if outcomes is None:
             raise NotFoundException()
-        for skill in skills:
+        for outcome in outcomes:
+            skill = outcome.skill
             if skill.removed_at is not None:
                 continue
+            detached = outcome.detached
             # Write with the removal transaction, so a failed batch cannot
             # leave successful deletion events behind in the audit queue.
             await self.audit_service.log(
@@ -1053,7 +1065,19 @@ class OrganizationSkillService:
                         "content_digest": skill.content_digest,
                         "published_revision_number": skill.published_revision_number,
                         "history_retained": True,
+                        # Every resource this removal changed, so the trail
+                        # answers "what lost this Skill?" without a join.
+                        "detached": {
+                            "assistant_count": len(detached.assistant_ids),
+                            "app_count": len(detached.app_ids),
+                            "personal_chat_count": len(detached.policy_ids),
+                            "assistant_ids": [str(id) for id in detached.assistant_ids],
+                            "app_ids": [str(id) for id in detached.app_ids],
+                            "personal_chat_policy_ids": [
+                                str(id) for id in detached.policy_ids
+                            ],
+                        },
                     },
                 ),
             )
-        return skills
+        return outcomes

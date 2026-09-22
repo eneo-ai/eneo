@@ -6629,7 +6629,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Organization Skill
-     * @description Remove an unused organisation Skill while retaining its history.
+     * @description Remove an organisation Skill while retaining its history. With detach_bindings, its Assistant, App and Personal Chat bindings are deleted in the same transaction.
      */
     delete: operations["delete_organization_skill_api_v1_skills_organization__skill_id___delete"];
     options?: never;
@@ -6832,7 +6832,7 @@ export interface paths {
     put?: never;
     /**
      * Remove Organization Skills
-     * @description Remove up to 100 unused organisation Skills atomically, retaining history.
+     * @description Remove up to 100 organisation Skills atomically, retaining history. With detach_bindings, their Assistant, App and Personal Chat bindings are deleted in the same transaction; otherwise a bound Skill refuses the whole batch.
      */
     post: operations["remove_organization_skills_api_v1_skills_organization_remove__post"];
     delete?: never;
@@ -18523,6 +18523,21 @@ export interface components {
       /** Slug */
       slug: string;
     };
+    /**
+     * SkillDetachmentTotalsPublic
+     * @description Distinct resources that lost a binding in one removal batch.
+     */
+    SkillDetachmentTotalsPublic: {
+      /** Assistant Count */
+      assistant_count: number;
+      /** App Count */
+      app_count: number;
+      /**
+       * Personal Chat Count
+       * @description Personal Chat policies that lost at least one selected Skill.
+       */
+      personal_chat_count: number;
+    };
     /** SkillExecutionBlockPublic */
     SkillExecutionBlockPublic: {
       /**
@@ -18657,11 +18672,18 @@ export interface components {
        * @description Selected Skills confirmed removed, including previously removed Skills.
        */
       removed_ids: string[];
+      detached: components["schemas"]["SkillDetachmentTotalsPublic"];
     };
     /** SkillRemovalRequest */
     SkillRemovalRequest: {
       /** Skill Ids */
       skill_ids: string[];
+      /**
+       * Detach Bindings
+       * @description Also delete every Assistant, App and Personal Chat binding of the selected Skills in the same transaction. Without it, a bound Skill refuses the whole batch.
+       * @default false
+       */
+      detach_bindings?: boolean;
     };
     /** SkillRevisionCreateRequest */
     SkillRevisionCreateRequest: {
@@ -44614,7 +44636,9 @@ export interface operations {
   };
   delete_organization_skill_api_v1_skills_organization__skill_id___delete: {
     parameters: {
-      query?: never;
+      query?: {
+        detach_bindings?: boolean;
+      };
       header?: never;
       path: {
         skill_id: string;

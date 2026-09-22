@@ -371,11 +371,19 @@ select up to 100 Skills and choose **Remove selected**. Review the named Skills
 in the confirmation before continuing. A selected Skill can be a draft,
 published, unpublished, or execution-blocked.
 
-Remove all bindings from Assistants, Apps, and Personal Chat first, then wait for
-any queued or running App jobs to finish. If any selected Skill is still in use,
-the whole selection stays unchanged. The confirmation lets you exclude Skills
-in use and review the remaining selection. A concurrent change can also refuse
-the request; review the message before retrying.
+If a selected Skill is still used by Assistants, Apps, or Personal Chat, the
+confirmation says so and offers to remove those bindings in the same step. The
+option is on by default: the Skill and every binding are removed together, in
+one transaction, and the audit event for the Skill lists each Assistant, App,
+and Personal Chat policy that lost it. Assistants and Apps continue without the
+Skill; a Personal Chat change applies to everyone in the organisation. Untick
+the option to keep today's stricter behaviour, where the whole selection stays
+unchanged while any Skill is in use and you can exclude the Skills in use
+instead.
+
+Queued or running App jobs still refuse removal, with or without the option,
+so a job never loses its Skill mid-run. A concurrent change can also refuse the
+request; review the message before retrying.
 
 Removed Skills leave the current and published catalogues. Under **Removed**,
 admins can still read their instructions and version history. Completed App-run
@@ -390,7 +398,7 @@ Choose the control that matches the intent:
 | --------------- | ----------------------------------------------------------------------- |
 | Unpublish       | Stops new attachments; existing exact-version bindings remain usable    |
 | Block execution | Stops runs that use the Skill; keeps bindings available for remediation |
-| Remove          | Retires an unused Skill from the catalogue and retains its history      |
+| Remove          | Retires a Skill from the catalogue, optionally detaching it everywhere  |
 
 ## When a change is blocked
 
