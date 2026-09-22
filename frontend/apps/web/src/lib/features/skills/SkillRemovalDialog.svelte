@@ -167,7 +167,9 @@
             : m.organization_skills_remove_blocked_title()}
         </Alert.Title>
         <Alert.Description>
-          {m.organization_skills_remove_blocked_description()}
+          {skills.length === 1
+            ? m.organization_skills_remove_blocked_single_description()
+            : m.organization_skills_remove_blocked_description()}
           <Field.Field orientation="horizontal" class="mt-3">
             <Checkbox
               id={detachCheckboxId}

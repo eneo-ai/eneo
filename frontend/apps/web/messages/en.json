@@ -4788,6 +4788,7 @@
   "organization_skills_remove_blocked_title": "Some skills are still in use",
   "organization_skills_remove_blocked_single_title": "This skill is still in use",
   "organization_skills_remove_blocked_description": "Open a skill to review where it is used. Leave the box ticked to remove its bindings in the same step. If you untick it, no skills in this selection are removed while any are still in use.",
+  "organization_skills_remove_blocked_single_description": "Its bindings are listed under Bindings and update status. Leave the box ticked to remove them in the same step. If you untick it, the skill is not removed while it is still in use.",
   "organization_skills_remove_detach_label": "Remove its bindings from every assistant, app and Personal Chat",
   "organization_skills_remove_detach_description": "Assistants and apps continue without the skill. Personal Chat changes apply to everyone in the organisation.",
   "organization_skills_removed_detached_success": "{count} skills were removed and detached from {assistants} assistants and {apps} apps.",

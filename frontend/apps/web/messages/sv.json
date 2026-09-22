@@ -4788,6 +4788,7 @@
   "organization_skills_remove_blocked_title": "Vissa skills används fortfarande",
   "organization_skills_remove_blocked_single_title": "Skillen används fortfarande",
   "organization_skills_remove_blocked_description": "Öppna en skill för att se var den används. Låt rutan vara markerad så tas kopplingarna bort i samma steg. Avmarkerar du den tas inga skills i urvalet bort så länge någon fortfarande används.",
+  "organization_skills_remove_blocked_single_description": "Kopplingarna visas under Kopplingar och uppdateringsstatus. Låt rutan vara markerad så tas de bort i samma steg. Avmarkerar du den tas skillen inte bort så länge den används.",
   "organization_skills_remove_detach_label": "Ta bort kopplingarna till alla assistenter, appar och Personlig chatt",
   "organization_skills_remove_detach_description": "Assistenter och appar fortsätter utan skillen. Ändringar i Personlig chatt gäller alla i organisationen.",
   "organization_skills_removed_detached_success": "{count} skills har tagits bort och kopplats loss från {assistants} assistenter och {apps} appar.",
