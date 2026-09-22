@@ -14,6 +14,8 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.main.exceptions import ErrorCodes
+from eneo.main.models import GeneralError
 from eneo.users.user import UserAdd, UserState
 
 
@@ -95,7 +97,10 @@ async def test_user_without_api_keys_permission_cannot_create(
         headers={"Authorization": f"Bearer {user_without_api_keys_token}"},
     )
     assert response.status_code == 403, response.text
-    assert "api_keys" in response.json().get("detail", "").lower()
+    error = GeneralError.model_validate(response.json())
+    assert error.code == "insufficient_permission"
+    assert error.eneo_error_code == ErrorCodes.UNAUTHORIZED
+    assert "api_keys" in error.message.lower()
 
 
 @pytest.mark.integration
