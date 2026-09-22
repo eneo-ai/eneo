@@ -76,3 +76,40 @@ An hourly scheduled reconciliation catches refs whose old workflows did not
 run; GitHub may delay scheduled jobs. Unchanged inputs skip installation and
 builds. A manual run can force a rebuild. See [README.md](README.md) for the
 implementation and recovery procedure.
+
+## Translate an existing page
+
+Keep the English source at its existing path. Add the Swedish version at the
+same relative path under `src/content/sv/`, on the same target branch as the
+English content. For example, `guides/deployment.mdx` is translated in
+`sv/guides/deployment.mdx`. Do not create language/version combinations by hand.
+The version builder selects translations from the same git ref as the original.
+
+English owns page inventory and `_meta.ts` ordering. Translate navigation titles
+in `src/lib/navigation.ts`; do not duplicate the navigation tree under `sv/`.
+Use normal root-relative docs links (for example `/guides/deployment`) in both
+languages. The shared MDX link adapters retain the current language and version.
+Keep existing fragment IDs for sections linked from the app; translated headings
+can use explicit IDs such as `## För webbansvariga [#for-the-website-team]`.
+
+Missing translations fall back to English with a visible notice. They are
+excluded from Swedish search. Never copy an untranslated English page into
+`sv/`: that would falsely label and index it as Swedish. A translated overview
+may link to still-untranslated detail pages; make its scope clear to readers.
+When changing English behaviour, update its existing translation in the same PR
+or remove that translation until it is current, allowing the marked fallback.
+
+This is enforced, not just expected. Every Swedish page records the English
+revision it was translated from in its frontmatter:
+
+```yaml
+translationSource: guides/deployment.mdx@0e64ce9832eb
+```
+
+The value is the English file's git blob hash
+(`git hash-object src/content/guides/deployment.mdx | cut -c1-12`). As soon as
+the English page changes without that value changing,
+`bun test scripts/languages.test.ts` fails locally and in the docs workflow, and
+the failure message prints the value to record. Update the translation and the
+recorded revision together; bumping only the revision is the explicit way to
+say that an English change, such as a typo fix, needs no translation change.

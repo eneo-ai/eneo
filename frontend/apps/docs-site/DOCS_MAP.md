@@ -5,7 +5,7 @@ Which pages on [docs.eneo.ai](https://docs.eneo.ai) describe which parts of the 
 - **Changing code?** Find the rows whose paths you touched and update those pages in the same pull request when user-visible behaviour, configuration, endpoints, defaults, commands or UI labels change. Follow [AUTHORING.md](AUTHORING.md) to choose the target branch. This map is a review aid, not an automated guarantee that the prose is current.
 - **Changing docs?** Verify claims against the files listed for that page.
 
-Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths are relative to the repository root. Globs are indicative, not exhaustive — when in doubt, the page whose subject matches wins.
+Page paths are relative to `frontend/apps/docs-site/src/content/`. Swedish translations use the same relative page paths under `src/content/sv/`; update existing translations together with the English page. Code paths are relative to the repository root. Globs are indicative, not exhaustive — when in doubt, the page whose subject matches wins.
 
 ## Release announcements
 
@@ -76,4 +76,4 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 | `.github/workflows/ci.yml`, `.github/workflows/dependency-review.yml`, `.github/dependabot.yml`, `docs/SECURITY.md`                                                    | `contributing/security.mdx`         |
 | `.github/workflows/export-roadmap.yml`, `.github/workflows/add-to-project.yml`, `.github/scripts/**`, `scripts/export_github_roadmap.mjs`, `.github/ISSUE_TEMPLATE/**` | `contributing/project-roadmap.mdx`  |
 | `docs/CONTRIBUTING.md`, `docs/DEPLOYMENT_WORKFLOW.md`, `docs/CODE_QUALITY.md`                                                                                          | `contributing/index.mdx`            |
-| `frontend/apps/docs-site/**` (the site itself)                                                                                                                         | `frontend/apps/docs-site/README.md` |
+| `frontend/apps/docs-site/**`, `frontend/apps/web/src/lib/core/docs.ts` (site languages, publication and app docs links)                                                | `frontend/apps/docs-site/README.md` |
