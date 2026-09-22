@@ -284,6 +284,23 @@ async def test_json_looking_inline_text_sections_preserve_implicit_source(
     assert tuple(questions) == manifest.resplit(text)
 
 
+async def test_sections_refuse_older_transcript_with_explained_cause(user):
+    executor, _, assistant, run, state, step, text, _, _, _ = _case(user, inline=True)
+    run.input_payload_json = {"transkribering": text}
+    step = replace(step, input_bindings={"question": "{{transkribering}}"})
+
+    with pytest.raises(TypedIOValidationException) as caught:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert (
+        caught.value.code
+        == FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value
+    )
+    assert "transcript predates the current format" in str(caught.value)
+    assistant.preflight_response_context.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
 async def test_raw_inline_transcript_after_structured_completion_stays_text(user):
     from eneo.flows.domain.step_output import inline_transcript
 

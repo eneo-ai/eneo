@@ -2443,6 +2443,8 @@ async def test_update_input_payload_applies_transcription_patch_without_clobberi
     assistant_factory,
     admin_user,
 ):
+    from eneo.flows.domain.step_output import inline_transcript
+
     async with db_container() as container:
         session = container.session()
         model = await completion_model_factory(session, "gpt-4o-mini")
@@ -2506,30 +2508,44 @@ async def test_update_input_payload_applies_transcription_patch_without_clobberi
         )
         assert claimed is True
 
+        draft_transcript = inline_transcript(
+            text="draft transcript",
+            source_step_id=flow.steps[0].id,
+            source_attempt_no=1,
+        )
+        final_transcript = inline_transcript(
+            text="transcribed text",
+            source_step_id=flow.steps[0].id,
+            source_attempt_no=1,
+        )
         updated = await run_repo.update_input_payload(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
             input_payload_patch=FlowRunInputEnvelopePatch.transcription(
-                transcript="draft transcript",
+                transcript=draft_transcript,
             ),
         )
-        assert updated[FLOW_INPUT_TRANSCRIPTION_KEY] == "draft transcript"
+        assert updated[FLOW_INPUT_TRANSCRIPTION_KEY] == draft_transcript.model_dump(
+            mode="json"
+        )
 
         updated = await run_repo.update_input_payload(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
             input_payload_patch=FlowRunInputEnvelopePatch.transcription(
-                transcript="transcribed text",
+                transcript=final_transcript,
             ),
         )
-        assert updated[FLOW_INPUT_TRANSCRIPTION_KEY] == "transcribed text"
+        assert updated[FLOW_INPUT_TRANSCRIPTION_KEY] == final_transcript.model_dump(
+            mode="json"
+        )
 
         refreshed = await run_repo.get(run_id=run.id, tenant_id=admin_user.tenant_id)
         assert refreshed.status.value == FlowRunStatus.RUNNING.value
         assert refreshed.input_payload_json == {
             "file_ids": ["f-1"],
             "case": "audio-case",
-            FLOW_INPUT_TRANSCRIPTION_KEY: "transcribed text",
+            FLOW_INPUT_TRANSCRIPTION_KEY: final_transcript.model_dump(mode="json"),
         }
 
 

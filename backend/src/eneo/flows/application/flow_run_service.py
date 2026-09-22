@@ -41,7 +41,7 @@ from eneo.flows.domain.run_step_input_exceptions import (
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
-from eneo.flows.domain.step_output import InlineTranscript, inline_transcript
+from eneo.flows.domain.step_output import inline_transcript
 from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
 from eneo.flows.enums import (
     FlowRunLifecycleSource,
@@ -379,17 +379,14 @@ class FlowRunService:
             }
             if prefix_seed.transcript is not None:
                 transcript = prefix_seed.transcript
-                if isinstance(transcript, InlineTranscript):
-                    transcript = inline_transcript(
-                        text=transcript.text,
-                        source_step_id=transcript.reference.source_step_id,
-                        source_attempt_no=1,
-                        selector_path=transcript.reference.selector.path,
-                    )
-                payload[FLOW_INPUT_TRANSCRIPTION_KEY] = (
-                    transcript.model_dump(mode="json")
-                    if isinstance(transcript, InlineTranscript)
-                    else transcript
+                transcript = inline_transcript(
+                    text=transcript.text,
+                    source_step_id=transcript.reference.source_step_id,
+                    source_attempt_no=1,
+                    selector_path=transcript.reference.selector.path,
+                )
+                payload[FLOW_INPUT_TRANSCRIPTION_KEY] = transcript.model_dump(
+                    mode="json"
                 )
             ensure_inline_payload_size_allowed(
                 flow_id=flow_id, input_payload_json=payload

@@ -199,6 +199,8 @@ def test_worker_stalled_error_retains_typed_recovery_facts():
 
 @pytest.mark.asyncio
 async def test_paused_execution_cannot_publish_transcript_after_recovery():
+    from eneo.flows.domain.step_output import inline_transcript
+
     manager = heartbeat.FlowExecutionHeartbeats(max_active=1)
     owner = FlowRunExecutionOwner(uuid4(), uuid4(), 1)
     session = AsyncMock(spec=AsyncSession)
@@ -211,7 +213,11 @@ async def test_paused_execution_cannot_publish_transcript_after_recovery():
                     run_id=owner.run_id,
                     tenant_id=owner.tenant_id,
                     input_payload_patch=FlowRunInputEnvelopePatch.transcription(
-                        transcript="Late provider result"
+                        transcript=inline_transcript(
+                            text="Late provider result",
+                            source_step_id=uuid4(),
+                            source_attempt_no=1,
+                        )
                     ),
                 )
                 await session.commit()

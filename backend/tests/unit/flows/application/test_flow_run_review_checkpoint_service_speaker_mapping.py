@@ -26,6 +26,7 @@ from eneo.flows.enums import (
     FlowRunReviewCheckpointState,
     FlowStepResultStatus,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.main.exceptions import NotFoundException, TypedIOValidationException
@@ -240,7 +241,9 @@ async def test_service_loads_source_and_syncs_run_transcript() -> None:
         return_value=_source_result(checkpoint, SOURCE)
     )
     flow_run_repo.update_input_payload = AsyncMock(
-        return_value={"transkribering": "new"}
+        side_effect=lambda **kwargs: kwargs["input_payload_patch"].apply_to(
+            run.input_payload_json
+        )
     )
     service = _service(checkpoint, run, flow_run_repo)
 
@@ -258,6 +261,67 @@ async def test_service_loads_source_and_syncs_run_transcript() -> None:
         patch.to_merge_dict()["transkribering"]["text"]
         == edited.current_payload_json["text"]
     )
+    assert run.input_payload_json["transkribering"]["kind"] == "inline_transcript"
+
+
+async def test_review_skips_older_transcript_with_diagnostic(caplog):
+    checkpoint = _checkpoint(_payload(SOURCE))
+    run = SimpleNamespace(
+        id=checkpoint.flow_run_id,
+        tenant_id=checkpoint.tenant_id,
+        flow_id=checkpoint.flow_id,
+        input_payload_json={"transkribering": SOURCE},
+    )
+    repo = AsyncMock()
+    repo.get_step_result.return_value = _source_result(checkpoint, SOURCE)
+    service = _service(checkpoint, run, repo)
+
+    edited = await service.edit_review_checkpoint(
+        flow_id=checkpoint.flow_id,
+        run_id=run.id,
+        checkpoint_id=checkpoint.id,
+        expected_checkpoint_revision=1,
+        edited_value=EDITED,
+    )
+
+    assert "Okänd gäst: Hallå." in edited.current_payload_json["text"]
+    repo.update_input_payload.assert_not_awaited()
+    assert run.input_payload_json["transkribering"] == SOURCE
+    assert "transcript predates the current format" in caplog.text
+    assert any(record.run_id == str(run.id) for record in caplog.records)
+
+
+async def test_correction_approval_refuses_older_transcript_before_writing():
+    checkpoint = _checkpoint(_payload(SOURCE))
+    run = SimpleNamespace(
+        id=checkpoint.flow_run_id,
+        tenant_id=checkpoint.tenant_id,
+        flow_id=checkpoint.flow_id,
+        input_payload_json={"transkribering": SOURCE},
+    )
+    repo = AsyncMock()
+    repo.get_step_result.return_value = _source_result(checkpoint, SOURCE)
+    service = _service(checkpoint, run, repo)
+    service.transcript_corrections_repo = AsyncMock()
+    service.transcript_corrections_repo.get_for_step.return_value = _correction_set(
+        checkpoint
+    ).model_copy(update={"schema_version": 3})
+
+    with pytest.raises(FlowBadRequestException) as caught:
+        await service.approve_review_checkpoint(
+            flow_id=checkpoint.flow_id,
+            run_id=run.id,
+            checkpoint_id=checkpoint.id,
+            expected_checkpoint_revision=1,
+        )
+
+    assert (
+        caught.value.code == FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION
+    )
+    assert "transcript predates the current format" in str(caught.value)
+    assert caught.value.context == {"reason": "transcript_format_unsupported"}
+    service.flow_run_review_checkpoint_repo.approve_review_checkpoint.assert_not_awaited()
+    repo.update_input_payload.assert_not_awaited()
 
 
 async def test_service_leaves_a_foreign_run_transcript_alone() -> None:

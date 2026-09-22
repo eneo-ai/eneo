@@ -19,7 +19,7 @@ class FlowRunPrefixSeed:
     provenance: dict[str, Any]
     kind: Literal["reviewed_transcript_snapshot", "reused_prefix"]
     review_established_step_ids: frozenset[UUID] = frozenset()
-    transcript: str | InlineTranscript | None = None
+    transcript: InlineTranscript | None = None
     transcript_sources: Mapping[UUID, TranscriptSource] = field(
         default_factory=dict[UUID, TranscriptSource]
     )

@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.flows.domain.step_output import inline_transcript
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS,
@@ -59,13 +60,18 @@ def test_read_semantic_flow_input_payload_strips_runtime_keys_and_returns_copy()
 
 
 def test_transcription_patch_has_named_merge_shape() -> None:
-    patch = FlowRunInputEnvelopePatch.transcription(transcript="transcribed text")
+    transcript = inline_transcript(
+        text="transcribed text", source_step_id=uuid4(), source_attempt_no=1
+    )
+    patch = FlowRunInputEnvelopePatch.transcription(transcript=transcript)
 
     assert isinstance(patch, FlowRunInputEnvelopePatch)
-    assert patch.to_merge_dict() == {FLOW_INPUT_TRANSCRIPTION_KEY: "transcribed text"}
+    assert patch.to_merge_dict() == {
+        FLOW_INPUT_TRANSCRIPTION_KEY: transcript.model_dump(mode="json")
+    }
     assert patch.apply_to({"case_id": "A-123"}) == {
         "case_id": "A-123",
-        FLOW_INPUT_TRANSCRIPTION_KEY: "transcribed text",
+        FLOW_INPUT_TRANSCRIPTION_KEY: transcript.model_dump(mode="json"),
     }
 
 

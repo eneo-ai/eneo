@@ -356,6 +356,17 @@ async def test_retry_preserves_transcription_input_from_completed_prefix(
     )
 
 
+async def test_retry_skips_older_transcript_with_diagnostic(context, caplog):
+    context.source.input_payload_json["transkribering"] = "Old transcript"
+
+    await context.service.retry_from_failed_step(**context.request)
+
+    args = context.service.run_service.create_run.await_args.kwargs
+    assert args["prefix_seed"].transcript is None
+    assert "transkribering" not in args["input_payload_json"]
+    assert "transcript predates the current format" in caplog.text
+
+
 async def test_other_principal_is_refused_before_lock_or_creation(context):
     context.source.principal_user_id = uuid4()
     with pytest.raises(UnauthorizedException) as exc:

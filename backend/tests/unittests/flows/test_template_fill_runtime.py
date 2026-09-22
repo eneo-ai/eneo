@@ -488,11 +488,17 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
 
 @pytest.mark.asyncio
 async def test_template_contract_materializes_and_renders_without_tokens() -> None:
+    from eneo.flows.domain.step_output import inline_transcript
+
     run = _run()
-    run.input_payload_json = FlowRunInputEnvelopePatch.transcription(
-        transcript="Verifierad transkribering",
-    ).apply_to(run.input_payload_json)
     prior_result = _completed_result(run=run)
+    run.input_payload_json = FlowRunInputEnvelopePatch.transcription(
+        transcript=inline_transcript(
+            text="Verifierad transkribering",
+            source_step_id=prior_result.step_id,
+            source_attempt_no=1,
+        ),
+    ).apply_to(run.input_payload_json)
     analysis_result = _completed_result(
         run=run,
         step_order=2,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Awaitable, TypeAlias, TypeVar, assert_never, cast
@@ -69,6 +70,7 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
+    TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE,
     FlowRunInputEnvelopePatch,
 )
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
@@ -98,6 +100,8 @@ from eneo.main.exceptions import (
     TypedIOValidationException,
 )
 from eneo.users.user import UserInDB
+
+logger = logging.getLogger(__name__)
 
 _ReviewOperationResult = TypeVar("_ReviewOperationResult")
 _REVIEW_REJECT_REASON_MAX_LENGTH = 1024
@@ -732,6 +736,17 @@ class FlowRunReviewCheckpointService:
         if self.flow_run_repo is None:
             return
         current = (run.input_payload_json or {}).get(FLOW_INPUT_TRANSCRIPTION_KEY)
+        if isinstance(current, str):
+            logger.warning(
+                "Transcript synchronization skipped. %s",
+                TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE,
+                extra={
+                    "diagnostic_code": "transcript_format_unsupported",
+                    "run_id": str(run.id),
+                    "step_id": str(checkpoint.step_id),
+                },
+            )
+            return
         previous_payload = checkpoint.current_payload_json or {}
         transcript = (
             InlineTranscript.model_validate(current)
@@ -1001,6 +1016,14 @@ class FlowRunReviewCheckpointService:
             and not correction_set.speaker_edits_json
         ):
             return None
+        if isinstance(
+            (run.input_payload_json or {}).get(FLOW_INPUT_TRANSCRIPTION_KEY), str
+        ):
+            raise FlowBadRequestException(
+                TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE,
+                code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION,
+                context={"reason": "transcript_format_unsupported"},
+            )
         transcript_source = (
             await self.transcript_source_service.get_for_attempt(
                 flow_id=run.flow_id,

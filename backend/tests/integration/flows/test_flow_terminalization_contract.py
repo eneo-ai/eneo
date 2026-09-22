@@ -1388,6 +1388,7 @@ async def test_paused_provider_publication_cannot_change_recovered_run(
 ):
     from eneo.database.tables.flow_tables import FlowRunWebhookDeliveries
     from eneo.flows.domain.flow_step_attempt_input import FlowStepAttemptInput
+    from eneo.flows.domain.step_output import inline_transcript
     from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
     from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
     from eneo.flows.runtime.execution_heartbeat import (
@@ -1428,7 +1429,11 @@ async def test_paused_provider_publication_cannot_change_recovered_run(
                         run_id=run.id,
                         tenant_id=run.tenant_id,
                         input_payload_patch=FlowRunInputEnvelopePatch.transcription(
-                            transcript=output
+                            transcript=inline_transcript(
+                                text=output,
+                                source_step_id=result.step_id,
+                                source_attempt_no=1,
+                            )
                         ),
                     )
                 elif publication == "result":

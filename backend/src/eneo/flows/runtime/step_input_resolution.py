@@ -58,6 +58,7 @@ from eneo.flows.flow_input_limits import (
 )
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
+    TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE,
     read_semantic_flow_input_payload,
 )
 from eneo.flows.flow_run_provenance import (
@@ -1393,6 +1394,11 @@ async def _resolve_step_materials(
                 text=text.text,
             )
     transcript = (run.input_payload_json or {}).get(FLOW_INPUT_TRANSCRIPTION_KEY)
+    if processing and selected_transcript and isinstance(transcript, str):
+        raise TypedIOValidationException(
+            TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE,
+            code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+        )
     if (
         selected_transcript
         and isinstance(transcript, dict)

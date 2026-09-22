@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any, NoReturn, cast
 from uuid import UUID
@@ -28,6 +29,7 @@ from eneo.flows.enums import FlowRunReviewCheckpointState
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
+    TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE,
     TRANSCRIPT_REGENERATION_KEY,
     read_semantic_flow_input_payload,
 )
@@ -46,6 +48,8 @@ from eneo.flows.published_runtime import load_published_definition
 from eneo.main.config import get_settings
 from eneo.main.exceptions import ConflictException
 from eneo.users.user import UserInDB
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -179,6 +183,15 @@ class FlowRunRetryService:
         reused_step_orders = tuple(step.step_order for step in prefix)
         transcript = (source.input_payload_json or {}).get(FLOW_INPUT_TRANSCRIPTION_KEY)
         inline = None
+        if isinstance(transcript, str):
+            logger.warning(
+                "Transcript omitted from retry. %s",
+                TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE,
+                extra={
+                    "diagnostic_code": "transcript_format_unsupported",
+                    "run_id": str(source.id),
+                },
+            )
         if (
             isinstance(transcript, dict)
             and cast(dict[str, object], transcript).get("kind") == "inline_transcript"
@@ -318,8 +331,7 @@ class FlowRunRetryService:
                 provenance=provenance,
                 kind="reused_prefix",
                 review_established_step_ids=frozenset(review_established_step_ids),
-                transcript=inline
-                or (transcript if isinstance(transcript, str) else None),
+                transcript=inline,
             ),
         )
         if created.created:

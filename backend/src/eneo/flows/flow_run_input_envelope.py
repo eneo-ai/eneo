@@ -8,6 +8,9 @@ from eneo.flows.domain.step_output import FileBackedStepText, InlineTranscript
 EXPECTED_FLOW_VERSION_KEY = "expected_flow_version"
 STEP_INPUTS_KEY = "step_inputs"
 FLOW_INPUT_TRANSCRIPTION_KEY = "transkribering"
+TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE = (
+    "The run's transcript predates the current format. Start a new run."
+)
 TRANSCRIPT_REGENERATION_KEY = "transcript_regeneration"
 
 _REMOVED_TOP_LEVEL_RUNTIME_FILE_IDS_KEY = "file_ids"
@@ -39,14 +42,10 @@ class FlowRunInputEnvelopePatch:
 
     @classmethod
     def transcription(
-        cls, *, transcript: str | FileBackedStepText | InlineTranscript
+        cls, *, transcript: FileBackedStepText | InlineTranscript
     ) -> Self:
         return cls._from_merge_payload(
-            {
-                FLOW_INPUT_TRANSCRIPTION_KEY: transcript.model_dump(mode="json")
-                if isinstance(transcript, (FileBackedStepText, InlineTranscript))
-                else transcript
-            }
+            {FLOW_INPUT_TRANSCRIPTION_KEY: transcript.model_dump(mode="json")}
         )
 
     def to_merge_dict(self) -> FlowPersistedJsonObject:

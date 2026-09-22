@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
@@ -9,6 +11,7 @@ from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     apply_template_attachment_contract,
 )
 from eneo.flows.domain.runtime_input import build_runtime_input_config
+from eneo.flows.domain.step_output import inline_transcript
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -181,7 +184,11 @@ def test_contract_requires_audio_and_accepts_runtime_injected_transcription_bind
     assert runtime_input.input_format == InputType.AUDIO.value
     assert contracted.spec_hash() != spec.spec_hash()
     payload = FlowRunInputEnvelopePatch.transcription(
-        transcript="Verified transcript",
+        transcript=inline_transcript(
+            text="Verified transcript",
+            source_step_id=uuid4(),
+            source_attempt_no=1,
+        ),
     ).apply_to({})
     resolver = FlowVariableResolver()
     context = resolver.build_context(payload, [])
