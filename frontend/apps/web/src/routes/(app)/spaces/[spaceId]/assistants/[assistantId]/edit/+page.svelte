@@ -1,6 +1,5 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
-  import OpenFilesHelp from "$lib/features/assistants/components/OpenFilesHelp.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
 
   import { Button, Input, Tooltip } from "@eneo/ui";
@@ -11,6 +10,7 @@
   import { fade } from "svelte/transition";
 
   import AssistantSettingsAttachments from "./AssistantSettingsAttachments.svelte";
+  import AssistantSettingsMaterialHandling from "./AssistantSettingsMaterialHandling.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
@@ -80,7 +80,10 @@
     })
   );
 
-  let cancelUploadsAndClearQueue = $state<() => void>(() => {});
+  let attachmentActions = $state<{ cancelUploadsAndClearQueue: () => void }>();
+  function cancelUploadsAndClearQueue() {
+    attachmentActions?.cancelUploadsAndClearQueue();
+  }
 
   async function createSkill(value: SkillFormValue) {
     return data.eneo.skills.create({ spaceId: $currentSpace.id, ...value });
@@ -103,6 +106,13 @@
           (model) => model.id === effectiveConfig?.locked_model?.id
         ) ?? effectiveConfig.locked_model)
       : null
+  );
+  const materialModel = $derived(
+    lockedModel ??
+      $currentSpace.completion_models.find((model) => model.id === $update.completion_model?.id)
+  );
+  const materialKnowledgeUsesTools = $derived(
+    $update.knowledge_mode === "tool" && materialModel?.supports_tool_calling === true
   );
   const mcpEnforced = $derived(effectiveConfig?.mcp_enforced === true);
   const availableMCPServers = $derived(
@@ -451,62 +461,68 @@
             </Settings.Row>
           </div>
         {/if}
+      </Settings.Group>
 
+      <Settings.Group title={m.material_title()}>
         <Settings.Row
-          title={m.attachments()}
-          description={m.attach_further_instructions()}
-          hasChanges={$currentChanges.diff.attachments !== undefined}
+          title={m.material_sources()}
+          description={m.material_sources_description()}
+          hasChanges={$currentChanges.diff.attachments !== undefined ||
+            $currentChanges.diff.groups !== undefined ||
+            $currentChanges.diff.websites !== undefined ||
+            $currentChanges.diff.integration_knowledge_list !== undefined}
           revertFn={() => {
             cancelUploadsAndClearQueue();
             discardChanges("attachments");
-          }}
-        >
-          <AssistantSettingsAttachments bind:cancelUploadsAndClearQueue
-          ></AssistantSettingsAttachments>
-        </Settings.Row>
-
-        <Settings.Row
-          title={m.knowledge()}
-          description={m.select_additional_knowledge()}
-          hasChanges={$currentChanges.diff.groups !== undefined ||
-            $currentChanges.diff.websites !== undefined ||
-            $currentChanges.diff.integration_knowledge_list !== undefined}
-          revertFn={() => {
             discardChanges("groups");
             discardChanges("websites");
             discardChanges("integration_knowledge_list");
           }}
         >
-          <div>
-            <SelectKnowledge
-              originMode="personal"
-              bind:selectedWebsites={$update.websites}
-              bind:selectedCollections={$update.groups}
-              bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
-            />
+          <AssistantSettingsAttachments
+            bind:this={attachmentActions}
+            fileReferencesEnabled={data.settings.file_references_enabled === true}
+            selectedModel={materialModel}
+          />
+          <div class="border-default mt-8 space-y-6 border-t pt-8">
+            <section aria-labelledby="material-space-knowledge">
+              <h4 id="material-space-knowledge" class="font-medium">{m.knowledge()}</h4>
+              <p class="text-secondary mt-1 text-sm">
+                {materialKnowledgeUsesTools
+                  ? m.material_knowledge_tool_summary()
+                  : m.material_knowledge_inject_summary()}
+              </p>
+              {#if $update.knowledge_mode === "tool" && materialModel && !materialModel.supports_tool_calling}
+                <p class="text-warning-stronger mt-2 text-sm">
+                  {m.material_knowledge_model_fallback()}
+                </p>
+              {/if}
+              <SelectKnowledge
+                originMode="personal"
+                aria={{ "aria-labelledby": "material-space-knowledge" }}
+                bind:selectedWebsites={$update.websites}
+                bind:selectedCollections={$update.groups}
+                bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
+              />
+            </section>
+            <section aria-labelledby="material-org-knowledge">
+              <h4 id="material-org-knowledge" class="font-medium">{m.organization_knowledge()}</h4>
+              <SelectKnowledge
+                originMode="organization"
+                aria={{ "aria-labelledby": "material-org-knowledge" }}
+                bind:selectedWebsites={$update.websites}
+                bind:selectedCollections={$update.groups}
+                bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
+              />
+            </section>
           </div>
         </Settings.Row>
 
-        <Settings.Row
-          title={m.organization_knowledge()}
-          description={m.organization_knowledge_description()}
-          hasChanges={$currentChanges.diff.groups !== undefined ||
-            $currentChanges.diff.websites !== undefined ||
-            $currentChanges.diff.integration_knowledge_list !== undefined}
-          revertFn={() => {
-            discardChanges("groups");
-            discardChanges("websites");
-            discardChanges("integration_knowledge_list");
-          }}
-        >
-          <div>
-            <SelectKnowledge
-              originMode="organization"
-              bind:selectedWebsites={$update.websites}
-              bind:selectedCollections={$update.groups}
-              bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
-            />
-          </div>
+        <Settings.Row title={m.material_handling()} description={m.material_handling_description()}>
+          <AssistantSettingsMaterialHandling
+            fileReferencesEnabled={data.settings.file_references_enabled === true}
+            modelSupportsTools={materialModel?.supports_tool_calling === true}
+          />
         </Settings.Row>
       </Settings.Group>
 
@@ -570,53 +586,6 @@
             ></SelectModelSpecificSettings>
           </Settings.Row>
         {/if}
-
-        {#if data.settings.file_references_enabled}
-          <!-- Phrased as a capability, matching the personal-assistant policy:
-               "on" hands large files to the model as references it reads with a
-               tool, which the backend stores as inline_file_text = false. -->
-          <Settings.Row
-            title={m.attachments_open_files_label()}
-            description=""
-            hasChanges={$currentChanges.diff.inline_file_text !== undefined}
-            revertFn={() => {
-              discardChanges("inline_file_text");
-            }}
-          >
-            <svelte:fragment slot="description">
-              <OpenFilesHelp />
-            </svelte:fragment>
-            <div class="border-default flex h-14 border-b py-2">
-              <Input.RadioSwitch
-                bind:value={
-                  () => !$update.inline_file_text, (on) => ($update.inline_file_text = !on)
-                }
-                labelTrue={m.enable()}
-                labelFalse={m.disable()}
-              ></Input.RadioSwitch>
-            </div>
-          </Settings.Row>
-        {/if}
-
-        <Settings.Row
-          title={m.knowledge_mode()}
-          description={m.knowledge_mode_description()}
-          hasChanges={$currentChanges.diff.knowledge_mode !== undefined}
-          revertFn={() => {
-            discardChanges("knowledge_mode");
-          }}
-        >
-          <div class="border-default flex h-14 border-b py-2">
-            <Input.RadioSwitch
-              bind:value={
-                () => $update.knowledge_mode !== "inject",
-                (v) => ($update.knowledge_mode = v ? "tool" : "inject")
-              }
-              labelTrue={m.knowledge_mode_tool()}
-              labelFalse={m.knowledge_mode_inject()}
-            ></Input.RadioSwitch>
-          </div>
-        </Settings.Row>
       </Settings.Group>
 
       <Settings.Group title={m.tools()}>
