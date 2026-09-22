@@ -123,11 +123,13 @@ if not os.getenv("TENANT_WORKER_SEMAPHORE_TTL_SECONDS"):
 
 import contextlib
 from typing import AsyncGenerator, Generator
+from unittest.mock import patch
 
 import psycopg2
 from cryptography.fernet import Fernet
 from dependency_injector import providers
 from httpx import ASGITransport, AsyncClient
+from psycopg2.extensions import connection as PostgresConnection
 from sqlalchemy import text
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
@@ -138,7 +140,7 @@ from eneo.database.database import sessionmanager
 from eneo.main.config import Settings, reset_settings, set_settings
 from eneo.main.container.container import Container
 from eneo.server.main import get_application
-from init_db import add_tenant_user
+from init_db import add_tenant_user, create_salt_and_hashed_password
 from tests.fixtures import mint_v2_api_key
 
 # Detect if we're in a devcontainer environment
@@ -412,7 +414,33 @@ def override_settings_for_session(test_settings: Settings):
 
 
 @pytest.fixture(scope="session")
-async def setup_database(test_settings: Settings):
+def seed_default_tenant_user() -> Callable[[PostgresConnection], None]:
+    """Reuse one real password hash per worker for the fixed baseline user."""
+    password = "IntegrationPass123!"
+    credentials = create_salt_and_hashed_password(password)
+
+    def seed(conn: PostgresConnection) -> None:
+        # Only the synchronous baseline seed uses these credentials. Restore the
+        # real function before returning so password/auth tests still hash their
+        # own inputs with fresh salts and the production bcrypt cost.
+        with patch("init_db.create_salt_and_hashed_password", return_value=credentials):
+            add_tenant_user(
+                conn,
+                tenant_name="test_tenant",
+                quota_limit=1000000,
+                user_name="test_user",
+                user_email="test@example.com",
+                user_password=password,
+            )
+
+    return seed
+
+
+@pytest.fixture(scope="session")
+async def setup_database(
+    test_settings: Settings,
+    seed_default_tenant_user: Callable[[PostgresConnection], None],
+):
     """
     Initialize the database schema and seed test data.
     Runs Alembic migrations and creates a default tenant/user using init_db logic.
@@ -440,14 +468,7 @@ async def setup_database(test_settings: Settings):
         password=test_settings.postgres_password,
     )
 
-    add_tenant_user(
-        conn,
-        tenant_name="test_tenant",
-        quota_limit=1000000,
-        user_name="test_user",
-        user_email="test@example.com",
-        user_password="IntegrationPass123!",
-    )
+    seed_default_tenant_user(conn)
 
     # Create required feature flags for initial setup
     cursor = conn.cursor()
@@ -522,6 +543,7 @@ async def setup_database(test_settings: Settings):
 async def cleanup_database(
     setup_database: _DeploymentPolicySeed,
     test_settings: Settings,
+    seed_default_tenant_user: Callable[[PostgresConnection], None],
 ):
     """
     Automatically truncate all tables and reseed after each test.
@@ -566,14 +588,7 @@ async def cleanup_database(
         password=test_settings.postgres_password,
     )
 
-    add_tenant_user(
-        conn,
-        tenant_name="test_tenant",
-        quota_limit=1000000,
-        user_name="test_user",
-        user_email="test@example.com",
-        user_password="IntegrationPass123!",
-    )
+    seed_default_tenant_user(conn)
 
     # Add using_templates feature flag (not handled by add_tenant_user)
     cursor = conn.cursor()
