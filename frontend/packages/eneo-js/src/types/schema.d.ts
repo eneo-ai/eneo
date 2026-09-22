@@ -17580,6 +17580,22 @@ export interface components {
       other_bytes: number;
     };
     /**
+     * PreflightAttachment
+     * @description A persistent attachment as the assistant editor is about to save it.
+     */
+    PreflightAttachment: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Inline Text
+       * @default true
+       */
+      inline_text?: boolean;
+    };
+    /**
      * PreflightRequest
      * @description Request shape for /conversations/preflight.
      *
@@ -17612,22 +17628,6 @@ export interface components {
       assistant_prompt?: string | null;
       /** Attachments */
       attachments?: components["schemas"]["PreflightAttachment"][] | null;
-    };
-    /**
-     * PreflightAttachment
-     * @description A persistent attachment as the assistant editor is about to save it.
-     */
-    PreflightAttachment: {
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /**
-       * Inline Text
-       * @default true
-       */
-      inline_text?: boolean;
     };
     /**
      * PreflightResponse
