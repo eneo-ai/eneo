@@ -18,7 +18,6 @@ from eneo.authentication.auth_models import (
     ApiKeyV2InDB,
 )
 from eneo.main.config import get_settings
-from eneo.main.exceptions import ErrorCodes
 from eneo.main.logging import get_logger
 from eneo.main.models import GeneralError
 from eneo.main.request_context import get_request_context
@@ -64,21 +63,6 @@ def _resolve_request_id(request: Request | None = None) -> str | None:
             return request_id
     context = get_request_context()
     return cast(str | None, context.get("correlation_id"))
-
-
-def _error_code_for_status(status_code: int) -> ErrorCodes:
-    """The numeric category for an API-key failure.
-
-    Follows the same status-to-category convention as EXCEPTION_MAP, so a
-    client sees one numeric code per status whichever layer refused it.
-    """
-    if status_code == 401:
-        return ErrorCodes.AUTHENTICATION_ERROR
-    if status_code == 403:
-        return ErrorCodes.UNAUTHORIZED
-    if status_code == 429:
-        return ErrorCodes.QUOTA_EXCEEDED
-    return ErrorCodes.BAD_REQUEST
 
 
 def _infer_auth_layer(exc: ApiKeyValidationError) -> str | None:
@@ -144,11 +128,7 @@ def raise_api_key_http_error(
         },
     )
 
-    detail: dict[str, object] = {
-        "code": exc.code,
-        "message": exc.message,
-        "eneo_error_code": _error_code_for_status(exc.status_code).value,
-    }
+    detail: dict[str, object] = {"code": exc.code, "message": exc.message}
     if context is not None:
         detail["context"] = context
     if request_id:

@@ -1,6 +1,11 @@
+import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from eneo.authentication.api_key_resolver import ApiKeyValidationError
+from eneo.authentication.api_key_router_helpers import raise_api_key_http_error
+from eneo.main.exceptions import ErrorCodes
+from eneo.main.models import GeneralError
 from eneo.server.main import get_application
 
 
@@ -47,3 +52,77 @@ def test_http_exception_structured_detail_is_unchanged():
     assert response.status_code == 503
     payload = response.json()
     assert payload == {"detail": detail}
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected"),
+    [
+        (400, ErrorCodes.BAD_REQUEST),
+        (401, ErrorCodes.AUTHENTICATION_ERROR),
+        (403, ErrorCodes.UNAUTHORIZED),
+        (404, ErrorCodes.NOT_FOUND),
+        (429, ErrorCodes.QUOTA_EXCEEDED),
+        (503, ErrorCodes.INTERNAL_SERVER_ERROR),
+    ],
+)
+def test_code_message_detail_gets_the_numeric_category(status_code, expected):
+    """Routes document these responses as GeneralError, which requires the
+    numeric category, while each raiser builds its own detail dict."""
+    app = get_application()
+
+    @app.get("/_test-coded-error")
+    async def _test_coded_error():
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": "resource_not_found", "message": "API key not found."},
+        )
+
+    response = TestClient(app).get("/_test-coded-error")
+
+    assert response.status_code == status_code
+    payload = response.json()
+    assert payload["eneo_error_code"] == expected.value
+    assert GeneralError.model_validate(payload).code == "resource_not_found"
+
+
+def test_raiser_supplied_category_is_kept():
+    app = get_application()
+
+    @app.get("/_test-owned-category")
+    async def _test_owned_category():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "quota_exceeded",
+                "message": "Out of quota.",
+                "eneo_error_code": ErrorCodes.QUOTA_EXCEEDED.value,
+            },
+        )
+
+    payload = TestClient(app).get("/_test-owned-category").json()
+
+    assert payload["eneo_error_code"] == ErrorCodes.QUOTA_EXCEEDED.value
+
+
+def test_api_key_refusal_validates_as_the_documented_error():
+    """The converter every API-key path routes through, read through the
+    handler: the bypassing routes are covered by the case above."""
+    app = get_application()
+
+    @app.get("/_test-api-key-error")
+    async def _test_api_key_error():
+        raise_api_key_http_error(
+            ApiKeyValidationError(
+                status_code=401,
+                code="invalid_api_key",
+                message="API key is invalid.",
+            )
+        )
+
+    response = TestClient(app).get("/_test-api-key-error")
+
+    assert response.status_code == 401
+    error = GeneralError.model_validate(response.json())
+    assert error.code == "invalid_api_key"
+    assert error.eneo_error_code == ErrorCodes.AUTHENTICATION_ERROR
+    assert error.context == {"auth_layer": "identity"}
