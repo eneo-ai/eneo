@@ -50,6 +50,7 @@ class TenantBase(BaseModel):
 
 
 class TenantPublic(PrivacyPolicyMixin, TenantBase):
+    id: UUID
     default_role_id: Optional[UUID] = None
 
 

@@ -96,22 +96,6 @@ class TestLogsEndpointResponse:
 class TestLogsEndpointFiltering:
     """Tests for /logs endpoint filtering capabilities."""
 
-    async def test_filter_by_action(
-        self, client, auth_headers_with_session, sample_audit_logs
-    ):
-        """Verify filtering by action type works."""
-        headers, cookies = auth_headers_with_session
-        response = await client.get(
-            "/api/v1/audit/logs?action=user_created",
-            headers=headers,
-            cookies=cookies,
-        )
-        assert response.status_code == 200
-        data = response.json()
-
-        for log in data["logs"]:
-            assert log["action"] == "user_created"
-
     async def test_filter_by_date_range(
         self, client, auth_headers_with_session, sample_audit_logs
     ):

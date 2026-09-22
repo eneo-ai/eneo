@@ -1,7 +1,7 @@
 """Retain removed Skills and their immutable revisions.
 
 Revision ID: 202609181000
-Revises: 202609101000
+Revises: 202609161000
 """
 
 import sqlalchemy as sa
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "202609181000"
-down_revision = "202609101000"
+down_revision = "202609161000"
 branch_labels = None
 depends_on = None
 

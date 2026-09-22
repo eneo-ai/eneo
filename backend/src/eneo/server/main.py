@@ -26,7 +26,10 @@ from eneo.object_content.runtime import (
 from eneo.scim.app import scim_app
 from eneo.server import api_documentation
 from eneo.server.dependencies.lifespan import lifespan as app_lifespan
-from eneo.server.exception_handlers import add_exception_handlers
+from eneo.server.exception_handlers import (
+    add_exception_handlers,
+    default_error_code_for_status,
+)
 from eneo.server.middleware.cors import CORSMiddleware
 from eneo.server.middleware.request_context import RequestContextMiddleware
 from eneo.server.middleware.trace_id import (
@@ -279,6 +282,14 @@ def get_application():
             normalized_detail: dict[str, Any] = cast(dict[str, Any], detail)
             if request_id and "request_id" not in normalized_detail:
                 normalized_detail["request_id"] = request_id
+            # Every raiser of this shape means it as the documented error, but
+            # each built the dict by hand and most left the required numeric
+            # category out. Fill it here, where the dict becomes the body, so a
+            # direct `raise HTTPException` cannot bypass the contract.
+            if "eneo_error_code" not in normalized_detail:
+                normalized_detail["eneo_error_code"] = default_error_code_for_status(
+                    exc.status_code
+                ).value
             return JSONResponse(
                 status_code=exc.status_code, content=normalized_detail, headers=headers
             )
@@ -385,7 +396,7 @@ def get_application():
 
         # Build error response
         settings = get_settings()
-        is_dev = settings.environment in ("development", "local", "dev")
+        is_dev = settings.is_development
 
         error_content: dict[str, Any] = {
             "error": "Internal server error",
@@ -467,7 +478,7 @@ def get_application():
 
         # Build error response
         settings = get_settings()
-        is_dev = settings.environment in ("development", "local", "dev")
+        is_dev = settings.is_development
 
         error_content: dict[str, Any] = {
             "error": "Internal server error",

@@ -202,7 +202,7 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.module_admin_title()} />
+    <Page.Title title={m.module_admin_title()} tour="admin-modules" />
   </Page.Header>
   <Page.Main>
     <Settings.Page>

@@ -75,8 +75,10 @@
   },
   "dependencies": {
     "@eneo/ui": "workspace:*",
+    "@eneo/whats-new": "workspace:*",
     "@inlang/paraglide-js": "^2.20.2",
     "dompurify": "^3.4.11",
+    "driver.js": "^1.8.0",
     "lucide-svelte": "^0.544.0",
     "marked": "^15.0.8",
     "paneforge": "^1.0.2"

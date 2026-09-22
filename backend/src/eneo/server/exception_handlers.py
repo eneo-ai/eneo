@@ -117,6 +117,34 @@ def _default_message_for_status(status_code: int) -> str:
     return "Request failed."
 
 
+def default_error_code_for_status(status_code: int) -> ErrorCodes:
+    """The coarse numeric category for a status raised without one.
+
+    `GeneralError` requires `eneo_error_code`, but an `HTTPException` raised
+    with a `{"code", "message"}` detail carries only the string code. This
+    keeps one category per status for those, so a client that branches on the
+    numeric field is not left guessing at which layer refused the request.
+    Precision lives in the string `code`, which the raiser owns.
+
+    Only statuses whose meaning the category restates are mapped. A status that
+    covers several domain failures, such as 409, falls through to the coarse
+    one: the web client turns a category into a sentence for the reader, so
+    inferring `NAME_COLLISION` from any conflict would tell someone resolving
+    an approval conflict that a display name is taken.
+    """
+    if status_code == 401:
+        return ErrorCodes.AUTHENTICATION_ERROR
+    if status_code == 403:
+        return ErrorCodes.UNAUTHORIZED
+    if status_code == 404:
+        return ErrorCodes.NOT_FOUND
+    if status_code == 429:
+        return ErrorCodes.QUOTA_EXCEEDED
+    if status_code >= 500:
+        return ErrorCodes.INTERNAL_SERVER_ERROR
+    return ErrorCodes.BAD_REQUEST
+
+
 def _extract_request_id(request: Request) -> str | None:
     request_id = request.headers.get("x-correlation-id") or request.headers.get(
         "x-request-id"

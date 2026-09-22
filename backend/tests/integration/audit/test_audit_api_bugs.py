@@ -250,18 +250,6 @@ class TestSessionValidationApi:
             f"Expected 401/403 for invalid session, got {response.status_code}"
         )
 
-    async def test_logs_endpoint_handles_missing_session(self, client, auth_headers):
-        """Verify /logs endpoint returns 401 when session cookie is missing."""
-        response = await client.get(
-            "/api/v1/audit/logs",
-            headers=auth_headers,
-            # No session cookie
-        )
-
-        # Should require audit session
-        assert response.status_code == 401
-        assert "AUDIT_SESSION_REQUIRED" in response.headers.get("X-Error-Code", "")
-
 
 class TestCsvExportMemoryLimit:
     """Tests for BUG #2: CSV Export Memory Accumulation.

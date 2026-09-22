@@ -61,16 +61,18 @@
         toggleModelSelected={draft.toggleModelSelected}
         toggleProvider={draft.toggleProvider}
       />
-      <ReasoningPolicySection
-        configured={draft.reasoningPolicyConfigured}
-        bind:defaultEffort={draft.defaultReasoningEffort}
-        bind:allowUserOverride={draft.allowUserReasoningEffort}
-        options={draft.reasoningOptions}
-        summary={draft.reasoningSummary}
-        valid={draft.reasoningValid}
-        optionLabel={draft.reasoningOptionLabel}
-        onActivate={draft.activateReasoningPolicy}
-      />
+      <div data-tour="governance-reasoning">
+        <ReasoningPolicySection
+          configured={draft.reasoningPolicyConfigured}
+          bind:defaultEffort={draft.defaultReasoningEffort}
+          bind:allowUserOverride={draft.allowUserReasoningEffort}
+          options={draft.reasoningOptions}
+          summary={draft.reasoningSummary}
+          valid={draft.reasoningValid}
+          optionLabel={draft.reasoningOptionLabel}
+          onActivate={draft.activateReasoningPolicy}
+        />
+      </div>
       <McpRestrictionSection
         bind:mcpEnabled={draft.mcpEnabled}
         allMcpServers={draft.allMcpServers}
@@ -94,10 +96,12 @@
         badgeVariant={draft.badgeVariant}
       />
       {#if showFilePolicy}
-        <FilePolicySection
-          bind:openFilesEnabled={draft.openFilesEnabled}
-          summary={draft.filesSummary}
-        />
+        <div data-tour="governance-attachments">
+          <FilePolicySection
+            bind:openFilesEnabled={draft.openFilesEnabled}
+            summary={draft.filesSummary}
+          />
+        </div>
       {/if}
       <SkillsPolicySection
         bind:skillBindings={draft.skillBindings}

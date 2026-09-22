@@ -41,7 +41,7 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.users()} />
+    <Page.Title title={m.users()} tour="admin-users" />
     <nav aria-label={m.status()} class="flex flex-wrap gap-2">
       {#each ["active", "inactive"] as tab (tab)}
         <Button

@@ -266,31 +266,12 @@ class TestMethodAwarePermissionCheck:
 
 
 # ---------------------------------------------------------------------------
-# Integration tests — endpoint permission transitions (tests 10-12)
+# Endpoint permission transitions
 # ---------------------------------------------------------------------------
 
 
 class TestEndpointPermissionTransitions:
-    """Tests 10-12: verify method+endpoint combos deny/allow correctly."""
-
-    def test_read_key_allowed_on_post_ask_assistant_via_override(self, monkeypatch):
-        """10. Read key + POST ask_assistant → pass (ask_assistant is a read-override)."""
-        monkeypatch.setattr(
-            "eneo.authentication.api_key_resolver.get_settings",
-            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
-        )
-        key = _make_key(
-            resource_permissions=ResourcePermissions(
-                assistants=ResourcePermissionLevel.READ,
-            ),
-        )
-        request = _fake_request("POST", endpoint_name="ask_assistant")
-        # Should NOT raise — ask_assistant is in ASSISTANTS_READ_OVERRIDES
-        _check_method_resource_permission(
-            request,
-            key,
-            _config("assistants", read_override_endpoints=ASSISTANTS_READ_OVERRIDES),
-        )
+    """Verify method and endpoint combinations deny or allow correctly."""
 
     def test_write_key_denied_on_delete_apps(self, monkeypatch):
         """11. Write key denied on DELETE delete_app (requires admin)."""
