@@ -16686,11 +16686,10 @@ export interface components {
       /** Inline Text Bytes */
       inline_text_bytes: number;
       /**
-       * Kind
-       * @default file_backed_step_text
-       * @constant
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
        */
-      kind?: "file_backed_step_text";
+      kind: "file_backed_step_text";
       /** Preview */
       preview: string;
       /** Source Attempt No */
@@ -22842,7 +22841,10 @@ export interface components {
         [key: string]: unknown;
       } | null;
       /** Input Text Aliases */
-      readonly input_text_aliases: components["schemas"]["FileBackedStepText"][];
+      readonly input_text_aliases: (
+        | components["schemas"]["FileBackedStepText"]
+        | components["schemas"]["InlineStepTextReference"]
+      )[];
       /** Model Parameters Json */
       model_parameters_json?: {
         [key: string]: unknown;
@@ -23839,7 +23841,10 @@ export interface components {
        * Material Aliases
        * @default []
        */
-      material_aliases?: components["schemas"]["FileBackedStepText"][];
+      material_aliases?: (
+        | components["schemas"]["FileBackedStepText"]
+        | components["schemas"]["InlineStepTextReference"]
+      )[];
       /** Question */
       question: string;
       /**
@@ -24026,7 +24031,10 @@ export interface components {
       id: string;
       input_payload_json?: components["schemas"]["FlowStepAttemptInput"] | null;
       /** Input Text Aliases */
-      readonly input_text_aliases: components["schemas"]["FileBackedStepText"][];
+      readonly input_text_aliases: (
+        | components["schemas"]["FileBackedStepText"]
+        | components["schemas"]["InlineStepTextReference"]
+      )[];
       /** Num Tokens Input */
       num_tokens_input?: number | null;
       /** Num Tokens Output */
@@ -26030,6 +26038,23 @@ export interface components {
       authorization_url: string;
       /** State */
       state: string;
+    };
+    /** InlineStepTextReference */
+    InlineStepTextReference: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "inline_step_text";
+      selection: components["schemas"]["FlowResolvedInputHashedSelection"];
+      selector: components["schemas"]["FlowResolvedInputJsonPath"];
+      /** Source Attempt No */
+      source_attempt_no: number;
+      /**
+       * Source Step Id
+       * Format: uuid
+       */
+      source_step_id: string;
     };
     /** InputField */
     InputField: {
