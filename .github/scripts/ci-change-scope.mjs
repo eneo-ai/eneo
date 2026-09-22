@@ -46,7 +46,8 @@ function classify(rawFiles) {
     "frontend/packages/whats-new/version-order.cases.json",
     "frontend/packages/whats-new/releases.schema.json",
   ].includes(file));
-  const backend = full || whatsNewContract || files.some(isBackendFile);
+  const backend = full || whatsNewContract || files.some(isBackendFile)
+    || files.includes("scripts/backend_test_shard.py");
   // The release-notes check runs in the frontend job against the real file.
   const frontend =
     full || files.some(isShippedFrontendFile) || files.includes("scripts/check_whats_new.py");
@@ -157,6 +158,9 @@ function runSelfTest() {
   assert.equal(classify(["backend/src/eneo/server/main.py"]).schema, true);
   assert.equal(classify(["backend/src/eneo/server/main.py"]).route_metadata, true);
   assert.equal(classify(["backend/src/eneo/server/main.py"]).docker_backend, true);
+
+  assert.equal(classify(["scripts/backend_test_shard.py"]).backend, true);
+  assert.equal(classify(["scripts/backend_test_shard.py"]).scripts, true);
 
   assert.equal(classify(["frontend/apps/web/src/routes/+page.svelte"]).frontend, true);
   assert.equal(classify(["frontend/apps/web/src/routes/+page.svelte"]).frontend_e2e, true);
