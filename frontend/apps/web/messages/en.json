@@ -6396,6 +6396,7 @@
   "flow_run_evidence_section_review_checkpoints": "review checkpoint",
   "flow_run_evidence_section_review_checkpoint_edits": "review checkpoint edit",
   "flow_run_evidence_section_transcript_correction_revisions": "transcript correction revision",
+  "flow_run_evidence_section_transcript_sources": "transcript source",
   "flow_run_evidence_section_webhook_deliveries": "webhook delivery",
   "flow_run_evidence_section_provider_calls": "provider call",
   "flow_run_evidence_section_whole_bundle": "whole bundle",

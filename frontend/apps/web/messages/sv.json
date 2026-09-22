@@ -6396,6 +6396,7 @@
   "flow_run_evidence_section_review_checkpoints": "granskningspunkt",
   "flow_run_evidence_section_review_checkpoint_edits": "ändring av granskningspunkt",
   "flow_run_evidence_section_transcript_correction_revisions": "revision av transkriptkorrigering",
+  "flow_run_evidence_section_transcript_sources": "transkriptkälla",
   "flow_run_evidence_section_webhook_deliveries": "webhook-leverans",
   "flow_run_evidence_section_provider_calls": "leverantörsanrop",
   "flow_run_evidence_section_whole_bundle": "hela underlagspaketet",
