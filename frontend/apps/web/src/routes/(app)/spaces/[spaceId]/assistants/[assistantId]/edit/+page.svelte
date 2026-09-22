@@ -392,6 +392,7 @@
             bind:attachments={$update.attachments}
             allowedAttachments={$update.allowed_attachments}
             bind:cancelUploadsAndClearQueue
+            attachmentMode
           />
         </Settings.Row>
 

@@ -1,7 +1,9 @@
 <!--
     Attachment list of an assistant or app in its editor: shows the attached
     files and running uploads, and uploads new files through its own
-    AttachmentManager.
+    AttachmentManager. With `attachmentMode` set, each file also carries a
+    reading mode: placed in the prompt on every turn, or looked up with a tool
+    when a question calls for it.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -9,7 +11,9 @@
   import { IconTrash } from "@eneo/icons/trash";
   import type { UploadedFile, components } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
   import { Progress } from "$lib/components/ui/progress/index.js";
+  import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { m } from "$lib/paraglide/messages";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatFileType } from "$lib/core/formatting/formatFileType";
@@ -20,19 +24,30 @@
   import AttachmentPreview from "./AttachmentPreview.svelte";
   import UploadedFileIcon from "./UploadedFileIcon.svelte";
 
+  /** An attachment with its optional reading mode (assistant attachments carry one, app attachments do not). */
+  type Attachment = UploadedFile & {
+    /** `false` sends the file as a signed reference the model opens with a tool; `true` or unset inlines it. */
+    inline_text?: boolean;
+    /** `false` marks a legacy row without a stored original, which can only be inlined. */
+    has_download_reference?: boolean | null;
+  };
+
   type Props = {
     /** The editor's attachments; bind it so uploads and removals reach the editor. */
-    attachments: UploadedFile[];
+    attachments: Attachment[];
     /** Read once on mount to build the upload rules. */
     allowedAttachments: components["schemas"]["FileRestrictions"];
     /** Set by this component; bind it and call it after saving or discarding to drop the upload queue. */
     cancelUploadsAndClearQueue?: () => void;
+    /** Show the per-file reading mode control; unset for resources whose attachments are always inlined. */
+    attachmentMode?: boolean;
   };
 
   let {
     attachments = $bindable(),
     allowedAttachments,
-    cancelUploadsAndClearQueue = $bindable()
+    cancelUploadsAndClearQueue = $bindable(),
+    attachmentMode = false
   }: Props = $props();
 
   const eneo = getEneo();
@@ -50,8 +65,16 @@
 
   function onFileUploaded(newFile: UploadedFile) {
     if (!attachments.find((file) => file.id === newFile.id)) {
-      attachments = [...attachments, newFile];
+      // New attachments are placed in the prompt until the author opts them into look-up.
+      attachments = [...attachments, attachmentMode ? { ...newFile, inline_text: true } : newFile];
     }
+  }
+
+  /** Set one attachment's mode; replaces the array so the editor diff picks the change up. */
+  function setInlineText(fileId: string, inlineText: boolean) {
+    attachments = attachments.map((file) =>
+      file.id === fileId ? { ...file, inline_text: inlineText } : file
+    );
   }
 
   async function removeFile(file: { id: string }) {
@@ -96,6 +119,34 @@
         {formatFileType(file.mimetype)} · {formatBytes(file.size)}
       </span>
     </div>
+
+    {#if attachmentMode}
+      <!-- Phrased by intent (must-know vs look-up), not mechanism. Only a
+           persisted file the backend reports as unreferenceable (a legacy row
+           without a stored original) is locked to the prompt. -->
+      {@const locked = file.has_download_reference === false}
+      <RadioGroup.Root
+        value={file.inline_text !== false ? "inline" : "lookup"}
+        onValueChange={(mode) => setInlineText(file.id, mode !== "lookup")}
+        disabled={locked}
+        aria-label={m.attachment_mode_for({ name: file.name })}
+        title={locked ? m.attachment_mode_lookup_unavailable() : m.attachment_mode_help()}
+        class="flex shrink-0 gap-3 text-sm"
+      >
+        <Field.Label for={`attachment-mode-${file.id}-inline`} class="font-normal">
+          <Field.Field orientation="horizontal">
+            <RadioGroup.Item value="inline" id={`attachment-mode-${file.id}-inline`} />
+            <span class="whitespace-nowrap">{m.attachment_mode_inline()}</span>
+          </Field.Field>
+        </Field.Label>
+        <Field.Label for={`attachment-mode-${file.id}-lookup`} class="font-normal">
+          <Field.Field orientation="horizontal">
+            <RadioGroup.Item value="lookup" id={`attachment-mode-${file.id}-lookup`} />
+            <span class="whitespace-nowrap">{m.attachment_mode_lookup()}</span>
+          </Field.Field>
+        </Field.Label>
+      </RadioGroup.Root>
+    {/if}
 
     <div class="min-w-8">
       <Button

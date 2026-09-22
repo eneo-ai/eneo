@@ -18,6 +18,7 @@ from eneo.files.file_models import (
     FileContentVariant,
     FileInfo,
     FileMetadata,
+    FilePublic,
     FileType,
     OriginalSignedURLRequest,
 )
@@ -108,6 +109,10 @@ def test_upload_request_resolves_shared_container_once_before_file_work(
         return saved
 
     file_service.save_file.side_effect = save_file
+    # The response is the public projection (carries has_download_reference).
+    file_service.get_public_file_by_id.return_value = FilePublic(
+        **saved.model_dump(), has_download_reference=True
+    )
     audit_service = AsyncMock()
     audit_service.log_async.side_effect = audit_error
     container = MagicMock()
@@ -167,6 +172,8 @@ async def test_upload_enqueues_audit_only_after_file_success() -> None:
         return file
 
     service.save_file.side_effect = save_file
+    public_file = FilePublic(**file.model_dump(), has_download_reference=True)
+    service.get_public_file_by_id.return_value = public_file
     audit_service = AsyncMock()
     session = MagicMock()
 
@@ -197,9 +204,11 @@ async def test_upload_enqueues_audit_only_after_file_success() -> None:
         container=Container(),
     )
 
-    assert result == file
+    assert result == public_file
     assert events == ["save", "log"]
-    session.begin.assert_called_once()
+    # One transaction for the audit row, one for the public projection.
+    assert session.begin.call_count == 2
+    service.get_public_file_by_id.assert_awaited_once_with(file.id)
     audit_service.log_async.assert_awaited_once()
     audit_service.log.assert_not_awaited()
 

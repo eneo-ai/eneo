@@ -5,7 +5,8 @@ type InternalMcpAvailability = {
   supportsToolCalling: boolean;
   hasKnowledge: boolean;
   storedKnowledgeMode?: string;
-  inlineFileText: boolean;
+  /** Some file in play (upload, history, or an assistant attachment marked
+   *  "open with tool") reaches the model as a signed reference URL. */
   hasDownloadReference: boolean;
 };
 
@@ -22,13 +23,14 @@ export function internalMcpServerNames({
   supportsToolCalling,
   hasKnowledge,
   storedKnowledgeMode,
-  inlineFileText,
   hasDownloadReference
 }: InternalMcpAvailability): InternalMcpServerName[] {
   if (!supportsToolCalling) return [];
 
   const names: InternalMcpServerName[] = [];
   if (hasKnowledge && storedKnowledgeMode === "tool") names.push("knowledge");
-  if (!inlineFileText && hasDownloadReference) names.push("files");
+  // Mirrors the backend: the files server attaches whenever a reference URL
+  // renders, whatever the assistant's inlining mode for uploads.
+  if (hasDownloadReference) names.push("files");
   return names;
 }
