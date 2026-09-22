@@ -84,6 +84,30 @@
   let advanceSaving = $state(false);
   let advanceError = $state<string | null>(null);
   let advanceAnnouncement = $state("");
+  // The adoption section is one component across refreshes: re-mounting it per
+  // await state discards what it is holding, from the last action's receipt to
+  // the administrator's filters.
+  type AdoptionView =
+    | { status: "loading" }
+    | { status: "loaded"; page: SkillAdoptionProjectionPagePublic }
+    | { status: "error" };
+  let adoptionView = $state<AdoptionView>({ status: "loading" });
+  let observedAdoptionPage: Promise<SkillAdoptionProjectionPagePublic> | null = null;
+
+  $effect(() => {
+    const pending = data.adoptionPage;
+    if (pending === observedAdoptionPage) return;
+    observedAdoptionPage = pending;
+    adoptionView = { status: "loading" };
+    pending.then(
+      (page) => {
+        if (observedAdoptionPage === pending) adoptionView = { status: "loaded", page };
+      },
+      () => {
+        if (observedAdoptionPage === pending) adoptionView = { status: "error" };
+      }
+    );
+  });
 
   const pageTitle = $derived(data.skill.display_name);
   const approvedPreview = $derived(
@@ -1145,53 +1169,22 @@
           </aside>
         </div>
 
-        {#await data.adoptionPage}
-          <SkillAdoptionProjection
-            skillId={data.skill.id}
-            initialPage={null}
-            initialLoading
-            {getOrganizationSkillAdoption}
-            onDetach={detachSkillBindings}
-            onAdvanceSelected={advanceSelectedBindings}
-            {onAdvancePersonalChat}
-            publishedRevisionId={data.published?.revision_id ?? null}
-            {onStartOutdatedBindingsUpdate}
-            run={rollout}
-            onStop={stopPublishedBindingUpdate}
-            onRestart={restartPublishedBindingUpdate}
-          />
-        {:then adoptionPage}
-          <SkillAdoptionProjection
-            skillId={data.skill.id}
-            initialPage={adoptionPage}
-            {getOrganizationSkillAdoption}
-            onDetach={detachSkillBindings}
-            onAdvanceSelected={advanceSelectedBindings}
-            {onAdvancePersonalChat}
-            publishedRevisionId={data.published?.revision_id ?? null}
-            {onStartOutdatedBindingsUpdate}
-            run={rollout}
-            onStop={stopPublishedBindingUpdate}
-            onRestart={restartPublishedBindingUpdate}
-          />
-          <p class="sr-only" aria-live="polite">{advanceAnnouncement}</p>
-        {:catch}
-          <SkillAdoptionProjection
-            skillId={data.skill.id}
-            initialPage={null}
-            initialError
-            {getOrganizationSkillAdoption}
-            onDetach={detachSkillBindings}
-            onAdvanceSelected={advanceSelectedBindings}
-            {onAdvancePersonalChat}
-            publishedRevisionId={data.published?.revision_id ?? null}
-            {onStartOutdatedBindingsUpdate}
-            run={rollout}
-            onStop={stopPublishedBindingUpdate}
-            onRestart={restartPublishedBindingUpdate}
-          />
-          <p class="sr-only" aria-live="polite">{advanceAnnouncement}</p>
-        {/await}
+        <SkillAdoptionProjection
+          skillId={data.skill.id}
+          initialPage={adoptionView.status === "loaded" ? adoptionView.page : null}
+          initialLoading={adoptionView.status === "loading"}
+          initialError={adoptionView.status === "error"}
+          {getOrganizationSkillAdoption}
+          onDetach={detachSkillBindings}
+          onAdvanceSelected={advanceSelectedBindings}
+          {onAdvancePersonalChat}
+          publishedRevisionId={data.published?.revision_id ?? null}
+          {onStartOutdatedBindingsUpdate}
+          run={rollout}
+          onStop={stopPublishedBindingUpdate}
+          onRestart={restartPublishedBindingUpdate}
+        />
+        <p class="sr-only" aria-live="polite">{advanceAnnouncement}</p>
       {/if}
 
       <section aria-labelledby="organization-skill-history-heading">

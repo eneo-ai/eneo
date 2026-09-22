@@ -114,6 +114,10 @@
 
   let observedSkillId = untrack(() => skillId);
   let observedInitialPage = untrack(() => initialPage);
+  // The parent keeps one instance and moves it between load states, so a
+  // change from loading to failed carries the same (null) page.
+  let observedInitialLoading = untrack(() => initialLoading);
+  let observedInitialError = untrack(() => initialError);
   // A local request may outlive a reactive parent refresh even when the current route often remounts.
   let projectionGeneration = 0;
   let page = $state.raw<SkillAdoptionProjectionPagePublic | null>(untrack(() => initialPage));
@@ -218,11 +222,22 @@
   $effect(() => {
     const nextSkillId = skillId;
     const nextInitialPage = initialPage;
-    if (nextSkillId === observedSkillId && nextInitialPage === observedInitialPage) return;
+    const nextInitialLoading = initialLoading;
+    const nextInitialError = initialError;
+    if (
+      nextSkillId === observedSkillId &&
+      nextInitialPage === observedInitialPage &&
+      nextInitialLoading === observedInitialLoading &&
+      nextInitialError === observedInitialError
+    ) {
+      return;
+    }
 
     const skillChanged = nextSkillId !== observedSkillId;
     observedSkillId = nextSkillId;
     observedInitialPage = nextInitialPage;
+    observedInitialLoading = nextInitialLoading;
+    observedInitialError = nextInitialError;
     projectionGeneration += 1;
     loadingMore = false;
     loadMoreError = null;
@@ -803,6 +818,20 @@
     </p>
   </header>
 
+  <!-- The outcome of the last action outlives the reload it triggers, so it is
+       rendered for every load state instead of inside the loaded table. -->
+  <p
+    class={[
+      "text-sm",
+      actionReceipt === "" && "sr-only",
+      receiptNeedsAttention ? "text-accent-default font-medium" : "text-muted-foreground"
+    ]}
+    role="status"
+    aria-live="polite"
+  >
+    {actionReceipt}
+  </p>
+
   {#if loadingInitial}
     <div
       class="flex flex-col gap-4"
@@ -1105,17 +1134,6 @@
               {/if}
             </div>
           {/if}
-          <p
-            class={[
-              "mt-2 text-sm",
-              actionReceipt === "" && "sr-only",
-              receiptNeedsAttention ? "text-accent-default font-medium" : "text-muted-foreground"
-            ]}
-            role="status"
-            aria-live="polite"
-          >
-            {actionReceipt}
-          </p>
           {#if actionError !== null && pendingAction === null}
             <p class="text-destructive mt-2 text-sm" role="alert">{actionError}</p>
           {/if}

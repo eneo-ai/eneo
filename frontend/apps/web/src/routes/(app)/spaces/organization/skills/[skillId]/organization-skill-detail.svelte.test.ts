@@ -1767,6 +1767,92 @@ describe("organisation Skill detail page", () => {
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
   });
 
+  test("keeps a refused selected update readable through the refresh it triggers", async () => {
+    // A refusal is a normal response: no error, so the page refreshes its data.
+    const advanceAssistants = vi.fn().mockResolvedValueOnce({
+      run_id: "run-1",
+      next_cursor: null,
+      counts: { advanced: 0, concurrent_change: 0, incompatible: 1 },
+      outcomes: [{ assistant_id: "assistant-1", outcome: "incompatible", reason: "context_window" }]
+    });
+    const behindAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        assistant_count: 1,
+        distinct_space_count: 1,
+        behind_published_count: 1
+      },
+      matched_count: 1,
+      items: [
+        {
+          kind: "assistant" as const,
+          resource_id: "assistant-1",
+          name: "HR Assistant",
+          space_id: "space-1",
+          space_name: "People and culture",
+          revision_id: "revision-0",
+          revision_number: 0,
+          drift: "behind" as const
+        }
+      ]
+    };
+    const refreshed = Promise.withResolvers<typeof behindAdoption>();
+
+    const rendered = render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.resolve(behindAdoption),
+        advanceAssistants,
+        getAdoption: vi.fn(async () => behindAdoption)
+      }) as never
+    });
+
+    await page
+      .getByRole("checkbox", {
+        name: m.organization_skills_adoption_select_resource({ name: "HR Assistant" })
+      })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+
+    const receipt = page.getByText(
+      m.organization_skills_adoption_advanced_success({
+        advanced: "0",
+        unprocessed: "0",
+        concurrent: "0",
+        incompatible: "1"
+      })
+    );
+    await expect.element(receipt).toBeVisible();
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
+
+    // The refresh the page asked for is still in flight.
+    await rendered.rerender({
+      data: publicationLifecycleData({
+        adoption: refreshed.promise,
+        advanceAssistants,
+        getAdoption: vi.fn(async () => behindAdoption)
+      }) as never
+    });
+    // The section really is reloading, and the receipt survives it.
+    await expect
+      .element(page.getByText(m.organization_skills_adoption_loading()).first())
+      .toBeInTheDocument();
+    await expect.element(page.getByText("HR Assistant")).not.toBeInTheDocument();
+    await expect.element(receipt).toBeVisible();
+    await expect.element(receipt).not.toHaveClass(/sr-only/);
+
+    refreshed.resolve(behindAdoption);
+    await expect.element(page.getByText("HR Assistant")).toBeVisible();
+    await expect.element(receipt).toBeVisible();
+    await expect.element(receipt).not.toHaveClass(/sr-only/);
+  });
+
   test("keeps a committed selected Assistant update visible when the App request fails", async () => {
     const advanceAssistants = vi.fn().mockResolvedValueOnce({
       run_id: "run-1",
