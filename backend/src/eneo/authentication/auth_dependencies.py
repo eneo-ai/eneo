@@ -111,7 +111,14 @@ def require_permission(permission: Permission) -> Callable[..., Awaitable[None]]
         try:
             validate_permission(user, permission)
         except UnauthorizedException as e:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+            # Operations behind this guard declare the error envelope for their
+            # 403. A bare string detail answers `{"detail": ...}` instead, which
+            # carries no code for a client to branch on and no category for the
+            # web app to translate. The handler supplies the numeric category.
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "insufficient_permission", "message": str(e)},
+            )
 
     return _dep
 

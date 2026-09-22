@@ -69,3 +69,34 @@ describe("client error privacy", () => {
     assert.equal(JSON.stringify(error).includes(password), false);
   });
 });
+
+describe("permission denial body", () => {
+  it("reads the message and the numeric category from the error envelope", async () => {
+    // The shared role-permission guard used to answer `{"detail": "..."}`, which
+    // left the client without a code and the web app without a localizable
+    // category. It now answers the envelope every other 403 uses.
+    const client = createClient({
+      baseUrl: "https://eneo.example",
+      fetch: async () =>
+        Response.json(
+          {
+            code: "insufficient_permission",
+            message: "Need permission api_keys in order to access",
+            eneo_error_code: 9001
+          },
+          { status: 403 }
+        )
+    });
+
+    await assert.rejects(
+      client.fetch("/api/v1/api-keys", { method: "post", requestBody: { "application/json": {} } }),
+      (error) => {
+        assert.ok(error instanceof EneoError);
+        assert.equal(error.status, 403);
+        assert.equal(error.code, 9001);
+        assert.equal(error.getReadableMessage(), "Need permission api_keys in order to access");
+        return true;
+      }
+    );
+  });
+});
