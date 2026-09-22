@@ -34,6 +34,8 @@ from eneo.authentication.auth_models import (
     ResourcePermissionLevel,
     ResourcePermissions,
 )
+from eneo.main.exceptions import ErrorCodes
+from eneo.main.models import GeneralError
 from eneo.users.user_service import (
     UserService,
     _check_basic_method_permission,
@@ -410,6 +412,7 @@ class TestErrorContracts:
         assert http_exc.detail == {
             "code": "rate_limited",
             "message": "Too many requests.",
+            "eneo_error_code": ErrorCodes.QUOTA_EXCEEDED.value,
         }
         assert http_exc.headers["Retry-After"] == "60"
 
@@ -475,6 +478,37 @@ class TestErrorContracts:
         assert http_exc.detail["message"] == "Invalid."
         assert http_exc.detail["context"]["auth_layer"] == "identity"
         assert http_exc.headers["WWW-Authenticate"] == "Bearer"
+
+    @pytest.mark.parametrize(
+        ("status_code", "expected_error_code"),
+        [
+            (401, ErrorCodes.AUTHENTICATION_ERROR),
+            (403, ErrorCodes.UNAUTHORIZED),
+            (429, ErrorCodes.QUOTA_EXCEEDED),
+            (400, ErrorCodes.BAD_REQUEST),
+        ],
+    )
+    def test_converter_carries_the_numeric_error_code(
+        self, status_code, expected_error_code
+    ):
+        """Clients parse these bodies as GeneralError, where the numeric code is
+        required. Without it an API-key refusal is the one 401 they cannot read."""
+        from eneo.authentication.api_key_router_helpers import (
+            raise_api_key_http_error,
+        )
+
+        exc = ApiKeyValidationError(
+            status_code=status_code,
+            code="invalid_api_key",
+            message="API key is invalid.",
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            raise_api_key_http_error(exc)
+
+        detail = exc_info.value.detail
+        assert detail["eneo_error_code"] == expected_error_code.value
+        assert GeneralError.model_validate(detail).code == "invalid_api_key"
 
     def test_converter_strips_granted_level_from_response_context(self):
         from eneo.authentication.api_key_router_helpers import (

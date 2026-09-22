@@ -8892,13 +8892,6 @@ export interface components {
        */
       rotation_grace_hours?: number;
     };
-    /** ApiKeyErrorResponse */
-    ApiKeyErrorResponse: {
-      /** Code */
-      code: string;
-      /** Message */
-      message: string;
-    };
     /** ApiKeyExactLookupRequest */
     ApiKeyExactLookupRequest: {
       /** Secret */
@@ -22804,7 +22797,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -22813,7 +22806,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22842,7 +22835,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -22851,7 +22844,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22884,7 +22877,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -22893,7 +22886,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -22902,7 +22895,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -22920,7 +22913,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22949,7 +22942,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -22958,7 +22951,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22990,7 +22983,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -22999,7 +22992,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -23008,7 +23001,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23017,7 +23010,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23035,7 +23028,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23067,7 +23060,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -23076,7 +23069,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23094,7 +23087,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23128,7 +23121,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23146,7 +23139,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23180,7 +23173,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -23189,7 +23182,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23198,7 +23191,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23216,7 +23209,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23290,7 +23283,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -23299,7 +23292,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23317,7 +23310,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23374,7 +23367,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -23383,7 +23376,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -23392,7 +23385,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23410,7 +23403,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23462,7 +23455,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -23471,7 +23464,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23480,7 +23473,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23498,7 +23491,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23527,7 +23520,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -23536,7 +23529,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23545,7 +23538,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23563,7 +23556,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23619,7 +23612,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -23628,7 +23621,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -23637,7 +23630,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23646,7 +23639,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23664,7 +23657,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23720,7 +23713,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -23729,7 +23722,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -23738,7 +23731,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23747,7 +23740,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23765,7 +23758,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23824,7 +23817,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -23833,7 +23826,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -23842,7 +23835,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23851,7 +23844,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23869,7 +23862,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23925,7 +23918,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -23934,7 +23927,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -23943,7 +23936,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23952,7 +23945,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23970,7 +23963,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23999,7 +23992,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -24008,7 +24001,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -24017,7 +24010,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -24026,7 +24019,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -24044,7 +24037,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -24100,7 +24093,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -24109,7 +24102,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -24118,7 +24111,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -24127,7 +24120,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -24145,7 +24138,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -24197,7 +24190,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -24206,7 +24199,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -24215,7 +24208,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -24224,7 +24217,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -24242,7 +24235,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31116,7 +31109,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31125,7 +31118,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -31134,7 +31127,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31175,7 +31168,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -31184,7 +31177,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31193,7 +31186,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31211,7 +31204,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31240,7 +31233,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31249,7 +31242,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -31258,7 +31251,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31291,7 +31284,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -31300,7 +31293,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31309,7 +31302,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31327,7 +31320,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31360,7 +31353,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -31369,7 +31362,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31378,7 +31371,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31396,7 +31389,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31430,7 +31423,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31439,7 +31432,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -31448,7 +31441,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31522,7 +31515,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -31531,7 +31524,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31540,7 +31533,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31558,7 +31551,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31589,7 +31582,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31598,7 +31591,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31616,7 +31609,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31674,7 +31667,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -31683,7 +31676,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31692,7 +31685,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -31701,7 +31694,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31719,7 +31712,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31753,7 +31746,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31762,7 +31755,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -31771,7 +31764,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31789,7 +31782,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31842,7 +31835,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31851,7 +31844,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -31860,7 +31853,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31878,7 +31871,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31907,7 +31900,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31916,7 +31909,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -31925,7 +31918,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31943,7 +31936,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -32000,7 +31993,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -32009,7 +32002,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -32018,7 +32011,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -32027,7 +32020,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -32045,7 +32038,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -32102,7 +32095,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -32111,7 +32104,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -32120,7 +32113,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -32129,7 +32122,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -32147,7 +32140,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -32204,7 +32197,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -32213,7 +32206,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -32222,7 +32215,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -32231,7 +32224,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -32249,7 +32242,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -32302,7 +32295,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -32311,7 +32304,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -32320,7 +32313,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -32329,7 +32322,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -32347,7 +32340,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -32407,7 +32400,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -32416,7 +32409,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -32425,7 +32418,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -32434,7 +32427,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -32452,7 +32445,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -32487,7 +32480,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -32496,7 +32489,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -32505,7 +32498,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -32514,7 +32507,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -32532,7 +32525,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -32561,7 +32554,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -32570,7 +32563,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -32579,7 +32572,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -32588,7 +32581,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -32606,7 +32599,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
