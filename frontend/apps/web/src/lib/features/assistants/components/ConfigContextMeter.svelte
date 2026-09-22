@@ -10,7 +10,7 @@
     assistantId: string;
     model: Model | undefined;
     prompt: string;
-    attachments: { id: string }[];
+    attachments: { id: string; inline_text?: boolean }[];
   };
   const { assistantId, model, prompt, attachments }: Props = $props();
 
@@ -44,10 +44,15 @@
     // correct before saving.
     const modelId = model?.id;
     const promptText = prompt ?? "";
-    const fileIds = attachments.map((a) => ({ id: a.id }));
+    // Each attachment's mode is read here so a flip re-meters: one marked
+    // "open with tool" omits the file body from this estimate.
+    const attachmentInputs = attachments.map((a) => ({
+      id: a.id,
+      inline_text: a.inline_text ?? true
+    }));
     // The ceiling covers prompt + attachments, so meter as soon as either has
     // content: a prompt that alone overflows is surfaced even with no files.
-    const hasContent = fileIds.length > 0 || promptText.trim().length > 0;
+    const hasContent = attachmentInputs.length > 0 || promptText.trim().length > 0;
 
     if (debounce) clearTimeout(debounce);
 
@@ -63,7 +68,8 @@
         const res = await eneo.conversations.preflight({
           chatPartner: { id: assistantId, type: "assistant" },
           question: "",
-          files: fileIds,
+          files: [],
+          attachments: attachmentInputs,
           assistantPrompt: promptText
         });
         if (current !== gen) return;
@@ -100,7 +106,7 @@
 </script>
 
 {#if show}
-  <div class="border-default flex flex-col gap-1.5 border-b px-4 py-3">
+  <div class="border-default mb-6 flex flex-col gap-1.5 border-b px-4 py-3">
     <div class="flex items-center justify-between gap-3">
       <span class="text-default text-sm font-medium">{m.config_attachment_meter_label()}</span>
       <span class="text-sm tabular-nums {textClass}">
@@ -121,6 +127,7 @@
     >
       <ContextMeterFill widthPct={Math.min(percent, 100)} class={barClass} />
     </div>
+    <p class="text-secondary text-sm">{m.config_attachment_meter_scope()}</p>
     {#if tone === "over"}
       <p
         class="text-negative-stronger flex items-start gap-1.5 text-xs leading-snug"

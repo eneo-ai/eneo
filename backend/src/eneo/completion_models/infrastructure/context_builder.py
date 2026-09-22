@@ -2,7 +2,7 @@ import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol, Sequence
+from typing import Any, Collection, Optional, Protocol, Sequence
 from uuid import UUID
 
 from typing_extensions import override
@@ -161,7 +161,23 @@ class _InformationChunkLike(Protocol):
     content: str
 
 
-def build_files_string(files: list[File], model_name: str = "") -> str:
+USER_FILES_PREAMBLE = (
+    "Below are files uploaded by the user. "
+    "You should act like you can see the files themselves, "
+    "and not reveal the specific formatting "
+    "you see below:"
+)
+ASSISTANT_FILES_PREAMBLE = (
+    "Below are files attached to this assistant by its author. "
+    "You should act like you can see the files themselves, "
+    "and not reveal the specific formatting "
+    "you see below:"
+)
+
+
+def build_files_string(
+    files: list[File], model_name: str = "", preamble: str = USER_FILES_PREAMBLE
+) -> str:
     if not files:
         return ""
 
@@ -175,12 +191,49 @@ def build_files_string(files: list[File], model_name: str = "") -> str:
         blocks.append(f"{header}\n{file.text or ''}")
 
     files_string = "\n\n---\n\n".join(blocks)
+    return f"{preamble}\n\n{files_string}"
+
+
+def _file_reference_entries(
+    files: list[File], file_reference_urls: dict[UUID, str]
+) -> list[str]:
+    return [
+        json.dumps(
+            {
+                "kind": "image" if file.file_type == FileType.IMAGE else "document",
+                "filename": file.name,
+                "mimetype": file.mimetype,
+                "size_bytes": file.size,
+                "url": file_reference_urls[file.id],
+            }
+        )
+        for file in files
+        if file.id in file_reference_urls
+    ]
+
+
+def build_assistant_file_references_string(
+    files: list[File], file_reference_urls: dict[UUID, str]
+) -> str:
+    """Reference entries for persistent attachments marked "open with tool".
+
+    Rendered on the current user message (never the system prompt: the signed
+    urls change every request and would defeat prompt caching there) with a
+    preamble that tells the model these are the author's standing files, not
+    something the user just uploaded. Behavioral rules live in
+    ATTACHED_FILE_REFERENCES_INSTRUCTION.
+    """
+    entries = _file_reference_entries(files, file_reference_urls)
+    if not entries:
+        return ""
+    references = "\n".join(entries)
     return (
-        "Below are files uploaded by the user. "
-        "You should act like you can see the files themselves, "
-        "and not reveal the specific formatting "
-        "you see below:"
-        f"\n\n{files_string}"
+        "Files attached to this assistant by its author (one JSON entry per "
+        "file). They are available on every turn of this conversation, not "
+        "only when the user mentions them. Their raw bytes are NOT in this "
+        'prompt; each "url" is a signed file reference for tools that accept '
+        "a URL input.\n\n"
+        f"{references}"
     )
 
 
@@ -195,19 +248,7 @@ def build_file_references_string(
     entry; the rest keep relying on the inlined text from
     ``build_files_string``.
     """
-    entries = [
-        json.dumps(
-            {
-                "kind": "image" if file.file_type == FileType.IMAGE else "document",
-                "filename": file.name,
-                "mimetype": file.mimetype,
-                "size_bytes": file.size,
-                "url": file_reference_urls[file.id],
-            }
-        )
-        for file in files
-        if file.id in file_reference_urls
-    ]
+    entries = _file_reference_entries(files, file_reference_urls)
     if not entries:
         return ""
 
@@ -485,7 +526,9 @@ class _Prompt:
         )
 
     def add_attachments(self, files: list[File]) -> None:
-        self.attachments = build_files_string(files=files, model_name=self.model_name)
+        self.attachments = build_files_string(
+            files=files, model_name=self.model_name, preamble=ASSISTANT_FILES_PREAMBLE
+        )
 
     def get_tokens_of_knowledge(self) -> int:
         return self._knowledge_tokens
@@ -631,6 +674,7 @@ class ContextBuilder:
         file_reference_urls: dict[UUID, str] | None = None,
         inline_file_text: bool = True,
         knowledge_catalog: str = "",
+        url_only_prompt_file_ids: Collection[UUID] = (),
     ) -> Context:
         if files is None:
             files = []
@@ -655,8 +699,20 @@ class ContextBuilder:
             file_reference_urls=file_reference_urls,
             inline_file_text=inline_file_text,
         )
+        # Persistent attachments marked "open with tool" render as reference
+        # entries on the current message, before any per-message files, and
+        # their text is withheld from the system prompt below. Placed ahead of
+        # the token count so the block is budgeted like the rest of the input.
+        if url_only_prompt_file_ids and file_reference_urls:
+            attachment_references = build_assistant_file_references_string(
+                [f for f in prompt_files if f.id in url_only_prompt_file_ids],
+                file_reference_urls,
+            )
+            if attachment_references:
+                _input_string = f"{attachment_references}\n\n{_input_string}"
         # Attachment images (prompt_files) travel with every request, the same
         # way attachment text does — they ride on the current user message.
+        # Pages rendered from a URL-only attachment stay out, like its text.
         current_images: list[File] = []
         if vision:
             current_images = self._get_files_by_type(files, FileType.IMAGE)
@@ -665,6 +721,7 @@ class ContextBuilder:
                 file
                 for file in self._get_files_by_type(prompt_files, FileType.IMAGE)
                 if file.id not in seen_image_ids
+                and file.parent_file_id not in url_only_prompt_file_ids
             ]
         tokens_used_input = count_message_tokens(
             [{"role": "user", "content": _input_string}], model_name
@@ -696,7 +753,11 @@ class ContextBuilder:
             transcription=bool(transcription_inputs),
         )
         _prompt.add_attachments(
-            files=self._get_files_by_type(prompt_files, FileType.TEXT)
+            files=[
+                file
+                for file in self._get_files_by_type(prompt_files, FileType.TEXT)
+                if file.id not in url_only_prompt_file_ids
+            ]
         )
         # Tool-mode knowledge: a token-cheap catalog of searchable sources; the
         # content itself stays behind the knowledge-MCP search tool.

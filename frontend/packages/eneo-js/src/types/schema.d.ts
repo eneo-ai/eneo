@@ -9861,6 +9861,52 @@ export interface components {
       /** Active User Count */
       active_user_count: number;
     };
+    /** AssistantAttachmentInput */
+    AssistantAttachmentInput: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Inline Text
+       * @description True: the attachment's text is placed in the prompt on every turn. False: the assistant gets a signed reference URL instead and opens the file with a tool when needed (requires a stored original and a model that can call tools; otherwise the text is inlined).
+       * @default true
+       */
+      inline_text?: boolean;
+    };
+    /** AssistantAttachmentPublic */
+    AssistantAttachmentPublic: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Mimetype */
+      mimetype: string;
+      /** Size */
+      size: number;
+      /** Transcription */
+      transcription?: string | null;
+      /** Token Count */
+      token_count?: number | null;
+      /**
+       * Has Download Reference
+       * @default false
+       */
+      has_download_reference?: boolean;
+      /**
+       * Inline Text
+       * @default true
+       */
+      inline_text?: boolean;
+    };
     /** AssistantCreatePublic */
     AssistantCreatePublic: {
       /** Name */
@@ -10069,7 +10115,7 @@ export interface components {
       /** Logging Enabled */
       logging_enabled: boolean | null;
       /** Attachments */
-      attachments: components["schemas"]["FilePublic"][];
+      attachments: components["schemas"]["AssistantAttachmentPublic"][];
       allowed_attachments: components["schemas"]["FileRestrictions"];
       /** Groups */
       groups: components["schemas"]["CollectionPublic"][];
@@ -12012,7 +12058,7 @@ export interface components {
       /** Logging Enabled */
       logging_enabled: boolean | null;
       /** Attachments */
-      attachments: components["schemas"]["FilePublic"][];
+      attachments: components["schemas"]["AssistantAttachmentPublic"][];
       allowed_attachments: components["schemas"]["FileRestrictions"];
       /** Groups */
       groups: components["schemas"]["CollectionPublic"][];
@@ -16500,7 +16546,7 @@ export interface components {
        */
       completion_model?: components["schemas"]["ModelId"] | null;
       /** Attachments */
-      attachments?: components["schemas"]["ModelId"][] | null;
+      attachments?: components["schemas"]["AssistantAttachmentInput"][] | null;
       /** Mcp Tools */
       mcp_tools?: components["schemas"]["MCPToolSetting"][] | null;
       /**
@@ -16927,6 +16973,22 @@ export interface components {
       other_bytes: number;
     };
     /**
+     * PreflightAttachment
+     * @description A persistent attachment as the assistant editor is about to save it.
+     */
+    PreflightAttachment: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Inline Text
+       * @default true
+       */
+      inline_text?: boolean;
+    };
+    /**
      * PreflightRequest
      * @description Request shape for /conversations/preflight.
      *
@@ -16957,6 +17019,8 @@ export interface components {
       tools?: components["schemas"]["UseTools"] | null;
       /** Assistant Prompt */
       assistant_prompt?: string | null;
+      /** Attachments */
+      attachments?: components["schemas"]["PreflightAttachment"][] | null;
     };
     /**
      * PreflightResponse

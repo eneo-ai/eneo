@@ -13,11 +13,14 @@ This predicate must stay identical everywhere it is applied — the completion
 send path (assistant_service / context_builder), the preflight token count,
 and the attachment-fit guard — or the counted context drifts from the sent
 context.
+
+Persistent assistant attachments carry their own per-file mode instead of the
+assistant-wide toggle: see ``url_only_attachment_ids``.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Iterable, Optional
+from typing import TYPE_CHECKING, Collection, Iterable, Mapping, Optional
 from uuid import UUID
 
 from eneo.files.file_models import FileType
@@ -110,3 +113,43 @@ def url_only_file_ids(files: Iterable["File"], inline_file_text: bool) -> set[UU
     if inline_file_text:
         return set()
     return referenced_file_ids(files)
+
+
+def url_only_attachment_ids(
+    attachments: Iterable["File"],
+    inline_text_by_id: Mapping[UUID, bool],
+    completion_model: "CompletionModel",
+) -> set[UUID]:
+    """Ids of persistent attachments the model gets as a signed URL only.
+
+    An attachment marked "open with tool" (``inline_text`` False) is URL-only
+    when a reference URL can serve it and the model can call the tool that
+    reads it; otherwise it inlines like any other attachment. Ids missing from
+    the mapping default to inlined, so untouched assistants are unaffected.
+    """
+    if not completion_model.supports_tool_calling:
+        return set()
+    return {
+        file_id
+        for file_id in referenced_file_ids(attachments)
+        if not inline_text_by_id.get(file_id, True)
+    }
+
+
+def inlined_attachments(
+    files: Iterable["File"], url_only_ids: Collection[UUID]
+) -> list["File"]:
+    """Attachments whose content actually enters the context.
+
+    Drops URL-only attachments and the derived images rendered from them, so
+    every counter (save-time fit, ask-time fit, preflight) sees the same set
+    the send path inlines.
+    """
+    files = list(files)
+    if not url_only_ids:
+        return files
+    return [
+        file
+        for file in files
+        if file.id not in url_only_ids and file.parent_file_id not in url_only_ids
+    ]
