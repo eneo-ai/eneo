@@ -1,6 +1,47 @@
 TITLE = "Eneo"
 
-SUMMARY = "General AI framework"
+SUMMARY = """General AI framework.
+
+## Errors
+
+Most errors answer with a common JSON envelope:
+
+```json
+{
+  "message": "Flow must be published before creating runs.",
+  "eneo_error_code": 9007,
+  "code": "flow_not_published",
+  "context": {"flow_id": "..."},
+  "request_id": "..."
+}
+```
+
+`message` and `eneo_error_code` are always present in that envelope; `code`,
+`context` and `request_id` are not. Branch on the string `code` where an
+operation documents one, and otherwise on the status code together with the
+numeric `eneo_error_code`, a coarse category kept for older clients. `message`
+is written for people and may be reworded. Quote `request_id`, or `error_id` on
+a `500`, when you contact support.
+
+Some failures answer in another shape, so treat the envelope as the common case
+rather than a guarantee: request validation answers `422` with
+`{"detail": [...]}`; some HTTP errors keep a legacy `{"detail": ...}` whose
+value is a string or an object, such as the report `/api/healthz` returns with
+`503`; and an unexpected `500` answers with `error`, `error_id` and `message`.
+
+### Errors that no operation lists
+
+A request whose `Origin` header is not allowed is rejected before routing, so it
+can reach any endpoint regardless of the responses listed for it. An actual
+request answers `400` in the envelope above with the code
+`disallowed_cors_origin`. A failed CORS preflight answers `400` in plain text,
+which a browser never exposes to the page.
+
+A server-side caller should not forward the browser `Origin` header. A browser
+caller needs its origin allowed for the tenant; the allowed origins of the
+active public API key it sends count only while the tenant policy does not
+require a tenant origin.
+"""
 
 TAGS_METADATA = [
     {
