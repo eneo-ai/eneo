@@ -39,6 +39,7 @@ from eneo.flows.domain.provider_call_evidence_gap import (
     ProviderCallEvidenceGap,
     ProviderCallPersistenceOutcome,
 )
+from eneo.flows.domain.speaker_labels import render_segments
 from eneo.flows.enums import FlowStepPhase
 from eneo.flows.flow_run_error import (
     TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH,
@@ -602,7 +603,7 @@ class RemoteTranscriptionClient:
             model=model if isinstance(model, str) else None,
             language=language if isinstance(language, str) else None,
             alignment=alignment if isinstance(alignment, str) else None,
-            segments=_parse_result_segments(body.get("segments")),
+            segments=_parse_result_segments(body.get("segments"), text),
             speaker_review=cast(dict[str, Any], review)
             if isinstance(review, dict)
             else None,
@@ -1202,8 +1203,10 @@ async def _probe_quietly(probe: RunCancelProbe, *, job_id: str) -> bool:
         return False
 
 
-def _parse_result_segments(raw: object) -> tuple[TranscriptSegment, ...] | None:
-    """Segments from a result body; malformed entries are dropped, not fatal.
+def _parse_result_segments(
+    raw: object, canonical_text: str
+) -> tuple[TranscriptSegment, ...] | None:
+    """Admit only a complete sidecar that renders to the canonical text.
 
     The rendered text is the contract; segments are the structured view of the
     same lines that a reader UI uses to seek audio. A service that sends none
@@ -1214,7 +1217,7 @@ def _parse_result_segments(raw: object) -> tuple[TranscriptSegment, ...] | None:
     segments: list[TranscriptSegment] = []
     for entry in cast(list[object], raw):
         if not isinstance(entry, dict):
-            continue
+            return None
         item = cast(dict[str, object], entry)
         text = item.get("text")
         start = item.get("start")
@@ -1225,8 +1228,10 @@ def _parse_result_segments(raw: object) -> tuple[TranscriptSegment, ...] | None:
             or isinstance(end, bool)
             or not isinstance(start, (int, float))
             or not isinstance(end, (int, float))
+            or not math.isfinite(start)
+            or not math.isfinite(end)
         ):
-            continue
+            return None
         speaker = item.get("speaker")
         attribution = item.get("speaker_attribution")
         overlap_ids = item.get("overlap_ids")
@@ -1249,6 +1254,9 @@ def _parse_result_segments(raw: object) -> tuple[TranscriptSegment, ...] | None:
                 else (),
             )
         )
+    segments.sort(key=lambda segment: (segment.start, segment.end))
+    if render_segments(segments) != canonical_text:
+        return None
     return tuple(segments)
 
 

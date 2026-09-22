@@ -10,7 +10,7 @@ from uuid import UUID
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
-from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.runtime import RuntimeStep, StepDiagnostic
 from eneo.flows.domain.step_output import (
     FileBackedStepText,
     InlineTranscript,
@@ -61,6 +61,7 @@ class AudioRuntimeResolution:
     diarization_reduced_precision_message: str | None = None
     material: ResolvedStepMaterial | None = None
     text_reference: FileBackedStepText | None = None
+    diagnostics: tuple[StepDiagnostic, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -329,4 +330,15 @@ async def resolve_transcribe_and_attach_audio_input(
         diarization_reduced_precision_message=reduced_precision_message,
         material=material,
         text_reference=text_reference,
+        diagnostics=tuple(
+            StepDiagnostic(
+                code="audio_transcription_empty_interval",
+                message=(
+                    f"Step {request.step.step_order}: no transcription text returned "
+                    f"from {interval.start} to {interval.end} seconds "
+                    f"in file '{interval.file_id}'."
+                ),
+            )
+            for interval in transcription_result.empty_intervals
+        ),
     )

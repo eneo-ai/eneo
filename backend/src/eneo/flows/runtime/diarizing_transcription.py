@@ -127,4 +127,5 @@ class DiarizingFlowTranscriber(RegistryFlowTranscriber):
             diarization_elapsed_ms=int((time.monotonic() - started) * 1000),
             alignment=labelled.alignment,
             speaker_review=labelled.speaker_review,
+            empty_intervals=transcribed.empty_intervals,
         )

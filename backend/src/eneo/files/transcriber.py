@@ -15,6 +15,7 @@ from eneo.model_providers.infrastructure.litellm_provider import (
     load_active_litellm_provider,
 )
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    EmptyTranscriptionInterval,
     LiteLLMTranscriptionAdapter,
     TranscriptSegment,
 )
@@ -64,6 +65,7 @@ class TranscribedAudio:
     # The service's word-timestamp source for the labels, when reported.
     alignment: str | None = None
     speaker_review: dict[str, Any] | None = None
+    empty_intervals: tuple[EmptyTranscriptionInterval, ...] = ()
 
 
 class Transcriber:
@@ -243,4 +245,5 @@ class Transcriber:
                 text=transcription.text,
                 duration_seconds=wav_file.duration,
                 segments=transcription.segments,
+                empty_intervals=transcription.empty_intervals,
             )

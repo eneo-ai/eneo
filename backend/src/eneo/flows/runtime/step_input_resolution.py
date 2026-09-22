@@ -339,6 +339,7 @@ async def resolve_step_input(
                         *state.resolved_materials,
                         audio_resolution.material,
                     )
+            diagnostics.extend(audio_resolution.diagnostics)
             if audio_resolution.near_inline_limit_message is not None:
                 diagnostics.append(
                     StepDiagnostic(

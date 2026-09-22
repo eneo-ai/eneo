@@ -89,6 +89,15 @@ class TranscriptSegment:
 
 
 @dataclass(frozen=True, slots=True)
+class EmptyTranscriptionInterval:
+    """Measured chunk with no provider text; file identity is attached by the flow."""
+
+    start: float
+    end: float
+    file_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AdapterTranscription:
     """A whole file's transcript and the chunk windows it was decoded in.
 
@@ -100,6 +109,7 @@ class AdapterTranscription:
 
     text: str
     segments: tuple[TranscriptSegment, ...]
+    empty_intervals: tuple[EmptyTranscriptionInterval, ...] = ()
 
 
 class LiteLLMTranscriptionAdapter:
@@ -168,9 +178,10 @@ class LiteLLMTranscriptionAdapter:
         absolute window of the whole file, including the shorter final chunk.
         """
         record_step_phase(FlowStepPhase.TRANSCRIPTION)
-        text = ""
+        text_blocks: list[str] = []
         five_minutes = 60 * 5
         segments: list[TranscriptSegment] = []
+        empty_intervals: list[EmptyTranscriptionInterval] = []
         offset_seconds = 0.0
 
         async with audio_file.asplit_file(seconds=five_minutes) as files:
@@ -188,23 +199,28 @@ class LiteLLMTranscriptionAdapter:
                 chunk_start = offset_seconds
                 offset_seconds += measured_seconds
                 chunk_text = block_text.strip()
-                if chunk_text:
-                    segments.append(
-                        TranscriptSegment(
-                            text=chunk_text,
-                            start=chunk_start,
-                            end=offset_seconds,
-                        )
+                if not chunk_text:
+                    empty_intervals.append(
+                        EmptyTranscriptionInterval(chunk_start, offset_seconds)
                     )
-
-                if chunk_index > 0:
-                    text += "\n\n"
-                text += (
+                    continue
+                segments.append(
+                    TranscriptSegment(
+                        text=chunk_text,
+                        start=chunk_start,
+                        end=offset_seconds,
+                    )
+                )
+                text_blocks.append(
                     f"### {_clock(chunk_start)} - {_clock(offset_seconds)}\n\n"
                     f"{block_text}"
                 )
 
-        return AdapterTranscription(text=text, segments=tuple(segments))
+        return AdapterTranscription(
+            text="\n\n".join(text_blocks),
+            segments=tuple(segments),
+            empty_intervals=tuple(empty_intervals),
+        )
 
     @retry(
         wait=wait_random_exponential(min=1, max=20),

@@ -29,9 +29,9 @@ then Eneo to the service). The provider is trusted for text only:
 - The service force-aligns the text inside each window (result metadata shows
   `alignment: forced`; anything else on a diarize job is worth alerting on).
   If alignment fails it labels whole segments, so text order is never lost.
-- A transcript with no text at all is not sent; run metadata shows
-  `diarization: skipped:empty_transcript` and the step carries an
-  `audio_diarization_skipped` diagnostic.
+- A file with no transcription text is not sent for speaker identification.
+  Empty chunks contribute no timestamp headings. If every file returns empty
+  or whitespace-only text, the step fails with `typed_io_transcription_empty`.
 - A failure of the service after a successful transcription fails the step
   (the author asked for speaker identification; silently dropping it would
   hide that).
@@ -42,8 +42,10 @@ in the step's transcription metadata. A follow-up `speaker_mapping` step (see
 `flow-developer-quickstart.md`) can map those labels to real participants.
 
 The service's segments (`start`, `end`, `speaker`, `text` per rendered line)
-are stored alongside the text as `transcription.segments` in the step's input
-payload, with a `file_index` per audio file and the same renumbered labels.
+are admitted only when every entry is valid and their complete ordered rendering
+matches the service's text before speaker renumbering. Otherwise the canonical
+text is kept, with segment details omitted as `no_segments` and no word timings.
+Admitted segments retain a `file_index` per audio file and the same renumbered labels.
 The run review and evidence views use them to play the recording with the
 spoken line highlighted; `POST
 /api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/` signs the

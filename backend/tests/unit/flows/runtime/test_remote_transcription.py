@@ -1292,11 +1292,11 @@ def test_build_remote_flow_transcriber_requires_configuration() -> None:
 
 
 @pytest.mark.parametrize(
-    ("raw", "expected"),
+    ("raw", "canonical_text", "expected"),
     [
-        (None, None),
-        ("not a list", None),
-        ([], ()),
+        (None, "", None),
+        ("not a list", "", None),
+        ([], "", ()),
         (
             [
                 {"start": 1, "end": 2, "text": "ok", "speaker": ""},
@@ -1305,15 +1305,33 @@ def test_build_remote_flow_transcriber_requires_configuration() -> None:
                 {"start": 1, "end": 2},
                 "garbage",
             ],
-            (TranscriptSegment("ok", 1.0, 2.0, speaker=None),),
+            "[00:00:01 - 00:00:02] ok",
+            None,
         ),
     ],
 )
-def test_result_segments_keep_only_well_formed_entries(
-    raw: object, expected: object
+def test_result_segments_reject_malformed_sidecar(
+    raw: object, canonical_text: str, expected: object
 ) -> None:
-    """A segment the reader cannot place in time is dropped; the text stands."""
-    assert remote_transcription._parse_result_segments(raw) == expected
+    assert remote_transcription._parse_result_segments(raw, canonical_text) == expected
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "garbage",
+        {"start": "1", "end": 2, "text": "bad"},
+        {"start": float("nan"), "end": 2, "text": "bad"},
+        {"start": 1, "end": float("inf"), "text": "bad"},
+    ],
+    ids=["non_object", "invalid_fields", "nan_start", "infinite_end"],
+)
+def test_malformed_extra_segment_rejects_even_matching_survivors(invalid):
+    raw = [{"start": 1, "end": 2, "text": "ok"}, invalid]
+    assert (
+        remote_transcription._parse_result_segments(raw, "[00:00:01 - 00:00:02] ok")
+        is None
+    )
 
 
 def test_result_segments_carry_word_timings_with_probability() -> None:
@@ -1334,7 +1352,10 @@ def test_result_segments_carry_word_timings_with_probability() -> None:
             },
             {"start": 2, "end": 3, "text": "utan ord"},
             {"start": 3, "end": 4, "text": "fel typ", "words": "nej"},
-        ]
+        ],
+        "[00:00:00 - 00:00:02] SPEAKER_00: hej du\n"
+        "[00:00:02 - 00:00:03] utan ord\n"
+        "[00:00:03 - 00:00:04] fel typ",
     )
 
     assert parsed is not None

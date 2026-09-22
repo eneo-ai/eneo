@@ -14,6 +14,7 @@ from eneo.flows.runtime.diarizing_transcription import (
 from eneo.flows.runtime.remote_transcription import RemoteTranscriptionResult
 from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    EmptyTranscriptionInterval,
     TranscriptSegment,
 )
 from tests.unittests.flows import audio_spool_test_support
@@ -50,7 +51,12 @@ def _remote(text: str = "[00:00:00 - 00:00:01] SPEAKER_00: hej du") -> SimpleNam
 async def test_registry_transcribes_and_service_labels_speakers(spool_contract) -> None:
     spool_contract.duration_seconds = 30.0
     spool = await spool_contract.spool(FILE)
-    registry = _registry(TranscribedAudio("hej du", 30.0, segments=SEGMENTS))
+    empty_intervals = (EmptyTranscriptionInterval(300.7, 601.4),)
+    registry = _registry(
+        TranscribedAudio(
+            "hej du", 30.0, segments=SEGMENTS, empty_intervals=empty_intervals
+        )
+    )
     remote = _remote()
     transcriber = DiarizingFlowTranscriber(registry, remote)  # type: ignore[arg-type]
 
@@ -67,6 +73,7 @@ async def test_registry_transcribes_and_service_labels_speakers(spool_contract) 
     # Chunk windows stay what Eneo measured; the reader's segments are the
     # service's labelled lines.
     assert result.segments == SEGMENTS
+    assert result.empty_intervals == empty_intervals
     assert result.transcript_segments == (
         TranscriptSegment("hej du", 0.0, 1.0, speaker="SPEAKER_00"),
     )

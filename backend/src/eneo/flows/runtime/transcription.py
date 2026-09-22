@@ -4,7 +4,7 @@ import json
 import re
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
@@ -50,6 +50,9 @@ from eneo.main.exceptions import (
 )
 from eneo.model_providers.domain.provider_call_observer import (
     ProviderCallObserverError,
+)
+from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    EmptyTranscriptionInterval,
 )
 
 
@@ -500,6 +503,7 @@ class FlowTranscriptionResult:
     max_speakers: int | None = None
     # Coarsest word-timestamp source across files, as reported by the service.
     alignment: str | None = None
+    empty_intervals: tuple[EmptyTranscriptionInterval, ...] = ()
 
     @property
     def source(self) -> TranscriptSource:
@@ -638,6 +642,7 @@ async def transcribe_audio_input(
     source_preparation = source_preparation or TranscriptSourcePreparation()
     label_offset = source_preparation.speakers_count
 
+    empty_intervals: list[EmptyTranscriptionInterval] = []
     for file_index, file in enumerate(files):
         try:
             try:
@@ -695,6 +700,10 @@ async def transcribe_audio_input(
             measured_seconds.append(transcribed.duration_seconds)
 
         diarization_outcomes.append(transcribed.diarization)
+        empty_intervals.extend(
+            replace(interval, file_id=file.id)
+            for interval in transcribed.empty_intervals
+        )
         if transcribed.diarization_elapsed_ms is not None:
             diarization_elapsed.append(transcribed.diarization_elapsed_ms)
         if transcribed.alignment:
@@ -810,6 +819,7 @@ async def transcribe_audio_input(
         speakers=speakers,
         max_speakers=max_speakers if diarize else None,
         alignment=_coarsest_alignment(alignments),
+        empty_intervals=tuple(empty_intervals),
     )
 
 

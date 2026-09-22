@@ -16,6 +16,7 @@ from eneo.flows.runtime.step_deadline import StepDeadline, step_deadline_scope
 from eneo.main.exceptions import TypedIOValidationException
 from eneo.transcription_models.infrastructure.adapters import litellm_transcription
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    EmptyTranscriptionInterval,
     LiteLLMTranscriptionAdapter,
     TranscriptSegment,
 )
@@ -315,7 +316,7 @@ async def test_cancelled_chunk_request_is_not_retried(monkeypatch, tmp_path) -> 
     assert transport.await_count == 1
 
 
-async def test_silent_chunks_keep_their_place_but_emit_no_segment(
+async def test_empty_chunks_keep_their_place_but_emit_no_segment(
     monkeypatch, tmp_path
 ) -> None:
     texts = iter(["hej", "   ", "du"])
@@ -332,6 +333,8 @@ async def test_silent_chunks_keep_their_place_but_emit_no_segment(
         TranscriptSegment("hej", 0.0, 300.0),
         TranscriptSegment("du", 600.0, 660.0),
     )
+    assert result.text == "### 0:00 - 5:00\n\nhej\n\n### 10:00 - 11:00\n\ndu"
+    assert result.empty_intervals == (EmptyTranscriptionInterval(300.0, 600.0),)
 
 
 async def test_transcript_with_no_text_has_no_segments(monkeypatch, tmp_path) -> None:
@@ -341,6 +344,8 @@ async def test_transcript_with_no_text_has_no_segments(monkeypatch, tmp_path) ->
     result = await _adapter().get_text_from_file(audio)  # type: ignore[arg-type]
 
     assert result.segments == ()
+    assert result.text == ""
+    assert result.empty_intervals == (EmptyTranscriptionInterval(0.0, 10.0),)
 
 
 async def test_transcription_request_uses_remaining_attempt_budget(

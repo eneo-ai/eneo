@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from hashlib import sha256
 from types import SimpleNamespace
@@ -15,13 +16,14 @@ from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import File, FileInfo, FileType
 from eneo.files.file_service import FileService
-from eneo.files.transcriber import TranscribedAudio
+from eneo.files.transcriber import TranscribedAudio, Transcriber
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 from eneo.flows.flow_input_limits import FlowInputLimits, resolve_flow_input_limits
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
 )
+from eneo.flows.runtime.diarizing_transcription import RegistryFlowTranscriber
 from eneo.flows.runtime.executor import (
     FlowRunExecutor,
     RunExecutionState,
@@ -35,9 +37,135 @@ from eneo.flows.runtime.transcription_runtime import (
     resolve_transcribe_and_attach_audio_input,
 )
 from eneo.main.exceptions import NotFoundException, TypedIOValidationException
+from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    EmptyTranscriptionInterval,
+)
 from tests.unittests.flows import audio_spool_test_support
 
 spool_contract = audio_spool_test_support.spool_contract
+
+
+def _chunked_transcriber(monkeypatch, tmp_path, chunk_texts):
+    from tests.unit.transcription_models.infrastructure.adapters.test_litellm_transcription import (
+        TRANSPORT,
+        _adapter,
+        _audio,
+    )
+
+    responses = iter(text for file_texts in chunk_texts for text in file_texts)
+    monkeypatch.setattr(
+        TRANSPORT,
+        AsyncMock(side_effect=lambda **kwargs: SimpleNamespace(text=next(responses))),
+    )
+    files = iter(chunk_texts)
+
+    @asynccontextmanager
+    async def to_wav(filepath):
+        texts = next(files)
+        yield _audio(tmp_path, [300.7] * (len(texts) - 1) + [60.0], monkeypatch)
+
+    monkeypatch.setattr("eneo.files.transcriber.audio.to_wav", to_wav)
+    transcriber = Transcriber(file_service=AsyncMock())
+    monkeypatch.setattr(
+        transcriber, "prepare_transcription", AsyncMock(return_value=_adapter())
+    )
+    return RegistryFlowTranscriber(transcriber)
+
+
+@pytest.mark.parametrize("chunk_text", ["", " \n\t "])
+async def test_empty_provider_chunks_fail_typed_through_processing(
+    spool_contract, monkeypatch, tmp_path, chunk_text
+):
+    from eneo.flows.runtime.transcription import transcribe_audio_input
+
+    file = _audio_file(name="empty.wav")
+    transcriber = _chunked_transcriber(monkeypatch, tmp_path, [[chunk_text] * 3])
+    with pytest.raises(TypedIOValidationException) as exc:
+        await transcribe_audio_input(
+            files=[file],
+            transcriber=transcriber,
+            transcription_model=SimpleNamespace(id=uuid4(), name="whisper-1"),
+            language="sv",
+            step_order=1,
+            max_files=5,
+            max_inline_text_bytes=100_000,
+            open_audio_download=spool_contract.downloads([file]),
+        )
+
+    assert exc.value.code == "typed_io_transcription_empty"
+
+
+@pytest.mark.parametrize(
+    ("chunk_texts", "expected_text", "missing"),
+    [
+        (
+            [["first", "", "last"]],
+            "### 0:00 - 5:00\n\nfirst\n\n### 10:01 - 11:01\n\nlast",
+            [(0, 300.7, 601.4)],
+        ),
+        (
+            [[" \n", "middle", ""]],
+            "### 5:00 - 10:01\n\nmiddle",
+            [(0, 0.0, 300.7), (0, 601.4, 661.4)],
+        ),
+        (
+            [["first"], [""], ["last"]],
+            "### 0:00 - 1:00\n\nfirst\n\n### 0:00 - 1:00\n\nlast",
+            [(1, 0.0, 60.0)],
+        ),
+    ],
+    ids=["middle", "leading_and_trailing", "empty_file"],
+)
+async def test_empty_chunk_intervals_reach_audio_runtime_diagnostics(
+    spool_contract, user, monkeypatch, tmp_path, chunk_texts, expected_text, missing
+):
+    files = [_audio_file(name=f"part-{index}.wav") for index in range(len(chunk_texts))]
+    model = SimpleNamespace(id=uuid4(), name="whisper-1", can_access=True)
+    space_repo = AsyncMock()
+    space_repo.get_space_by_assistant.return_value = _SpaceStub([model], model)
+    flow_run_repo = AsyncMock()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+
+    result = await resolve_transcribe_and_attach_audio_input(
+        request=AudioRuntimeRequest(
+            run=run,
+            step=_runtime_step(),
+            context={"flow_input": {}},
+            version_metadata={
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_model": {"id": str(model.id)},
+                    "transcription_language": "sv",
+                }
+            },
+            files=files,
+            requested_ids=[file.id for file in files],
+            max_audio_files=5,
+            max_inline_text_bytes=100_000,
+        ),
+        deps=AudioRuntimeDeps(
+            transcriber=_chunked_transcriber(monkeypatch, tmp_path, chunk_texts),
+            space_repo=space_repo,
+            flow_run_repo=flow_run_repo,
+            audit_service=None,
+            actor=FlowRunActor.from_user(user=user),
+            open_audio_download=spool_contract.downloads(files),
+            apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
+            commit=AsyncMock(),
+            stage_transcript_source=lambda reference, source: None,
+        ),
+    )
+
+    assert result.text == expected_text
+    assert [(item.code, item.message) for item in result.diagnostics] == [
+        (
+            "audio_transcription_empty_interval",
+            f"Step 1: no transcription text returned from {start} to {end} seconds "
+            f"in file '{files[index].id}'.",
+        )
+        for index, start, end in missing
+    ]
 
 
 @pytest.mark.asyncio
@@ -729,6 +857,64 @@ async def test_audio_resolve_near_cap_adds_warning_diagnostic(spool_contract, us
     assert resolved.transcription_metadata is not None
     assert resolved.transcription_metadata["transcript_bytes"] >= 90
     assert resolved.transcription_metadata["estimated_tokens"] > 0
+
+
+@pytest.mark.asyncio
+async def test_audio_resolve_carries_empty_interval_diagnostics(spool_contract, user):
+    """The executor's resolved input carries the intervals the adapter measured."""
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user, max_inline_text_bytes=100_000
+    )
+    file_id = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_service.get_files_by_ids.return_value = [
+        _audio_file(file_id=file_id, name="gap.wav")
+    ]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.get_space_by_assistant = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    transcriber.transcribe = AsyncMock(
+        return_value=TranscribedAudio(
+            text="### 00:00:00 - 00:05:00\n\nHej.",
+            duration_seconds=600.0,
+            empty_intervals=(EmptyTranscriptionInterval(300.0, 600.0),),
+        )
+    )
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_language": "sv",
+            }
+        },
+        requested_file_ids=[file_id],
+    )
+
+    assert [
+        (item.code, item.message)
+        for item in resolved.diagnostics
+        if item.code == "audio_transcription_empty_interval"
+    ] == [
+        (
+            "audio_transcription_empty_interval",
+            "Step 1: no transcription text returned from 300.0 to 600.0 seconds "
+            f"in file '{file_id}'.",
+        )
+    ]
 
 
 @pytest.mark.asyncio
