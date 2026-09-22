@@ -1,6 +1,6 @@
 <!--
     Drop area for picking local files: drag and drop (including folders),
-    a file picker, an inline summary of what the server accepts and,
+    a file picker, an expandable summary of what the server accepts and,
     with `keepSelection`, the list of picked files. Files whose type is
     not accepted never enter the selection; every pick is reported through
     `onselect` so the caller can queue the accepted files and explain the
@@ -8,13 +8,17 @@
 -->
 <script lang="ts">
   import CloudUploadIcon from "@lucide/svelte/icons/cloud-upload";
+  import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
+  import FileCheck2Icon from "@lucide/svelte/icons/file-check-2";
   import FileIcon from "@lucide/svelte/icons/file";
   import FilePlusIcon from "@lucide/svelte/icons/file-plus";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
   import { cn } from "$lib/utils.js";
   import type { AcceptedFormat } from "../AttachmentManager";
   import { summarizeFileFormats, type FileFormatGroupKind } from "../fileFormatSummary";
@@ -55,8 +59,14 @@
 
   const acceptedMimeTypes = $derived(formats.map((format) => format.mimetype));
   const groups = $derived(summarizeFileFormats(formats));
+  const groupSummary = $derived(
+    new Intl.ListFormat(getLocale(), { type: "conjunction" }).format(
+      groups.map((group) => groupLabels[group.kind]())
+    )
+  );
   const formatsHeadingId = $props.id();
 
+  let formatsOpen = $state(false);
   let input = $state<HTMLInputElement | null>(null);
   let isDragging = $state(false);
   // dragenter/dragleave fire for every child element crossed, so count the
@@ -156,6 +166,7 @@
       }
     }
     if (!multiple) accepted.splice(1);
+    if (rejected.length > 0) formatsOpen = true;
     if (keepSelection && accepted.length > 0) files = [...files, ...accepted];
     if (accepted.length > 0 || rejected.length > 0) onselect?.({ accepted, rejected });
   }
@@ -240,36 +251,45 @@
   {/if}
 
   {#if groups.length > 0}
-    <div
-      class="border-border flex flex-col gap-2 border-t pt-3"
-      role="group"
-      aria-labelledby={formatsHeadingId}
-    >
-      <p
-        id={formatsHeadingId}
-        class="text-muted-foreground text-xs font-medium tracking-wide uppercase"
+    <Collapsible.Root bind:open={formatsOpen} class="border-border border-t pt-2">
+      <Collapsible.Trigger
+        aria-labelledby={formatsHeadingId}
+        class="hover:bg-muted focus-visible:ring-ring/50 flex min-h-11 w-full items-center gap-2 rounded-lg px-2 py-2 text-left outline-none focus-visible:ring-3"
       >
-        {m.supported_formats()}
-      </p>
-      <dl class="flex flex-col gap-2">
-        {#each groups as group (group.kind)}
-          <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-3">
-            <dt class="shrink-0 text-sm sm:w-40">
-              {groupLabels[group.kind]()}
-              {#if group.maxSizeBytes !== null}
-                <span class="text-muted-foreground block text-xs">
-                  {m.max_size_per_file({ size: formatBytes(group.maxSizeBytes) })}
-                </span>
-              {/if}
-            </dt>
-            <dd class="flex flex-wrap gap-1">
-              {#each group.extensions as extension (extension)}
-                <Badge variant="outline" class="font-mono">{extension}</Badge>
-              {/each}
-            </dd>
-          </div>
-        {/each}
-      </dl>
-    </div>
+        <FileCheck2Icon class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+        <span class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span id={formatsHeadingId} class="text-sm font-medium">{m.file_types_and_sizes()}</span>
+          <span class="text-muted-foreground text-xs">{groupSummary}</span>
+        </span>
+        <ChevronDownIcon
+          class={cn(
+            "text-muted-foreground size-4 shrink-0 transition-transform motion-reduce:transition-none",
+            formatsOpen && "rotate-180"
+          )}
+          aria-hidden="true"
+        />
+      </Collapsible.Trigger>
+      <Collapsible.Content role="group" aria-labelledby={formatsHeadingId} class="pt-3">
+        <dl class="flex flex-col gap-3">
+          {#each groups as group (group.kind)}
+            <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-3">
+              <dt class="shrink-0 text-sm sm:w-40">
+                {groupLabels[group.kind]()}
+                {#if group.maxSizeBytes !== null}
+                  <span class="text-muted-foreground block text-xs">
+                    {m.max_size_per_file({ size: formatBytes(group.maxSizeBytes) })}
+                  </span>
+                {/if}
+              </dt>
+              <dd class="flex flex-wrap gap-1">
+                {#each group.extensions as extension (extension)}
+                  <Badge variant="outline" class="font-mono">{extension}</Badge>
+                {/each}
+              </dd>
+            </div>
+          {/each}
+        </dl>
+      </Collapsible.Content>
+    </Collapsible.Root>
   {/if}
 </div>

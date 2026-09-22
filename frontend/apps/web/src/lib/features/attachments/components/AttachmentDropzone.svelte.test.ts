@@ -37,7 +37,7 @@ describe("AttachmentDropzone", () => {
     const eneo = createEneoMock();
     const screen = render(AttachmentDropzoneTestHost, { eneo, rules, multiple: true });
 
-    await expect.element(page.getByText(m.supported_formats())).toBeVisible();
+    await page.getByRole("button", { name: m.file_types_and_sizes() }).click();
     await expect.element(page.getByText(".pdf", { exact: true })).toBeVisible();
 
     selectFiles(screen.container, [

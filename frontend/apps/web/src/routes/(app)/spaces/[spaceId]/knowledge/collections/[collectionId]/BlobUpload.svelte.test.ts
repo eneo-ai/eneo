@@ -93,8 +93,14 @@ describe("BlobUpload", () => {
     render(BlobUpload, { collection, currentBlobs: [] });
     const dialog = await openDialog();
 
-    await expect.element(dialog.getByText(m.supported_formats())).toBeVisible();
-    await expect.element(dialog.getByText(m.file_format_group_documents())).toBeVisible();
+    await dialog.getByRole("button", { name: m.file_types_and_sizes() }).click();
+    await expect
+      .element(
+        dialog
+          .getByRole("group", { name: m.file_types_and_sizes() })
+          .getByText(m.file_format_group_documents())
+      )
+      .toBeVisible();
     await expect.element(dialog.getByText(".pdf", { exact: true })).toBeVisible();
     await expect.element(dialog.getByText(".txt", { exact: true })).toBeVisible();
     expect(document.body.textContent).not.toContain("application/pdf");

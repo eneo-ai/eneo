@@ -37,7 +37,7 @@ describe("InputUpload", () => {
   it("lists the app's accepted formats with extensions instead of mimetypes", async () => {
     const screen = render(InputUploadTestHost, { eneo: createEneoMock(), input });
 
-    await expect.element(page.getByText(m.supported_formats())).toBeVisible();
+    await page.getByRole("button", { name: m.file_types_and_sizes() }).click();
     await expect.element(page.getByText(".pdf", { exact: true })).toBeVisible();
     await expect.element(page.getByText(".txt", { exact: true })).toBeVisible();
     await expect.element(page.getByText(m.upload_files_description())).toBeVisible();

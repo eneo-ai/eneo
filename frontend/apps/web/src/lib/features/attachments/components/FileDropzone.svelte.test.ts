@@ -1,4 +1,4 @@
-import { page } from "@vitest/browser/context";
+import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
@@ -20,12 +20,17 @@ function selectFiles(container: Element, files: File[]) {
 }
 
 describe("FileDropzone", () => {
-  it("lists the supported formats inline, grouped with their size limits", async () => {
+  it("starts collapsed and reveals grouped formats and limits on click or keyboard activation", async () => {
     const screen = render(FileDropzoneTestHost, { formats });
+    const toggle = page.getByRole("button", { name: m.file_types_and_sizes() });
+    const details = page.getByRole("group", { name: m.file_types_and_sizes() });
 
-    await expect.element(page.getByText(m.supported_formats())).toBeVisible();
-    await expect.element(page.getByText(m.file_format_group_documents())).toBeVisible();
-    await expect.element(page.getByText(m.file_format_group_audio())).toBeVisible();
+    await expect.element(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect.element(page.getByText(".pdf", { exact: true })).not.toBeVisible();
+    await toggle.click();
+    await expect.element(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect.element(details.getByText(m.file_format_group_documents())).toBeVisible();
+    await expect.element(details.getByText(m.file_format_group_audio())).toBeVisible();
     await expect.element(page.getByText(m.max_size_per_file({ size: "10 MB" }))).toBeVisible();
     await expect.element(page.getByText(m.max_size_per_file({ size: "200 MB" }))).toBeVisible();
     for (const extension of [".pdf", ".txt", ".text", ".mp3"]) {
@@ -33,6 +38,39 @@ describe("FileDropzone", () => {
     }
     // The raw mimetypes stay out of the UI.
     expect(screen.container.textContent).not.toContain("application/pdf");
+
+    await userEvent.keyboard("{Enter}");
+    await expect.element(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect.element(page.getByText(".pdf", { exact: true })).not.toBeVisible();
+    await userEvent.keyboard(" ");
+    await expect.element(page.getByText(".pdf", { exact: true })).toBeVisible();
+  });
+
+  it.each([true, false])(
+    "opens the formats for rejected types and allows closing again (keepSelection=%s)",
+    async (keepSelection) => {
+      const screen = render(FileDropzoneTestHost, { formats, keepSelection });
+      const toggle = page.getByRole("button", { name: m.file_types_and_sizes() });
+
+      selectFiles(screen.container, [new File(["ok"], "notes.txt", { type: "text/plain" })]);
+      await expect.element(toggle).toHaveAttribute("aria-expanded", "false");
+
+      selectFiles(screen.container, [new File(["png"], "photo.png", { type: "image/png" })]);
+      await expect.element(toggle).toHaveAttribute("aria-expanded", "true");
+      await expect.element(page.getByText(".pdf", { exact: true })).toBeVisible();
+      await toggle.click();
+      await expect.element(toggle).toHaveAttribute("aria-expanded", "false");
+
+      selectFiles(screen.container, [new File(["png"], "second.png", { type: "image/png" })]);
+      await expect.element(toggle).toHaveAttribute("aria-expanded", "true");
+    }
+  );
+
+  it("omits the disclosure when there are no formats to show", async () => {
+    render(FileDropzoneTestHost, { formats: [] });
+    await expect
+      .element(page.getByRole("button", { name: m.file_types_and_sizes() }))
+      .not.toBeInTheDocument();
   });
 
   it("keeps accepted files, reports rejected ones and lets the user remove a file", async () => {
