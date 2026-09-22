@@ -228,7 +228,7 @@
         aria-invalid={descriptionInvalid || undefined}
         aria-describedby={`${descriptionId}-description`}
         disabled={isSubmitting}
-        class="min-h-24"
+        class="max-h-64 min-h-24 overflow-y-auto"
         rows={3}
         maxlength={1024}
         required
