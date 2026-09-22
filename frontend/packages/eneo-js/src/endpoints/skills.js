@@ -410,15 +410,17 @@ export function initSkills(client) {
       },
 
       /**
-       * Remove an unused organisation Skill while retaining its history.
-       * @param {{skillId: string}} params
+       * Remove an organisation Skill while retaining its history. With
+       * `detachBindings`, its Assistant, App and Personal Chat bindings are
+       * deleted in the same transaction; otherwise a bound Skill is refused.
+       * @param {{skillId: string, detachBindings?: boolean}} params
        * @returns {Promise<void>}
        * @throws {EneoError}
        */
-      delete: async ({ skillId }) => {
+      delete: async ({ skillId, detachBindings = false }) => {
         await client.fetch("/api/v1/skills/organization/{skill_id}/", {
           method: "delete",
-          params: { path: { skill_id: skillId } }
+          params: { path: { skill_id: skillId }, query: { detach_bindings: detachBindings } }
         });
       }
     },

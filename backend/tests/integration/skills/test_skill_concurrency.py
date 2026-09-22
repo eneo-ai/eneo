@@ -8,6 +8,7 @@ import sqlalchemy as sa
 from eneo.apps.app_runs.app_run_repo import _serialize_skill_provenance
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.governance_policy_table import GovernancePolicies
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.skill_table import Skills
@@ -1497,6 +1498,114 @@ async def test_detaching_removal_fails_fast_while_a_binding_save_holds_its_paren
         )
         retained = await container.skill_repo().get(skill_id=skill.id)
         assert retained is not None and retained.removed_at is None
+
+
+async def test_execution_plan_read_waiting_behind_detaching_removal_sees_no_binding(
+    db_container,
+    db_session,
+    skill_concurrency_resources,
+    organization_removal_skills,
+):
+    resources = skill_concurrency_resources
+    skill = organization_removal_skills[0]
+    reader_pid = asyncio.get_running_loop().create_future()
+
+    async def prepare_run():
+        async with db_container() as container:
+            reader_pid.set_result(await _backend_pid(container))
+            return await container.skill_repo().list_app_bindings_for_execution_plan(
+                app_id=resources.app_id
+            )
+
+    async with db_container() as container:
+        await container.skill_service().replace_app_bindings(
+            space_id=resources.space_id,
+            app_id=resources.app_id,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=skill.current_revision.id
+                )
+            ],
+        )
+    async with db_container() as remover:
+        await remover.organization_skill_service().remove_many(
+            skill_ids=[skill.id], detach_bindings=True
+        )
+        # The run's share lock on the Skill row queues behind the removal's
+        # exclusive lock; after commit it must re-evaluate against the
+        # removed row, not compose the Skill from its pre-removal snapshot.
+        task = asyncio.create_task(prepare_run())
+        try:
+            pid = await asyncio.wait_for(reader_pid, timeout=5)
+            await _wait_until_database_lock(db_session, pid=pid)
+        except BaseException:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            raise
+    assert await asyncio.wait_for(task, timeout=5) == []
+
+
+async def test_detaching_removal_rolls_back_entirely_when_the_audit_write_fails(
+    db_container,
+    skill_concurrency_resources,
+    organization_removal_skills,
+    admin_user,
+    monkeypatch,
+):
+    resources = skill_concurrency_resources
+    skill = organization_removal_skills[0]
+
+    async def row_versions(container):
+        versions = {}
+        for table, row_id in parents:
+            versions[table] = await container.session().scalar(
+                sa.select(
+                    sa.cast(sa.literal_column(f"{table.__tablename__}.xmin"), sa.Text)
+                )
+                .select_from(table)
+                .where(table.id == row_id)
+            )
+        return versions
+
+    async with db_container() as container:
+        policy_id = await _bind_everywhere(container, resources, skill, admin_user)
+    parents = (
+        (Assistants, resources.assistant_id),
+        (Apps, resources.app_id),
+        (GovernancePolicies, policy_id),
+    )
+    async with db_container() as container:
+        before = await row_versions(container)
+
+    async def audit_down(**_kwargs):
+        raise RuntimeError("audit store unavailable")
+
+    with pytest.raises(RuntimeError, match="audit store unavailable"):
+        async with db_container() as container:
+            service = container.organization_skill_service()
+            monkeypatch.setattr(service.audit_service, "log", audit_down)
+            await service.remove_many(skill_ids=[skill.id], detach_bindings=True)
+
+    async with db_container() as container:
+        repo = container.skill_repo()
+        # Deletes ran before the audit call; none of them may survive it.
+        assert (
+            len(await repo.list_assistant_bindings(assistant_id=resources.assistant_id))
+            == 1
+        )
+        assert len(await repo.list_app_bindings(app_id=resources.app_id)) == 1
+        assert len(await repo.list_policy_bindings(policy_id=policy_id)) == 1
+        assert await row_versions(container) == before
+        retained = await repo.get(skill_id=skill.id)
+        assert retained is not None and retained.removed_at is None
+        assert (
+            await container.session().scalar(
+                sa.select(sa.func.count())
+                .select_from(AuditLog)
+                .where(AuditLog.entity_id == skill.id)
+            )
+            == 0
+        )
 
 
 async def test_execution_plan_never_composes_a_removed_skill(

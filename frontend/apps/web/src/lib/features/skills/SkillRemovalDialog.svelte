@@ -73,7 +73,8 @@
     error = null;
     let result: SkillRemovalResult;
     try {
-      // Only authorise detaching bindings the admin has seen listed; a
+      // The flag authorises detaching every current binding of the selection;
+      // it is only sent once the admin has seen that something is bound. A
       // binding the server discovers later surfaces here first (9051).
       result = await onRemove({
         skill_ids: skills.map((skill) => skill.id),

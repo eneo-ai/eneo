@@ -7,7 +7,7 @@ happened to own. These tests pin the status and the reason code a client reads
 to choose that instruction.
 """
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -699,12 +699,49 @@ async def test_detaching_removal_removes_bound_skill_and_reports_totals(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_single_removal_accepts_the_detach_query_parameter(client, admin_token):
+async def test_single_removal_accepts_the_detach_query_parameter(
+    client, admin_token, db_container
+):
     skill = await _create_organization_skill(
         client, token=admin_token, slug="detach-one"
     )
+    published = await client.post(
+        f"/api/v1/skills/organization/{skill['id']}/publish/",
+        json={"expected_revision_id": skill["current_revision"]["id"]},
+        headers=_auth(admin_token),
+    )
+    assert published.status_code == 200, published.text
+    space_id = await _create_space(client, token=admin_token)
+    assistant_id = await _create_assistant(client, token=admin_token, space_id=space_id)
+    attach = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={
+            "skill_bindings": [
+                {
+                    "skill_id": skill["id"],
+                    "skill_revision_id": skill["current_revision"]["id"],
+                }
+            ]
+        },
+        headers=_auth(admin_token),
+    )
+    assert attach.status_code == 200, attach.text
+
+    strict = await client.delete(
+        f"/api/v1/skills/organization/{skill['id']}/", headers=_auth(admin_token)
+    )
+    assert strict.status_code == 409, strict.text
+    assert strict.json()["eneo_error_code"] == 9051
+
     response = await client.delete(
         f"/api/v1/skills/organization/{skill['id']}/?detach_bindings=true",
         headers=_auth(admin_token),
     )
     assert response.status_code == 204, response.text
+    async with db_container() as container:
+        repo = container.skill_repo()
+        assert await repo.list_assistant_bindings(assistant_id=assistant_id) == []
+        removed_at = await container.session().scalar(
+            sa.select(Skills.removed_at).where(Skills.id == UUID(skill["id"]))
+        )
+        assert removed_at is not None

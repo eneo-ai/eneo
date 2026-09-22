@@ -607,6 +607,34 @@ test("organization removal sends one bounded batch and returns removed IDs", asy
   ]);
 });
 
+test("organization single removal forwards the detach flag as a query parameter", async () => {
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return undefined;
+    }
+  });
+  await skills.organization.delete({ skillId: "skill-1" });
+  await skills.organization.delete({ skillId: "skill-1", detachBindings: true });
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/",
+      request: {
+        method: "delete",
+        params: { path: { skill_id: "skill-1" }, query: { detach_bindings: false } }
+      }
+    },
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/",
+      request: {
+        method: "delete",
+        params: { path: { skill_id: "skill-1" }, query: { detach_bindings: true } }
+      }
+    }
+  ]);
+});
+
 test("organization catalogue can request retained removed skills", async () => {
   const calls = [];
   const skills = initSkills({

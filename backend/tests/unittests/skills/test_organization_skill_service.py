@@ -616,7 +616,7 @@ async def test_detaching_removal_forwards_the_flag_and_audits_every_detached_res
     )
     service.audit_service.log.assert_awaited_once()
     metadata = service.audit_service.log.await_args.kwargs["metadata"]
-    assert metadata["detached"] == {
+    assert metadata["extra"]["detached"] == {
         "assistant_count": 1,
         "app_count": 1,
         "personal_chat_count": 1,

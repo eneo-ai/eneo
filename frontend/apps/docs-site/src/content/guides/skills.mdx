@@ -410,7 +410,7 @@ the next safe action.
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | Identifier already taken            | Another Skill in the same Space, or in the organisation catalogue, already uses that identifier                                                                               | Choose a different identifier                                        |
 | Skill changed while you reviewed it | Someone saved a new version, or published a different one, between the moment the page loaded and the moment you saved; this covers restoring an older version and publishing | Reload the Skill, compare the latest version, then repeat the action |
-| Skill is still attached             | The Skill is attached to an Assistant, an App, or the organisation Personal Chat policy                                                                                       | Remove every attachment, then remove the Skill                       |
+| Skill is still attached             | The Skill is attached to an Assistant, an App, or the organisation Personal Chat policy, and the removal was sent without the detach option                                    | Tick the detach option in the confirmation, or remove the attachments |
 | App run in progress                 | A queued or running App run needs the Skill                                                                                                                                   | Wait for the run to finish, then remove the Skill                    |
 | Execution block changed             | The block you reviewed was released or replaced before your unblock was applied                                                                                               | The page reloads the live block state; review it and try again       |
 
@@ -497,8 +497,10 @@ that operational context and make recovery a manual reconfiguration task.
 
 ### When can I remove a Skill?
 
-First detach it from every Assistant, App, and Personal Chat policy, and wait
-for queued or running App jobs to finish. Organisation Skills retain their
-instructions, immutable versions, and audit history under **Removed**, including
-Skills that were published before removal. Local Space Skills still use permanent
-deletion once their bindings and active App jobs have been cleared.
+Whenever no queued or running App job needs it. The confirmation offers to
+detach the Skill from every Assistant, App, and Personal Chat policy in the same
+step (on by default), so prior manual detachment is not required. Organisation
+Skills retain their instructions, immutable versions, and audit history under
+**Removed**, including Skills that were published before removal. Local Space
+Skills still use permanent deletion once their bindings and active App jobs have
+been cleared.

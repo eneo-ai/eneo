@@ -2165,18 +2165,24 @@ class SkillRepoImpl:
         )
         for key, parent, binding, parent_column in kinds:
             scope = (binding.tenant_id == tenant_id, binding.skill_id.in_(skill_ids))
-            parent_ids = list(
-                await self.session.scalars(
-                    sa.select(parent_column).where(*scope).distinct()
-                )
-            )
-            if not parent_ids:
-                continue
+            # Parents are selected in SQL, never expanded into bind parameters:
+            # fan-out is unbounded and asyncpg caps a statement at 32 767 of them.
+            affected_parents = sa.select(parent_column).where(*scope)
             await self._execute_nowait(
                 sa.select(parent.id)
-                .where(parent.id.in_(parent_ids))
+                .where(parent.id.in_(affected_parents))
                 .with_for_update(nowait=True)
             )
+            # Rewrite the parents before their bindings go, while the subquery
+            # still finds them; readers key their version guards on this row.
+            touched = await self.session.execute(
+                sa.update(parent)
+                .where(parent.id.in_(affected_parents))
+                .values(updated_at=sa.func.now())
+                .returning(parent.id)
+            )
+            if not touched.scalars().first():
+                continue
             deleted = await self.session.execute(
                 sa.delete(binding)
                 .where(*scope)
@@ -2184,11 +2190,6 @@ class SkillRepoImpl:
             )
             for skill_id, parent_id in deleted.tuples():
                 detached[skill_id][key].append(parent_id)
-            await self.session.execute(
-                sa.update(parent)
-                .where(parent.id.in_(parent_ids))
-                .values(updated_at=sa.func.now())
-            )
         return {
             skill_id: SkillDetachment(
                 assistant_ids=tuple(ids["assistant_ids"]),
