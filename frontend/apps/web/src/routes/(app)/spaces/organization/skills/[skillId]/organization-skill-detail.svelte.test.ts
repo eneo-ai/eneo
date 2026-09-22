@@ -1767,6 +1767,102 @@ describe("organisation Skill detail page", () => {
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
   });
 
+  test("keeps a committed selected Assistant update visible when the App request fails", async () => {
+    const advanceAssistants = vi.fn().mockResolvedValueOnce({
+      run_id: "run-1",
+      next_cursor: null,
+      counts: { advanced: 1, concurrent_change: 0, incompatible: 0 },
+      outcomes: [{ assistant_id: "assistant-1", outcome: "advanced" }]
+    });
+    const advanceApps = vi.fn().mockRejectedValueOnce(new Error("Apps unavailable"));
+    const behindAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        assistant_count: 1,
+        app_count: 1,
+        distinct_space_count: 1,
+        behind_published_count: 2
+      },
+      matched_count: 2,
+      items: [
+        {
+          kind: "assistant" as const,
+          resource_id: "assistant-1",
+          name: "HR Assistant",
+          space_id: "space-1",
+          space_name: "People and culture",
+          revision_id: "revision-0",
+          revision_number: 0,
+          drift: "behind" as const
+        },
+        {
+          kind: "app" as const,
+          resource_id: "app-1",
+          name: "Onboarding App",
+          space_id: "space-1",
+          space_name: "People and culture",
+          revision_id: "revision-0",
+          revision_number: 0,
+          drift: "behind" as const
+        }
+      ]
+    };
+
+    render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.resolve(behindAdoption),
+        advanceAssistants,
+        advanceApps,
+        getAdoption: vi.fn(async () => behindAdoption)
+      }) as never
+    });
+
+    await page
+      .getByRole("checkbox", {
+        name: m.organization_skills_adoption_select_shown({ count: "2" })
+      })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+
+    await vi.waitFor(() =>
+      expect(advanceAssistants).toHaveBeenCalledWith(
+        expect.objectContaining({ assistant_ids: ["assistant-1"], cursor: null })
+      )
+    );
+    await vi.waitFor(() =>
+      expect(advanceApps).toHaveBeenCalledWith(expect.objectContaining({ app_ids: ["app-1"] }))
+    );
+    await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+    await expect.element(page.getByRole("alert")).toBeVisible();
+    await expect
+      .element(
+        page.getByText(
+          m.organization_skills_adoption_advanced_success({
+            advanced: "1",
+            unprocessed: "0",
+            concurrent: "0",
+            incompatible: "0"
+          })
+        )
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("checkbox", {
+          name: m.organization_skills_adoption_select_resource({ name: "Onboarding App" })
+        })
+      )
+      .toBeChecked();
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
+  });
+
   test("stops between Assistant chunks and restarts a fresh server walk", async () => {
     const firstChunk = deferred<AssistantFleetAdvancePublic>();
     const restartChunk = deferred<AssistantFleetAdvancePublic>();

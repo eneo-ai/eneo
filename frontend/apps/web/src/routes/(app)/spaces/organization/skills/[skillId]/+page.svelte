@@ -212,33 +212,49 @@
     const result: SkillSelectedAdvanceResult = {
       advanced: 0,
       concurrentChange: 0,
-      incompatible: 0
+      incompatible: 0,
+      processedIds: [],
+      failedIds: [],
+      error: null
     };
-    const add = (chunk: AssistantFleetAdvancePublic | AppFleetAdvancePublic) => {
+    const add = (chunk: AssistantFleetAdvancePublic | AppFleetAdvancePublic, ids: string[]) => {
       result.advanced += chunk.counts.advanced;
       result.concurrentChange += chunk.counts.concurrent_change;
       result.incompatible += chunk.counts.incompatible;
+      result.processedIds.push(...ids);
     };
-    // One chunk each: the selection is capped at the fleet chunk size.
+    // One chunk each: the selection is capped at the fleet chunk size. The two
+    // requests are independent commits, so a failed second request must not
+    // hide the first one's outcome.
     if (selection.assistantIds.length > 0) {
+      const chunk = await data.eneo.skills.organization.advanceAssistants({
+        skillId: data.skill.id,
+        expected_published_revision_id: publishedRevisionId,
+        cursor: null,
+        assistant_ids: selection.assistantIds
+      });
       add(
-        await data.eneo.skills.organization.advanceAssistants({
-          skillId: data.skill.id,
-          expected_published_revision_id: publishedRevisionId,
-          cursor: null,
-          assistant_ids: selection.assistantIds
-        })
+        chunk,
+        chunk.outcomes.map((outcome) => outcome.assistant_id)
       );
     }
     if (selection.appIds.length > 0) {
-      add(
-        await data.eneo.skills.organization.advanceApps({
+      try {
+        const chunk = await data.eneo.skills.organization.advanceApps({
           skillId: data.skill.id,
           expected_published_revision_id: publishedRevisionId,
           cursor: null,
           app_ids: selection.appIds
-        })
-      );
+        });
+        add(
+          chunk,
+          chunk.outcomes.map((outcome) => outcome.app_id)
+        );
+      } catch (error) {
+        if (selection.assistantIds.length === 0) throw error;
+        result.failedIds = [...selection.appIds];
+        result.error = getErrorMessage(error, m.organization_skills_adoption_advance_partial());
+      }
     }
     void refreshOrganizationSkills(data.skill.id);
     return result;

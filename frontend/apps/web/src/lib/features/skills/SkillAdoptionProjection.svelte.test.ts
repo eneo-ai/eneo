@@ -943,8 +943,12 @@ describe("Skill adoption projection", () => {
   });
 
   test("a parent refresh during a reload ends the loading state and keeps the fresh rows", async () => {
+    const slowSearch = deferred<SkillAdoptionProjectionPagePublic>();
     const slowReload = deferred<SkillAdoptionProjectionPagePublic>();
-    const getOrganizationSkillAdoption = vi.fn().mockReturnValueOnce(slowReload.promise);
+    const getOrganizationSkillAdoption = vi
+      .fn()
+      .mockReturnValueOnce(slowSearch.promise)
+      .mockReturnValueOnce(slowReload.promise);
     const rendered = render(SkillAdoptionProjection, {
       skillId: "skill-1",
       initialPage: adoptionPage(),
@@ -959,6 +963,8 @@ describe("Skill adoption projection", () => {
     await page
       .getByRole("button", { name: m.organization_skills_adoption_clear_filters() })
       .click();
+    await vi.waitFor(() => expect(getOrganizationSkillAdoption).toHaveBeenCalledTimes(2));
+    // The unfiltered reload is still pending when the parent hands over a new page.
     await rendered.rerender({
       skillId: "skill-1",
       initialPage: adoptionPage({
@@ -977,6 +983,10 @@ describe("Skill adoption projection", () => {
       }),
       getOrganizationSkillAdoption
     });
+    await expect
+      .element(page.getByRole("region", { name: m.organization_skills_adoption_heading() }))
+      .toHaveAttribute("aria-busy", "false");
+    slowSearch.resolve(adoptionPage({ items: [] }));
     slowReload.resolve(adoptionPage({ items: [] }));
     await new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -1038,9 +1048,14 @@ describe("Skill adoption projection", () => {
   });
 
   test("updates only the selected stale rows to the published version", async () => {
-    const onAdvanceSelected = vi
-      .fn()
-      .mockResolvedValue({ advanced: 1, concurrentChange: 0, incompatible: 0 });
+    const onAdvanceSelected = vi.fn().mockResolvedValue({
+      advanced: 1,
+      concurrentChange: 0,
+      incompatible: 0,
+      processedIds: ["assistant-1"],
+      failedIds: [],
+      error: null
+    });
     const getOrganizationSkillAdoption = vi.fn().mockResolvedValue(adoptionPage());
     render(SkillAdoptionProjection, {
       skillId: "skill-1",
@@ -1094,7 +1109,7 @@ describe("Skill adoption projection", () => {
         page.getByText(
           m.organization_skills_adoption_advanced_success({
             advanced: "1",
-            skipped: "1",
+            unprocessed: "1",
             concurrent: "0",
             incompatible: "0"
           })
@@ -1102,5 +1117,135 @@ describe("Skill adoption projection", () => {
       )
       .toBeInTheDocument();
     await vi.waitFor(() => expect(getOrganizationSkillAdoption).toHaveBeenCalledTimes(1));
+  });
+
+  test("accounts for selected rows the server did not process", async () => {
+    const onAdvanceSelected = vi.fn().mockResolvedValue({
+      advanced: 0,
+      concurrentChange: 0,
+      incompatible: 0,
+      processedIds: [],
+      failedIds: [],
+      error: null
+    });
+    render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: adoptionPage(),
+      getOrganizationSkillAdoption: vi.fn().mockResolvedValue(adoptionPage({ items: [] })),
+      onAdvanceSelected,
+      publishedRevisionId: "revision-2"
+    });
+
+    await page
+      .getByRole("checkbox", {
+        name: m.organization_skills_adoption_select_resource({ name: "HR Assistant" })
+      })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+
+    await expect
+      .element(
+        page.getByText(
+          m.organization_skills_adoption_advanced_success({
+            advanced: "0",
+            unprocessed: "1",
+            concurrent: "0",
+            incompatible: "0"
+          })
+        )
+      )
+      .toBeInTheDocument();
+  });
+
+  test("keeps committed work visible and the failed rows selected after a partial failure", async () => {
+    const items = [
+      {
+        kind: "assistant" as const,
+        resource_id: "assistant-1",
+        name: "HR Assistant",
+        space_id: "space-1",
+        space_name: "People and culture",
+        revision_id: "revision-1",
+        revision_number: 1,
+        drift: "behind" as const
+      },
+      {
+        kind: "app" as const,
+        resource_id: "app-1",
+        name: "Onboarding App",
+        space_id: "space-1",
+        space_name: "People and culture",
+        revision_id: "revision-1",
+        revision_number: 1,
+        drift: "behind" as const
+      }
+    ];
+    const onAdvanceSelected = vi.fn().mockResolvedValue({
+      advanced: 1,
+      concurrentChange: 0,
+      incompatible: 0,
+      processedIds: ["assistant-1"],
+      failedIds: ["app-1"],
+      error: "Apps unavailable"
+    });
+    const getOrganizationSkillAdoption = vi
+      .fn()
+      .mockResolvedValue(adoptionPage({ items: [{ ...items[0], drift: "current" }, items[1]] }));
+    render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: adoptionPage({ items }),
+      getOrganizationSkillAdoption,
+      onAdvanceSelected,
+      publishedRevisionId: "revision-2"
+    });
+
+    await page
+      .getByRole("checkbox", {
+        name: m.organization_skills_adoption_select_shown({ count: "2" })
+      })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+
+    await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+    await expect.element(page.getByRole("alert")).toHaveTextContent("Apps unavailable");
+    await vi.waitFor(() => expect(getOrganizationSkillAdoption).toHaveBeenCalledTimes(1));
+    await expect
+      .element(
+        page.getByText(
+          m.organization_skills_adoption_advanced_success({
+            advanced: "1",
+            unprocessed: "0",
+            concurrent: "0",
+            incompatible: "0"
+          })
+        )
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("checkbox", {
+          name: m.organization_skills_adoption_select_resource({ name: "Onboarding App" })
+        })
+      )
+      .toBeChecked();
+    await expect
+      .element(
+        page.getByRole("checkbox", {
+          name: m.organization_skills_adoption_select_resource({ name: "HR Assistant" })
+        })
+      )
+      .not.toBeChecked();
   });
 });

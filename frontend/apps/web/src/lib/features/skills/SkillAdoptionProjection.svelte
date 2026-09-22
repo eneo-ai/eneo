@@ -42,6 +42,12 @@
     advanced: number;
     concurrentChange: number;
     incompatible: number;
+    // Every resource the server reported an outcome for; the rest were not
+    // processed (already current, detached meanwhile, or in a failed request).
+    processedIds: string[];
+    // Resources whose request failed after earlier work was committed.
+    failedIds: string[];
+    error: string | null;
   };
 </script>
 
@@ -356,6 +362,7 @@
   }
 
   function toggleResource(resource: AdoptionResource, checked: boolean) {
+    if (pendingAction === null) actionError = null;
     const key = resourceKey(resource);
     selectedKeys = checked
       ? [...selectedKeys.filter((existing) => existing !== key), key].slice(0, selectionLimit)
@@ -398,16 +405,33 @@
         });
       } else {
         if (onAdvanceSelected === undefined) return;
-        // Rows already on the published version are skipped here, so the
-        // server only validates real targets.
-        const skipped = selectedResources.length - selectedBehind.length;
+        // Rows already on the published version are not sent, so the server
+        // only validates real targets; every selected row is still accounted
+        // for against the outcomes it returns.
+        const submitted = selectedResources;
         const result = await onAdvanceSelected(toSelection(selectedBehind));
+        const processed = new Set(result.processedIds);
+        const failed = new Set(result.failedIds);
+        const unprocessed = submitted.filter(
+          (resource) => !processed.has(resource.resource_id) && !failed.has(resource.resource_id)
+        ).length;
         message = m.organization_skills_adoption_advanced_success({
           advanced: String(result.advanced),
-          skipped: String(skipped),
+          unprocessed: String(unprocessed),
           concurrent: String(result.concurrentChange),
           incompatible: String(result.incompatible)
         });
+        if (result.error !== null) {
+          // Part of the work is committed: show it, keep the rest selected.
+          pendingAction = null;
+          await announce(message);
+          await reload();
+          selectedKeys = items
+            .filter((resource) => failed.has(resource.resource_id))
+            .map(resourceKey);
+          actionError = result.error;
+          return;
+        }
       }
       pendingAction = null;
       selectedKeys = [];
@@ -1052,6 +1076,9 @@
             </div>
           {/if}
           <p class="sr-only" aria-live="polite">{detachAnnouncement}</p>
+          {#if actionError !== null && pendingAction === null}
+            <p class="text-destructive mt-2 text-sm" role="alert">{actionError}</p>
+          {/if}
         </div>
 
         {#if reloading}
