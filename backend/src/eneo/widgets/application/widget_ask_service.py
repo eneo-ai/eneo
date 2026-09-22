@@ -104,7 +104,11 @@ class WidgetAskService:
     async def get_session(
         self, principal: WidgetPrincipal, session_id: UUID
     ) -> SessionInDB:
-        return await self._owned_session(principal.widget, session_id)
+        session = await self._owned_session(principal.widget, session_id)
+        if not principal.widget.show_sources:
+            for question in session.questions:
+                question.info_blobs = []
+        return session
 
     async def leave_feedback(
         self, principal: WidgetPrincipal, session_id: UUID, feedback: SessionFeedback
@@ -225,6 +229,10 @@ class WidgetAskService:
         completed = False
         try:
             async for chunk in answer:
+                # Hidden sources never leave the server: the visitor gets
+                # neither citation targets nor document titles.
+                if not widget.show_sources:
+                    chunk.reference_chunks = None
                 yield chunk
             completed = True
         finally:

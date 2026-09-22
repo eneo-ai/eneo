@@ -13,6 +13,7 @@ function widget(overrides: Partial<Widget> = {}): Widget {
     privacy: { retention_days: 30 },
     status: "draft",
     token_generation: 0,
+    show_sources: true,
     revision: 0,
     allowed_origins: [],
     ...overrides

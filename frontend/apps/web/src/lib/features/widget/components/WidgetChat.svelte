@@ -345,6 +345,7 @@
               {index}
               isLast={index === messages.length - 1}
               isLoading={chat.askQuestion.isLoading}
+              showSources={initial.config.show_sources ?? true}
             />
           {/each}
           {#if showPending && pendingQuestion !== null}

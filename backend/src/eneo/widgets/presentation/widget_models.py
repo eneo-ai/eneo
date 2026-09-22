@@ -97,6 +97,7 @@ class WidgetUpdate(BaseModel):
     language: Optional[WidgetLanguage] = None
     allowed_origins: Optional[list[str]] = Field(default=None, max_length=20)
     bot_protection: Optional[BotProtection] = None
+    show_sources: Optional[bool] = None
 
     @field_validator("allowed_origins")
     @classmethod
@@ -121,6 +122,7 @@ class WidgetPublic(BaseModel):
     language: WidgetLanguage
     allowed_origins: list[str]
     bot_protection: BotProtection
+    show_sources: bool
     activation_blockers: list[str] = Field(
         description="Empty when the widget can be activated as configured."
     )

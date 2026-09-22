@@ -21,13 +21,15 @@
     index: number;
     isLast: boolean;
     isLoading: boolean;
+    /** Off when the widget hides citations and the source list. */
+    showSources?: boolean;
   };
 
-  let { message, index, isLast, isLoading }: Props = $props();
+  let { message, index, isLast, isLoading, showSources = true }: Props = $props();
 
   const anchorFor = (sourceIndex: number) => `widget-source-${index}-${sourceIndex}`;
   const listId = $derived(`widget-sources-${index}`);
-  const sources = $derived(messageSources(message));
+  const sources = $derived(showSources ? messageSources(message) : []);
   const indexer = $derived(referenceIndexer(message));
 
   // Collapsed by default: the answer is what the visitor came for, the
@@ -47,7 +49,7 @@
   }
 
   setWidgetMessageContext({
-    referenceIndex: (id) => indexer(id),
+    referenceIndex: (id) => (showSources ? indexer(id) : null),
     referenceAnchor: anchorFor,
     revealSource
   });
@@ -58,8 +60,10 @@
       : m.widget_sources_count_other({ count: sources.length })
   );
 
+  const appOrigin = () => (typeof location === "undefined" ? "" : location.origin);
+
   async function copyReference(source: WidgetSource) {
-    const text = sourceReferenceText(source, m.widget_source_reference_id());
+    const text = sourceReferenceText(source, appOrigin());
     try {
       await navigator.clipboard.writeText(text);
       copiedId = source.id;
@@ -167,9 +171,10 @@
                       {#if copyFailedId === source.id}
                         <p class="text-secondary text-xs">{m.widget_reference_copy_failed()}</p>
                         <p class="text-primary text-xs break-all select-all">
-                          {sourceReferenceText(source, m.widget_source_reference_id())}
+                          {sourceReferenceText(source, appOrigin())}
                         </p>
                       {/if}
+                      <p class="text-secondary text-xs">{m.widget_source_request_hint()}</p>
                     {/if}
                   </div>
                 </li>

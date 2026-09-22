@@ -22618,6 +22618,8 @@ export interface components {
       /** Allowed Origins */
       allowed_origins: string[];
       bot_protection: components["schemas"]["BotProtection"];
+      /** Show Sources */
+      show_sources: boolean;
       /**
        * Activation Blockers
        * @description Empty when the widget can be activated as configured.
@@ -22662,6 +22664,11 @@ export interface components {
       max_question_chars: number;
       /** Token Generation */
       token_generation: number;
+      /**
+       * Show Sources
+       * @description False when answers are shown without citations or a source list.
+       */
+      show_sources: boolean;
       /**
        * Single Turn
        * @description True when the widget stores nothing after the answer: no follow-up questions, feedback or restore; every question starts a new conversation.
@@ -22890,6 +22897,8 @@ export interface components {
       /** Allowed Origins */
       allowed_origins?: string[] | null;
       bot_protection?: components["schemas"]["BotProtection"] | null;
+      /** Show Sources */
+      show_sources?: boolean | null;
     };
     /** WidgetUsageDayPublic */
     WidgetUsageDayPublic: {

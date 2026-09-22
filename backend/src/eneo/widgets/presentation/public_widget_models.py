@@ -28,6 +28,9 @@ class WidgetPublicConfig(BaseModel):
     bot_protection: BotProtection
     max_question_chars: int
     token_generation: int
+    show_sources: bool = Field(
+        description="False when answers are shown without citations or a source list."
+    )
     single_turn: bool = Field(
         description=(
             "True when the widget stores nothing after the answer: no follow-up"

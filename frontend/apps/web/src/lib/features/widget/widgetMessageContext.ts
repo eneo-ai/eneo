@@ -48,9 +48,10 @@ export function referenceIndexer(message: Pick<ConversationMessage, "references"
 }
 
 /**
- * What a visitor copies for a source without a link: enough for the
- * organisation to find the document when asked for it.
+ * What a visitor copies for a source without a link: the title plus a link
+ * into Eneo that resolves the document for anyone with access to it, so the
+ * reference can be forwarded to an administrator as is.
  */
-export function sourceReferenceText(source: WidgetSource, idLabel: string): string {
-  return `${source.title} · ${idLabel}: ${source.id}`;
+export function sourceReferenceText(source: WidgetSource, appOrigin: string): string {
+  return `${source.title} – ${appOrigin}/documents/${source.id}`;
 }

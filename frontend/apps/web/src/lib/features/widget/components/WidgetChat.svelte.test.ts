@@ -108,6 +108,7 @@ function config(overrides: Partial<WidgetPublicConfig> = {}): WidgetPublicConfig
     bot_protection: "none",
     max_question_chars: 2000,
     token_generation: 0,
+    show_sources: true,
     single_turn: false,
     frame_ancestors: [],
     ...overrides

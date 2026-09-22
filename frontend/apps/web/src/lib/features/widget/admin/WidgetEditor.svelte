@@ -14,6 +14,7 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import { toastWidgetError } from "./errors";
@@ -277,6 +278,21 @@
                   {#if languageLocked}
                     <Field.Description id="widget-language-lock">{lockHint}</Field.Description>
                   {/if}
+                </Field.Field>
+                <Field.Field orientation="horizontal" class="sm:col-span-2">
+                  <Field.Content>
+                    <Field.Label for="widget-show-sources"
+                      >{m.widget_admin_show_sources()}</Field.Label
+                    >
+                    <Field.Description
+                      >{m.widget_admin_show_sources_description()}</Field.Description
+                    >
+                  </Field.Content>
+                  <Switch
+                    id="widget-show-sources"
+                    checked={current.show_sources ?? true}
+                    onCheckedChange={(checked) => autosave.patch({ show_sources: checked })}
+                  />
                 </Field.Field>
               </Field.Group>
             </Card.Content>

@@ -45,12 +45,13 @@ function message(answer: string): ConversationMessage {
   } as unknown as ConversationMessage;
 }
 
-function renderMessage(answer = "Svaret.") {
+function renderMessage(answer = "Svaret.", showSources = true) {
   return render(WidgetMessage, {
     message: message(answer),
     index: 0,
     isLast: true,
-    isLoading: false
+    isLoading: false,
+    showSources
   });
 }
 
@@ -85,7 +86,7 @@ describe("WidgetMessage sources", () => {
     await page.getByRole("button", { name: /widget_copy_reference_for/ }).click();
 
     expect(writeText).toHaveBeenCalledWith(
-      `Taxa plan- och bygglov.pdf · widget_source_reference_id: ${FILE_ID}`
+      `Taxa plan- och bygglov.pdf – ${location.origin}/documents/${FILE_ID}`
     );
     await expect.element(page.getByText("widget_reference_copied").first()).toBeVisible();
   });
@@ -97,9 +98,15 @@ describe("WidgetMessage sources", () => {
     await page.getByRole("button", { name: /widget_sources_count_other/ }).click();
     await page.getByRole("button", { name: /widget_copy_reference_for/ }).click();
 
-    await expect
-      .element(page.getByText(`widget_source_reference_id: ${FILE_ID}`, { exact: false }))
-      .toBeVisible();
+    await expect.element(page.getByText(`/documents/${FILE_ID}`, { exact: false })).toBeVisible();
+  });
+
+  test("hides citations and the list when the widget does not show sources", async () => {
+    renderMessage(`Bygglov kostar pengar <inref id="${FILE_ID.slice(0, 8)}"/>.`, false);
+
+    await expect.element(page.getByText("Bygglov kostar pengar", { exact: false })).toBeVisible();
+    expect(page.getByRole("button", { name: /widget_sources_count/ }).elements()).toHaveLength(0);
+    expect(page.getByRole("link", { name: /widget_citation_label/ }).elements()).toHaveLength(0);
   });
 
   test("an inline citation opens the list and focuses its source", async () => {

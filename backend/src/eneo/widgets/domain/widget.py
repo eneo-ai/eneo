@@ -299,6 +299,8 @@ class Widget(BaseModel):
     language: WidgetLanguage = WidgetLanguage.AUTO
     allowed_origins: list[str] = Field(default_factory=list)
     bot_protection: BotProtection = BotProtection.ALTCHA
+    # Visitors see numbered citations and a source list unless turned off.
+    show_sources: bool = True
     # The template this widget follows; None for a stand-alone widget. Only
     # the link/detach commands change it, never a plain update.
     template_id: Optional[UUID] = None
@@ -416,6 +418,7 @@ class Widget(BaseModel):
             "language",
             "allowed_origins",
             "bot_protection",
+            "show_sources",
         }
         unknown = set(changes) - editable
         if unknown:

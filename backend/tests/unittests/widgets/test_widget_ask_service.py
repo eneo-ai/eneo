@@ -183,6 +183,43 @@ async def test_ask_streams_then_settles_budget_and_records_usage():
     deps.usage.delete_session.assert_not_awaited()
 
 
+async def test_ask_strips_references_when_sources_are_hidden():
+    async def cited():
+        yield SimpleNamespace(text="Hej", reference_chunks=[object()])
+
+    service, _ = _service(
+        ask_result=SimpleNamespace(
+            session=SimpleNamespace(id=uuid4(), questions=[], feedback_value=None),
+            answer=cited(),
+            question="q",
+            question_id=uuid4(),
+            completion_model=object(),
+        )
+    )
+    response = await service.ask(
+        _principal(_widget(show_sources=False)),
+        question="Hej?",
+        session_id=None,
+        client_ip="203.0.113.1",
+    )
+    chunks = [chunk async for chunk in response.answer]
+    assert [chunk.reference_chunks for chunk in chunks] == [None]
+
+
+async def test_get_session_strips_references_when_sources_are_hidden():
+    question = SimpleNamespace(info_blobs=[object()])
+    service, deps = _service()
+    deps.session_service.get_session_by_uuid = AsyncMock(
+        return_value=SimpleNamespace(id=uuid4(), questions=[question])
+    )
+
+    session = await service.get_session(
+        _principal(_widget(show_sources=False)), uuid4()
+    )
+
+    assert session.questions[0].info_blobs == []
+
+
 async def test_retention_zero_deletes_the_session_after_streaming():
     widget = _widget(privacy=WidgetPrivacy(retention_days=0))
     service, deps = _service()
