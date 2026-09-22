@@ -10,6 +10,7 @@
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import SkillRemovalDialog from "$lib/features/skills/SkillRemovalDialog.svelte";
+  import { formatSkillUsage } from "$lib/features/skills/skillUsage";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -85,9 +86,9 @@
     skill: OrganizationSkillSummaryPublic
   ): "default" | "destructive" | "secondary" | "outline" {
     if (skill.removed_at) return "outline";
-    if (skill.execution_blocked) return "destructive";
+    if (skill.execution_blocked) return "outline";
     if (skill.publication_state === "published") return "secondary";
-    if (skill.publication_state === "update_pending") return "default";
+    if (skill.publication_state === "update_pending") return "outline";
     return "outline";
   }
 
@@ -275,7 +276,10 @@
       {:else}
         {#if !data.removed}
           <div class="flex flex-wrap items-center gap-3">
-            <p class="text-muted-foreground text-sm" aria-live="polite">
+            <p
+              class={["text-muted-foreground text-sm", selectedIds.length === 0 && "sr-only"]}
+              aria-live="polite"
+            >
               {m.organization_skills_selection_count({
                 count: String(selectedIds.length),
                 limit: String(selectionLimit)
@@ -302,6 +306,7 @@
                 {#if !data.removed}
                   <Table.Head class="w-12">
                     <Checkbox
+                      class="relative before:absolute before:-inset-1.5 before:content-['']"
                       aria-label={m.organization_skills_select_shown({
                         count: String(selectableItems.length)
                       })}
@@ -323,9 +328,11 @@
                 <Table.Head class="hidden w-32 @4xl:table-cell">
                   {m.skills_library_updated_column()}
                 </Table.Head>
-                <Table.Head class="w-16 text-right">
-                  <span class="sr-only @4xl:not-sr-only">{m.actions()}</span>
-                </Table.Head>
+                {#if !data.removed}
+                  <Table.Head class="w-16 text-right">
+                    <span class="sr-only @4xl:not-sr-only">{m.actions()}</span>
+                  </Table.Head>
+                {/if}
               </Table.Row>
             </Table.Header>
             <Table.Body>
@@ -334,6 +341,7 @@
                   {#if !data.removed}
                     <Table.Cell>
                       <Checkbox
+                        class="relative before:absolute before:-inset-1.5 before:content-['']"
                         aria-label={m.organization_skills_select_skill({
                           name: skill.display_name
                         })}
@@ -355,21 +363,24 @@
                       {skill.slug}
                     </p>
                     {#if !data.removed}
-                      <a
-                        href={resolve(
-                          `/spaces/organization/skills/${skill.id}#organization-skill-adoption-heading`
-                        )}
-                        class="text-muted-foreground hover:text-foreground mt-2 block whitespace-normal text-xs font-normal leading-5 underline underline-offset-4"
-                      >
-                        {m.organization_skills_usage_counts({
-                          assistants: String(skill.usage.assistant_count),
-                          apps: String(skill.usage.app_count),
-                          spaces: String(skill.usage.distinct_space_count)
-                        })}
-                        {#if skill.usage.personal_chat_pinned}<span class="block"
-                            >{m.organization_skills_usage_personal_chat()}</span
-                          >{/if}
-                      </a>
+                      {@const usageText = formatSkillUsage(skill.usage)}
+                      {#if usageText === null}
+                        <p class="text-muted-foreground mt-2 text-xs font-normal leading-5">
+                          {m.organization_skills_usage_none()}
+                        </p>
+                      {:else}
+                        <a
+                          href={resolve(
+                            `/spaces/organization/skills/${skill.id}#organization-skill-adoption-heading`
+                          )}
+                          class="text-muted-foreground hover:text-foreground mt-2 block whitespace-normal text-xs font-normal leading-5 tabular-nums underline underline-offset-4"
+                        >
+                          {usageText}
+                          {#if skill.usage.personal_chat_pinned}<span class="block"
+                              >{m.organization_skills_usage_personal_chat()}</span
+                            >{/if}
+                        </a>
+                      {/if}
                     {:else if skill.removed_at}
                       <p class="text-muted-foreground mt-2 whitespace-normal text-xs font-normal">
                         {m.organization_skills_removed_at({ time: formatDate(skill.removed_at) })}
@@ -426,8 +437,8 @@
                   >
                     {formatDate(skill.updated_at)}
                   </Table.Cell>
-                  <Table.Cell class="text-right">
-                    {#if !data.removed}
+                  {#if !data.removed}
+                    <Table.Cell class="text-right">
                       <Button
                         variant="ghost"
                         size="icon-sm"
@@ -440,8 +451,8 @@
                       >
                         <Trash2 aria-hidden="true" />
                       </Button>
-                    {/if}
-                  </Table.Cell>
+                    </Table.Cell>
+                  {/if}
                 </Table.Row>
               {/each}
             </Table.Body>

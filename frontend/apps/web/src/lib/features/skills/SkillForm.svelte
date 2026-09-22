@@ -228,6 +228,7 @@
         aria-invalid={descriptionInvalid || undefined}
         aria-describedby={`${descriptionId}-description`}
         disabled={isSubmitting}
+        class="min-h-24"
         rows={3}
         maxlength={1024}
         required
@@ -249,7 +250,7 @@
         aria-invalid={instructionsInvalid || undefined}
         aria-describedby={`${instructionsId}-description`}
         disabled={isSubmitting}
-        class="max-h-[min(50dvh,32rem)] overflow-y-auto"
+        class={["max-h-[min(50dvh,32rem)] overflow-y-auto", isCreateMode ? "min-h-48" : "min-h-72"]}
         rows={isCreateMode ? 8 : 12}
         required
       />

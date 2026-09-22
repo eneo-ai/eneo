@@ -7,9 +7,12 @@
   import { resolve } from "$app/paths";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { getErrorMessage, SKILL_STILL_ATTACHED } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
+  import { formatSkillUsage } from "./skillUsage";
+  import { TriangleAlert } from "lucide-svelte";
   import { onDestroy, tick } from "svelte";
 
   type Target = Pick<OrganizationSkillSummaryPublic, "id" | "display_name" | "usage">;
@@ -52,6 +55,7 @@
         serverBlockers.includes(skill.id)
     )
   );
+  const isBlocked = $derived((skill: Target) => blockers.some((item) => item.id === skill.id));
 
   async function remove(event: MouseEvent) {
     event.preventDefault();
@@ -107,28 +111,29 @@
     <ul class="max-h-64 overflow-y-auto divide-y divide-border">
       {#each skills as skill (skill.id)}
         <li class="flex flex-col gap-1 py-3 first:pt-0">
-          <a
-            href={resolve(
-              `/spaces/organization/skills/${skill.id}#organization-skill-adoption-heading`
-            )}
-            onclick={(event) => {
-              if (saving) {
-                event.preventDefault();
-                return;
-              }
-              restoreFocus = false;
-              onClose();
-            }}
-            class="text-foreground break-words text-sm font-medium underline underline-offset-4"
-          >
-            {skill.display_name}
-          </a>
+          <div class="flex flex-wrap items-center gap-2">
+            <a
+              href={resolve(
+                `/spaces/organization/skills/${skill.id}#organization-skill-adoption-heading`
+              )}
+              onclick={(event) => {
+                if (saving) {
+                  event.preventDefault();
+                  return;
+                }
+                restoreFocus = false;
+                onClose();
+              }}
+              class="text-foreground min-w-0 text-sm font-medium underline underline-offset-4 [overflow-wrap:anywhere]"
+            >
+              {skill.display_name}
+            </a>
+            {#if isBlocked(skill)}
+              <Badge variant="outline">{m.organization_skills_usage_in_use()}</Badge>
+            {/if}
+          </div>
           <p class="text-muted-foreground text-sm tabular-nums">
-            {m.organization_skills_usage_counts({
-              assistants: String(skill.usage.assistant_count),
-              apps: String(skill.usage.app_count),
-              spaces: String(skill.usage.distinct_space_count)
-            })}
+            {formatSkillUsage(skill.usage) ?? m.organization_skills_usage_none()}
             {#if skill.usage.personal_chat_pinned}
               · {m.organization_skills_usage_personal_chat()}{/if}
           </p>
@@ -140,7 +145,12 @@
     </ul>
     {#if blockers.length > 0}
       <Alert.Root>
-        <Alert.Title>{m.organization_skills_remove_blocked_title()}</Alert.Title>
+        <TriangleAlert aria-hidden="true" />
+        <Alert.Title>
+          {skills.length === 1
+            ? m.organization_skills_remove_blocked_single_title()
+            : m.organization_skills_remove_blocked_title()}
+        </Alert.Title>
         <Alert.Description>
           {m.organization_skills_remove_blocked_description()}
           {#if blockers.length < skills.length}

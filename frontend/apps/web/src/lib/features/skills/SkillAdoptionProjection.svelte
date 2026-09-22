@@ -29,6 +29,7 @@
 <script lang="ts">
   import type { SkillAdoptionProjectionPagePublic } from "@eneo/eneo-js";
   import { AlertCircle, LoaderCircle } from "lucide-svelte";
+  import { resolve } from "$app/paths";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -193,7 +194,7 @@
       case "current":
         return "secondary";
       case "behind":
-        return "default";
+        return "outline";
       case "unpublished":
         return "outline";
     }
@@ -221,7 +222,7 @@
   ): "default" | "secondary" | "outline" | "destructive" {
     switch (status) {
       case "running":
-        return "default";
+        return "secondary";
       case "completed":
         return "secondary";
       case "stopped":
@@ -264,7 +265,7 @@
   ): "default" | "secondary" | "outline" | "destructive" {
     switch (status) {
       case "running":
-        return "default";
+        return "secondary";
       case "completed":
         return "secondary";
       case "pending":
@@ -475,7 +476,10 @@
   aria-busy={loadingInitial || loadingMore}
 >
   <header>
-    <h2 id="organization-skill-adoption-heading" class="text-foreground text-lg font-semibold">
+    <h2
+      id="organization-skill-adoption-heading"
+      class="text-foreground scroll-mt-24 text-lg font-semibold"
+    >
       {m.organization_skills_adoption_heading()}
     </h2>
     <p class="text-muted-foreground mt-1 max-w-[65ch] text-sm leading-6">
@@ -722,7 +726,20 @@
                 {#each items as resource (`${resource.kind}:${resource.resource_id}`)}
                   <Table.Row>
                     <Table.Cell class="min-w-0 max-w-64 whitespace-normal">
-                      <span class="line-clamp-2 font-medium">{resource.name}</span>
+                      <a
+                        href={resource.kind === "assistant"
+                          ? resolve("/(app)/spaces/[spaceId]/assistants/[assistantId]", {
+                              spaceId: resource.space_id,
+                              assistantId: resource.resource_id
+                            })
+                          : resolve("/(app)/spaces/[spaceId]/apps/[appId]", {
+                              spaceId: resource.space_id,
+                              appId: resource.resource_id
+                            })}
+                        class="text-foreground hover:text-accent-default focus-visible:ring-ring line-clamp-2 rounded-sm font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                      >
+                        {resource.name}
+                      </a>
                       <div class="mt-2 @md:hidden">
                         <Badge variant={driftVariant(resource.drift)}>
                           {driftLabel(resource.drift)}
@@ -759,7 +776,10 @@
                       })}
                     </Table.Cell>
                     <Table.Cell class="hidden @md:table-cell">
-                      <Badge variant={driftVariant(resource.drift)}>
+                      <Badge
+                        variant={driftVariant(resource.drift)}
+                        class="h-auto min-h-5 max-w-full whitespace-normal text-left"
+                      >
                         {driftLabel(resource.drift)}
                       </Badge>
                     </Table.Cell>

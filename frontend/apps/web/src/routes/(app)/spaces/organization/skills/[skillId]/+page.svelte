@@ -15,6 +15,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
+  import { Separator } from "$lib/components/ui/separator/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
@@ -114,7 +115,7 @@
 
   function publicationVariant(skill: OrganizationSkillPublic): "default" | "secondary" | "outline" {
     if (skill.publication_state === "published") return "secondary";
-    if (skill.publication_state === "update_pending") return "default";
+    if (skill.publication_state === "update_pending") return "outline";
     return "outline";
   }
 
@@ -760,7 +761,6 @@
     {#if !removedAt}
       <Button
         variant="outline"
-        class="text-destructive"
         disabled={formDirty ||
           rolloutMutationInFlight ||
           publicationSaving ||
@@ -797,6 +797,7 @@
       {/if}
       {#if removedAt}
         <Alert.Root>
+          <Info aria-hidden="true" />
           <Alert.Title
             >{m.organization_skills_removed_at({
               time: formatExecutionDate(removedAt)
@@ -996,16 +997,16 @@
                     <div>
                       <h2
                         id="organization-skill-execution-heading"
-                        class="text-destructive flex items-center gap-1.5 font-semibold"
+                        class="text-foreground flex items-center gap-1.5 font-semibold"
                       >
-                        <ShieldAlert class="size-4" aria-hidden="true" />
+                        <ShieldAlert class="text-muted-foreground size-4" aria-hidden="true" />
                         {m.organization_skills_execution_heading()}
                       </h2>
                       <p class="text-muted-foreground mt-1 max-w-[32ch] text-sm leading-6">
                         {m.organization_skills_execution_description()}
                       </p>
                     </div>
-                    <Badge variant={executionBlock.block === null ? "outline" : "destructive"}>
+                    <Badge variant="outline">
                       {executionBlock.block === null
                         ? m.organization_skills_execution_available_status()
                         : m.organization_skills_execution_blocked_status()}
@@ -1139,7 +1140,7 @@
 {/if}
 
 <AlertDialog.Root open={publicationAction !== null} onOpenChange={setPublicationDialogOpen}>
-  <AlertDialog.Content class={publicationAction === "publish" ? "sm:max-w-md" : undefined}>
+  <AlertDialog.Content>
     <AlertDialog.Header>
       <AlertDialog.Title>
         {publicationAction === "unpublish"
@@ -1155,8 +1156,8 @@
       </AlertDialog.Description>
     </AlertDialog.Header>
     {#if publicationAction === "publish"}
-      <div class="grid gap-2">
-        <Field.Field orientation="horizontal" class="border-border rounded-lg border p-3">
+      <Field.Group>
+        <Field.Field orientation="horizontal">
           <Checkbox
             id="update-bindings-on-publish"
             bind:checked={updateBindingsOnPublish}
@@ -1172,7 +1173,8 @@
             </Field.Description>
           </Field.Content>
         </Field.Field>
-        <Field.Field orientation="horizontal" class="border-border rounded-lg border p-3">
+        <Separator />
+        <Field.Field orientation="horizontal">
           <Checkbox
             id="update-apps-on-publish"
             bind:checked={updateAppsOnPublish}
@@ -1188,7 +1190,7 @@
             </Field.Description>
           </Field.Content>
         </Field.Field>
-      </div>
+      </Field.Group>
     {/if}
     {#if publicationError}
       <Alert.Root variant="destructive">

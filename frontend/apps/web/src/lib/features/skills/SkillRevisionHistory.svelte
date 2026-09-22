@@ -237,34 +237,28 @@
     {/if}
     <dl class="flex flex-col gap-3">
       <div class="flex flex-col gap-1">
-        <dt
-          class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
-        >
+        <dt class="text-muted-foreground flex flex-wrap items-baseline gap-2 text-xs font-medium">
           {m.name()}
           {#if fieldChanged(revision, comparison, "display_name")}
-            <span class="text-accent-stronger font-normal">{m.skills_library_changed_field()}</span>
+            <Badge variant="outline" class="font-normal">{m.skills_library_changed_field()}</Badge>
           {/if}
         </dt>
         <dd class="text-sm">{revision.display_name}</dd>
       </div>
       <div class="flex flex-col gap-1">
-        <dt
-          class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
-        >
+        <dt class="text-muted-foreground flex flex-wrap items-baseline gap-2 text-xs font-medium">
           {m.description()}
           {#if fieldChanged(revision, comparison, "description")}
-            <span class="text-accent-stronger font-normal">{m.skills_library_changed_field()}</span>
+            <Badge variant="outline" class="font-normal">{m.skills_library_changed_field()}</Badge>
           {/if}
         </dt>
         <dd class="text-sm">{revision.description}</dd>
       </div>
       <div class="flex flex-col gap-1">
-        <dt
-          class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
-        >
+        <dt class="text-muted-foreground flex flex-wrap items-baseline gap-2 text-xs font-medium">
           <span>{m.skills_instructions_label()}</span>
           {#if fieldChanged(revision, comparison, "instructions")}
-            <span class="text-accent-stronger font-normal">{m.skills_library_changed_field()}</span>
+            <Badge variant="outline" class="font-normal">{m.skills_library_changed_field()}</Badge>
           {/if}
         </dt>
         <dd>
@@ -429,12 +423,12 @@
     </div>
     <Dialog.Footer class="border-border mx-0 mb-0 border-t px-6 py-4">
       {#if canRestore && viewedRevision && viewedRevision.id !== comparisonCurrentRevision.id}
-        <Button variant="outline" onclick={() => viewedRevision && requestRestore(viewedRevision)}>
+        <Button onclick={() => viewedRevision && requestRestore(viewedRevision)}>
           <RotateCcw aria-hidden="true" />
           {m.skills_library_restore_revision_from_preview()}
         </Button>
       {/if}
-      <Button onclick={() => (viewedRevision = null)}>{m.close()}</Button>
+      <Button variant="outline" onclick={() => (viewedRevision = null)}>{m.close()}</Button>
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

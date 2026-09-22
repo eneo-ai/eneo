@@ -25,6 +25,7 @@ vi.mock("$app/navigation", () => ({
 }));
 
 import OrganizationSkillsPage from "./+page.svelte";
+import { formatSkillUsage } from "$lib/features/skills/skillUsage";
 
 function skill(
   id: string,
@@ -184,9 +185,7 @@ describe("organisation Skill catalogue page", () => {
     await expect
       .element(
         page.getByRole("link", {
-          name: new RegExp(
-            m.organization_skills_usage_counts({ assistants: "2", apps: "1", spaces: "2" })
-          )
+          name: new RegExp(formatSkillUsage(used.usage) ?? "")
         })
       )
       .toBeVisible();
