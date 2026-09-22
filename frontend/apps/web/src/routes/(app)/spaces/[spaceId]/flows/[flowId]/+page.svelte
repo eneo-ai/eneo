@@ -31,6 +31,8 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import IconArrowRight from "@lucide/svelte/icons/arrow-right";
   import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
   import CircleAlert from "lucide-svelte/icons/circle-alert";
   import ListTree from "lucide-svelte/icons/list-tree";
@@ -751,7 +753,7 @@
 
               {#if i > 0}
                 <div
-                  class="mx-1 h-0.5 w-4 shrink-0 motion-safe:transition-colors motion-safe:duration-(--duration-quick) sm:mx-1.5 sm:w-6 xl:mx-3 xl:w-auto xl:flex-1
+                  class="mx-1 h-0.5 w-4 shrink-0 motion-safe:transition-colors motion-safe:duration-(--duration-quick) min-[1700px]:mx-2 min-[1700px]:w-8 sm:mx-1.5 sm:w-6 2xl:mx-1 2xl:w-4
                     {isPreviousCompleted ? 'bg-accent-default' : 'bg-border-default'}"
                 ></div>
               {/if}
@@ -759,9 +761,11 @@
               <li class="min-w-0">
                 <button
                   type="button"
-                  class="hover:bg-hover-dimmer flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-sm motion-safe:transition-colors motion-safe:duration-(--duration-quick) sm:gap-2 sm:px-2 lg:gap-2.5 lg:px-2.5
+                  class="hover:bg-hover-dimmer flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-sm motion-safe:transition-colors motion-safe:duration-(--duration-quick) min-[1700px]:gap-2.5 min-[1700px]:px-2.5 sm:gap-2 sm:px-2 2xl:px-1.5
                     {isActive ? 'text-primary font-semibold' : ''}"
                   aria-current={isActive ? "step" : undefined}
+                  aria-label={`${stage.id}. ${stage.labelKey()}`}
+                  title={stage.labelKey()}
                   onclick={() => void navigateToStage(stage.id)}
                 >
                   {#if isCompleted}
@@ -799,7 +803,7 @@
                   {/if}
 
                   <!-- The current stage keeps its label at every width; other
-                       stages show labels only when the full row fits (2xl+). -->
+                       stages show labels once the full row fits (2xl, measured with the Swedish names beside two labelled buttons). -->
                   <span
                     class="{isActive
                       ? 'inline'
@@ -824,8 +828,7 @@
             class="border-default flex shrink-0 items-center gap-1.5 border-l pl-2.5 sm:gap-2 sm:pl-3 md:pl-5"
           >
             <Button
-              variant="ghost"
-              size="sm"
+              variant="outline"
               disabled={!previousStage || stageNavigating}
               aria-label={previousStage
                 ? `${m.flow_stage_previous()}: ${previousStage.labelKey()}`
@@ -835,18 +838,19 @@
                 : undefined}
               onclick={goToPreviousStage}
             >
-              &larr; <span class="hidden lg:inline">{m.flow_stage_previous()}</span>
+              <IconArrowLeft class="size-4" aria-hidden="true" />
+              <span class="hidden lg:inline">{m.flow_stage_previous()}</span>
             </Button>
             {#if nextStage}
               <Button
                 variant="default"
-                size="sm"
                 disabled={stageNavigating}
                 aria-label={`${m.flow_stage_next()}: ${nextStage.labelKey()}`}
                 title={`${m.flow_stage_next()}: ${nextStage.labelKey()}`}
                 onclick={goToNextStage}
               >
-                <span class="hidden lg:inline">{m.flow_stage_next()}</span> &rarr;
+                <span class="hidden lg:inline">{m.flow_stage_next()}</span>
+                <IconArrowRight class="size-4" aria-hidden="true" />
               </Button>
             {/if}
           </div>
