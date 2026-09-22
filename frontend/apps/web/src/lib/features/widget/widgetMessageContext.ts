@@ -5,6 +5,8 @@ export type WidgetMessageContext = {
   /** 0-based position of a reference in the message's de-duplicated source list, or null. */
   referenceIndex: (infoBlobId: string) => number | null;
   referenceAnchor: (index: number) => string;
+  /** Expand the source list (if collapsed) and move focus to the given entry. */
+  revealSource: (index: number) => void;
 };
 
 export const [getWidgetMessageContext, setWidgetMessageContext] =
@@ -43,4 +45,12 @@ export function referenceIndexer(message: Pick<ConversationMessage, "references"
     const key = reference.metadata.url ?? reference.metadata.title ?? reference.id;
     return byKey.get(key) ?? null;
   };
+}
+
+/**
+ * What a visitor copies for a source without a link: enough for the
+ * organisation to find the document when asked for it.
+ */
+export function sourceReferenceText(source: WidgetSource, idLabel: string): string {
+  return `${source.title} · ${idLabel}: ${source.id}`;
 }

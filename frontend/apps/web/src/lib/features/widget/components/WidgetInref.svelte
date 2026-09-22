@@ -1,8 +1,9 @@
 <!--
   Inline citation inside a streamed answer: a small numbered marker that
-  jumps to the matching entry in the sources list below the message.
+  opens the sources list below the message and jumps to the matching entry.
 -->
 <script lang="ts">
+  import { m } from "$lib/paraglide/messages";
   import { getWidgetMessageContext } from "../widgetMessageContext";
 
   // Shape of the `<inref>` token the Markdown renderer hands custom components.
@@ -14,7 +15,37 @@
 
 {#if index !== null}
   <a
-    class="text-accent-default ml-0.5 align-super text-xs font-semibold no-underline hover:underline"
-    href={`#${message.referenceAnchor(index)}`}>[{index + 1}]</a
+    class="widget-citation"
+    href={`#${message.referenceAnchor(index)}`}
+    aria-label={m.widget_citation_label({ number: index + 1 })}
+    onclick={(event) => {
+      event.preventDefault();
+      message.revealSource(index);
+    }}>{index + 1}</a
   >
 {/if}
+
+<style>
+  .widget-citation {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.125rem;
+    height: 1.125rem;
+    padding: 0 0.3rem;
+    margin-left: 0.125rem;
+    border-radius: 9999px;
+    background: var(--widget-accent);
+    color: var(--widget-on-accent);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+    vertical-align: 0.2em;
+  }
+  .widget-citation:hover,
+  .widget-citation:focus-visible {
+    outline: 2px solid var(--widget-accent);
+    outline-offset: 1px;
+  }
+</style>

@@ -480,6 +480,10 @@ class Settings(BaseSettings):
     # settled to the real usage afterwards. Sized for a RAG prompt plus a
     # full answer. This admission estimate does not bound actual model usage.
     widget_budget_reservation_tokens: int = Field(default=8_000, gt=0)
+    # Knowledge chunks retrieved per widget question. Widgets use the citing
+    # protocol (version 2), whose default retrieval fills half the context
+    # window; a fixed count keeps visitor questions inside the budget.
+    widget_retrieval_chunks: int = Field(default=30, gt=0)
     trusted_proxy_count: int = 0
     trusted_proxy_headers: list[str] = ["x-forwarded-for", "x-real-ip"]
     jwt_audience: str

@@ -78,6 +78,7 @@ def _service(*, ask_result=None, session_questions=0, tokens=(120, 80)):
     settings = SimpleNamespace(
         widget_budget_reservation_tokens=8_000,
         widget_budget_timezone="Europe/Stockholm",
+        widget_retrieval_chunks=30,
     )
     service = WidgetAskService(
         user=SimpleNamespace(id=uuid4()),
@@ -166,6 +167,8 @@ async def test_ask_streams_then_settles_budget_and_records_usage():
     assert kwargs["assistant_id"] == widget.target_id
     assert kwargs["allow_tools"] is False
     assert kwargs["stream"] is True
+    assert kwargs["version"] == 2
+    assert kwargs["num_chunks_override"] == 30
     assert kwargs["disabled_capabilities"]
     assert response.completion_model is None
 

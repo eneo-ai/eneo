@@ -183,6 +183,10 @@ class WidgetAskService:
                 assistant_id=widget.target_id,
                 session_id=session_id,
                 stream=True,
+                # The citing protocol: the model tags claims with <inref/> and
+                # only cited documents come back as references.
+                version=2,
+                num_chunks_override=self.settings.widget_retrieval_chunks,
                 allow_tools=False,
                 disabled_capabilities=list(CAPABILITY_PURPOSES),
             )

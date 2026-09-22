@@ -465,6 +465,7 @@ class Assistant(Entity):
         files: list["File"] | None = None,
         stream: bool = False,
         version: int = 1,
+        num_chunks_override: int | None = None,
         capability_mcp_servers: Sequence["MCPServer"] = (),
         require_tool_approval: bool = False,
         completion_model_override: Optional[CompletionModel] = None,
@@ -506,7 +507,9 @@ class Assistant(Entity):
 
         # Fill half the context
         num_chunks = (
-            effective_model.max_input_tokens // 200 // 2 if version == 2 else 30
+            num_chunks_override
+            if num_chunks_override is not None
+            else (effective_model.max_input_tokens // 200 // 2 if version == 2 else 30)
         )
 
         # Tool mode: the loopback knowledge-MCP server (when provided by the

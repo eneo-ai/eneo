@@ -113,6 +113,7 @@ An active widget whose assistant has been unpublished answers `404 widget_not_ac
 1. Resolve widget (`active`), verify token, enforce limits and budget, validate `question` length.
 2. Load the target assistant through `AssistantService` **as the widget principal**: a `WidgetPrincipal` dataclass (not a synthetic `UserInDB`) carrying `tenant_id`, `widget_id`, `visitor_id`. `SpaceActor`/permission checks are bypassed by construction because the widget was authorized at activation time by a tenant admin; the ask path only needs the assistant's resolved config.
 3. Build the `AskAssistant` payload with `stream=True`, `files=[]`, `tools=None`, every `CapabilityPurpose` disabled except plain completion + knowledge retrieval, and all MCP servers disabled. Governance `effective_config` still applies (model allowlist, prompt library, security classification).
+   The ask uses the citing protocol (`version=2`): the model tags claims with `<inref/>` and only cited documents are returned as references, so the embed page can render numbered citations and a short source list. Retrieval is capped by `widget_retrieval_chunks` (default 30) instead of version 2's half-context default, keeping visitor questions inside the budget reservation.
 4. Create/continue the session with `widget_id`/`visitor_id` and stream through the same `response_stream` layers as today (so new SSE event types keep flowing; see the three chunk-filter layers note in `docs/`).
 5. Settle the durable receipt and daily usage atomically, then apply content retention even if settlement failed.
 
