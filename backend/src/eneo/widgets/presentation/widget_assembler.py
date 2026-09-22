@@ -44,6 +44,7 @@ class WidgetAssembler:
             allowed_origins=list(widget.allowed_origins),
             bot_protection=widget.bot_protection,
             show_sources=widget.show_sources,
+            tools_enabled=widget.tools_enabled,
             activation_blockers=list(view.activation_blockers),
             template=template,
             created_by_user_id=widget.created_by_user_id,

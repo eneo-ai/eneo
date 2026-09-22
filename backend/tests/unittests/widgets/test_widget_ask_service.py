@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.mcp_servers.domain.entities.mcp_server import CAPABILITY_PURPOSES
 from eneo.widgets.application import widget_ask_service as module
 from eneo.widgets.application.widget_ask_service import (
     SessionNotOwnedError,
@@ -165,11 +166,11 @@ async def test_ask_streams_then_settles_budget_and_records_usage():
     kwargs = deps.assistant_service.ask.await_args.kwargs
     assert kwargs["question"] == "Hej?"
     assert kwargs["assistant_id"] == widget.target_id
-    assert kwargs["allow_tools"] is False
+    assert kwargs["allow_tools"] is True
+    assert kwargs["disabled_capabilities"] is None
     assert kwargs["stream"] is True
     assert kwargs["version"] == 2
     assert kwargs["num_chunks_override"] == 30
-    assert kwargs["disabled_capabilities"]
     assert response.completion_model is None
 
     deps.budget.reserve.assert_awaited_once_with(widget, 8_000)
@@ -181,6 +182,21 @@ async def test_ask_streams_then_settles_budget_and_records_usage():
         deps.usage.session, response.question_id
     )
     deps.usage.delete_session.assert_not_awaited()
+
+
+async def test_ask_keeps_visitors_to_knowledge_when_tools_are_off():
+    service, deps = _service()
+
+    await service.ask(
+        _principal(_widget(tools_enabled=False)),
+        question="Hej?",
+        session_id=None,
+        client_ip="203.0.113.1",
+    )
+
+    kwargs = deps.assistant_service.ask.await_args.kwargs
+    assert kwargs["allow_tools"] is False
+    assert set(kwargs["disabled_capabilities"]) == set(CAPABILITY_PURPOSES)
 
 
 async def test_ask_strips_references_when_sources_are_hidden():

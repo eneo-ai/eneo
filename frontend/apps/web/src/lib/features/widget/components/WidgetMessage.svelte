@@ -3,7 +3,7 @@
   import { Markdown } from "@eneo/ui";
   import { sanitizeLinkHref } from "@eneo/ui/components/markdown";
   import { tick } from "svelte";
-  import { Check, ChevronRight, Copy, ExternalLink, FileText } from "lucide-svelte";
+  import { Check, ChevronRight, Copy, ExternalLink, FileText, X } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import {
     messageSources,
@@ -13,7 +13,9 @@
     type WidgetSource
   } from "../widgetMessageContext";
   import { linkHost } from "../urls";
+  import { stepServers, widgetToolSteps } from "../widgetToolSteps";
   import WidgetInref from "./WidgetInref.svelte";
+  import InternalToolStep from "$lib/features/chat/components/conversation/InternalToolStep.svelte";
   import TypingIndicator from "$lib/features/chat/components/conversation/TypingIndicator.svelte";
 
   type Props = {
@@ -80,6 +82,24 @@
   }
 
   const waiting = $derived(isLast && isLoading && message.answer.trim().length === 0);
+
+  // Tool activity: while the assistant works only the latest step shows and
+  // each new call replaces it; once done, several steps fold into one line
+  // that opens to the full list. A single step never folds.
+  const streaming = $derived(isLast && isLoading);
+  const steps = $derived(widgetToolSteps(message, { streaming, working: waiting }));
+  const stepsWorking = $derived(
+    waiting || steps.some((step) => step.status === "preparing" || step.status === "running")
+  );
+  const stepsFailed = $derived(
+    steps.some((step) => step.status === "failed" || step.status === "denied")
+  );
+  const foldedSteps = $derived(!stepsWorking && steps.length > 1);
+  const visibleSteps = $derived(stepsWorking ? steps.slice(-1) : steps);
+  let stepsOpen = $state(false);
+  const stepsSummary = $derived(
+    `${stepServers(steps).join(" · ")} · ${m.internal_tool_steps_count({ count: steps.length })}`
+  );
 </script>
 
 <li class="flex flex-col gap-3">
@@ -91,9 +111,44 @@
 
   <div class="flex flex-col gap-2">
     <span class="sr-only">{m.widget_assistant()}: </span>
-    {#if waiting}
+    {#if steps.length > 0}
+      <div class="flex flex-col gap-0.5" aria-label={m.widget_activity()} role="group">
+        {#if foldedSteps}
+          <button
+            type="button"
+            class="text-secondary hover:text-primary focus-visible:ring-accent-default flex w-fit max-w-full items-center gap-1.5 rounded-md text-sm leading-tight focus-visible:ring-2 focus-visible:outline-none"
+            aria-expanded={stepsOpen}
+            onclick={() => (stepsOpen = !stepsOpen)}
+          >
+            <ChevronRight
+              class={`size-3.5 shrink-0 transition-transform ${stepsOpen ? "rotate-90" : ""}`}
+              aria-hidden="true"
+            />
+            {#if stepsFailed}
+              <X class="text-negative-default size-3.5 shrink-0" aria-hidden="true" />
+            {/if}
+            <span class="truncate">{stepsSummary}</span>
+          </button>
+        {/if}
+        {#if !foldedSteps || stepsOpen}
+          <div class={`flex flex-col gap-0.5 ${foldedSteps ? "pl-5" : ""}`}>
+            {#each visibleSteps as step, stepIndex (step.toolCallId ?? stepIndex)}
+              <InternalToolStep
+                runningLabel={step.toolName}
+                doneLabel={step.doneLabel}
+                serverName={step.serverName}
+                detail={step.detail}
+                args={step.args}
+                status={step.status}
+              />
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+    {#if waiting && steps.length === 0}
       <TypingIndicator />
-    {:else}
+    {:else if !waiting}
       <Markdown
         class="text-primary max-w-none text-base"
         source={message.answer}

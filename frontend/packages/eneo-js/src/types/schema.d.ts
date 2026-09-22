@@ -22620,6 +22620,8 @@ export interface components {
       bot_protection: components["schemas"]["BotProtection"];
       /** Show Sources */
       show_sources: boolean;
+      /** Tools Enabled */
+      tools_enabled: boolean;
       /**
        * Activation Blockers
        * @description Empty when the widget can be activated as configured.
@@ -22899,6 +22901,8 @@ export interface components {
       bot_protection?: components["schemas"]["BotProtection"] | null;
       /** Show Sources */
       show_sources?: boolean | null;
+      /** Tools Enabled */
+      tools_enabled?: boolean | null;
     };
     /** WidgetUsageDayPublic */
     WidgetUsageDayPublic: {

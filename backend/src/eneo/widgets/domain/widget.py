@@ -301,6 +301,10 @@ class Widget(BaseModel):
     bot_protection: BotProtection = BotProtection.ALTCHA
     # Visitors see numbered citations and a source list unless turned off.
     show_sources: bool = True
+    # The assistant's MCP servers and capabilities serve visitors as
+    # configured; off answers from knowledge alone. Identity forwarding and
+    # per-call approval never apply to visitors either way.
+    tools_enabled: bool = True
     # The template this widget follows; None for a stand-alone widget. Only
     # the link/detach commands change it, never a plain update.
     template_id: Optional[UUID] = None
@@ -419,6 +423,7 @@ class Widget(BaseModel):
             "allowed_origins",
             "bot_protection",
             "show_sources",
+            "tools_enabled",
         }
         unknown = set(changes) - editable
         if unknown:

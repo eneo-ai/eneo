@@ -23,6 +23,7 @@
   import { ExternalLink, FileText, Palette, Rocket, SlidersHorizontal } from "lucide-svelte";
   import { untrack } from "svelte";
   import { blockerLabel } from "./blockers";
+  import { getCapability } from "$lib/features/mcp/capabilities";
   import { urlTab } from "./tabState.svelte";
   import type { LoaderRelease } from "./snippet";
   import { isGroupLocked, lockedTextFields } from "./templateLocks";
@@ -178,6 +179,16 @@
   });
 
   const blockers = $derived(current.activation_blockers ?? []);
+  // What an active widget exposes besides knowledge: the assistant's general
+  // MCP servers and its enabled capabilities, named as the editor sees them.
+  const visitorTools = $derived([
+    ...(assistant.mcp_servers ?? [])
+      .filter((server) => server.purpose === "general" && server.is_enabled)
+      .map((server) => server.name),
+    ...(assistant.enabled_capabilities ?? []).map(
+      (purpose) => getCapability(purpose)?.label() ?? purpose
+    )
+  ]);
   const showPreview = $derived(tab.value === "content" || tab.value === "appearance");
 </script>
 
@@ -292,6 +303,21 @@
                     id="widget-show-sources"
                     checked={current.show_sources ?? true}
                     onCheckedChange={(checked) => autosave.patch({ show_sources: checked })}
+                  />
+                </Field.Field>
+                <Field.Field orientation="horizontal" class="sm:col-span-2">
+                  <Field.Content>
+                    <Field.Label for="widget-tools-enabled"
+                      >{m.widget_admin_tools_enabled()}</Field.Label
+                    >
+                    <Field.Description
+                      >{m.widget_admin_tools_enabled_description()}</Field.Description
+                    >
+                  </Field.Content>
+                  <Switch
+                    id="widget-tools-enabled"
+                    checked={current.tools_enabled ?? true}
+                    onCheckedChange={(checked) => autosave.patch({ tools_enabled: checked })}
                   />
                 </Field.Field>
               </Field.Group>
@@ -421,6 +447,22 @@
                   {/each}
                 </ul>
               {/if}
+              <section aria-labelledby="widget-visitor-access" class="mt-6 flex flex-col gap-1">
+                <h3 id="widget-visitor-access" class="text-sm font-medium">
+                  {m.widget_admin_visitor_access()}
+                </h3>
+                <p class="text-secondary text-sm">{m.widget_admin_visitor_access_description()}</p>
+                <ul class="mt-1 list-disc pl-5 text-sm">
+                  <li>{m.widget_admin_visitor_access_knowledge()}</li>
+                  {#if current.tools_enabled ?? true}
+                    {#each visitorTools as tool (tool)}
+                      <li>{tool}</li>
+                    {/each}
+                  {:else}
+                    <li>{m.widget_admin_visitor_access_tools_off()}</li>
+                  {/if}
+                </ul>
+              </section>
             </Card.Content>
           </Card.Root>
           <WidgetSnippet widget={current} {release} origin={page.url.origin} />

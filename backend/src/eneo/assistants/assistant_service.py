@@ -77,6 +77,7 @@ from eneo.mcp_servers.domain.capabilities import (
     CapabilityPurpose,
 )
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    CAPABILITY_PURPOSES,
     GENERAL_PURPOSE,
     allowed_capability_purposes,
     duplicate_capability_purposes,
@@ -936,7 +937,14 @@ class AssistantService:
                 requested_capabilities=sorted(requested_capabilities),
                 supports_tool_calling=model.supports_tool_calling,
                 user_group_ids=self.user.user_groups_ids,
-                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+                # A widget visitor holds no permissions; the assistant's own
+                # configuration decides what the widget exposes (gated by the
+                # widget's tools_enabled through disabled_capabilities).
+                allowed_purposes=(
+                    set(CAPABILITY_PURPOSES)
+                    if self.user.active_widget is not None
+                    else allowed_capability_purposes(self.user.permissions)
+                ),
                 space_security_classification=space.security_classification,
             )
             effective_mcp_servers = [
@@ -3051,7 +3059,14 @@ class AssistantService:
                 requested_capabilities=sorted(requested_capabilities),
                 supports_tool_calling=effective_completion_model.supports_tool_calling,
                 user_group_ids=self.user.user_groups_ids,
-                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+                # A widget visitor holds no permissions; the assistant's own
+                # configuration decides what the widget exposes (gated by the
+                # widget's tools_enabled through disabled_capabilities).
+                allowed_purposes=(
+                    set(CAPABILITY_PURPOSES)
+                    if self.user.active_widget is not None
+                    else allowed_capability_purposes(self.user.permissions)
+                ),
                 space_security_classification=space.security_classification,
             )
             mcp_servers_override = resolution.general_servers

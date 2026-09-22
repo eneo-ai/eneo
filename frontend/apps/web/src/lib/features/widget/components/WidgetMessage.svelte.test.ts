@@ -109,6 +109,65 @@ describe("WidgetMessage sources", () => {
     expect(page.getByRole("link", { name: /widget_citation_label/ }).elements()).toHaveLength(0);
   });
 
+  test("folds finished tool activity into one line that opens to the steps", async () => {
+    const call = (id: string, tool: string) => ({
+      server_name: "Tid",
+      tool_name: tool,
+      tool_call_id: id,
+      result_status: "completed"
+    });
+    render(WidgetMessage, {
+      message: {
+        ...message("Klockan är 14:02."),
+        tool_calls: [call("c1", "get_current_time"), call("c2", "convert_time")]
+      } as unknown as ConversationMessage,
+      index: 0,
+      isLast: true,
+      isLoading: false
+    });
+
+    const summary = page.getByRole("button", { name: /internal_tool_steps_count/ });
+    await expect.element(summary).toHaveAttribute("aria-expanded", "false");
+    await expect.element(summary).toHaveTextContent("Tid");
+    expect(page.getByText("convert_time").elements()).toHaveLength(0);
+
+    await summary.click();
+
+    await expect.element(page.getByText("get_current_time")).toBeVisible();
+    await expect.element(page.getByText("convert_time")).toBeVisible();
+  });
+
+  test("shows only the latest step while the assistant is still working", async () => {
+    render(WidgetMessage, {
+      message: {
+        ...message(""),
+        mcp_tool_calls: [
+          {
+            server_name: "Tid",
+            tool_name: "get_current_time",
+            tool_call_id: "c1",
+            result_status: "completed"
+          },
+          {
+            server_name: "Tid",
+            tool_name: "convert_time",
+            tool_call_id: "c2",
+            result_status: "pending"
+          }
+        ]
+      } as unknown as ConversationMessage,
+      index: 0,
+      isLast: true,
+      isLoading: true
+    });
+
+    await expect.element(page.getByText("convert_time")).toBeVisible();
+    expect(page.getByText("get_current_time").elements()).toHaveLength(0);
+    expect(page.getByRole("button", { name: /internal_tool_steps_count/ }).elements()).toHaveLength(
+      0
+    );
+  });
+
   test("an inline citation opens the list and focuses its source", async () => {
     renderMessage(`Bygglov kostar pengar <inref id="${FILE_ID.slice(0, 8)}"/>.`);
 

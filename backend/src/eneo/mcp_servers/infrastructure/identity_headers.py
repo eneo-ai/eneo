@@ -55,7 +55,14 @@ def build_identity_headers(
     header. Callers forward the result only to servers with
     ``forward_identity=True``.
     """
-    if user is None or is_service_api_key(user):
+    # A widget visitor is anonymous: the synthetic user's id, email and role
+    # describe the widget, not a person, so a server opted into identity
+    # forwarding gets nothing rather than fabricated fields.
+    if (
+        user is None
+        or is_service_api_key(user)
+        or getattr(user, "active_widget", None) is not None
+    ):
         return {}
 
     display_name = user.username or (user.email.split("@")[0] if user.email else None)

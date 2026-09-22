@@ -191,8 +191,12 @@ class WidgetAskService:
                 # only cited documents come back as references.
                 version=2,
                 num_chunks_override=self.settings.widget_retrieval_chunks,
-                allow_tools=False,
-                disabled_capabilities=list(CAPABILITY_PURPOSES),
+                # The assistant as configured, unless the widget keeps visitors
+                # to knowledge only. Approval is never requested for visitors.
+                allow_tools=widget.tools_enabled,
+                disabled_capabilities=(
+                    None if widget.tools_enabled else list(CAPABILITY_PURPOSES)
+                ),
             )
         except BaseException:
             # No stream owns the reservation yet. Cleanup must also run on a
