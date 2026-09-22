@@ -10,7 +10,7 @@
     assistantId: string;
     model: Model | undefined;
     prompt: string;
-    attachments: { id: string }[];
+    attachments: { id: string; inline_text?: boolean }[];
   };
   const { assistantId, model, prompt, attachments }: Props = $props();
 
@@ -44,10 +44,15 @@
     // correct before saving.
     const modelId = model?.id;
     const promptText = prompt ?? "";
-    const fileIds = attachments.map((a) => ({ id: a.id }));
+    // Each attachment's mode is read here so a flip re-meters: one marked
+    // "open with tool" is sent as a signed URL and costs nothing.
+    const attachmentInputs = attachments.map((a) => ({
+      id: a.id,
+      inline_text: a.inline_text ?? true
+    }));
     // The ceiling covers prompt + attachments, so meter as soon as either has
     // content: a prompt that alone overflows is surfaced even with no files.
-    const hasContent = fileIds.length > 0 || promptText.trim().length > 0;
+    const hasContent = attachmentInputs.length > 0 || promptText.trim().length > 0;
 
     if (debounce) clearTimeout(debounce);
 
@@ -63,7 +68,8 @@
         const res = await eneo.conversations.preflight({
           chatPartner: { id: assistantId, type: "assistant" },
           question: "",
-          files: fileIds,
+          files: [],
+          attachments: attachmentInputs,
           assistantPrompt: promptText
         });
         if (current !== gen) return;

@@ -57,6 +57,22 @@ class AssistantType(str, Enum):
     DEFAULT_ASSISTANT = "default-assistant"
 
 
+class AssistantAttachmentInput(ModelId):
+    inline_text: bool = Field(
+        default=True,
+        description=(
+            "True: the attachment's text is placed in the prompt on every turn. "
+            "False: the assistant gets a signed reference URL instead and opens "
+            "the file with a tool when needed (requires a stored original and a "
+            "model that can call tools; otherwise the text is inlined)."
+        ),
+    )
+
+
+class AssistantAttachmentPublic(FilePublic):
+    inline_text: bool = True
+
+
 class KnowledgeMode(str, Enum):
     """How attached knowledge reaches the model.
 
@@ -239,7 +255,7 @@ class AssistantCreatePublic(AssistantBase):
 class AssistantUpdatePublic(AssistantCreatePublic):
     enabled_capabilities: list[CapabilityPurpose] | None = None
     prompt: Optional[PromptCreate] = None
-    attachments: Optional[list[ModelId]] = None
+    attachments: Optional[list[AssistantAttachmentInput]] = None
     groups: Optional[list[ModelId]] = None  # type: ignore[assignment]
     websites: Optional[list[ModelId]] = None  # type: ignore[assignment]
     integration_knowledge_list: Optional[list[ModelId]] = None  # type: ignore[assignment]
@@ -377,7 +393,7 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     space_id: UUID
     completion_model_kwargs: ModelKwargs
     logging_enabled: bool | None
-    attachments: list[FilePublic]
+    attachments: list[AssistantAttachmentPublic]
     allowed_attachments: FileRestrictions
     groups: list[CollectionPublic]
     websites: list[WebsitePublic]

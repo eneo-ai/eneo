@@ -148,6 +148,9 @@ class AssistantsFiles(BaseCrossReference):
     file_id: Mapped[UUID] = mapped_column(
         ForeignKey(Files.id, ondelete="CASCADE"), primary_key=True
     )
+    # False = "open with tool": the attachment reaches the model only as a
+    # signed reference URL a tool can read, never as inlined text.
+    inline_text: Mapped[bool] = mapped_column(nullable=False, server_default="true")
 
     # Relationships
     file: Mapped[Files] = relationship()

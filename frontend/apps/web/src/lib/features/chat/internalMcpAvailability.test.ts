@@ -9,7 +9,6 @@ describe("internal MCP availability", () => {
         supportsToolCalling: false,
         hasKnowledge: true,
         storedKnowledgeMode: "tool",
-        inlineFileText: false,
         hasDownloadReference: true
       })
     ).toEqual([]);
@@ -21,7 +20,6 @@ describe("internal MCP availability", () => {
         supportsToolCalling: true,
         hasKnowledge: true,
         storedKnowledgeMode: "tool",
-        inlineFileText: false,
         hasDownloadReference: true
       })
     ).toEqual(["knowledge", "files"]);
@@ -31,9 +29,19 @@ describe("internal MCP availability", () => {
         supportsToolCalling: true,
         hasKnowledge: false,
         storedKnowledgeMode: "inject",
-        inlineFileText: false,
         hasDownloadReference: false
       })
     ).toEqual([]);
+  });
+
+  it("names the files server for any referenced file, including inline-mode uploads", () => {
+    expect(
+      internalMcpServerNames({
+        supportsToolCalling: true,
+        hasKnowledge: false,
+        storedKnowledgeMode: "inject",
+        hasDownloadReference: true
+      })
+    ).toEqual(["files"]);
   });
 });

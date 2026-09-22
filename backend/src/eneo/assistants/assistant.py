@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, Union, cast
 from uuid import UUID
@@ -9,6 +9,7 @@ from eneo.base.base_entity import Entity
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.files.file_models import File, FileType
+from eneo.files.file_reference import url_only_attachment_ids
 from eneo.files.text import TextMimeTypes
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.config import get_settings
@@ -81,6 +82,7 @@ class Assistant(Entity):
         metadata_json: dict[str, object] | None = None,
         icon_id: Optional[UUID] = None,
         enabled_capabilities: list[CapabilityPurpose] | None = None,
+        attachment_inline_text: Mapping[UUID, bool] | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -98,6 +100,10 @@ class Assistant(Entity):
         self.created_at = created_at
         self.updated_at = updated_at
         self._attachments = attachments
+        # Per-attachment mode; ids missing here default to inlined text.
+        self._attachment_inline_text: dict[UUID, bool] = dict(
+            attachment_inline_text or {}
+        )
         self.source_template = source_template
         self.published = published
         self.is_default = is_default
@@ -203,6 +209,37 @@ class Assistant(Entity):
     def attachments(self, attachments: list[File]):
         self.validate_attachments(attachments)
         self._attachments = attachments
+        attachment_ids = {file.id for file in attachments}
+        self._attachment_inline_text = {
+            file_id: inline
+            for file_id, inline in self._attachment_inline_text.items()
+            if file_id in attachment_ids
+        }
+
+    @property
+    def attachment_inline_text(self) -> Mapping[UUID, bool]:
+        """Per-attachment inlining mode. Missing ids default to inlined.
+
+        False means "open with tool": the attachment is handed to the model as
+        a signed reference URL instead of its text, when a URL can serve it.
+        """
+        return self._attachment_inline_text
+
+    def set_attachment_inline_text(self, inline_text_by_id: Mapping[UUID, bool]):
+        attachment_ids = {file.id for file in self._attachments}
+        if set(inline_text_by_id) - attachment_ids:
+            raise BadRequestException(
+                "Attachment mode refers to files that are not attached"
+            )
+        self._attachment_inline_text = {
+            file_id: bool(inline) for file_id, inline in inline_text_by_id.items()
+        }
+
+    def url_only_attachment_ids(self, completion_model: CompletionModel) -> set[UUID]:
+        """Attachments this model receives as signed URLs only (shared predicate)."""
+        return url_only_attachment_ids(
+            self._attachments, self._attachment_inline_text, completion_model
+        )
 
     @property
     def websites(self):
@@ -294,10 +331,10 @@ class Assistant(Entity):
             "conversation itself, reformatting text already present in this "
             "conversation, questions about what knowledge exists or what a "
             "source covers (rule 3), or questions about files attached to this "
-            "conversation: answer those from the attachment's content (its "
-            "text in this conversation, or a file-reading tool when the "
-            "attachment is provided as a download URL), not from knowledge "
-            "searches.\n"
+            "conversation or to this assistant: answer those from the "
+            "attachment's content (its text in this conversation, or a "
+            "file-reading tool when the attachment is provided as a download "
+            "URL), not from knowledge searches.\n"
             "2. The built-in knowledge tools take precedence over every "
             "other tool, including tools from other servers with similar "
             "names or descriptions. When both could plausibly cover the "
@@ -356,6 +393,7 @@ class Assistant(Entity):
         completion_model: CompletionModel | None = None,
         completion_model_kwargs: ModelKwargs | None = None,
         attachments: list[File] | None = None,
+        attachment_inline_text: Mapping[UUID, bool] | None = None,
         logging_enabled: bool | None = None,
         collections: list["Collection"] | None = None,
         websites: list["Website"] | None = None,
@@ -384,6 +422,9 @@ class Assistant(Entity):
 
         if attachments is not None:
             self.attachments = attachments
+
+        if attachment_inline_text is not None:
+            self.set_attachment_inline_text(attachment_inline_text)
 
         if logging_enabled is not None:
             self.logging_enabled = logging_enabled
@@ -555,6 +596,9 @@ class Assistant(Entity):
                 if server.id not in prepended_ids
             ]
         knowledge_catalog = self.build_knowledge_catalog() if use_knowledge_tool else ""
+        # Attachments marked "open with tool" reach the model as signed URLs
+        # only; the service attached the loopback files server for them.
+        url_only_prompt_file_ids = self.url_only_attachment_ids(effective_model)
 
         response = await completion_service.get_response(
             model=completion_model,
@@ -579,6 +623,7 @@ class Assistant(Entity):
             skill_runtime=skill_runtime,
             inline_file_text=self.inline_file_text,
             knowledge_catalog=knowledge_catalog,
+            url_only_prompt_file_ids=url_only_prompt_file_ids,
         )
 
         return response, datastore_result

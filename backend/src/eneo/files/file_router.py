@@ -118,7 +118,20 @@ async def upload_file(
             },
         )
 
-    return file
+    # Project through the public reader so the response carries the same
+    # capability flags (has_download_reference) as a later GET; the editor
+    # decides from them whether a fresh attachment can be opened with a tool.
+    # The container's session has autobegin disabled, so the read needs its
+    # own transaction. A display flag must never fail a committed upload.
+    try:
+        async with session.begin():
+            return await service.get_public_file_by_id(file.id)
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "File upload committed but public projection was unavailable",
+            extra={"file_id": str(file.id), "error_type": type(exc).__name__},
+        )
+        return file
 
 
 @router.get(

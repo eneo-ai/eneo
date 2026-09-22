@@ -53,7 +53,11 @@ ATTACHED_FILE_REFERENCES_INSTRUCTION = (
     'user a file cannot be read. Entries with "kind": "image" are images '
     "(attached by the user or generated earlier in this conversation): pass "
     "their url to an image tool to edit them or make variations, never to "
-    "read_file."
+    "read_file. Entries introduced as attached to this assistant by its "
+    "author are standing material available on every turn, not something the "
+    "user just uploaded. Always take a url from the entries in the current "
+    "message; never reuse one from an earlier tool call, since those links "
+    "have expired."
 )
 
 SHOW_REFERENCES_PROMPT = """Use the provided sources delimited by triple quotes to answer questions.

@@ -29,8 +29,9 @@ NOT_A_REFERENCE_MESSAGE = (
     "file reference entry, without modifying it."
 )
 INVALID_LINK_MESSAGE = (
-    "The attachment link is invalid or has expired. Ask the user to attach "
-    "the file again to get a fresh link."
+    "The attachment link is invalid or has expired. Use the url from the "
+    "file's reference entry in the current message; if the file has no entry "
+    "there, ask the user to attach it again to get a fresh link."
 )
 NOT_FOUND_MESSAGE = "No attached file matches that URL."
 

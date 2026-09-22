@@ -281,10 +281,21 @@ export function initConversations(client) {
      * @param {import("../types/resources").ConversationTools} [params.tools] Pending assistant target
      * @param {string} [params.assistantPrompt] Unsaved assistant prompt override
      * for config-time baseline estimates
+     * @param {{id: string, inline_text?: boolean}[]} [params.attachments] Unsaved persistent
+     * attachments with their mode, for config-time estimates; ones marked "open with tool"
+     * are excluded from the count
      * @returns {Promise<import('../types/resources').PreflightResponse>}
      * @throws {EneoError}
      */
-    preflight: async ({ chatPartner, conversation, question, files, tools, assistantPrompt }) => {
+    preflight: async ({
+      chatPartner,
+      conversation,
+      question,
+      files,
+      tools,
+      assistantPrompt,
+      attachments
+    }) => {
       /** @type {{session_id?: string, assistant_id?: string, group_chat_id?: string}} */
       const target = { session_id: undefined, assistant_id: undefined, group_chat_id: undefined };
 
@@ -311,7 +322,8 @@ export function initConversations(client) {
             question,
             file_ids: (files ?? []).map((f) => f.id),
             tools,
-            assistant_prompt: assistantPrompt
+            assistant_prompt: assistantPrompt,
+            attachments: attachments?.map((a) => ({ id: a.id, inline_text: a.inline_text ?? true }))
           }
         }
       });

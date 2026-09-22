@@ -188,6 +188,7 @@ def _assistant_with(max_input_tokens, n_attachments=1, prompt_text=None, vision=
         is_default=False,
         completion_model=model,
         attachments=[_text_attachment() for _ in range(n_attachments)],
+        url_only_attachment_ids=lambda model: set(),
         mcp_servers=[],
         enabled_capabilities=[],
         prompt=prompt,
@@ -480,6 +481,7 @@ def _assistant_with_runtime_model(*, prompt_text: str = "Base instructions"):
         is_default=False,
         completion_model=model,
         attachments=[],
+        url_only_attachment_ids=lambda model: set(),
         mcp_servers=[],
         enabled_capabilities=[],
         prompt=SimpleNamespace(text=prompt_text),
@@ -812,6 +814,7 @@ async def test_fit_skipped_when_no_model(monkeypatch):
         is_default=False,
         completion_model=None,
         attachments=[_text_attachment()],
+        url_only_attachment_ids=lambda model: set(),
         prompt=None,
         get_prompt_text=lambda: "",
     )
@@ -1531,6 +1534,7 @@ async def test_governance_preflight_uses_each_assistants_effective_model():
             is_default=True,
             completion_model=allowed_current,
             attachments=[],
+            url_only_attachment_ids=lambda model: set(),
             get_prompt_text=lambda: "first",
         ),
         SimpleNamespace(
@@ -1538,6 +1542,7 @@ async def test_governance_preflight_uses_each_assistants_effective_model():
             is_default=True,
             completion_model=stale_model,
             attachments=[],
+            url_only_attachment_ids=lambda model: set(),
             get_prompt_text=lambda: "second",
         ),
     ]
@@ -2203,7 +2208,11 @@ async def test_message_fit_rejects_when_upload_alone_over_ceiling(monkeypatch):
         lambda *, text_files, image_files, model_name: len(text_files) * 100,
     )
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
-    assistant = SimpleNamespace(attachments=[], inline_file_text=True)
+    assistant = SimpleNamespace(
+        attachments=[],
+        inline_file_text=True,
+        url_only_attachment_ids=lambda model: set(),
+    )
     # ceiling = 90; one uploaded text file = 100 > 90 -> reject
     with pytest.raises(BadRequestException):
         await _service()._assert_message_attachments_fit(
@@ -2220,7 +2229,11 @@ async def test_message_fit_passes_when_within_ceiling(monkeypatch):
         lambda *, text_files, image_files, model_name: len(text_files) * 40,
     )
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
-    assistant = SimpleNamespace(attachments=[], inline_file_text=True)
+    assistant = SimpleNamespace(
+        attachments=[],
+        inline_file_text=True,
+        url_only_attachment_ids=lambda model: set(),
+    )
     # ceiling = 90; one uploaded text file = 40 <= 90 -> ok
     await _service()._assert_message_attachments_fit(
         assistant=assistant, model=model, prompt_text="", files=[_text_attachment()]
@@ -2238,7 +2251,11 @@ async def test_message_fit_includes_persistent_baseline(monkeypatch):
         lambda *, text_files, image_files, model_name: len(text_files) * 50,
     )
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
-    assistant = SimpleNamespace(attachments=[_text_attachment()], inline_file_text=True)
+    assistant = SimpleNamespace(
+        attachments=[_text_attachment()],
+        inline_file_text=True,
+        url_only_attachment_ids=lambda model: set(),
+    )
     # message alone = 50 <= 90; persistent 50 + message 50 = 100 > 90 -> reject
     with pytest.raises(BadRequestException):
         await _service()._assert_message_attachments_fit(
@@ -2260,7 +2277,11 @@ async def test_message_fit_skips_when_no_uploads(monkeypatch):
     )
     file_service = AsyncMock()
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=True)
-    assistant = SimpleNamespace(attachments=[_text_attachment()], inline_file_text=True)
+    assistant = SimpleNamespace(
+        attachments=[_text_attachment()],
+        inline_file_text=True,
+        url_only_attachment_ids=lambda model: set(),
+    )
     # Would raise (and touch derived images) if it ran -> proves the early return.
     await _service(file_service)._assert_message_attachments_fit(
         assistant=assistant, model=model, prompt_text="x", files=[]
@@ -2276,7 +2297,11 @@ async def test_message_fit_rechecks_skill_baseline_without_uploads(monkeypatch):
         "eneo.files.attachment_budget.count_attachment_tokens", lambda **k: 0
     )
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
-    assistant = SimpleNamespace(attachments=[], inline_file_text=True)
+    assistant = SimpleNamespace(
+        attachments=[],
+        inline_file_text=True,
+        url_only_attachment_ids=lambda model: set(),
+    )
 
     with pytest.raises(BadRequestException):
         await _service()._assert_message_attachments_fit(
@@ -2305,7 +2330,11 @@ async def test_message_fit_counts_derived_images_for_vision(monkeypatch):
     )
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=True)
     # No persistent attachments, so the only derived-image lookup is the upload's.
-    assistant = SimpleNamespace(attachments=[], inline_file_text=True)
+    assistant = SimpleNamespace(
+        attachments=[],
+        inline_file_text=True,
+        url_only_attachment_ids=lambda model: set(),
+    )
     # ceiling = 90; text 10 + derived image 90 = 100 > 90 -> reject
     with pytest.raises(BadRequestException):
         await _service(file_service)._assert_message_attachments_fit(
@@ -2328,7 +2357,11 @@ async def test_message_fit_no_derived_images_without_vision(monkeypatch):
         return_value=[_text_attachment(), _image_attachment()]
     )
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
-    assistant = SimpleNamespace(attachments=[], inline_file_text=True)
+    assistant = SimpleNamespace(
+        attachments=[],
+        inline_file_text=True,
+        url_only_attachment_ids=lambda model: set(),
+    )
     # Non-vision: uploaded file used as-is (10 <= 90), no derived-image lookup.
     await _service(file_service)._assert_message_attachments_fit(
         assistant=assistant, model=model, prompt_text="", files=[_text_attachment()]

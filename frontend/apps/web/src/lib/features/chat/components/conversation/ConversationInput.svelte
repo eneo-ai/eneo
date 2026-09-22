@@ -416,9 +416,10 @@
     effectiveKnowledgeMode(partnerKnowledgeMode, supportsToolCalling)
   );
 
-  // Current uploads and persisted user-message attachments are the only files
-  // the backend's files server considers. Assistant prompt attachments remain
-  // inline and therefore do not activate this tool.
+  // Files the backend's files server considers: current uploads, persisted
+  // user-message attachments, and the assistant's own attachments marked
+  // "open with tool" (inline_text false). Inlined assistant attachments never
+  // get a reference URL and so do not activate the tool.
   const hasDownloadReference = $derived.by(() => {
     const pending = $attachments
       .map((attachment) => attachment.fileRef)
@@ -426,21 +427,25 @@
     const history = (chat.currentConversation?.messages ?? []).flatMap(
       (message) => message.files ?? []
     );
-    return [...pending, ...history].some((file) => file.has_download_reference === true);
+    // Group chats type their (always empty) attachments without a mode.
+    const toolAttachments = (chat.partner?.attachments ?? []).filter(
+      (file) => "inline_text" in file && file.inline_text === false
+    );
+    return [...pending, ...history, ...toolAttachments].some(
+      (file) => file.has_download_reference === true
+    );
   });
 
   // Eneo's built-in loopback MCP servers that will be active for this partner:
   // always on, not togglable, but surfaced next to the external servers so the
   // user sees every tool the model can reach. Mirrors the backend attach gates
-  // (knowledge_mode "tool" + knowledge attached; inline_file_text off means
-  // attachments reach the model as signed URLs read by the files server).
+  // (knowledge_mode "tool" + knowledge attached; some file reaching the model
+  // as a signed URL read by the files server).
   const internalMcpServers = $derived.by(() => {
-    const partner = chat.partner as Record<string, unknown> | null;
     return internalMcpServerNames({
       supportsToolCalling,
       hasKnowledge,
       storedKnowledgeMode: partnerKnowledgeMode,
-      inlineFileText: partner?.inline_file_text !== false,
       hasDownloadReference
     }).map((name) => ({ name }));
   });

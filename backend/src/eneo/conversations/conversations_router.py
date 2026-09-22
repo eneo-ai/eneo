@@ -489,6 +489,11 @@ async def preflight_tokens(
             group_chat_id=request.group_chat_id,
             tool_assistant_id=tool_assistant_id,
             assistant_prompt=request.assistant_prompt,
+            attachments=(
+                [(a.id, a.inline_text) for a in request.attachments]
+                if request.attachments is not None
+                else None
+            ),
         )
 
 

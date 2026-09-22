@@ -495,12 +495,28 @@ def _build_assistant_update_changes(
         is_attachment=True,
         assistant_space_id=updated_assistant.space_id,
     )
-    if attachments_added or attachments_removed:
+    attachment_modes_changed: list[dict[str, str | None]] = [
+        {
+            "id": str(file.id),
+            "name": file.name,
+            "mode": (
+                "inline"
+                if updated_assistant.attachment_inline_text.get(file.id, True)
+                else "lookup"
+            ),
+        }
+        for file in updated_assistant.attachments
+        if old_assistant.attachment_inline_text.get(file.id, True)
+        != updated_assistant.attachment_inline_text.get(file.id, True)
+    ]
+    if attachments_added or attachments_removed or attachment_modes_changed:
         knowledge_changes["attachments"] = {}
         if attachments_added:
             knowledge_changes["attachments"]["added"] = attachments_added
         if attachments_removed:
             knowledge_changes["attachments"]["removed"] = attachments_removed
+        if attachment_modes_changed:
+            knowledge_changes["attachments"]["mode_changed"] = attachment_modes_changed
 
     # Integration Knowledge
     integrations_added, integrations_removed = get_changes_for_list(
@@ -622,9 +638,12 @@ async def update_assistant(
         result = await service.repo.session.execute(stmt)
         old_mcp_tool_overrides = {str(row[0]): row[1] for row in result.all()}
 
-    attachment_ids = None
+    attachments = None
     if assistant.attachments is not None:
-        attachment_ids = [attachment.id for attachment in assistant.attachments]
+        attachments = [
+            (attachment.id, attachment.inline_text)
+            for attachment in assistant.attachments
+        ]
 
     groups = None
     if assistant.groups is not None:
@@ -691,7 +710,7 @@ async def update_assistant(
         completion_model_id=completion_model_id,
         completion_model_kwargs=completion_model_kwargs,
         logging_enabled=assistant.logging_enabled,
-        attachment_ids=attachment_ids,
+        attachments=attachments,
         groups=groups,
         websites=websites,
         integration_knowledge_ids=integration_knowledge_ids,

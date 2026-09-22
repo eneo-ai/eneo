@@ -799,7 +799,7 @@ async def test_personal_chat_cannot_store_unsupported_reasoning_effort(
         {"integration_knowledge_ids": []},
         {"mcp_server_ids": []},
         {"mcp_tools": []},
-        {"attachment_ids": []},
+        {"attachments": []},
         {"description": None},
         {"insight_enabled": False},
         {"inline_file_text": False},

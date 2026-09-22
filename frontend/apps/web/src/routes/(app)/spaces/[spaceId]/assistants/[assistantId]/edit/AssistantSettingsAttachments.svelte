@@ -1,7 +1,8 @@
 <script lang="ts">
   import { IconCancel } from "@eneo/icons/cancel";
   import { IconTrash } from "@eneo/icons/trash";
-  import { Button, ProgressBar } from "@eneo/ui";
+  import { Button, Input, ProgressBar, Tooltip } from "@eneo/ui";
+  import { m } from "$lib/paraglide/messages";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatFileType } from "$lib/core/formatting/formatFileType";
   import { getEneo } from "$lib/core/Eneo";
@@ -39,10 +40,21 @@
   } = initAttachmentManager({ eneo, options: { onFileUploaded, rules: attachmentRules } });
 
   function onFileUploaded(newFile: UploadedFile) {
-    // After successful upload add the uploaded file ref to attachments
+    // After successful upload add the uploaded file ref to attachments.
+    // New attachments are placed in the prompt until the author opts them
+    // into "open with tool".
     if (!$update.attachments.find((file) => file.id === newFile.id)) {
-      $update.attachments = [...$update.attachments, newFile];
+      $update.attachments = [...$update.attachments, { ...newFile, inline_text: true }];
     }
+  }
+
+  /** Set one attachment's mode: always in the prompt (inline_text true) or
+   *  looked up with a tool when needed (inline_text false). Replaces the
+   *  array so the editor diff picks the change up. */
+  function setInlineText(fileId: string, inlineText: boolean) {
+    $update.attachments = $update.attachments.map((file) =>
+      file.id === fileId ? { ...file, inline_text: inlineText } : file
+    );
   }
 
   async function removeFile(file: { id: string }) {
@@ -100,6 +112,25 @@
         {formatFileType(file.mimetype)} · {formatBytes(file.size)}
       </span>
     </div>
+
+    <!-- Phrased by intent (must-know vs look-up), not mechanism. Only a
+         persisted file the backend reports as unreferenceable (a legacy row
+         without a stored original) is locked to the prompt. -->
+    <Tooltip
+      text={file.has_download_reference === false
+        ? m.attachment_mode_lookup_unavailable()
+        : m.attachment_mode_help()}
+    >
+      <div class="shrink-0 text-sm [&_span]:whitespace-nowrap">
+        <Input.RadioSwitch
+          value={file.inline_text !== false}
+          disabled={file.has_download_reference === false}
+          labelTrue={m.attachment_mode_inline()}
+          labelFalse={m.attachment_mode_lookup()}
+          sideEffect={({ next }) => setInlineText(file.id, next)}
+        ></Input.RadioSwitch>
+      </div>
+    </Tooltip>
 
     <div class="min-w-8">
       <Button
