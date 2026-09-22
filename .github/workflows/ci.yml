@@ -328,10 +328,16 @@ jobs:
         run: python3 scripts/check_no_intric.py --repo-root .
 
   frontend:
-    name: Frontend
+    name: Frontend (${{ matrix.task }})
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The production build and the checks/tests are independent and each
+        # take ~3 min, so they run on separate runners instead of back to back.
+        task: [checks, build]
     defaults:
       run:
         working-directory: frontend
@@ -343,6 +349,7 @@ jobs:
       # Enforced in pre-commit too, but pre-commit can be bypassed; CI is the
       # backstop that keeps the i18n catalogs duplicate-free and in key parity.
       - name: Check i18n message catalogs
+        if: matrix.task == 'checks'
         run: |
           python3 apps/web/scripts/check-i18n-duplicates.py
           python3 apps/web/scripts/check-i18n-parity.py
@@ -350,6 +357,7 @@ jobs:
       # User-facing release notes: schema, sv+en parity, newest-first order and
       # that every "Show me" anchor still exists in the web app.
       - name: Check What's new release notes
+        if: matrix.task == 'checks'
         working-directory: .
         run: python3 scripts/check_whats_new.py --repo-root .
 
@@ -365,13 +373,16 @@ jobs:
         run: bun run --filter @eneo/ui build
 
       - name: Run type checks
+        if: matrix.task == 'checks'
         run: bun run check
 
       # The docs workflow owns docs-site lint/build; this gate stays focused on shipped frontend packages.
       - name: Run package lint
+        if: matrix.task == 'checks'
         run: FORCE_COLOR=1 bun run --filter '@eneo/*' lint
 
       - name: Run package tests
+        if: matrix.task == 'checks'
         run: |
           FORCE_COLOR=1 bun run --filter '@eneo/eslint-plugin' test
           FORCE_COLOR=1 bun run --filter '@eneo/eneo-js' test
@@ -383,15 +394,19 @@ jobs:
       # installs a browser build that @vitest/browser (on the pinned playwright)
       # can't find. Keep this in sync with apps/web's playwright dependency.
       - name: Install Playwright Chromium
+        if: matrix.task == 'checks'
         run: bun x playwright@1.61.1 install --with-deps chromium chromium-headless-shell
 
       - name: Run frontend dev lifecycle tests
+        if: matrix.task == 'checks'
         run: FORCE_COLOR=1 bun run test:dev-lifecycle
 
       - name: Run web unit & component tests
+        if: matrix.task == 'checks'
         run: FORCE_COLOR=1 bun run --filter '@eneo/web' test
 
       - name: Build frontend
+        if: matrix.task == 'build'
         run: bun run build
         env:
           # The Svelte production build exceeds Node's default heap on GitHub-hosted runners.
@@ -408,8 +423,14 @@ jobs:
 
       # Isolated, prod-safe stack: own postgres/redis, a deterministic mock model,
       # and the backend built from its Dockerfile. Nothing touches a real provider.
-      - name: Start isolated E2E stack
-        run: docker compose -f docker-compose.e2e.ci.yml up -d --build --wait
+      - name: Start isolated E2E stack in the background
+        # Building the backend image and waiting for the stack's health checks
+        # take ~2 min and need nothing from the frontend steps, so they overlap
+        # with bun install and the web build. "Wait for the E2E stack" collects
+        # the exit status before the tests start.
+        run: |
+          nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
+            > "$RUNNER_TEMP/e2e-stack.log" 2>&1 &
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -444,6 +465,15 @@ jobs:
           SVELTE_KIT_OUT_DIR: .svelte-kit-e2e
           NODE_OPTIONS: --max-old-space-size=8192
         run: bun run build
+
+      - name: Wait for the E2E stack
+        run: |
+          for _ in $(seq 1 300); do
+            [ -f "$RUNNER_TEMP/e2e-stack.exit" ] && break
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/e2e-stack.log"
+          [ "$(cat "$RUNNER_TEMP/e2e-stack.exit" 2>/dev/null)" = "0" ]
 
       - name: Run E2E tests
         working-directory: frontend/apps/web
