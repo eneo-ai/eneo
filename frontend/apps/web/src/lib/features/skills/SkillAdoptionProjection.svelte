@@ -141,10 +141,18 @@
   // Selection is bounded by the detach endpoint; select-all takes the first 100 loaded rows.
   const selectionLimit = 100;
   let selectedKeys = $state<string[]>([]);
+  // Rows that stay selected even when the page they came from is no longer
+  // loaded, so a retry after a partial failure still carries them.
+  let retainedSelection = $state<AdoptionResource[]>([]);
   let selectableItems = $derived(items.slice(0, selectionLimit));
-  let selectedResources = $derived(
-    items.filter((resource) => selectedKeys.includes(resourceKey(resource)))
-  );
+  let selectedResources = $derived([
+    ...items.filter((resource) => selectedKeys.includes(resourceKey(resource))),
+    ...retainedSelection.filter(
+      (resource) =>
+        selectedKeys.includes(resourceKey(resource)) &&
+        !items.some((item) => resourceKey(item) === resourceKey(resource))
+    )
+  ]);
   let detachAvailable = $derived(onDetach !== undefined && run?.status !== "running");
   let advanceAvailable = $derived(
     onAdvanceSelected !== undefined && publishedRevisionId !== null && run?.status !== "running"
@@ -157,7 +165,9 @@
   let pendingAction = $state<"detach" | "advance" | null>(null);
   let actionRunning = $state(false);
   let actionError = $state<string | null>(null);
-  let detachAnnouncement = $state("");
+  let actionReceipt = $state("");
+  // A receipt that reports nothing done needs to read as an outcome, not noise.
+  let receiptNeedsAttention = $state(false);
   let rolloutProcessed = $derived(
     run === null
       ? 0
@@ -219,7 +229,7 @@
     // Only a request started after this point may own the loading flag.
     reloading = false;
     reloadError = null;
-    selectedKeys = [];
+    clearSelection();
     if (skillChanged) {
       untrack(() => clearFilters(false));
     }
@@ -256,6 +266,11 @@
       void untrack(() => reload());
     }
   });
+
+  function clearSelection() {
+    selectedKeys = [];
+    retainedSelection = [];
+  }
 
   function resourceKey(resource: AdoptionResource): string {
     return `${resource.kind}:${resource.resource_id}`;
@@ -302,7 +317,7 @@
     loadMoreError = null;
     // The old cursor belongs to the old filters; never continue from it.
     nextCursor = null;
-    selectedKeys = [];
+    clearSelection();
     try {
       const loadedPage = await getOrganizationSkillAdoption(requestSkillId, {
         limit: 25,
@@ -370,7 +385,11 @@
   }
 
   function toggleAll(checked: boolean) {
-    selectedKeys = checked ? selectableItems.map(resourceKey) : [];
+    if (!checked) {
+      clearSelection();
+      return;
+    }
+    selectedKeys = selectableItems.map(resourceKey);
   }
 
   function toSelection(resources: AdoptionResource[]): SkillDetachSelection {
@@ -384,10 +403,11 @@
     };
   }
 
-  async function announce(message: string) {
-    detachAnnouncement = "";
+  async function announce(message: string, needsAttention = false) {
+    actionReceipt = "";
     await tick();
-    detachAnnouncement = message;
+    actionReceipt = message;
+    receiptNeedsAttention = needsAttention;
   }
 
   async function confirmAction() {
@@ -421,20 +441,30 @@
           concurrent: String(result.concurrentChange),
           incompatible: String(result.incompatible)
         });
+        const rejected = result.concurrentChange + result.incompatible;
         if (result.error !== null) {
-          // Part of the work is committed: show it, keep the rest selected.
+          // Part of the work is committed: report it, and keep exactly the
+          // rows whose request failed selected, even if the refreshed page no
+          // longer lists them.
+          const failedRows = submitted.filter((resource) => failed.has(resource.resource_id));
           pendingAction = null;
-          await announce(message);
+          await announce(message, true);
           await reload();
-          selectedKeys = items
-            .filter((resource) => failed.has(resource.resource_id))
-            .map(resourceKey);
+          retainedSelection = failedRows;
+          selectedKeys = failedRows.map(resourceKey);
           actionError = result.error;
           return;
         }
+        pendingAction = null;
+        clearSelection();
+        // Nothing moved although the server accepted the request: that is an
+        // outcome the administrator has to see, not only hear.
+        await announce(message, result.advanced === 0 && rejected > 0);
+        await reload();
+        return;
       }
       pendingAction = null;
-      selectedKeys = [];
+      clearSelection();
       await announce(message);
       await reload();
     } catch (error) {
@@ -1069,13 +1099,23 @@
                     <Unlink aria-hidden="true" />{m.organization_skills_adoption_detach_selected()}
                   </Button>
                 {/if}
-                <Button variant="ghost" size="sm" onclick={() => (selectedKeys = [])}>
+                <Button variant="ghost" size="sm" onclick={clearSelection}>
                   {m.clear()}
                 </Button>
               {/if}
             </div>
           {/if}
-          <p class="sr-only" aria-live="polite">{detachAnnouncement}</p>
+          <p
+            class={[
+              "mt-2 text-sm",
+              actionReceipt === "" && "sr-only",
+              receiptNeedsAttention ? "text-accent-default font-medium" : "text-muted-foreground"
+            ]}
+            role="status"
+            aria-live="polite"
+          >
+            {actionReceipt}
+          </p>
           {#if actionError !== null && pendingAction === null}
             <p class="text-destructive mt-2 text-sm" role="alert">{actionError}</p>
           {/if}

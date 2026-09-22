@@ -1860,6 +1860,30 @@ describe("organisation Skill detail page", () => {
         })
       )
       .toBeChecked();
+    // The recovery selection survives because this path does not invalidate
+    // the page data, which would hand over a fresh adoption page and clear it.
+    expect(invalidate).not.toHaveBeenCalledWith("organization:skills");
+
+    advanceApps.mockResolvedValueOnce({
+      run_id: "run-2",
+      next_cursor: null,
+      counts: { advanced: 1, concurrent_change: 0, incompatible: 0 },
+      outcomes: [{ app_id: "app-1", outcome: "advanced" }]
+    });
+    await page
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+
+    // The retry carries only the App that failed, and then refreshes.
+    await vi.waitFor(() => expect(advanceApps).toHaveBeenCalledTimes(2));
+    expect(advanceApps).toHaveBeenLastCalledWith(
+      expect.objectContaining({ app_ids: ["app-1"], cursor: null })
+    );
+    expect(advanceAssistants).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
   });
 

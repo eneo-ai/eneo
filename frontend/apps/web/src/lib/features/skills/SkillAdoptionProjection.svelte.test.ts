@@ -1194,9 +1194,12 @@ describe("Skill adoption projection", () => {
       failedIds: ["app-1"],
       error: "Apps unavailable"
     });
+    // The refreshed first page no longer lists the App: it sits on a later page.
     const getOrganizationSkillAdoption = vi
       .fn()
-      .mockResolvedValue(adoptionPage({ items: [{ ...items[0], drift: "current" }, items[1]] }));
+      .mockResolvedValue(
+        adoptionPage({ items: [{ ...items[0], drift: "current" }], nextCursor: "page-2" })
+      );
     render(SkillAdoptionProjection, {
       skillId: "skill-1",
       initialPage: adoptionPage({ items }),
@@ -1233,13 +1236,13 @@ describe("Skill adoption projection", () => {
         )
       )
       .toBeInTheDocument();
+    // The failed App is still selected although its row is off this page, and
+    // a retry carries only it.
     await expect
       .element(
-        page.getByRole("checkbox", {
-          name: m.organization_skills_adoption_select_resource({ name: "Onboarding App" })
-        })
+        page.getByText(m.organization_skills_adoption_selection_count({ count: "1", limit: "100" }))
       )
-      .toBeChecked();
+      .toBeVisible();
     await expect
       .element(
         page.getByRole("checkbox", {
@@ -1247,5 +1250,68 @@ describe("Skill adoption projection", () => {
         })
       )
       .not.toBeChecked();
+
+    onAdvanceSelected.mockResolvedValueOnce({
+      advanced: 1,
+      concurrentChange: 0,
+      incompatible: 0,
+      processedIds: ["app-1"],
+      failedIds: [],
+      error: null
+    });
+    await page
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+    await vi.waitFor(() =>
+      expect(onAdvanceSelected).toHaveBeenLastCalledWith({ assistantIds: [], appIds: ["app-1"] })
+    );
+  });
+
+  test("shows a refused selected update as visible text, not only to screen readers", async () => {
+    const onAdvanceSelected = vi.fn().mockResolvedValue({
+      advanced: 0,
+      concurrentChange: 0,
+      incompatible: 1,
+      processedIds: ["assistant-1"],
+      failedIds: [],
+      error: null
+    });
+    render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: adoptionPage(),
+      getOrganizationSkillAdoption: vi.fn().mockResolvedValue(adoptionPage()),
+      onAdvanceSelected,
+      publishedRevisionId: "revision-2"
+    });
+
+    await page
+      .getByRole("checkbox", {
+        name: m.organization_skills_adoption_select_resource({ name: "HR Assistant" })
+      })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+
+    const receipt = page.getByText(
+      m.organization_skills_adoption_advanced_success({
+        advanced: "0",
+        unprocessed: "0",
+        concurrent: "0",
+        incompatible: "1"
+      })
+    );
+    await expect.element(receipt).toBeVisible();
+    // The receipt survives the refresh that follows the action.
+    await vi.waitFor(() => expect(onAdvanceSelected).toHaveBeenCalledTimes(1));
+    await expect.element(receipt).not.toHaveClass(/sr-only/);
   });
 });

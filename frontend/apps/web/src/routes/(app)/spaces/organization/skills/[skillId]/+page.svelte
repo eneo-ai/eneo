@@ -256,7 +256,9 @@
         result.error = getErrorMessage(error, m.organization_skills_adoption_advance_partial());
       }
     }
-    void refreshOrganizationSkills(data.skill.id);
+    // A refresh replaces the adoption page, which clears the selection the
+    // component is holding for the retry; skip it while that state is shown.
+    if (result.error === null) void refreshOrganizationSkills(data.skill.id);
     return result;
   }
 
