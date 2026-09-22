@@ -204,9 +204,8 @@ def _set_app_version():
         return "DEV"
 
 
-_SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = frozenset(
-    {"development", "local", "dev", "test"}
-)
+_DEVELOPMENT_ENVIRONMENTS = frozenset({"development", "local", "dev"})
+_SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = _DEVELOPMENT_ENVIRONMENTS | {"test"}
 
 
 class Settings(BaseSettings):
@@ -217,6 +216,11 @@ class Settings(BaseSettings):
     # Environment setting (development, staging, production)
     # Controls error detail exposure in API responses
     environment: str = "production"
+
+    @property
+    def is_development(self) -> bool:
+        """Local development or test: verbose errors and developer tools."""
+        return self.environment.strip().lower() in _DEVELOPMENT_ENVIRONMENTS
 
     # Explicit opt-in for the development-only SharePoint fixture API. Runtime
     # environment checks provide a second guard so fixture data cannot be

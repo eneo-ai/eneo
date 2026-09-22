@@ -108,7 +108,7 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.roles()} />
+    <Page.Title title={m.roles()} tour="admin-roles" />
     <RoleEditor mode="create" permissions={data.permissions} templates={data.templates} />
   </Page.Header>
 

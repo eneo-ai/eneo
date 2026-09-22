@@ -282,3 +282,93 @@ body.print-mode > .printable-document {
   }
 }
 /* ------------------------------------------ */
+
+/* ------------------------------------------ */
+/* What's new "Show me" spotlight (driver.js)  */
+/* ------------------------------------------ */
+/* driver.js ships its own light-only popover; re-skin it with the theme
+   tokens so it follows dark mode like every other surface. */
+.driver-popover.eneo-spotlight {
+  background: var(--background-primary);
+  color: var(--text-primary);
+  border: 0.5px solid var(--border-stronger);
+  border-radius: 0.75rem;
+  max-width: 22rem;
+  padding: 1rem 1.1rem;
+}
+.driver-popover.eneo-spotlight .eneo-spotlight-version {
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-stronger);
+  background: color-mix(in srgb, var(--accent-default) 10%, transparent);
+}
+.driver-popover.eneo-spotlight .driver-popover-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.driver-popover.eneo-spotlight .driver-popover-description {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.driver-popover.eneo-spotlight .driver-popover-close-btn {
+  color: var(--text-secondary);
+}
+.driver-popover.eneo-spotlight .driver-popover-close-btn:hover {
+  color: var(--text-primary);
+}
+.driver-popover.eneo-spotlight .driver-popover-arrow-side-left.driver-popover-arrow {
+  border-left-color: var(--background-primary);
+}
+.driver-popover.eneo-spotlight .driver-popover-arrow-side-right.driver-popover-arrow {
+  border-right-color: var(--background-primary);
+}
+.driver-popover.eneo-spotlight .driver-popover-arrow-side-top.driver-popover-arrow {
+  border-top-color: var(--background-primary);
+}
+.driver-popover.eneo-spotlight .driver-popover-arrow-side-bottom.driver-popover-arrow {
+  border-bottom-color: var(--background-primary);
+}
+.driver-popover.eneo-spotlight .driver-popover-footer {
+  margin-top: 0.75rem;
+}
+.driver-popover.eneo-spotlight .driver-popover-footer button {
+  background: var(--accent-default);
+  color: var(--text-on-fill);
+  border: none;
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-shadow: none;
+}
+.driver-popover.eneo-spotlight .driver-popover-footer button:hover {
+  background: var(--accent-stronger);
+}
+.driver-popover.eneo-spotlight .driver-popover-footer button:focus-visible {
+  outline: 2px solid var(--border-stronger);
+  outline-offset: 2px;
+}
+.driver-popover.eneo-spotlight .driver-popover-footer .driver-popover-prev-btn {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 0.5px solid var(--border-stronger);
+}
+.driver-popover.eneo-spotlight .driver-popover-footer .driver-popover-prev-btn:hover {
+  background: var(--background-secondary);
+  color: var(--text-primary);
+}
+.driver-popover.eneo-spotlight .driver-popover-footer button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.driver-popover.eneo-spotlight .driver-popover-progress-text {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}

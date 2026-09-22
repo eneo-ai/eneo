@@ -14,6 +14,7 @@
       "name": "docs-site",
       "version": "0.1.0",
       "dependencies": {
+        "@eneo/whats-new": "workspace:*",
         "@theguild/remark-mermaid": "^0.3.0",
         "classnames": "^2.5.1",
         "next": "15.5.22",
@@ -42,9 +43,11 @@
       "version": "1.23.1",
       "dependencies": {
         "@eneo/ui": "workspace:*",
+        "@eneo/whats-new": "workspace:*",
         "@inlang/paraglide-js": "^2.20.2",
         "altcha": "^3.2.2",
         "dompurify": "^3.4.11",
+        "driver.js": "^1.8.0",
         "lucide-svelte": "^0.544.0",
         "marked": "^15.0.8",
         "paneforge": "^1.0.2",
@@ -155,6 +158,13 @@
         "svelte": "^5.0.0",
       },
     },
+    "packages/whats-new": {
+      "name": "@eneo/whats-new",
+      "version": "0.1.0",
+      "devDependencies": {
+        "prettier": "^3.9.4",
+      },
+    },
     "packages/widget-loader": {
       "name": "@eneo/widget-loader",
       "version": "1.0.0",
@@ -221,6 +231,8 @@
     "@eneo/ui": ["@eneo/ui@workspace:packages/ui"],
 
     "@eneo/web": ["@eneo/web@workspace:apps/web"],
+
+    "@eneo/whats-new": ["@eneo/whats-new@workspace:packages/whats-new"],
 
     "@eneo/widget-loader": ["@eneo/widget-loader@workspace:packages/widget-loader"],
 
@@ -1203,6 +1215,8 @@
     "dom-accessibility-api": ["dom-accessibility-api@0.5.16", "", {}, "sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg=="],
 
     "dompurify": ["dompurify@3.4.11", "", { "optionalDependencies": { "@types/trusted-types": "^2.0.7" } }, "sha512-zhlUV12GsaRzMsf9q5M254YhA4+VuF0fG+QFqu6aYpoGlKtz+w8//jBcGVYBgQkR5GHjUomejY84AV+/uPbWdw=="],
+
+    "driver.js": ["driver.js@1.8.0", "", {}, "sha512-+8/IO7h1v14IzWh2GP60N7T3PFZweXwdn5e5POuxRSBoCYUojsBxzqawPeXh3YZIibRy7EehYNEyxe7slwwtdg=="],
 
     "dunder-proto": ["dunder-proto@1.0.1", "", { "dependencies": { "call-bind-apply-helpers": "^1.0.1", "es-errors": "^1.3.0", "gopd": "^1.2.0" } }, "sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A=="],
 

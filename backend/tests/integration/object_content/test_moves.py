@@ -1747,6 +1747,10 @@ async def test_move_candidate_query_uses_bounded_ordered_index(
         )
         session.add(owner)
         await session.flush()
+        # The plan under test only needs 20k available, referenced rows. Skip the
+        # per-row reference triggers while generating them and set the count
+        # directly; with triggers on this fixture alone takes ~40 s in CI.
+        await session.execute(text("SET LOCAL session_replication_role = replica"))
         await session.execute(
             text(
                 """
@@ -1755,7 +1759,7 @@ async def test_move_candidate_query_uses_bounded_ordered_index(
                         id, tenant_id, storage_kind, state, access_class,
                         sha256, size_bytes, declared_media_type,
                         verified_media_type, idempotency_key,
-                        request_fingerprint, available_at
+                        request_fingerprint, available_at, reference_count
                     )
                     SELECT
                         gen_random_uuid(), :tenant_id, 'postgres_inline',
@@ -1763,7 +1767,7 @@ async def test_move_candidate_query_uses_bounded_ordered_index(
                         decode(repeat('00', 32), 'hex'), 0,
                         'application/octet-stream', 'application/octet-stream',
                         'move-plan-' || candidate::text,
-                        decode(repeat('00', 32), 'hex'), now()
+                        decode(repeat('00', 32), 'hex'), now(), 1
                     FROM generate_series(1, 20000) AS candidate
                     RETURNING id
                 ), stored AS (

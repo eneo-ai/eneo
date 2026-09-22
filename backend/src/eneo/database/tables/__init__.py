@@ -53,6 +53,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.users_table",
     "eneo.database.tables.websites_spaces_table",
     "eneo.database.tables.websites_table",
+    "eneo.database.tables.whats_new_table",
     "eneo.database.tables.widget_templates_table",
     "eneo.database.tables.widget_usage_table",
     "eneo.database.tables.widgets_table",

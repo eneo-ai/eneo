@@ -586,7 +586,7 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.storage_settings_title()} />
+    <Page.Title title={m.storage_settings_title()} tour="admin-storage" />
   </Page.Header>
 
   <Page.Main>

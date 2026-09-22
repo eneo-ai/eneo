@@ -1,0 +1,25 @@
+{
+  "name": "@eneo/whats-new",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "User-facing release notes shared by the web app and the docs site",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./releases.json": "./releases.json"
+  },
+  "scripts": {
+    "lint": "prettier --check .",
+    "format": "prettier --write .",
+    "test": "bun test src"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.4"
+  },
+  "sideEffects": false
+}

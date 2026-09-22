@@ -1219,6 +1219,33 @@ export interface paths {
     patch: operations["update_api_key_expiry_notifications_setting_api_v1_settings_api_key_expiry_notifications_patch"];
     trace?: never;
   };
+  "/api/v1/settings/whats-new": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Toggle the What's new feature
+     * @description Toggle the What's new page, release announcement and menu indicator for your tenant.
+     *
+     *     **Admin Only:** Requires admin permissions.
+     *
+     *     **Behavior:**
+     *     - Updates the `whats_new_enabled` feature flag for your tenant
+     *     - When disabled: the page, the one-time release announcement and the menu indicator are hidden for every user in the tenant
+     *     - Change takes effect on the next page load
+     */
+    patch: operations["update_whats_new_setting_api_v1_settings_whats_new_patch"];
+    trace?: never;
+  };
   "/api/v1/assistants/": {
     parameters: {
       query?: never;
@@ -7261,6 +7288,70 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/whats-new/state/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Whats New State
+     * @description Get which releases the current user has seen and been told about.
+     */
+    get: operations["get_whats_new_state_api_v1_whats_new_state__get"];
+    put?: never;
+    post?: never;
+    /**
+     * Reset Whats New State
+     * @description Development only: forget the current user's What's new markers so the announcement and dot return.
+     */
+    delete: operations["reset_whats_new_state_api_v1_whats_new_state__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/whats-new/seen/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Mark Whats New Seen
+     * @description Record that the current user has opened the What's new page for a release.
+     */
+    put: operations["mark_whats_new_seen_api_v1_whats_new_seen__put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/whats-new/announced/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Mark Whats New Announced
+     * @description Record that the current user has been shown the announcement for a release.
+     */
+    put: operations["mark_whats_new_announced_api_v1_whats_new_announced__put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/integrations/sharepoint/webhook/": {
     parameters: {
       query?: never;
@@ -8796,6 +8887,8 @@ export interface components {
       mimetype: string;
       /** Size Limit */
       size_limit: number;
+      /** Extensions */
+      extensions: string[];
     };
     /**
      * AccessJustificationRequest
@@ -18557,6 +18650,11 @@ export interface components {
        */
       api_key_expiry_notifications?: boolean;
       /**
+       * Whats New Enabled
+       * @default true
+       */
+      whats_new_enabled?: boolean;
+      /**
        * File References Enabled
        * @default false
        */
@@ -18571,6 +18669,11 @@ export interface components {
        * @default false
        */
       sharepoint_fixture_mode_available?: boolean;
+      /**
+       * Developer Tools Available
+       * @default false
+       */
+      developer_tools_available?: boolean;
     };
     /** SharePointFixturePreviewResponse */
     SharePointFixturePreviewResponse: {
@@ -22188,6 +22291,28 @@ export interface components {
        * @description Password for HTTP Basic Authentication. Set to null to remove auth. Must be provided with username.
        */
       http_auth_password?: string | null;
+    };
+    /** WhatsNewStatePublic */
+    WhatsNewStatePublic: {
+      /**
+       * Seen Version
+       * @description Newest release the user has opened the What's new page for; null before the first visit.
+       */
+      seen_version: string | null;
+      /**
+       * Announced Version
+       * @description Newest release the user has been shown the announcement for; null before the first one.
+       */
+      announced_version: string | null;
+    };
+    /** WhatsNewVersionUpdate */
+    WhatsNewVersionUpdate: {
+      /**
+       * Version
+       * @description A release id as written in releases.json.
+       * @example 2.2.0
+       */
+      version: string;
     };
     /** WidgetAsk */
     WidgetAsk: {
@@ -27378,6 +27503,48 @@ export interface operations {
     };
   };
   update_api_key_expiry_notifications_setting_api_v1_settings_api_key_expiry_notifications_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_whats_new_setting_api_v1_settings_whats_new_patch: {
     parameters: {
       query?: never;
       header?: never;
@@ -48217,6 +48384,157 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_whats_new_state_api_v1_whats_new_state__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  reset_whats_new_state_api_v1_whats_new_state__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  mark_whats_new_seen_api_v1_whats_new_seen__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WhatsNewVersionUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mark_whats_new_announced_api_v1_whats_new_announced__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WhatsNewVersionUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

@@ -1,7 +1,7 @@
 """add widgets
 
 Revision ID: 202609171100
-Revises: 202609171000
+Revises: 202609161000
 Create Date: 2026-09-17 11:00:00.000000
 """
 
@@ -15,7 +15,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "202609171100"
-down_revision: str | None = "202609171000"
+down_revision: str | None = "202609161000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

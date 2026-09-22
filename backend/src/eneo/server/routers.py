@@ -155,6 +155,7 @@ from eneo.user_groups.user_groups_router import router as user_groups_router
 from eneo.users.user_router import router as users_router
 from eneo.users.user_router import users_admin_router
 from eneo.websites.presentation.website_router import router as website_router
+from eneo.whats_new.whats_new_router import router as whats_new_router
 from eneo.widgets.presentation.public_widget_router import (
     router as public_widgets_router,
 )
@@ -635,6 +636,13 @@ router.include_router(
     ],
 )
 router.include_router(organization_skill_router)
+# "Seen" is personal UI state, so API keys (user-owned or service) are rejected.
+router.include_router(
+    whats_new_router,
+    prefix="/whats-new",
+    tags=["whats-new"],
+    dependencies=[Depends(require_session_auth)],
+)
 router.include_router(
     sharepoint_webhook_router, prefix="/integrations", tags=["integrations"]
 )

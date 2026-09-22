@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from eneo.files.extensions import MIMETYPE_EXTENSIONS_MAPPER
 from eneo.main.models import InDB
 
 
@@ -143,6 +144,17 @@ class FilePublic(InDB):
 class AcceptedFileType(BaseModel):
     mimetype: str
     size_limit: int
+    extensions: list[str]
+
+    @classmethod
+    def for_mimetype(cls, mimetype: str, size_limit: int) -> "AcceptedFileType":
+        # Every producer goes through here so the advertised extensions always
+        # match the mimetype; the frontend renders these instead of mimetypes.
+        return cls(
+            mimetype=mimetype,
+            size_limit=size_limit,
+            extensions=list(MIMETYPE_EXTENSIONS_MAPPER.get(mimetype, [])),
+        )
 
 
 class Limit(BaseModel):

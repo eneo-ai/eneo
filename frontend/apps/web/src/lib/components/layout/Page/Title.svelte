@@ -7,6 +7,8 @@
   export let parent: { title?: string; href: string } | null = null;
   export let title: string | undefined = undefined;
   export let truncate = false;
+  /** Anchor for the What's new "Show me" spotlight (rendered as data-tour). */
+  export let tour: string | undefined = undefined;
 
   let titleContainer: HTMLDivElement;
   let originalTitleWidth: number | null = null;
@@ -43,6 +45,7 @@
 
 <div
   bind:this={titleContainer}
+  data-tour={tour}
   class:max-w-[40%]={isOverflowing}
   class="grid translate-y-[0.02rem] flex-col overflow-hidden transition-all"
 >

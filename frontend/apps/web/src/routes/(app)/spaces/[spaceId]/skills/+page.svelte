@@ -80,7 +80,7 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.skills()}></Page.Title>
+    <Page.Title title={m.skills()} tour="space-skills"></Page.Title>
     {#if canCreate && data.skills.items.length > 0}
       <Button href={resolve(`/spaces/${spaceRouteId}/skills/new`)}>
         <Plus data-icon="inline-start" aria-hidden="true" />
