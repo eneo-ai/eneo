@@ -1106,11 +1106,33 @@ async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
                 observed_storage_kind=StorageKind.POSTGRES_INLINE,
             )
 
+    startup_at_admission_lock = asyncio.Event()
+    startup_backend_pid: int | None = None
+    original_lock_admission = (
+        file_icon_backfill_module._FileIconBackfillRepository.lock_admission
+    )
+
+    async def announce_admission_lock(
+        repository: file_icon_backfill_module._FileIconBackfillRepository,
+    ) -> None:
+        nonlocal startup_backend_pid
+        if not startup_at_admission_lock.is_set():
+            startup_backend_pid = await repository._session.scalar(
+                sa.text("SELECT pg_backend_pid()")
+            )
+            startup_at_admission_lock.set()
+        await original_lock_admission(repository)
+
     failure_task = asyncio.create_task(fail_reference())
     startup_task: asyncio.Task[FileIconBackfillResult] | None = None
     capacity_lock_observed = False
     try:
         await asyncio.wait_for(failure_paused.wait(), timeout=LOCK_WAIT_SECONDS)
+        monkeypatch.setattr(
+            file_icon_backfill_module._FileIconBackfillRepository,
+            "lock_admission",
+            announce_admission_lock,
+        )
         startup_task = asyncio.create_task(
             _backfill(
                 object_content_database,
@@ -1121,23 +1143,32 @@ async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
         assert failure_backend_pid is not None
 
         async def wait_for_blocked_campaign_start() -> bool:
+            announced = asyncio.create_task(startup_at_admission_lock.wait())
+            try:
+                await asyncio.wait(
+                    {announced, startup_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                announced.cancel()
+            if startup_task.done():
+                return False
+            assert startup_backend_pid is not None
+            # Ask the live lock graph about the campaign's own backend. Listing
+            # pg_stat_activity instead freezes the backend set at the first read
+            # of this transaction, hiding a connection the pool opens afterwards.
             async with object_content_database.session() as session, session.begin():
                 while not startup_task.done():
-                    waiting = await session.scalar(
+                    blocked = await session.scalar(
                         sa.text(
-                            """
-                            SELECT EXISTS (
-                                SELECT 1
-                                FROM pg_stat_activity
-                                WHERE datname = current_database()
-                                  AND pid <> pg_backend_pid()
-                                  AND :blocking_pid = ANY(pg_blocking_pids(pid))
-                            )
-                            """
+                            "SELECT :blocking_pid = ANY(pg_blocking_pids(:blocked_pid))"
                         ),
-                        {"blocking_pid": failure_backend_pid},
+                        {
+                            "blocking_pid": failure_backend_pid,
+                            "blocked_pid": startup_backend_pid,
+                        },
                     )
-                    if waiting:
+                    if blocked:
                         return True
                     await asyncio.sleep(0.01)
             return False
