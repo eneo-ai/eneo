@@ -27,7 +27,8 @@ try {
     ? fs.readFileSync(filesPath, "utf8").split("\n")
     : process.argv.slice(2).filter((arg) => !arg.startsWith("--"));
 
-  writeOutputs(classify(files));
+  const eventName = getArgValue("--event-name") ?? "pull_request";
+  writeOutputs(scopeForEvent(files, eventName));
 } catch (error) {
   console.error(`::warning::Failed to classify changed files. Running full CI. ${error.message}`);
   writeOutputs(allTrue());
@@ -113,10 +114,31 @@ function allTrue() {
   return Object.fromEntries(outputNames.map((name) => [name, true]));
 }
 
+function scopeForEvent(files, eventName) {
+  // Pushes and merge candidates have always run every check. Keep that rule
+  // here so the matrix and Docker selection cannot accidentally narrow them.
+  return eventName === "pull_request" ? classify(files) : allTrue();
+}
+
+function selectedChecks(scope) {
+  const checks = [];
+  if (scope.backend) checks.push("backend-quality", "backend-tests");
+  if (scope.scripts) checks.push("script-tests");
+  if (scope.route_metadata) checks.push("route-metadata");
+  if (scope.frontend) checks.push("frontend");
+  if (scope.frontend_e2e) checks.push("frontend-e2e");
+  if (scope.schema) checks.push("schema-drift");
+  if (scope.docker_backend || scope.docker_frontend || scope.docker_devcontainer) {
+    checks.push("docker-builds");
+  }
+  return checks;
+}
+
 function writeOutputs(scope) {
   for (const name of outputNames) {
     console.log(`${name}=${scope[name] ? "true" : "false"}`);
   }
+  console.log(`checks=${JSON.stringify(selectedChecks(scope))}`);
 }
 
 function getArgValue(name) {
@@ -191,6 +213,41 @@ function runSelfTest() {
   const emptyScope = classify([]);
   for (const name of outputNames) {
     assert.equal(emptyScope[name], true, `empty change lists should fail open for ${name}`);
+  }
+
+  assert.deepEqual(
+    selectedChecks(classify(["frontend/apps/docs-site/src/content/index.mdx"])),
+    [],
+    "docs-only pull requests should skip the matrix entirely",
+  );
+  assert.deepEqual(
+    selectedChecks(classify(["frontend/apps/web/src/routes/+page.svelte"])),
+    ["frontend", "frontend-e2e", "docker-builds"],
+  );
+  assert.deepEqual(
+    selectedChecks(classify(["backend/src/eneo/server/main.py"])),
+    ["backend-quality", "backend-tests", "route-metadata", "frontend-e2e", "schema-drift", "docker-builds"],
+  );
+  assert.deepEqual(
+    selectedChecks(classify([".devcontainer/Dockerfile"])),
+    ["docker-builds"],
+  );
+  assert.deepEqual(
+    selectedChecks(classify(["scripts/tests/test_commit_hooks.py"])),
+    ["script-tests"],
+  );
+  const allChecks = [
+    "backend-quality", "backend-tests", "script-tests", "route-metadata",
+    "frontend", "frontend-e2e", "schema-drift", "docker-builds",
+  ];
+  assert.deepEqual(selectedChecks(emptyScope), allChecks);
+  assert.deepEqual(selectedChecks(fullScope), allChecks);
+  for (const eventName of ["push", "merge_group"]) {
+    const scope = scopeForEvent(["README.md"], eventName);
+    assert.deepEqual(selectedChecks(scope), allChecks, `${eventName} must run full CI`);
+    for (const image of ["backend", "frontend", "devcontainer"]) {
+      assert.equal(scope[`docker_${image}`], true);
+    }
   }
 
   console.log("ci-change-scope self-test passed");

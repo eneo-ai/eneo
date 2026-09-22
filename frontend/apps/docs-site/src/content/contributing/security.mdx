@@ -16,6 +16,16 @@ Pull requests into `develop` run two security and quality gates:
 
 `CI / CI` is the main app check. It runs backend quality checks, backend tests, frontend checks, package lint, and the frontend production build.
 
+Branch policy, the PR's **User-facing** section and the legacy-name check run
+before the expensive checks. If a prerequisite fails, CI does not start the
+test and build jobs. After those prerequisites pass, the selected checks run
+in a fail-fast matrix: one failure cancels queued and running sibling checks.
+E2E container cleanup still runs after cancellation, and the final `CI` check
+reports failure or cancellation rather than accepting an incomplete run.
+Fix the reported error before rerunning; cancelled checks have not passed.
+Separate workflows, including Dependency Review and documentation publication,
+keep their own lifecycle.
+
 Backend dependency installs use `uv sync --frozen --all-groups`. Frontend dependency installs use `bun install --frozen-lockfile`. This matters because dependency PRs should prove that the committed lockfiles still install and the app still builds.
 
 The CI workflow also builds the backend, frontend, and devcontainer Docker images without pushing them. This catches Dockerfile and base-image update problems before Dependabot Docker PRs merge.

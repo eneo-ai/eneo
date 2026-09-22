@@ -1,0 +1,506 @@
+name: CI check
+
+# Called once per selected check by CI's fail-fast matrix. Jobs retain their
+# own setup and cleanup; only the selected job receives a runner.
+on:
+  workflow_call:
+    inputs:
+      check:
+        required: true
+        type: string
+      docker-backend:
+        type: boolean
+        default: false
+      docker-frontend:
+        type: boolean
+        default: false
+      docker-devcontainer:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  POSTGRES_USER: placeholder
+  POSTGRES_HOST: placeholder
+  POSTGRES_PASSWORD: placeholder
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: placeholder
+  REDIS_HOST: localhost
+  REDIS_PORT: 6379
+  MAX_IN_QUESTION: 1
+  API_PREFIX: /api/v1
+  API_KEY_LENGTH: 64
+  API_KEY_HEADER_NAME: X-API-Key
+  JWT_AUDIENCE: test
+  JWT_ISSUER: test
+  JWT_EXPIRY_TIME: 3600
+  JWT_ALGORITHM: HS256
+  JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789
+  JWT_TOKEN_PREFIX: Bearer
+  URL_SIGNING_KEY: test_key
+  ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
+  OPENAI_API_KEY: test-api-key
+
+jobs:
+  backend-quality:
+    name: Backend quality
+    if: inputs.check == 'backend-quality'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+
+      - name: Set up Python
+        # uv downloads a prebuilt CPython from GitHub releases; that CDN
+        # occasionally returns 504s. Retry with backoff so a transient
+        # blip doesn't fail the whole run.
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if uv python install 3.11; then
+              exit 0
+            fi
+            echo "::warning::uv python install failed (attempt $attempt/5); retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          echo "::error::uv python install failed after 5 attempts"
+          exit 1
+
+      - name: Verify lockfile consistency
+        run: uv lock --check
+
+      - name: Install dependencies
+        run: uv sync --python 3.11 --frozen --all-groups
+
+      - name: Verify Alembic migration graph
+        run: uv run pytest -q tests/unit/test_alembic_migration_graph.py
+
+      - name: Ruff lint
+        run: uv run ruff check src/eneo --output-format github
+
+      - name: Ruff format check
+        run: uv run ruff format --check src/eneo
+
+      - name: Pyright type check
+        run: uv run pyright
+
+  backend-tests:
+    name: Backend tests
+    if: inputs.check == 'backend-tests'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+
+      - name: Set up Python
+        # uv downloads a prebuilt CPython from GitHub releases; that CDN
+        # occasionally returns 504s. Retry with backoff so a transient
+        # blip doesn't fail the whole run.
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if uv python install 3.11; then
+              exit 0
+            fi
+            echo "::warning::uv python install failed (attempt $attempt/5); retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          echo "::error::uv python install failed after 5 attempts"
+          exit 1
+
+      - name: Verify lockfile consistency
+        run: uv lock --check
+
+      - name: Install dependencies
+        run: uv sync --python 3.11 --frozen --all-groups
+
+      - name: Run unit tests
+        run: uv run pytest -v -n 4 -m "not integration" tests/
+
+      - name: Run integration tests
+        # -n 4: public-repo ubuntu-latest runners have 4 vCPUs, and each xdist
+        # worker gets its own session-scoped Postgres testcontainer.
+        run: uv run pytest -v -n 4 -m integration tests/integration/
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          DOCKER_HOST: unix:///var/run/docker.sock
+
+      - name: Verify File/Icon upgrade and optional cleanup on PostgreSQL 13
+        # Migration tests are opt-in and run outside the parallel suite. The
+        # restore rehearsal needs its own application/database session.
+        working-directory: backend
+        timeout-minutes: 10
+        run: |
+          uv run pytest -v -m migration_isolation \
+            tests/integration/migrations/test_file_icon_preflight.py \
+            tests/integration/migrations/test_file_icon_legacy_cleanup.py
+          uv run pytest -v -o faulthandler_timeout=180 -m migration_isolation \
+            tests/integration/migrations/test_file_icon_bridge_rehearsal.py
+        env:
+          ENEO_FILE_ICON_REHEARSAL_PROFILE: smoke
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          DOCKER_HOST: unix:///var/run/docker.sock
+
+  script-tests:
+    name: Script tests
+    if: inputs.check == 'script-tests'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run developer-tooling tests
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+      - name: Run project workflow self-tests
+        run: |
+          node .github/scripts/ensure-project-fields.mjs --self-test
+          node .github/scripts/project-intake.mjs --self-test
+          node .github/scripts/ci-change-scope.mjs --self-test
+          node .github/scripts/check-user-facing.mjs --self-test
+          node scripts/collect_user_facing.mjs --self-test
+          node scripts/export_github_roadmap.mjs --self-test
+
+  route-metadata:
+    name: Route metadata
+    if: inputs.check == 'route-metadata'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check all HTTP route decorators
+        run: python3 scripts/check_route_metadata.py --repo-root . --all
+
+  frontend:
+    name: Frontend
+    if: inputs.check == 'frontend'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Enforced in pre-commit too, but pre-commit can be bypassed; CI is the
+      # backstop that keeps the i18n catalogs duplicate-free and in key parity.
+      - name: Check i18n message catalogs
+        run: |
+          python3 apps/web/scripts/check-i18n-duplicates.py
+          python3 apps/web/scripts/check-i18n-parity.py
+
+      # User-facing release notes: schema, sv+en parity, newest-first order and
+      # that every "Show me" anchor still exists in the web app.
+      - name: Check What's new release notes
+        working-directory: .
+        run: python3 scripts/check_whats_new.py --repo-root .
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build workspace dependencies
+        run: bun run --filter @eneo/ui build
+
+      - name: Run type checks
+        run: bun run check
+
+      # The docs workflow owns docs-site lint/build; this gate stays focused on shipped frontend packages.
+      - name: Run package lint
+        run: FORCE_COLOR=1 bun run --filter '@eneo/*' lint
+
+      - name: Run package tests
+        run: |
+          FORCE_COLOR=1 bun run --filter '@eneo/eslint-plugin' test
+          FORCE_COLOR=1 bun run --filter '@eneo/eneo-js' test
+          FORCE_COLOR=1 bun run --filter '@eneo/whats-new' test
+
+      # Component tests run in a real Chromium via Vitest browser mode, so the
+      # matching Playwright browser must be on the runner. Pin the playwright
+      # version explicitly: a bare `bun x playwright` fetches the latest and
+      # installs a browser build that @vitest/browser (on the pinned playwright)
+      # can't find. Keep this in sync with apps/web's playwright dependency.
+      - name: Install Playwright Chromium
+        run: bun x playwright@1.61.1 install --with-deps chromium chromium-headless-shell
+
+      - name: Run frontend dev lifecycle tests
+        run: FORCE_COLOR=1 bun run test:dev-lifecycle
+
+      - name: Run web unit & component tests
+        run: FORCE_COLOR=1 bun run --filter '@eneo/web' test
+
+      - name: Build frontend
+        run: bun run build
+        env:
+          # The Svelte production build exceeds Node's default heap on GitHub-hosted runners.
+          NODE_OPTIONS: --max-old-space-size=8192
+
+  frontend-e2e:
+    name: Frontend E2E
+    if: inputs.check == 'frontend-e2e'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Isolated, prod-safe stack: own postgres/redis, a deterministic mock model,
+      # and the backend built from its Dockerfile. Nothing touches a real provider.
+      - name: Start isolated E2E stack
+        run: docker compose -f docker-compose.e2e.ci.yml up -d --build --wait
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      - name: Build workspace dependencies
+        working-directory: frontend
+        run: bun run --filter @eneo/ui build
+
+      # Pin to match apps/web's @playwright/test dependency; a bare
+      # `bun x playwright` fetches the latest and installs a browser build the
+      # pinned runner can't find ("Executable doesn't exist").
+      - name: Install Playwright Chromium
+        working-directory: frontend/apps/web
+        run: bun x playwright@1.61.1 install --with-deps chromium
+
+      # Build the production app up front so the Playwright webServer only has to
+      # start `preview`. A full `vite build` inside the webServer's 180s timeout
+      # is the root cause of the flaky "Timed out waiting from config.webServer":
+      # its wall-clock straddles 180s on shared runners. SVELTE_KIT_OUT_DIR must
+      # match playwright.config.ts so `preview` serves exactly this build; the
+      # backend URLs are read at runtime (via $env/dynamic) so they don't affect
+      # the artifact, but we set them to mirror the previous build environment.
+      - name: Build web app for E2E
+        working-directory: frontend/apps/web
+        env:
+          SVELTE_KIT_OUT_DIR: .svelte-kit-e2e
+          NODE_OPTIONS: --max-old-space-size=8192
+        run: bun run build
+
+      - name: Run E2E tests
+        working-directory: frontend/apps/web
+        env:
+          # The workflow owns the stack lifecycle, so Playwright must not manage it.
+          E2E_MANAGE_STACK: "0"
+          # Keep SSR and direct API helpers on one deterministic loopback path.
+          E2E_BACKEND_URL: http://127.0.0.1:8124
+          E2E_JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789 # matches the e2e-backend JWT_SECRET
+        run: bun run test:e2e
+
+      - name: Capture E2E stack diagnostics
+        if: ${{ failure() }}
+        run: |
+          mkdir -p e2e-artifacts
+          docker compose -f docker-compose.e2e.ci.yml ps --all \
+            > e2e-artifacts/compose-ps.txt
+          docker compose -f docker-compose.e2e.ci.yml logs \
+            --no-color --timestamps \
+            > e2e-artifacts/compose.log
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/apps/web/playwright-report
+            e2e-artifacts
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Stop E2E stack
+        if: ${{ always() }}
+        run: docker compose -f docker-compose.e2e.ci.yml down -v
+
+  schema-drift:
+    name: Schema drift
+    if: inputs.check == 'schema-drift'
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+
+      - name: Set up Python
+        # uv downloads a prebuilt CPython from GitHub releases; that CDN
+        # occasionally returns 504s. Retry with backoff so a transient
+        # blip doesn't fail the whole run.
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if uv python install 3.11; then
+              exit 0
+            fi
+            echo "::warning::uv python install failed (attempt $attempt/5); retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          echo "::error::uv python install failed after 5 attempts"
+          exit 1
+        working-directory: backend
+
+      - name: Install backend dependencies
+        run: uv sync --python 3.11 --frozen --all-groups
+        working-directory: backend
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+        working-directory: frontend
+
+      # schema.d.ts is generated from the backend OpenAPI spec; nothing else keeps
+      # it in sync, so a backend model change that skips regeneration silently
+      # leaves the frontend types (and any ActionType-driven i18n guards) stale.
+      - name: Dump backend OpenAPI spec
+        run: uv run python -c "import json; from eneo.server.main import app; json.dump(app.openapi(), open('/tmp/openapi.gen.json', 'w'))"
+        working-directory: backend
+
+      - name: Regenerate schema.d.ts
+        run: |
+          bun x openapi-typescript /tmp/openapi.gen.json -o src/types/schema.d.ts --default-non-nullable=false
+          bun x prettier --write src/types/schema.d.ts
+        working-directory: frontend/packages/eneo-js
+
+      - name: Fail on schema drift
+        run: |
+          SCHEMA=frontend/packages/eneo-js/src/types/schema.d.ts
+          if git diff --quiet -- "$SCHEMA"; then
+            echo "$SCHEMA is in sync with the backend OpenAPI spec."
+            exit 0
+          fi
+
+          echo "::error file=$SCHEMA::Out of sync with the backend OpenAPI spec — regenerate and commit it."
+
+          # Render the drift in the job Summary so it's visible without opening raw logs.
+          {
+            echo "## ❌ schema.d.ts drift detected"
+            echo ""
+            echo "\`$SCHEMA\` does not match the backend OpenAPI spec."
+            echo "Regenerate it (\`cd frontend/packages/eneo-js && node update.js\` against a backend, or the offline \`app.openapi()\` regen) and commit the result."
+            echo ""
+            echo "<details><summary>Diff — committed (red) vs. regenerated/expected (green)</summary>"
+            echo ""
+            echo '```diff'
+            git diff --no-color -- "$SCHEMA"
+            echo '```'
+            echo ""
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Also surface it in the step log, collapsed.
+          echo "::group::schema.d.ts diff (committed vs. regenerated)"
+          git diff -- "$SCHEMA"
+          echo "::endgroup::"
+          exit 1
+
+  docker-builds:
+    name: Docker builds (${{ matrix.image }})
+    if: inputs.check == 'docker-builds'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - image: backend
+            context: ./backend
+            file: ./backend/Dockerfile
+          - image: frontend
+            context: ./frontend
+            file: ./frontend/Dockerfile
+          - image: devcontainer
+            context: ./.devcontainer
+            file: ./.devcontainer/Dockerfile
+
+    steps:
+      - name: Checkout
+        if: >-
+          github.event_name != 'pull_request' ||
+          (matrix.image == 'backend' && inputs.docker-backend) ||
+          (matrix.image == 'frontend' && inputs.docker-frontend) ||
+          (matrix.image == 'devcontainer' && inputs.docker-devcontainer)
+        uses: actions/checkout@v4
+
+      # The frontend production build needs more memory than the hosted runner
+      # can provide without swap once it runs inside Docker. Keep this scoped to
+      # the frontend image; the other images build within the runner's RAM.
+      - name: Add swap for frontend image build
+        if: >-
+          matrix.image == 'frontend' &&
+          (github.event_name != 'pull_request' || inputs.docker-frontend)
+        run: |
+          sudo fallocate --length 4G /mnt/eneo-frontend.swap
+          sudo chmod 600 /mnt/eneo-frontend.swap
+          sudo mkswap /mnt/eneo-frontend.swap
+          sudo swapon /mnt/eneo-frontend.swap
+
+      - name: Build Docker image
+        if: >-
+          github.event_name != 'pull_request' ||
+          (matrix.image == 'backend' && inputs.docker-backend) ||
+          (matrix.image == 'frontend' && inputs.docker-frontend) ||
+          (matrix.image == 'devcontainer' && inputs.docker-devcontainer)
+        env:
+          DOCKER_BUILDKIT: "1"
+        run: docker build --pull --file "${{ matrix.file }}" --tag "eneo-${{ matrix.image }}:ci" "${{ matrix.context }}"

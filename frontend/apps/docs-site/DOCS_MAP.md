@@ -70,9 +70,9 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 
 ## Project and contributing
 
-| Code                                                                                                                                                                   | Pages                               |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| `.github/workflows/ci.yml`, `.github/workflows/dependency-review.yml`, `.github/dependabot.yml`, `docs/SECURITY.md`                                                    | `contributing/security.mdx`         |
-| `.github/workflows/export-roadmap.yml`, `.github/workflows/add-to-project.yml`, `.github/scripts/**`, `scripts/export_github_roadmap.mjs`, `.github/ISSUE_TEMPLATE/**` | `contributing/project-roadmap.mdx`  |
-| `docs/CONTRIBUTING.md`, `docs/DEPLOYMENT_WORKFLOW.md`, `docs/CODE_QUALITY.md`                                                                                          | `contributing/index.mdx`            |
-| `frontend/apps/docs-site/**` (the site itself)                                                                                                                         | `frontend/apps/docs-site/README.md` |
+| Code                                                                                                                                                                                         | Pages                               |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| `.github/workflows/ci.yml`, `.github/workflows/ci-check.yml`, `.github/scripts/ci-change-scope.mjs`, `.github/workflows/dependency-review.yml`, `.github/dependabot.yml`, `docs/SECURITY.md` | `contributing/security.mdx`         |
+| `.github/workflows/export-roadmap.yml`, `.github/workflows/add-to-project.yml`, `.github/scripts/**`, `scripts/export_github_roadmap.mjs`, `.github/ISSUE_TEMPLATE/**`                       | `contributing/project-roadmap.mdx`  |
+| `docs/CONTRIBUTING.md`, `docs/DEPLOYMENT_WORKFLOW.md`, `docs/CODE_QUALITY.md`                                                                                                                | `contributing/index.mdx`            |
+| `frontend/apps/docs-site/**` (the site itself)                                                                                                                                               | `frontend/apps/docs-site/README.md` |

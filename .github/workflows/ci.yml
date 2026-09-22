@@ -9,8 +9,8 @@ on:
     branches:
       - develop
       - 'release/**'
-  # Merge queue candidates (develop + queued PRs). Every scoped job runs in
-  # full here (their conditions only scope pull_request events), and the
+  # Merge queue candidates (develop + queued PRs). Scope selection runs every
+  # check for these events, and the
   # aggregate CI job reports the required "CI" check on the candidate.
   merge_group:
 
@@ -22,40 +22,19 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  POSTGRES_USER: placeholder
-  POSTGRES_HOST: placeholder
-  POSTGRES_PASSWORD: placeholder
-  POSTGRES_PORT: 5432
-  POSTGRES_DB: placeholder
-  REDIS_HOST: localhost
-  REDIS_PORT: 6379
-  MAX_IN_QUESTION: 1
-  API_PREFIX: /api/v1
-  API_KEY_LENGTH: 64
-  API_KEY_HEADER_NAME: X-API-Key
-  JWT_AUDIENCE: test
-  JWT_ISSUER: test
-  JWT_EXPIRY_TIME: 3600
-  JWT_ALGORITHM: HS256
-  JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789
-  JWT_TOKEN_PREFIX: Bearer
-  URL_SIGNING_KEY: test_key
-  ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
-  OPENAI_API_KEY: test-api-key
-
 jobs:
   changes:
     name: Change scope
+    needs: [branch-policy, user-facing, no-intric]
+    # PR-only gates are skipped on pushes and merge candidates. Any actual
+    # failure or cancellation must prevent the expensive matrix from starting.
+    if: >-
+      !cancelled() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     outputs:
-      full: ${{ steps.scope.outputs.full }}
-      backend: ${{ steps.scope.outputs.backend }}
-      frontend: ${{ steps.scope.outputs.frontend }}
-      frontend_e2e: ${{ steps.scope.outputs.frontend_e2e }}
-      schema: ${{ steps.scope.outputs.schema }}
-      scripts: ${{ steps.scope.outputs.scripts }}
-      route_metadata: ${{ steps.scope.outputs.route_metadata }}
+      checks: ${{ steps.scope.outputs.checks }}
       docker_backend: ${{ steps.scope.outputs.docker_backend }}
       docker_frontend: ${{ steps.scope.outputs.docker_frontend }}
       docker_devcontainer: ${{ steps.scope.outputs.docker_devcontainer }}
@@ -104,7 +83,9 @@ jobs:
 
       - name: Classify CI scope
         id: scope
-        run: node .github/scripts/ci-change-scope.mjs --files "${{ steps.changed-files.outputs.files }}" >> "$GITHUB_OUTPUT"
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: node .github/scripts/ci-change-scope.mjs --files "${{ steps.changed-files.outputs.files }}" --event-name "$EVENT_NAME" >> "$GITHUB_OUTPUT"
 
   branch-policy:
     if: github.event_name == 'pull_request'
@@ -129,176 +110,11 @@ jobs:
             exit 1
           fi
 
-  backend-quality:
-    name: Backend quality
-    needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-        with:
-          version: "0.8.22"
-          enable-cache: true
-
-      - name: Set up Python
-        # uv downloads a prebuilt CPython from GitHub releases; that CDN
-        # occasionally returns 504s. Retry with backoff so a transient
-        # blip doesn't fail the whole run.
-        run: |
-          for attempt in 1 2 3 4 5; do
-            if uv python install 3.11; then
-              exit 0
-            fi
-            echo "::warning::uv python install failed (attempt $attempt/5); retrying in $((attempt * 10))s"
-            sleep $((attempt * 10))
-          done
-          echo "::error::uv python install failed after 5 attempts"
-          exit 1
-
-      - name: Verify lockfile consistency
-        run: uv lock --check
-
-      - name: Install dependencies
-        run: uv sync --python 3.11 --frozen --all-groups
-
-      - name: Verify Alembic migration graph
-        run: uv run pytest -q tests/unit/test_alembic_migration_graph.py
-
-      - name: Ruff lint
-        run: uv run ruff check src/eneo --output-format github
-
-      - name: Ruff format check
-        run: uv run ruff format --check src/eneo
-
-      - name: Pyright type check
-        run: uv run pyright
-
-  backend-tests:
-    name: Backend tests
-    needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-        with:
-          version: "0.8.22"
-          enable-cache: true
-
-      - name: Set up Python
-        # uv downloads a prebuilt CPython from GitHub releases; that CDN
-        # occasionally returns 504s. Retry with backoff so a transient
-        # blip doesn't fail the whole run.
-        run: |
-          for attempt in 1 2 3 4 5; do
-            if uv python install 3.11; then
-              exit 0
-            fi
-            echo "::warning::uv python install failed (attempt $attempt/5); retrying in $((attempt * 10))s"
-            sleep $((attempt * 10))
-          done
-          echo "::error::uv python install failed after 5 attempts"
-          exit 1
-
-      - name: Verify lockfile consistency
-        run: uv lock --check
-
-      - name: Install dependencies
-        run: uv sync --python 3.11 --frozen --all-groups
-
-      - name: Run unit tests
-        run: uv run pytest -v -n 4 -m "not integration" tests/
-
-      - name: Run integration tests
-        # -n 4: public-repo ubuntu-latest runners have 4 vCPUs, and each xdist
-        # worker gets its own session-scoped Postgres testcontainer.
-        run: uv run pytest -v -n 4 -m integration tests/integration/
-        env:
-          TESTCONTAINERS_RYUK_DISABLED: "true"
-          DOCKER_HOST: unix:///var/run/docker.sock
-
-      - name: Verify File/Icon upgrade and optional cleanup on PostgreSQL 13
-        # Migration tests are opt-in and run outside the parallel suite. The
-        # restore rehearsal needs its own application/database session.
-        working-directory: backend
-        timeout-minutes: 10
-        run: |
-          uv run pytest -v -m migration_isolation \
-            tests/integration/migrations/test_file_icon_preflight.py \
-            tests/integration/migrations/test_file_icon_legacy_cleanup.py
-          uv run pytest -v -o faulthandler_timeout=180 -m migration_isolation \
-            tests/integration/migrations/test_file_icon_bridge_rehearsal.py
-        env:
-          ENEO_FILE_ICON_REHEARSAL_PROFILE: smoke
-          TESTCONTAINERS_RYUK_DISABLED: "true"
-          DOCKER_HOST: unix:///var/run/docker.sock
-
-  script-tests:
-    name: Script tests
-    needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.scripts == 'true'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Run developer-tooling tests
-        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
-
-      - name: Run project workflow self-tests
-        run: |
-          node .github/scripts/ensure-project-fields.mjs --self-test
-          node .github/scripts/project-intake.mjs --self-test
-          node .github/scripts/ci-change-scope.mjs --self-test
-          node .github/scripts/check-user-facing.mjs --self-test
-          node scripts/collect_user_facing.mjs --self-test
-          node scripts/export_github_roadmap.mjs --self-test
-
-  # Preserve the existing required CI gate during rollout. Remove this caller
-  # and its aggregate references once the standalone User-facing section check
-  # is required in GitHub (see the What's new PLAYBOOK).
+  # Keep this caller until the standalone User-facing section check replaces
+  # its aggregate requirement; it is also a cheap gate before the matrix.
   user-facing:
     name: User-facing section (CI transition)
     uses: ./.github/workflows/user-facing.yml
-
-  route-metadata:
-    name: Route metadata
-    needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.route_metadata == 'true'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Check all HTTP route decorators
-        run: python3 scripts/check_route_metadata.py --repo-root . --all
 
   no-intric:
     name: No intric references
@@ -311,347 +127,38 @@ jobs:
       - name: Guard against re-introducing the old product name
         run: python3 scripts/check_no_intric.py --repo-root .
 
-  frontend:
-    name: Frontend
+  checks:
+    name: Checks (${{ matrix.check }})
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # Enforced in pre-commit too, but pre-commit can be bypassed; CI is the
-      # backstop that keeps the i18n catalogs duplicate-free and in key parity.
-      - name: Check i18n message catalogs
-        run: |
-          python3 apps/web/scripts/check-i18n-duplicates.py
-          python3 apps/web/scripts/check-i18n-parity.py
-
-      # User-facing release notes: schema, sv+en parity, newest-first order and
-      # that every "Show me" anchor still exists in the web app.
-      - name: Check What's new release notes
-        working-directory: .
-        run: python3 scripts/check_whats_new.py --repo-root .
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.3.14
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build workspace dependencies
-        run: bun run --filter @eneo/ui build
-
-      - name: Run type checks
-        run: bun run check
-
-      # The docs workflow owns docs-site lint/build; this gate stays focused on shipped frontend packages.
-      - name: Run package lint
-        run: FORCE_COLOR=1 bun run --filter '@eneo/*' lint
-
-      - name: Run package tests
-        run: |
-          FORCE_COLOR=1 bun run --filter '@eneo/eslint-plugin' test
-          FORCE_COLOR=1 bun run --filter '@eneo/eneo-js' test
-          FORCE_COLOR=1 bun run --filter '@eneo/whats-new' test
-
-      # Component tests run in a real Chromium via Vitest browser mode, so the
-      # matching Playwright browser must be on the runner. Pin the playwright
-      # version explicitly: a bare `bun x playwright` fetches the latest and
-      # installs a browser build that @vitest/browser (on the pinned playwright)
-      # can't find. Keep this in sync with apps/web's playwright dependency.
-      - name: Install Playwright Chromium
-        run: bun x playwright@1.61.1 install --with-deps chromium chromium-headless-shell
-
-      - name: Run frontend dev lifecycle tests
-        run: FORCE_COLOR=1 bun run test:dev-lifecycle
-
-      - name: Run web unit & component tests
-        run: FORCE_COLOR=1 bun run --filter '@eneo/web' test
-
-      - name: Build frontend
-        run: bun run build
-        env:
-          # The Svelte production build exceeds Node's default heap on GitHub-hosted runners.
-          NODE_OPTIONS: --max-old-space-size=8192
-
-  frontend-e2e:
-    name: Frontend E2E
-    needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.frontend_e2e == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # Isolated, prod-safe stack: own postgres/redis, a deterministic mock model,
-      # and the backend built from its Dockerfile. Nothing touches a real provider.
-      - name: Start isolated E2E stack
-        run: docker compose -f docker-compose.e2e.ci.yml up -d --build --wait
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.3.14
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: bun install --frozen-lockfile
-
-      - name: Build workspace dependencies
-        working-directory: frontend
-        run: bun run --filter @eneo/ui build
-
-      # Pin to match apps/web's @playwright/test dependency; a bare
-      # `bun x playwright` fetches the latest and installs a browser build the
-      # pinned runner can't find ("Executable doesn't exist").
-      - name: Install Playwright Chromium
-        working-directory: frontend/apps/web
-        run: bun x playwright@1.61.1 install --with-deps chromium
-
-      # Build the production app up front so the Playwright webServer only has to
-      # start `preview`. A full `vite build` inside the webServer's 180s timeout
-      # is the root cause of the flaky "Timed out waiting from config.webServer":
-      # its wall-clock straddles 180s on shared runners. SVELTE_KIT_OUT_DIR must
-      # match playwright.config.ts so `preview` serves exactly this build; the
-      # backend URLs are read at runtime (via $env/dynamic) so they don't affect
-      # the artifact, but we set them to mirror the previous build environment.
-      - name: Build web app for E2E
-        working-directory: frontend/apps/web
-        env:
-          SVELTE_KIT_OUT_DIR: .svelte-kit-e2e
-          NODE_OPTIONS: --max-old-space-size=8192
-        run: bun run build
-
-      - name: Run E2E tests
-        working-directory: frontend/apps/web
-        env:
-          # The workflow owns the stack lifecycle, so Playwright must not manage it.
-          E2E_MANAGE_STACK: "0"
-          # Keep SSR and direct API helpers on one deterministic loopback path.
-          E2E_BACKEND_URL: http://127.0.0.1:8124
-          E2E_JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789 # matches the e2e-backend JWT_SECRET
-        run: bun run test:e2e
-
-      - name: Capture E2E stack diagnostics
-        if: ${{ failure() }}
-        run: |
-          mkdir -p e2e-artifacts
-          docker compose -f docker-compose.e2e.ci.yml ps --all \
-            > e2e-artifacts/compose-ps.txt
-          docker compose -f docker-compose.e2e.ci.yml logs \
-            --no-color --timestamps \
-            > e2e-artifacts/compose.log
-
-      - name: Upload Playwright report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: |
-            frontend/apps/web/playwright-report
-            e2e-artifacts
-          retention-days: 7
-          if-no-files-found: ignore
-
-      - name: Stop E2E stack
-        if: ${{ always() }}
-        run: docker compose -f docker-compose.e2e.ci.yml down -v
-
-  schema-drift:
-    name: Schema drift
-    needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.schema == 'true'
-    runs-on: ubuntu-latest
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-        with:
-          version: "0.8.22"
-          enable-cache: true
-
-      - name: Set up Python
-        # uv downloads a prebuilt CPython from GitHub releases; that CDN
-        # occasionally returns 504s. Retry with backoff so a transient
-        # blip doesn't fail the whole run.
-        run: |
-          for attempt in 1 2 3 4 5; do
-            if uv python install 3.11; then
-              exit 0
-            fi
-            echo "::warning::uv python install failed (attempt $attempt/5); retrying in $((attempt * 10))s"
-            sleep $((attempt * 10))
-          done
-          echo "::error::uv python install failed after 5 attempts"
-          exit 1
-        working-directory: backend
-
-      - name: Install backend dependencies
-        run: uv sync --python 3.11 --frozen --all-groups
-        working-directory: backend
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.3.14
-
-      - name: Install frontend dependencies
-        run: bun install --frozen-lockfile
-        working-directory: frontend
-
-      # schema.d.ts is generated from the backend OpenAPI spec; nothing else keeps
-      # it in sync, so a backend model change that skips regeneration silently
-      # leaves the frontend types (and any ActionType-driven i18n guards) stale.
-      - name: Dump backend OpenAPI spec
-        run: uv run python -c "import json; from eneo.server.main import app; json.dump(app.openapi(), open('/tmp/openapi.gen.json', 'w'))"
-        working-directory: backend
-
-      - name: Regenerate schema.d.ts
-        run: |
-          bun x openapi-typescript /tmp/openapi.gen.json -o src/types/schema.d.ts --default-non-nullable=false
-          bun x prettier --write src/types/schema.d.ts
-        working-directory: frontend/packages/eneo-js
-
-      - name: Fail on schema drift
-        run: |
-          SCHEMA=frontend/packages/eneo-js/src/types/schema.d.ts
-          if git diff --quiet -- "$SCHEMA"; then
-            echo "$SCHEMA is in sync with the backend OpenAPI spec."
-            exit 0
-          fi
-
-          echo "::error file=$SCHEMA::Out of sync with the backend OpenAPI spec — regenerate and commit it."
-
-          # Render the drift in the job Summary so it's visible without opening raw logs.
-          {
-            echo "## ❌ schema.d.ts drift detected"
-            echo ""
-            echo "\`$SCHEMA\` does not match the backend OpenAPI spec."
-            echo "Regenerate it (\`cd frontend/packages/eneo-js && node update.js\` against a backend, or the offline \`app.openapi()\` regen) and commit the result."
-            echo ""
-            echo "<details><summary>Diff — committed (red) vs. regenerated/expected (green)</summary>"
-            echo ""
-            echo '```diff'
-            git diff --no-color -- "$SCHEMA"
-            echo '```'
-            echo ""
-            echo "</details>"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          # Also surface it in the step log, collapsed.
-          echo "::group::schema.d.ts diff (committed vs. regenerated)"
-          git diff -- "$SCHEMA"
-          echo "::endgroup::"
-          exit 1
-
-  docker-builds:
-    name: Docker builds (${{ matrix.image }})
-    needs: changes
-    if: >-
-      github.event_name != 'pull_request' ||
-      needs.changes.outputs.docker_backend == 'true' ||
-      needs.changes.outputs.docker_frontend == 'true' ||
-      needs.changes.outputs.docker_devcontainer == 'true'
-    runs-on: ubuntu-latest
+    if: needs.changes.outputs.checks != '[]'
     strategy:
-      fail-fast: false
+      # This matrix owns every expensive CI check, so a failed check cancels
+      # queued and running siblings, including their reusable-workflow jobs.
+      fail-fast: true
       matrix:
-        include:
-          - image: backend
-            context: ./backend
-            file: ./backend/Dockerfile
-          - image: frontend
-            context: ./frontend
-            file: ./frontend/Dockerfile
-          - image: devcontainer
-            context: ./.devcontainer
-            file: ./.devcontainer/Dockerfile
-
-    steps:
-      - name: Checkout
-        if: >-
-          github.event_name != 'pull_request' ||
-          (matrix.image == 'backend' && needs.changes.outputs.docker_backend == 'true') ||
-          (matrix.image == 'frontend' && needs.changes.outputs.docker_frontend == 'true') ||
-          (matrix.image == 'devcontainer' && needs.changes.outputs.docker_devcontainer == 'true')
-        uses: actions/checkout@v4
-
-      # The frontend production build needs more memory than the hosted runner
-      # can provide without swap once it runs inside Docker. Keep this scoped to
-      # the frontend image; the other images build within the runner's RAM.
-      - name: Add swap for frontend image build
-        if: >-
-          matrix.image == 'frontend' &&
-          (github.event_name != 'pull_request' || needs.changes.outputs.docker_frontend == 'true')
-        run: |
-          sudo fallocate --length 4G /mnt/eneo-frontend.swap
-          sudo chmod 600 /mnt/eneo-frontend.swap
-          sudo mkswap /mnt/eneo-frontend.swap
-          sudo swapon /mnt/eneo-frontend.swap
-
-      - name: Build Docker image
-        if: >-
-          github.event_name != 'pull_request' ||
-          (matrix.image == 'backend' && needs.changes.outputs.docker_backend == 'true') ||
-          (matrix.image == 'frontend' && needs.changes.outputs.docker_frontend == 'true') ||
-          (matrix.image == 'devcontainer' && needs.changes.outputs.docker_devcontainer == 'true')
-        env:
-          DOCKER_BUILDKIT: "1"
-        run: docker build --pull --file "${{ matrix.file }}" --tag "eneo-${{ matrix.image }}:ci" "${{ matrix.context }}"
+        check: ${{ fromJSON(needs.changes.outputs.checks) }}
+    uses: ./.github/workflows/ci-check.yml
+    with:
+      check: ${{ matrix.check }}
+      docker-backend: ${{ needs.changes.outputs.docker_backend == 'true' }}
+      docker-frontend: ${{ needs.changes.outputs.docker_frontend == 'true' }}
+      docker-devcontainer: ${{ needs.changes.outputs.docker_devcontainer == 'true' }}
 
   ci:
     name: CI
     runs-on: ubuntu-latest
     if: always()
-    needs:
-      - changes
-      - branch-policy
-      - backend-quality
-      - backend-tests
-      - script-tests
-      - route-metadata
-      - user-facing
-      - no-intric
-      - frontend
-      - frontend-e2e
-      - schema-drift
-      - docker-builds
+    needs: [changes, branch-policy, user-facing, no-intric, checks]
 
     steps:
       - name: Check required jobs
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
           BRANCH_POLICY_RESULT: ${{ needs.branch-policy.result }}
-          BACKEND_QUALITY_RESULT: ${{ needs.backend-quality.result }}
-          BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
-          SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
-          ROUTE_METADATA_RESULT: ${{ needs.route-metadata.result }}
           USER_FACING_RESULT: ${{ needs.user-facing.result }}
           NO_INTRIC_RESULT: ${{ needs.no-intric.result }}
-          FRONTEND_RESULT: ${{ needs.frontend.result }}
-          FRONTEND_E2E_RESULT: ${{ needs.frontend-e2e.result }}
-          SCHEMA_DRIFT_RESULT: ${{ needs.schema-drift.result }}
-          DOCKER_BUILDS_RESULT: ${{ needs.docker-builds.result }}
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          SELECTED_CHECKS: ${{ needs.changes.outputs.checks }}
         run: |
           failed=0
 
@@ -672,15 +179,16 @@ jobs:
 
           check_result "Change scope" "$CHANGES_RESULT"
           check_result "Branch policy" "$BRANCH_POLICY_RESULT"
-          check_result "Backend quality" "$BACKEND_QUALITY_RESULT"
-          check_result "Backend tests" "$BACKEND_TESTS_RESULT"
-          check_result "Script tests" "$SCRIPT_TESTS_RESULT"
-          check_result "Route metadata" "$ROUTE_METADATA_RESULT"
           check_result "User-facing section" "$USER_FACING_RESULT"
           check_result "No intric references" "$NO_INTRIC_RESULT"
-          check_result "Frontend" "$FRONTEND_RESULT"
-          check_result "Frontend E2E" "$FRONTEND_E2E_RESULT"
-          check_result "Schema drift" "$SCHEMA_DRIFT_RESULT"
-          check_result "Docker builds" "$DOCKER_BUILDS_RESULT"
+          check_result "Selected checks" "$CHECKS_RESULT"
+
+          # A skipped matrix is legitimate only when successful scope detection
+          # selected no checks. Cancelled siblings must never turn the gate green.
+          if [[ "$CHANGES_RESULT" != success ||
+                ( "$CHECKS_RESULT" == skipped && "$SELECTED_CHECKS" != '[]' ) ]]; then
+            echo "::error::CI did not complete the selected checks."
+            failed=1
+          fi
 
           exit "$failed"
