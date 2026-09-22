@@ -21,6 +21,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import UploadFile
 
+from eneo.main.exceptions import ErrorCodes
 from eneo.server.dependencies.container import load_container_upload_admission
 from eneo.users.user import UserAdd, UserState
 
@@ -618,6 +619,7 @@ async def test_missing_and_out_of_scope_knowledge_deletes_have_same_error(
         ),
         "context": {"auth_layer": "api_key_scope"},
         "request_id": "knowledge-scope-denial",
+        "eneo_error_code": ErrorCodes.UNAUTHORIZED.value,
     }
     for blob_id in (str(uuid4()), blob_b):
         response = await api_client.delete(
