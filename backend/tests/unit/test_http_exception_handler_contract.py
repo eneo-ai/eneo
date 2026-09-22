@@ -126,3 +126,27 @@ def test_api_key_refusal_validates_as_the_documented_error():
     assert error.code == "invalid_api_key"
     assert error.eneo_error_code == ErrorCodes.AUTHENTICATION_ERROR
     assert error.context == {"auth_layer": "identity"}
+
+
+def test_conflict_does_not_borrow_a_domain_category():
+    """The real approval-conflict body: a 409 is not a name collision, and the
+    web client renders 9017 as "display name already exists"."""
+    app = get_application()
+
+    @app.post("/_test-conflict")
+    async def _test_conflict():
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "approval_conflict",
+                "message": "This approval request was already processed with a different decision set.",
+                "existing_status": "approved",
+            },
+        )
+
+    payload = TestClient(app).post("/_test-conflict").json()
+
+    assert payload["eneo_error_code"] != ErrorCodes.NAME_COLLISION.value
+    assert payload["eneo_error_code"] == ErrorCodes.BAD_REQUEST.value
+    assert payload["code"] == "approval_conflict"
+    assert payload["existing_status"] == "approved"
