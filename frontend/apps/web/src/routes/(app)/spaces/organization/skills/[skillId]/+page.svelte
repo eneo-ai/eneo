@@ -1007,6 +1007,7 @@
                       </p>
                     </div>
                     <Badge variant="outline">
+                      {#if executionBlock.block !== null}<ShieldAlert aria-hidden="true" />{/if}
                       {executionBlock.block === null
                         ? m.organization_skills_execution_available_status()
                         : m.organization_skills_execution_blocked_status()}

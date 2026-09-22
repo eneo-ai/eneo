@@ -20,6 +20,7 @@
     Plus,
     RefreshCw,
     Search,
+    ShieldAlert,
     Trash2,
     X,
     BookOpenCheck
@@ -390,8 +391,12 @@
                       <Badge
                         variant={statusVariant(skill)}
                         class="h-auto min-h-5 max-w-full whitespace-normal text-left"
-                        >{statusLabel(skill)}</Badge
                       >
+                        {#if skill.execution_blocked && !skill.removed_at}
+                          <ShieldAlert aria-hidden="true" />
+                        {/if}
+                        {statusLabel(skill)}
+                      </Badge>
                     </div>
                     <p
                       class="text-muted-foreground mt-2 line-clamp-2 min-w-0 break-words whitespace-normal pr-2 text-sm leading-6 @4xl:hidden"
@@ -424,8 +429,12 @@
                     <Badge
                       variant={statusVariant(skill)}
                       class="h-auto min-h-5 max-w-full whitespace-normal text-left"
-                      >{statusLabel(skill)}</Badge
                     >
+                      {#if skill.execution_blocked && !skill.removed_at}
+                        <ShieldAlert aria-hidden="true" />
+                      {/if}
+                      {statusLabel(skill)}
+                    </Badge>
                   </Table.Cell>
                   <Table.Cell class="text-muted-foreground hidden text-sm @4xl:table-cell">
                     {m.organization_skills_version({
