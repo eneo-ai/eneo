@@ -144,7 +144,22 @@ On an organisation Skill's detail page, the adoption view shows:
   to the published version.
 
 Configured resources load 25 at a time. The count shows how many are visible,
-and **Show more resources** loads the next page.
+and **Show more resources** loads the next page. Search by resource, Space or
+owner name, and filter by type or update status, to find one resource among
+hundreds; the totals above the table always describe the whole Skill.
+
+Rows in a personal Space name their owner. A row the administrator cannot open
+(another user's personal Space, or a Space they are not a member of) is shown
+as plain text instead of a link.
+
+Tick rows (at most 100 at a time) to act on them without visiting each one:
+
+- **Detach** removes the Skill from the selected Assistants and Apps only. The
+  Skill, every unselected binding, and Personal Chat stay as they are. The
+  audit log records which resources lost the binding.
+- **Update to published version** moves the selected stale rows to the
+  published version in one chunk. Rows already on it are skipped, each
+  Assistant is validated first, and queued App runs are not affected.
 
 ### Moving Personal Chat to the published version
 

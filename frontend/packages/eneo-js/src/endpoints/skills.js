@@ -237,17 +237,24 @@ export function initSkills(client) {
       },
 
       /**
-       * List the structural adoption of an organisation Skill.
-       * @param {{skillId: string, limit?: number, cursor?: string | null}} params
+       * List the structural adoption of an organisation Skill. The optional
+       * filters narrow the resource rows; the summary stays whole-skill.
+       * @param {{skillId: string, limit?: number, cursor?: string | null, query?: string, kind?: import('../types/resources').SkillAdoptionResourceKind, drift?: import('../types/resources').SkillAdoptionDrift}} params
        * @returns {Promise<SkillAdoptionProjectionPagePublic>}
        * @throws {EneoError}
        */
-      getAdoption: async ({ skillId, limit, cursor }) => {
+      getAdoption: async ({ skillId, limit, cursor, query, kind, drift }) => {
         return await client.fetch("/api/v1/skills/organization/{skill_id}/adoption/", {
           method: "get",
           params: {
             path: { skill_id: skillId },
-            query: { limit, cursor }
+            query: {
+              limit,
+              cursor,
+              ...(query ? { query } : {}),
+              ...(kind ? { kind } : {}),
+              ...(drift ? { drift } : {})
+            }
           }
         });
       },
@@ -406,6 +413,20 @@ export function initSkills(client) {
         return await client.fetch("/api/v1/skills/organization/{skill_id}/unpublish/", {
           method: "post",
           params: { path: { skill_id: skillId } }
+        });
+      },
+
+      /**
+       * Detach an organisation Skill from selected Assistants and Apps (at most 100).
+       * @param {{skillId: string} & import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/{skill_id}/detach/">} params
+       * @returns {Promise<import('../types/resources').SkillDetachmentTotals>}
+       * @throws {EneoError}
+       */
+      detach: async ({ skillId, ...request }) => {
+        return await client.fetch("/api/v1/skills/organization/{skill_id}/detach/", {
+          method: "post",
+          params: { path: { skill_id: skillId } },
+          requestBody: { "application/json": request }
         });
       },
 

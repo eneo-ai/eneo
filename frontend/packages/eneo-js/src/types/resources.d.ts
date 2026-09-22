@@ -27,6 +27,10 @@ export type OrganizationSkillPublic = components["schemas"]["OrganizationSkillPu
 export type SkillUsageCounts = components["schemas"]["SkillUsageCountsPublic"];
 export type SkillRemovalRequest = components["schemas"]["SkillRemovalRequest"];
 export type SkillRemovalResult = components["schemas"]["SkillRemovalPublic"];
+export type SkillBindingDetachRequest = components["schemas"]["SkillBindingDetachRequest"];
+export type SkillDetachmentTotals = components["schemas"]["SkillDetachmentTotalsPublic"];
+export type SkillAdoptionResourceKind = components["schemas"]["SkillAdoptionResourceKind"];
+export type SkillAdoptionDrift = components["schemas"]["SkillAdoptionDrift"];
 export type OrganizationSkillSummaryPublic =
   components["schemas"]["OrganizationSkillSummaryPublic"];
 export type OrganizationSkillSummaryPagePublic =

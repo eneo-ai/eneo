@@ -30,7 +30,10 @@
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import SkillAdoptionProjection, {
+    type SkillAdoptionQuery,
     type SkillAdoptionRun,
+    type SkillDetachSelection,
+    type SkillSelectedAdvanceResult,
     type SkillBindingUpdateScope
   } from "$lib/features/skills/SkillAdoptionProjection.svelte";
   import { Info, RefreshCw, ShieldAlert, ShieldCheck, Trash2 } from "lucide-svelte";
@@ -183,13 +186,73 @@
 
   async function getOrganizationSkillAdoption(
     skillId: string,
-    options: { limit: number; cursor: string | null }
+    options: SkillAdoptionQuery
   ): Promise<SkillAdoptionProjectionPagePublic> {
     return data.eneo.skills.organization.getAdoption({
       skillId,
       limit: options.limit,
-      cursor: options.cursor
+      cursor: options.cursor,
+      query: options.query,
+      kind: options.kind,
+      drift: options.drift
     });
+  }
+
+  async function advanceSelectedBindings(
+    selection: SkillDetachSelection
+  ): Promise<SkillSelectedAdvanceResult> {
+    const publishedRevisionId = data.published?.revision_id;
+    if (
+      publishedRevisionId === undefined ||
+      rolloutMutationInFlight ||
+      executionBlock.block !== null
+    ) {
+      throw new Error(m.organization_skills_adoption_advance_unavailable());
+    }
+    const result: SkillSelectedAdvanceResult = {
+      advanced: 0,
+      concurrentChange: 0,
+      incompatible: 0
+    };
+    const add = (chunk: AssistantFleetAdvancePublic | AppFleetAdvancePublic) => {
+      result.advanced += chunk.counts.advanced;
+      result.concurrentChange += chunk.counts.concurrent_change;
+      result.incompatible += chunk.counts.incompatible;
+    };
+    // One chunk each: the selection is capped at the fleet chunk size.
+    if (selection.assistantIds.length > 0) {
+      add(
+        await data.eneo.skills.organization.advanceAssistants({
+          skillId: data.skill.id,
+          expected_published_revision_id: publishedRevisionId,
+          cursor: null,
+          assistant_ids: selection.assistantIds
+        })
+      );
+    }
+    if (selection.appIds.length > 0) {
+      add(
+        await data.eneo.skills.organization.advanceApps({
+          skillId: data.skill.id,
+          expected_published_revision_id: publishedRevisionId,
+          cursor: null,
+          app_ids: selection.appIds
+        })
+      );
+    }
+    void refreshOrganizationSkills(data.skill.id);
+    return result;
+  }
+
+  async function detachSkillBindings(selection: SkillDetachSelection) {
+    const result = await data.eneo.skills.organization.detach({
+      skillId: data.skill.id,
+      assistant_ids: selection.assistantIds,
+      app_ids: selection.appIds
+    });
+    // Usage counts in the header and removal dialog come from the page data.
+    void refreshOrganizationSkills(data.skill.id);
+    return result;
   }
 
   async function refreshAfterRestore(outcome: SkillRevisionRestorePublic) {
@@ -1070,6 +1133,8 @@
             initialPage={null}
             initialLoading
             {getOrganizationSkillAdoption}
+            onDetach={detachSkillBindings}
+            onAdvanceSelected={advanceSelectedBindings}
             {onAdvancePersonalChat}
             publishedRevisionId={data.published?.revision_id ?? null}
             {onStartOutdatedBindingsUpdate}
@@ -1082,6 +1147,8 @@
             skillId={data.skill.id}
             initialPage={adoptionPage}
             {getOrganizationSkillAdoption}
+            onDetach={detachSkillBindings}
+            onAdvanceSelected={advanceSelectedBindings}
             {onAdvancePersonalChat}
             publishedRevisionId={data.published?.revision_id ?? null}
             {onStartOutdatedBindingsUpdate}
@@ -1096,6 +1163,8 @@
             initialPage={null}
             initialError
             {getOrganizationSkillAdoption}
+            onDetach={detachSkillBindings}
+            onAdvanceSelected={advanceSelectedBindings}
             {onAdvancePersonalChat}
             publishedRevisionId={data.published?.revision_id ?? null}
             {onStartOutdatedBindingsUpdate}

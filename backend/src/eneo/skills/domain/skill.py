@@ -573,6 +573,15 @@ class SkillAdoptionSummary:
 
 
 @dataclass(frozen=True)
+class SkillAdoptionFilter:
+    """Narrows the resource rows of an adoption page; totals stay whole-skill."""
+
+    query: str | None = None
+    kind: SkillAdoptionResourceKind | None = None
+    drift: SkillAdoptionDrift | None = None
+
+
+@dataclass(frozen=True)
 class SkillAdoptionResource:
     kind: SkillAdoptionResourceKind
     resource_id: UUID
@@ -582,6 +591,11 @@ class SkillAdoptionResource:
     revision_id: UUID
     revision_number: int
     drift: SkillAdoptionDrift
+    # Set only for resources in a personal space: whose space it is.
+    owner_name: str | None = None
+    # False when the space is another user's personal space, which the
+    # organisation admin cannot open (space_actor grants them no role there).
+    can_open: bool = True
 
 
 @dataclass(frozen=True)
@@ -590,6 +604,9 @@ class SkillAdoptionProjectionPage:
     items: tuple[SkillAdoptionResource, ...]
     limit: int
     next_cursor: str | None
+    # Resources matching the filter across all pages, for "n of m shown".
+    # Counted on the first page only; continuations leave it None.
+    matched_count: int | None = None
 
 
 @dataclass(frozen=True)

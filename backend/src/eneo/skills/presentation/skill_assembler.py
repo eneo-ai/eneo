@@ -106,6 +106,8 @@ class SkillAssembler:
             revision_id=resource.revision_id,
             revision_number=resource.revision_number,
             drift=resource.drift,
+            owner_name=resource.owner_name,
+            can_open=resource.can_open,
         )
 
     @staticmethod
@@ -168,6 +170,7 @@ class SkillAssembler:
             ],
             limit=projection.limit,
             next_cursor=projection.next_cursor,
+            matched_count=projection.matched_count,
         )
 
     @staticmethod

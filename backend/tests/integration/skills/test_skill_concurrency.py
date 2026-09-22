@@ -24,6 +24,7 @@ from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import (
     SkillBindingIntent,
     SkillBindingReference,
+    SkillDetachment,
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
     SkillRemovalBusyError,
@@ -1642,3 +1643,65 @@ async def test_execution_plan_never_composes_a_removed_skill(
             await repo.list_app_bindings_for_execution_plan(app_id=resources.app_id)
             == []
         )
+
+
+async def test_selected_detach_keeps_unselected_bindings_and_personal_chat(
+    db_container,
+    skill_concurrency_resources,
+    organization_removal_skills,
+    admin_user,
+):
+    resources = skill_concurrency_resources
+    skill = organization_removal_skills[0]
+    async with db_container() as container:
+        policy_id = await _bind_everywhere(container, resources, skill, admin_user)
+    async with db_container() as container:
+        detached = await container.organization_skill_service().detach_bindings(
+            skill_id=skill.id, assistant_ids=[resources.assistant_id], app_ids=[]
+        )
+    assert detached == SkillDetachment(assistant_ids=(resources.assistant_id,))
+    async with db_container() as container:
+        repo = container.skill_repo()
+        assert (
+            await repo.list_assistant_bindings(assistant_id=resources.assistant_id)
+            == []
+        )
+        assert len(await repo.list_app_bindings(app_id=resources.app_id)) == 1
+        assert len(await repo.list_policy_bindings(policy_id=policy_id)) == 1
+        retained = await repo.get(skill_id=skill.id)
+        assert retained is not None and retained.published_revision_number == 1
+
+
+async def test_selected_detach_fails_fast_and_rolls_back_while_a_parent_save_holds_its_lock(
+    db_container,
+    skill_concurrency_resources,
+    organization_removal_skills,
+    admin_user,
+):
+    resources = skill_concurrency_resources
+    skill = organization_removal_skills[0]
+    async with db_container() as container:
+        await _bind_everywhere(container, resources, skill, admin_user)
+    async with db_container() as writer:
+        # Assistants are detached before Apps; holding the App lock proves the
+        # earlier Assistant deletion is rolled back with the refusal.
+        assert await writer.skill_repo().lock_app_for_binding_update(
+            app_id=resources.app_id
+        )
+        with pytest.raises(SkillRemovalBusyError):
+            async with db_container() as remover:
+                await asyncio.wait_for(
+                    remover.organization_skill_service().detach_bindings(
+                        skill_id=skill.id,
+                        assistant_ids=[resources.assistant_id],
+                        app_ids=[resources.app_id],
+                    ),
+                    timeout=2,
+                )
+    async with db_container() as container:
+        repo = container.skill_repo()
+        assert (
+            len(await repo.list_assistant_bindings(assistant_id=resources.assistant_id))
+            == 1
+        )
+        assert len(await repo.list_app_bindings(app_id=resources.app_id)) == 1

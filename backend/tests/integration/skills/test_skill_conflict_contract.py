@@ -745,3 +745,241 @@ async def test_single_removal_accepts_the_detach_query_parameter(
             sa.select(Skills.removed_at).where(Skills.id == UUID(skill["id"]))
         )
         assert removed_at is not None
+
+
+async def _bind_published_skill_to_new_assistants(
+    client, *, token: str, slug: str, count: int
+) -> tuple[dict, str, list[str]]:
+    skill = await _create_organization_skill(client, token=token, slug=slug)
+    published = await client.post(
+        f"/api/v1/skills/organization/{skill['id']}/publish/",
+        json={"expected_revision_id": skill["current_revision"]["id"]},
+        headers=_auth(token),
+    )
+    assert published.status_code == 200, published.text
+    space_id = await _create_space(client, token=token)
+    assistant_ids = []
+    for _ in range(count):
+        assistant_id = await _create_assistant(client, token=token, space_id=space_id)
+        attach = await client.post(
+            f"/api/v1/assistants/{assistant_id}/",
+            json={
+                "skill_bindings": [
+                    {
+                        "skill_id": skill["id"],
+                        "skill_revision_id": skill["current_revision"]["id"],
+                    }
+                ]
+            },
+            headers=_auth(token),
+        )
+        assert attach.status_code == 200, attach.text
+        assistant_ids.append(assistant_id)
+    return skill, space_id, assistant_ids
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_detach_endpoint_removes_only_the_selected_bindings_and_audits_them(
+    client, admin_token, db_container
+):
+    (
+        skill,
+        _space_id,
+        (kept, detached_id),
+    ) = await _bind_published_skill_to_new_assistants(
+        client, token=admin_token, slug="detach-selected", count=2
+    )
+
+    response = await client.post(
+        f"/api/v1/skills/organization/{skill['id']}/detach/",
+        json={"assistant_ids": [detached_id, str(uuid4())], "app_ids": []},
+        headers=_auth(admin_token),
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "assistant_count": 1,
+        "app_count": 0,
+        "personal_chat_count": 0,
+    }
+
+    async with db_container() as container:
+        repo = container.skill_repo()
+        assert await repo.list_assistant_bindings(assistant_id=UUID(detached_id)) == []
+        assert len(await repo.list_assistant_bindings(assistant_id=UUID(kept))) == 1
+        skill_row = await container.session().scalar(
+            sa.select(Skills).where(Skills.id == UUID(skill["id"]))
+        )
+        assert skill_row is not None
+        assert skill_row.removed_at is None and skill_row.published_revision_number == 1
+        audits = (
+            await container.session().scalars(
+                sa.select(AuditLog).where(
+                    AuditLog.entity_id == UUID(skill["id"]),
+                    AuditLog.action == ActionType.SKILL_BINDINGS_DETACHED.value,
+                )
+            )
+        ).all()
+        assert len(audits) == 1
+        assert audits[0].log_metadata["extra"]["assistant_ids"] == [detached_id]
+        assert audits[0].log_metadata["changes"] == {
+            "assistant_count": 1,
+            "app_count": 0,
+        }
+
+    # Repeating the request is harmless and leaves no second audit row.
+    again = await client.post(
+        f"/api/v1/skills/organization/{skill['id']}/detach/",
+        json={"assistant_ids": [detached_id], "app_ids": []},
+        headers=_auth(admin_token),
+    )
+    assert again.status_code == 200, again.text
+    assert again.json()["assistant_count"] == 0
+    async with db_container() as container:
+        count = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLog)
+            .where(
+                AuditLog.entity_id == UUID(skill["id"]),
+                AuditLog.action == ActionType.SKILL_BINDINGS_DETACHED.value,
+            )
+        )
+        assert count == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_detach_endpoint_validates_the_selection(client, admin_token):
+    skill = await _create_organization_skill(
+        client, token=admin_token, slug="detach-validation"
+    )
+    url = f"/api/v1/skills/organization/{skill['id']}/detach/"
+    duplicate = str(uuid4())
+    for payload in (
+        {"assistant_ids": [], "app_ids": []},
+        {"assistant_ids": [duplicate, duplicate], "app_ids": []},
+        {"assistant_ids": [str(uuid4()) for _ in range(101)], "app_ids": []},
+        {"assistant_ids": [str(uuid4())], "app_ids": [], "policy_ids": []},
+    ):
+        response = await client.post(url, json=payload, headers=_auth(admin_token))
+        assert response.status_code == 422, (payload, response.text)
+
+    missing = await client.post(
+        f"/api/v1/skills/organization/{uuid4()}/detach/",
+        json={"assistant_ids": [str(uuid4())], "app_ids": []},
+        headers=_auth(admin_token),
+    )
+    assert missing.status_code == 404, missing.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_adoption_filters_narrow_the_rows_but_never_the_summary(
+    client, admin_token
+):
+    skill, _space_id, assistant_ids = await _bind_published_skill_to_new_assistants(
+        client, token=admin_token, slug="adoption-filters", count=2
+    )
+    url = f"/api/v1/skills/organization/{skill['id']}/adoption/"
+
+    async def page(**params):
+        response = await client.get(url, params=params, headers=_auth(admin_token))
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    unfiltered = await page(limit=10)
+    assert unfiltered["matched_count"] == 2
+    assert {item["resource_id"] for item in unfiltered["items"]} == set(assistant_ids)
+    assert all(item["can_open"] is True for item in unfiltered["items"])
+    assert all(item["owner_name"] is None for item in unfiltered["items"])
+
+    by_space = await page(limit=10, query="skill-conflicts")
+    assert by_space["matched_count"] == 2
+
+    apps_only = await page(limit=10, kind="app")
+    assert apps_only["matched_count"] == 0 and apps_only["items"] == []
+    assert apps_only["summary"]["assistant_count"] == 2
+
+    current = await page(limit=1, drift="current")
+    assert current["matched_count"] == 2 and len(current["items"]) == 1
+    assert current["next_cursor"] is not None
+    behind = await page(limit=10, drift="behind")
+    assert behind["matched_count"] == 0
+
+    escaped = await page(limit=10, query="%")
+    assert escaped["matched_count"] == 0
+
+    too_long = await client.get(
+        url, params={"query": "x" * 101}, headers=_auth(admin_token)
+    )
+    assert too_long.status_code == 422
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_selected_assistants_advance_to_the_published_revision_one_chunk(
+    client, admin_token
+):
+    skill, _space_id, (chosen, other) = await _bind_published_skill_to_new_assistants(
+        client, token=admin_token, slug="advance-selected", count=2
+    )
+    revision_two = await client.post(
+        f"/api/v1/skills/organization/{skill['id']}/revisions/",
+        json={
+            "display_name": "Payroll",
+            "description": "Answers approved payroll questions.",
+            "instructions": "Use approved payroll sources, briefly.",
+        },
+        headers=_auth(admin_token),
+    )
+    assert revision_two.status_code == 201, revision_two.text
+    published = await client.post(
+        f"/api/v1/skills/organization/{skill['id']}/publish/",
+        json={"expected_revision_id": revision_two.json()["id"]},
+        headers=_auth(admin_token),
+    )
+    assert published.status_code == 200, published.text
+    url = f"/api/v1/skills/organization/{skill['id']}/assistants/advance/"
+
+    with_cursor = await client.post(
+        url,
+        json={
+            "expected_published_revision_id": revision_two.json()["id"],
+            "cursor": "anything",
+            "assistant_ids": [chosen],
+        },
+        headers=_auth(admin_token),
+    )
+    assert with_cursor.status_code == 400, with_cursor.text
+    empty = await client.post(
+        url,
+        json={
+            "expected_published_revision_id": revision_two.json()["id"],
+            "assistant_ids": [],
+        },
+        headers=_auth(admin_token),
+    )
+    assert empty.status_code == 422, empty.text
+
+    response = await client.post(
+        url,
+        json={
+            "expected_published_revision_id": revision_two.json()["id"],
+            "assistant_ids": [chosen, str(uuid4())],
+        },
+        headers=_auth(admin_token),
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["next_cursor"] is None
+    assert payload["counts"]["advanced"] == 1
+    assert [outcome["assistant_id"] for outcome in payload["outcomes"]] == [chosen]
+
+    adoption = await client.get(
+        f"/api/v1/skills/organization/{skill['id']}/adoption/",
+        params={"limit": 10},
+        headers=_auth(admin_token),
+    )
+    assert adoption.status_code == 200, adoption.text
+    drift = {item["resource_id"]: item["drift"] for item in adoption.json()["items"]}
+    assert drift == {chosen: "current", other: "behind"}

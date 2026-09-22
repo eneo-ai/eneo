@@ -15,6 +15,9 @@ from eneo.skills.domain.skill import (
     DEFAULT_SKILL_ADOPTION_PAGE_LIMIT,
     MAX_SKILL_ADOPTION_PAGE_LIMIT,
     PersonalChatPinAdvanceOutcome,
+    SkillAdoptionDrift,
+    SkillAdoptionFilter,
+    SkillAdoptionResourceKind,
 )
 from eneo.skills.presentation.skill_audit import (
     audit_skill_created,
@@ -36,6 +39,7 @@ from eneo.skills.presentation.skill_models import (
     PublishedSkillPublic,
     PublishedSkillSummaryPagePublic,
     SkillAdoptionProjectionPagePublic,
+    SkillBindingDetachRequest,
     SkillCreateRequest,
     SkillDetachmentTotalsPublic,
     SkillPublishRequest,
@@ -190,11 +194,18 @@ async def get_organization_skill_adoption(
         Query(ge=1, le=MAX_SKILL_ADOPTION_PAGE_LIMIT),
     ] = DEFAULT_SKILL_ADOPTION_PAGE_LIMIT,
     cursor: Annotated[str | None, Query(max_length=256)] = None,
+    query: Annotated[
+        str | None,
+        Query(max_length=100, description="Matches resource, space or owner name."),
+    ] = None,
+    kind: SkillAdoptionResourceKind | None = None,
+    drift: SkillAdoptionDrift | None = None,
 ) -> SkillAdoptionProjectionPagePublic:
     projection = await container.organization_skill_service().get_adoption_projection(
         skill_id=skill_id,
         limit=limit,
         cursor=cursor,
+        filters=SkillAdoptionFilter(query=query or None, kind=kind, drift=drift),
     )
     return container.skill_assembler().adoption_projection_to_public(projection)
 
@@ -504,6 +515,7 @@ async def advance_assistant_bindings(
         skill_id=skill_id,
         expected_published_revision_id=payload.expected_published_revision_id,
         cursor=payload.cursor,
+        assistant_ids=payload.assistant_ids,
     )
     return AssistantFleetAdvancePublic(
         run_id=outcome.run_id,
@@ -542,6 +554,7 @@ async def advance_app_bindings(
         skill_id=skill_id,
         expected_published_revision_id=payload.expected_published_revision_id,
         cursor=payload.cursor,
+        app_ids=payload.app_ids,
     )
     return AppFleetAdvancePublic(
         run_id=outcome.run_id,
@@ -624,6 +637,32 @@ async def delete_organization_skill(
 ) -> None:
     await container.organization_skill_service().delete(
         skill_id=skill_id, detach_bindings=detach_bindings
+    )
+
+
+@router.post(
+    "/organization/{skill_id}/detach/",
+    response_model=SkillDetachmentTotalsPublic,
+    description=(
+        "Detach an organisation Skill from up to 100 selected Assistants and "
+        "Apps in one transaction. Personal Chat keeps its binding."
+    ),
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+async def detach_organization_skill_bindings(
+    skill_id: UUID,
+    payload: SkillBindingDetachRequest,
+    container: _ContainerWithUser,
+) -> SkillDetachmentTotalsPublic:
+    detached = await container.organization_skill_service().detach_bindings(
+        skill_id=skill_id,
+        assistant_ids=payload.assistant_ids,
+        app_ids=payload.app_ids,
+    )
+    return SkillDetachmentTotalsPublic(
+        assistant_count=len(detached.assistant_ids),
+        app_count=len(detached.app_ids),
+        personal_chat_count=0,
     )
 
 

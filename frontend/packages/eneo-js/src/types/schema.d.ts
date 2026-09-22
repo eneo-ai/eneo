@@ -6821,6 +6821,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/skills/organization/{skill_id}/detach/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Detach Organization Skill Bindings
+     * @description Detach an organisation Skill from up to 100 selected Assistants and Apps in one transaction. Personal Chat keeps its binding.
+     */
+    post: operations["detach_organization_skill_bindings_api_v1_skills_organization__skill_id__detach__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/skills/organization/remove/": {
     parameters: {
       query?: never;
@@ -8564,6 +8584,7 @@ export interface components {
       | "skill_published"
       | "skill_unpublished"
       | "skill_bindings_advanced"
+      | "skill_bindings_detached"
       | "skill_deleted"
       | "session_started"
       | "session_ended"
@@ -9328,6 +9349,11 @@ export interface components {
       expected_published_revision_id: string;
       /** Cursor */
       cursor?: string | null;
+      /**
+       * App Ids
+       * @description Restrict the update to these Apps (one chunk, no cursor). Apps already on the published revision are skipped.
+       */
+      app_ids?: string[] | null;
     };
     /** AppInTemplatePublic */
     AppInTemplatePublic: {
@@ -9888,6 +9914,11 @@ export interface components {
       expected_published_revision_id: string;
       /** Cursor */
       cursor?: string | null;
+      /**
+       * Assistant Ids
+       * @description Restrict the update to these Assistants (one chunk, no cursor). Assistants already on the published revision are skipped.
+       */
+      assistant_ids?: string[] | null;
     };
     /** AssistantGuard */
     AssistantGuard: {
@@ -18398,6 +18429,11 @@ export interface components {
       limit: number;
       /** Next Cursor */
       next_cursor?: string | null;
+      /**
+       * Matched Count
+       * @description Resources matching the filters across all pages; first page only.
+       */
+      matched_count?: number | null;
     };
     /**
      * SkillAdoptionResourceKind
@@ -18429,6 +18465,17 @@ export interface components {
       /** Revision Number */
       revision_number: number;
       drift: components["schemas"]["SkillAdoptionDrift"];
+      /**
+       * Owner Name
+       * @description Owner of the personal space, when personal.
+       */
+      owner_name?: string | null;
+      /**
+       * Can Open
+       * @description False for another user's personal space, which admins cannot open.
+       * @default true
+       */
+      can_open?: boolean;
     };
     /** SkillAdoptionRevisionCountPublic */
     SkillAdoptionRevisionCountPublic: {
@@ -18459,6 +18506,16 @@ export interface components {
       personal_chat: components["schemas"]["SkillAdoptionPersonalChatPublic"] | null;
       /** Revision Counts */
       revision_counts: components["schemas"]["SkillAdoptionRevisionCountPublic"][];
+    };
+    /**
+     * SkillBindingDetachRequest
+     * @description Assistants and Apps to detach one Skill from; at most 100 in total.
+     */
+    SkillBindingDetachRequest: {
+      /** Assistant Ids */
+      assistant_ids?: string[];
+      /** App Ids */
+      app_ids?: string[];
     };
     /** SkillBindingReferenceInput */
     SkillBindingReferenceInput: {
@@ -44697,6 +44754,10 @@ export interface operations {
       query?: {
         limit?: number;
         cursor?: string | null;
+        /** @description Matches resource, space or owner name. */
+        query?: string | null;
+        kind?: components["schemas"]["SkillAdoptionResourceKind"] | null;
+        drift?: components["schemas"]["SkillAdoptionDrift"] | null;
       };
       header?: never;
       path: {
@@ -45295,6 +45356,77 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  detach_organization_skill_bindings_api_v1_skills_organization__skill_id__detach__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillBindingDetachRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillDetachmentTotalsPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

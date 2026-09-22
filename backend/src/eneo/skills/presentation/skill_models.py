@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from eneo.main.models import NotProvided, PaginatedResponse
 from eneo.skills.domain.skill import (
@@ -69,9 +69,29 @@ class PersonalChatPinAdvancePublic(BaseModel):
     to_revision_number: int
 
 
+def _distinct_ids(value: list[UUID] | None) -> list[UUID] | None:
+    if value is not None and len(value) != len(set(value)):
+        raise ValueError("Select each resource once")
+    return value
+
+
 class AssistantFleetAdvanceRequest(BaseModel):
     expected_published_revision_id: UUID
     cursor: str | None = None
+    assistant_ids: list[UUID] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_SKILL_REMOVAL_BATCH_SIZE,
+        description=(
+            "Restrict the update to these Assistants (one chunk, no cursor). "
+            "Assistants already on the published revision are skipped."
+        ),
+    )
+
+    @field_validator("assistant_ids")
+    @classmethod
+    def distinct_assistants(cls, value: list[UUID] | None) -> list[UUID] | None:
+        return _distinct_ids(value)
 
 
 class AssistantFleetAdvanceCountsPublic(BaseModel):
@@ -96,6 +116,20 @@ class AssistantFleetAdvancePublic(BaseModel):
 class AppFleetAdvanceRequest(BaseModel):
     expected_published_revision_id: UUID
     cursor: str | None = None
+    app_ids: list[UUID] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_SKILL_REMOVAL_BATCH_SIZE,
+        description=(
+            "Restrict the update to these Apps (one chunk, no cursor). Apps "
+            "already on the published revision are skipped."
+        ),
+    )
+
+    @field_validator("app_ids")
+    @classmethod
+    def distinct_apps(cls, value: list[UUID] | None) -> list[UUID] | None:
+        return _distinct_ids(value)
 
 
 class AppFleetAdvanceCountsPublic(BaseModel):
@@ -144,6 +178,31 @@ class SkillRemovalRequest(BaseModel):
         if len(value) != len(set(value)):
             raise ValueError("Select distinct Skills")
         return value
+
+
+class SkillBindingDetachRequest(BaseModel):
+    """Assistants and Apps to detach one Skill from; at most 100 in total."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    assistant_ids: list[UUID] = Field(default_factory=lambda: list[UUID]())
+    app_ids: list[UUID] = Field(default_factory=lambda: list[UUID]())
+
+    @field_validator("assistant_ids", "app_ids")
+    @classmethod
+    def unique_ids(cls, value: list[UUID]) -> list[UUID]:
+        if len(value) != len(set(value)):
+            raise ValueError("Select each resource once")
+        return value
+
+    @model_validator(mode="after")
+    def bounded_selection(self) -> "SkillBindingDetachRequest":
+        total = len(self.assistant_ids) + len(self.app_ids)
+        if not 1 <= total <= MAX_SKILL_REMOVAL_BATCH_SIZE:
+            raise ValueError(
+                f"Select between 1 and {MAX_SKILL_REMOVAL_BATCH_SIZE} resources"
+            )
+        return self
 
 
 class SkillDetachmentTotalsPublic(BaseModel):
@@ -238,6 +297,13 @@ class SkillAdoptionResourcePublic(BaseModel):
     revision_id: UUID
     revision_number: int
     drift: SkillAdoptionDrift
+    owner_name: str | None = Field(
+        default=None, description="Owner of the personal space, when personal."
+    )
+    can_open: bool = Field(
+        default=True,
+        description="False for another user's personal space, which admins cannot open.",
+    )
 
 
 class SkillAdoptionPersonalChatPublic(BaseModel):
@@ -268,6 +334,12 @@ class SkillAdoptionProjectionPagePublic(BaseModel):
     items: list[SkillAdoptionResourcePublic]
     limit: int
     next_cursor: str | None = None
+    matched_count: int | None = Field(
+        default=None,
+        description=(
+            "Resources matching the filters across all pages; first page only."
+        ),
+    )
 
 
 class OrganizationSkillSummaryPagePublic(

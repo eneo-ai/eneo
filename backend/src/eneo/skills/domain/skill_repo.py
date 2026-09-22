@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Protocol
 from uuid import UUID
 
@@ -15,9 +15,12 @@ from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
     SkillAdoptionCursor,
+    SkillAdoptionFilter,
     SkillAdoptionProjectionPage,
+    SkillAdoptionResourceKind,
     SkillBindingReference,
     SkillCatalogEntry,
+    SkillDetachment,
     SkillExecutionBlock,
     SkillExecutionBlockChange,
     SkillPublicationChange,
@@ -101,9 +104,21 @@ class SkillRepo(Protocol):
         *,
         tenant_id: UUID,
         skill_id: UUID,
+        actor_user_id: UUID,
+        actor_group_ids: Collection[UUID],
+        readable_kinds: Collection[SkillAdoptionResourceKind],
         limit: int,
         after: SkillAdoptionCursor | None,
+        filters: SkillAdoptionFilter,
     ) -> SkillAdoptionProjectionPage | None: ...
+
+    async def detach_organization_bindings(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        selection: SkillDetachment,
+    ) -> SkillDetachment | None: ...
 
     async def list_assistant_pin_advance_targets(
         self,
@@ -113,6 +128,7 @@ class SkillRepo(Protocol):
         expected_published_revision_id: UUID,
         after_assistant_id: UUID | None,
         limit: int,
+        only_ids: Sequence[UUID] | None = None,
     ) -> tuple[list[AssistantPinAdvanceTarget], UUID | None]: ...
 
     async def get_fleet_advance_candidate(
@@ -141,6 +157,7 @@ class SkillRepo(Protocol):
         expected_published_revision_id: UUID,
         after_app_id: UUID | None,
         limit: int,
+        only_ids: Sequence[UUID] | None = None,
     ) -> tuple[list[AppPinAdvanceTarget], UUID | None]: ...
 
     async def advance_app_skill_pins(

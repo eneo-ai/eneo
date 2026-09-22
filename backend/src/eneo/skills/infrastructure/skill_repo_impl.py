@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import replace
 from typing import Any, TypeVar
 from uuid import UUID, uuid4
@@ -26,7 +26,8 @@ from eneo.database.tables.skill_table import (
     SkillRuntimePolicies,
     Skills,
 )
-from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups, SpacesUsers
+from eneo.database.tables.users_table import Users
 from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.main.models import Status
 from eneo.skills.domain.skill import (
@@ -51,6 +52,7 @@ from eneo.skills.domain.skill import (
     SkillActivationMode,
     SkillAdoptionCursor,
     SkillAdoptionDrift,
+    SkillAdoptionFilter,
     SkillAdoptionPersonalChat,
     SkillAdoptionProjectionPage,
     SkillAdoptionResource,
@@ -588,13 +590,30 @@ class SkillRepoImpl:
         row = result.one_or_none()
         return self._to_skill(row[0], row[1]) if row is not None else None
 
+    @staticmethod
+    def _adoption_drift_condition(
+        drift: SkillAdoptionDrift, published_revision_number: ColumnElement[int | None]
+    ) -> ColumnElement[bool]:
+        if drift is SkillAdoptionDrift.UNPUBLISHED:
+            return published_revision_number.is_(None)
+        comparison = (
+            SkillRevisions.revision_number == published_revision_number
+            if drift is SkillAdoptionDrift.CURRENT
+            else SkillRevisions.revision_number != published_revision_number
+        )
+        return sa.and_(published_revision_number.is_not(None), comparison)
+
     async def get_organization_adoption_projection_page(
         self,
         *,
         tenant_id: UUID,
         skill_id: UUID,
+        actor_user_id: UUID,
+        actor_group_ids: Collection[UUID],
+        readable_kinds: Collection[SkillAdoptionResourceKind],
         limit: int,
         after: SkillAdoptionCursor | None,
+        filters: SkillAdoptionFilter,
     ) -> SkillAdoptionProjectionPage | None:
         scope = (
             sa.select(
@@ -608,6 +627,51 @@ class SkillRepoImpl:
             )
             .cte("organization_skill_adoption_scope")
         )
+        # A personal space names its owner; shared spaces have none.
+        owner_name = sa.func.coalesce(Users.username, Users.email).label("owner_name")
+        group_ids = list(actor_group_ids)
+
+        def membership(*, non_viewer: bool) -> ColumnElement[bool]:
+            direct = [
+                SpacesUsers.space_id == Spaces.id,
+                SpacesUsers.user_id == actor_user_id,
+            ]
+            via_group = [
+                SpacesUserGroups.space_id == Spaces.id,
+                SpacesUserGroups.user_group_id.in_(group_ids),
+            ]
+            if non_viewer:
+                direct.append(SpacesUsers.role != "viewer")
+                via_group.append(SpacesUserGroups.role != "viewer")
+            return sa.or_(
+                sa.exists().where(*direct),
+                sa.exists().where(*via_group) if group_ids else sa.false(),
+            )
+
+        def can_open_column(
+            kind: SkillAdoptionResourceKind, published: ColumnElement[bool]
+        ) -> ColumnElement[bool]:
+            # Mirrors SpaceActor.can_perform_action(READ) for a signed-in user:
+            # the tenant permission for the kind, then owner of the personal
+            # space or a member of the shared space, where a viewer only reads
+            # published resources. API-key scope does not apply to this page.
+            if kind not in readable_kinds:
+                return sa.false().label("can_open")
+            return sa.case(
+                (Spaces.user_id.is_not(None), Spaces.user_id == actor_user_id),
+                else_=sa.and_(
+                    membership(non_viewer=False),
+                    sa.or_(published, membership(non_viewer=True)),
+                ),
+            ).label("can_open")
+
+        resource_filters: list[ColumnElement[bool]] = []
+        if filters.drift is not None:
+            resource_filters.append(
+                self._adoption_drift_condition(
+                    filters.drift, scope.c.published_revision_number
+                )
+            )
         assistant_resources = (
             sa.select(
                 sa.literal(0).label("kind_rank"),
@@ -618,6 +682,10 @@ class SkillRepoImpl:
                 Spaces.name.label("space_name"),
                 SkillRevisions.id.label("revision_id"),
                 SkillRevisions.revision_number.label("revision_number"),
+                owner_name,
+                can_open_column(
+                    SkillAdoptionResourceKind.ASSISTANT, Assistants.published.is_(True)
+                ),
             )
             .select_from(AssistantSkillBindings)
             .join(scope, sa.true())
@@ -626,6 +694,7 @@ class SkillRepoImpl:
                 Assistants.id == AssistantSkillBindings.assistant_id,
             )
             .join(Spaces, Spaces.id == AssistantSkillBindings.space_id)
+            .outerjoin(Users, Users.id == Spaces.user_id)
             .join(
                 SkillRevisions,
                 sa.and_(
@@ -637,6 +706,7 @@ class SkillRepoImpl:
                 AssistantSkillBindings.tenant_id == tenant_id,
                 AssistantSkillBindings.skill_id == skill_id,
                 Spaces.tenant_id == tenant_id,
+                *resource_filters,
             )
         )
         app_resources = (
@@ -649,11 +719,16 @@ class SkillRepoImpl:
                 Spaces.name.label("space_name"),
                 SkillRevisions.id.label("revision_id"),
                 SkillRevisions.revision_number.label("revision_number"),
+                owner_name,
+                can_open_column(
+                    SkillAdoptionResourceKind.APP, Apps.published.is_(True)
+                ),
             )
             .select_from(AppSkillBindings)
             .join(scope, sa.true())
             .join(Apps, Apps.id == AppSkillBindings.app_id)
             .join(Spaces, Spaces.id == AppSkillBindings.space_id)
+            .outerjoin(Users, Users.id == Spaces.user_id)
             .join(
                 SkillRevisions,
                 sa.and_(
@@ -666,7 +741,44 @@ class SkillRepoImpl:
                 AppSkillBindings.skill_id == skill_id,
                 Apps.tenant_id == tenant_id,
                 Spaces.tenant_id == tenant_id,
+                *resource_filters,
             )
+        )
+        if filters.query:
+            query = filters.query
+            assistant_resources = assistant_resources.where(
+                sa.or_(
+                    Assistants.name.icontains(query, autoescape=True),
+                    Spaces.name.icontains(query, autoescape=True),
+                    owner_name.icontains(query, autoescape=True),
+                )
+            )
+            app_resources = app_resources.where(
+                sa.or_(
+                    Apps.name.icontains(query, autoescape=True),
+                    Spaces.name.icontains(query, autoescape=True),
+                    owner_name.icontains(query, autoescape=True),
+                )
+            )
+        if filters.kind is SkillAdoptionResourceKind.ASSISTANT:
+            app_resources = app_resources.where(sa.false())
+        elif filters.kind is SkillAdoptionResourceKind.APP:
+            assistant_resources = assistant_resources.where(sa.false())
+        # Counted before the cursor narrows the branches: the whole filtered
+        # result, in the same statement snapshot as the page. First page only,
+        # so continuations stay bounded index seeks.
+        matched = (
+            (
+                sa.select(sa.func.count().label("matched_count"))
+                .select_from(
+                    sa.union_all(assistant_resources, app_resources).subquery(
+                        "organization_skill_adoption_matches"
+                    )
+                )
+                .cte("organization_skill_adoption_matched")
+            )
+            if after is None
+            else None
         )
         if after is not None:
             if after.kind is SkillAdoptionResourceKind.ASSISTANT:
@@ -716,6 +828,8 @@ class SkillRepoImpl:
             null_uuid.label("space_id"),
             null_string.label("space_name"),
             null_integer.label("kind_rank"),
+            null_string.label("owner_name"),
+            null_boolean.label("can_open"),
         ).select_from(scope)
 
         branches = [scope_row]
@@ -826,6 +940,8 @@ class SkillRepoImpl:
                 null_uuid.label("space_id"),
                 null_string.label("space_name"),
                 null_integer.label("kind_rank"),
+                null_string.label("owner_name"),
+                null_boolean.label("can_open"),
             ).select_from(totals)
             branches.append(
                 sa.select(
@@ -844,6 +960,8 @@ class SkillRepoImpl:
                     null_uuid.label("space_id"),
                     null_string.label("space_name"),
                     null_integer.label("kind_rank"),
+                    null_string.label("owner_name"),
+                    null_boolean.label("can_open"),
                 )
                 .select_from(revision_counts)
                 .join(scope, sa.true())
@@ -866,10 +984,36 @@ class SkillRepoImpl:
                 resource_page.c.space_id,
                 resource_page.c.space_name,
                 resource_page.c.kind_rank,
+                resource_page.c.owner_name,
+                resource_page.c.can_open,
             )
             .select_from(resource_page)
             .join(scope, sa.true())
         )
+        if matched is not None:
+            branches.append(
+                sa.select(
+                    sa.literal(3).label("row_kind"),
+                    scope.c.published_revision_number,
+                    matched.c.matched_count.label("assistant_count"),
+                    null_count.label("app_count"),
+                    null_count.label("distinct_space_count"),
+                    null_count.label("behind_published_count"),
+                    null_uuid.label("revision_id"),
+                    null_integer.label("revision_number"),
+                    null_boolean.label("personal_chat_pinned"),
+                    null_string.label("resource_kind"),
+                    null_uuid.label("resource_id"),
+                    null_string.label("resource_name"),
+                    null_uuid.label("space_id"),
+                    null_string.label("space_name"),
+                    null_integer.label("kind_rank"),
+                    null_string.label("owner_name"),
+                    null_boolean.label("can_open"),
+                )
+                .select_from(matched)
+                .join(scope, sa.true())
+            )
         projection_rows = sa.union_all(*branches).subquery(
             "organization_skill_adoption_projection"
         )
@@ -896,6 +1040,7 @@ class SkillRepoImpl:
         personal_chat: SkillAdoptionPersonalChat | None = None
         adoption_resources: list[SkillAdoptionResource] = []
         summary: SkillAdoptionSummary | None = None
+        matched_count: int | None = None
         for row in rows:
             row_kind = row[0]
             if row_kind == 0 and after is None:
@@ -939,8 +1084,12 @@ class SkillRepoImpl:
                             revision_number=row[7],
                             published_revision_number=published_revision_number,
                         ),
+                        owner_name=row[15],
+                        can_open=bool(row[16]),
                     )
                 )
+            elif row_kind == 3:
+                matched_count = int(row[2])
 
         if summary is not None:
             summary = SkillAdoptionSummary(
@@ -965,6 +1114,7 @@ class SkillRepoImpl:
             items=tuple(visible),
             limit=limit,
             next_cursor=next_cursor,
+            matched_count=matched_count,
         )
 
     async def list_assistant_pin_advance_targets(
@@ -975,6 +1125,7 @@ class SkillRepoImpl:
         expected_published_revision_id: UUID,
         after_assistant_id: UUID | None,
         limit: int,
+        only_ids: Sequence[UUID] | None = None,
     ) -> tuple[list[AssistantPinAdvanceTarget], UUID | None]:
         organization_space = aliased(Spaces, name="organization_skill_space")
         statement = (
@@ -1036,6 +1187,10 @@ class SkillRepoImpl:
                     AssistantSkillBindings.assistant_id,
                 )
                 > (skill_id, after_assistant_id)
+            )
+        if only_ids is not None:
+            statement = statement.where(
+                AssistantSkillBindings.assistant_id.in_(list(only_ids))
             )
         rows = (await self.session.execute(statement)).all()
         visible = rows[:limit]
@@ -1238,6 +1393,7 @@ class SkillRepoImpl:
         expected_published_revision_id: UUID,
         after_app_id: UUID | None,
         limit: int,
+        only_ids: Sequence[UUID] | None = None,
     ) -> tuple[list[AppPinAdvanceTarget], UUID | None]:
         organization_space = aliased(Spaces, name="organization_skill_space")
         statement = (
@@ -1278,6 +1434,8 @@ class SkillRepoImpl:
         )
         if after_app_id is not None:
             statement = statement.where(AppSkillBindings.app_id > after_app_id)
+        if only_ids is not None:
+            statement = statement.where(AppSkillBindings.app_id.in_(list(only_ids)))
         rows = (await self.session.execute(statement)).all()
         visible = rows[:limit]
         targets = [
@@ -2133,9 +2291,16 @@ class SkillRepoImpl:
             raise SkillHasActiveAppRunsError(skill_ids=active_run_ids)
 
     async def _detach_skill_bindings(
-        self, *, tenant_id: UUID, skill_ids: Sequence[UUID]
+        self,
+        *,
+        tenant_id: UUID,
+        skill_ids: Sequence[UUID],
+        only: SkillDetachment | None = None,
     ) -> dict[UUID, SkillDetachment]:
-        """Delete every Assistant, App and Personal Chat binding of the given Skills.
+        """Delete Assistant, App and Personal Chat bindings of the given Skills.
+
+        Without ``only`` every binding goes; with it, only the listed parents
+        of each kind (an empty kind means none of that kind).
 
         The caller already holds ``FOR UPDATE`` on the Skill rows. Binding saves
         lock their parent first and then share-lock the Skill rows, so each
@@ -2165,6 +2330,11 @@ class SkillRepoImpl:
         )
         for key, parent, binding, parent_column in kinds:
             scope = (binding.tenant_id == tenant_id, binding.skill_id.in_(skill_ids))
+            if only is not None:
+                selected: tuple[UUID, ...] = getattr(only, key)
+                if not selected:
+                    continue
+                scope = (*scope, parent_column.in_(selected))
             # Parents are selected in SQL, never expanded into bind parameters:
             # fan-out is unbounded and asyncpg caps a statement at 32 767 of them.
             affected_parents = sa.select(parent_column).where(*scope)
@@ -2198,6 +2368,36 @@ class SkillRepoImpl:
             )
             for skill_id, ids in detached.items()
         }
+
+    async def detach_organization_bindings(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        selection: SkillDetachment,
+    ) -> SkillDetachment | None:
+        """Delete the selected Assistant and App bindings of one organisation Skill.
+
+        Same locks as removal (Skill FOR UPDATE NOWAIT, then each parent), so a
+        concurrent binding save is refused fast instead of deadlocking. Ids
+        that no longer hold a binding are simply absent from the result.
+        """
+        locked = await self._execute_nowait(
+            sa.select(Skills.id)
+            .join(Spaces, Spaces.id == Skills.space_id)
+            .where(
+                Skills.id == skill_id,
+                Skills.removed_at.is_(None),
+                *self._organization_scope(tenant_id),
+            )
+            .with_for_update(of=Skills, nowait=True)
+        )
+        if locked.scalar_one_or_none() is None:
+            return None
+        detached = await self._detach_skill_bindings(
+            tenant_id=tenant_id, skill_ids=[skill_id], only=selection
+        )
+        return detached[skill_id]
 
     async def remove_organization_many(
         self,
