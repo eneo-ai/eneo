@@ -358,7 +358,7 @@ async def prepare_text_sections(
                     end,
                 )
             )
-            if whitespace_end != end:
+            if whitespace_end != end and text[start:whitespace_end].strip():
                 try:
                     candidate = await measure(start, whitespace_end)
                 except TypedIOValidationException as exc:
@@ -374,6 +374,11 @@ async def prepare_text_sections(
         assert prepared_completion is not None
         # Request construction strips boundary whitespace; the manifest retains it.
         core_text = text[start:end].strip()
+        if not core_text:
+            raise TypedIOValidationException(
+                "Section processing requires readable text.",
+                code=FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value,
+            )
         for package in _dispatchable_packages(prepared_completion):
             if not any(
                 core_text in _message_text(message) for message in package.messages

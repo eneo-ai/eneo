@@ -1093,6 +1093,92 @@ async def test_sections_cover_material_in_prepared_primary_and_fallback_messages
         assert sent.kwargs["messages"] == dispatched.kwargs["prepared_request"].messages
 
 
+@pytest.mark.parametrize("inline", [False, True])
+async def test_sections_refuse_wholly_blank_material_before_activation(
+    user, inline, preflight_dispatch
+):
+    executor, repo, assistant, run, state, step, _, _, _, _ = _case(
+        user, text="\n" * 400, inline=inline
+    )
+    h = preflight_dispatch
+    h.model.max_input_tokens = 1800
+    h.model.max_output_tokens = 300
+    executor.completion_service = h.service
+    assistant.completion_model = h.model
+    assistant.preflight_response_context.side_effect = (
+        h.assistant.preflight_response_context
+    )
+
+    with pytest.raises(TypedIOValidationException) as caught:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert caught.value.code == FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value
+    repo.activate_step_attempt.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+    h.transport.assert_not_awaited()
+
+
+@pytest.mark.parametrize("inline", [False, True])
+@pytest.mark.parametrize("leading", ["\n" * 400, " " * 400], ids=["newlines", "spaces"])
+async def test_section_boundaries_do_not_dispatch_blank_leading_whitespace(
+    user, inline, leading, preflight_dispatch, monkeypatch
+):
+    executor, _, assistant, run, state, step, text, _, _, _ = _case(
+        user, text=leading + "ABCDEFGHIJKL" * 100, inline=inline
+    )
+    h = preflight_dispatch
+    h.model.max_input_tokens = 1800
+    h.model.max_output_tokens = 300
+    executor.completion_service = h.service
+    assistant.completion_model = h.model
+    assistant.preflight_response_context.side_effect = (
+        h.assistant.preflight_response_context
+    )
+    assistant.get_response.side_effect = h.assistant.get_response
+    h.transport.return_value.choices[0].message.content = json.dumps(
+        {"records": [{"value": "fact"}]}
+    )
+    observer = SimpleNamespace(
+        started=AsyncMock(return_value=uuid4()),
+        completed=AsyncMock(),
+        rejected=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "eneo.flows.runtime.executor.FlowProviderCallRecorder",
+        lambda **kwargs: observer,
+    )
+
+    result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    manifest = SectionManifest.model_validate(
+        result.output.output_payload_extensions["section_manifest"]
+    )
+    sections = manifest.resplit(text)
+    assert len(sections) > 1
+    assert len(sections[0]) > len(leading)
+    assert "".join(sections).encode() == text.encode()
+    for core, dispatched, sent in zip(
+        sections,
+        assistant.get_response.await_args_list,
+        h.transport.await_args_list,
+        strict=True,
+    ):
+        assert core.strip()
+        assert sent.kwargs["messages"] == dispatched.kwargs["prepared_request"].messages
+        user_messages = [
+            message for message in sent.kwargs["messages"] if message["role"] == "user"
+        ]
+        contents = [
+            message["content"]
+            if isinstance(message["content"], str)
+            else "".join(part["text"] for part in message["content"])
+            for message in user_messages
+        ]
+        assert any(core.strip() in content for content in contents)
+        assert all(content.strip() for content in contents)
+
+
 @pytest.mark.parametrize("variant", ["primary", "fallback"])
 async def test_sections_refuse_missing_message_text_even_with_schema_and_tool_decoys(
     user, variant
