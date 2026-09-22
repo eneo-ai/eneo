@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from typing import (
@@ -78,6 +78,7 @@ from eneo.flows.input_binding_contract_rules import (
     item_template_field_names,
     question_binding,
     source_ref_bindings,
+    structured_projection_destination_path,
 )
 from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
 from eneo.flows.runtime.input_files import (
@@ -1049,24 +1050,27 @@ def _resolve_structured_source_refs_input(
                 f"'{ref.step_ref}'.",
                 code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
             )
-        value = _source_ref_runtime_value(
-            ref_output=ref.output,
+        value: Any = []
+        for selected_path, selected_value in _structured_projection_selections(
             field_path=ref.field_path,
             result=result,
             consuming_step_order=step.step_order,
-        )
-        selector_path = ("output", "structured", *ref.field_path)
-        edges.append(
-            _step_result_edge(
-                binding_ref=f"input_bindings.source_refs[{ref_index}]",
-                result=result,
-                selector_path=selector_path,
-                selected_value=value,
+        ):
+            if "*" in ref.field_path:
+                value.extend(selected_value)
+            else:
+                value = selected_value
+            edges.append(
+                _step_result_edge(
+                    binding_ref=f"input_bindings.source_refs[{ref_index}]",
+                    result=result,
+                    selector_path=("output", "structured", *selected_path),
+                    selected_value=selected_value,
+                )
             )
-        )
         _insert_structured_projection_value(
             projected=projected,
-            field_path=ref.field_path,
+            field_path=structured_projection_destination_path(ref.field_path),
             value=value,
             source_step_ref=ref.step_ref,
             projection_containers=projection_containers,
@@ -1078,6 +1082,50 @@ def _resolve_structured_source_refs_input(
         reference_count=len(source_refs),
         edges=merge_resolved_input_edges(edges),
     )
+
+
+def _structured_projection_selections(
+    *,
+    field_path: tuple[str, ...],
+    result: FlowStepResult,
+    consuming_step_order: int,
+) -> Iterator[tuple[tuple[str | int, ...], Any]]:
+    if "*" not in field_path:
+        yield (
+            field_path,
+            _source_ref_runtime_value(
+                ref_output="structured",
+                field_path=field_path,
+                result=result,
+                consuming_step_order=consuming_step_order,
+            ),
+        )
+        return
+    prefix = field_path[: field_path.index("*")]
+    suffix = structured_projection_destination_path(field_path)
+    sections = _source_ref_runtime_value(
+        ref_output="structured",
+        field_path=prefix,
+        result=result,
+        consuming_step_order=consuming_step_order,
+    )
+    if not isinstance(sections, list):
+        raise TypedIOValidationException(
+            f"Step {consuming_step_order}: source_ref field_path '{'.'.join(field_path)}' "
+            "wildcard resolved to a non-array value.",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+        )
+    for index, section in enumerate(cast(list[Any], sections)):
+        selected = _source_ref_value_at_path(
+            section, field_path=suffix, consuming_step_order=consuming_step_order
+        )
+        if not isinstance(selected, list):
+            raise TypedIOValidationException(
+                f"Step {consuming_step_order}: source_ref field_path '{'.'.join(field_path)}' "
+                "suffix resolved to a non-array value.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        yield (*prefix, index, *suffix), selected
 
 
 def _insert_structured_projection_value(
@@ -1170,7 +1218,16 @@ def _source_ref_runtime_value(
             consuming_step_order=consuming_step_order,
             input_source="input_bindings.source_refs",
         )
-    current: Any = payload.get("structured")
+    return _source_ref_value_at_path(
+        payload.get("structured"),
+        field_path=field_path,
+        consuming_step_order=consuming_step_order,
+    )
+
+
+def _source_ref_value_at_path(
+    current: Any, *, field_path: tuple[str, ...], consuming_step_order: int
+) -> Any:
     for segment in field_path:
         if not isinstance(current, dict):
             raise TypedIOValidationException(

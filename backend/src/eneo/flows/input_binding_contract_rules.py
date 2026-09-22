@@ -266,12 +266,29 @@ def derive_structured_projection_contract(
         )
         _insert_projected_schema(
             projected=projected,
-            field_path=ref.field_path,
+            field_path=structured_projection_destination_path(ref.field_path),
             selected_schema=selected_schema,
             source_step_ref=ref.step_ref,
             projection_containers=projection_containers,
         )
     return projected
+
+
+def structured_projection_destination_path(
+    field_path: tuple[str, ...],
+) -> tuple[str, ...]:
+    if "*" in field_path:
+        return field_path[field_path.index("*") + 1 :]
+    return field_path
+
+
+def source_ref_field_path_error(
+    *, field_path: tuple[str, ...], source_step_ref: str
+) -> InputBindingContractError:
+    return InputBindingContractError(
+        f"source_ref field_path '{'.'.join(field_path)}' is absent from "
+        f"'{source_step_ref}' output contract."
+    )
 
 
 def _schema_at_projection_path(
@@ -282,6 +299,14 @@ def _schema_at_projection_path(
 ) -> Mapping[str, Any]:
     current = source_contract
     for segment in field_path:
+        if segment == "*":
+            items = current.get("items")
+            if current.get("type") != "array" or not isinstance(items, Mapping):
+                raise source_ref_field_path_error(
+                    field_path=field_path, source_step_ref=source_step_ref
+                )
+            current = cast(Mapping[str, Any], items)
+            continue
         if current.get("type") != "object":
             raise InputBindingContractError(
                 f"source_ref field_path '{'.'.join(field_path)}' for "
@@ -296,11 +321,16 @@ def _schema_at_projection_path(
         properties = cast(Mapping[str, object], raw_properties)
         next_schema: object | None = properties.get(segment)
         if not isinstance(next_schema, Mapping):
-            raise InputBindingContractError(
-                f"source_ref field_path '{'.'.join(field_path)}' is absent from "
-                f"'{source_step_ref}' output contract."
+            raise source_ref_field_path_error(
+                field_path=field_path, source_step_ref=source_step_ref
             )
         current = cast(Mapping[str, Any], next_schema)
+    if "*" in field_path:
+        if current.get("type") != "array":
+            raise source_ref_field_path_error(
+                field_path=field_path, source_step_ref=source_step_ref
+            )
+        return {"type": "array", "items": deepcopy(current.get("items", {}))}
     return current
 
 
@@ -434,7 +464,7 @@ def _parse_source_ref(raw_ref: object, *, index: int) -> SourceRefBinding:
             )
     step_ref = _required_string(ref.get("step_ref"), index=index, field="step_ref")
     output = _source_ref_output(ref.get("output"), index=index)
-    field_path = _field_path(ref.get("field_path"), index=index)
+    field_path = _field_path(ref.get("field_path"), index=index, step_ref=step_ref)
     if output == "text" and field_path:
         raise InputBindingContractError(
             "input_bindings.source_refs"
@@ -469,7 +499,7 @@ def _source_ref_output(value: object, *, index: int) -> SourceRefOutput:
     return output
 
 
-def _field_path(value: object, *, index: int) -> tuple[str, ...]:
+def _field_path(value: object, *, index: int, step_ref: str) -> tuple[str, ...]:
     if value is None:
         return ()
     if not isinstance(value, str) or not value.strip():
@@ -486,6 +516,8 @@ def _field_path(value: object, *, index: int) -> tuple[str, ...]:
         raise InputBindingContractError(
             f"input_bindings.source_refs[{index}].field_path must not contain templates."
         )
+    if parts.count("*") > 1 or parts[-1] == "*":
+        raise source_ref_field_path_error(field_path=parts, source_step_ref=step_ref)
     return parts
 
 

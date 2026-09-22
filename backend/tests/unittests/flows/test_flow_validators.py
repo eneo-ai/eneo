@@ -27,6 +27,9 @@ from eneo.flows.flow_validators import (
 )
 from eneo.flows.flow_validators_form import validate_variable_alias_collisions
 from eneo.main.exceptions import BadRequestException
+from tests.unittests.flows.test_input_binding_contract_rules import (
+    _wildcard_projection_case,
+)
 
 
 def _step(step_order: int = 1, **updates) -> FlowStep:
@@ -1252,6 +1255,29 @@ def test_validate_steps_accepts_structured_source_refs_with_projection_contract(
                 },
             ),
         ]
+    )
+
+
+@pytest.mark.parametrize("output_mode", ["pass_through", "compose_text"])
+@pytest.mark.parametrize("publish_strict", [False, True])
+def test_wildcard_projection_refuses_text_consumers(output_mode, publish_strict):
+    bindings, source, _ = _wildcard_projection_case()
+    _assert_validate_steps_rejects(
+        [
+            _step(1, output_contract=source),
+            _step(
+                2,
+                input_type="text",
+                output_type="text",
+                output_mode=output_mode,
+                input_bindings=bindings,
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="field_path .* is absent",
+        code="flow_input_binding_unsupported_key",
+        step_order=2,
+        require_complete_template_fill_config=publish_strict,
     )
 
 

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, create_autospec
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileContentVariant, FileType
@@ -30,6 +31,10 @@ from eneo.flows.flow_input_limits import (
     DEFAULT_MAX_AUDIO_FILES_PER_RUN,
     FlowInputLimits,
 )
+from eneo.flows.flow_run_provenance import (
+    FLOW_RESOLVED_INPUT_MAX_EDGES,
+    group_resolved_input_edges,
+)
 from eneo.flows.flow_validators import validate_steps
 from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
 from eneo.flows.runtime.step_definition_parser import parse_runtime_steps
@@ -48,6 +53,9 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from tests.flow_snapshot_fixtures import assistant_snapshot
+from tests.unittests.flows.test_input_binding_contract_rules import (
+    _wildcard_projection_case,
+)
 
 
 def _file_backed_material(text: str, *, step_order: int = 1):
@@ -646,6 +654,144 @@ async def test_depth_four_structured_output_survives_publish_and_source_refs() -
             prior_results=[prior],
             deps=_resolution_deps(),
         )
+
+
+def _wildcard_runtime_step() -> RuntimeStep:
+    bindings, _, projected = _wildcard_projection_case()
+    return replace(
+        _step(
+            step_order=2,
+            input_source="previous_step",
+            input_type="json",
+            input_bindings=bindings,
+        ),
+        input_contract=projected,
+    )
+
+
+@pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.asyncio
+async def test_wildcard_projection_runtime_preserves_order_and_concrete_edges(empty):
+    sections = (
+        []
+        if empty
+        else [
+            {"underlag": {"krav": {"uppgifter": [{"text": "A"}, {"text": "B"}]}}},
+            {"underlag": {"krav": {"uppgifter": []}}},
+            {"underlag": {"krav": {"uppgifter": [{"text": "A"}]}}},
+        ]
+    )
+    prior = _result(output_payload={"structured": {"sektioner": sections}})
+    resolved = await resolve_step_input(
+        step=_wildcard_runtime_step(),
+        context={},
+        run=_run(),
+        prior_results=[prior],
+        deps=_resolution_deps(),
+    )
+
+    expected = {
+        "underlag": {
+            "krav": {
+                "uppgifter": []
+                if empty
+                else [{"text": "A"}, {"text": "B"}, {"text": "A"}]
+            }
+        }
+    }
+    assert resolved.structured == expected
+    assert json.loads(resolved.text) == expected
+    assert len(resolved.edges) == len(sections)
+    for index, edge in enumerate(resolved.edges):
+        assert edge.binding_ref == "input_bindings.source_refs[0]"
+        assert edge.source.kind == "step_result"
+        assert edge.source.source_step_id == prior.step_id
+        assert edge.source.source_attempt_no == 2
+        assert edge.source.selector.path == (
+            "output",
+            "structured",
+            "sektioner",
+            index,
+            "underlag",
+            "krav",
+            "uppgifter",
+        )
+        selected = canonical_json_bytes(
+            sections[index]["underlag"]["krav"]["uppgifter"]
+        )
+        assert edge.selection.encoding == "canonical_json"
+        assert edge.selection.sha256 == hashlib.sha256(selected).hexdigest()
+        assert edge.selection.byte_size == len(selected)
+    grouped = group_resolved_input_edges(resolved.edges)
+    assert grouped.indexes_by_group == (tuple(range(len(sections))),)
+
+
+@pytest.mark.parametrize(
+    ("bad_section", "message"),
+    [
+        ({}, "references missing field 'underlag'"),
+        (
+            {"underlag": None},
+            "underlag.krav.uppgifter' did not resolve through an object value",
+        ),
+        ({"underlag": {"krav": {"uppgifter": None}}}, "non-array value"),
+        ({"underlag": {"krav": {"uppgifter": "lost fact"}}}, "non-array value"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_wildcard_projection_runtime_refuses_incomplete_section(
+    bad_section, message
+):
+    prior = _result(
+        output_payload={
+            "structured": {
+                "sektioner": [
+                    {"underlag": {"krav": {"uppgifter": [{"text": "A"}]}}},
+                    bad_section,
+                ]
+            }
+        }
+    )
+    with pytest.raises(TypedIOValidationException, match=message) as exc:
+        await resolve_step_input(
+            step=_wildcard_runtime_step(),
+            context={},
+            run=_run(),
+            prior_results=[prior],
+            deps=_resolution_deps(),
+        )
+    assert exc.value.code == FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value
+
+
+@pytest.mark.parametrize("sections", [None, {}])
+@pytest.mark.asyncio
+async def test_wildcard_projection_runtime_requires_array(sections):
+    prior = _result(output_payload={"structured": {"sektioner": sections}})
+    with pytest.raises(TypedIOValidationException, match="non-array value"):
+        await resolve_step_input(
+            step=_wildcard_runtime_step(),
+            context={},
+            run=_run(),
+            prior_results=[prior],
+            deps=_resolution_deps(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_wildcard_projection_edges_obey_existing_ceiling():
+    sections = [
+        {"underlag": {"krav": {"uppgifter": []}}}
+        for _ in range(FLOW_RESOLVED_INPUT_MAX_EDGES + 1)
+    ]
+    resolved = await resolve_step_input(
+        step=_wildcard_runtime_step(),
+        context={},
+        run=_run(),
+        prior_results=[_result(output_payload={"structured": {"sektioner": sections}})],
+        deps=_resolution_deps(),
+    )
+    with pytest.raises(ValidationError, match="at most 2048 items"):
+        group_resolved_input_edges(resolved.edges)
 
 
 def test_aliases_record_the_same_flow_input_selection() -> None:

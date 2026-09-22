@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -45,7 +46,10 @@ from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageTemplateAssetRequirement,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
-from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
+from eneo.flows.domain.flow_step_validation import (
+    FlowGraphIssueCode,
+    FlowStepValidationError,
+)
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -63,7 +67,146 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotKind,
     ResourceSlotRef,
 )
-from eneo.flows.flow_validators import collect_step_graph_issues
+from eneo.flows.flow_validators import collect_step_graph_issues, validate_steps
+from eneo.flows.runtime.step_input_resolution import resolve_step_input
+from tests.unittests.flows.test_input_binding_contract_rules import (
+    _wildcard_projection_case,
+)
+from tests.unittests.flows.test_resolved_input_runtime import (
+    _publish_step,
+    _resolution_deps,
+    _result,
+    _run,
+    _step,
+    _wildcard_runtime_step,
+)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "valid",
+        "text",
+        "scalar_leaf",
+        "object_leaf",
+        "two_wildcards",
+        "trailing_wildcard",
+        "non_array",
+        "collision",
+        "wrong_destination",
+    ],
+)
+@pytest.mark.asyncio
+async def test_wildcard_projection_planner_publish_runtime_parity(case):
+    bindings, source, projected = _wildcard_projection_case()
+    input_type = InputType.TEXT if case == "text" else InputType.JSON
+    if case in {"scalar_leaf", "object_leaf"}:
+        source["properties"]["sektioner"]["items"]["properties"]["underlag"][
+            "properties"
+        ]["krav"]["properties"]["uppgifter"] = {
+            "type": "string" if case == "scalar_leaf" else "object"
+        }
+    elif case == "non_array":
+        source["properties"]["sektioner"]["type"] = "object"
+    elif case == "two_wildcards":
+        bindings["source_refs"][0]["field_path"] = "sektioner.*.underlag.*.uppgifter"
+    elif case == "trailing_wildcard":
+        bindings["source_refs"][0]["field_path"] = "sektioner.*"
+    elif case == "collision":
+        bindings["source_refs"].append(dict(bindings["source_refs"][0]))
+    elif case == "wrong_destination":
+        projected = source
+    envelope = _envelope(
+        requirements=[],
+        extra_steps=[
+            StepSpec(
+                plan_step_ref="consume",
+                name="Consume",
+                assistant_spec=AssistantSpec(instructions="Use the projected facts."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=input_type,
+                input_bindings=_wildcard_projection_case()[0],
+                input_contract=None if case == "text" else projected,
+            )
+        ],
+    )
+    envelope.spec.steps[1] = envelope.spec.steps[1].model_copy(
+        update={"input_bindings": bindings}
+    )
+    envelope.spec.steps[0].output_type = OutputType.JSON
+    envelope.spec.steps[0].output_contract = source
+    producer = replace(
+        _step(step_order=1, input_source="flow_input"),
+        user_description="Extract",
+        output_type="json",
+        output_contract=source,
+    )
+    consumer = replace(
+        _wildcard_runtime_step(),
+        user_description="Consume",
+        input_type=input_type.value,
+        input_bindings=bindings,
+        input_contract=None if case == "text" else projected,
+    )
+    published = [_publish_step(producer), _publish_step(consumer)]
+    if case != "valid":
+        error_code = (
+            "flow_input_contract_inapplicable"
+            if case == "wrong_destination"
+            else "flow_input_binding_unsupported_key"
+        )
+        with pytest.raises(FlowPackageValidationError) as imported:
+            build_flow_package_import_plan(
+                envelope, candidates=FlowPackageImportPlannerCandidates()
+            )
+        assert imported.value.context["reason"] == error_code
+        with pytest.raises(FlowStepValidationError) as published_error:
+            validate_steps(published, require_complete_template_fill_config=True)
+        assert published_error.value.code == error_code
+        return
+
+    plan = build_flow_package_import_plan(
+        envelope, candidates=FlowPackageImportPlannerCandidates()
+    )
+    assert plan.can_install_as_draft
+    assert plan.can_publish_after_import
+    assert (
+        flow_step_validation_views_from_draft_spec(envelope.spec.steps)[
+            1
+        ].input_contract
+        == projected
+    )
+    validate_steps(published, require_complete_template_fill_config=True)
+    resolved = await resolve_step_input(
+        step=consumer,
+        context={},
+        run=_run(),
+        prior_results=[
+            _result(
+                output_payload={
+                    "structured": {
+                        "sektioner": [
+                            {"underlag": {"krav": {"uppgifter": [{"text": "A"}]}}},
+                            {"underlag": {"krav": {"uppgifter": []}}},
+                            {
+                                "underlag": {
+                                    "krav": {
+                                        "uppgifter": [{"text": "A"}, {"text": "B"}]
+                                    }
+                                }
+                            },
+                        ]
+                    }
+                }
+            )
+        ],
+        deps=_resolution_deps(),
+    )
+    assert resolved.structured == {
+        "underlag": {
+            "krav": {"uppgifter": [{"text": "A"}, {"text": "A"}, {"text": "B"}]}
+        }
+    }
 
 
 def test_planner_returns_unresolved_required_when_no_matching_model_exists() -> None:

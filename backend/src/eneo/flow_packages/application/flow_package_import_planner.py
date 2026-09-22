@@ -53,6 +53,10 @@ from eneo.flows.flow_validators import (
 from eneo.flows.flow_validators_form import (
     validate_variable_alias_collisions_for_step_graph,
 )
+from eneo.flows.input_binding_contract_rules import (
+    FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+    InputBindingContractError,
+)
 from eneo.main.exceptions import BadRequestException
 
 CandidateT = TypeVar("CandidateT", bound=FlowPackageLocalCandidate)
@@ -160,7 +164,10 @@ def _validate_installable_draft(
             "no_executable_steps",
             "Flow package draft must contain at least one step.",
         )
-    steps = flow_step_validation_views_from_draft_spec(envelope.spec.steps)
+    try:
+        steps = flow_step_validation_views_from_draft_spec(envelope.spec.steps)
+    except InputBindingContractError as exc:
+        raise _invalid_flow_draft(FLOW_INPUT_BINDING_UNSUPPORTED_KEY, str(exc)) from exc
     metadata_json = build_flow_draft_metadata_json(
         spec=envelope.spec,
         current_flow=None,

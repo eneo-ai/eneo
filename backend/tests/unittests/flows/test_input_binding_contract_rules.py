@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from typing import Any
+
 import pytest
 
 from eneo.flows.input_binding_contract_rules import (
     InputBindingContractError,
     SourceRefBinding,
     dedupe_source_refs,
+    derive_structured_projection_contract,
     effective_question_binding,
     input_contract_binding_conflict,
     item_template_field_names,
@@ -14,6 +18,118 @@ from eneo.flows.input_binding_contract_rules import (
     source_ref_bindings,
     unsupported_input_binding_key,
 )
+
+
+def _wildcard_projection_case() -> tuple[
+    dict[str, Any], dict[str, Any], dict[str, Any]
+]:
+    projected: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "underlag": {
+                "type": "object",
+                "properties": {
+                    "krav": {
+                        "type": "object",
+                        "properties": {
+                            "uppgifter": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {"text": {"type": "string"}},
+                                    "required": ["text"],
+                                    "additionalProperties": True,
+                                },
+                            }
+                        },
+                        "required": ["uppgifter"],
+                        "additionalProperties": False,
+                    }
+                },
+                "required": ["krav"],
+                "additionalProperties": False,
+            }
+        },
+        "required": ["underlag"],
+        "additionalProperties": False,
+    }
+    section = deepcopy(projected)
+    section["properties"]["underlag"]["properties"]["krav"]["properties"][
+        "uppgifter"
+    ].update(minItems=1, maxItems=2, uniqueItems=True)
+    source = {
+        "type": "object",
+        "properties": {"sektioner": {"type": "array", "items": section}},
+        "required": ["sektioner"],
+        "additionalProperties": False,
+    }
+    bindings = {
+        "source_refs": [
+            {
+                "step_ref": "step_1",
+                "output": "structured",
+                "field_path": "sektioner.*.underlag.krav.uppgifter",
+            }
+        ]
+    }
+    return bindings, source, projected
+
+
+def test_wildcard_projection_schema_uses_suffix_and_unconstrained_aggregate() -> None:
+    bindings, source, projected = _wildcard_projection_case()
+
+    assert (
+        derive_structured_projection_contract(
+            input_bindings=bindings,
+            source_contracts_by_step_ref={"step_1": source},
+        )
+        == projected
+    )
+
+
+@pytest.mark.parametrize(
+    "field_path", ["sektioner.*.underlag.*.uppgifter", "sektioner.*"]
+)
+def test_wildcard_projection_rejects_invalid_grammar(field_path: str) -> None:
+    bindings, _, _ = _wildcard_projection_case()
+    bindings["source_refs"][0]["field_path"] = field_path
+
+    with pytest.raises(InputBindingContractError, match="field_path .* is absent"):
+        source_ref_bindings(bindings)
+
+
+@pytest.mark.parametrize("invalid_node", ["scalar_leaf", "object_leaf", "non_array"])
+def test_wildcard_projection_rejects_non_array_schema(invalid_node: str) -> None:
+    bindings, source, _ = _wildcard_projection_case()
+    sections = source["properties"]["sektioner"]
+    if invalid_node == "non_array":
+        sections["type"] = "object"
+    else:
+        properties = sections["items"]["properties"]["underlag"]["properties"]["krav"][
+            "properties"
+        ]
+        properties["uppgifter"] = {
+            "type": "string" if invalid_node == "scalar_leaf" else "object"
+        }
+
+    with pytest.raises(InputBindingContractError, match="field_path .* is absent"):
+        derive_structured_projection_contract(
+            input_bindings=bindings,
+            source_contracts_by_step_ref={"step_1": source},
+        )
+
+
+def test_wildcard_projection_rejects_suffix_destination_collision() -> None:
+    bindings, source, _ = _wildcard_projection_case()
+    bindings["source_refs"].append({**bindings["source_refs"][0], "step_ref": "step_2"})
+
+    with pytest.raises(
+        InputBindingContractError, match="path collision at 'underlag.krav.uppgifter'"
+    ):
+        derive_structured_projection_contract(
+            input_bindings=bindings,
+            source_contracts_by_step_ref={"step_1": source, "step_2": source},
+        )
 
 
 def test_question_binding_returns_original_non_empty_question() -> None:

@@ -192,6 +192,16 @@ Publish errors identify the exact location: question errors point to
 `input_bindings.question`, and source-reference errors point to the indexed
 `input_bindings.source_refs[i].step_ref`.
 
+For a JSON input using structured `source_refs`, a `field_path` can contain one
+`*` segment to combine lists from every section. The wildcard must select an
+array and be followed by an explicit path to an array in each element. For
+example, `sektioner.*.underlag.krav.uppgifter` combines those lists in section
+order, preserving duplicates. The projected input mirrors only the path after
+`*`: `{"underlag": {"krav": {"uppgifter": [...]}}}`. Empty lists contribute no
+items, and zero sections produce an empty list. Missing, null, or non-array
+values cause the step to fail. Multiple wildcards, a trailing wildcard, and
+wildcards in text inputs are not supported.
+
 ## Output modes and what they mean
 
 | `output_mode`     | What it is for                                    | Constraints                                                                          |
