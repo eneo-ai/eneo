@@ -19,26 +19,36 @@ immutable, for hosts that require `integrity`).
 <script async src="https://eneo.example.se/widget/v1/eneo.js" data-widget-id="wgt_…"></script>
 ```
 
+The snippet carries nothing the editor can change later. Before it shows
+the launcher, the loader asks the Eneo origin for the widget's saved
+settings (`GET /widget/settings/<id>`: language, position and colours), so
+an edit or a template publication reaches every site without a new snippet
+and the launcher never appears in one corner and moves to the other. It
+waits at most three seconds; without an answer (a paused widget, a host CSP
+without the Eneo origin in `connect-src`) it shows with its attributes. An
+open requested before then (`auto-open`, `Eneo('open')`) waits as well, so
+the panel opens in the saved corner too.
+
 Optional `data-*` attributes (also usable as attributes on a hand-written
 `<eneo-widget>` element for single-page apps):
 
-| Attribute      | Values                                            | Default                     |
-| -------------- | ------------------------------------------------- | --------------------------- |
-| `lang`         | `sv`, `en`                                        | the page's `<html lang>`    |
-| `position`     | `bottom-right`, `bottom-left`                     | `bottom-right`              |
-| `color-scheme` | `auto`, `light`, `dark`                           | `auto`                      |
-| `auto-open`    | `true`                                            | closed                      |
-| `launcher`     | `none` (host renders its own)                     | built-in button             |
-| `label`        | accessible name of the button                     | "Öppna chatt" / "Open chat" |
-| `frame-title`  | accessible name of the iframe                     | "Chatt" / "Chat"            |
-| `prefetch`     | `true` (load before first open)                   | lazy                        |
-| `preview`      | preview token from the admin page (draft widgets) | none                        |
+| Attribute      | Values                                                     | Default                     |
+| -------------- | ---------------------------------------------------------- | --------------------------- |
+| `lang`         | `sv`, `en`; used while the widget's language is automatic  | the page's `<html lang>`    |
+| `position`     | `bottom-right`, `bottom-left`; only without saved settings | `bottom-right`              |
+| `color-scheme` | `auto`, `light`, `dark`                                    | `auto`                      |
+| `auto-open`    | `true`                                                     | closed                      |
+| `launcher`     | `none` (host renders its own)                              | built-in button             |
+| `label`        | accessible name of the button                              | "Öppna chatt" / "Open chat" |
+| `frame-title`  | accessible name of the iframe                              | "Chatt" / "Chat"            |
+| `prefetch`     | `true` (load before first open)                            | lazy                        |
+| `preview`      | preview token from the admin page (draft widgets)          | none                        |
 
 The launcher takes the widget's primary colour (and its dark-mode colour when
-the page is dark) as soon as the embed page reports ready. On screens
-narrower than 640px the panel fills the viewport; the launcher then stays on
-top of it as the close button until the embed page has reported ready and
-the chat's own header can close the panel. CSS custom
+the page is dark) from the saved settings, and again when the embed page
+reports ready. On screens narrower than 640px the panel fills the viewport;
+the launcher then stays on top of it as the close button until the embed
+page has reported ready and the chat's own header can close the panel. CSS custom
 properties on the element or `:root` override it: `--eneo-widget-color`,
 `--eneo-widget-on-color`, `--eneo-widget-radius`, `--eneo-widget-z`,
 `--eneo-widget-offset-x`, `--eneo-widget-offset-y`. Parts: `launcher`, `panel`.
@@ -77,6 +87,12 @@ iframe, `Escape` inside it closes the panel and focus returns to the launcher
 (or to the element that was focused when the launcher is hidden). Below 640 px
 the panel is full-screen and follows the visual viewport so the on-screen
 keyboard never covers the composer. Transitions respect `prefers-reduced-motion`.
+
+A host with a Content Security Policy allows the Eneo origin in `script-src`
+(the loader), `connect-src` (the saved settings) and `frame-src` (the chat).
+The iframe's sandbox allows scripts, same-origin storage, forms (the
+composer and the comment dialog are forms; nothing is ever really
+submitted) and popups for source links.
 
 ## Development
 

@@ -1,11 +1,17 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mountFromScript, resolveOrigin } from "./bootstrap";
 import { EneoWidgetElement } from "./element";
+import { flushSettings, stubSettings } from "./testing";
 
 if (!customElements.get("eneo-widget")) customElements.define("eneo-widget", EneoWidgetElement);
 
+beforeEach(() => {
+  stubSettings();
+});
+
 afterEach(() => {
   document.body.innerHTML = "";
+  vi.restoreAllMocks();
 });
 
 function scriptTag(attributes: Record<string, string>): HTMLScriptElement {
@@ -67,8 +73,9 @@ describe("mountFromScript", () => {
     expect(document.querySelector("eneo-widget")).toBeNull();
   });
 
-  it("prefetches the iframe when asked", () => {
+  it("prefetches the iframe when asked", async () => {
     mountFromScript(scriptTag({ "data-widget-id": "wgt_pre", "data-prefetch": "true" }));
+    await flushSettings();
     const element = document.querySelector("eneo-widget") as EneoWidgetElement;
     expect(element.shadowRoot!.querySelector("iframe")).not.toBeNull();
     expect(element.open).toBe(false);
