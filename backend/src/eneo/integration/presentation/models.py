@@ -5,8 +5,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, computed_field
 
-from eneo.ai_models.embedding_models.embedding_model import (
-    EmbeddingModelPublicLegacy,
+from eneo.embedding_models.presentation.embedding_model_models import (
+    EmbeddingModelPublic,
 )
 from eneo.integration.domain.value_objects import (
     IntegrationType,
@@ -198,7 +198,7 @@ class IntegrationKnowledgePublic(BaseModel):
     tenant_id: UUID
     space_id: UUID
     user_integration_id: UUID
-    embedding_model: EmbeddingModelPublicLegacy
+    embedding_model: EmbeddingModelPublic
     site_id: Optional[str] = None
     drive_id: Optional[str] = None  # For OneDrive direct access
     resource_type: Optional[str] = (

@@ -37,7 +37,7 @@
       title={data.collection.name}
     ></Page.Title>
     <Tooltip
-      text={$disabledModelInUse ? "Enable model in settings to add text" : undefined}
+      text={$disabledModelInUse ? m.enable_embedding_model_to_add_content() : undefined}
       placement="left"
     >
       <Page.Flex>

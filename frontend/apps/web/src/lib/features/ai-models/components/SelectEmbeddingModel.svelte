@@ -3,6 +3,7 @@
   import { Select } from "@eneo/ui";
   import { writable, type Writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { embeddingModelLabel } from "../modelLabels";
   import { toast } from "$lib/components/toast";
 
   // Id of currently selected Embedding Model
@@ -18,10 +19,8 @@
   let modelSelectStore: Writable<{ value: EmbeddingModel; label: string }>;
 
   function getModelDisplayName(model: EmbeddingModel) {
-    if (model.open_source) {
-      return `${model.name} (Open Source)`;
-    }
-    return model.name;
+    const label = embeddingModelLabel(model);
+    return model.open_source ? `${label} (${m.model_label_open_source()})` : label;
   }
 
   let unsupportedModelSelected = false;

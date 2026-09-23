@@ -27,6 +27,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { getJobManager } from "$lib/features/jobs/JobManager";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { embeddingModelLabel } from "$lib/features/ai-models/modelLabels";
   import type { IntegrationImportDialogProps } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -407,7 +408,8 @@
   });
 
   function getModelDisplayName(model: EmbeddingModel): string {
-    return model.open_source ? `${model.name} (${m.model_label_open_source()})` : model.name;
+    const label = embeddingModelLabel(model);
+    return model.open_source ? `${label} (${m.model_label_open_source()})` : label;
   }
 
   function selectEmbeddingModel(id: string) {
