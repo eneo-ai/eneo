@@ -102,18 +102,21 @@
         <li>
           <Card.Root class="h-full">
             <Card.Header class="border-b">
-              <Card.Title class="flex flex-wrap items-center gap-2">
-                <!-- eslint-disable svelte/no-navigation-without-resolve -- localized href built from typed route segments -->
-                <a class="underline-offset-2 hover:underline" href={widgetHref(item)}>{item.name}</a
-                >
-                <!-- eslint-enable svelte/no-navigation-without-resolve -->
-                <Badge
-                  variant={item.status === "active"
-                    ? "default"
-                    : item.status === "paused"
-                      ? "destructive"
-                      : "outline"}>{statusLabel(item)}</Badge
-                >
+              <Card.Title>
+                <h2 class="flex flex-wrap items-center gap-2">
+                  <!-- eslint-disable svelte/no-navigation-without-resolve -- localized href built from typed route segments -->
+                  <a class="underline-offset-2 hover:underline" href={widgetHref(item)}
+                    >{item.name}</a
+                  >
+                  <!-- eslint-enable svelte/no-navigation-without-resolve -->
+                  <Badge
+                    variant={item.status === "active"
+                      ? "default"
+                      : item.status === "paused"
+                        ? "destructive"
+                        : "outline"}>{statusLabel(item)}</Badge
+                  >
+                </h2>
               </Card.Title>
               <Card.Description>
                 {item.space_name ?? "–"} · {item.assistant_name ?? "–"} ·
@@ -135,6 +138,12 @@
               </Card.Action>
             </Card.Header>
             <Card.Content class="flex flex-col gap-4">
+              {#if item.status === "active" && blockedReason(item)}
+                <!-- Live, but not serving as configured: say so where the badge says "Aktiv". -->
+                <p class="bg-warning-dimmer text-warning-stronger rounded-lg px-3 py-2 text-sm">
+                  {m.widget_admin_overview_active_issues({ reasons: blockedReason(item) })}
+                </p>
+              {/if}
               <dl class="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5">
                 <div>
                   <dt class="text-secondary text-xs">{m.widget_admin_overview_questions_7d()}</dt>

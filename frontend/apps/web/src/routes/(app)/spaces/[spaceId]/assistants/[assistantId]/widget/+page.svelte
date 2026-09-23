@@ -72,7 +72,7 @@
       {:else}
         <Card.Root class="mx-auto w-full max-w-3xl">
           <Card.Header>
-            <Card.Title>{m.widget_admin_create_title()}</Card.Title>
+            <Card.Title><h2>{m.widget_admin_create_title()}</h2></Card.Title>
             <Card.Description>{m.widget_admin_create_description()}</Card.Description>
           </Card.Header>
           <Card.Content>
