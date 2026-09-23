@@ -3,6 +3,7 @@
 # Licensed under the MIT License.
 
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID, uuid4
@@ -18,10 +19,20 @@ from eneo.widgets.domain.visitor import VisitorClaims
 from eneo.widgets.domain.widget import Widget
 
 TOKEN_USE = "widget_visitor"
+# The key is a derived HMAC secret, so the algorithm is fixed with it.
+ALGORITHM = "HS256"
 
 
 def widget_audience(widget_id: UUID) -> str:
     return f"eneo-widget:{widget_id}"
+
+
+def visitor_token_key(settings: Settings) -> str:
+    """Visitor tokens get their own key: a user-session decode can never
+    accept one, whatever audience checks it skips."""
+    return hashlib.sha256(
+        f"eneo-widget-token:{settings.jwt_secret}".encode()
+    ).hexdigest()
 
 
 class VisitorTokenService:
@@ -61,7 +72,7 @@ class VisitorTokenService:
         if preview:
             payload["preview"] = True
         token = jwt.encode(
-            payload, self.settings.jwt_secret, algorithm=self.settings.jwt_algorithm
+            payload, visitor_token_key(self.settings), algorithm=ALGORITHM
         )
         return token, ttl
 
@@ -77,9 +88,9 @@ class VisitorTokenService:
         try:
             claims = jwt.decode(
                 token,
-                key=self.settings.jwt_secret,
+                key=visitor_token_key(self.settings),
                 audience=widget_audience(widget.id),
-                algorithms=[self.settings.jwt_algorithm],
+                algorithms=[ALGORITHM],
                 options={"verify_exp": False, "require": ["exp", "iat", "sub"]},
             )
         except jwt.PyJWTError as exc:
