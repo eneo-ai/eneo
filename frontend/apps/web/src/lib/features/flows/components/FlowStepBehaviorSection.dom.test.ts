@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FlowStep } from "@eneo/eneo-js";
+import { tick } from "svelte";
 
 import { m } from "$lib/paraglide/messages";
 import { getFlowStepUxCopy } from "$lib/features/flows/flowStepUxCopy";
@@ -103,7 +104,8 @@ describe("FlowStepBehaviorSection", () => {
       instructionText: "Skriv en sammanfattning."
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Focus would move one tick after the read settles.
+    await tick();
     expect(document.activeElement).toBe(stepList);
     stepList.remove();
   });
