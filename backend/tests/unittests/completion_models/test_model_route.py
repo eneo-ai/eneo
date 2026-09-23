@@ -53,6 +53,15 @@ def test_tenant_adapter_uses_the_completion_models_canonical_route():
     assert adapter.get_model_route() == model.get_model_route()
 
 
+def test_a_provider_alias_routes_like_its_canonical_type():
+    # "vllm" is accepted for an OpenAI-compatible vLLM server; LiteLLM's own
+    # "vllm/" prefix means an in-process vLLM, so the route must be hosted_vllm.
+    assert (
+        resolve_model_route(provider_type="vllm", model_name="realtime-asr")
+        == "hosted_vllm/realtime-asr"
+    )
+
+
 def test_model_route_accepts_the_maximum_length():
     route = "m" * MAX_MODEL_ROUTE_LENGTH
 

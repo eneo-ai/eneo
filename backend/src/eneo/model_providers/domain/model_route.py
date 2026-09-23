@@ -1,3 +1,5 @@
+from eneo.tenants.provider_field_config import get_canonical_provider_type
+
 MAX_MODEL_ROUTE_LENGTH = 1024
 
 
@@ -9,7 +11,7 @@ def resolve_model_route(
 ) -> str:
     """Return the provider-qualified route used for LiteLLM operations."""
     if provider_type:
-        route = f"{provider_type}/{model_name}"
+        route = f"{get_canonical_provider_type(provider_type)}/{model_name}"
     else:
         route = litellm_model_name or model_name
     if len(route) > MAX_MODEL_ROUTE_LENGTH:
