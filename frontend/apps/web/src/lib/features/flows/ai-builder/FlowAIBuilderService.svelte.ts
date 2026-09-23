@@ -134,7 +134,12 @@ export class FlowAIBuilderService {
       this.#state.currentPlan?.status === "approved" &&
       this.#state.session?.status === "awaiting_approval"
   );
-  isApplied = $derived(this.#state.session?.status === "applied");
+  /** The change is in the flow: the apply call returned, or the session says
+   *  so. The session is re-read after a successful apply, and a failed re-read
+   *  leaves its status behind while the change is already written. */
+  isApplied = $derived(
+    this.#state.applyResult !== null || this.#state.session?.status === "applied"
+  );
   /** A change is being prepared and is not in the flow yet: a conversation, a
    *  proposed plan, or the session's plan fact. An applied change is done, so
    *  a new launch does not ask before replacing it. */

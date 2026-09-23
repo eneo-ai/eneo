@@ -358,6 +358,75 @@ describe("BuilderReviewScreen approval", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 
+  it("keeps an approved edit whose apply failed, and applies it later without approving again", async () => {
+    // A server that reports what it did: approved after approve, applied only
+    // after an apply that went through.
+    const routes: string[] = [];
+    let applyAttempts = 0;
+    let approved = false;
+    let applied = false;
+    const transport = {
+      fetch: vi.fn(async (route: string) => {
+        routes.push(route);
+        if (route === "/api/v1/flows/ai-builder/plans/{plan_id}/approve") {
+          approved = true;
+          return {};
+        }
+        if (route === "/api/v1/flows/ai-builder/plans/{plan_id}/apply") {
+          applyAttempts += 1;
+          if (applyAttempts === 1) throw new TypeError("Failed to fetch");
+          applied = true;
+          return {
+            flow_id: "flow-1",
+            flow_name: "Flöde",
+            steps_created: 0,
+            steps_updated: 1,
+            steps_removed: 0
+          };
+        }
+        if (route === "/api/v1/flows/ai-builder/sessions/{session_id}") {
+          return makeSession({
+            status: applied ? "applied" : "awaiting_approval",
+            latest_plan_id: "plan-1"
+          });
+        }
+        if (route === "/api/v1/flows/ai-builder/plans/{plan_id}") {
+          return makePlan({ status: applied ? "applied" : approved ? "approved" : "proposed" });
+        }
+        throw new Error(`Unexpected route ${route}`);
+      }),
+      stream: vi.fn()
+    };
+    const onapplied = vi.fn(async () => {});
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: {
+        session: makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }),
+        currentPlan: makePlan({ status: "proposed" })
+      },
+      transport: transport as never,
+      screenProps: { onapplied }
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_approve() }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_approve_dialog_confirm_edit() })
+    );
+    // The approval stands; the failed apply closes the dialog and leaves the
+    // footer offering the apply alone.
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(onapplied).not.toHaveBeenCalled();
+    const applyButton = await screen.findByRole("button", { name: m.ai_builder_apply() });
+
+    await fireEvent.click(applyButton);
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_approve_dialog_confirm_edit() })
+    );
+    await waitFor(() => expect(onapplied).toHaveBeenCalledOnce());
+    expect(routes.filter((route) => route.endsWith("/approve"))).toHaveLength(1);
+    expect(applyAttempts).toBe(2);
+  });
+
   it("announces a new proposal, not the session refresh that stamps the same one", async () => {
     let service!: Parameters<
       NonNullable<ComponentProps<typeof BuilderReviewScreenHarness>["onservice"]>
@@ -710,7 +779,11 @@ describe("BuilderReviewScreen plan document", () => {
           knowledge_refs: [],
           model_ref: null
         },
-        input_bindings: { question: "Underlag:\n{{step_a.output.text}}" }
+        input_bindings: {
+          question:
+            "Underlag:\n{{step_a.output.text}}\nRubrik: {{ step_a.output.structured.title }}\n" +
+            "Beslut: {{ step_a.output.structured.decision }}\nFält: {{ flow_input.namn }}"
+        }
       })
     });
 
@@ -720,10 +793,21 @@ describe("BuilderReviewScreen plan document", () => {
     expect(screen.getByTitle("{{step_a.output.text}}").textContent?.trim()).toBe(
       "1. Transkribera ljud"
     );
-    // The words around a reference keep their spacing and line breaks.
+    // A field of the step keeps its path, so two fields never read alike.
+    expect(screen.getByTitle("{{ step_a.output.structured.title }}").textContent?.trim()).toBe(
+      "1. Transkribera ljud · output.structured.title"
+    );
+    expect(screen.getByTitle("{{ step_a.output.structured.decision }}").textContent?.trim()).toBe(
+      "1. Transkribera ljud · output.structured.decision"
+    );
+    // The words around a reference keep their spacing and line breaks, and a
+    // token that names no planned step stays as written.
     const paragraphs = [...document.querySelectorAll("p")].map((p) => p.textContent);
     expect(paragraphs).toContain("Sammanfatta 1. Transkribera ljud kort.");
-    expect(paragraphs).toContain("Underlag:\n1. Transkribera ljud");
+    expect(paragraphs).toContain(
+      "Underlag:\n1. Transkribera ljud\nRubrik: 1. Transkribera ljud · output.structured.title\n" +
+        "Beslut: 1. Transkribera ljud · output.structured.decision\nFält: {{ flow_input.namn }}"
+    );
   });
 
   it("shows what an edit changes in a published step and opens that step first", async () => {

@@ -95,6 +95,41 @@ function makeService() {
 }
 
 describe("FlowAIBuilderService", () => {
+  it("counts a confirmed apply as applied when re-reading the session fails", async () => {
+    const fetch = vi.fn(async (route: string) => {
+      if (route === "/api/v1/flows/ai-builder/plans/{plan_id}/apply") {
+        return { flow_id: "flow-1" } as ApplyResult;
+      }
+      throw new TypeError("Failed to fetch");
+    });
+    const service = new FlowAIBuilderService(
+      { client: { fetch, stream: vi.fn() } } as never,
+      "space-1",
+      "flow-1"
+    );
+    service.seedState({
+      session: makeSession({
+        status: "awaiting_approval",
+        target_kind: "edit",
+        flow_id: "flow-1",
+        latest_plan_id: "plan-1"
+      }),
+      currentPlan: makePlan({ status: "approved" })
+    });
+
+    await service.applyPlan().catch(() => undefined);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/flows/ai-builder/plans/{plan_id}/apply",
+      expect.anything()
+    );
+    // The re-read failed, so the session still says it waits for approval.
+    expect(service.session?.status).toBe("awaiting_approval");
+    expect(service.isApplied).toBe(true);
+    // The next "Ändra med AI" starts fresh instead of asking to replace it.
+    expect(service.hasOpenWork).toBe(false);
+  });
+
   it("owns and clears the saved-step launch scope", () => {
     const service = makeService();
     const scope = {

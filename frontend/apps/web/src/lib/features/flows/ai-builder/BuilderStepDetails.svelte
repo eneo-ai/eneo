@@ -127,6 +127,8 @@
 
   // The plan names its steps by stable keys ("step_a"); the reader knows them
   // by number and name, so a token that points at a planned step reads as it.
+  // Only the key is replaced: any path past the step's text answer stays, so
+  // two fields of one step never read alike.
   const TEMPLATE_TOKEN = /\{\{\s*([^{}]+?)\s*\}\}/g;
   function readableParts(text: string): { text: string; step: string | null }[] {
     const parts: { text: string; step: string | null }[] = [];
@@ -134,8 +136,12 @@
     for (const match of text.matchAll(TEMPLATE_TOKEN)) {
       const at = match.index;
       if (at > last) parts.push({ text: text.slice(last, at), step: null });
-      const stepRef = match[1].split(".")[0].trim();
-      parts.push({ text: match[0], step: resolveInputStepLabel?.(stepRef) ?? null });
+      const [stepRef, ...path] = match[1].split(".").map((segment) => segment.trim());
+      const label = resolveInputStepLabel?.(stepRef) ?? null;
+      const rest = path.join(".");
+      const step =
+        label === null || rest === "" || rest === "output.text" ? label : `${label} · ${rest}`;
+      parts.push({ text: match[0], step });
       last = at + match[0].length;
     }
     if (last < text.length) parts.push({ text: text.slice(last), step: null });

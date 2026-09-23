@@ -103,9 +103,13 @@
   let textareaEl: HTMLTextAreaElement | null = $state(null);
   let mirrorEl: HTMLDivElement | null = $state(null);
 
-  /** Puts the caret in the editor, for a parent that replaced what held focus. */
+  let rootEl: HTMLDivElement | null = $state(null);
+
+  /** Puts the caret in the editor, for a parent that replaced what held focus.
+   *  A read-only editor cannot take the caret, so the editor frame takes focus. */
   export function focus() {
-    textareaEl?.focus();
+    if (disabled) rootEl?.focus();
+    else textareaEl?.focus();
   }
   let autocompleteOpen = $state(false);
   let autocompleteQuery = $state("");
@@ -388,6 +392,8 @@
 </script>
 
 <Card.Root
+  bind:ref={rootEl}
+  tabindex={disabled ? -1 : undefined}
   class="flow-prompt-editor focus-within:ring-accent-default/30 transition-shadow focus-within:ring-2 {invalid
     ? 'ring-warning-default/40 ring-1'
     : ''}"

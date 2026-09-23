@@ -91,6 +91,24 @@ describe("FlowStepBehaviorSection", () => {
     );
   });
 
+  it("puts focus on the read-only instruction of a published flow after a retry", async () => {
+    const { rerender } = renderFailedLoad();
+    await rerender({ isPublished: true });
+
+    await fireEvent.click(screen.getByRole("button", { name: m.retry() }));
+    await rerender({
+      assistantLoading: false,
+      assistant: { id: "assistant-2" } as LoadedAssistant,
+      instructionText: "Bedöm vad faktauppgifterna innebär."
+    });
+
+    // The disabled textarea cannot take focus; the editor frame around it does.
+    const instruction = screen.getByRole("textbox", { name: stepUxCopy.instructionsTitle });
+    expect((instruction as HTMLTextAreaElement).disabled).toBe(true);
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(document.activeElement?.contains(instruction)).toBe(true);
+  });
+
   it("leaves focus alone when the reader has moved to another step meanwhile", async () => {
     const { rerender } = renderFailedLoad();
     const stepList = document.body.appendChild(document.createElement("button"));
