@@ -23,8 +23,8 @@
     collectsText: boolean;
     /** The vote the server already holds for a restored conversation. */
     restored?: { value: Vote; text?: string | null } | null;
-    /** Sends a vote (with an optional comment); resolves false when it failed. */
-    submit: (feedback: { value: Vote; text?: string }) => Promise<boolean>;
+    /** Sends a vote (with an optional comment); resolves to the visitor-facing error, or null. */
+    submit: (feedback: { value: Vote; text?: string }) => Promise<string | null>;
   } = $props();
 
   let votes = $state<Record<string, Vote>>({});
@@ -33,6 +33,9 @@
   let dialogOpen = $state(false);
   let text = $state("");
   let sending = $state(false);
+  // Shown where the visitor is looking: inside the dialog while it is open,
+  // otherwise under the thumbs. A footer alert would hide behind the overlay.
+  let error = $state<string | null>(null);
 
   const given = $derived<Vote | undefined>(votes[sessionId] ?? restored?.value ?? undefined);
   const sent = $derived(commented[sessionId] === true || !!restored?.text);
@@ -40,8 +43,10 @@
   async function vote(value: Vote) {
     if (given === value || voting) return;
     voting = true;
+    error = null;
     try {
-      if (await submit({ value })) votes = { ...votes, [sessionId]: value };
+      error = await submit({ value });
+      if (!error) votes = { ...votes, [sessionId]: value };
     } finally {
       voting = false;
     }
@@ -52,8 +57,10 @@
     const comment = text.trim();
     if (!value || !comment || sending) return;
     sending = true;
+    error = null;
     try {
-      if (await submit({ value, text: comment })) {
+      error = await submit({ value, text: comment });
+      if (!error) {
         commented = { ...commented, [sessionId]: true };
         text = "";
         dialogOpen = false;
@@ -61,6 +68,11 @@
     } finally {
       sending = false;
     }
+  }
+
+  function openDialog() {
+    error = null;
+    dialogOpen = true;
   }
 </script>
 
@@ -103,11 +115,19 @@
     <button
       type="button"
       class="text-accent-default focus-visible:ring-default mt-1 w-fit rounded-md text-xs underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
-      onclick={() => (dialogOpen = true)}
+      onclick={openDialog}
     >
       {given === -1 ? m.widget_feedback_more_negative() : m.widget_feedback_more()}
     </button>
   {/if}
+{/if}
+{#if error && !dialogOpen}
+  <p
+    role="alert"
+    class="bg-negative-dimmer text-negative-default mt-2 rounded-lg px-3 py-2 text-xs"
+  >
+    {error}
+  </p>
 {/if}
 
 <Dialog.Root bind:open={dialogOpen}>
@@ -132,6 +152,14 @@
           ? m.widget_feedback_more_placeholder_negative()
           : m.widget_feedback_more_placeholder()}
         bind:value={text}></textarea>
+      {#if error && dialogOpen}
+        <p
+          role="alert"
+          class="bg-negative-dimmer text-negative-default rounded-lg px-3 py-2 text-sm"
+        >
+          {error}
+        </p>
+      {/if}
       <Dialog.Footer>
         <Dialog.Close>
           {#snippet child({ props })}

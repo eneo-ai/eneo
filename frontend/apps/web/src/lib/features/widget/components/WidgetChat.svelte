@@ -214,20 +214,20 @@
   async function submitFeedback(
     feedback: { value: 1 | -1; text?: string },
     retried = false
-  ): Promise<boolean> {
+  ): Promise<string | null> {
     const sessionId = chat.currentConversation.id;
-    if (!sessionId) return false;
+    if (!sessionId) return m.widget_error_generic();
     try {
       await session.ensureToken();
       await client.conversations.leaveFeedback({ conversation: { id: sessionId }, feedback });
-      return true;
+      return null;
     } catch (error) {
       if (isTokenRejected(error) && !retried) {
         session.invalidate();
         return submitFeedback(feedback, true);
       }
-      errorMessage = describeWidgetError(error);
-      return false;
+      // The feedback component shows this where the visitor is looking.
+      return describeWidgetError(error);
     }
   }
 </script>

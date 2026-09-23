@@ -32,6 +32,8 @@ const fake = vi.hoisted(() => ({
   feedback: [] as unknown[],
   release: null as null | (() => void),
   sessions: 0,
+  // Rejects the next feedback call when set, then clears itself.
+  failNextFeedback: false,
   // A stored conversation the fake returns on restore, when set.
   restored: null as null | Record<string, unknown>
 }));
@@ -89,6 +91,10 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
           return fake.restored;
         },
         leaveFeedback: async (args: unknown) => {
+          if (fake.failNextFeedback) {
+            fake.failNextFeedback = false;
+            throw new Error("boom");
+          }
           fake.feedback.push(args);
           return {};
         },
@@ -163,6 +169,7 @@ beforeEach(() => {
   fake.release = null;
   fake.sessions = 0;
   fake.restored = null;
+  fake.failNextFeedback = false;
   localStorage.clear();
 });
 
@@ -224,6 +231,32 @@ describe("WidgetChat", () => {
     });
     await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
     expect(page.getByRole("button", { name: "widget_feedback_more" }).elements()).toHaveLength(0);
+  });
+
+  test("a failed comment keeps the dialog open and says so inside it", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await vi.waitFor(() => expect(fake.release).not.toBeNull());
+    await releaseAnswer();
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_more" }));
+    const dialog = page.getByRole("dialog");
+    await userEvent.fill(dialog.getByRole("textbox"), "Ett försök.");
+
+    fake.failNextFeedback = true;
+    await userEvent.click(dialog.getByRole("button", { name: "widget_feedback_send" }));
+
+    await expect.element(dialog.getByRole("alert")).toHaveTextContent("widget_error_generic");
+    await expect.element(dialog).toBeVisible();
+
+    // The text is still there; the next attempt goes through and closes it.
+    await userEvent.click(dialog.getByRole("button", { name: "widget_feedback_send" }));
+    await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_received");
+    await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
+    expect(fake.feedback.at(-1)).toEqual({
+      conversation: { id: "session-1" },
+      feedback: { value: 1, text: "Ett försök." }
+    });
   });
 
   test("a restored conversation shows the vote the server remembers", async () => {
