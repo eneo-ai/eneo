@@ -50,7 +50,7 @@
 </script>
 
 <div class="flex flex-1 justify-center px-7 pt-7 pb-8 max-sm:px-3 max-sm:pt-4 max-sm:pb-5">
-  <div class="repair-screen w-full {BUILDER_COLUMN.standard}">
+  <div class="repair-screen w-full {BUILDER_COLUMN.sheet}">
     <section
       class="border-stronger bg-primary overflow-hidden rounded-xl border shadow-xs"
       aria-label={m.ai_builder_repair_title()}

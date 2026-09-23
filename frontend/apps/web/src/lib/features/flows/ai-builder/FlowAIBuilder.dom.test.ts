@@ -3952,6 +3952,47 @@ describe("FlowAIBuilder edit host contract", () => {
     });
   });
 
+  it("says a generation failed when the phase falls back to the composer", async () => {
+    // A step-scoped edit confirms no requirements summary, so a failed
+    // generation without a plan drops the phase back to the composer and no
+    // plan surface is mounted. The failure still has to be said: it used to
+    // be claimed by a surface that was not on screen, and only a reload
+    // revealed it.
+    const started = editSession();
+    const failed = {
+      ...started,
+      latest_plan_id: null,
+      latest_turn: {
+        client_turn_id: "33333333-3333-4333-8333-333333333333",
+        state: "committed" as const,
+        user_message_id: "33333333-3333-4333-8333-333333333334",
+        error: null,
+        requires_duplicate_provider_spend_acknowledgement: false,
+        retry_request: null
+      }
+    };
+    const { fetch } = makeFetch({ created: started, sessions: [[started, failed]] });
+    const { stream, calls } = makeStream(() => "hold");
+    const { service } = renderShell({ fetch, stream, targetKind: "edit", flowId: "flow-1" });
+    await waitFor(() => expect(service().hasSession).toBe(true));
+
+    await fireEvent.input(textbox(), { target: { value: "Ändra underlaget" } });
+    await fireEvent.click(button(m.ai_builder_send()));
+    await waitFor(() => expect(calls).toHaveLength(1));
+
+    // Generation is under way, then the stream itself fails.
+    calls[0]!.emit([statusEvent("architecture_committed")]);
+    calls[0]!.fail(new Error("Planeringen avbröts."));
+
+    // No plan and no summary: the composer owns the screen again, and the
+    // plan surface that would have shown the failure is not mounted.
+    await waitFor(() => expect(service().streamState).toBe("failed"));
+    await waitFor(() => expect(service().phase).toBe("discovering"));
+    expect(service().currentPlan).toBeNull();
+    // The turn alert says it, because no plan surface is there to.
+    expect(await screen.findByText(m.ai_builder_failure_heading_other())).toBeTruthy();
+  });
+
   it("promises an unaffected published version only when the flow is published", async () => {
     // Starting over is offered only when there is work to discard.
     const openDiscard = async (flowIsPublished: boolean) => {

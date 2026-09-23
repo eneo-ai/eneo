@@ -33,7 +33,7 @@
   let {
     targetKind,
     suppressStreamError = false,
-    columnClass = BUILDER_COLUMN.standard
+    columnClass = BUILDER_COLUMN.sheet
   }: Props = $props();
 
   const reducedMotion = prefersReducedMotion();

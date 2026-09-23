@@ -1,5 +1,6 @@
 <script lang="ts">
   import { BUILDER_COLUMN } from "./builderColumns";
+  import { FOLD_MIN_RUN } from "./builderStepRuns";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
@@ -50,7 +51,7 @@
     const rows: PlanningRow[] = [];
     let run: AIBuilderStepChoice[] = [];
     const endRun = (unchanged: boolean) => {
-      if (run.length >= 2) {
+      if (run.length >= FOLD_MIN_RUN) {
         rows.push({ kind: "gap", first: run[0].order, last: run[run.length - 1].order, unchanged });
       } else {
         rows.push(...run.map((step) => ({ kind: "step" as const, step })));
@@ -102,7 +103,7 @@
 <div
   class="flex min-h-full shrink-0 justify-center px-7 pt-6 pb-12 max-lg:px-5 max-md:px-4 max-sm:pt-4"
 >
-  <div class="w-full {BUILDER_COLUMN.standard}">
+  <div class="w-full {BUILDER_COLUMN.sheet}">
     {#if confirmedLine}
       <div
         class="border-default bg-primary mb-4 flex flex-wrap items-center gap-2.5 rounded-[10px] border px-3.5 py-2.5"

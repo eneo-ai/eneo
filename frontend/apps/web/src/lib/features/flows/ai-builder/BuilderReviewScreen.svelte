@@ -1,5 +1,6 @@
 <script lang="ts">
   import { BUILDER_COLUMN } from "./builderColumns";
+  import { FOLD_MIN_RUN } from "./builderStepRuns";
   import type { Snippet } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { onDestroy, tick, untrack } from "svelte";
@@ -299,7 +300,7 @@
     let run: typeof all = [];
     const endRun = () => {
       const key = run[0]?.step.plan_step_ref;
-      if (run.length >= 2 && !openGaps.has(key)) {
+      if (run.length >= FOLD_MIN_RUN && !openGaps.has(key)) {
         rows.push({
           kind: "gap",
           key,
@@ -1134,7 +1135,7 @@
     <div
       class="flex flex-1 justify-center px-7 pt-6 pb-28 max-lg:px-5 max-md:px-4 max-sm:pt-4 max-sm:pb-40"
     >
-      <div class="w-full {BUILDER_COLUMN.review}">
+      <div class="w-full {BUILDER_COLUMN.sheet}">
         <!-- Turn receipts and blockers, above the plan they describe -->
         {#if justUpdated}
           <div
@@ -1261,9 +1262,7 @@
               />
             {/if}
           </header>
-          <div
-            class="border-default grid border-t @min-[60rem]:grid-cols-[minmax(0,1fr)_20rem] @min-[80rem]:grid-cols-[minmax(0,1fr)_24rem]"
-          >
+          <div class="border-default grid border-t @min-[60rem]:grid-cols-[minmax(0,1fr)_20rem]">
             <div class="relative min-w-0" aria-busy={service.isRevisingPlan}>
               {#if service.isRevisingPlan}
                 <div
@@ -2095,12 +2094,12 @@
 
     <!-- Nothing is created until this bar says so -->
     <div
-      class="border-default bg-primary/95 sticky bottom-0 z-20 shrink-0 border-t px-7 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur max-sm:px-3"
+      class="border-default bg-primary/95 sticky bottom-0 z-20 shrink-0 border-t px-7 py-3.5 pb-[calc(0.875rem+env(safe-area-inset-bottom))] backdrop-blur max-sm:px-3"
     >
       <div
         bind:this={footerStatusEl}
         tabindex="-1"
-        class="mx-auto flex flex-wrap items-center gap-2.5 outline-none {BUILDER_COLUMN.review}"
+        class="mx-auto flex flex-wrap items-center gap-2.5 outline-none {BUILDER_COLUMN.sheet}"
       >
         {#if isCreateMode && service.applyResult}
           <!-- The one authored moment of the flow, in the bar the reader just
@@ -2165,8 +2164,8 @@
           {#if !service.applyResult && !isScopedStepReview}
             <Button
               variant="outline"
-              size="sm"
-              class="max-sm:min-h-11"
+              size="lg"
+              class="px-3.5 max-sm:min-h-11"
               disabled={isLocked}
               onclick={() => void service.changeRequirements()}
             >
@@ -2177,8 +2176,8 @@
           {#if isCreateMode}
             {#if !service.applyResult && (service.canApprove || service.canApply || service.isCreating || createFailed)}
               <Button
-                size="sm"
-                class="max-sm:min-h-11"
+                size="lg"
+                class="px-4 max-sm:min-h-11"
                 disabled={service.isBusy ||
                   service.isRevisingPlan ||
                   applyBlockedByPrerequisites ||
@@ -2203,8 +2202,8 @@
                  dialog confirms it and runs both. "Tillämpa" remains for a plan
                  approved earlier whose apply did not go through. -->
             <Button
-              size="sm"
-              class="max-sm:min-h-11"
+              size="lg"
+              class="px-4 max-sm:min-h-11"
               disabled={isLocked || isPublishedError || applyBlockedByPrerequisites}
               onclick={() => (approveDialogOpen = true)}
             >
@@ -2241,7 +2240,7 @@
   <div
     class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4"
   >
-    <div class="w-full {BUILDER_COLUMN.standard}">
+    <div class="w-full {BUILDER_COLUMN.sheet}">
       <div
         bind:this={generationCardEl}
         class="t-panel-slide border-default bg-primary rounded-xl border p-6 max-sm:p-4"

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { BUILDER_COLUMN } from "./builderColumns";
+  import { BUILDER_COLUMN, BUILDER_MEASURE } from "./builderColumns";
   import { m } from "$lib/paraglide/messages";
   import { Markdown } from "@eneo/ui";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
@@ -36,44 +36,46 @@
 <div
   class="flex min-h-full shrink-0 justify-center px-7 pt-6 pb-12 max-lg:px-5 max-md:px-4 max-sm:pt-4"
 >
-  <div class="w-full {BUILDER_COLUMN.question}">
-    <!-- With nothing to read and nothing to wait for there is no card: an
+  <div class="w-full {BUILDER_COLUMN.sheet}">
+    <div class="mx-auto w-full {BUILDER_MEASURE}">
+      <!-- With nothing to read and nothing to wait for there is no card: an
          empty box reads as something that failed to load. -->
-    {#if waiting || assistantText}
-      <div class="border-default bg-primary rounded-xl border p-[1.125rem] max-sm:p-4">
-        {#if waiting}
-          <p class="text-secondary text-[0.8125rem]" role="status" aria-live="polite">
-            {status === "reading_sources"
-              ? m.ai_builder_reply_reading_sources()
-              : status === "understanding_request"
-                ? m.ai_builder_reply_understanding()
-                : m.ai_builder_reply_reading()}
-          </p>
-          <div class="mt-3 flex flex-col gap-[0.4375rem]" aria-hidden="true">
-            <Skeleton class="bg-tertiary h-[0.6875rem] w-[74%] rounded" />
-            <Skeleton class="bg-tertiary h-[0.5625rem] w-[44%] rounded" />
-          </div>
-        {:else if assistantText}
-          <p class="text-secondary text-xs font-semibold">
-            {m.ai_builder_reply_from_eneo()}
-          </p>
-          <div class="text-primary mt-1.5 text-[0.9375rem] leading-relaxed">
-            <Markdown source={assistantText} />
-          </div>
-        {/if}
-      </div>
-    {/if}
+      {#if waiting || assistantText}
+        <div class="border-default bg-primary rounded-xl border p-[1.125rem] max-sm:p-4">
+          {#if waiting}
+            <p class="text-secondary text-[0.8125rem]" role="status" aria-live="polite">
+              {status === "reading_sources"
+                ? m.ai_builder_reply_reading_sources()
+                : status === "understanding_request"
+                  ? m.ai_builder_reply_understanding()
+                  : m.ai_builder_reply_reading()}
+            </p>
+            <div class="mt-3 flex flex-col gap-[0.4375rem]" aria-hidden="true">
+              <Skeleton class="bg-tertiary h-[0.6875rem] w-[74%] rounded" />
+              <Skeleton class="bg-tertiary h-[0.5625rem] w-[44%] rounded" />
+            </div>
+          {:else if assistantText}
+            <p class="text-secondary text-xs font-semibold">
+              {m.ai_builder_reply_from_eneo()}
+            </p>
+            <div class="text-primary mt-1.5 text-[0.9375rem] leading-relaxed">
+              <Markdown source={assistantText} />
+            </div>
+          {/if}
+        </div>
+      {/if}
 
-    {#if !waiting}
-      <div class:mt-3={assistantText}>
-        <FlowAIBuilderInput
-          {editContext}
-          {editContextLabel}
-          {editContextLocked}
-          {oncleareditcontext}
-          placeholder={m.ai_builder_reply_placeholder()}
-        />
-      </div>
-    {/if}
+      {#if !waiting}
+        <div class:mt-3={assistantText}>
+          <FlowAIBuilderInput
+            {editContext}
+            {editContextLabel}
+            {editContextLocked}
+            {oncleareditcontext}
+            placeholder={m.ai_builder_reply_placeholder()}
+          />
+        </div>
+      {/if}
+    </div>
   </div>
 </div>

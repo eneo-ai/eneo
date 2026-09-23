@@ -63,7 +63,7 @@
 <div
   class="flex min-h-full shrink-0 justify-center px-7 pt-6 pb-12 max-lg:px-5 max-md:px-4 max-sm:pt-4 max-sm:pb-0"
 >
-  <div class="flex w-full flex-col {BUILDER_COLUMN.question}">
+  <div class="flex w-full flex-col {BUILDER_COLUMN.sheet}">
     {#if answered.length > 0}
       <!-- On a phone the answered chips stay on one line and scroll sideways;
            wrapping them would push the question itself below the fold. -->

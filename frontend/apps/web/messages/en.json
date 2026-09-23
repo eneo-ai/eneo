@@ -4760,7 +4760,7 @@
   "ai_builder_confirm_lead": "This is what gets built. Use Change on a row, or describe the change below.",
   "ai_builder_confirm_lead_confirmed": "Confirmed. The plan is built from this.",
   "ai_builder_confirm_stale_title": "Updated. Confirm again.",
-  "ai_builder_confirm_stale_body": "You changed an answer, so the summary has been updated. Confirm it again before Eneo continues.",
+  "ai_builder_confirm_stale_body": "The summary has been updated since you confirmed it. Confirm it again before Eneo continues.",
   "ai_builder_confirm_no_questions": "No questions were needed. Everything was in your description.",
   "ai_builder_confirm_attachments": "Attached files",
   "ai_builder_understanding_title": "Here is how I understand it",

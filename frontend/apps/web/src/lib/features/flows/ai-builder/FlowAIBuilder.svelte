@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { BUILDER_COLUMN } from "./builderColumns";
+  import { BUILDER_COLUMN, BUILDER_MEASURE } from "./builderColumns";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { resolve } from "$app/paths";
@@ -340,24 +340,13 @@
         screen === "review")
   );
 
-  // One column per screen: the rail, the status row and the content sit in it,
-  // so nothing floats beside the card it belongs to.
-  const columnClass = $derived.by(() => {
-    switch (screen) {
-      case "review":
-        // A failure or conflict without a plan is a message, not a sheet.
-        return service.currentPlan ? BUILDER_COLUMN.review : BUILDER_COLUMN.standard;
-      case "task":
-        return BUILDER_COLUMN.task;
-      case "findings":
-        return BUILDER_COLUMN.standard;
-      case "question":
-      case "reply":
-        return BUILDER_COLUMN.question;
-      default:
-        return BUILDER_COLUMN.standard;
-    }
-  });
+  // One sheet for every screen: the edges never move between phases.
+  const columnClass = BUILDER_COLUMN.sheet;
+  // The two screens that are one composer cap it at the reading measure, so a
+  // notice above it ends where that card ends instead of overhanging it.
+  const alertColumnClass = $derived(
+    screen === "task" || screen === "reply" ? BUILDER_MEASURE : columnClass
+  );
 
   // ---- Screen change: announce it, then hand focus to the new heading -------
   // A screen swap is a navigation for anyone not watching the viewport, so it
@@ -994,7 +983,11 @@
     </div>
 
     <div class="flex min-h-0 flex-1 flex-col overflow-y-auto" bind:this={screenScrollEl}>
-      <BuilderTurnAlert {targetKind} {columnClass} suppressStreamError={planSurfaceClaimsError} />
+      <BuilderTurnAlert
+        {targetKind}
+        columnClass={alertColumnClass}
+        suppressStreamError={planSurfaceClaimsError}
+      />
       {#if showModelNotice}
         <div class="px-7 pt-3 max-sm:px-3" data-testid="ai-builder-model-notice">
           <!-- The trigger's own inset is pulled back so its icon starts on the

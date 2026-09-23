@@ -31,6 +31,24 @@ describe("BuilderBuildScreen", () => {
     expect(screen.getAllByText(m.ai_builder_node_changes())).toHaveLength(1);
   });
 
+  it("keeps a short flow whole: two unchanged steps are not worth a fold", () => {
+    // Folding two steps hides them behind a click and saves one row. Short
+    // flows are read at a glance, so the run stays open.
+    render(BuilderBuildScreen, {
+      props: {
+        status: null,
+        mode: "edit",
+        flowSteps: thirtySteps.slice(0, 4),
+        targetStepNumber: 4
+      }
+    });
+
+    for (const order of [1, 2, 3, 4]) {
+      expect(screen.getByText(`Steg nummer ${order}`)).toBeTruthy();
+    }
+    expect(screen.queryByText(m.ai_builder_diagram_gap({ first: "1", last: "2" }))).toBeNull();
+  });
+
   it("shows a whole-flow change's first steps and counts the rest in one row", () => {
     render(BuilderBuildScreen, {
       props: { status: null, mode: "edit", flowSteps: thirtySteps, targetStepNumber: null }

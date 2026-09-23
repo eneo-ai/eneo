@@ -357,10 +357,11 @@ export class FlowAIBuilderDriver {
   }
 
   /** The model the composer names and a turn runs: the user's choice when
-   *  there is one, otherwise the advertised default. A choice a later listing
-   *  omits is still named, from the last listing that had it. */
+   *  there is one, then the model this session's latest turn ran, otherwise
+   *  the advertised default. A choice a later listing omits is still named,
+   *  from the last listing that had it. */
   get effectiveModel(): AIBuilderModel | null {
-    const id = this.#state.selectedModelId ?? this.#state.defaultModelId;
+    const id = this.#state.selectedModelId ?? this.#sessionModelId ?? this.#state.defaultModelId;
     if (id === null) return null;
     const listed = this.#state.availableModels.find((model) => model.id === id);
     if (listed) return listed;
@@ -370,6 +371,15 @@ export class FlowAIBuilderDriver {
   /** The last listed version of the user's choice, so a listing that drops it
    *  still shows which model the user picked. */
   #lastListedSelection: AIBuilderModel | null = null;
+
+  /** The model this session's latest turn ran, when the listing still offers
+   *  it. A choice lives in the browser, so after a reload the default would
+   *  otherwise be named above a plan another model wrote. */
+  get #sessionModelId(): string | null {
+    const id = this.#state.session?.latest_turn?.retry_request?.model_id ?? null;
+    if (id === null) return null;
+    return this.#state.availableModels.some((model) => model.id === id) ? id : null;
+  }
 
   /** The model a same-turn replay of the latest turn runs, when that is not
    *  the model the composer shows: its listed name, or "previous" when no

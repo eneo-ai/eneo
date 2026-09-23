@@ -76,6 +76,25 @@ describe("wordDiff", () => {
     ]);
   });
 
+  it("keeps the separators inside a removed run of several lines", () => {
+    // Struck lines must not run together: the old instruction has to read as
+    // it was written, even though the layout belongs to the new text.
+    const parts = wordDiff("A\nOld first\nOld second\nZ", "A\nZ")!;
+    const view = markedView(parts);
+    const removed = view
+      .filter((part) => part.kind === "removed")
+      .map((part) => part.text)
+      .join("");
+    expect(removed).toBe("Old first\nOld second");
+    // Everything that is not struck still reads as the new text.
+    expect(
+      view
+        .filter((part) => part.kind !== "removed")
+        .map((part) => part.text)
+        .join("")
+    ).toBe("A\nZ");
+  });
+
   it("keeps a step reference whole", () => {
     expect(
       show(

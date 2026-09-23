@@ -450,7 +450,7 @@
 <div
   class="flex min-h-full shrink-0 justify-center px-7 pt-6 pb-16 max-lg:px-5 max-md:px-4 max-sm:pt-4 max-sm:pb-12"
 >
-  <div class="confirm-screen w-full {BUILDER_COLUMN.standard}">
+  <div class="confirm-screen w-full {BUILDER_COLUMN.sheet}">
     {#if unlistedAnswers.length > 0 && !readOnly}
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <span class="text-secondary text-xs">{m.ai_builder_question_answers_label()}</span>
@@ -617,7 +617,7 @@
               {#each summary.key_decisions as decision (decision.topic)}
                 {@const settledBy = decision.question_id ?? null}
                 <div
-                  class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
+                  class="border-dimmer grid max-w-[56rem] items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_minmax(0,1fr)_auto]"
                 >
                   <dt class="text-secondary text-[0.8125rem]">{decision.topic}</dt>
                   <dd class="text-primary text-[0.8125rem] font-medium">
@@ -659,7 +659,7 @@
                    never states the same thing twice. -->
               {#each contractRows as row (row.label)}
                 <div
-                  class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
+                  class="border-dimmer grid max-w-[56rem] items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_minmax(0,1fr)_auto]"
                 >
                   <dt class="text-secondary text-[0.8125rem]">{row.label}</dt>
                   <dd class="text-primary text-[0.8125rem] font-medium">{row.value}</dd>
@@ -679,7 +679,7 @@
               {/each}
               {#if attachmentRows.length > 0}
                 <div
-                  class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
+                  class="border-dimmer grid max-w-[56rem] gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_minmax(0,1fr)]"
                 >
                   <dt class="text-secondary text-[0.8125rem]">
                     {m.ai_builder_attachment_rows_title()}
@@ -750,7 +750,7 @@
                 </div>
               {:else if attachments.length > 0}
                 <div
-                  class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
+                  class="border-dimmer grid max-w-[56rem] gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_minmax(0,1fr)]"
                 >
                   <dt class="text-secondary text-[0.8125rem]">
                     {m.ai_builder_confirm_attachments()}
@@ -779,7 +779,9 @@
             <p class="text-secondary mt-0.5 text-[0.8rem]">{m.ai_builder_run_preview_note()}</p>
             <dl class="mt-1.5 flex flex-col">
               {#if previewInput}
-                <div class="grid gap-x-4 gap-y-0.5 py-1.5 sm:grid-cols-[12.5rem_1fr]">
+                <div
+                  class="grid max-w-[56rem] gap-x-4 gap-y-0.5 py-1.5 sm:grid-cols-[12.5rem_minmax(0,1fr)]"
+                >
                   <dt class="text-secondary text-[0.8125rem]">
                     {m.ai_builder_run_preview_input()}
                   </dt>
@@ -787,7 +789,9 @@
                 </div>
               {/if}
               {#if previewResult}
-                <div class="grid gap-x-4 gap-y-0.5 py-1.5 sm:grid-cols-[12.5rem_1fr]">
+                <div
+                  class="grid max-w-[56rem] gap-x-4 gap-y-0.5 py-1.5 sm:grid-cols-[12.5rem_minmax(0,1fr)]"
+                >
                   <dt class="text-secondary text-[0.8125rem]">
                     {m.ai_builder_run_preview_result()}
                   </dt>
@@ -795,7 +799,9 @@
                 </div>
               {/if}
               {#if runPreview.template}
-                <div class="grid gap-x-4 gap-y-0.5 py-1.5 sm:grid-cols-[12.5rem_1fr]">
+                <div
+                  class="grid max-w-[56rem] gap-x-4 gap-y-0.5 py-1.5 sm:grid-cols-[12.5rem_minmax(0,1fr)]"
+                >
                   <dt class="text-secondary text-[0.8125rem]">
                     {m.ai_builder_run_preview_template()}
                   </dt>
@@ -876,7 +882,9 @@
                 transition:slide={{ duration: reducedMotion ? 0 : 180, easing: cubicOut }}
               >
                 {#each runtimeFields as field, detailIndex (detailIndex)}
-                  <div class="grid gap-x-4 gap-y-0.5 py-2 sm:grid-cols-[12.5rem_1fr]">
+                  <div
+                    class="grid max-w-[56rem] gap-x-4 gap-y-0.5 py-2 sm:grid-cols-[12.5rem_minmax(0,1fr)]"
+                  >
                     <dt class="text-primary text-[0.8125rem] font-medium">{field.label}</dt>
                     <dd class="text-secondary text-[0.8125rem]">
                       {fieldTypeLabel(field.type)}{field.required
@@ -1162,7 +1170,7 @@
                 <dl class="flex flex-col">
                   {#each assumptionRows as row (row.question_id)}
                     <div
-                      class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
+                      class="border-dimmer grid max-w-[56rem] items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_minmax(0,1fr)_auto]"
                     >
                       <dt class="text-secondary text-[0.8125rem]">{row.topic}</dt>
                       <dd class="text-primary text-[0.8125rem] font-medium">{row.label}</dd>
@@ -1223,7 +1231,13 @@
                  below the card. A second button for it here read as two
                  different actions. -->
             <div class="ml-auto flex flex-wrap gap-2">
-              <Button variant="default" onclick={onconfirm} disabled={actionsDisabled}>
+              <Button
+                variant="default"
+                size="lg"
+                class="px-4"
+                onclick={onconfirm}
+                disabled={actionsDisabled}
+              >
                 {isEdit ? m.ai_builder_confirm_action_edit() : m.ai_builder_confirm_action()}
               </Button>
             </div>

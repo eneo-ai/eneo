@@ -1,18 +1,15 @@
 /**
- * The Builder's reading columns, one owner for the widths each screen, the
- * phase rail and the status rows share (DESIGN.md: 41.25, 43.75 and 53.75rem,
- * about 10% wider at 2xl). The plan review is the exception: one wide sheet
- * with the change and its context side by side, sized by the Builder's
- * container rather than the viewport. Tailwind reads these literals from this
- * file.
+ * The Builder's one sheet width, shared by every screen, the phase rail and
+ * the status rows, so the card edges never move as the work moves from the
+ * task to the questions to the plan. Reading measures are capped inside each
+ * screen instead (DESIGN.md caps prose at 64 to 72ch); the width is sized by
+ * the Builder's own container, not the viewport. Tailwind reads the literals
+ * from this file.
  */
 export const BUILDER_COLUMN = {
-  /** The first task prompt. */
-  task: "max-w-[40.625rem] 2xl:max-w-[45rem]",
-  /** One question or a reply. */
-  question: "max-w-[41.25rem] 2xl:max-w-[45.625rem]",
-  /** Confirm, build, findings, repair and the conversation. */
-  standard: "max-w-[43.75rem] 2xl:max-w-[48.125rem]",
-  /** The plan review sheet. */
-  review: "max-w-[84rem] @min-[140rem]:max-w-[96rem]"
+  /** Every Builder screen. */
+  sheet: "max-w-[70rem] @min-[110rem]:max-w-[76rem]"
 } as const;
+
+/** The measure a column of prose or a single-choice list reads at. */
+export const BUILDER_MEASURE = "max-w-[46rem]";

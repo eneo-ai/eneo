@@ -4760,7 +4760,7 @@
   "ai_builder_confirm_lead": "Det här är vad som byggs. Använd Ändra på raden, eller beskriv ändringen nedan.",
   "ai_builder_confirm_lead_confirmed": "Bekräftad. Planen bygger på det här.",
   "ai_builder_confirm_stale_title": "Uppdaterad. Bekräfta igen.",
-  "ai_builder_confirm_stale_body": "Du ändrade ett svar, så sammanfattningen är uppdaterad. Bekräfta den igen innan Eneo går vidare.",
+  "ai_builder_confirm_stale_body": "Sammanfattningen har uppdaterats sedan du bekräftade den. Bekräfta den igen innan Eneo går vidare.",
   "ai_builder_confirm_no_questions": "Inga frågor behövdes. Allt fanns i din beskrivning.",
   "ai_builder_confirm_attachments": "Bifogade filer",
   "ai_builder_understanding_title": "Så här uppfattar jag det",

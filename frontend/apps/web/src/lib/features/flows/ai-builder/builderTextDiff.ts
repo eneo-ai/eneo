@@ -84,15 +84,18 @@ function regroup(raw: DiffPart[]): DiffPart[] {
   let added = "";
   // A change is marked from its first to its last visible character, line by
   // line: the spaces and line breaks around and inside it stay on their side,
-  // unmarked, so no empty line carries a mark.
+  // unmarked, so no empty line carries a mark. Splitting on the newline
+  // itself keeps this linear; scanning every whitespace run for one does not.
+  const BLANK_EDGES = /^([^\S\n]*)([\s\S]*?)([^\S\n]*)$/;
   const pushChange = (kind: "removed" | "added", text: string) => {
-    for (const piece of text.split(/(\s*\n\s*)/)) {
-      if (!piece) continue;
-      const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(piece) ?? ["", "", piece, ""];
+    text.split("\n").forEach((line, index) => {
+      if (index > 0) parts.push({ kind, text: "\n", plain: true });
+      if (!line) return;
+      const [, lead, core, trail] = BLANK_EDGES.exec(line) ?? ["", "", line, ""];
       if (lead) parts.push({ kind, text: lead, plain: true });
       if (core) parts.push({ kind, text: core });
       if (trail) parts.push({ kind, text: trail, plain: true });
-    }
+    });
   };
   const flush = () => {
     if (removed) pushChange("removed", removed);
@@ -148,10 +151,24 @@ export function markedView(parts: DiffPart[]): MarkedPart[] {
           : "added";
       view.push({ kind, text: isBreak ? "¶" : "·", marker: isBreak ? "break" : "space" });
     }
-    for (const part of change) {
-      if (!part.plain) view.push(part);
-      else if (part.kind === "added") view.push({ kind: "same", text: part.text });
-    }
+    // The view reads as the new text, so the added side keeps its own spacing
+    // and the removed side keeps only what sits between its struck words: a
+    // removed run of several lines must not collapse into one.
+    const lastRemovedCore = change.reduce(
+      (last, part, index) => (part.kind === "removed" && !part.plain ? index : last),
+      -1
+    );
+    let seenRemovedCore = false;
+    change.forEach((part, index) => {
+      if (!part.plain) {
+        if (part.kind === "removed") seenRemovedCore = true;
+        view.push(part);
+      } else if (part.kind === "added") {
+        view.push({ kind: "same", text: part.text });
+      } else if (seenRemovedCore && index < lastRemovedCore) {
+        view.push({ kind: "removed", text: part.text, plain: true });
+      }
+    });
     change = [];
   };
   for (const part of parts) {

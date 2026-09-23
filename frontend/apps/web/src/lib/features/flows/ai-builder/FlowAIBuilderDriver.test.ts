@@ -860,6 +860,33 @@ describe("FlowAIBuilderDriver", () => {
       expect(body.model_id).toBe(retainedModelId);
     });
 
+    it("names the model the session's latest turn ran, not the default", () => {
+      // The choice lives in the browser. After a reload the session is read
+      // back with its turns, so the plan on screen must keep the name of the
+      // model that wrote it, and the next turn continues on that model.
+      const ranTurn = makeRecoverableSession("failed_before_provider");
+      const ranModelId = ranTurn.latest_turn!.retry_request!.model_id!;
+      const { driver } = makeDriver();
+      driver.seedState({
+        session: ranTurn,
+        availableModels: [makeModel(), makeModel({ id: ranModelId, name: "Ran the turn" })],
+        defaultModelId: DEFAULT_MODEL_ID
+      });
+
+      expect(driver.effectiveModel?.name).toBe("Ran the turn");
+
+      // A model the listing no longer offers cannot be named: the default is.
+      driver.seedState({ availableModels: [makeModel()] });
+      expect(driver.effectiveModel?.id).toBe(DEFAULT_MODEL_ID);
+
+      // And the user's own choice still wins over both.
+      driver.selectModel(DEFAULT_MODEL_ID);
+      driver.seedState({
+        availableModels: [makeModel(), makeModel({ id: ranModelId, name: "Ran the turn" })]
+      });
+      expect(driver.effectiveModel?.id).toBe(DEFAULT_MODEL_ID);
+    });
+
     it("keeps the choice and its effort when a listing fails", async () => {
       const fetch = vi.fn(async () => {
         throw new Error("listing failed");
