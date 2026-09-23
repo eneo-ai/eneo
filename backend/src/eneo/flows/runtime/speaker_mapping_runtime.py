@@ -135,16 +135,19 @@ def validate_speaker_mapping(
     inventory: Sequence[Mapping[str, Any]],
     participants: Sequence[str],
     allow_free_text: bool,
+    split_labels: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Normalize a mapping to the inventory: every known label exactly once,
-    each name one short line, restricted to participants unless free text is
-    allowed."""
+    and at most once a label the transcript's own speaker edits split off
+    after the inventory was taken. A name is one short line, restricted to
+    participants unless free text is allowed."""
     if not isinstance(structured, Mapping):
         raise SpeakerMappingValidationError("Speaker mapping must be an object.")
     raw_speakers = cast(Mapping[str, object], structured).get("speakers")
     if not isinstance(raw_speakers, list):
         raise SpeakerMappingValidationError("Speaker mapping needs a speakers list.")
     known_labels = [str(entry.get("label")) for entry in inventory]
+    optional_labels = [label for label in split_labels if label not in known_labels]
     by_label: dict[str, dict[str, Any]] = {}
     for item in cast(list[object], raw_speakers):
         if not isinstance(item, Mapping):
@@ -153,7 +156,7 @@ def validate_speaker_mapping(
         label = entry.get("label")
         if not isinstance(label, str) or not SPEAKER_LABEL_RE.match(label):
             raise SpeakerMappingValidationError("Each speaker entry needs a label.")
-        if label not in known_labels:
+        if label not in known_labels and label not in optional_labels:
             raise SpeakerMappingValidationError(
                 f"Unknown speaker label '{label}' in mapping."
             )
@@ -193,7 +196,13 @@ def validate_speaker_mapping(
         raise SpeakerMappingValidationError(
             f"Mapping is missing speaker labels: {', '.join(missing)}."
         )
-    return {"speakers": [by_label[label] for label in known_labels]}
+    return {
+        "speakers": [
+            by_label[label]
+            for label in [*known_labels, *optional_labels]
+            if label in by_label
+        ]
+    }
 
 
 def ground_speaker_mapping_proposal(

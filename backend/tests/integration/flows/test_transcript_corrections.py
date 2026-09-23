@@ -1885,3 +1885,212 @@ async def test_large_source_is_reviewed_and_regenerated_through_api(
     assert child.status_code == 200, child.text
     assert child.json()["source_hash"] == source_hash
     assert child.json()["segments"] == detail.json()["segments"]
+
+
+async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    from eneo.database.tables.flow_tables import FlowRuns, FlowStepAttempts
+    from eneo.database.tables.spaces_table import SpacesUsers
+    from eneo.flows.application.flow_transcript_regeneration_service import (
+        render_original_segments,
+    )
+    from eneo.flows.domain.speaker_labels import (
+        SPEAKER_MAPPING_OUTPUT_CONTRACT,
+        apply_speaker_names,
+        build_speaker_inventory,
+    )
+    from eneo.flows.enums import FlowOutputType
+    from eneo.flows.flow_review_policy import FlowStepReviewMode
+    from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
+    from eneo.spaces.api.space_models import SpaceRoleValue
+
+    source_text = render_original_segments(SEGMENTS)
+    proposal = {
+        "speakers": [
+            {
+                "label": "SPEAKER_00",
+                "name": "Anna",
+                "confidence": "high",
+                "evidence": "",
+            },
+            {"label": "SPEAKER_01", "name": None, "confidence": "low", "evidence": ""},
+        ]
+    }
+    named_text = apply_speaker_names(source_text, {"SPEAKER_00": "Anna"})
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+            runtime_definition=True,
+        )
+        flow = await FlowRepository(session=session).get(
+            scenario.flow_id, admin_user.tenant_id
+        )
+        session.add(
+            SpacesUsers(
+                space_id=flow.space_id,
+                user_id=admin_user.id,
+                role=SpaceRoleValue.EDITOR,
+            )
+        )
+        run_repo = FlowRunRepository(session=session)
+        assert await run_repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=admin_user.tenant_id,
+            expected_revision=1,
+        )
+        results = {
+            result.step_id: result
+            for result in await session.scalars(
+                sa.select(FlowStepResults).where(
+                    FlowStepResults.flow_run_id == scenario.flow_run_id
+                )
+            )
+        }
+        source = results[scenario.transcription_step_id]
+        source.status = "completed"
+        source.output_payload_json = {"text": source_text}
+        mapping_step = results[scenario.plain_step_id]
+        mapping_step.status = "completed"
+        mapping_step.current_attempt_no = 1
+        mapping_step.output_payload_json = {
+            "text": named_text,
+            "structured": proposal,
+            "speaker_mapping": {
+                "source_step_id": str(scenario.transcription_step_id),
+                "source_step_order": 1,
+                "source_attempt_no": source.current_attempt_no,
+                "participants_field": "deltagare",
+                "participants": ["Anna"],
+                "infer_names": False,
+                "inventory": build_speaker_inventory(source_text),
+            },
+        }
+        session.add(
+            FlowStepAttempts(
+                flow_run_id=scenario.flow_run_id,
+                flow_id=scenario.flow_id,
+                tenant_id=admin_user.tenant_id,
+                step_id=scenario.plain_step_id,
+                step_order=2,
+                attempt_no=1,
+                status="completed",
+                started_at=sa.func.now(),
+                finished_at=sa.func.now(),
+                input_payload_json={
+                    "schema_version": "flow-step-attempt-input.v1",
+                    "resolved_input": {},
+                },
+            )
+        )
+        await session.flush()
+        await run_repo.update_input_payload(
+            run_id=scenario.flow_run_id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_patch=FlowRunInputEnvelopePatch.transcription(
+                transcript=inline_transcript(
+                    text=named_text,
+                    source_step_id=scenario.plain_step_id,
+                    source_attempt_no=1,
+                    selector_path=("output", "text"),
+                )
+            ),
+        )
+        opened = await container.flow_run_review_checkpoint_repo().open_review_checkpoint_for_completed_step(
+            tenant_id=admin_user.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.plain_step_id,
+            step_order=2,
+            attempt_no=1,
+            requester_principal=FlowPrincipal.from_user(admin_user),
+            next_step_ids=[],
+            review_mode=FlowStepReviewMode.EDIT,
+            output_type=FlowOutputType.JSON,
+            output_contract_json=SPEAKER_MAPPING_OUTPUT_CONTRACT,
+        )
+        checkpoint = opened.checkpoint
+        token = container.auth_service().create_access_token_for_user(admin_user)
+    headers = {"Authorization": f"Bearer {token}"}
+    run_path = f"/api/v1/flows/{scenario.flow_id}/runs/{scenario.flow_run_id}"
+    split = await client.patch(
+        f"{run_path}/steps/{scenario.transcription_step_id}/transcript-corrections/",
+        headers=headers,
+        json={
+            "schema_version": 3,
+            "segments_hash": segments_content_hash(SEGMENTS),
+            "expected_revision": None,
+            "occurrences": [],
+            "speaker_edits": [
+                {
+                    "segment_index": 1,
+                    "original_speaker": "SPEAKER_01",
+                    "speaker": "SPEAKER_05",
+                }
+            ],
+        },
+    )
+    assert split.status_code == 200, split.text
+    checkpoint_path = f"{run_path}/review-checkpoints/{checkpoint.id}/"
+
+    anna, unnamed = proposal["speakers"]
+
+    def edit(*speakers: dict) -> dict:
+        return {
+            "expected_checkpoint_revision": checkpoint.revision,
+            "edited_value": {"speakers": list(speakers)},
+        }
+
+    split_name = {"label": "SPEAKER_05", "name": "Eva Ek", "confidence": "high"}
+    for refused in (
+        edit(anna, unnamed, {**split_name, "label": "SPEAKER_09"}),
+        edit(anna, {**unnamed, "name": "Eva\nEk"}),
+        edit(anna, {**unnamed, "name": "Eva\u0007Ek"}),
+    ):
+        response = await client.patch(checkpoint_path, headers=headers, json=refused)
+        assert response.status_code == 400, response.text
+        assert (
+            response.json()["code"] == FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value
+        )
+    edited = await client.patch(
+        checkpoint_path, headers=headers, json=edit(anna, unnamed, split_name)
+    )
+    assert edited.status_code == 200, edited.text
+
+    approved = await client.post(
+        f"{checkpoint_path}approve/",
+        headers=headers,
+        json={"expected_checkpoint_revision": edited.json()["revision"]},
+    )
+
+    assert approved.status_code == 200, approved.text
+    document = approved.json()["current_payload_json"]["text"]
+    assert "] Eva Ek: sugary svarade direkt." in document
+    assert "] Anna: Vi frågade sugary om planen." in document
+    assert "SPEAKER_" not in document
+    async with db_container() as container:
+        session = container.session()
+        output = await session.scalar(
+            sa.select(FlowStepResults.output_payload_json).where(
+                FlowStepResults.flow_run_id == scenario.flow_run_id,
+                FlowStepResults.step_id == scenario.plain_step_id,
+            )
+        )
+        run_input = await session.scalar(
+            sa.select(FlowRuns.input_payload_json).where(
+                FlowRuns.id == scenario.flow_run_id
+            )
+        )
+    assert output["text"] == document
+    assert run_input["transkribering"]["text"] == document

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Awaitable, TypeAlias, TypeVar, assert_never, cast
@@ -376,12 +377,25 @@ def speaker_mapping_extension(
     return cast(dict[str, Any], extension) if isinstance(extension, dict) else None
 
 
+def split_speaker_labels(
+    correction_set: FlowTranscriptCorrectionSet | None,
+) -> list[str]:
+    """Labels the transcript's own speaker edits assign, which a mapping
+    review may name beyond its inventory (a speaker split off in review)."""
+    if correction_set is None:
+        return []
+    return sorted(
+        {edit.speaker for edit in correction_set.speaker_edits() if edit.speaker}
+    )
+
+
 def _speaker_mapping_text(
     *,
     checkpoint: FlowRunReviewCheckpoint,
     extension: dict[str, Any],
     structured: StructuredOutputValue,
     source_text: str | None,
+    split_labels: Sequence[str],
 ) -> tuple[str, StructuredOutputValue]:
     """Re-apply an edited mapping to the source transcript.
 
@@ -407,6 +421,7 @@ def _speaker_mapping_text(
             if isinstance(participants, list)
             else [],
             allow_free_text=True,
+            split_labels=split_labels,
         )
     except SpeakerMappingValidationError as exc:
         raise TypedIOValidationException(
@@ -423,13 +438,15 @@ def build_edited_review_payload(
     checkpoint: FlowRunReviewCheckpoint,
     edited_value: FlowReviewEditedValue,
     source_text: str | None = None,
+    split_labels: Sequence[str] = (),
 ) -> FlowPersistedJsonObject:
     """Rebuild the reviewed step's payload from the one value the reviewer owns.
 
     Both persisted encodings of a JSON step output — the structured value and its
     text rendering — are derived here, so an edit cannot leave them disagreeing.
     For a speaker-mapping step the text is the source transcript with the edited
-    mapping applied, which needs ``source_text``.
+    mapping applied, which needs ``source_text``; ``split_labels`` are the
+    labels the source transcript's speaker edits assign (``split_speaker_labels``).
     """
     if checkpoint.schema_version != _REVIEW_CHECKPOINT_SCHEMA_VERSION:
         raise TypedIOValidationException(
@@ -482,6 +499,7 @@ def build_edited_review_payload(
                     extension=extension,
                     structured=structured,
                     source_text=source_text,
+                    split_labels=split_labels,
                 )
             else:
                 text = _rendered_json_text(checkpoint=checkpoint, structured=structured)
@@ -643,10 +661,22 @@ class FlowRunReviewCheckpointService:
             if extension is not None
             else None
         )
+        split_labels = (
+            split_speaker_labels(
+                await self.transcript_corrections_repo.get_for_step(
+                    run_id=run.id,
+                    step_id=UUID(str(extension.get("source_step_id"))),
+                    tenant_id=run.tenant_id,
+                )
+            )
+            if extension is not None and self.transcript_corrections_repo is not None
+            else []
+        )
         current_payload_json = build_edited_review_payload(
             checkpoint=checkpoint,
             edited_value=edited_value,
             source_text=source_text,
+            split_labels=split_labels,
         )
         edited = await self._with_review_lifecycle_translation(
             self.flow_run_review_checkpoint_repo.edit_review_checkpoint_payload(
@@ -1068,6 +1098,7 @@ class FlowRunReviewCheckpointService:
                 checkpoint=checkpoint,
                 edited_value=mapping,
                 source_text=folded_source,
+                split_labels=split_speaker_labels(correction_set),
             )
 
         return build_folded_transcript(

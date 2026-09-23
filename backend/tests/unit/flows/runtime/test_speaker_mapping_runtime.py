@@ -180,6 +180,59 @@ INVENTORY_NAMES = [
 ]
 
 
+def test_a_speaker_split_off_in_review_can_be_named_or_left_out() -> None:
+    named = validate_speaker_mapping(
+        {"speakers": [*INVENTORY_NAMES, {"label": "SPEAKER_05", "name": "Eva Ek"}]},
+        inventory=INVENTORY,
+        participants=PARTICIPANTS,
+        allow_free_text=True,
+        split_labels=["SPEAKER_05", "SPEAKER_00"],
+    )
+    assert [entry["label"] for entry in named["speakers"]] == [
+        "SPEAKER_00",
+        "SPEAKER_01",
+        "SPEAKER_05",
+    ]
+    assert mapping_to_names(named) == {
+        "SPEAKER_00": "Anna Svensson",
+        "SPEAKER_05": "Eva Ek",
+    }
+    unnamed = validate_speaker_mapping(
+        {"speakers": INVENTORY_NAMES},
+        inventory=INVENTORY,
+        participants=PARTICIPANTS,
+        allow_free_text=True,
+        split_labels=["SPEAKER_05"],
+    )
+    assert [entry["label"] for entry in unnamed["speakers"]] == [
+        "SPEAKER_00",
+        "SPEAKER_01",
+    ]
+
+
+@pytest.mark.parametrize(
+    "speakers",
+    [
+        [INVENTORY_NAMES[0], {"label": "SPEAKER_05", "name": "Eva Ek"}],
+        [*INVENTORY_NAMES, {"label": "SPEAKER_09", "name": "Eva Ek"}],
+        [
+            *INVENTORY_NAMES,
+            {"label": "SPEAKER_05", "name": "Eva Ek"},
+            {"label": "SPEAKER_05", "name": None},
+        ],
+    ],
+)
+def test_a_split_label_keeps_the_inventory_rules(speakers) -> None:
+    with pytest.raises(SpeakerMappingValidationError):
+        validate_speaker_mapping(
+            {"speakers": speakers},
+            inventory=INVENTORY,
+            participants=PARTICIPANTS,
+            allow_free_text=True,
+            split_labels=["SPEAKER_05"],
+        )
+
+
 @pytest.mark.parametrize(
     "name",
     [
