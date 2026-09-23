@@ -233,12 +233,14 @@ describe("FlowStepInputTemplateSection", () => {
     );
   });
 
-  it("says the step, not the AI, reads the material when the step does not call the AI", () => {
-    const compose = makeStep(2, { output_mode: "compose_text" });
-    const { container } = renderSection({ step: compose });
-    expect(container.textContent).toContain(m.flow_material_title_step());
-    expect(container.textContent).not.toContain(m.flow_material_title());
-  });
+  it.each(["compose_text", "render_verbatim"] as const)(
+    "says the step, not the AI, reads the material when the step does not call the AI (%s)",
+    (output_mode) => {
+      const { container } = renderSection({ step: makeStep(2, { output_mode }) });
+      expect(container.textContent).toContain(m.flow_material_title_step());
+      expect(container.textContent).not.toContain(m.flow_material_title());
+    }
+  );
 
   it("keeps custom text available for document input without a JSON input contract", () => {
     const step = makeStep(2, { input_type: "document" });
