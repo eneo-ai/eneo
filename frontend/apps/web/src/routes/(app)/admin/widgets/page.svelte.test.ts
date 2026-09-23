@@ -19,7 +19,13 @@ vi.mock("$app/state", () => ({
   page: { url: new URL("http://localhost/admin/widgets?tab=policy"), state: {} }
 }));
 vi.mock("$lib/paraglide/messages", () => ({
-  m: new Proxy<Record<string, () => string>>({}, { get: (_target, key) => () => String(key) })
+  m: new Proxy<Record<string, (params?: Record<string, string>) => string>>(
+    {},
+    {
+      get: (_target, key) => (params?: Record<string, string>) =>
+        params ? `${String(key)}(${Object.values(params).join("|")})` : String(key)
+    }
+  )
 }));
 vi.mock("$lib/paraglide/runtime", () => ({
   getLocale: () => "sv",
@@ -99,7 +105,7 @@ describe("widget policy page", () => {
     const budget = page.getByLabelText("widget_admin_policy_max_budget");
     await userEvent.fill(budget, "5");
     await userEvent.tab();
-    await expect.element(page.getByText("widget_admin_value_out_of_range")).toBeVisible();
+    await expect.element(page.getByText(/^widget_admin_value_out_of_range/)).toBeVisible();
     await expect.element(budget).toHaveAttribute("aria-invalid", "true");
     expect(update).not.toHaveBeenCalled();
 
@@ -107,5 +113,32 @@ describe("widget policy page", () => {
     await userEvent.tab();
     await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
     expect(update).toHaveBeenCalledWith({ max_daily_token_budget: 3000 });
+  });
+});
+
+describe("widget policy retention window", () => {
+  test("a minimum above the maximum stays in the field instead of failing the save", async () => {
+    const update = vi.fn<(patch: Partial<WidgetPolicy>) => Promise<WidgetPolicy>>();
+    renderPage(update);
+
+    const min = page.getByLabelText("widget_admin_policy_retention_min");
+    await userEvent.fill(min, "400");
+    await userEvent.tab();
+    await expect.element(page.getByText("widget_admin_retention_window_min(365)")).toBeVisible();
+    await expect.element(min).toHaveAttribute("aria-invalid", "true");
+
+    const max = page.getByLabelText("widget_admin_policy_retention_max");
+    await userEvent.fill(max, "500");
+    await userEvent.tab();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update).toHaveBeenCalledWith({ max_retention_days: 500 });
+    expect(update).not.toHaveBeenCalledWith({ min_retention_days: 400 });
+  });
+
+  test("the policy card title is a section heading", async () => {
+    renderPage(vi.fn());
+    await expect
+      .element(page.getByRole("heading", { level: 2, name: "widget_admin_policy" }))
+      .toBeVisible();
   });
 });

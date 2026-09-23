@@ -75,3 +75,18 @@ describe("WidgetThemeFields locks", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+describe("WidgetThemeFields radius", () => {
+  test("a fraction stays in the field with an error instead of reaching the API", async () => {
+    const { onChange } = renderFields();
+    const radius = page.getByLabelText("widget_admin_radius", { exact: true });
+    await userEvent.fill(radius, "1.5");
+    await expect.element(radius).toHaveAttribute("aria-invalid", "true");
+    await expect.element(radius).toHaveAccessibleDescription(/widget_admin_value_out_of_range/);
+    expect(onChange).not.toHaveBeenCalled();
+
+    await userEvent.fill(radius, "8");
+    expect(onChange).toHaveBeenLastCalledWith({ radius: 8 });
+    await expect.element(radius).toHaveAttribute("aria-invalid", "false");
+  });
+});

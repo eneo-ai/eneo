@@ -76,9 +76,15 @@
     if (!checked && hasDarkColors) onChange({ primary_color_dark: null, header_color_dark: null });
   }
 
-  function number(event: Event, apply: (value: number) => void) {
-    const value = Number((event.currentTarget as HTMLInputElement).value);
-    if (Number.isFinite(value)) apply(value);
+  // The API stores the radius as a whole number of pixels; a fraction stays
+  // in the field with an error instead of failing the save.
+  let radiusInvalid = $state(false);
+  function radius(event: Event) {
+    const raw = (event.currentTarget as HTMLInputElement).value;
+    const value = Number(raw);
+    radiusInvalid = raw !== "" && !Number.isInteger(value);
+    if (raw !== "" && Number.isInteger(value))
+      onChange({ radius: Math.min(24, Math.max(0, value)) });
   }
 
   // The lock hint must reach every control; a describedby on the group's
@@ -271,7 +277,7 @@
         >
       </Field.Field>
 
-      <Field.Field>
+      <Field.Field data-invalid={radiusInvalid || undefined}>
         <Field.Label for={id("radius")}>{m.widget_admin_radius()}</Field.Label>
         <Input
           id={id("radius")}
@@ -281,13 +287,20 @@
           step={1}
           class="max-w-32"
           value={theme.radius ?? 12}
-          aria-describedby={describedBy("radius-help")}
-          oninput={(event) =>
-            number(event, (value) => onChange({ radius: Math.min(24, Math.max(0, value)) }))}
+          aria-invalid={radiusInvalid}
+          aria-describedby={radiusInvalid
+            ? `${describedBy("radius-help")} ${id("radius-error")}`
+            : describedBy("radius-help")}
+          oninput={radius}
         />
         <Field.Description id={id("radius-help")}
           >{m.widget_admin_radius_description()}</Field.Description
         >
+        {#if radiusInvalid}
+          <Field.Error id={id("radius-error")}
+            >{m.widget_admin_value_out_of_range({ min: "0", max: "24" })}</Field.Error
+          >
+        {/if}
       </Field.Field>
     </Field.Group>
   </Field.Group>

@@ -1,5 +1,5 @@
 /* eslint-disable eneo/no-raw-color -- fixtures use literal widget colours */
-import { page } from "@vitest/browser/context";
+import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import type { WidgetTemplate } from "@eneo/eneo-js";
 import { describe, expect, test, vi } from "vitest";
@@ -149,5 +149,58 @@ describe("widget template page", () => {
     click(page.getByRole("button", { name: "widget_admin_template_publish" }));
     await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1), { timeout: 3000 });
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+});
+
+describe("widget template details", () => {
+  // The API collapses whitespace in names and descriptions, like it does in texts.
+  function renderNormalising(current: WidgetTemplate) {
+    const clean = (value: string) => value.split(/\s+/).filter(Boolean).join(" ");
+    const update = vi.fn(async ({ update: patch }: { update: Partial<WidgetTemplate> }) => ({
+      ...current,
+      ...patch,
+      ...(patch.name !== undefined ? { name: clean(patch.name) } : {}),
+      ...(patch.description !== undefined ? { description: clean(patch.description) } : {})
+    }));
+    render(TemplatePage, {
+      data: { template: current, eneo: { widgets: { templates: { update } } } } as never
+    });
+    return { update };
+  }
+
+  test("the trimmed echo of a name being typed leaves the typed space alone", async () => {
+    const { update } = renderNormalising(template());
+    const name = page.getByLabelText("name", { exact: true });
+    await userEvent.fill(name, "Kommun ");
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update).toHaveBeenLastCalledWith({
+      template: { id: "t1" },
+      update: { name: "Kommun " }
+    });
+    await expect.element(page.getByText("widget_admin_saved")).toBeVisible();
+
+    await expect.element(name).toHaveValue("Kommun ");
+    await expect.element(name).toHaveFocus();
+    const input = name.element() as HTMLInputElement;
+    input.setSelectionRange(input.value.length, input.value.length);
+    await userEvent.keyboard("blå");
+    await expect.element(name).toHaveValue("Kommun blå");
+  });
+
+  test("a blank name is flagged and never sent", async () => {
+    const { update } = renderNormalising(template());
+    const name = page.getByLabelText("name", { exact: true });
+    await userEvent.fill(name, "   ");
+    await expect.element(name).toHaveAttribute("aria-invalid", "true");
+    await expect.element(name).toHaveAccessibleDescription("widget_admin_name_required");
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  test("each card title is a section heading", async () => {
+    renderNormalising(template());
+    for (const name of ["widget_admin_template_details", "widget_admin_template_locks"]) {
+      await expect.element(page.getByRole("heading", { level: 2, name })).toBeVisible();
+    }
   });
 });

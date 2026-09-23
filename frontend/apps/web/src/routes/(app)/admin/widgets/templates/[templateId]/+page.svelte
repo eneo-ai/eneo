@@ -23,6 +23,7 @@
   import WidgetThemeFields from "$lib/features/widget/admin/WidgetThemeFields.svelte";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { LOCK_GROUPS, publicationSummary } from "$lib/features/widget/admin/templateLocks";
+  import { collapseWhitespace, TextDraft } from "$lib/features/widget/admin/textDraft.svelte";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { FileText, Palette } from "lucide-svelte";
@@ -56,16 +57,27 @@
   });
 
   beforeNavigate((navigation) => {
-    if (autosave.status === "error" || autosave.status === "conflict") {
-      if (autosave.hasPending && !confirm(m.widget_admin_unsaved_leave_confirm())) {
-        navigation.cancel();
-      }
+    if (autosave.stranded && !confirm(m.widget_admin_unsaved_leave_confirm())) {
+      navigation.cancel();
       return;
     }
     void autosave.flush();
   });
 
   const template = $derived(autosave.widget);
+
+  const name = new TextDraft(() => autosave.widget.name);
+  const description = new TextDraft(() => autosave.widget.description ?? "");
+  const nameProblem = $derived(
+    !collapseWhitespace(name.text) ? m.widget_admin_name_required() : autosave.refusals["name"]
+  );
+  const textErrors = $derived(
+    Object.fromEntries(
+      Object.entries(autosave.refusals)
+        .filter(([path]) => path.startsWith("texts."))
+        .map(([path, message]) => [path.slice("texts.".length), message])
+    )
+  );
   // The legal-texts lock needs a subtitle to enforce; the API refuses the
   // save otherwise, so the switch waits until there is one.
   const hasSubtitle = $derived((template.texts.subtitle ?? "").trim().length > 0);
@@ -77,7 +89,9 @@
         ? m.widget_admin_saved()
         : autosave.status === "error"
           ? m.widget_admin_save_failed()
-          : ""
+          : autosave.status === "refused"
+            ? m.widget_admin_save_refused()
+            : ""
   );
 
   const languageLabels = $derived({
@@ -210,7 +224,7 @@
       <div class="flex min-w-0 flex-col gap-6">
         <Card.Root>
           <Card.Header>
-            <Card.Title>{m.widget_admin_template_details()}</Card.Title>
+            <Card.Title><h2>{m.widget_admin_template_details()}</h2></Card.Title>
             <Card.Description>{m.widget_admin_template_name_description()}</Card.Description>
             <Card.Action>
               <Badge variant={template.linked_widgets > 0 ? "default" : "secondary"}>
@@ -227,14 +241,25 @@
           </Card.Content>
           <Card.Content>
             <Field.Group class="grid gap-6 sm:grid-cols-2">
-              <Field.Field>
+              <Field.Field data-invalid={nameProblem ? true : undefined}>
                 <Field.Label for="template-name">{m.name()}</Field.Label>
                 <Input
                   id="template-name"
                   maxlength={100}
-                  value={template.name}
-                  oninput={(event) => autosave.patch({ name: event.currentTarget.value })}
+                  required
+                  value={name.text}
+                  aria-invalid={!!nameProblem}
+                  aria-describedby={nameProblem ? "template-name-error" : undefined}
+                  onfocus={name.focus}
+                  onblur={name.blur}
+                  oninput={(event) => {
+                    name.text = event.currentTarget.value;
+                    if (collapseWhitespace(name.text)) autosave.patch({ name: name.text });
+                  }}
                 />
+                {#if nameProblem}
+                  <Field.Error id="template-name-error">{nameProblem}</Field.Error>
+                {/if}
               </Field.Field>
               <Field.Field>
                 <Field.Label for="template-language">{m.widget_admin_language()}</Field.Label>
@@ -262,9 +287,14 @@
                   id="template-description"
                   maxlength={500}
                   rows={2}
-                  value={template.description}
+                  value={description.text}
                   aria-describedby="template-description-help"
-                  oninput={(event) => autosave.patch({ description: event.currentTarget.value })}
+                  onfocus={description.focus}
+                  onblur={description.blur}
+                  oninput={(event) => {
+                    description.text = event.currentTarget.value;
+                    autosave.patch({ description: description.text });
+                  }}
                 />
                 <Field.Description id="template-description-help"
                   >{m.widget_admin_template_description_description()}</Field.Description
@@ -275,12 +305,13 @@
                   <Field.Label for="template-default"
                     >{m.widget_admin_template_default()}</Field.Label
                   >
-                  <Field.Description
+                  <Field.Description id="template-default-help"
                     >{m.widget_admin_template_default_description()}</Field.Description
                   >
                 </Field.Content>
                 <Switch
                   id="template-default"
+                  aria-describedby="template-default-help"
                   checked={template.is_default}
                   onCheckedChange={(checked) => autosave.patch({ is_default: checked })}
                 />
@@ -291,7 +322,7 @@
 
         <Card.Root>
           <Card.Header>
-            <Card.Title>{m.widget_admin_template_locks()}</Card.Title>
+            <Card.Title><h2>{m.widget_admin_template_locks()}</h2></Card.Title>
             <Card.Description>{m.widget_admin_template_locks_description()}</Card.Description>
           </Card.Header>
           <Card.Content>
@@ -347,7 +378,7 @@
           <Tabs.Content value="content">
             <Card.Root>
               <Card.Header>
-                <Card.Title>{m.widget_admin_texts()}</Card.Title>
+                <Card.Title><h2>{m.widget_admin_texts()}</h2></Card.Title>
                 <Card.Description>{m.widget_admin_template_texts_description()}</Card.Description>
               </Card.Header>
               <Card.Content>
@@ -355,6 +386,7 @@
                   texts={template.texts}
                   showSuggestions={false}
                   idPrefix="template"
+                  errors={textErrors}
                   onChange={(change) => autosave.patch({ texts: { ...template.texts, ...change } })}
                 />
               </Card.Content>
@@ -363,7 +395,7 @@
           <Tabs.Content value="appearance">
             <Card.Root>
               <Card.Header>
-                <Card.Title>{m.widget_admin_appearance()}</Card.Title>
+                <Card.Title><h2>{m.widget_admin_appearance()}</h2></Card.Title>
                 <Card.Description>{m.widget_admin_appearance_description()}</Card.Description>
               </Card.Header>
               <Card.Content>

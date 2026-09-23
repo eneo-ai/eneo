@@ -57,10 +57,8 @@
   );
 
   beforeNavigate((navigation) => {
-    if (autosave.status === "error" || autosave.status === "conflict") {
-      if (autosave.hasPending && !confirm(m.widget_admin_unsaved_leave_confirm())) {
-        navigation.cancel();
-      }
+    if (autosave.stranded && !confirm(m.widget_admin_unsaved_leave_confirm())) {
+      navigation.cancel();
       return;
     }
     void autosave.flush();
@@ -98,6 +96,26 @@
     apply(value);
   }
 
+  // The API refuses a retention window whose minimum exceeds its maximum.
+  function commitRetention(event: Event, bound: "min" | "max") {
+    const key = `retention-${bound}`;
+    commitNumber(event, key, 0, 3650, (value) => {
+      if (bound === "min" && value > policy.max_retention_days) {
+        rangeErrors = {
+          ...rangeErrors,
+          [key]: m.widget_admin_retention_window_min({ max: String(policy.max_retention_days) })
+        };
+      } else if (bound === "max" && value < policy.min_retention_days) {
+        rangeErrors = {
+          ...rangeErrors,
+          [key]: m.widget_admin_retention_window_max({ min: String(policy.min_retention_days) })
+        };
+      } else {
+        patch(bound === "min" ? { min_retention_days: value } : { max_retention_days: value });
+      }
+    });
+  }
+
   const statusLabel = $derived.by(() => {
     switch (autosave.status) {
       case "saving":
@@ -107,6 +125,8 @@
       case "error":
       case "conflict":
         return m.widget_admin_save_failed();
+      case "refused":
+        return m.widget_admin_save_refused();
       default:
         return "";
     }
@@ -277,7 +297,7 @@
         <Tabs.Content value="policy">
           <Card.Root>
             <Card.Header>
-              <Card.Title>{m.widget_admin_policy()}</Card.Title>
+              <Card.Title><h2>{m.widget_admin_policy()}</h2></Card.Title>
               <Card.Description>{m.widget_admin_policy_description()}</Card.Description>
             </Card.Header>
             <Card.Content>
@@ -322,10 +342,7 @@
                     aria-describedby={rangeErrors["retention-min"]
                       ? "policy-retention-help policy-retention-min-error"
                       : "policy-retention-help"}
-                    onchange={(event) =>
-                      commitNumber(event, "retention-min", 0, 3650, (value) =>
-                        patch({ min_retention_days: value })
-                      )}
+                    onchange={(event) => commitRetention(event, "min")}
                   />
                   <Field.Description id="policy-retention-help"
                     >{m.widget_admin_policy_retention_description()}</Field.Description
@@ -350,10 +367,7 @@
                     aria-describedby={rangeErrors["retention-max"]
                       ? "policy-retention-help policy-retention-max-error"
                       : "policy-retention-help"}
-                    onchange={(event) =>
-                      commitNumber(event, "retention-max", 0, 3650, (value) =>
-                        patch({ max_retention_days: value })
-                      )}
+                    onchange={(event) => commitRetention(event, "max")}
                   />
                   {#if rangeErrors["retention-max"]}
                     <Field.Error id="policy-retention-max-error"
@@ -367,12 +381,13 @@
                     <Field.Label for="policy-allow-none"
                       >{m.widget_admin_policy_allow_none()}</Field.Label
                     >
-                    <Field.Description
+                    <Field.Description id="policy-allow-none-help"
                       >{m.widget_admin_policy_allow_none_description()}</Field.Description
                     >
                   </Field.Content>
                   <Switch
                     id="policy-allow-none"
+                    aria-describedby="policy-allow-none-help"
                     checked={policy.allow_bot_protection_none}
                     onCheckedChange={(checked) => patch({ allow_bot_protection_none: checked })}
                   />
@@ -385,7 +400,7 @@
         <Tabs.Content value="templates">
           <Card.Root>
             <Card.Header class="border-b">
-              <Card.Title>{m.widget_admin_templates()}</Card.Title>
+              <Card.Title><h2>{m.widget_admin_templates()}</h2></Card.Title>
               <Card.Description>{m.widget_admin_templates_description()}</Card.Description>
               <Card.Action>
                 <Button onclick={createTemplate} disabled={createTemplate.isLoading}>
