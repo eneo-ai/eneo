@@ -287,6 +287,30 @@ describe("WidgetAutosave refusals", () => {
     expect(autosave.widget.revision).toBe(1);
   });
 
+  it("drops only the refused groups an action replaces", async () => {
+    const save = vi.fn().mockRejectedValue(
+      refused(422, [
+        { loc: ["body", "texts", "subtitle"], type: "value_error", msg: "Invalid" },
+        { loc: ["body", "allowed_origins"], type: "value_error", msg: "Invalid" }
+      ])
+    );
+    const autosave = new WidgetAutosave(widget(), save, { delay: 10 });
+    autosave.patch({
+      texts: { title: "Ny", welcome: "", subtitle: "" },
+      allowed_origins: ["https://[abc.def]:80"]
+    });
+    await vi.runAllTimersAsync();
+    expect(Object.keys(autosave.refusals).sort()).toEqual(["allowed_origins", "texts.subtitle"]);
+
+    autosave.discardRefused(["texts", "theme", "language"]);
+
+    expect(autosave.widget.texts).toEqual({ title: "", welcome: "" });
+    expect(autosave.widget.allowed_origins).toEqual(["https://[abc.def]:80"]);
+    expect(Object.keys(autosave.refusals)).toEqual(["allowed_origins"]);
+    expect(autosave.status).toBe("refused");
+    expect(autosave.stranded).toBe(true);
+  });
+
   it("a failure that names no field keeps everything pending, as before", async () => {
     const save = vi.fn().mockRejectedValue(new EneoError("down", "RESPONSE", 503, 0));
     const autosave = new WidgetAutosave(widget(), save, { delay: 10 });

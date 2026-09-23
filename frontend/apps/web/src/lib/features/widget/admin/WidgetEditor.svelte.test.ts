@@ -1,7 +1,7 @@
 /* eslint-disable eneo/no-raw-color -- fixtures use literal widget colours */
 import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
-import type { Assistant, Eneo, Widget } from "@eneo/eneo-js";
+import { EneoError, type Assistant, type Eneo, type Widget } from "@eneo/eneo-js";
 import { describe, expect, test, vi } from "vitest";
 import "../../../../app.css";
 
@@ -171,5 +171,50 @@ describe("WidgetEditor", () => {
           .getByText("widget_admin_visitor_access_hidden")
       )
       .toBeVisible();
+  });
+
+  test("detaching a template keeps a refused edit held at its field", async () => {
+    const linked = widget({
+      template: { id: "t1", name: "Kommunblå", locked_groups: [] }
+    } as unknown as Partial<Widget>);
+    const update = vi.fn(async () => {
+      throw new EneoError("raw", "RESPONSE", 422, 0, {
+        detail: [{ loc: ["body", "allowed_origins"], type: "value_error", msg: "Invalid" }]
+      });
+    });
+    const detachTemplate = vi.fn(async () => ({ ...linked, template: null, revision: 1 }));
+    const eneo = {
+      widgets: {
+        update,
+        detachTemplate,
+        previewToken: vi.fn(() => new Promise(() => {})),
+        usage: vi.fn(() => new Promise(() => {}))
+      }
+    } as unknown as Eneo;
+    render(WidgetEditor, {
+      widget: linked,
+      assistant: { id: "a1", published: true, mcp_servers: [] } as unknown as Assistant,
+      eneo,
+      isAdmin: true,
+      policy: null,
+      release: null
+    });
+
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_rules/ }));
+    const origins = page.getByLabelText("widget_admin_allowed_origins", { exact: true });
+    await userEvent.fill(origins, "https://www.kommun.se\nhttps://ny.kommun.se");
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_appearance/ }));
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+
+    await userEvent.click(page.getByRole("button", { name: "widget_admin_template_detach" }));
+    await userEvent.click(
+      page.getByRole("alertdialog").getByRole("button", { name: "widget_admin_template_detach" })
+    );
+    await vi.waitFor(() => expect(detachTemplate).toHaveBeenCalledTimes(1));
+
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_rules/ }));
+    const held = page.getByLabelText("widget_admin_allowed_origins", { exact: true });
+    await expect.element(held).toHaveValue("https://www.kommun.se\nhttps://ny.kommun.se");
+    await expect.element(held).toHaveAccessibleDescription(/widget_admin_origins_refused/);
   });
 });

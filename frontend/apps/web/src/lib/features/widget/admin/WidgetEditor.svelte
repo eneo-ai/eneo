@@ -139,17 +139,22 @@
     (link?.locked_groups ?? []).map((group) => groupLabels[group] ?? group).join(", ")
   );
 
+  // What linking copies from the template's release onto the widget.
+  const RELEASE_GROUPS = ["texts", "theme", "language"];
+
   async function withTemplate(
     action: () => Promise<Widget>,
-    failure: () => string
+    failure: () => string,
+    replaced: string[]
   ): Promise<boolean> {
     applying = true;
     try {
       await autosave.flush();
       if (autosave.hasPending) return false;
       const updated = await action();
-      // The template's release replaces what the server refused anyway.
-      autosave.discardRefused();
+      // Refused edits of the groups the release replaced are moot; any other
+      // refused edit stays on screen, held with its reason.
+      autosave.discardRefused(replaced);
       autosave.replace(updated);
       return true;
     } catch (error) {
@@ -168,7 +173,8 @@
           templateId,
           revision: current.revision
         }),
-      () => m.widget_admin_template_could_not_apply()
+      () => m.widget_admin_template_could_not_apply(),
+      RELEASE_GROUPS
     );
   }
 
@@ -188,7 +194,8 @@
   async function detachTemplate() {
     const done = await withTemplate(
       () => eneo.widgets.detachTemplate({ widget: { id: widget.id }, revision: current.revision }),
-      () => m.widget_admin_template_could_not_detach()
+      () => m.widget_admin_template_could_not_detach(),
+      []
     );
     if (done) confirmDetach = false;
   }

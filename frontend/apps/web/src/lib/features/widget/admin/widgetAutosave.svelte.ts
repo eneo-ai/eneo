@@ -99,11 +99,11 @@ export class Autosave<Resource extends object, Update extends object> {
     this.widget = this.#onTop(widget);
   }
 
-  /** Drop refused edits, e.g. before an action that overwrites those groups anyway. */
-  discardRefused(): void {
-    this.#release(Object.keys(this.#refused));
+  /** Drop refused edits of these groups (all by default), e.g. before an action that overwrites them. */
+  discardRefused(keys: string[] = Object.keys(this.#refused)): void {
+    this.#release(keys);
     this.widget = this.#onTop(this.#baseline);
-    if (this.status === "refused") this.status = "idle";
+    if (this.status === "refused" && !this.hasRefused) this.status = "idle";
   }
 
   /** Explicitly discard a conflicted draft after the editor reloads it. */
