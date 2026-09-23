@@ -118,15 +118,16 @@ def build_speaker_mapping_question(
 def resolve_participants(
     run_input_payload: Mapping[str, Any] | None,
     participants_field: str | None,
-) -> list[str]:
+) -> tuple[list[str], bool]:
+    """The run's participants, cleaned like a model's proposal so the model's
+    copy of a name matches, and whether a roster was supplied at all: one can
+    clean down to nothing."""
     if participants_field is None:
-        return []
+        return [], False
     semantic = read_semantic_flow_input_payload(dict(run_input_payload or {}))
-    # Cleaned like a model's proposal, so the model's copy of a name matches.
-    cleaned = (
-        one_line(name) for name in parse_participants(semantic.get(participants_field))
-    )
-    return list(dict.fromkeys(name for name in cleaned if name))
+    supplied = parse_participants(semantic.get(participants_field))
+    cleaned = (one_line(name) for name in supplied)
+    return list(dict.fromkeys(name for name in cleaned if name)), bool(supplied)
 
 
 class SpeakerMappingValidationError(ValueError):
@@ -189,9 +190,13 @@ def validate_speaker_mapping(
                         f"{ONE_LINE_TEXT_MAX_CHARS} characters."
                     )
         if name is not None and not allow_free_text and name not in participants:
-            raise SpeakerMappingValidationError(
-                f"'{name}' is not one of the participants."
-            )
+            if model_proposal and not participants:
+                # A roster that cleaned to nothing lists nobody to name.
+                name = None
+            else:
+                raise SpeakerMappingValidationError(
+                    f"'{name}' is not one of the participants."
+                )
         confidence = entry.get("confidence")
         if confidence not in ("low", "medium", "high"):
             confidence = "low"

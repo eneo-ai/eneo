@@ -277,6 +277,35 @@ async def test_a_listed_name_matches_whatever_its_whitespace(harness) -> None:
     assert extension["participants"] == ["Eva Ek", "Bo Berg"]
 
 
+async def test_a_roster_that_cleans_to_nothing_still_restricts_names(
+    harness,
+) -> None:
+    calls, activate = harness
+    calls["structured"] = {
+        "speakers": [
+            {"label": "SPEAKER_00", "name": "Anna", "confidence": "high"},
+            {"label": "SPEAKER_01", "name": "Bo", "confidence": "high"},
+        ]
+    }
+    handler, _ = _handler(activate)
+    state, _ = _state()
+    run = SimpleNamespace(id=uuid4(), input_payload_json={"deltagare": ["x" * 121]})
+
+    result = await handler.execute(
+        step=_step(), run=run, state=state, version_metadata=None, attempt_no=1
+    )
+
+    output = result.output
+    assert [entry["name"] for entry in output.structured_output["speakers"]] == [
+        None,
+        None,
+    ]
+    assert output.full_text.splitlines()[0].startswith(
+        "[00:00:00 - 00:00:04] SPEAKER_00:"
+    )
+    assert any(d.code == "speaker_mapping_unmapped_labels" for d in output.diagnostics)
+
+
 async def test_run_transcript_keeps_distinct_source_with_identical_text(
     harness,
 ) -> None:

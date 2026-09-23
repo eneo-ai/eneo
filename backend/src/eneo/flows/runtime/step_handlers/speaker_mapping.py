@@ -180,7 +180,9 @@ class SpeakerMappingStepHandler:
                 effective_prompt=prepared.effective_prompt,
             )
         participants_field = speaker_mapping_participants_field(step.output_config)
-        participants = resolve_participants(run.input_payload_json, participants_field)
+        participants, roster_supplied = resolve_participants(
+            run.input_payload_json, participants_field
+        )
         infer_names = speaker_mapping_infer_names(step.output_config)
 
         # The model sees the speaker inventory (plus the conversation's opening
@@ -226,7 +228,9 @@ class SpeakerMappingStepHandler:
                 output.structured_output,
                 inventory=inventory,
                 participants=participants,
-                allow_free_text=infer_names or not participants,
+                # A supplied roster restricts names even if nothing on it
+                # survived cleaning.
+                allow_free_text=infer_names or not roster_supplied,
                 model_proposal=True,
             )
         except SpeakerMappingValidationError as exc:

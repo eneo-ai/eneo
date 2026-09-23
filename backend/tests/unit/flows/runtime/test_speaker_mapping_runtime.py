@@ -38,9 +38,10 @@ def test_question_is_json_with_inventory_and_participants() -> None:
 
 def test_resolve_participants_reads_the_semantic_run_input() -> None:
     payload = {"deltagare": "Anna Svensson, Bo Berg", "transkribering": "..."}
-    assert resolve_participants(payload, "deltagare") == PARTICIPANTS
-    assert resolve_participants(payload, None) == []
-    assert resolve_participants(None, "deltagare") == []
+    assert resolve_participants(payload, "deltagare") == (PARTICIPANTS, True)
+    assert resolve_participants(payload, None) == ([], False)
+    assert resolve_participants(None, "deltagare") == ([], False)
+    assert resolve_participants({"deltagare": ["x" * 121]}, "deltagare") == ([], True)
 
 
 def test_max_speakers_comes_from_the_first_mapping_step() -> None:
