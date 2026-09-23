@@ -259,6 +259,34 @@ describe("WidgetAutosave refusals", () => {
     expect(autosave.stranded).toBe(false);
   });
 
+  it("makes every flush wait for the save a refusal starts for the rest", async () => {
+    let rejectFirst!: (reason: unknown) => void;
+    let resolveSecond!: (value: Widget) => void;
+    const save = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise((_, reject) => (rejectFirst = reject)))
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveSecond = resolve)));
+    const autosave = new WidgetAutosave(widget(), save, { delay: 10 });
+    autosave.patch({ name: "Kontakt", allowed_origins: ["https://[abc.def]:80"] });
+
+    const owner = autosave.flush();
+    let secondDone = false;
+    // E.g. linking a template: it must not start while a save is in flight.
+    const second = autosave.flush().then(() => (secondDone = true));
+    rejectFirst(
+      refused(422, [{ loc: ["body", "allowed_origins"], type: "value_error", msg: "Invalid" }])
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save).toHaveBeenLastCalledWith({ name: "Kontakt", revision: 0 });
+    expect(secondDone).toBe(false);
+
+    resolveSecond(widget({ name: "Kontakt", revision: 1 }));
+    await Promise.all([owner, second]);
+    expect(secondDone).toBe(true);
+    expect(autosave.widget.revision).toBe(1);
+  });
+
   it("a failure that names no field keeps everything pending, as before", async () => {
     const save = vi.fn().mockRejectedValue(new EneoError("down", "RESPONSE", 503, 0));
     const autosave = new WidgetAutosave(widget(), save, { delay: 10 });

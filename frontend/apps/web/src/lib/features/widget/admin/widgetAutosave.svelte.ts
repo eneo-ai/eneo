@@ -125,7 +125,9 @@ export class Autosave<Resource extends object, Update extends object> {
       clearTimeout(this.#timer);
       this.#timer = null;
     }
-    if (this.#inflight) {
+    // A refusal re-saves the rest from inside the save that owns the flush;
+    // every caller waits for that save too before it looks at what is pending.
+    while (this.#inflight) {
       await this.#inflight;
     }
     if (!this.hasPending || this.status === "conflict") return;
