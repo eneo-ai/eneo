@@ -2,7 +2,7 @@
 import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import type { WidgetTemplate } from "@eneo/eneo-js";
-import { describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { beforeNavigate } from "$app/navigation";
 import "../../../../../../app.css";
 
@@ -75,6 +75,26 @@ function renderPage(current: WidgetTemplate) {
 
 const click = (locator: { element: () => Element }) => (locator.element() as HTMLElement).click();
 
+// A dialog a test leaves open keeps bits-ui reading destroyed state in the
+// tests after it, which Svelte only warns about.
+const svelteWarnings: string[] = [];
+beforeAll(() => {
+  const warn = console.warn.bind(console);
+  vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+    if (String(args[0]).includes("[svelte]")) svelteWarnings.push(String(args[0]));
+    warn(...args);
+  });
+});
+afterAll(() => {
+  vi.mocked(console.warn).mockRestore();
+  expect(svelteWarnings).toEqual([]);
+});
+
+async function cancelDialog() {
+  click(page.getByRole("alertdialog").getByRole("button", { name: "cancel" }));
+  await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')).toBeNull());
+}
+
 describe("widget template page", () => {
   test("a lock toggle only edits the draft and marks it unpublished", async () => {
     const { update, publish } = renderPage(template());
@@ -131,6 +151,7 @@ describe("widget template page", () => {
       .element(changes.getByText("widget_admin_template_publish_unlocked_changes"))
       .toBeVisible();
     expect(changes.getByText("widget_admin_template_publish_no_widget_changes").query()).toBeNull();
+    await cancelDialog();
   });
 
   test("the publish dialog says when the followers do not change at all", async () => {
@@ -140,6 +161,7 @@ describe("widget template page", () => {
       .element(page.getByText("widget_admin_template_publish_no_widget_changes"))
       .toBeVisible();
     expect(page.getByText("widget_admin_template_publish_writes").query()).toBeNull();
+    await cancelDialog();
   });
 
   test("a template nobody follows publishes without a question", async () => {
