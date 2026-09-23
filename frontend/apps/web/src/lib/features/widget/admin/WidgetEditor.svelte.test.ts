@@ -3,6 +3,7 @@ import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { EneoError, type Assistant, type Eneo, type Widget } from "@eneo/eneo-js";
 import { describe, expect, test, vi } from "vitest";
+import { beforeNavigate } from "$app/navigation";
 import "../../../../app.css";
 
 vi.mock("$app/navigation", () => ({
@@ -124,6 +125,25 @@ describe("WidgetEditor", () => {
       .element(subtitle)
       .toHaveAccessibleDescription(/widget_admin_blocker_subtitle_empty/);
     await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  test("leaving with a live widget's disclosure emptied asks first", async () => {
+    const { update } = renderEditor(widget());
+    const subtitle = page.getByLabelText("widget_admin_text_subtitle", { exact: true });
+    await userEvent.clear(subtitle);
+    await expect.element(subtitle).toHaveAttribute("aria-invalid", "true");
+
+    const leave = vi.mocked(beforeNavigate).mock.lastCall![0];
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const cancel = vi.fn();
+    try {
+      leave({ cancel } as unknown as Parameters<typeof leave>[0]);
+      expect(confirm).toHaveBeenCalledWith("widget_admin_unsaved_leave_confirm");
+      expect(cancel).toHaveBeenCalled();
+    } finally {
+      confirm.mockRestore();
+    }
     expect(update).not.toHaveBeenCalled();
   });
 

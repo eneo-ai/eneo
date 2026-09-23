@@ -30,6 +30,8 @@
     subtitleRequired?: string;
     /** Told whether the suggested questions hold edits that cannot be sent yet. */
     onQuestionsHeld?: (held: boolean) => void;
+    /** Told whether a blank subtitle is held back because it is required. */
+    onSubtitleHeld?: (held: boolean) => void;
     /** Id of an error about the whole texts group, which every field points to. */
     groupErrorId?: string;
   };
@@ -44,6 +46,7 @@
     errors = {},
     subtitleRequired,
     onQuestionsHeld,
+    onSubtitleHeld,
     groupErrorId
   }: Props = $props();
 
@@ -72,12 +75,29 @@
   const drafts = Object.fromEntries(
     DRAFTED.map((field) => [field, new TextDraft(() => texts[field] ?? "")])
   ) as Record<Drafted, TextDraft>;
+  let subtitleBlankHeld = $state(false);
   const typed = (field: Drafted) => (event: Event & { currentTarget: { value: string } }) => {
     drafts[field].text = event.currentTarget.value;
-    if (field === "subtitle" && subtitleRequired && !event.currentTarget.value.trim()) return;
+    if (field === "subtitle") {
+      subtitleBlankHeld = !!subtitleRequired && !event.currentTarget.value.trim();
+      if (subtitleBlankHeld) return;
+    }
     const change: Partial<WidgetTexts> = { [field]: event.currentTarget.value };
     onChange(change);
   };
+  // A held blank subtitle is sent as soon as it may be (the widget is paused,
+  // the template unlocks it), not left in the field until it is edited again.
+  const subtitleHeld = $derived(subtitleBlankHeld && !drafts.subtitle.text.trim());
+  $effect(() => {
+    if (!subtitleHeld || subtitleRequired) return;
+    untrack(() => {
+      subtitleBlankHeld = false;
+      onChange({ subtitle: drafts.subtitle.text });
+    });
+  });
+  $effect(() => {
+    onSubtitleHeld?.(subtitleHeld);
+  });
   const problems = $derived<Partial<Record<keyof WidgetTexts, string>>>({
     ...errors,
     subtitle:

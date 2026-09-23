@@ -390,6 +390,7 @@
                   subtitleRequired={template.locked_groups.includes("legal_texts")
                     ? m.widget_admin_blocker_legal_texts_lock_subtitle()
                     : undefined}
+                  onSubtitleHeld={(held) => autosave.markDraft("texts.subtitle", held)}
                   onChange={(change) => autosave.patch({ texts: { ...template.texts, ...change } })}
                 />
               </Card.Content>

@@ -140,4 +140,24 @@ describe("WidgetTextsFields and the save's echo", () => {
     expect(onChange).toHaveBeenLastCalledWith({ subtitle: "Du chattar med AI." });
     await expect.element(subtitle).not.toHaveAccessibleDescription(/Mallen låser/);
   });
+
+  test("a subtitle held back while required is reported, and sent once it no longer is", async () => {
+    const onChange = vi.fn();
+    const onSubtitleHeld = vi.fn();
+    const screen = render(WidgetTextsFields, {
+      texts,
+      onChange,
+      onSubtitleHeld,
+      subtitleRequired: "Widgeten är aktiv"
+    });
+    const subtitle = page.getByLabelText("widget_admin_text_subtitle", { exact: true });
+    await userEvent.clear(subtitle);
+    expect(onChange).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(onSubtitleHeld).toHaveBeenLastCalledWith(true));
+
+    await screen.rerender({ subtitleRequired: undefined });
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalledWith({ subtitle: "" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(onSubtitleHeld).toHaveBeenLastCalledWith(false));
+  });
 });

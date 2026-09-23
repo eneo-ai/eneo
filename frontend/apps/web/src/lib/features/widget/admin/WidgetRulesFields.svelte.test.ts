@@ -140,6 +140,20 @@ describe("WidgetRulesFields origins", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(save).not.toHaveBeenCalled();
   });
+
+  test("a list emptied on a live widget is sent once the widget is paused", async () => {
+    const save = vi.fn(async (update: WidgetUpdate) => widget(update as Partial<Widget>));
+    const { autosave } = setup(widget({ status: "active" }), save);
+    await userEvent.clear(origins());
+    await userEvent.tab();
+    expect(autosave.stranded).toBe(true);
+
+    autosave.replace(widget({ status: "paused", revision: 1 }));
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save).toHaveBeenCalledWith({ allowed_origins: [], revision: 1 });
+    await vi.waitFor(() => expect(autosave.unsaved).toBe(false));
+    await expect.element(origins()).toHaveValue("");
+  });
 });
 
 describe("WidgetRulesFields policy", () => {

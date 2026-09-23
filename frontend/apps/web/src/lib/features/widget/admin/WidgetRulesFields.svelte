@@ -8,6 +8,7 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { untrack } from "svelte";
   import { blockerLabel } from "./blockers";
   import { MAX_ALLOWED_ORIGINS, parseOrigins } from "./origins";
   import { TextDraft } from "./textDraft.svelte";
@@ -123,8 +124,17 @@
     return () => autosave.markDraft("rule-numbers", false);
   });
 
+  // An empty list held back only because the widget was live is sent once it
+  // no longer is, not left in the field until it is edited again.
+  let emptiedHeld = $state(false);
+  $effect(() => {
+    if (!emptiedHeld || widget.status === "active" || widget.status === "archived") return;
+    untrack(commitOrigins);
+  });
+
   function commitOrigins() {
     originsTouched = true;
+    emptiedHeld = emptiedWhileActive;
     if (parsedOrigins.invalid.length > 0 || parsedOrigins.tooMany || emptiedWhileActive) return;
     const saved = widget.allowed_origins ?? [];
     if (parsedOrigins.origins.join("\n") !== saved.join("\n")) {
