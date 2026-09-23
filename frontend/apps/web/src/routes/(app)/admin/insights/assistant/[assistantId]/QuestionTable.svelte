@@ -5,7 +5,8 @@
 -->
 
 <script lang="ts">
-  import { Button, Table } from "@eneo/ui";
+  import { Table } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import dayjs from "dayjs";
   import { m } from "$lib/paraglide/messages";
   import QuestionDetails from "./QuestionDetails.svelte";
@@ -191,7 +192,7 @@
   {#if errorMessage}
     <p class="text-sm text-red-700" role="alert">{errorMessage}</p>
   {:else if nextCursor}
-    <Button variant="outlined" on:click={loadMore} disabled={isLoading || isLoadingMore}>
+    <Button variant="outline" onclick={loadMore} disabled={isLoading || isLoadingMore}>
       {#if isLoadingMore}
         {m.loading()}
       {:else}

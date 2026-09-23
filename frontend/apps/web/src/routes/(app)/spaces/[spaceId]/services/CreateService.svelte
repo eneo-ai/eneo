@@ -3,7 +3,9 @@
   import { resolve } from "$app/paths";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Button, Dialog } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -35,7 +37,7 @@
       });
 
       refreshCurrentSpace();
-      $showCreateDialog = false;
+      showCreateDialog = false;
       newServiceName = "";
       if (openServiceAfterCreation) {
         goto(resolve(`/spaces/${$currentSpace.routeId}/services/${service.id}?tab=edit`));
@@ -47,36 +49,49 @@
     isProcessing = false;
   }
 
-  let showCreateDialog: Dialog.OpenState;
+  let showCreateDialog = false;
 </script>
 
-<Dialog.Root alert bind:isOpen={showCreateDialog}>
-  <Dialog.Trigger asFragment let:trigger>
-    <Button is={trigger} variant="primary">{m.create_service()}</Button>
-  </Dialog.Trigger>
-  <Dialog.Content width="medium" form>
-    <Dialog.Title>{m.create_a_new_service()}</Dialog.Title>
+<AlertDialog.Root bind:open={showCreateDialog}>
+  <AlertDialog.Trigger>
+    {#snippet child({ props })}
+      <Button {...props}>{m.create_service()}</Button>
+    {/snippet}
+  </AlertDialog.Trigger>
+  <AlertDialog.Content class={dialogLayout.content("medium")}>
+    <form
+      class="contents"
+      onsubmit={(event) => {
+        event.preventDefault();
+        createService();
+      }}
+    >
+      <AlertDialog.Header class={dialogLayout.header}>
+        <AlertDialog.Title>{m.create_a_new_service()}</AlertDialog.Title>
+      </AlertDialog.Header>
 
-    <Dialog.Section>
-      <Field.Field class="border-default hover:bg-hover-dimmer border-b px-4 py-4">
-        <Field.Label for={nameId}>
-          {m.name()}
-          <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
-        </Field.Label>
-        <Input id={nameId} bind:value={newServiceName} required />
-      </Field.Field>
-    </Dialog.Section>
+      <div class={dialogLayout.body}>
+        <div class={dialogLayout.section}>
+          <Field.Field class="border-default hover:bg-hover-dimmer border-b px-4 py-4">
+            <Field.Label for={nameId}>
+              {m.name()}
+              <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+            </Field.Label>
+            <Input id={nameId} bind:value={newServiceName} required />
+          </Field.Field>
+        </div>
+      </div>
 
-    <Dialog.Controls let:close>
-      <Field.Field orientation="horizontal" class="w-auto p-2">
-        <Switch id={openAfterId} bind:checked={openServiceAfterCreation} />
-        <Field.Label for={openAfterId}>{m.open_service_editor_after_creation()}</Field.Label>
-      </Field.Field>
-      <div class="flex-grow"></div>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="primary" on:click={createService} disabled={isProcessing}
-        >{isProcessing ? m.creating() : m.create_service()}</Button
-      >
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+      <AlertDialog.Footer class={dialogLayout.footer}>
+        <Field.Field orientation="horizontal" class="w-auto sm:mr-auto">
+          <Switch id={openAfterId} bind:checked={openServiceAfterCreation} />
+          <Field.Label for={openAfterId}>{m.open_service_editor_after_creation()}</Field.Label>
+        </Field.Field>
+        <AlertDialog.Cancel type="button">{m.cancel()}</AlertDialog.Cancel>
+        <Button type="submit" disabled={isProcessing}
+          >{isProcessing ? m.creating() : m.create_service()}</Button
+        >
+      </AlertDialog.Footer>
+    </form>
+  </AlertDialog.Content>
+</AlertDialog.Root>

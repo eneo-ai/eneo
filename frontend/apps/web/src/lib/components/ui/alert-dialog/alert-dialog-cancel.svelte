@@ -12,6 +12,7 @@
     class: className,
     variant = "outline",
     size = "default",
+    type = "button",
     ...restProps
   }: AlertDialogPrimitive.CancelProps & {
     variant?: ButtonVariant;
@@ -19,8 +20,10 @@
   } = $props();
 </script>
 
+<!-- NOTE: defaults to type="button" (upstream sets none) so Cancel never submits a surrounding form. -->
 <AlertDialogPrimitive.Cancel
   bind:ref
+  {type}
   data-slot="alert-dialog-cancel"
   class={cn(buttonVariants({ variant, size }), "cn-alert-dialog-cancel", className)}
   {...restProps}

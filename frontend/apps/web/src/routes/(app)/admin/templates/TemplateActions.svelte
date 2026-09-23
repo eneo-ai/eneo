@@ -6,7 +6,8 @@
 
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
-  import { Button, Dropdown } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import {
     MoreVertical,
     Edit,
@@ -57,20 +58,22 @@
   }
 </script>
 
-<Dropdown.Root>
-  <Dropdown.Trigger asFragment let:trigger>
-    <Button is={trigger} padding="icon" aria-label={m.actions()}>
-      <MoreVertical size={16} />
-    </Button>
-  </Dropdown.Trigger>
+<DropdownMenu.Root>
+  <DropdownMenu.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+        <MoreVertical size={16} />
+      </Button>
+    {/snippet}
+  </DropdownMenu.Trigger>
 
-  <Dropdown.Menu let:item>
-    <Button is={item} padding="icon-leading" onclick={handleEdit}>
+  <DropdownMenu.Content align="end">
+    <DropdownMenu.Item onSelect={handleEdit}>
       <Edit size={16} />
       {m.edit()}
-    </Button>
+    </DropdownMenu.Item>
 
-    <Button is={item} padding="icon-leading" onclick={toggleDefault}>
+    <DropdownMenu.Item onSelect={toggleDefault}>
       {#if template.is_default}
         <ArrowDownToLine size={16} />
         {m.unset_default_status()}
@@ -78,26 +81,21 @@
         <ArrowUpToLine size={16} />
         {m.set_as_default_template()}
       {/if}
-    </Button>
+    </DropdownMenu.Item>
 
     {#if template.original_snapshot}
-      <Button is={item} padding="icon-leading" onclick={() => isRollbackOpen.set(true)}>
+      <DropdownMenu.Item onSelect={() => isRollbackOpen.set(true)}>
         <RotateCcw size={16} />
         {m.rollback()}
-      </Button>
+      </DropdownMenu.Item>
     {/if}
 
-    <Button
-      is={item}
-      padding="icon-leading"
-      onclick={() => isDeleteOpen.set(true)}
-      variant="destructive"
-    >
+    <DropdownMenu.Item variant="destructive" onSelect={() => isDeleteOpen.set(true)}>
       <Trash2 size={16} />
       {m.delete()}
-    </Button>
-  </Dropdown.Menu>
-</Dropdown.Root>
+    </DropdownMenu.Item>
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
 
 <TemplateDeleteDialog openController={isDeleteOpen} {template} {type} />
 {#if template.original_snapshot}

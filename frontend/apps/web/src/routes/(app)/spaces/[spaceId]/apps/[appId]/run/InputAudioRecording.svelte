@@ -4,7 +4,7 @@
   import { IconDownload } from "@eneo/icons/download";
   import { IconInfo } from "@eneo/icons/info";
   import { IconCheck } from "@eneo/icons/check";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { onDestroy, onMount } from "svelte";
   import { browser } from "$app/environment";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
@@ -123,8 +123,7 @@
   <div class="action-row">
     {#if $attachments.length === 0}
       <Button
-        variant="primary"
-        on:click={() => {
+        onclick={() => {
           if (!audioFile) {
             toast.error(m.recording_not_found());
             return;
@@ -142,13 +141,11 @@
     {/if}
 
     <div class="secondary-actions">
-      <Button variant="outlined" on:click={saveAudioFile}><IconDownload />{m.save_as_file()}</Button
-      >
+      <Button variant="outline" onclick={saveAudioFile}><IconDownload />{m.save_as_file()}</Button>
       {#if $attachments.length === 0}
         <Button
           variant="destructive"
-          padding="icon-leading"
-          on:click={() => {
+          onclick={() => {
             if (confirm(m.confirm_discard_recording())) {
               audioFile = undefined;
               audioURL = undefined;

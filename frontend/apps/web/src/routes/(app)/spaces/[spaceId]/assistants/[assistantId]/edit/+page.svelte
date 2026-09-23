@@ -3,10 +3,9 @@
   import OpenFilesHelp from "$lib/features/assistants/components/OpenFilesHelp.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
 
-  import { Button } from "@eneo/ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
-  import { Button as UIButton } from "$lib/components/ui/button/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { IconSparkles } from "@eneo/icons/sparkles";
   import { afterNavigate, beforeNavigate, invalidate } from "$app/navigation";
@@ -251,16 +250,15 @@
         <Button
           variant="destructive"
           disabled={$isSaving}
-          on:click={() => {
+          onclick={() => {
             cancelUploadsAndClearQueue();
             discardChanges();
           }}>{m.discard_all_changes()}</Button
         >
 
         <Button
-          variant="positive"
-          class="h-8 w-32 whitespace-nowrap"
-          on:click={async () => {
+          class="bg-positive-default hover:bg-positive-stronger w-32"
+          onclick={async () => {
             cancelUploadsAndClearQueue();
 
             $update.completion_model_kwargs = filterSupportedModelKwargs(
@@ -279,7 +277,7 @@
         {#if showSavesChangedNotice}
           <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
         {/if}
-        <Button variant="primary" class="w-32" href={previousRoute}>{m.done()}</Button>
+        <Button class="w-32" href={previousRoute}>{m.done()}</Button>
       {/if}
     </Page.Flex>
   </Page.Header>
@@ -341,16 +339,16 @@
                 <Tooltip.Trigger onclick={available ? () => (isModalOpen = true) : undefined}>
                   {#snippet child({ props })}
                     {#if available}
-                      <UIButton {...props} variant="ghost">
+                      <Button {...props} variant="ghost">
                         <IconSparkles />
                         {m.prompt_guide_button()}
-                      </UIButton>
+                      </Button>
                     {:else}
                       <span {...props} class="inline-flex">
-                        <UIButton variant="ghost" disabled>
+                        <Button variant="ghost" disabled>
                           <IconSparkles />
                           {m.prompt_guide_button()}
-                        </UIButton>
+                        </Button>
                       </span>
                     {/if}
                   {/snippet}

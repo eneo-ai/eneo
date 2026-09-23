@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { IconSparkles } from "@eneo/icons/sparkles";
@@ -85,7 +85,7 @@
   <!-- Collapsible header: toggling the chevron/name reveals this helper's
        settings, mirroring the grouped rows on the Models admin page. -->
   <div class="flex items-center gap-2 px-2.5 py-3.5">
-    <Button onclick={() => (isOpen = !isOpen)} padding="icon-leading" aria-label={displayName}>
+    <Button variant="ghost" onclick={() => (isOpen = !isOpen)} aria-label={displayName}>
       <IconChevronDown class="{isOpen ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
     </Button>
     <span
@@ -93,7 +93,7 @@
     >
       <IconSparkles class="!size-4" />
     </span>
-    <Button onclick={() => (isOpen = !isOpen)} padding="text" class="-ml-1 font-medium">
+    <Button variant="ghost" onclick={() => (isOpen = !isOpen)} class="-ml-1 font-medium">
       <span>{roleKindLabel(role.kind)}</span>
     </Button>
     <span
@@ -140,7 +140,7 @@
       </Field.Field>
 
       <div class="border-default flex flex-wrap items-center justify-between gap-2 border-t pt-4">
-        <Button variant="primary" href={settingsHref}>
+        <Button href={settingsHref}>
           {m.admin_help_assistants_open_settings()}
         </Button>
         <Button variant="destructive" onclick={remove} disabled={remove.isLoading}>

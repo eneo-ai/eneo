@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { Page, Settings } from "$lib/components/layout";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
@@ -109,8 +109,12 @@
     />
 
     <Page.Flex>
-      <Button variant="outlined" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
-      <Button variant="positive" class="w-32" onclick={handleCreateTemplate} disabled={isSaving}>
+      <Button variant="outline" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
+      <Button
+        class="w-32 bg-positive-default hover:bg-positive-stronger"
+        onclick={handleCreateTemplate}
+        disabled={isSaving}
+      >
         {isSaving ? m.loading() : m.create_template()}
       </Button>
     </Page.Flex>

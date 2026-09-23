@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { RefreshCw, AlertTriangle, Trash2, Check, Pencil, X, ShieldAlert } from "lucide-svelte";
@@ -277,8 +277,8 @@
         {/if}
       </div>
     </div>
-    <Button variant="outlined" size="sm" onclick={syncTools} disabled={syncing} class="gap-1.5">
-      <RefreshCw class="h-3.5 w-3.5 {syncing ? 'animate-spin' : ''}" aria-hidden="true" />
+    <Button variant="outline" size="sm" onclick={syncTools} disabled={syncing} class="gap-1.5">
+      <RefreshCw class="size-3.5 {syncing ? 'animate-spin' : ''}" aria-hidden="true" />
       <span>{syncing ? m.syncing() : m.sync_tools()}</span>
     </Button>
   </div>
@@ -296,23 +296,23 @@
         </div>
         <div class="flex items-center gap-1.5">
           <Button
-            variant="outlined"
+            variant="outline"
             size="sm"
             onclick={approveAll}
             disabled={bulkUpdating}
             class="gap-1 text-xs"
           >
-            <Check class="h-3 w-3" />
+            <Check class="size-3" />
             {m.approve_all()}
           </Button>
           <Button
-            variant="outlined"
+            variant="outline"
             size="sm"
             onclick={rejectAll}
             disabled={bulkUpdating}
             class="gap-1 text-xs"
           >
-            <X class="h-3 w-3" />
+            <X class="size-3" />
             {m.reject_all()}
           </Button>
         </div>

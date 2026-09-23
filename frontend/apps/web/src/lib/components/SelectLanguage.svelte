@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { Select } from "@eneo/ui";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { availableLanguages, type Language } from "../core/language";
   import { getLanguageStore } from "../core/language";
-  import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
 
   const currentLanguage = getLanguageStore();
@@ -13,22 +12,21 @@
     en: m.english()
   };
 
-  const selected = writable<{ label: string; value: Language }>({
-    label: languageLabels[$currentLanguage],
-    value: $currentLanguage
-  });
-
-  $: $currentLanguage = $selected.value;
+  function selectLanguage(value: string) {
+    const language = availableLanguages.find((language) => language === value);
+    if (language) $currentLanguage = language;
+  }
 </script>
 
-<Select.Root customStore={selected}>
-  <div class="sr-only">
-    <Select.Label>{m.language()}</Select.Label>
-  </div>
-  <Select.Trigger placeholder={m.language()}></Select.Trigger>
-  <Select.Options>
+<Select.Root type="single" value={$currentLanguage} onValueChange={selectLanguage}>
+  <Select.Trigger class="w-full" aria-label={m.language()}>
+    {languageLabels[$currentLanguage]}
+  </Select.Trigger>
+  <Select.Content>
     {#each availableLanguages as language (language)}
-      <Select.Item value={language} label={languageLabels[language]}></Select.Item>
+      <Select.Item value={language} label={languageLabels[language]}>
+        {languageLabels[language]}
+      </Select.Item>
     {/each}
-  </Select.Options>
+  </Select.Content>
 </Select.Root>

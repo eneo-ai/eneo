@@ -1,7 +1,10 @@
 <script lang="ts">
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEdit } from "@eneo/icons/edit";
-  import { Button, Dialog } from "@eneo/ui";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -22,7 +25,8 @@
   const untitled = m.chat_history_untitled();
   const renameId = useId();
 
-  let renameOpen: Dialog.OpenState;
+  let renameOpen = false;
+  let deleteOpen = false;
 
   async function submitRename() {
     const trimmed = (newName ?? "").trim();
@@ -30,74 +34,87 @@
 
     try {
       await chat.renameConversation(conversation, trimmed);
-      $renameOpen = false;
+      renameOpen = false;
     } catch (e) {
       toastError(e);
     }
+  }
+
+  async function deleteConversation() {
+    deleteOpen = false;
+    await chat.deleteConversation(conversation);
+    onConversationDeleted?.(conversation);
   }
 </script>
 
 <div class="flex items-center justify-end gap-2">
   <!-- Rename -->
-  <Dialog.Root bind:isOpen={renameOpen}>
-    <Dialog.Trigger asFragment let:trigger>
-      <Button is={trigger} label={m.chat_history_rename()} padding="icon">
-        <IconEdit />
-      </Button>
+  <Dialog.Root bind:open={renameOpen}>
+    <Dialog.Trigger>
+      {#snippet child({ props })}
+        <Button {...props} variant="ghost" size="icon" aria-label={m.chat_history_rename()}>
+          <IconEdit />
+        </Button>
+      {/snippet}
     </Dialog.Trigger>
 
-    <Dialog.Content width="small">
-      <Dialog.Title>{m.chat_history_rename()}</Dialog.Title>
-      <Dialog.Description>{m.chat_history_rename_description()}</Dialog.Description>
+    <Dialog.Content class={dialogLayout.content("small")} closeLabel={m.close()}>
+      <Dialog.Header class={dialogLayout.header}>
+        <Dialog.Title>{m.chat_history_rename()}</Dialog.Title>
+        <Dialog.Description>{m.chat_history_rename_description()}</Dialog.Description>
+      </Dialog.Header>
 
-      <Dialog.Section class="p-6">
-        <Field.Field class="gap-3">
-          <Field.Label for={renameId} class="text-default text-sm font-medium">
-            {m.chat_history_name_label()}
-          </Field.Label>
+      <div class={dialogLayout.body}>
+        <div class="{dialogLayout.section} p-6">
+          <Field.Field class="gap-3">
+            <Field.Label for={renameId} class="text-default text-sm font-medium">
+              {m.chat_history_name_label()}
+            </Field.Label>
 
-          <Input id={renameId} bind:value={newName} placeholder={conversation?.name ?? untitled} />
-        </Field.Field>
-      </Dialog.Section>
+            <Input
+              id={renameId}
+              bind:value={newName}
+              placeholder={conversation?.name ?? untitled}
+            />
+          </Field.Field>
+        </div>
+      </div>
 
-      <Dialog.Controls let:close>
-        <Button is={close}>{m.cancel()}</Button>
+      <Dialog.Footer class={dialogLayout.footer}>
+        <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
 
-        <Button disabled={(newName ?? "").trim().length === 0} on:click={submitRename}>
+        <Button disabled={(newName ?? "").trim().length === 0} onclick={submitRename}>
           {m.save()}
         </Button>
-      </Dialog.Controls>
+      </Dialog.Footer>
     </Dialog.Content>
   </Dialog.Root>
 
   <!-- Delete -->
-  <Dialog.Root alert>
-    <Dialog.Trigger asFragment let:trigger>
-      <Button variant="destructive" is={trigger} label={m.delete_conversation()} padding="icon">
-        <IconTrash />
-      </Button>
-    </Dialog.Trigger>
+  <AlertDialog.Root bind:open={deleteOpen}>
+    <AlertDialog.Trigger>
+      {#snippet child({ props })}
+        <Button {...props} variant="destructive" size="icon" aria-label={m.delete_conversation()}>
+          <IconTrash />
+        </Button>
+      {/snippet}
+    </AlertDialog.Trigger>
 
-    <Dialog.Content width="small">
-      <Dialog.Title>{m.delete_conversation()}</Dialog.Title>
-      <Dialog.Description>
-        {m.do_you_really_want_to_delete()}
-        <span class="italic">{(conversation?.name ?? untitled).slice(0, 200)}</span>?
-      </Dialog.Description>
+    <AlertDialog.Content class={dialogLayout.content("small")}>
+      <AlertDialog.Header class={dialogLayout.header}>
+        <AlertDialog.Title>{m.delete_conversation()}</AlertDialog.Title>
+        <AlertDialog.Description>
+          {m.do_you_really_want_to_delete()}
+          <span class="italic">{(conversation?.name ?? untitled).slice(0, 200)}</span>?
+        </AlertDialog.Description>
+      </AlertDialog.Header>
 
-      <Dialog.Controls let:close>
-        <Button is={close}>{m.cancel()}</Button>
-        <Button
-          is={close}
-          variant="destructive"
-          on:click={async () => {
-            await chat.deleteConversation(conversation);
-            onConversationDeleted?.(conversation);
-          }}
-        >
+      <AlertDialog.Footer class={dialogLayout.footer}>
+        <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+        <Button variant="destructive" onclick={deleteConversation}>
           {m.delete()}
         </Button>
-      </Dialog.Controls>
-    </Dialog.Content>
-  </Dialog.Root>
+      </AlertDialog.Footer>
+    </AlertDialog.Content>
+  </AlertDialog.Root>
 </div>

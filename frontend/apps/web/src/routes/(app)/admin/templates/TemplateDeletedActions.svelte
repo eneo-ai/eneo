@@ -6,7 +6,8 @@
 
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
-  import { Button, Dropdown } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { MoreVertical, Undo, Trash2 } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { writable } from "svelte/store";
@@ -23,30 +24,27 @@
   let isPermanentDeleteOpen = writable(false);
 </script>
 
-<Dropdown.Root>
-  <Dropdown.Trigger asFragment let:trigger>
-    <Button is={trigger} padding="icon" aria-label={m.actions()}>
-      <MoreVertical size={16} />
-    </Button>
-  </Dropdown.Trigger>
+<DropdownMenu.Root>
+  <DropdownMenu.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+        <MoreVertical size={16} />
+      </Button>
+    {/snippet}
+  </DropdownMenu.Trigger>
 
-  <Dropdown.Menu let:item>
-    <Button is={item} padding="icon-leading" onclick={() => isRestoreOpen.set(true)}>
+  <DropdownMenu.Content align="end">
+    <DropdownMenu.Item onSelect={() => isRestoreOpen.set(true)}>
       <Undo size={16} />
       {m.restore()}
-    </Button>
+    </DropdownMenu.Item>
 
-    <Button
-      is={item}
-      padding="icon-leading"
-      variant="destructive"
-      onclick={() => isPermanentDeleteOpen.set(true)}
-    >
+    <DropdownMenu.Item variant="destructive" onSelect={() => isPermanentDeleteOpen.set(true)}>
       <Trash2 size={16} />
       {m.permanent_delete()}
-    </Button>
-  </Dropdown.Menu>
-</Dropdown.Root>
+    </DropdownMenu.Item>
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
 
 <TemplateRestoreDialog openController={isRestoreOpen} {template} {type} />
 <TemplatePermanentDeleteDialog openController={isPermanentDeleteOpen} {template} {type} />

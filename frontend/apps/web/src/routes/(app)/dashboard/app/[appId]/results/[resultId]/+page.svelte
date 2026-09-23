@@ -3,8 +3,8 @@
   import { IconDownload } from "@eneo/icons/download";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconPrint } from "@eneo/icons/print";
-  import { Button, Markdown } from "@eneo/ui";
-  import { Button as UIButton } from "$lib/components/ui/button/index.js";
+  import { Markdown } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import dayjs from "dayjs";
   import utc from "dayjs/plugin/utc";
@@ -120,14 +120,14 @@
     <Tooltip.Root>
       <Tooltip.Trigger onclick={print}>
         {#snippet child({ props })}
-          <UIButton
+          <Button
             {...props}
             variant="outline"
             size="icon"
             aria-label={m.print_save_type_pdf({ type })}
           >
             <IconPrint size="md" />
-          </UIButton>
+          </Button>
         {/snippet}
       </Tooltip.Trigger>
       <Tooltip.Content side="bottom">{m.print_save_type_pdf({ type })}</Tooltip.Content>
@@ -136,14 +136,14 @@
     <Tooltip.Root>
       <Tooltip.Trigger onclick={() => downloadAsText(text)}>
         {#snippet child({ props })}
-          <UIButton
+          <Button
             {...props}
             variant="outline"
             size="icon"
             aria-label={m.download_type_raw_text({ type })}
           >
             <IconDownload />
-          </UIButton>
+          </Button>
         {/snippet}
       </Tooltip.Trigger>
       <Tooltip.Content side="bottom">{m.download_type_raw_text({ type })}</Tooltip.Content>
@@ -152,9 +152,9 @@
     <Tooltip.Root>
       <Tooltip.Trigger onclick={() => copyText(text)}>
         {#snippet child({ props })}
-          <UIButton {...props} variant="outline" size="icon" aria-label={m.copy_type({ type })}>
+          <Button {...props} variant="outline" size="icon" aria-label={m.copy_type({ type })}>
             <IconCopy />
-          </UIButton>
+          </Button>
         {/snippet}
       </Tooltip.Trigger>
       <Tooltip.Content side="bottom">{m.copy_type({ type })}</Tooltip.Content>
@@ -189,11 +189,7 @@
         {resultTitle}
       </h1>
     </a>
-    <Button
-      variant="primary"
-      href={localizeHref(`/dashboard/app/${data.app.id}`)}
-      class="!rounded-lg !px-5 !py-1"
-    >
+    <Button href={localizeHref(`/dashboard/app/${data.app.id}`)} class="px-5">
       {m.new_run()}
     </Button>
   </div>
@@ -246,7 +242,12 @@
                       <UploadedFileIcon {file} />
                       <span class="truncate">{file.name}</span>
                     </div>
-                    <Button href={url} padding="icon">
+                    <Button
+                      href={url}
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`${m.download()} ${file.name}`}
+                    >
                       <IconDownload />
                     </Button>
                   </div>
@@ -276,7 +277,7 @@
           <span class="text-secondary">{m.app_run_failed_files_list()}</span>
           {#each result.input.files as file (file.id)}
             {#await eneo.files.generateSignedUrl( { fileId: file.id, expiresIn: 3600, contentDisposition: "attachment" } ) then signedFile}
-              <Button href={signedFile.url} variant="outlined">
+              <Button href={signedFile.url} variant="outline">
                 <IconDownload />
                 {m.download()} "{file.name}"
               </Button>

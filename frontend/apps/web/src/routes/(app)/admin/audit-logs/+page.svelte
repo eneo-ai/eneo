@@ -5,7 +5,10 @@
   import { writable } from "svelte/store";
   import { SvelteDate, SvelteSet, SvelteURLSearchParams } from "svelte/reactivity";
   import { Page } from "$lib/components/layout";
-  import { Button, Input, Dropdown } from "@eneo/ui";
+  import { Input } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as Popover from "$lib/components/ui/popover/index.js";
   import { Input as TextInput } from "$lib/components/ui/input/index.js";
   import { Progress } from "$lib/components/ui/progress/index.js";
   import * as m from "$lib/paraglide/messages";
@@ -880,7 +883,7 @@
             {/if}
           </div>
           <Button
-            variant="simple"
+            variant="ghost"
             onclick={cancelExport}
             class="text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950 dark:hover:text-red-300"
           >
@@ -897,45 +900,41 @@
             <IconInfo class="h-4 w-4" />
             <span>{exportError}</span>
           </div>
-          <Button variant="simple" onclick={resetExportState}>
+          <Button variant="ghost" onclick={resetExportState} aria-label={m.dismiss()}>
             <IconXMark class="h-4 w-4" />
           </Button>
         </div>
       {:else}
         <!-- Normal Export Buttons -->
         <div class="flex gap-[1px]">
-          <Button
-            variant="primary"
-            onclick={() => exportLogs("csv")}
-            disabled={isExporting}
-            class="!rounded-r-none"
-          >
+          <Button onclick={() => exportLogs("csv")} disabled={isExporting} class="!rounded-r-none">
             <IconDownload class="h-4 w-4" />
             {m.audit_export_with_count({ count: totalCount })}
           </Button>
-          <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
-            <Dropdown.Trigger asFragment let:trigger>
-              <Button
-                padding="icon"
-                variant="primary"
-                is={trigger}
-                disabled={isExporting}
-                class="!rounded-l-none"
-              >
-                <IconChevronDown></IconChevronDown>
-              </Button>
-            </Dropdown.Trigger>
-            <Dropdown.Menu let:item>
-              <Button is={item} onclick={() => exportLogs("csv")}>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger disabled={isExporting}>
+              {#snippet child({ props })}
+                <Button
+                  {...props}
+                  size="icon"
+                  class="!rounded-l-none"
+                  aria-label={m.audit_export_format_options()}
+                >
+                  <IconChevronDown></IconChevronDown>
+                </Button>
+              {/snippet}
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="end">
+              <DropdownMenu.Item onSelect={() => exportLogs("csv")}>
                 <IconDownload size="sm"></IconDownload>
                 {m.audit_download_csv()}
-              </Button>
-              <Button is={item} onclick={() => exportLogs("json")}>
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => exportLogs("json")}>
                 <IconDownload size="sm"></IconDownload>
                 {m.audit_download_json()}
-              </Button>
-            </Dropdown.Menu>
-          </Dropdown.Root>
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
         </div>
       {/if}
     {/if}
@@ -1005,8 +1004,7 @@
               {#if !isEditingRetention}
                 <Button
                   onclick={() => (isEditingRetention = true)}
-                  variant="simple"
-                  size="sm"
+                  variant="ghost"
                   class="min-w-[80px]"
                 >
                   {m.audit_retention_edit()}
@@ -1082,32 +1080,28 @@
                     <div class="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <Button
                         onclick={() => (retentionInputValue = "90")}
-                        variant={retentionInputNum === 90 ? "primary" : "simple"}
-                        size="sm"
+                        variant={retentionInputNum === 90 ? "default" : "ghost"}
                         class="w-full text-sm font-medium"
                       >
                         {m.audit_preset_3_months()}
                       </Button>
                       <Button
                         onclick={() => (retentionInputValue = "365")}
-                        variant={retentionInputNum === 365 ? "primary" : "simple"}
-                        size="sm"
+                        variant={retentionInputNum === 365 ? "default" : "ghost"}
                         class="w-full text-sm font-medium"
                       >
                         {m.audit_preset_1_year()}
                       </Button>
                       <Button
                         onclick={() => (retentionInputValue = "730")}
-                        variant={retentionInputNum === 730 ? "primary" : "simple"}
-                        size="sm"
+                        variant={retentionInputNum === 730 ? "default" : "ghost"}
                         class="w-full text-sm font-medium"
                       >
                         {m.audit_preset_2_years()}
                       </Button>
                       <Button
                         onclick={() => (retentionInputValue = "2555")}
-                        variant={retentionInputNum === 2555 ? "primary" : "simple"}
-                        size="sm"
+                        variant={retentionInputNum === 2555 ? "default" : "ghost"}
                         class="w-full text-sm font-medium"
                       >
                         {m.audit_preset_7_years()}
@@ -1171,7 +1165,7 @@
                   <div class="flex items-center justify-end gap-2">
                     <Button
                       onclick={cancelRetentionEdit}
-                      variant="simple"
+                      variant="ghost"
                       disabled={isSavingRetention}
                       class="min-w-[80px] text-sm font-medium"
                     >
@@ -1179,7 +1173,6 @@
                     </Button>
                     <Button
                       onclick={saveRetentionPolicy}
-                      variant="primary"
                       disabled={isSavingRetention || retentionInputNum === retentionDays}
                       class="min-w-[120px] text-sm font-medium"
                     >
@@ -1207,12 +1200,7 @@
             >
               <IconInfo class="h-5 w-5 text-red-600 dark:text-red-400" />
               <p class="text-sm text-red-800 dark:text-red-200">{m.audit_error_loading()}</p>
-              <Button
-                onclick={() => window.location.reload()}
-                variant="outlined"
-                size="sm"
-                class="ml-auto"
-              >
+              <Button onclick={() => window.location.reload()} variant="outline" class="ml-auto">
                 {m.audit_retry()}
               </Button>
             </div>
@@ -1430,41 +1418,39 @@
 
                 <!-- Action Multi-Select -->
                 <div class="relative min-w-[200px] sm:min-w-[220px]">
-                  <Dropdown.Root
-                    {...{ open: showActionDropdown }}
-                    gutter={4}
-                    placement="bottom-start"
-                  >
-                    <Dropdown.Trigger asFragment let:trigger>
-                      <Button
-                        is={trigger}
-                        variant="outlined"
-                        class="w-full justify-between"
-                        aria-haspopup="listbox"
-                        aria-expanded={showActionDropdown}
-                        aria-label={selectedActions.length === 0
-                          ? m.audit_all_actions()
-                          : `${selectedActions.length} ${m.audit_actions_selected()}`}
-                      >
-                        <span class={selectedActions.length === 0 ? "text-muted" : "text-default"}>
-                          {#if selectedActions.length === 0}
-                            {m.audit_all_actions()}
-                          {:else if selectedActions.length === 1}
-                            {actionOptions.find((o) => o.value === selectedActions[0])?.label}
-                          {:else}
-                            {selectedActions.length} {m.audit_actions_selected()}
-                          {/if}
-                        </span>
-                        <IconChevronDown
-                          class={`text-muted h-4 w-4 transition-transform duration-200 ${showActionDropdown ? "rotate-180" : ""}`}
-                        />
-                      </Button>
-                    </Dropdown.Trigger>
-                    <Dropdown.Menu>
+                  <Popover.Root bind:open={showActionDropdown}>
+                    <Popover.Trigger>
+                      {#snippet child({ props })}
+                        <Button
+                          {...props}
+                          variant="outline"
+                          class="w-full justify-between"
+                          aria-label={selectedActions.length === 0
+                            ? m.audit_all_actions()
+                            : `${selectedActions.length} ${m.audit_actions_selected()}`}
+                        >
+                          <span
+                            class={selectedActions.length === 0 ? "text-muted" : "text-default"}
+                          >
+                            {#if selectedActions.length === 0}
+                              {m.audit_all_actions()}
+                            {:else if selectedActions.length === 1}
+                              {actionOptions.find((o) => o.value === selectedActions[0])?.label}
+                            {:else}
+                              {selectedActions.length} {m.audit_actions_selected()}
+                            {/if}
+                          </span>
+                          <IconChevronDown
+                            class={`text-muted h-4 w-4 transition-transform duration-200 ${showActionDropdown ? "rotate-180" : ""}`}
+                          />
+                        </Button>
+                      {/snippet}
+                    </Popover.Trigger>
+                    <Popover.Content align="start" class="w-auto gap-0 overflow-hidden p-0">
                       <!-- Container with search and scrollable list -->
-                      <div class="-mx-2 -mb-2 min-w-[280px] sm:min-w-[300px]">
+                      <div class="min-w-[280px] sm:min-w-[300px]">
                         <!-- Search input (sticky at top) -->
-                        <div class="bg-primary border-default sticky top-0 z-30 -mt-2 border-b p-2">
+                        <div class="bg-primary border-default sticky top-0 z-30 border-b p-2">
                           <input
                             type="text"
                             bind:value={actionSearchQuery}
@@ -1558,17 +1544,12 @@
                           ></div>
                         </div>
                       </div>
-                    </Dropdown.Menu>
-                  </Dropdown.Root>
+                    </Popover.Content>
+                  </Popover.Root>
                 </div>
 
                 <!-- Apply Filters Button -->
-                <Button
-                  variant="primary"
-                  onclick={() => applyFilters()}
-                  disabled={isFiltering}
-                  class="min-w-[100px]"
-                >
+                <Button onclick={() => applyFilters()} disabled={isFiltering} class="min-w-[100px]">
                   {#if isFiltering}
                     <div class="flex items-center gap-2">
                       <div
@@ -1694,8 +1675,7 @@
                   <Button
                     onclick={prevPage}
                     disabled={currentPage <= 1}
-                    variant="outlined"
-                    size="sm"
+                    variant="outline"
                     class="min-w-[100px]"
                   >
                     {m.audit_previous()}
@@ -1703,8 +1683,7 @@
                   <Button
                     onclick={nextPage}
                     disabled={currentPage >= totalPages}
-                    variant="outlined"
-                    size="sm"
+                    variant="outline"
                     class="min-w-[100px]"
                   >
                     {m.audit_next()}
@@ -1765,7 +1744,7 @@
                             </p>
                           </div>
                           {#if activeFilterCount > 0}
-                            <Button onclick={clearFilters} variant="outlined" size="sm">
+                            <Button onclick={clearFilters} variant="outline">
                               {m.audit_clear_filters()}
                             </Button>
                           {/if}
@@ -1958,7 +1937,7 @@
                 <Button
                   onclick={prevPage}
                   disabled={currentPage <= 1}
-                  variant="outlined"
+                  variant="outline"
                   class="min-w-[120px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]"
                 >
                   {m.audit_previous()}
@@ -1970,7 +1949,7 @@
                 <Button
                   onclick={nextPage}
                   disabled={currentPage >= totalPages}
-                  variant="outlined"
+                  variant="outline"
                   class="min-w-[120px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]"
                 >
                   {m.audit_next()}

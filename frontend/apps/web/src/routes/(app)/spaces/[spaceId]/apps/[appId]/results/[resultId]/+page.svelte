@@ -3,8 +3,8 @@
   import { IconCopy } from "@eneo/icons/copy";
   import { IconDownload } from "@eneo/icons/download";
   import { IconPrint } from "@eneo/icons/print";
-  import { Button, Markdown } from "@eneo/ui";
-  import { Button as UIButton } from "$lib/components/ui/button/index.js";
+  import { Markdown } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import dayjs from "dayjs";
@@ -145,14 +145,14 @@
     <Tooltip.Root>
       <Tooltip.Trigger onclick={print}>
         {#snippet child({ props })}
-          <UIButton
+          <Button
             {...props}
             variant="ghost"
             size="icon"
             aria-label={m.print_save_type_pdf({ type })}
           >
             <IconPrint size="md" />
-          </UIButton>
+          </Button>
         {/snippet}
       </Tooltip.Trigger>
       <Tooltip.Content side="left">{m.print_save_type_pdf({ type })}</Tooltip.Content>
@@ -161,14 +161,14 @@
     <Tooltip.Root>
       <Tooltip.Trigger onclick={() => downloadAsText(text)}>
         {#snippet child({ props })}
-          <UIButton
+          <Button
             {...props}
             variant="ghost"
             size="icon"
             aria-label={m.download_type_raw_text({ type })}
           >
             <IconDownload />
-          </UIButton>
+          </Button>
         {/snippet}
       </Tooltip.Trigger>
       <Tooltip.Content side="left">{m.download_type_raw_text({ type })}</Tooltip.Content>
@@ -177,9 +177,9 @@
     <Tooltip.Root>
       <Tooltip.Trigger onclick={() => copyText(text)}>
         {#snippet child({ props })}
-          <UIButton {...props} variant="ghost" size="icon" aria-label={m.copy_type({ type })}>
+          <Button {...props} variant="ghost" size="icon" aria-label={m.copy_type({ type })}>
             <IconCopy />
-          </UIButton>
+          </Button>
         {/snippet}
       </Tooltip.Trigger>
       <Tooltip.Content side="left">{m.copy_type({ type })}</Tooltip.Content>
@@ -199,13 +199,11 @@
 
     <Page.Flex>
       <Button
+        variant="ghost"
         href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}/edit`)}
-        class="!line-clamp-1">{m.edit()}</Button
+        >{m.edit()}</Button
       >
-      <Button
-        variant="primary"
-        class="!line-clamp-1"
-        href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}`)}
+      <Button href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}`)}
         >{m.new_run()}</Button
       >
     </Page.Flex>
@@ -244,7 +242,7 @@
                               <UploadedFileIcon {file}></UploadedFileIcon>
                               {file.name}
                             </div>
-                            <Button href={url}>
+                            <Button variant="ghost" href={url}>
                               <IconDownload></IconDownload>
                               {m.download()}</Button
                             >
@@ -274,7 +272,7 @@
 
                 {#each result.input.files as file (file.id)}
                   {#await eneo.files.generateSignedUrl( { fileId: file.id, contentDisposition: "attachment" } ) then { url }}
-                    <Button href={url} class="outlined no-underline"
+                    <Button variant="ghost" href={url} class="no-underline"
                       ><IconDownload></IconDownload>{m.download()} "{file.name}"</Button
                     >
                   {/await}

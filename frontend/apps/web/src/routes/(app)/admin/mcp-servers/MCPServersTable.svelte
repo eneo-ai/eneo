@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import type { Snippet } from "svelte";
@@ -137,11 +137,12 @@
           >
             <td class="border-dimmer border-b px-2 py-3 align-top">
               <Button
-                variant="simple"
-                padding="icon"
+                variant="ghost"
+                size="icon"
+                aria-label={`${expanded ? m.governance_mcp_hide_tools() : m.governance_mcp_show_tools()}: ${server.name}`}
+                aria-expanded={expanded}
                 onclick={() => toggleExpanded(server.mcp_server_id)}
                 disabled={!hasTools}
-                class={hasTools ? "" : "opacity-30"}
               >
                 <ChevronRight
                   class="h-4 w-4 transition-transform duration-200 {expanded ? 'rotate-90' : ''}"

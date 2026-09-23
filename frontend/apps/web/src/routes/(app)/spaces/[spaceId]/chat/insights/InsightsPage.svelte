@@ -13,7 +13,8 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconSendArrow } from "@eneo/icons/send-arrow";
   import { IconSparkles } from "@eneo/icons/sparkles";
-  import { Button, Input, Markdown } from "@eneo/ui";
+  import { Input, Markdown } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
 
   const eneo = getEneo();
@@ -124,7 +125,9 @@
             aria-describedby="insights-question-status-live"
           />
           <Button
-            padding="icon"
+            type="submit"
+            variant="ghost"
+            size="icon"
             aria-label={m.send_the_question()}
             disabled={insights.askQuestion.isLoading || !question.trim()}
             ><IconSendArrow aria-hidden="true"></IconSendArrow></Button

@@ -1,6 +1,5 @@
 <script lang="ts">
   import { IconPlay } from "@eneo/icons/play";
-  import { Button } from "@eneo/ui";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { getEneo } from "$lib/core/Eneo";
@@ -116,15 +115,15 @@
       </div>
 
       {#snippet runButton()}
-        <Button
+        <button
+          type="button"
           disabled={!hasData || isSubmitting}
-          unstyled
           on:click={createRun}
-          class="border-stronger bg-dynamic-default text-on-fill hover:border-dynamic-default hover:bg-dynamic-dimmer hover:text-dynamic-stronger flex w-full cursor-pointer items-center justify-center gap-2 rounded-md border px-4 py-2 pl-3 text-lg shadow-lg "
+          class="border-stronger bg-dynamic-default text-on-fill hover:border-dynamic-default hover:bg-dynamic-dimmer hover:text-dynamic-stronger flex w-full cursor-pointer items-center justify-center gap-2 rounded-md border px-4 py-2 pl-3 text-lg shadow-lg"
         >
           <IconPlay />
           {isSubmitting ? m.submitting() : m.submit()}
-        </Button>
+        </button>
       {/snippet}
       {#if hasData}
         {@render runButton()}
@@ -147,14 +146,14 @@
         </p>
       </div>
 
-      <Button
+      <button
+        type="button"
         disabled
-        unstyled
         class="border-stronger bg-dynamic-default text-on-fill flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-md border px-4 py-2 pl-3 text-lg opacity-50 shadow-lg"
       >
         <IconPlay />
         {m.submit()}
-      </Button>
+      </button>
     {/if}
   </div>
 </div>

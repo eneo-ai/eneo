@@ -7,8 +7,9 @@
 <script lang="ts">
   import { IconCog } from "@eneo/icons/cog";
   import type { GroupChat } from "@eneo/eneo-js";
-  import { Button, Dialog } from "@eneo/ui";
-  import { writable } from "svelte/store";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -29,44 +30,51 @@
     return { value };
   });
 
-  let isOpen = writable(false);
+  let isOpen = $state(false);
 </script>
 
-<Dialog.Root openController={isOpen}>
-  <Dialog.Trigger let:trigger asFragment>
-    <Button variant="outlined" is={trigger} padding="icon"><IconCog></IconCog></Button>
+<Dialog.Root bind:open={isOpen}>
+  <Dialog.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} variant="outline" size="icon" aria-label={m.edit_assistant_description()}
+        ><IconCog></IconCog></Button
+      >
+    {/snippet}
   </Dialog.Trigger>
 
-  <Dialog.Content width="medium">
-    <Dialog.Title>{m.edit_assistant_description()}</Dialog.Title>
-    <Dialog.Section scrollable={false}>
-      <Field.Field class="border-default hover:bg-hover-dimmer border-b px-4 py-4">
-        <Field.Label for={`${uid}-handle`}>{m.assistant()}</Field.Label>
-        <Input
-          id={`${uid}-handle`}
-          value={assistant.handle}
-          disabled
-          class="text-secondary pointer-events-none"
-        />
-      </Field.Field>
-      <Field.Field class="border-default hover:bg-hover-dimmer px-4 py-4">
-        <Field.Label for={`${uid}-description`}>{m.description()}</Field.Label>
-        <Textarea
-          id={`${uid}-description`}
-          bind:value={descriptionProxy.value}
-          rows={4}
-          placeholder={assistant?.default_description}
-          aria-describedby={`${uid}-description-description`}
-        />
-        <Field.Description id={`${uid}-description-description`}>
-          {m.will_help_determine_assistant()}
-        </Field.Description>
-      </Field.Field>
-    </Dialog.Section>
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
+  <Dialog.Content class={dialogLayout.content("medium")} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{m.edit_assistant_description()}</Dialog.Title>
+    </Dialog.Header>
+    <div class={dialogLayout.body}>
+      <div class={dialogLayout.section}>
+        <Field.Field class="border-default hover:bg-hover-dimmer border-b px-4 py-4">
+          <Field.Label for={`${uid}-handle`}>{m.assistant()}</Field.Label>
+          <Input
+            id={`${uid}-handle`}
+            value={assistant.handle}
+            disabled
+            class="text-secondary pointer-events-none"
+          />
+        </Field.Field>
+        <Field.Field class="border-default hover:bg-hover-dimmer px-4 py-4">
+          <Field.Label for={`${uid}-description`}>{m.description()}</Field.Label>
+          <Textarea
+            id={`${uid}-description`}
+            bind:value={descriptionProxy.value}
+            rows={4}
+            placeholder={assistant?.default_description}
+            aria-describedby={`${uid}-description-description`}
+          />
+          <Field.Description id={`${uid}-description-description`}>
+            {m.will_help_determine_assistant()}
+          </Field.Description>
+        </Field.Field>
+      </div>
+    </div>
+    <Dialog.Footer class={dialogLayout.footer}>
+      <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
       <Button
-        variant="primary"
         onclick={() => {
           const user_description =
             descriptionProxy.value.trim() === "" ? null : descriptionProxy.value;
@@ -75,9 +83,9 @@
             return;
           }
           updateAssistant({ ...assistant, user_description });
-          $isOpen = false;
+          isOpen = false;
         }}>{m.accept_changes()}</Button
       >
-    </Dialog.Controls>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

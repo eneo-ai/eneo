@@ -3,9 +3,10 @@
   import { IconUpload } from "@eneo/icons/upload";
   import { IconDownload } from "@eneo/icons/download";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import { Button, Dialog } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { createEventDispatcher } from "svelte";
-  import { writable } from "svelte/store";
   import * as m from "$lib/paraglide/messages";
 
   /** Icon URL for display - pass the full URL directly */
@@ -18,7 +19,7 @@
     delete: void;
   }>();
 
-  let showPreview = writable(false);
+  let showPreview = false;
 
   const MAX_SIZE = 262144; // 256KB
   const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp"];
@@ -62,7 +63,7 @@
   }
 
   function openPreview() {
-    $showPreview = true;
+    showPreview = true;
   }
 </script>
 
@@ -82,30 +83,40 @@
       <p class="line-clamp-1 text-sm">{m.avatar_current()}</p>
     </div>
 
-    <Button variant="destructive" padding="icon" on:click={handleDelete} disabled={uploading}>
+    <Button
+      variant="destructive"
+      size="icon"
+      aria-label={m.delete()}
+      onclick={handleDelete}
+      disabled={uploading}
+    >
       <IconTrash />
     </Button>
   </div>
 
-  <Dialog.Root alert openController={showPreview}>
-    <Dialog.Content width="medium">
-      <Dialog.Title>{m.upload_avatar_alt()}</Dialog.Title>
+  <AlertDialog.Root bind:open={showPreview}>
+    <AlertDialog.Content class={dialogLayout.content("medium")}>
+      <AlertDialog.Header class={dialogLayout.header}>
+        <AlertDialog.Title>{m.upload_avatar_alt()}</AlertDialog.Title>
+      </AlertDialog.Header>
 
-      <Dialog.Section>
-        <div class="flex justify-center p-4">
-          <img src={iconUrl} alt={m.upload_avatar_preview_alt()} class="max-h-96 rounded-lg" />
+      <div class={dialogLayout.body}>
+        <div class={dialogLayout.section}>
+          <div class="flex justify-center p-4">
+            <img src={iconUrl} alt={m.upload_avatar_preview_alt()} class="max-h-96 rounded-lg" />
+          </div>
         </div>
-      </Dialog.Section>
+      </div>
 
-      <Dialog.Controls let:close>
-        <Button is={close} variant="outlined">{m.close?.() || "Close"}</Button>
-        <Button variant="primary" on:click={downloadAvatar}>
+      <AlertDialog.Footer class={dialogLayout.footer}>
+        <AlertDialog.Cancel>{m.close()}</AlertDialog.Cancel>
+        <Button onclick={downloadAvatar}>
           <IconDownload />
-          {m.download?.() || "Download"}
+          {m.download()}
         </Button>
-      </Dialog.Controls>
-    </Dialog.Content>
-  </Dialog.Root>
+      </AlertDialog.Footer>
+    </AlertDialog.Content>
+  </AlertDialog.Root>
 {:else if uploading}
   <div
     class="border-default bg-primary hover:bg-hover-dimmer flex h-16 w-full items-center gap-4 border-b px-4"

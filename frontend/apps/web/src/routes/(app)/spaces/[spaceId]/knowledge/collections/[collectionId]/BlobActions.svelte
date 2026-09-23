@@ -1,6 +1,10 @@
 <script lang="ts">
   import { IconTrash } from "@eneo/icons/trash";
-  import { Button, Dialog, Dropdown } from "@eneo/ui";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -45,71 +49,74 @@
     }
   }
 
-  let showDeleteDialog: Dialog.OpenState;
-  let showEditDialog: Dialog.OpenState;
+  let showDeleteDialog = false;
+  let showEditDialog = false;
 </script>
 
 {#if canEdit}
-  <Dropdown.Root>
-    <Dropdown.Trigger asFragment let:trigger>
-      <Button is={trigger} padding="icon">
-        <IconEllipsis />
-      </Button>
-    </Dropdown.Trigger>
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger>
+      {#snippet child({ props })}
+        <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+          <IconEllipsis />
+        </Button>
+      {/snippet}
+    </DropdownMenu.Trigger>
 
-    <Dropdown.Menu let:item>
-      <Button
-        is={item}
-        on:click={() => {
-          $showEditDialog = true;
-        }}
-        padding="icon-leading"
-      >
+    <DropdownMenu.Content align="end">
+      <DropdownMenu.Item onSelect={() => (showEditDialog = true)}>
         <IconEdit size="sm" />
-        {m.edit()}</Button
-      >
-      <Button
-        is={item}
-        variant="destructive"
-        on:click={() => {
-          $showDeleteDialog = true;
-        }}
-        padding="icon-leading"
-      >
-        <IconTrash size="sm" />{m.delete()}</Button
-      >
-    </Dropdown.Menu>
-  </Dropdown.Root>
+        {m.edit()}
+      </DropdownMenu.Item>
+      <DropdownMenu.Item variant="destructive" onSelect={() => (showDeleteDialog = true)}>
+        <IconTrash size="sm" />{m.delete()}
+      </DropdownMenu.Item>
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
 {/if}
 
-<Dialog.Root bind:isOpen={showEditDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.edit_file()}</Dialog.Title>
-    <Dialog.Description hidden>{m.enter_new_file_name()}</Dialog.Description>
+<Dialog.Root bind:open={showEditDialog}>
+  <Dialog.Content class={dialogLayout.content()} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{m.edit_file()}</Dialog.Title>
+      <Dialog.Description class="sr-only">{m.enter_new_file_name()}</Dialog.Description>
+    </Dialog.Header>
 
-    <Dialog.Section>
-      <Field.Field class="border-default hover:bg-hover-dimmer px-4 py-4">
-        <Field.Label for={titleId}>{m.name()}</Field.Label>
-        <Input id={titleId} bind:value={updatableTitle} />
-      </Field.Field>
-    </Dialog.Section>
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button is={close} variant="primary" on:click={updateBlobName}>{m.save_changes()}</Button>
-    </Dialog.Controls>
+    <div class={dialogLayout.body}>
+      <div class={dialogLayout.section}>
+        <Field.Field class="border-default hover:bg-hover-dimmer px-4 py-4">
+          <Field.Label for={titleId}>{m.name()}</Field.Label>
+          <Input id={titleId} bind:value={updatableTitle} />
+        </Field.Field>
+      </div>
+    </div>
+    <Dialog.Footer class={dialogLayout.footer}>
+      <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
+      <Dialog.Close class={buttonVariants()} onclick={updateBlobName}
+        >{m.save_changes()}</Dialog.Close
+      >
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root alert bind:isOpen={showDeleteDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.delete_group()}</Dialog.Title>
-    <Dialog.Description
-      >{m.confirm_delete_file({ fileName: blob.metadata.title || "" })}</Dialog.Description
-    >
+<AlertDialog.Root bind:open={showDeleteDialog}>
+  <AlertDialog.Content class={dialogLayout.content()}>
+    <AlertDialog.Header class={dialogLayout.header}>
+      <AlertDialog.Title>{m.delete_group()}</AlertDialog.Title>
+      <AlertDialog.Description
+        >{m.confirm_delete_file({ fileName: blob.metadata.title || "" })}</AlertDialog.Description
+      >
+    </AlertDialog.Header>
 
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button is={close} variant="destructive" on:click={deleteBlob}>{m.delete()}</Button>
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+    <AlertDialog.Footer class={dialogLayout.footer}>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <Button
+        variant="destructive"
+        onclick={() => {
+          showDeleteDialog = false;
+          deleteBlob();
+        }}>{m.delete()}</Button
+      >
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

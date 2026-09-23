@@ -1,7 +1,8 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
   import { EneoError, type CompletionModel, type ModelKwargs, type Service } from "@eneo/eneo-js";
-  import { Button, Select } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -36,6 +37,20 @@
   const nameId = useId();
   const promptId = useId();
   const jsonSchemaId = useId();
+  const outputFormatId = useId();
+
+  const outputFormatOptions: { value: Service["output_format"]; label: string }[] = [
+    { value: "json", label: "JSON" },
+    { value: "list", label: m.list() },
+    { value: "boolean", label: m.boolean() },
+    { value: null, label: m.none() }
+  ];
+  const outputFormatKey = (value: Service["output_format"]) => value ?? "none";
+
+  function setOutputFormat(key: string) {
+    const option = outputFormatOptions.find((option) => outputFormatKey(option.value) === key);
+    if (option) editableService.output_format = option.value;
+  }
 
   let updatingService = false;
   async function updateService() {
@@ -122,16 +137,28 @@
     />
   {/if}
 
-  <Select.Simple
-    class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4"
-    options={[
-      { value: "json", label: "JSON" },
-      { value: "list", label: m.list() },
-      { value: "boolean", label: m.boolean() },
-      { value: null, label: m.none() }
-    ]}
-    bind:value={editableService.output_format}>{m.output_format()}</Select.Simple
-  >
+  <Field.Field class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4">
+    <Field.Label for={outputFormatId}>{m.output_format()}</Field.Label>
+    <Select.Root
+      type="single"
+      value={outputFormatKey(editableService.output_format)}
+      onValueChange={setOutputFormat}
+    >
+      <Select.Trigger id={outputFormatId} class="w-full">
+        {outputFormatOptions.find(
+          (option) =>
+            outputFormatKey(option.value) === outputFormatKey(editableService.output_format)
+        )?.label ?? m.ui_select_placeholder()}
+      </Select.Trigger>
+      <Select.Content>
+        {#each outputFormatOptions as option (outputFormatKey(option.value))}
+          <Select.Item value={outputFormatKey(option.value)} label={option.label}
+            >{option.label}</Select.Item
+          >
+        {/each}
+      </Select.Content>
+    </Select.Root>
+  </Field.Field>
 
   {#if editableService.output_format === "json"}
     <Field.Field class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4">
@@ -150,7 +177,7 @@
   <div
     class="sticky bottom-0 flex justify-end bg-gradient-to-t from-[var(--background-primary)] to-transparent p-4"
   >
-    <Button variant="primary" on:click={updateService} class="w-[140px]">
+    <Button onclick={updateService} class="w-[140px]">
       {#if updatingService}
         {m.saving()}
       {:else}

@@ -246,12 +246,12 @@
   },
   "src/routes/(app)/dashboard/[assistantId]/[[sessionId]]/+page.svelte": {
     "eneo/no-raw-color": {
-      "count": 3
+      "count": 2
     }
   },
   "src/routes/(app)/dashboard/app/[appId]/+page.svelte": {
     "eneo/no-raw-color": {
-      "count": 5
+      "count": 4
     }
   },
   "src/routes/(app)/dashboard/app/[appId]/results/[resultId]/+page.svelte": {

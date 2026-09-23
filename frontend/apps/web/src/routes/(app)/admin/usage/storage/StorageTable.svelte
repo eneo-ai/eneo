@@ -7,7 +7,8 @@
 <script lang="ts">
   import type { StorageSpaceList } from "@eneo/eneo-js";
   import { createRender } from "svelte-headless-table";
-  import { Button, Table } from "@eneo/ui";
+  import { Table } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import SpaceMembersChips from "$lib/features/spaces/components/SpaceMembersChips.svelte";
   import StorageSpaceName from "./StorageSpaceName.svelte";
@@ -59,9 +60,9 @@
 <Table.Root {viewModel} resourceName={m.resource_spaces()} displayAs="list"></Table.Root>
 {#if spaces.length > 10}
   <Button
-    variant="outlined"
+    variant="outline"
     class="h-12"
-    on:click={() => {
+    onclick={() => {
       showAllSpaces = !showAllSpaces;
     }}
     >{showAllSpaces ? m.show_only_10_spaces() : m.show_all_spaces({ count: spaces.length })}</Button

@@ -1,7 +1,6 @@
 <script lang="ts">
   import CreateAssistantBackdrop from "./CreateAssistantBackdrop.svelte";
   import TemplateSmallPreviewGallery from "../gallery/TemplateSmallPreviewGallery.svelte";
-  import { Button } from "@eneo/ui";
   import { getTemplateController } from "../../TemplateController";
 
   const {
@@ -20,15 +19,15 @@
       <p class="text-secondary max-w-[50ch] pt-2 pr-48">
         {m.assistants_intro_text()}
       </p>
-      <Button
-        unstyled
+      <button
+        type="button"
         on:click={() => {
           $showCreateDialog = true;
         }}
-        class="bg-accent-default text-on-fill hover:bg-accent-stronger mt-8 -ml-1 rounded-lg px-3 py-1.5 text-center"
+        class="bg-accent-default text-on-fill hover:bg-accent-stronger mt-8 -ml-1 cursor-pointer rounded-lg px-3 py-1.5 text-center"
       >
         {m.create_new_assistant_arrow()}
-      </Button>
+      </button>
 
       <div class="absolute top-0 right-0 h-56 w-80 overflow-hidden">
         <CreateAssistantBackdrop></CreateAssistantBackdrop>

@@ -8,7 +8,9 @@
   import { beforeNavigate } from "$app/navigation";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { initSpaceSettingsEditor } from "$lib/features/spaces/SpaceSettingsEditor";
-  import { Button, Dialog } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import SelectEmbeddingModels from "./SelectEmbeddingModels.svelte";
@@ -20,7 +22,6 @@
   import { Page, Settings } from "$lib/components/layout";
   import SpaceStorageOverview from "./SpaceStorageOverview.svelte";
   import SelectTranscriptionModels from "./SelectTranscriptionModels.svelte";
-  import { writable } from "svelte/store";
   import { getEneo } from "$lib/core/Eneo.js";
   import ChangeSecurityClassification from "./ChangeSecurityClassification.svelte";
   import EditRetentionPolicy from "./EditRetentionPolicy.svelte";
@@ -96,7 +97,7 @@
     }, 5000);
   }
 
-  let showDeleteDialog = writable(false);
+  let showDeleteDialog = $state(false);
   let deleteConfirmation = $state("");
   let isDeleting = $state(false);
   let showStillDeletingMessage = $state(false);
@@ -176,22 +177,19 @@
     <Page.Title title={m.settings()}></Page.Title>
     <Page.Flex>
       {#if $currentChanges.hasUnsavedChanges}
-        <Button variant="destructive" disabled={$isSaving} on:click={() => discardChanges()}
+        <Button variant="destructive" disabled={$isSaving} onclick={() => discardChanges()}
           >{m.discard_all_changes()}</Button
         >
         <Button
-          variant="positive"
-          class="h-8 w-32 whitespace-nowrap"
+          class="bg-positive-default hover:bg-positive-stronger h-8 w-32 whitespace-nowrap"
           disabled={$isSaving}
-          on:click={handleSave}>{$isSaving ? m.loading() : m.save_changes()}</Button
+          onclick={handleSave}>{$isSaving ? m.loading() : m.save_changes()}</Button
         >
       {:else}
         {#if showSaveSuccess}
           <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
         {/if}
-        <Button variant="primary" class="w-32" href={`/spaces/${$currentSpace.routeId}`}
-          >{m.done()}</Button
-        >
+        <Button class="w-32" href={`/spaces/${$currentSpace.routeId}`}>{m.done()}</Button>
       {/if}
     </Page.Flex>
   </Page.Header>
@@ -272,51 +270,68 @@
       {#if !isOrgSpace && $currentSpace.permissions?.includes("delete")}
         <Settings.Group title={m.danger_zone()}>
           <Settings.Row title={m.delete_space()} description={m.delete_space_description()}>
-            <Dialog.Root alert openController={showDeleteDialog}>
-              <Dialog.Trigger asFragment let:trigger>
-                <Button is={trigger} variant="destructive" class="flex-grow"
-                  >{m.delete_this_space()}</Button
+            <AlertDialog.Root bind:open={showDeleteDialog}>
+              <AlertDialog.Trigger>
+                {#snippet child({ props })}
+                  <Button {...props} variant="destructive" class="flex-grow"
+                    >{m.delete_this_space()}</Button
+                  >
+                {/snippet}
+              </AlertDialog.Trigger>
+              <AlertDialog.Content class={dialogLayout.content("medium")}>
+                <form
+                  class="contents"
+                  onsubmit={(event) => {
+                    event.preventDefault();
+                    deleteSpace();
+                  }}
                 >
-              </Dialog.Trigger>
-              <Dialog.Content width="medium" form>
-                <Dialog.Title>{m.delete_space()}</Dialog.Title>
+                  <AlertDialog.Header class={dialogLayout.header}>
+                    <AlertDialog.Title>{m.delete_space()}</AlertDialog.Title>
+                  </AlertDialog.Header>
 
-                <Dialog.Section>
-                  <p class="border-default hover:bg-hover-dimmer border-b px-7 py-4">
-                    {m.confirm_delete_space_message({ space: $currentSpace.name })}
-                  </p>
-                  <Field.Field class="border-default hover:bg-hover-dimmer px-4 py-4">
-                    <Field.Label for={`${uid}-delete-confirmation`}>
-                      {m.enter_space_name_to_confirm()}
-                      <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span
+                  <div class={dialogLayout.body}>
+                    <div class={dialogLayout.section}>
+                      <p class="border-default hover:bg-hover-dimmer border-b px-7 py-4">
+                        {m.confirm_delete_space_message({ space: $currentSpace.name })}
+                      </p>
+                      <Field.Field class="border-default hover:bg-hover-dimmer px-4 py-4">
+                        <Field.Label for={`${uid}-delete-confirmation`}>
+                          {m.enter_space_name_to_confirm()}
+                          <span class="text-muted font-normal" aria-hidden="true"
+                            >({m.required()})</span
+                          >
+                        </Field.Label>
+                        <Input
+                          id={`${uid}-delete-confirmation`}
+                          bind:value={deleteConfirmation}
+                          required
+                          placeholder={$currentSpace.name}
+                        />
+                      </Field.Field>
+                    </div>
+
+                    {#if showStillDeletingMessage}
+                      <p
+                        class="label-info border-label-default bg-label-dimmer text-label-stronger rounded-md border p-2"
                       >
-                    </Field.Label>
-                    <Input
-                      id={`${uid}-delete-confirmation`}
-                      bind:value={deleteConfirmation}
-                      required
-                      placeholder={$currentSpace.name}
-                    />
-                  </Field.Field>
-                </Dialog.Section>
+                        <span class="font-bold">{m.hint()}:</span>
+                        {m.delete_space_hint()}
+                      </p>
+                    {/if}
+                  </div>
 
-                {#if showStillDeletingMessage}
-                  <p
-                    class="label-info border-label-default bg-label-dimmer text-label-stronger mt-2 rounded-md border p-2"
-                  >
-                    <span class="font-bold">{m.hint()}:</span>
-                    {m.delete_space_hint()}
-                  </p>
-                {/if}
-
-                <Dialog.Controls let:close>
-                  <Button is={close} disabled={isDeleting}>{m.cancel()}</Button>
-                  <Button variant="destructive" on:click={deleteSpace} disabled={isDeleting}
-                    >{isDeleting ? m.deleting() : m.confirm_deletion()}</Button
-                  >
-                </Dialog.Controls>
-              </Dialog.Content>
-            </Dialog.Root>
+                  <AlertDialog.Footer class={dialogLayout.footer}>
+                    <AlertDialog.Cancel type="button" disabled={isDeleting}
+                      >{m.cancel()}</AlertDialog.Cancel
+                    >
+                    <Button type="submit" variant="destructive" disabled={isDeleting}
+                      >{isDeleting ? m.deleting() : m.confirm_deletion()}</Button
+                    >
+                  </AlertDialog.Footer>
+                </form>
+              </AlertDialog.Content>
+            </AlertDialog.Root>
           </Settings.Row>
         </Settings.Group>
       {/if}

@@ -7,7 +7,10 @@
 <script lang="ts">
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
-  import { Button, Dialog, Dropdown } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getPromptManager } from "../PromptManager";
   import type { PromptSparse } from "@eneo/eneo-js";
@@ -15,7 +18,7 @@
   import { m } from "$lib/paraglide/messages";
 
   export let prompt: PromptSparse;
-  let showDeleteDialog: Dialog.OpenState;
+  let showDeleteDialog = false;
   let isProcessing = false;
 
   const {
@@ -49,46 +52,49 @@
       <Tooltip.Content>{description}</Tooltip.Content>
     </Tooltip.Root>
   {/if}
-  <Dropdown.Root>
-    <Dropdown.Trigger let:trigger asFragment>
-      <Button is={trigger} disabled={false} padding="icon">
-        <IconEllipsis />
-      </Button>
-    </Dropdown.Trigger>
-    <Dropdown.Menu let:item>
-      <Button
-        is={item}
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger>
+      {#snippet child({ props })}
+        <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+          <IconEllipsis />
+        </Button>
+      {/snippet}
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Content align="end">
+      <DropdownMenu.Item
         variant="destructive"
         disabled={prompt.is_selected}
-        on:click={() => {
-          $showDeleteDialog = true;
+        onSelect={() => {
+          showDeleteDialog = true;
         }}
-        padding="icon-leading"
-        label={m.delete_prompt()}
-        class="relative"
+        aria-label={m.delete_prompt()}
       >
         <IconTrash size="sm" />{m.delete()}
-      </Button>
-    </Dropdown.Menu>
-  </Dropdown.Root>
+      </DropdownMenu.Item>
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
 
-  <Dialog.Root alert bind:isOpen={showDeleteDialog}>
-    <Dialog.Content>
-      <Dialog.Title>{m.delete_prompt()}</Dialog.Title>
-      <Dialog.Description>{m.do_you_really_want_to_delete_this_version()}</Dialog.Description>
+  <AlertDialog.Root bind:open={showDeleteDialog}>
+    <AlertDialog.Content class={dialogLayout.content()}>
+      <AlertDialog.Header class={dialogLayout.header}>
+        <AlertDialog.Title>{m.delete_prompt()}</AlertDialog.Title>
+        <AlertDialog.Description
+          >{m.do_you_really_want_to_delete_this_version()}</AlertDialog.Description
+        >
+      </AlertDialog.Header>
 
-      <Dialog.Controls let:close>
-        <Button is={close}>{m.cancel()}</Button>
+      <AlertDialog.Footer class={dialogLayout.footer}>
+        <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
         <Button
-          is={close}
           variant="destructive"
-          on:click={() => {
+          onclick={() => {
             deletePrompt(prompt);
+            showDeleteDialog = false;
           }}>{isProcessing ? m.deleting() : m.delete()}</Button
         >
-      </Dialog.Controls>
-    </Dialog.Content>
-  </Dialog.Root>
+      </AlertDialog.Footer>
+    </AlertDialog.Content>
+  </AlertDialog.Root>
 </div>
 
 <style lang="postcss">

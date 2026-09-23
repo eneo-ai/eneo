@@ -7,7 +7,7 @@
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getEneo } from "$lib/core/Eneo";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { resolve } from "$app/paths";
   import { IconInfo } from "@eneo/icons/info";
@@ -166,7 +166,7 @@
         {@render noCreatePermission(m.collections().toLowerCase())}
       {:else if $selectedTab === "websites" && $currentSpace.hasPermission("create", "website")}
         {#if $selectedWebsiteIds.size > 0}
-          <Button variant="primary" on:click={bulkRecrawl} disabled={isBulkRecrawling}>
+          <Button onclick={bulkRecrawl} disabled={isBulkRecrawling}>
             <IconRefresh size="sm" />
             {isBulkRecrawling ? m.syncing() : m.sync_selected({ count: $selectedWebsiteIds.size })}
           </Button>
@@ -184,14 +184,12 @@
           <ImportKnowledgeDialog></ImportKnowledgeDialog>
         {:else if isPersonalSpace}
           <Button
-            variant="primary"
             onclick={() => (window.location.href = resolve("/account/integrations?tab=providers"))}
           >
             {m.configure_integrations()}
           </Button>
         {:else if isAdmin}
           <Button
-            variant="primary"
             onclick={() => (window.location.href = resolve("/admin/integrations?tab=providers"))}
           >
             {m.configure_integrations()}
@@ -245,9 +243,9 @@
               </p>
               <div class="flex-grow"></div>
               <Button
-                variant="outlined"
+                variant="outline"
                 class="min-w-24"
-                on:click={() => {
+                onclick={() => {
                   showIntegrationsNotice = false;
                 }}>{m.dismiss()}</Button
               >
