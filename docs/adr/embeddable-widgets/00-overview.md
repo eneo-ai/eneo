@@ -1,7 +1,8 @@
 # Embeddable widgets
 
-- **Status:** Proposed — awaiting review; decisions 1–4 below confirmed by the
-  product owner on 2026-09-17
+- **Status:** Accepted — decisions 1–4 confirmed by the product owner on
+  2026-09-17; implemented in [#867](https://github.com/eneo-ai/eneo/pull/867)
+  (deviations from this plan are logged in [04-review.md](04-review.md))
 - **Date:** 2026-09-17
 - **Decision owners:** Product, security, architecture, and frontend
 - **Scope:** Publishing an assistant as an embeddable chat widget on a
@@ -34,7 +35,7 @@ Widgets are a **core feature**, built in the backend and the production Svelte a
 | # | Decision | Consequence |
 |---|---|---|
 | 1 | **Own `widgets` entity + short-lived visitor tokens.** No API key in page source. | New table, new public endpoints under `/api/v1/widgets/{public_id}/`, visitor JWT (`token_use=widget_visitor`). Reuses origin matching, the Redis rate-limit primitive and tenant policy from API keys v2. |
-| 2 | **Frontend in the Svelte app**, `(public)/embed/[publicId]`. | Reuses `ChatService` + `ConversationView`. Loader is framework-free TypeScript in its own workspace package. |
+| 2 | **Frontend in the Svelte app**, `(public)/embed/[publicId]`. | Reuses `ChatService`; the visible chat is a lean widget UI (see [02](02-frontend.md)). Loader is framework-free TypeScript in its own workspace package. |
 | 3 | **Abuse protection in v1 = rate limits + daily token budget + pause + ALTCHA** (self-hosted proof-of-work, no third party). | Backend issues and verifies ALTCHA challenges; solved in the iframe before a visitor token is minted. |
 | 4 | **Tenant admin activates, with review.** Space editors create, configure and preview; `status=active` requires `Permission.ADMIN`. | Activation and pausing are explicit, audited actions. Autosave applies to configuration only. |
 
@@ -47,7 +48,7 @@ kommun.se page                          Eneo origin (eneo.kommun.se)
 │   data-widget-id="wgt_…">    │        │                                          │
 │                              │        │ GET /embed/wgt_…  (Svelte (public) route)│
 │ <eneo-widget> custom element │ iframe │   CSP frame-ancestors = widget origins   │
-│   shadow DOM launcher button │──────▶ │   renders ConversationView               │
+│   shadow DOM launcher button │──────▶ │   renders the widget chat (ChatService)  │
 │   panel = <iframe title=…>   │        │        │ same-origin fetch / SSE          │
 │        ▲ postMessage ▼       │        │        ▼                                 │
 └──────────────────────────────┘        │ /api/v1/widgets/{public_id}/…            │
@@ -71,7 +72,7 @@ Key properties:
 | Option | Verdict | Why |
 |---|---|---|
 | **Loader + iframe, custom-element launcher** (chosen) | ✅ | Same-origin policy makes the conversation unreadable to the host page and every third-party script on it (tag managers, analytics, cookie tools); reuses the existing chat UI and WCAG work; no CORS and no credential in page source; `frame-ancestors` is browser-enforced; the host site's CSP needs only `script-src` + `frame-src`. Used by OpenAI ChatKit, Intercom, Dify and Stripe Elements. |
-| **Web component with Shadow DOM rendering the whole chat** (Flowise style) | ❌ for v1 | Shadow DOM isolates styles, not security: host JavaScript can read the DOM, wrap `fetch` and take the visitor token; the visitor id would live in the host origin's storage, visible to the site's analytics. Also requires a self-contained bundle that cannot reuse `ConversationView`, CORS plus `connect-src` on the host, and inherits host typography and stacking-context bugs. Its real advantages — auto-height, inline placement in page content, one document for focus — matter for an *inline* question box, not a floating chat. |
+| **Web component with Shadow DOM rendering the whole chat** (Flowise style) | ❌ for v1 | Shadow DOM isolates styles, not security: host JavaScript can read the DOM, wrap `fetch` and take the visitor token; the visitor id would live in the host origin's storage, visible to the site's analytics. Also requires a self-contained bundle that cannot reuse the app's chat stack, CORS plus `connect-src` on the host, and inherits host typography and stacking-context bugs. Its real advantages — auto-height, inline placement in page content, one document for focus — matter for an *inline* question box, not a floating chat. |
 | **Hybrid inline mode** (`mode="inline"`: a small Shadow-DOM question box that hands the answer to the iframe panel) | ⏩ later | Captures the inline-placement benefit without exposing the conversation. Listed under Phase 5; the versioned postMessage protocol and the custom element are designed so it can be added without touching host sites. |
 | **Widget as a module** (own container, BFF with `sk_`) | ❌ | Modules serve signed-in employees through SSO handoff and are stateless; a widget needs anonymous visitors, per-visitor state, limits, budget and retention, and would duplicate the chat UI and core policies. See the introduction. |
 | **`pk_` key in the snippet** | ❌ | Exposes a key that can call every read endpoint in its scope, puts all visitors' sessions on the key owner, and offers no per-visitor isolation, budget or kill switch. |

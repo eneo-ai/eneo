@@ -81,11 +81,6 @@ A self-review of the first draft of this plan against current practice (OpenAI C
 | D27 | Texts named after their legal purpose: `ai_disclosure`, `personal_data_notice`, `privacy_url` | Named after where they sit: `subtitle` (required, defaults to the AI disclosure), `footer_text`, `footer_link_url` + `footer_link_label` (host name when empty). The help texts still suggest the AI disclosure and a privacy link | The fields are general-purpose ("powered by …" fits as well); the names made editors think they had to be about personal data. |
 | D28 | Daily budget as Redis counters (reserve-then-settle in Redis); last-writer-wins on widget updates | Budget receipts and daily totals live in PostgreSQL (`widget_budget_reservations`, `widget_daily_usage.reserved_tokens`), committed in short transactions independent of the stream; Redis keeps only request-rate and challenge-replay checks. Widgets carry a `revision`; PATCH and apply-template must send it and get `409 widget_revision_conflict` otherwise, and the repository compares it atomically so a stale save cannot undo a pause. A question-delete trigger removes the question's private model log with it | Redis loss could reset a day's budget, and concurrent editors could silently revert each other's changes or a pause. Deleting a conversation must delete its model logs too. |
 
-### Draft What's new entry
-
-- **sv** — *Webbwidget: publicera en assistent på er webbplats.* Redaktörer skapar en chattwidget för en publicerad assistent, ser den i förhandsgranskning, testar den i Eneo och kopierar installationskoden. Administratörer sätter organisationens policy, aktiverar widgetar och underhåller mallar för husstilen. Besökare chattar anonymt utan kakor; botskydd, begränsningar och daglig budget ingår.
-- **en** — *Web widget: publish an assistant on your website.* Editors create a chat widget for a published assistant, preview it, test it inside Eneo and copy the install snippet. Admins set the organisation policy, activate widgets and maintain house-style templates. Visitors chat anonymously without cookies; bot protection, limits and a daily budget are built in.
-
 ## Review fixes (2026-09-21)
 
 | # | Plan said | Implementation | Why |
@@ -102,7 +97,6 @@ Also closed in the same pass: duplicate suggested questions are rejected (they c
 
 ## Still open after review
 
-- Exact split of `ConversationView` dependencies on `(app)` context is unknown until the Phase 2 spike; the plan budgets it as a task, not a risk to the architecture.
 - `style-src` is unrestricted (D20); a nonce would need patches in the SSR `style:` attributes and ALTCHA's shadow styles.
 - Whether Traefik's rate-limit middleware belongs in the deployment template as defence in depth (proposal: yes, on `/api/v1/widgets/` and `/embed/`, in Phase 5).
 - Template drafts have no revision (last save wins between two admins); widget/template `is_default` races surface as a database error.
