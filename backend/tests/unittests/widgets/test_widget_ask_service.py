@@ -692,3 +692,25 @@ async def test_feedback_moves_the_daily_counters_with_the_vote():
     await service.leave_feedback(principal, uuid4(), SessionFeedback(value=-1))
     kwargs = deps.usage.record.await_args.kwargs
     assert (kwargs["helpful"], kwargs["unhelpful"]) == (-1, 1)
+
+
+async def test_a_vote_and_its_later_change_are_booked_on_the_conversation_day():
+    service, deps = _service()
+    principal = _principal(_widget())
+    session = deps.session_service.get_session_by_uuid.return_value
+    # Monday 00:30 in Stockholm, still Sunday in UTC.
+    session.created_at = datetime(2026, 9, 20, 22, 30, tzinfo=timezone.utc)
+    monday = date(2026, 9, 21)
+    locked_vote: list[int | None] = [None]
+    deps.usage.lock_feedback = AsyncMock(side_effect=lambda _id: locked_vote[0])
+
+    await service.leave_feedback(principal, uuid4(), SessionFeedback(value=1))
+    # Changed on Tuesday (today, whenever the test runs): the same row.
+    locked_vote[0] = 1
+    await service.leave_feedback(principal, uuid4(), SessionFeedback(value=-1))
+
+    booked = [
+        (call.args[1], call.kwargs["helpful"], call.kwargs["unhelpful"])
+        for call in deps.usage.record.await_args_list
+    ]
+    assert booked == [(monday, 1, 0), (monday, -1, 1)]

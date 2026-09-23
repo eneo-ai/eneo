@@ -22648,12 +22648,12 @@ export interface components {
       blocked_30d: number;
       /**
        * Helpful 30D
-       * @description Net thumbs up registered in the last 30 days.
+       * @description Thumbs up on conversations started in the last 30 days.
        */
       helpful_30d: number;
       /**
        * Unhelpful 30D
-       * @description Net thumbs down registered in the last 30 days.
+       * @description Thumbs down on conversations started in the last 30 days.
        */
       unhelpful_30d: number;
       /** Last Activity */
@@ -23104,12 +23104,12 @@ export interface components {
       blocked_rate: number;
       /**
        * Helpful
-       * @description Net thumbs up registered on the day.
+       * @description Thumbs up on conversations started on the day.
        */
       helpful: number;
       /**
        * Unhelpful
-       * @description Net thumbs down registered on the day.
+       * @description Thumbs down on conversations started on the day.
        */
       unhelpful: number;
     };

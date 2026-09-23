@@ -228,10 +228,10 @@ class WidgetOverviewItem(BaseModel):
     output_tokens_30d: int
     blocked_30d: int
     helpful_30d: int = Field(
-        description="Net thumbs up registered in the last 30 days."
+        description="Thumbs up on conversations started in the last 30 days."
     )
     unhelpful_30d: int = Field(
-        description="Net thumbs down registered in the last 30 days."
+        description="Thumbs down on conversations started in the last 30 days."
     )
     last_activity: Optional[date] = None
     daily_token_budget: int = Field(
@@ -281,8 +281,10 @@ class WidgetUsageDayPublic(BaseModel):
     output_tokens: int
     blocked_budget: int
     blocked_rate: int
-    helpful: int = Field(description="Net thumbs up registered on the day.")
-    unhelpful: int = Field(description="Net thumbs down registered on the day.")
+    helpful: int = Field(description="Thumbs up on conversations started on the day.")
+    unhelpful: int = Field(
+        description="Thumbs down on conversations started on the day."
+    )
 
 
 class WidgetUsagePublic(BaseModel):

@@ -4,7 +4,7 @@
 
 
 from collections.abc import AsyncGenerator
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, AsyncIterator, Optional
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -101,6 +101,16 @@ class WidgetAskService:
     def _today(self) -> date:
         return datetime.now(ZoneInfo(self.settings.widget_budget_timezone)).date()
 
+    def _session_day(self, session: SessionInDB) -> date:
+        if session.created_at is None:
+            return self._today()
+        created_at = session.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        return created_at.astimezone(
+            ZoneInfo(self.settings.widget_budget_timezone)
+        ).date()
+
     async def _owned_session(self, widget: Widget, session_id: UUID) -> SessionInDB:
         try:
             return await self.session_service.get_session_by_uuid(
@@ -137,12 +147,14 @@ class WidgetAskService:
             feedback=feedback,
             keep_existing_text=True,
         )
-        # Daily counters follow the vote: a changed vote moves between the
-        # columns on the day it changes, in the same transaction as the vote.
+        # Daily counters follow the vote, in the same transaction as the vote
+        # and always on the conversation's first day, so a vote changed on a
+        # later day moves between the columns of that one row instead of
+        # leaving a negative count on the day it changed.
         if previous != feedback.value:
             await self.usage_repo.record(
                 widget.id,
-                self._today(),
+                self._session_day(session),
                 helpful=(feedback.value == 1) - (previous == 1),
                 unhelpful=(feedback.value == -1) - (previous == -1),
             )
