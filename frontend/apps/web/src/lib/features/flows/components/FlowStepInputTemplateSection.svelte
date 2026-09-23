@@ -276,11 +276,8 @@
 </script>
 
 {#if !isPowerUser && hasInputTemplateOverride}
-  <Alert.Root
-    class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mb-3"
-    role="status"
-  >
-    <Alert.Description class="text-warning-stronger flex items-start gap-3 text-xs">
+  <Alert.Root class="border-accent-default/20 bg-accent-dimmer mb-3 rounded-[9px]" role="status">
+    <Alert.Description class="text-accent-stronger flex items-center gap-3 text-xs">
       <span class="flex-1">{m.flow_input_template_active_notice()}</span>
       <div class="flex shrink-0 gap-1.5">
         {#if !showInputTemplate}

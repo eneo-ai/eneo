@@ -13,10 +13,10 @@ describe("flowStepUxCopy", () => {
     expect(copy.inputTemplateEditorLabel).toBe("Anpassad text till AI:n");
     expect(copy.inputTemplateCtaAction).toBe("Anpassa texten");
     expect(copy.inputTemplateDescription).toBe(
-      "Här bygger du den text AI:n ska arbeta med. Lämna tomt om steget ska använda sitt vanliga underlag."
+      "Bestäm exakt vilken text AI:n får att arbeta med. Skriv egna rubriker och lägg in formulärfält eller svar från tidigare steg med Infoga variabel."
     );
     expect(copy.inputTemplatePlaceholder).toBe(
-      "t.ex. Rubrik: {{flow_input.titel}}\nText: {{step_1.output.text}}"
+      "t.ex.\nÄrende: {{ärendenummer}}\nSammanfattning: {{Sammanfatta ärendet}}"
     );
   });
 
@@ -44,10 +44,10 @@ describe("flowStepUxCopy", () => {
     expect(copy.inputTemplateEditorLabel).toBe("Custom text for the AI");
     expect(copy.inputTemplateCtaAction).toBe("Customize text");
     expect(copy.inputTemplateDescription).toBe(
-      "Here you build the text the AI should work with. Leave it empty if the step should use its normal material."
+      "Decide exactly which text the AI gets to work with. Write your own headings and insert form fields or answers from earlier steps with Insert variable."
     );
     expect(copy.inputTemplatePlaceholder).toBe(
-      "e.g. Title: {{flow_input.title}}\nText: {{step_1.output.text}}"
+      "e.g.\nCase: {{case_number}}\nSummary: {{Summarize the case}}"
     );
     expect(copy.inputTemplateDefaultHint).toBe(
       "If you leave this empty, the text sent in when the flow runs will be used."

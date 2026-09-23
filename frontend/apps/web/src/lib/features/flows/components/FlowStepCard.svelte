@@ -226,7 +226,7 @@
 
     <div class="flex min-w-0 flex-1 flex-col gap-0.5">
       <span
-        class="truncate text-sm leading-snug tracking-[-0.005em]"
+        class="line-clamp-2 text-sm leading-snug tracking-[-0.005em] break-words"
         class:font-semibold={isActive}
         class:font-medium={!isActive}
         title={label}>{label}</span

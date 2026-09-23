@@ -739,7 +739,6 @@ describe("Flow processing workspace layout", () => {
     expect(flowRouteSource).toContain("flow-processing-workspace");
     expect(flowRouteSource).toContain("flow-processing-step-list");
     expect(flowRouteSource).toContain("flow-processing-step-editor");
-    expect(flowRouteSource).toContain("hidden 2xl:inline");
     expect(stepEditorSource).toContain("flow-step-editor-content");
   });
 });

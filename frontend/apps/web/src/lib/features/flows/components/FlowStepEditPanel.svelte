@@ -19,6 +19,7 @@
   import { IconChevronRight } from "@eneo/icons/chevron-right";
   import MousePointerClick from "lucide-svelte/icons/mouse-pointer-click";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Empty from "$lib/components/ui/empty/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { toast } from "$lib/components/toast";
@@ -58,6 +59,7 @@
     type FlowRuntimeInputConfigValue
   } from "$lib/features/flows/flowRuntimeInputConfig";
   import { updateTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
+  import FlowStepAIMenu from "./FlowStepAIMenu.svelte";
   import { getFlowStepUxCopy } from "$lib/features/flows/flowStepUxCopy";
   import {
     collectTemplateStepReferenceOrders,
@@ -183,7 +185,8 @@
     speakerMappingStepOffered?: boolean;
     onAddSpeakerMappingStep?: () => void;
     onBuildFlowWithAI?: () => void;
-    onEditStepWithAI?: (step: FlowStep) => void;
+    /** Opens the AI Builder on a step, optionally with a request waiting in the composer. */
+    onEditStepWithAI?: (step: FlowStep, request?: string) => void;
   } = $props();
 
   // ---------------------------------------------------------------------------
@@ -885,40 +888,44 @@
 
 {#if activeStep === null}
   {#if steps.length === 0}
-    <div class="flex h-full flex-col items-center justify-center gap-5 px-8 text-center">
-      <div class="bg-hover-dimmer flex size-16 items-center justify-center rounded-2xl shadow-sm">
-        <IconWorkflow class="text-secondary size-8" />
-      </div>
-      <div class="flex flex-col gap-2">
-        <h2 class="text-lg font-semibold">{m.flow_no_steps_welcome_title()}</h2>
-        <p class="text-secondary max-w-md text-sm leading-relaxed">
-          {m.flow_no_steps_welcome_description()}
-        </p>
-      </div>
+    <Empty.Root class="h-full">
+      <Empty.Header>
+        <Empty.Media variant="icon">
+          <IconWorkflow />
+        </Empty.Media>
+        <Empty.Title>{m.flow_no_steps_welcome_title()}</Empty.Title>
+        <Empty.Description>
+          {onBuildFlowWithAI
+            ? m.flow_no_steps_welcome_description_ai()
+            : m.flow_no_steps_welcome_description()}
+        </Empty.Description>
+      </Empty.Header>
       {#if !isPublished}
-        <div class="flex max-w-xl flex-col items-center gap-3">
+        <Empty.Content>
+          <!-- AI first: the Builder is the main way in; manual steps stay one click away. -->
           <div class="flex flex-wrap items-center justify-center gap-2">
-            <Button onclick={() => flowEditor.addStep()}>
+            {#if onBuildFlowWithAI}
+              <Button onclick={onBuildFlowWithAI}>{m.ai_builder_empty_state_cta()}</Button>
+            {/if}
+            <Button
+              variant={onBuildFlowWithAI ? "outline" : "default"}
+              onclick={() => flowEditor.addStep()}
+            >
               {m.flow_empty_add_step()}
             </Button>
             <Button variant="outline" onclick={() => flowEditor.createDraftingChainStarter()}>
               {m.flow_starter_drafting_action()}
             </Button>
-            {#if onBuildFlowWithAI}
-              <Button variant="outline" onclick={onBuildFlowWithAI}>
-                {m.ai_builder_empty_state_cta()}
-              </Button>
-            {/if}
           </div>
-          <p class="text-muted max-w-lg text-xs leading-relaxed">
+          <p class="text-secondary max-w-lg text-xs leading-relaxed">
             {m.flow_starter_drafting_body()}
           </p>
-        </div>
+        </Empty.Content>
       {/if}
-    </div>
+    </Empty.Root>
   {:else}
     <div class="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
-      <MousePointerClick class="text-muted/40 mb-3 size-10" />
+      <MousePointerClick class="text-secondary mb-3 size-10" aria-hidden="true" />
       <h2 class="text-lg font-semibold">{m.flow_step_select_prompt()}</h2>
       <p class="text-secondary max-w-md text-sm">
         {m.flow_step_select_prompt_desc()}
@@ -972,9 +979,13 @@
                approving unpublishes the flow until it is published again. Hiding
                this hid the feature from the people whose flows are published. -->
           {#if onEditStepWithAI && activeStep.id}
-            <Button variant="outline" size="sm" onclick={() => onEditStepWithAI?.(activeStep)}>
-              {m.flow_step_change_with_ai()}
-            </Button>
+            <FlowStepAIMenu
+              usesAI={!isTemplateFill &&
+                !isTranscribeOnly &&
+                outputModeUsesCompletionModel(activeStep.output_mode)}
+              hasInstruction={instructionText.trim().length > 0}
+              onRequest={(request) => onEditStepWithAI?.(activeStep, request)}
+            />
           {/if}
         </div>
         {#if stepSummaryModel}
@@ -1005,9 +1016,10 @@
               description=""
               help={m.flow_step_name_help()}
               density="compact"
+              fullWidth
               let:aria
             >
-              <div class="flex flex-col gap-2">
+              <div class="flex max-w-xl flex-col gap-2">
                 <Input
                   {...aria}
                   bind:ref={nameInputEl}
@@ -1042,7 +1054,9 @@
               onInstructionFocused={() => (focusInstructionPending = false)}
               assistant={assistantState.assistant}
               assistantLoading={assistantState.loading}
-              promptGuideAvailability={assistantState.promptGuideAvailability}
+              onImproveInstructionWithAI={onEditStepWithAI && activeStep.id
+                ? (request) => onEditStepWithAI?.(activeStep, request)
+                : undefined}
               availableModels={$currentSpace.completion_models}
               {steps}
               {formSchema}
@@ -1054,14 +1068,6 @@
               onAssistantFieldChange={(detail) => updateAssistantField(detail.field, detail.value)}
               onInstructionDraft={(detail) => queueInstructionDraft(detail.value)}
               onInstructionCommit={(detail) => void updateInstruction(detail.value)}
-              onPreparePromptGuide={async () => {
-                try {
-                  await flowEditor.flushAssistantSaves();
-                  return true;
-                } catch {
-                  return false;
-                }
-              }}
             />
           {/if}
         </FlowStepChapter>
@@ -1115,7 +1121,9 @@
               onInstructionFocused={() => (focusInstructionPending = false)}
               assistant={assistantState.assistant}
               assistantLoading={assistantState.loading}
-              promptGuideAvailability={assistantState.promptGuideAvailability}
+              onImproveInstructionWithAI={onEditStepWithAI && activeStep.id
+                ? (request) => onEditStepWithAI?.(activeStep, request)
+                : undefined}
               availableModels={$currentSpace.completion_models}
               {steps}
               {formSchema}
@@ -1127,14 +1135,6 @@
               onAssistantFieldChange={(detail) => updateAssistantField(detail.field, detail.value)}
               onInstructionDraft={(detail) => queueInstructionDraft(detail.value)}
               onInstructionCommit={(detail) => void updateInstruction(detail.value)}
-              onPreparePromptGuide={async () => {
-                try {
-                  await flowEditor.flushAssistantSaves();
-                  return true;
-                } catch {
-                  return false;
-                }
-              }}
             />
           {/if}
 

@@ -48,8 +48,9 @@ const FLOW_STEP_COPY = {
     instructionsPlaceholder: "t.ex. Svara kort och tydligt. Använd punktlista.",
     inputTemplateTitle: "Anpassad text till AI:n",
     inputTemplateDescription:
-      "Här bygger du den text AI:n ska arbeta med. Lämna tomt om steget ska använda sitt vanliga underlag.",
-    inputTemplatePlaceholder: "t.ex. Rubrik: {{flow_input.titel}}\nText: {{step_1.output.text}}",
+      "Bestäm exakt vilken text AI:n får att arbeta med. Skriv egna rubriker och lägg in formulärfält eller svar från tidigare steg med Infoga variabel.",
+    inputTemplatePlaceholder:
+      "t.ex.\nÄrende: {{ärendenummer}}\nSammanfattning: {{Sammanfatta ärendet}}",
     inputTemplateCtaTitle: "Anpassa underlaget",
     inputTemplateCtaAction: "Anpassa texten",
     inputTemplateDefaultPreviousStep:
@@ -67,8 +68,8 @@ const FLOW_STEP_COPY = {
     instructionsPlaceholder: "e.g. Answer briefly and clearly. Use bullet points.",
     inputTemplateTitle: "Custom text for the AI",
     inputTemplateDescription:
-      "Here you build the text the AI should work with. Leave it empty if the step should use its normal material.",
-    inputTemplatePlaceholder: "e.g. Title: {{flow_input.title}}\nText: {{step_1.output.text}}",
+      "Decide exactly which text the AI gets to work with. Write your own headings and insert form fields or answers from earlier steps with Insert variable.",
+    inputTemplatePlaceholder: "e.g.\nCase: {{case_number}}\nSummary: {{Summarize the case}}",
     inputTemplateCtaTitle: "Customize material",
     inputTemplateCtaAction: "Customize text",
     inputTemplateDefaultPreviousStep:

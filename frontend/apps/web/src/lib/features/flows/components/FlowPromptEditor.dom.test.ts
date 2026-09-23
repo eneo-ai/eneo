@@ -1,8 +1,14 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { FlowStep } from "@eneo/eneo-js";
 
 import FlowPromptEditor from "./FlowPromptEditor.svelte";
+
+// The variable picker's command list scrolls the active option into view,
+// which jsdom does not implement.
+beforeAll(() => {
+  Element.prototype.scrollIntoView ??= vi.fn();
+});
 
 afterEach(async () => {
   cleanup();
@@ -31,7 +37,7 @@ describe("FlowPromptEditor", () => {
     await fireEvent.click(
       screen.getByRole("button", { name: /^(Infoga variabel|Insert variable)$/ })
     );
-    const chip = await screen.findByRole("menuitem", { name: /user_flow/ });
+    const chip = await screen.findByRole("option", { name: /user_flow/ });
     await fireEvent.click(chip);
 
     expect(onChange).toHaveBeenCalledWith("{{flow_input.user_flow}}");
@@ -63,8 +69,10 @@ describe("FlowPromptEditor", () => {
       onCommit
     });
 
-    await fireEvent.click(screen.getByTitle("Infoga variabel"));
-    await fireEvent.click(await screen.findByText("Textutdata"));
+    await fireEvent.click(
+      screen.getByRole("button", { name: /^(Infoga variabel|Insert variable)$/ })
+    );
+    await fireEvent.click(await screen.findByRole("option", { name: /Textutdata/ }));
 
     expect(onChange).toHaveBeenCalledWith("{{step_4.output.text}}");
     expect(onCommit).toHaveBeenCalledWith("{{step_4.output.text}}");

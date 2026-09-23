@@ -3,14 +3,11 @@ import type { FlowEditor } from "$lib/features/flows/FlowEditor";
 import type { Eneo } from "@eneo/eneo-js";
 import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
 import type { Attachment } from "$lib/features/attachments/AttachmentManager";
-import { SvelteMap, SvelteSet } from "svelte/reactivity";
+import { SvelteSet } from "svelte/reactivity";
 import type { Readable, Writable } from "svelte/store";
 import { outputModeUsesCompletionModel } from "$lib/features/flows/flowStepTypes";
 
 export type LoadedAssistant = NonNullable<Awaited<ReturnType<FlowEditor["loadAssistant"]>>>;
-export type PromptGuideAvailability = Awaited<
-  ReturnType<Eneo["helpAssistants"]["runs"]["availability"]>
->;
 
 /**
  * Manages the assistant lifecycle for the active flow step:
@@ -26,13 +23,11 @@ export class FlowStepAssistantState {
 
   assistant = $state<LoadedAssistant | null>(null);
   loading = $state(false);
-  promptGuideAvailability = $state<PromptGuideAvailability | null>(null);
 
   #lastLoadedId: string | null = null;
   #lastLoadedRevision = -1;
   #loadRequestToken = 0;
   #autoClearedLegacyTemplateByStepId = new SvelteSet<string>();
-  #promptGuideAvailabilityByAssistantId = new SvelteMap<string, PromptGuideAvailability | null>();
 
   runningUploads = $derived(
     (this.#getNewAttachments() ?? []).filter(
@@ -82,7 +77,6 @@ export class FlowStepAssistantState {
       const activeStep = this.#getActiveStep();
       if (activeStep?.assistant_id !== assistantId) return;
       this.assistant = loaded;
-      void this.#loadPromptGuideAvailability(assistantId, requestToken);
     } catch (error) {
       if (requestToken !== this.#loadRequestToken) return;
       console.error("Failed to load assistant for flow step:", error);
@@ -92,24 +86,6 @@ export class FlowStepAssistantState {
         this.loading = false;
       }
     }
-  }
-
-  async #loadPromptGuideAvailability(assistantId: string, requestToken: number) {
-    let availability = this.#promptGuideAvailabilityByAssistantId.get(assistantId);
-    if (availability === undefined) {
-      try {
-        availability = await this.#eneo.helpAssistants.runs.availability({
-          kind: "prompt_guide",
-          target_id: assistantId
-        });
-      } catch {
-        availability = null;
-      }
-      this.#promptGuideAvailabilityByAssistantId.set(assistantId, availability);
-    }
-    if (requestToken !== this.#loadRequestToken) return;
-    if (this.#getActiveStep()?.assistant_id !== assistantId) return;
-    this.promptGuideAvailability = availability;
   }
 
   updateField(field: string, value: unknown) {
@@ -203,7 +179,6 @@ export class FlowStepAssistantState {
       this.#lastLoadedId = null;
       this.#lastLoadedRevision = revision;
       this.loading = false;
-      this.promptGuideAvailability = null;
       this.cancelUploadsAndClearQueue();
     } else if (
       activeStep?.assistant_id &&
@@ -213,7 +188,6 @@ export class FlowStepAssistantState {
       this.#lastLoadedId = targetId;
       this.#lastLoadedRevision = revision;
       this.assistant = null;
-      this.promptGuideAvailability = null;
       this.loading = true;
       this.cancelUploadsAndClearQueue();
       void (async () => {
@@ -223,7 +197,6 @@ export class FlowStepAssistantState {
       })();
     } else if (!activeStep || !activeStep.assistant_id) {
       this.assistant = null;
-      this.promptGuideAvailability = null;
       this.#lastLoadedId = null;
       this.#lastLoadedRevision = revision;
       this.loading = false;

@@ -396,26 +396,29 @@
   <!-- Toolbar. The row that hosts the editor already titles it, so the label
        is kept for assistive technology only; repeating it here read as two
        different fields. -->
-  <div class="border-default bg-secondary/30 flex items-center justify-end border-b px-3 py-1.5">
+  <div class="border-default flex items-center justify-between gap-2 border-b px-2 py-1.5">
     <span class="sr-only">{label}</span>
-    <div class="flex items-center gap-1">
-      {#if toolbar}
+    {#if !disabled}
+      <VariablePicker
+        {steps}
+        {currentStepOrder}
+        {formSchema}
+        {isAdvancedMode}
+        {transcriptionEnabled}
+        sectionVariablesAvailable={classificationContext.sectionVariablesAvailable}
+        onInsert={(variable) => {
+          const match = variable.match(/^\{\{(.+)\}\}$/);
+          if (match) void insertAtCursor(match[1]);
+        }}
+      />
+    {:else}
+      <span></span>
+    {/if}
+    {#if toolbar}
+      <div class="flex items-center gap-1">
         {@render toolbar()}
-      {/if}
-      {#if !disabled}
-        <VariablePicker
-          {steps}
-          {currentStepOrder}
-          {formSchema}
-          {isAdvancedMode}
-          {transcriptionEnabled}
-          onInsert={(variable) => {
-            const match = variable.match(/^\{\{(.+)\}\}$/);
-            if (match) void insertAtCursor(match[1]);
-          }}
-        />
-      {/if}
-    </div>
+      </div>
+    {/if}
   </div>
 
   <!-- Editor area (overlay pattern) -->
@@ -423,7 +426,7 @@
     <!-- Mirror layer (behind, shows colored chips) -->
     <div
       aria-hidden="true"
-      class="pointer-events-none absolute inset-0 overflow-hidden px-4 py-3 font-mono text-base leading-relaxed break-words whitespace-pre-wrap sm:text-sm"
+      class="pointer-events-none absolute inset-0 overflow-hidden px-4 py-3 font-sans text-base leading-relaxed break-words whitespace-pre-wrap sm:text-sm"
       bind:this={mirrorEl}
     >
       {#each mirrorSegments as seg, index (`${seg.type}:${seg.value}:${index}`)}
@@ -435,7 +438,8 @@
           >{:else if seg.type === "text"}<span class="text-primary">{seg.value}</span>{:else}<span
             class="{getChipClasses(
               seg.category ?? 'unknown'
-            )} inline !px-0 !py-0 !text-base sm:!text-sm">{seg.value}</span
+            )} inline !px-0 !py-0 !font-sans !text-base !font-normal sm:!text-sm"
+            >{seg.value}</span
           >{/if}
       {/each}
       <span>&nbsp;</span>
@@ -444,7 +448,7 @@
     <!-- Textarea layer (on top, transparent text, visible caret) -->
     <textarea
       bind:this={textareaEl}
-      class="selection:bg-accent-dimmer selection:text-primary caret-foreground relative z-10 w-full overflow-hidden bg-transparent px-4 py-3 font-mono text-base leading-relaxed text-transparent focus:outline-none sm:text-sm"
+      class="selection:bg-accent-dimmer selection:text-primary caret-foreground relative z-10 w-full overflow-hidden bg-transparent px-4 py-3 font-sans text-base leading-relaxed text-transparent focus:outline-none sm:text-sm"
       style={`min-height: ${minHeight}px`}
       oninput={handleInput}
       onkeydown={handleKeydown}

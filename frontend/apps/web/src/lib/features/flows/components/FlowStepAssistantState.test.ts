@@ -109,20 +109,6 @@ describe("FlowStepAssistantState", () => {
     expect(flowEditor.updateAssistantImmediately).not.toHaveBeenCalled();
   });
 
-  it("loads Prompt Guide availability once per selected assistant", async () => {
-    const activeStep = { current: makeStep("assistant-1") };
-    const { state, availability } = makeState(activeStep);
-
-    await state.load("assistant-1");
-    await state.load("assistant-1");
-
-    await vi.waitFor(() => expect(availability).toHaveBeenCalledTimes(1));
-    expect(state.promptGuideAvailability).toEqual({
-      available: false,
-      disabled_reason: "no_assignment"
-    });
-  });
-
   it("reloads the same assistant when its external revision changes", async () => {
     const activeStep = { current: makeStep("assistant-1") };
     const { state, flowEditor } = makeState(activeStep);

@@ -13,16 +13,15 @@
 </script>
 
 <script lang="ts">
-  import { tick } from "svelte";
+  import * as Popover from "$lib/components/ui/popover/index.js";
+  import * as Command from "$lib/components/ui/command/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import { Input } from "$lib/components/ui/input/index.js";
+  import Braces from "@lucide/svelte/icons/braces";
   import { m } from "$lib/paraglide/messages";
   import {
     getFlowFormFieldVariableExpression,
     isFlowFormFieldNameUsableAsVariable
   } from "$lib/features/flows/flowFormSchema";
-  import { getChipClasses } from "$lib/features/flows/flowVariableTokens";
 
   let {
     steps,
@@ -30,6 +29,7 @@
     formSchema,
     isAdvancedMode = false,
     transcriptionEnabled = false,
+    sectionVariablesAvailable = false,
     onInsert
   }: {
     steps: VariablePickerContext["steps"];
@@ -37,51 +37,21 @@
     formSchema: VariablePickerContext["formSchema"];
     isAdvancedMode?: boolean;
     transcriptionEnabled?: boolean;
+    /** The editor holds the AI instruction of a step that reads section by section. */
+    sectionVariablesAvailable?: boolean;
     onInsert?: (variable: string) => void;
   } = $props();
 
-  const previousSteps = $derived(steps.filter((s) => s.step_order < currentStepOrder));
-  const formFields = $derived(
-    (formSchema?.fields ?? []).filter((field) =>
-      isFlowFormFieldNameUsableAsVariable(field.name ?? "")
-    )
-  );
+  type Entry = { token: string; label: string; description?: string };
+  type Group = { key: string; heading: string; entries: Entry[] };
 
-  let searchQuery = $state("");
-  let searchInputEl: HTMLInputElement | null = $state(null);
+  let open = $state(false);
 
-  function matchesSearch(label: string): boolean {
-    if (!searchQuery.trim()) return true;
-    return label.toLowerCase().includes(searchQuery.trim().toLowerCase());
+  function stepName(step: FlowStep): string {
+    return step.user_description?.trim() || m.flow_step_unnamed();
   }
 
-  function getFieldLabel(field: { name: string; label?: string | null }): string {
-    const label = field.label?.trim();
-    return label || field.name;
-  }
-
-  function handleDropdownOpen(open: boolean) {
-    if (open) {
-      searchQuery = "";
-      tick().then(() => searchInputEl?.focus());
-    }
-  }
-
-  function insert(variable: string) {
-    onInsert?.(`{{${variable}}}`);
-  }
-
-  function getSchemaType(step: FlowStep, prop: string): string {
-    const schema = step.output_contract as Record<string, unknown> | null | undefined;
-    if (!schema || typeof schema !== "object") return "";
-    const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
-    if (!properties || !properties[prop]) return "";
-    const propType = properties[prop].type;
-    if (typeof propType === "string") return propType;
-    return "";
-  }
-
-  function getOutputTextDescription(step: FlowStep): string {
+  function outputTextDescription(step: FlowStep): string {
     if (step.output_type === "json") return m.flow_variable_output_text_desc_json();
     if (step.output_type === "pdf" || step.output_type === "docx") {
       return m.flow_variable_output_text_desc_prerender();
@@ -89,220 +59,176 @@
     return m.flow_variable_output_text_desc();
   }
 
-  function getFullOutputDescription(step: FlowStep): string {
-    if (step.output_type === "pdf" || step.output_type === "docx") {
-      return m.flow_variable_full_output_desc_artifacts();
+  function fullOutputDescription(step: FlowStep): string {
+    return step.output_type === "pdf" || step.output_type === "docx"
+      ? m.flow_variable_full_output_desc_artifacts()
+      : m.flow_variable_full_output_desc();
+  }
+
+  function schemaFields(step: FlowStep): Array<{ name: string; type: string }> {
+    const properties = (step.output_contract as { properties?: Record<string, { type?: unknown }> })
+      ?.properties;
+    if (!properties || typeof properties !== "object") return [];
+    return Object.entries(properties).map(([name, schema]) => ({
+      name,
+      type: typeof schema?.type === "string" ? schema.type : ""
+    }));
+  }
+
+  // The same variables the editor's autocomplete accepts, grouped the way an
+  // author thinks about them: what the person filled in, what the run itself
+  // provides, and what each earlier step answered. Technical paths only in
+  // Avancerad.
+  const groups = $derived.by<Group[]>(() => {
+    const result: Group[] = [];
+
+    const fields = (formSchema?.fields ?? []).filter((field) =>
+      isFlowFormFieldNameUsableAsVariable(field.name ?? "")
+    );
+    const fieldEntries: Entry[] = fields.map((field) => ({
+      token: getFlowFormFieldVariableExpression(field.name),
+      label: field.label?.trim() || field.name,
+      description: isAdvancedMode ? field.type : undefined
+    }));
+    if (fieldEntries.length === 0 && isAdvancedMode) {
+      fieldEntries.push({
+        token: "flow_input.text",
+        label: m.flow_variable_flow_input_text_label(),
+        description: m.flow_variable_flow_input_text_desc()
+      });
     }
-    return m.flow_variable_full_output_desc();
+    if (fieldEntries.length > 0) {
+      result.push({ key: "fields", heading: m.flow_variable_form_field(), entries: fieldEntries });
+    }
+
+    const runEntries: Entry[] = [];
+    if (sectionVariablesAvailable) {
+      runEntries.push({
+        token: "section_index",
+        label: m.flow_variable_section_index_label(),
+        description: m.flow_variable_section_index()
+      });
+    }
+    if (transcriptionEnabled) {
+      runEntries.push({
+        token: "transkribering",
+        label: m.flow_variable_transcription(),
+        description: m.flow_variable_transcription_desc()
+      });
+    }
+    if (isAdvancedMode && currentStepOrder > 1) {
+      runEntries.push({
+        token: "föregående_steg",
+        label: m.flow_variable_previous_step(),
+        description: m.flow_variable_previous_step_desc()
+      });
+    }
+    if (runEntries.length > 0) {
+      result.push({ key: "run", heading: m.flow_variable_run_section(), entries: runEntries });
+    }
+
+    for (const step of steps.filter((s) => s.step_order < currentStepOrder)) {
+      const entries: Entry[] = [];
+      if (step.user_description?.trim()) {
+        entries.push({
+          token: step.user_description.trim(),
+          label: m.flow_variable_step_answer_label(),
+          description: m.flow_variable_alias_desc()
+        });
+      }
+      if (isAdvancedMode) {
+        entries.push(
+          {
+            token: `step_${step.step_order}.output.text`,
+            label: m.flow_variable_output_text_label(),
+            description: outputTextDescription(step)
+          },
+          {
+            token: `step_${step.step_order}.output`,
+            label: m.flow_variable_full_output_label(),
+            description: fullOutputDescription(step)
+          }
+        );
+        if (step.output_type === "json") {
+          const fieldsOfStep = schemaFields(step);
+          if (fieldsOfStep.length > 0) {
+            for (const field of fieldsOfStep) {
+              entries.push({
+                token: `step_${step.step_order}.output.structured.${field.name}`,
+                label: field.name,
+                description: field.type || undefined
+              });
+            }
+          } else {
+            entries.push({
+              token: `step_${step.step_order}.output.structured`,
+              label: m.flow_variable_structured_label(),
+              description: m.flow_variable_structured_desc()
+            });
+          }
+        }
+      }
+      if (entries.length > 0) {
+        result.push({
+          key: `step-${step.step_order}`,
+          heading: m.flow_variable_step_output({
+            order: String(step.step_order),
+            name: stepName(step)
+          }),
+          entries
+        });
+      }
+    }
+    return result;
+  });
+
+  function insert(token: string) {
+    open = false;
+    onInsert?.(`{{${token}}}`);
   }
 </script>
 
-<DropdownMenu.Root onOpenChange={handleDropdownOpen}>
-  <DropdownMenu.Trigger>
+<Popover.Root bind:open>
+  <Popover.Trigger>
     {#snippet child({ props })}
-      <Button
-        {...props}
-        size="icon"
-        variant="outline"
-        class="size-7 text-xs font-bold"
-        title={m.flow_variable_insert()}
-        aria-label={m.flow_variable_insert()}
-      >
-        &#123; &#125;
+      <Button {...props} variant="outline" size="sm" title={m.flow_variable_insert_hint()}>
+        <Braces data-icon="inline-start" aria-hidden="true" />
+        {m.flow_variable_insert()}
       </Button>
     {/snippet}
-  </DropdownMenu.Trigger>
-  <DropdownMenu.Content align="end" class="max-h-[400px] min-w-[280px] overflow-y-auto p-0">
-    <!-- Search -->
-    <div class="border-default bg-primary sticky top-0 z-10 border-b px-3 py-2">
-      <Input
-        bind:ref={searchInputEl}
-        type="text"
-        class="w-full text-xs"
-        placeholder={m.flow_variable_search_placeholder()}
-        bind:value={searchQuery}
-        onkeydown={(e) => e.stopPropagation()}
-      />
-    </div>
-
-    <!-- Flow Input Section -->
-    {#if formFields.length > 0 ? formFields.some((f) => matchesSearch(getFieldLabel(f)) || matchesSearch(f.name)) : isAdvancedMode && matchesSearch("flow_input.text")}
-      <div class="px-3 pt-2 pb-1">
-        <span class="text-secondary text-xs font-semibold">{m.flow_variable_flow_input()}</span>
-      </div>
-      {#if formFields.length > 0}
-        {#each formFields as field (field.name)}
-          {#if matchesSearch(getFieldLabel(field)) || matchesSearch(field.name)}
-            <DropdownMenu.Item
-              class="!justify-start !px-3 !py-1.5 !text-sm"
-              onclick={() => insert(getFlowFormFieldVariableExpression(field.name))}
-            >
-              <span class="flex items-center gap-2">
-                <span class={getChipClasses("field")}>
-                  {getFieldLabel(field)}
-                </span>
-                {#if getFieldLabel(field) !== field.name}
-                  <span class="text-muted font-mono text-xs">{field.name}</span>
-                {/if}
-                <span class="text-muted text-xs">{field.type}</span>
-              </span>
-            </DropdownMenu.Item>
-          {/if}
-        {/each}
-      {:else if isAdvancedMode && matchesSearch("flow_input.text")}
-        <DropdownMenu.Item
-          class="!justify-start !px-3 !py-1.5 !text-sm"
-          onclick={() => insert("flow_input.text")}
-        >
-          <span class="flex w-full items-center justify-between">
-            <!-- eslint-disable-next-line eneo/no-hardcoded-text -- runtime variable identifier, not UI copy -->
-            <span class={getChipClasses("technical")}> text </span>
-            <span class="text-muted ml-2 text-xs">{m.flow_variable_flow_input_text_desc()}</span>
-          </span>
-        </DropdownMenu.Item>
-      {/if}
-    {/if}
-
-    {#if (transcriptionEnabled && matchesSearch("transkribering")) || (isAdvancedMode && currentStepOrder > 1 && matchesSearch("föregående_steg"))}
-      <DropdownMenu.Separator class="mx-2 my-1.5" />
-      <div class="px-3 pt-1.5 pb-1">
-        <span class="text-secondary text-xs font-semibold">{m.flow_variable_system_section()}</span>
-      </div>
-      {#if transcriptionEnabled && matchesSearch("transkribering")}
-        <DropdownMenu.Item
-          class="!justify-start !px-3 !py-1.5 !text-sm"
-          onclick={() => insert("transkribering")}
-        >
-          <!-- eslint-disable-next-line eneo/no-hardcoded-text -- runtime variable identifier, not UI copy -->
-          <span class={getChipClasses("system")}> transkribering </span>
-        </DropdownMenu.Item>
-      {/if}
-      {#if isAdvancedMode && currentStepOrder > 1 && matchesSearch("föregående_steg")}
-        <DropdownMenu.Item
-          class="!justify-start !px-3 !py-1.5 !text-sm"
-          onclick={() => insert("föregående_steg")}
-        >
-          <!-- eslint-disable-next-line eneo/no-hardcoded-text -- runtime variable identifier, not UI copy -->
-          <span class={getChipClasses("system")}> föregående_steg </span>
-        </DropdownMenu.Item>
-      {/if}
-    {/if}
-
-    <!-- Previous Steps Sections -->
-    {#if previousSteps.length > 0}
-      {#each previousSteps as prevStep (prevStep.step_order)}
-        {@const stepName = prevStep.user_description ?? `Step ${prevStep.step_order}`}
-        {@const hasStepMatches =
-          matchesSearch(stepName) ||
-          (isAdvancedMode &&
-            (matchesSearch("text") ||
-              matchesSearch("output") ||
-              matchesSearch(`step_${prevStep.step_order}`)))}
-        {#if hasStepMatches}
-          <DropdownMenu.Separator class="mx-2 my-1.5" />
-
-          <!-- Step header -->
-          <div class="px-3 pt-1.5 pb-1">
-            <span class="text-secondary text-xs font-semibold">
-              {m.flow_variable_step_output({
-                order: String(prevStep.step_order),
-                name: stepName
-              })}
-            </span>
-          </div>
-
-          <!-- Step name alias -->
-          {#if prevStep.user_description?.trim() && matchesSearch(prevStep.user_description)}
-            <DropdownMenu.Item
-              class="!justify-start !px-3 !py-1.5 !text-sm"
-              onclick={() => insert(prevStep.user_description ?? "")}
-            >
-              <span class="flex w-full items-center justify-between">
-                <span class={getChipClasses("step")}>
-                  {prevStep.user_description}
-                </span>
-                <span class="text-muted ml-2 text-xs">{m.flow_variable_alias_desc()}</span>
-              </span>
-            </DropdownMenu.Item>
-          {/if}
-
-          <!-- Output text -->
-          {#if isAdvancedMode && (matchesSearch("text") || matchesSearch(`step_${prevStep.step_order}`))}
-            <DropdownMenu.Item
-              class="!justify-start !px-3 !py-1.5 !text-sm"
-              onclick={() => insert(`step_${prevStep.step_order}.output.text`)}
-            >
-              <span class="flex w-full items-center justify-between">
-                <span class={getChipClasses("step")}>
-                  {m.flow_variable_output_text_label()}
-                </span>
-                <span class="text-muted ml-2 text-xs">{getOutputTextDescription(prevStep)}</span>
-              </span>
-            </DropdownMenu.Item>
-          {/if}
-
-          <!-- Full output -->
-          {#if isAdvancedMode && (matchesSearch("output") || matchesSearch(`step_${prevStep.step_order}`))}
-            <DropdownMenu.Item
-              class="!justify-start !px-3 !py-1.5 !text-sm"
-              onclick={() => insert(`step_${prevStep.step_order}.output`)}
-            >
-              <span class="flex w-full items-center justify-between">
-                <span class={getChipClasses("step")}>
-                  {m.flow_variable_full_output_label()}
-                </span>
-                <span class="text-muted ml-2 text-xs">{getFullOutputDescription(prevStep)}</span>
-              </span>
-            </DropdownMenu.Item>
-          {/if}
-
-          <!-- JSON fields sub-section -->
-          {#if isAdvancedMode && prevStep.output_type === "json"}
-            <div class="mx-3 mt-1.5 mb-1 flex items-center gap-2">
-              <div class="border-default h-px flex-1 border-t"></div>
-              <span class="text-muted text-xs font-medium tracking-wider uppercase"
-                >{m.flow_variable_json_fields()}</span
+  </Popover.Trigger>
+  <Popover.Content align="start" class="w-[min(26rem,calc(100vw-2rem))] p-0">
+    <Command.Root>
+      <Command.Input placeholder={m.flow_variable_search_placeholder()} />
+      <Command.List class="max-h-[min(24rem,60vh)]">
+        <Command.Empty>{m.flow_variable_search_empty()}</Command.Empty>
+        {#each groups as group (group.key)}
+          <Command.Group heading={group.heading}>
+            {#each group.entries as entry (entry.token)}
+              <Command.Item
+                value={`${group.key}:${entry.token}`}
+                keywords={[entry.label, entry.token, group.heading, entry.description ?? ""]}
+                onSelect={() => insert(entry.token)}
+                class="items-start gap-3 py-2"
               >
-              <div class="border-default h-px flex-1 border-t"></div>
-            </div>
-            {#if prevStep.output_contract?.properties}
-              {#each Object.keys(prevStep.output_contract.properties) as prop (prop)}
-                {#if matchesSearch(prop)}
-                  {@const propType = getSchemaType(prevStep, prop)}
-                  <DropdownMenu.Item
-                    class="!justify-start !px-3 !py-1.5 !text-sm"
-                    onclick={() => insert(`step_${prevStep.step_order}.output.structured.${prop}`)}
+                <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span class="text-primary text-sm font-medium">{entry.label}</span>
+                  {#if entry.description}
+                    <span class="text-secondary text-xs leading-relaxed">{entry.description}</span>
+                  {/if}
+                </span>
+                {#if isAdvancedMode}
+                  <code
+                    translate="no"
+                    class="text-secondary max-w-[45%] truncate pt-0.5 font-mono text-xs"
+                    >{entry.token}</code
                   >
-                    <span class="flex w-full items-center justify-between">
-                      <span class={getChipClasses("structured")}>
-                        {prop}
-                      </span>
-                      {#if propType}
-                        <span class="text-muted ml-2 font-mono text-xs">{propType}</span>
-                      {/if}
-                    </span>
-                  </DropdownMenu.Item>
                 {/if}
-              {/each}
-            {:else if matchesSearch("structured")}
-              <DropdownMenu.Item
-                class="!justify-start !px-3 !py-1.5 !text-sm"
-                onclick={() => insert(`step_${prevStep.step_order}.output.structured`)}
-              >
-                <span class="flex w-full items-center justify-between">
-                  <span class={getChipClasses("structured")}>
-                    {m.flow_variable_structured_label()}
-                  </span>
-                  <span class="text-muted ml-2 text-xs">{m.flow_variable_structured_desc()}</span>
-                </span>
-              </DropdownMenu.Item>
-              <p class="text-muted px-3 pb-1 text-xs">
-                {m.flow_variable_json_no_contract_hint()}
-              </p>
-            {/if}
-          {/if}
-        {/if}
-      {/each}
-    {/if}
-  </DropdownMenu.Content>
-</DropdownMenu.Root>
+              </Command.Item>
+            {/each}
+          </Command.Group>
+        {/each}
+      </Command.List>
+    </Command.Root>
+  </Popover.Content>
+</Popover.Root>

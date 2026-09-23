@@ -15,13 +15,11 @@
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import FlowPromptEditor from "./FlowPromptEditor.svelte";
   import type { FlowFormSchemaMetadata } from "$lib/features/flows/flowFormSchema";
-  import type { LoadedAssistant, PromptGuideAvailability } from "./FlowStepAssistantState.svelte";
+  import type { LoadedAssistant } from "./FlowStepAssistantState.svelte";
   import type { FlowStepUxCopy } from "$lib/features/flows/flowStepUxCopy";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import { supportsBehaviorPresets } from "$lib/features/ai-models/ModelKwargCapabilities.js";
   import { buildNextFlowPrompt } from "$lib/features/flows/flowPromptDraft";
-  import PromptGuideModal from "$lib/features/prompt-guide/components/PromptGuideModal.svelte";
-  import { getEneo } from "$lib/core/Eneo";
 
   let {
     step,
@@ -30,7 +28,7 @@
     isTranscribeOnly,
     assistant,
     assistantLoading,
-    promptGuideAvailability,
+    onImproveInstructionWithAI,
     availableModels,
     steps,
     formSchema,
@@ -44,7 +42,6 @@
     onAssistantFieldChange,
     onInstructionDraft,
     onInstructionCommit,
-    onPreparePromptGuide,
     onInstructionFocused
   }: {
     step: FlowStep;
@@ -53,7 +50,8 @@
     isTranscribeOnly: boolean;
     assistant: LoadedAssistant | null;
     assistantLoading: boolean;
-    promptGuideAvailability: PromptGuideAvailability | null;
+    /** Opens the AI Builder on this step with a request about the instruction. */
+    onImproveInstructionWithAI?: (request: string) => void;
     availableModels: CompletionModel[];
     steps: FlowStep[];
     formSchema: FlowFormSchemaMetadata | undefined;
@@ -67,31 +65,9 @@
     onAssistantFieldChange?: (detail: { field: string; value: unknown }) => void;
     onInstructionDraft?: (detail: { value: string }) => void;
     onInstructionCommit?: (detail: { value: string }) => void;
-    onPreparePromptGuide?: () => Promise<boolean>;
     onInstructionFocused?: () => void;
   } = $props();
-  const eneo = getEneo();
-  let promptGuideOpen = $state(false);
-  let promptGuideRunId = $state<string | null>(null);
-  const promptGuideVisible = $derived(
-    promptGuideAvailability?.available === true ||
-      promptGuideAvailability?.disabled_reason === "no_completion_model"
-  );
-
-  async function openPromptGuide() {
-    if (!promptGuideAvailability?.available) return;
-    if (onPreparePromptGuide && !(await onPreparePromptGuide())) return;
-    promptGuideOpen = true;
-  }
-
-  function applyPromptGuideSuggestion(text: string) {
-    onInstructionCommit?.({ value: text });
-    const runId = promptGuideRunId;
-    promptGuideOpen = false;
-    if (runId) {
-      void eneo.helpAssistants.runs.setStatus({ run_id: runId, status: "completed" });
-    }
-  }
+  const hasInstruction = $derived(instructionText.trim().length > 0);
 
   // Collapsed label for the advanced model group — the chosen model's name.
   const modelStatus = $derived(
@@ -149,24 +125,31 @@
         </Tooltip.Provider>
       </svelte:fragment>
       <svelte:fragment slot="toolbar">
-        {#if promptGuideVisible && !isPublished}
-          <Tooltip.Provider delayDuration={150}>
+        {#if onImproveInstructionWithAI}
+          <Tooltip.Provider delayDuration={300}>
             <Tooltip.Root>
               <Tooltip.Trigger>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!promptGuideAvailability?.available}
-                  onclick={() => void openPromptGuide()}
-                >
-                  {m.flow_step_edit_with_ai()}
-                </Button>
+                {#snippet child({ props })}
+                  <Button
+                    {...props}
+                    variant="outline"
+                    size="sm"
+                    onclick={() =>
+                      onImproveInstructionWithAI?.(
+                        hasInstruction
+                          ? m.flow_step_ai_request_improve_instruction()
+                          : m.flow_step_ai_request_write_instruction()
+                      )}
+                  >
+                    {hasInstruction
+                      ? m.flow_step_ai_menu_improve_instruction()
+                      : m.flow_step_ai_menu_write_instruction()}
+                  </Button>
+                {/snippet}
               </Tooltip.Trigger>
-              <Tooltip.Content>
-                {promptGuideAvailability?.available
-                  ? m.prompt_guide_button_tooltip()
-                  : m.prompt_guide_disabled_no_completion_model()}
-              </Tooltip.Content>
+              <Tooltip.Content class="max-w-72"
+                >{m.flow_step_ai_menu_instruction_desc()}</Tooltip.Content
+              >
             </Tooltip.Root>
           </Tooltip.Provider>
         {/if}
@@ -266,15 +249,3 @@
     {/if}
   {/if}
 </FlowStepSection>
-
-{#if assistant?.id && promptGuideAvailability?.available}
-  <PromptGuideModal
-    bind:open={promptGuideOpen}
-    bind:runId={promptGuideRunId}
-    targetType="assistant"
-    targetId={assistant.id}
-    targetPrompt={instructionText}
-    hasUnsavedPromptChanges={false}
-    onApply={applyPromptGuideSuggestion}
-  />
-{/if}

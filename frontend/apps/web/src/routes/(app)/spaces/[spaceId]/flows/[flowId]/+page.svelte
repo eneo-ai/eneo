@@ -33,6 +33,7 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import IconArrowRight from "@lucide/svelte/icons/arrow-right";
+  import Check from "@lucide/svelte/icons/check";
   import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
   import CircleAlert from "lucide-svelte/icons/circle-alert";
   import ListTree from "lucide-svelte/icons/list-tree";
@@ -156,7 +157,7 @@
     setActiveTab("ai-builder");
   }
 
-  async function openStepInAIBuilder(step: FlowStep) {
+  async function openStepInAIBuilder(step: FlowStep, request?: string) {
     if (!step.id) return;
     try {
       await flowEditor.flushSaves();
@@ -180,7 +181,8 @@
     await aiBuilderHost?.focusSavedFlowStep({
       editContext: { kind: "saved_flow_step", flow_step_id: step.id },
       stepName: step.user_description?.trim() || m.flow_step_unnamed(),
-      stepNumber: step.step_order
+      stepNumber: step.step_order,
+      request
     });
   }
 
@@ -734,87 +736,58 @@
         </Alert.Root>
       {/if}
 
-      <!-- Wizard Stepper -->
-      <div class="border-default bg-primary/95 sticky top-0 z-10 border-b backdrop-blur-sm">
+      <!-- Wizard stepper: every stage is named under its circle at every width,
+           and the five stages share the row evenly beside the navigation. -->
+      <div class="border-default bg-primary sticky top-0 z-10 border-b">
         <nav
-          class="mx-auto flex max-w-[1600px] items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 md:px-6 md:py-3.5"
+          class="mx-auto flex max-w-[1600px] items-center gap-4 px-3 py-2 sm:px-4 md:gap-6 md:px-6"
           aria-label={m.flow_stages_nav_aria()}
         >
-          <!-- Steps — scrollable on small screens -->
-          <ol
-            class="flex min-w-0 flex-1 [scrollbar-width:none] items-center overflow-x-auto [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-          >
+          <ol class="grid min-w-0 flex-1 grid-cols-5">
             {#each FLOW_BUILDER_STAGES as stage, i (stage.id)}
               {@const isActive = builderStage === stage.id}
               {@const isCompleted = isStageCompleted(stage.id)}
               {@const isSkipped = stage.id === 2 && isTranscriptionSkipped}
-              {@const isPreviousCompleted =
-                i > 0 && isStageCompleted(FLOW_BUILDER_STAGES[i - 1].id)}
-
-              {#if i > 0}
-                <div
-                  class="mx-1 h-0.5 w-4 shrink-0 motion-safe:transition-colors motion-safe:duration-(--duration-quick) min-[1700px]:mx-2 min-[1700px]:w-8 sm:mx-1.5 sm:w-6 2xl:mx-1 2xl:w-4
-                    {isPreviousCompleted ? 'bg-accent-default' : 'bg-border-default'}"
-                ></div>
-              {/if}
-
-              <li class="min-w-0">
+              <li class="relative min-w-0">
+                <!-- The connector runs from this circle's centre to the next one. -->
+                {#if i < FLOW_BUILDER_STAGES.length - 1}
+                  <span
+                    aria-hidden="true"
+                    class="absolute top-[1.125rem] left-[calc(50%+1rem)] h-0.5 w-[calc(100%-2rem)] motion-safe:transition-colors motion-safe:duration-(--duration-quick) {isCompleted
+                      ? 'bg-accent-default'
+                      : 'bg-border-default'}"
+                  ></span>
+                {/if}
                 <button
                   type="button"
-                  class="hover:bg-hover-dimmer flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-sm motion-safe:transition-colors motion-safe:duration-(--duration-quick) min-[1700px]:gap-2.5 min-[1700px]:px-2.5 sm:gap-2 sm:px-2 2xl:px-1.5
-                    {isActive ? 'text-primary font-semibold' : ''}"
+                  class="group focus-visible:ring-ring flex w-full min-w-0 flex-col items-center gap-1 rounded-lg px-1 py-1 focus-visible:ring-2 focus-visible:outline-none"
                   aria-current={isActive ? "step" : undefined}
-                  aria-label={`${stage.id}. ${stage.labelKey()}`}
-                  title={stage.labelKey()}
+                  aria-label={isSkipped
+                    ? `${stage.id}. ${stage.labelKey()}, ${m.flow_stage_skipped()}`
+                    : `${stage.id}. ${stage.labelKey()}`}
+                  title={isSkipped ? `${stage.labelKey()}: ${m.flow_stage_skipped()}` : undefined}
                   onclick={() => void navigateToStage(stage.id)}
                 >
-                  {#if isCompleted}
-                    <span
-                      class="bg-accent-default/15 text-accent-default inline-flex size-7 items-center justify-center rounded-full text-sm font-semibold motion-safe:transition-colors motion-safe:duration-(--duration-quick) sm:size-8"
-                    >
-                      <svg class="size-3.5 sm:size-4" viewBox="0 0 16 16" fill="none">
-                        <path
-                          d="M3.5 8.5L6.5 11.5L12.5 4.5"
-                          stroke="currentColor"
-                          stroke-width="2"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        />
-                      </svg>
-                    </span>
-                  {:else if isActive}
-                    <span
-                      class="bg-accent-default text-on-fill ring-accent-default/20 inline-flex size-7 items-center justify-center rounded-full text-sm font-semibold ring-2 motion-safe:transition-colors motion-safe:duration-(--duration-quick) sm:size-8"
-                    >
-                      {stage.id}
-                    </span>
-                  {:else if isSkipped}
-                    <span
-                      class="border-default text-muted inline-flex size-7 items-center justify-center rounded-full border-2 border-dashed text-sm font-medium opacity-60 motion-safe:transition-colors motion-safe:duration-(--duration-quick) sm:size-8"
-                    >
-                      {stage.id}
-                    </span>
-                  {:else}
-                    <span
-                      class="border-default text-muted inline-flex size-7 items-center justify-center rounded-full border-2 text-sm font-medium motion-safe:transition-colors motion-safe:duration-(--duration-quick) sm:size-8"
-                    >
-                      {stage.id}
-                    </span>
-                  {/if}
-
-                  <!-- The current stage keeps its label at every width; other
-                       stages show labels once the full row fits (2xl, measured with the Swedish names beside two labelled buttons). -->
                   <span
-                    class="{isActive
-                      ? 'inline'
-                      : 'hidden 2xl:inline'} truncate text-sm whitespace-nowrap
-                      {isActive
-                      ? 'text-primary font-semibold'
+                    aria-hidden="true"
+                    class="relative inline-flex size-7 items-center justify-center rounded-full text-sm font-semibold tabular-nums motion-safe:transition-colors motion-safe:duration-(--duration-quick) {isActive
+                      ? 'bg-accent-default text-on-fill ring-accent-default/20 ring-4'
                       : isSkipped
-                        ? 'text-muted italic'
+                        ? 'border-stronger text-secondary bg-primary group-hover:bg-hover-dimmer border-2 border-dashed'
                         : isCompleted
-                          ? 'text-secondary'
-                          : 'text-muted'}"
+                          ? 'bg-accent-dimmer text-accent-stronger group-hover:bg-accent-default/25'
+                          : 'border-stronger text-secondary bg-primary group-hover:bg-hover-dimmer border-2'}"
+                  >
+                    {#if isCompleted && !isActive && !isSkipped}
+                      <Check class="size-4" strokeWidth={2.5} />
+                    {:else}
+                      {stage.id}
+                    {/if}
+                  </span>
+                  <span
+                    class="max-w-full truncate text-xs leading-4 {isActive
+                      ? 'text-primary font-semibold'
+                      : 'text-secondary group-hover:text-primary font-medium'}"
                   >
                     {stage.labelKey()}
                   </span>
@@ -1268,14 +1241,14 @@
           >
             {#if isDesktopStepLayout.current}
               <div
-                class="flow-processing-step-list border-default bg-primary w-80 shrink-0 overflow-hidden rounded-xl border shadow-sm xl:w-[340px]"
+                class="flow-processing-step-list border-default bg-primary w-72 shrink-0 overflow-hidden rounded-xl border xl:w-[340px]"
               >
                 {@render processingStepList()}
               </div>
             {/if}
 
             <div
-              class="flow-processing-step-editor border-default bg-primary flex-1 overflow-hidden rounded-xl border shadow-sm xl:max-w-[900px] 2xl:max-w-[1000px]"
+              class="flow-processing-step-editor border-default bg-primary min-w-0 flex-1 overflow-hidden rounded-xl border xl:max-w-[900px] 2xl:max-w-[1000px]"
             >
               <div bind:this={stepEditorScrollEl} class="h-full overflow-y-auto">
                 <FlowStepEditPanel
@@ -1319,7 +1292,7 @@
             <div class="mx-auto w-full max-w-6xl space-y-5 md:space-y-6">
               <!-- Pipeline summary -->
               <section
-                class="border-default bg-primary rounded-2xl border p-5 shadow-sm sm:p-6"
+                class="border-default bg-primary rounded-xl border p-5 sm:p-6"
                 aria-labelledby="flow-review-pipeline-heading"
               >
                 <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -1329,78 +1302,62 @@
                   >
                     {m.flow_review_pipeline_title()}
                   </h3>
-                  <span
-                    class="text-muted text-xs font-semibold tracking-[0.06em] uppercase tabular-nums"
-                  >
-                    {($update.steps ?? []).length}&nbsp;&middot;&nbsp;{m.flow_steps()}
+                  <span class="text-secondary text-xs tabular-nums">
+                    {m.flow_review_step_count({ count: String(($update.steps ?? []).length) })}
                   </span>
                 </div>
-                <div class="mt-5 flex flex-wrap items-center gap-2.5 sm:gap-3">
-                  <div
-                    class="bg-accent-dimmer text-accent-stronger rounded-xl px-3.5 py-2 text-[13px] font-medium tracking-[-0.005em]"
-                  >
-                    {m.flow_review_input_label()}
-                  </div>
+                <!-- Read top to bottom: what comes in, each step in order, what comes out. -->
+                <p class="text-secondary mt-3 text-[0.8125rem]">
+                  <span class="text-primary font-medium">{m.flow_review_input_label()}</span>
+                </p>
+                <ol class="mt-2 gap-x-8 sm:columns-2 2xl:columns-3">
                   {#each $update.steps ?? [] as pipeStep, stepIdx (pipeStep.id ?? pipeStep.step_order)}
-                    <span class="text-muted text-base" aria-hidden="true">&rarr;</span>
                     {@const completionModel =
                       "completion_model" in pipeStep
                         ? (pipeStep as { completion_model?: { name?: string | null } | null })
                             .completion_model
                         : null}
-                    <div
-                      class="border-default/80 bg-secondary/20 hover:bg-secondary/35 flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 motion-safe:transition-colors motion-safe:duration-(--duration-micro)"
+                    {@const stepLabel =
+                      pipeStep.user_description ||
+                      m.flow_step_fallback_label({ order: String(pipeStep.step_order) })}
+                    <li
+                      class="mb-1.5 flex min-w-0 break-inside-avoid items-baseline gap-2.5 text-[0.8125rem] leading-snug"
                     >
                       <span
-                        class="bg-hover-dimmer text-secondary flex size-5 shrink-0 items-center justify-center rounded-md text-xs font-semibold tabular-nums"
+                        class="bg-hover-dimmer text-secondary inline-flex size-5 shrink-0 translate-y-[-1px] items-center justify-center rounded-md text-xs font-semibold tabular-nums"
                         aria-hidden="true"
                       >
                         {stepIdx + 1}
                       </span>
-                      <div class="flex min-w-0 flex-col">
-                        <span
-                          class="text-primary max-w-[14rem] truncate text-[13px] leading-snug font-medium"
-                          title={pipeStep.user_description ||
-                            m.flow_step_fallback_label({
-                              order: String(pipeStep.step_order)
-                            })}
-                        >
-                          {pipeStep.user_description ||
-                            m.flow_step_fallback_label({ order: String(pipeStep.step_order) })}
-                        </span>
-                        {#if completionModel?.name}
-                          <span
-                            class="text-muted max-w-[14rem] truncate text-xs leading-snug tabular-nums"
-                            title={completionModel.name}
+                      <span class="min-w-0">
+                        <span class="text-primary font-medium">{stepLabel}</span>
+                        {#if $userMode === "power_user" && completionModel?.name}
+                          <span class="text-secondary block truncate text-xs"
+                            >{completionModel.name}</span
                           >
-                            {completionModel.name}
-                          </span>
                         {/if}
-                      </div>
-                    </div>
+                      </span>
+                    </li>
                   {/each}
-                  <span class="text-muted text-base" aria-hidden="true">&rarr;</span>
-                  <div
-                    class="bg-positive-dimmer text-positive-stronger rounded-xl px-3.5 py-2 text-[13px] font-medium tracking-[-0.005em]"
-                  >
-                    {m.flow_review_output_label()}
-                  </div>
-                </div>
+                </ol>
+                <p class="text-secondary mt-3 text-[0.8125rem]">
+                  <span class="text-primary font-medium">{m.flow_review_output_label()}</span>
+                </p>
               </section>
 
               <!-- Test section -->
               <section
-                class="border-default bg-primary rounded-2xl border p-5 shadow-sm sm:p-6"
+                class="border-default bg-primary rounded-xl border p-5 sm:p-6"
                 aria-labelledby="flow-review-testing-heading"
               >
                 <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
                   <div class="min-w-0 flex-1">
-                    <h4
+                    <h3
                       id="flow-review-testing-heading"
                       class="text-[0.9375rem] font-semibold tracking-[-0.005em]"
                     >
                       {m.flow_testing()}
-                    </h4>
+                    </h3>
                     {#if $isPublished && $userMode === "power_user"}
                       <p class="text-secondary mt-1 text-sm leading-relaxed">
                         {m.flow_export_debug_desc()}
@@ -1485,7 +1442,7 @@
           eneo={data.eneo}
           spaceId={$currentSpace.id}
           flowId={$resource.id}
-          canReview={canReviewWithAIBuilder}
+          canReview={canReviewWithAIBuilder && $resource.published_version != null}
           {stepChoices}
           onapplied={async (detail) => {
             try {
