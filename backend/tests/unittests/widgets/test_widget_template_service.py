@@ -49,6 +49,9 @@ class _InMemoryRepo:
     async def delete(self, template_id):
         self.rows.pop(template_id, None)
 
+    async def lock_default(self, tenant_id):
+        return None
+
     async def clear_default(self, tenant_id):
         for key, t in list(self.rows.items()):
             if t.tenant_id == tenant_id and t.is_default:

@@ -105,6 +105,9 @@ class _InMemoryTemplateRepo:
     async def delete(self, template_id):
         self.rows.pop(template_id, None)
 
+    async def lock_default(self, tenant_id):
+        return None
+
     async def clear_default(self, tenant_id):
         return None
 

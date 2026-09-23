@@ -22,4 +22,10 @@ class WidgetTemplateRepo(Protocol):
 
     async def delete(self, template_id: UUID) -> None: ...
 
+    async def lock_default(self, tenant_id: UUID) -> None:
+        """Serialise changes of the tenant's default template until the
+        transaction ends, so a second one clears the default the first
+        committed instead of colliding with it."""
+        ...
+
     async def clear_default(self, tenant_id: UUID) -> None: ...

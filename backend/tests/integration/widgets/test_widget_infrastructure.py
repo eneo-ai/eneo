@@ -24,6 +24,7 @@ from eneo.widgets.domain.exceptions import (
     WidgetRevisionConflictError,
 )
 from eneo.widgets.domain.widget import Widget, WidgetStatus, generate_public_id
+from eneo.widgets.domain.widget_template import WidgetTemplate
 from eneo.widgets.infrastructure.widget_overview_repo_impl import WidgetOverviewRepoImpl
 from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
 from eneo.widgets.infrastructure.widget_usage_repo_impl import WidgetUsageRepoImpl
@@ -158,6 +159,9 @@ async def _wait_until_blocked(session, racer: "asyncio.Task") -> None:
             raise AssertionError(
                 f"racer finished before the lock was released: {racer.exception()!r}"
             )
+        # pg_stat_activity is a per-transaction snapshot: without clearing
+        # it a racer that connected after the first poll is never seen.
+        await session.execute(sa.text("SELECT pg_stat_clear_snapshot()"))
         blocked = await session.scalar(
             sa.text(
                 "SELECT count(*) FROM pg_stat_activity"
@@ -256,6 +260,40 @@ async def test_draft_save_cannot_roll_back_a_concurrent_publication(db_container
         stored = await reader.widget_template_service().get_template(template.id)
     assert stored.published == published.published
     assert stored.description == saved.description
+
+
+@pytest.mark.parametrize("how", ["create", "update"])
+async def test_concurrent_default_templates_leave_exactly_one_default(
+    db_container, how
+):
+    async with db_container() as container:
+        templates = container.widget_template_service()
+        first = await templates.create_template(name="Kommunblå")
+        second = await templates.create_template(name="Kommungrön")
+    assert first.id is not None and second.id is not None
+    second_id = second.id
+
+    async def make_default() -> WidgetTemplate:
+        async with db_container() as container:
+            service = container.widget_template_service()
+            if how == "create":
+                return await service.create_template(name="Kommunröd", is_default=True)
+            return await service.update_template(second_id, {"is_default": True})
+
+    async with db_container() as holder:
+        await holder.widget_template_service().update_template(
+            first.id, {"is_default": True}
+        )
+        racer = asyncio.create_task(make_default())
+        await _wait_until_blocked(holder.session(), racer)
+        assert not racer.done()
+    # The later one wins instead of colliding with the default committed
+    # meanwhile on the one-default-per-tenant index.
+    winner = await racer
+    assert winner.is_default is True
+    async with db_container() as reader:
+        listed = await reader.widget_template_service().list_templates()
+    assert [t.id for t in listed if t.is_default] == [winner.id]
 
 
 @pytest.mark.parametrize("how", ["link", "create"])
