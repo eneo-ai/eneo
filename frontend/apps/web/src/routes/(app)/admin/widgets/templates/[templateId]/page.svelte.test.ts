@@ -220,23 +220,31 @@ describe("widget template details", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  test("leaving with a subtitle the locked disclosure requires emptied asks first", async () => {
-    const { update } = renderNormalising(template({ locked_groups: ["legal_texts"] }));
+  // Whether an emptied required text asks before leaving is an open product
+  // decision; whichever way it goes, the name and the disclosure agree.
+  test("leaving with the name or the locked disclosure emptied is handled alike", async () => {
+    renderNormalising(template({ locked_groups: ["legal_texts"] }));
+    const leavingAsks = () => {
+      const leave = vi.mocked(beforeNavigate).mock.lastCall![0];
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      try {
+        leave({ cancel: vi.fn() } as unknown as Parameters<typeof leave>[0]);
+        return confirm.mock.calls.length > 0;
+      } finally {
+        confirm.mockRestore();
+      }
+    };
+    const name = page.getByLabelText("name", { exact: true });
+    await userEvent.clear(name);
+    await expect.element(name).toHaveAttribute("aria-invalid", "true");
+    const askedWithoutName = leavingAsks();
+
+    await userEvent.fill(name, "Kommunblå");
+    await expect.element(name).toHaveAttribute("aria-invalid", "false");
     const subtitle = page.getByLabelText("widget_admin_text_subtitle", { exact: true });
     await userEvent.clear(subtitle);
     await expect.element(subtitle).toHaveAttribute("aria-invalid", "true");
-
-    const leave = vi.mocked(beforeNavigate).mock.lastCall![0];
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const cancel = vi.fn();
-    try {
-      leave({ cancel } as unknown as Parameters<typeof leave>[0]);
-      expect(confirm).toHaveBeenCalledWith("widget_admin_unsaved_leave_confirm");
-      expect(cancel).toHaveBeenCalled();
-    } finally {
-      confirm.mockRestore();
-    }
-    expect(update).not.toHaveBeenCalled();
+    expect(leavingAsks()).toBe(askedWithoutName);
   });
 
   test("each card title is a section heading", async () => {

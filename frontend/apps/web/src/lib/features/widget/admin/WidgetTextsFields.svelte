@@ -30,8 +30,6 @@
     subtitleRequired?: string;
     /** Told whether the suggested questions hold edits that cannot be sent yet. */
     onQuestionsHeld?: (held: boolean) => void;
-    /** Told whether a blank subtitle is held back because it is required. */
-    onSubtitleHeld?: (held: boolean) => void;
     /** Id of an error about the whole texts group, which every field points to. */
     groupErrorId?: string;
   };
@@ -46,7 +44,6 @@
     errors = {},
     subtitleRequired,
     onQuestionsHeld,
-    onSubtitleHeld,
     groupErrorId
   }: Props = $props();
 
@@ -94,9 +91,6 @@
       subtitleBlankHeld = false;
       onChange({ subtitle: drafts.subtitle.text });
     });
-  });
-  $effect(() => {
-    onSubtitleHeld?.(subtitleHeld);
   });
   const problems = $derived<Partial<Record<keyof WidgetTexts, string>>>({
     ...errors,

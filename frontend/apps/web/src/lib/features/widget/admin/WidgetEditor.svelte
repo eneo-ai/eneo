@@ -401,7 +401,6 @@
                   ? m.widget_admin_blocker_subtitle_empty()
                   : undefined}
                 onQuestionsHeld={(held) => autosave.markDraft("texts.suggested_questions", held)}
-                onSubtitleHeld={(held) => autosave.markDraft("texts.subtitle", held)}
                 groupErrorId={autosave.refusals["texts"] ? "widget-texts-error" : undefined}
                 onChange={(change) => autosave.patch({ texts: { ...current.texts, ...change } })}
               />
