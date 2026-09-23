@@ -401,6 +401,18 @@ async def test_suspended_tenant_revokes_visitor_access(
 
     await _set_tenant_state(tenant_id, "suspended")
     try:
+        # The embed page shows its paused notice before anyone solves a
+        # challenge or gets a token.
+        for method, path, body in [
+            ("GET", "config/", None),
+            ("GET", "challenge/", None),
+            ("POST", "visitor-sessions/", {"previous_token": token}),
+        ]:
+            resp = await client.request(
+                method, f"/api/v1/widgets/{public_id}/{path}", json=body
+            )
+            assert resp.status_code == 404, (path, resp.text)
+            assert resp.json()["detail"]["code"] == "widget_not_active"
         resp = await client.get(
             f"/api/v1/widgets/{public_id}/sessions/{session_id}/",
             headers=_auth(token),

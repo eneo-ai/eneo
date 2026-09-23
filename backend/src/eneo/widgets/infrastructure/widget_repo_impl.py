@@ -14,6 +14,7 @@ from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.widgets_table import Widgets
 from eneo.main.exceptions import NotFoundException
+from eneo.tenants.tenant import TenantState
 from eneo.widgets.domain.exceptions import WidgetRevisionConflictError
 from eneo.widgets.domain.widget import (
     BotProtection,
@@ -111,7 +112,10 @@ class WidgetRepoImpl:
         result = await self.session.execute(
             sa.select(Widgets, Tenants.widget_policy)
             .join(Tenants, Tenants.id == Widgets.tenant_id)
-            .where(Widgets.public_id == public_id)
+            .where(
+                Widgets.public_id == public_id,
+                Tenants.state != TenantState.SUSPENDED.value,
+            )
         )
         found = result.first()
         if found is None:

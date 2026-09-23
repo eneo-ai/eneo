@@ -53,8 +53,9 @@ async def get_active_widget(
 ) -> Widget:
     """Resolve an active widget by its public id; anything else is 404.
 
-    A malformed id, an unknown id and a paused/archived widget all answer the
-    same way so the public surface leaks nothing about what exists. The one
+    A malformed id, an unknown id, a paused/archived widget and a suspended
+    tenant's widget all answer the same way so the public surface leaks
+    nothing about what exists. The one
     exception is an editor's preview token, which admits a draft or paused
     widget so the admin page can show the real embed page before activation.
     """

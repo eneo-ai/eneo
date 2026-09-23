@@ -20,7 +20,8 @@ class WidgetRepo(Protocol):
 
     async def get_by_public_id(self, public_id: str) -> Widget | None:
         """The widget as the visitor surface serves it: within its tenant's
-        widget policy (``WidgetPolicy.serving``). Never write it back."""
+        widget policy (``WidgetPolicy.serving``). Never write it back. None
+        while the tenant is suspended."""
         ...
 
     async def policy_for(self, tenant_id: UUID) -> WidgetPolicy: ...
