@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { page } from "$app/state";
   import { Markdown } from "@eneo/ui";
   import { Check, Copy, Download, ExternalLink, FileText } from "lucide-svelte";
   import { Page } from "$lib/components/layout";
@@ -6,23 +7,28 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import { toast } from "$lib/components/toast";
   import { getEneo } from "$lib/core/Eneo";
+  import { sourceReferenceText } from "$lib/features/widget/widgetMessageContext";
   import { m } from "$lib/paraglide/messages";
 
   let { data } = $props();
 
   const eneo = getEneo();
   const title = $derived(data.blob?.metadata.title ?? data.blob?.metadata.url ?? data.id);
-  const reference = $derived(
-    `${data.blob?.metadata.title ?? data.id} – ${location.origin}/documents/${data.id}`
-  );
+  // The text a widget visitor copies, from the request's origin: a pasted
+  // link is a full page load, so this renders on the server first.
+  const reference = $derived(sourceReferenceText({ id: data.id, title }, page.url.origin));
 
   let copied = $state(false);
   let downloading = $state(false);
 
   async function copyReference() {
-    await navigator.clipboard.writeText(reference);
-    copied = true;
-    setTimeout(() => (copied = false), 2000);
+    try {
+      await navigator.clipboard.writeText(reference);
+      copied = true;
+      setTimeout(() => (copied = false), 2000);
+    } catch {
+      toast.error(m.widget_document_reference_copy_failed());
+    }
   }
 
   async function downloadOriginal() {
@@ -45,6 +51,25 @@
 <svelte:head>
   <title>{title} – {m.document_lookup_title()}</title>
 </svelte:head>
+
+{#snippet referenceDetails()}
+  <dl class="grid gap-1 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-6">
+    <dt class="text-secondary">{m.document_lookup_reference()}</dt>
+    <dd class="break-all select-all">{reference}</dd>
+  </dl>
+{/snippet}
+
+{#snippet copyButton()}
+  <Button variant="outline" onclick={copyReference}>
+    {#if copied}
+      <Check aria-hidden="true" />
+      {m.copied_to_clipboard()}
+    {:else}
+      <Copy aria-hidden="true" />
+      {m.copy_to_clipboard()}
+    {/if}
+  </Button>
+{/snippet}
 
 <Page.Root>
   <Page.Header>
@@ -70,20 +95,9 @@
             {/if}
           </Card.Header>
           <Card.Content class="flex flex-col gap-4">
-            <dl class="grid gap-1 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-6">
-              <dt class="text-secondary">{m.document_lookup_reference()}</dt>
-              <dd class="break-all select-all">{reference}</dd>
-            </dl>
+            {@render referenceDetails()}
             <div class="flex flex-wrap gap-2">
-              <Button variant="outline" onclick={copyReference}>
-                {#if copied}
-                  <Check aria-hidden="true" />
-                  {m.copied_to_clipboard()}
-                {:else}
-                  <Copy aria-hidden="true" />
-                  {m.copy_to_clipboard()}
-                {/if}
-              </Button>
+              {@render copyButton()}
               {#if data.blob.original_available}
                 <Button variant="outline" onclick={downloadOriginal} disabled={downloading}>
                   <Download aria-hidden="true" />
@@ -128,20 +142,9 @@
             <Card.Description>{m.document_lookup_not_found_body()}</Card.Description>
           </Card.Header>
           <Card.Content class="flex flex-col gap-4">
-            <dl class="grid gap-1 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-6">
-              <dt class="text-secondary">{m.document_lookup_reference()}</dt>
-              <dd class="break-all select-all">{reference}</dd>
-            </dl>
+            {@render referenceDetails()}
             <div>
-              <Button variant="outline" onclick={copyReference}>
-                {#if copied}
-                  <Check aria-hidden="true" />
-                  {m.copied_to_clipboard()}
-                {:else}
-                  <Copy aria-hidden="true" />
-                  {m.copy_to_clipboard()}
-                {/if}
-              </Button>
+              {@render copyButton()}
             </div>
           </Card.Content>
         </Card.Root>
