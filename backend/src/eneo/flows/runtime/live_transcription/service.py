@@ -27,7 +27,7 @@ from eneo.main.exceptions import ConflictException
 
 if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
-    from eneo.spaces.space_repo import SpaceRepository
+    from eneo.spaces.space import Space
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
@@ -50,13 +50,13 @@ class LiveTranscriptionSessionService:
     flow_service: FlowRuntimeFlowSource
     flow_version_repo: FlowRuntimeVersionSource
     settings_service: FlowRuntimeSettingsSource
-    space_repo: SpaceRepository
     ticket_store: LiveTranscriptionTicketStore
     settings: Settings
 
     async def open_session(
-        self, *, flow_id: UUID, step_id: UUID
+        self, *, flow_id: UUID, step_id: UUID, space: Space
     ) -> LiveTranscriptionSession:
+        """``space`` is the flow's space the caller was authorized in."""
         runtime_inputs = await load_published_runtime_inputs(
             flow_service=self.flow_service,
             flow_version_repo=self.flow_version_repo,
@@ -76,9 +76,9 @@ class LiveTranscriptionSessionService:
             )
 
         published = runtime_inputs.published
-        availability = await resolve_live_transcription(
+        availability = resolve_live_transcription(
             wizard_metadata=runtime_inputs.definition.metadata().wizard,
-            space_repo=self.space_repo,
+            space=space,
             step=spec.step,
             settings=self.settings,
         )

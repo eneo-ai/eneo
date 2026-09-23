@@ -221,6 +221,7 @@ if TYPE_CHECKING:
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
     )
+    from eneo.spaces.space import Space
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
@@ -557,6 +558,16 @@ async def resolve_transcription_model_for_step(
     step_order: int,
 ) -> "TranscriptionModel":
     space = await space_repo.get_space_by_assistant(assistant_id=assistant_id)
+    return select_transcription_model(space, config=config, step_order=step_order)
+
+
+def select_transcription_model(
+    space: "Space",
+    *,
+    config: FlowTranscriptionConfig,
+    step_order: int,
+) -> "TranscriptionModel":
+    """The flow's transcription model, when the step's space may use it."""
     available_models = list(getattr(space, "transcription_models", []) or [])
 
     if config.model_id is None:

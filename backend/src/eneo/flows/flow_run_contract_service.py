@@ -60,7 +60,7 @@ from eneo.main.exceptions import NotFoundException
 
 if TYPE_CHECKING:
     from eneo.main.config import Settings
-    from eneo.spaces.space_repo import SpaceRepository
+    from eneo.spaces.space import Space
 
 logger = logging.getLogger(__name__)
 
@@ -75,10 +75,12 @@ class FlowRunContractService:
     settings_service: FlowRuntimeSettingsSource
     flow_version_repo: FlowRuntimeVersionSource
     template_asset_repo: _FlowTemplateAssetRepositoryProtocol
-    space_repo: SpaceRepository
     settings: Settings
 
-    async def get_run_contract(self, *, flow_id: UUID) -> FlowRunContractPublic:
+    async def get_run_contract(
+        self, *, flow_id: UUID, space: Space
+    ) -> FlowRunContractPublic:
+        """``space`` is the flow's space the caller was authorized in."""
         runtime_inputs = await load_published_runtime_inputs(
             flow_service=self.flow_service,
             flow_version_repo=self.flow_version_repo,
@@ -106,11 +108,11 @@ class FlowRunContractService:
                 published_version=published.published_version,
                 steps=runtime_inputs.steps,
             ),
-            transcription=await self._transcription(runtime_inputs),
+            transcription=self._transcription(runtime_inputs, space),
         )
 
-    async def _transcription(
-        self, runtime_inputs: PublishedRuntimeInputs
+    def _transcription(
+        self, runtime_inputs: PublishedRuntimeInputs, space: Space
     ) -> FlowTranscriptionContractPublic | None:
         wizard_metadata = runtime_inputs.definition.metadata().wizard
         speaker_labels = speaker_labels_option(
@@ -121,9 +123,9 @@ class FlowRunContractService:
         audio_step = _audio_input_step(runtime_inputs.steps)
         if speaker_labels is None or audio_step is None:
             return None
-        live = await resolve_live_transcription(
+        live = resolve_live_transcription(
             wizard_metadata=wizard_metadata,
-            space_repo=self.space_repo,
+            space=space,
             step=audio_step,
             settings=self.settings,
         )

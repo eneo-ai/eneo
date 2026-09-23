@@ -81,12 +81,15 @@ async def enforce_flow_scope(
     required_access: FlowApiAction = FlowApiAction.VIEW,
     allow_service_key_principals: bool = False,
     require_published_for_service_key: bool = False,
-) -> None:
+) -> Space:
+    """Refuse a caller who may not read the flow; return the space it was checked in."""
     scope_filter = get_scope_filter(request)
     _ensure_flow_scope_type_allowed(
         scope_filter,
         scope_mismatch_message="API key scope does not permit flow access.",
     )
+    # A service key on a route that does not allow one is refused in here,
+    # before any space is loaded; every caller that passes is loaded below.
     access_context = await resolve_flow_access_context(
         request,
         container,
@@ -95,26 +98,30 @@ async def enforce_flow_scope(
         allow_service_key_principals=allow_service_key_principals,
         require_published_for_service_key=require_published_for_service_key,
         scope_filter=scope_filter,
-        load_actor_context=(
-            allow_service_key_principals
-            or not FlowPrincipal.from_user(container.user()).is_service_key
-        ),
+        load_actor_context=False,
     )
+    space, actor = await _space_and_actor(container, access_context.flow)
 
-    if access_context.actor is not None and not access_context.actor.can_read_flows():
+    if not actor.can_read_flows():
         raise UnauthorizedException(
             "You do not have permission to access flows in this space.",
             code="insufficient_space_permission",
             context={"auth_layer": "space_membership"},
         )
-    if access_context.actor is not None and not access_context.actor.can_read_flow(
-        access_context.flow
-    ):
+    if not actor.can_read_flow(access_context.flow):
         raise UnauthorizedException(
             "You do not have permission to access this flow.",
             code="insufficient_space_permission",
             context={"auth_layer": "space_membership"},
         )
+    return space
+
+
+async def _space_and_actor(
+    container: Container, flow: Flow
+) -> tuple[Space, SpaceActor]:
+    space = await container.space_service().get_space(flow.space_id)
+    return space, container.actor_manager().get_space_actor_from_space(space)
 
 
 def _ensure_required_flow_action(
@@ -176,10 +183,7 @@ async def resolve_flow_access_context(
             scope_filter=resolved_scope_filter,
         )
 
-    space_service = container.space_service()
-    actor_manager = container.actor_manager()
-    space = await space_service.get_space(flow.space_id)
-    actor = actor_manager.get_space_actor_from_space(space)
+    space, actor = await _space_and_actor(container, flow)
     return FlowAccessContext(
         flow=flow,
         scope_filter=resolved_scope_filter,

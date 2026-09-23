@@ -106,7 +106,7 @@ async def test_run_contract_projects_published_section_processing_steps(mode):
         flow_service=flow_service,
         settings_service=settings_service,
         flow_version_repo=versions,
-    ).get_run_contract(flow_id=flow.id)
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
     assert len(contract.text_processing_steps) == 1
     processing = contract.text_processing_steps[0]
@@ -137,7 +137,6 @@ def _service(
     settings_service: AsyncMock,
     flow_version_repo: AsyncMock,
     template_asset_repo: AsyncMock | None = None,
-    space_repo: AsyncMock | None = None,
     settings: Settings | None = None,
 ) -> FlowRunContractService:
     return FlowRunContractService(
@@ -145,9 +144,12 @@ def _service(
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
         template_asset_repo=template_asset_repo or AsyncMock(),
-        space_repo=space_repo or AsyncMock(),
         settings=settings or get_settings(),
     )
+
+
+# The space the caller was authorized in; it offers no transcription models.
+_SPACE = SimpleNamespace(transcription_models=[])
 
 
 @pytest.mark.asyncio
@@ -201,10 +203,6 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
             ],
         },
     )
-    space_repo = AsyncMock()
-    space_repo.get_space_by_assistant.return_value = SimpleNamespace(
-        transcription_models=[]
-    )
     with_service = get_settings().model_copy(
         update={
             "flow_transcription_service_url": "http://speaker-service.invalid",
@@ -216,9 +214,8 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
         flow_service=flow_service,
         settings_service=settings_service,
         flow_version_repo=versions,
-        space_repo=space_repo,
         settings=with_service,
-    ).get_run_contract(flow_id=flow.id)
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
     assert contract.transcription is not None
     assert contract.transcription.speaker_labels.model_dump() == {
@@ -244,7 +241,7 @@ async def test_get_run_contract_requires_persisted_flow_id() -> None:
     )
 
     with pytest.raises(FlowPersistedIdMissingError):
-        await service.get_run_contract(flow_id=uuid4())
+        await service.get_run_contract(flow_id=uuid4(), space=_SPACE)
 
     flow_version_repo.get.assert_not_awaited()
     settings_service.get_flow_input_limits_resolved.assert_not_awaited()
@@ -267,7 +264,7 @@ async def test_get_run_contract_requires_published_flow() -> None:
     )
 
     with pytest.raises(FlowBadRequestException) as exc_info:
-        await service.get_run_contract(flow_id=flow.id)
+        await service.get_run_contract(flow_id=flow.id, space=_SPACE)
 
     assert exc_info.value.code is FlowApiErrorCode.FLOW_NOT_PUBLISHED
     assert str(exc_info.value) == (
@@ -312,7 +309,7 @@ async def test_get_run_contract_rejects_checksum_drift_before_limits() -> None:
             flow_service=flow_service,
             settings_service=settings_service,
             flow_version_repo=flow_version_repo,
-        ).get_run_contract(flow_id=flow.id)
+        ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
     assert exc_info.value.code is FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH
     settings_service.get_flow_input_limits_resolved.assert_not_awaited()
@@ -432,7 +429,7 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
         template_asset_repo=template_asset_repo,
-    ).get_run_contract(flow_id=flow.id)
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
     assert contract.published_flow_version == 4
     assert contract.final_output is not None
@@ -536,7 +533,7 @@ async def test_get_run_contract_marks_template_checksum_drift_needs_action(
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
         template_asset_repo=template_asset_repo,
-    ).get_run_contract(flow_id=flow.id)
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
     readiness = contract.template_readiness[0]
     assert readiness.status == "needs_action"
@@ -594,7 +591,7 @@ async def test_get_run_contract_normalizes_and_sorts_published_form_fields() -> 
         flow_service=flow_service,
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
-    ).get_run_contract(flow_id=flow.id)
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
     assert [(field.name, field.type) for field in contract.form_fields] == [
         ("first", "text"),
@@ -638,7 +635,7 @@ async def test_get_run_contract_preserves_invalid_form_schema_error_code() -> No
             flow_service=flow_service,
             settings_service=settings_service,
             flow_version_repo=flow_version_repo,
-        ).get_run_contract(flow_id=flow.id)
+        ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
     assert exc_info.value.code == FLOW_PUBLISHED_FORM_SCHEMA_INVALID
 
@@ -668,7 +665,7 @@ async def test_get_run_contract_rejects_published_snapshot_without_executable_st
             flow_service=flow_service,
             settings_service=settings_service,
             flow_version_repo=flow_version_repo,
-        ).get_run_contract(flow_id=flow.id)
+        ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
     assert exc_info.value.flow_id == flow.id
     assert exc_info.value.flow_version == 7
@@ -723,7 +720,7 @@ async def test_get_run_contract_caps_step_file_count_by_tenant_limit() -> None:
         flow_service=flow_service,
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
-    ).get_run_contract(flow_id=flow.id)
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
     assert contract.aggregate_max_files == 5
     assert contract.steps_requiring_input[0].max_files == 5
@@ -763,7 +760,7 @@ async def test_get_run_contract_returns_zero_aggregate_when_no_runtime_inputs() 
         flow_service=flow_service,
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
-    ).get_run_contract(flow_id=flow.id)
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
     assert contract.aggregate_max_files == 0
     assert contract.steps_requiring_input == []
@@ -822,7 +819,7 @@ async def test_get_run_contract_returns_deployment_ceiling_when_step_is_unbounde
         flow_service=flow_service,
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
-    ).get_run_contract(flow_id=flow.id)
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
     assert contract.aggregate_max_files == 1000
     assert contract.steps_requiring_input[0].max_files == 1000
@@ -879,7 +876,7 @@ async def test_get_run_contract_returns_review_steps() -> None:
         flow_service=flow_service,
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
-    ).get_run_contract(flow_id=flow.id)
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
     assert len(contract.steps_requiring_review) == 1
     review_contract = contract.steps_requiring_review[0]
@@ -958,7 +955,7 @@ async def test_get_run_contract_uses_terminal_step_after_review_step() -> None:
         flow_service=flow_service,
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
-    ).get_run_contract(flow_id=flow.id)
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
     assert contract.final_output is not None
     assert contract.final_output.step_id == final_step.id
@@ -1023,7 +1020,7 @@ async def test_get_run_contract_marks_missing_template_assets_unavailable() -> N
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
         template_asset_repo=template_asset_repo,
-    ).get_run_contract(flow_id=flow.id)
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
     assert contract.template_readiness[0].status == "unavailable"
     assert contract.template_readiness[0].message_code == "flow_template_not_accessible"

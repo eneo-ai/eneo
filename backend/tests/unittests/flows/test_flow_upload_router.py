@@ -29,6 +29,7 @@ async def test_get_flow_run_contract_enforces_scope_and_returns_contract(monkeyp
     run_contract_service = AsyncMock()
     container.flow_service.return_value = AsyncMock()
     container.flow_run_contract_service.return_value = run_contract_service
+    authorized_space = SimpleNamespace(transcription_models=[])
 
     async def fake_enforce(
         request,
@@ -42,6 +43,7 @@ async def test_get_flow_run_contract_enforces_scope_and_returns_contract(monkeyp
         assert required_access == FlowApiAction.VIEW
         assert allow_service_key_principals is True
         assert require_published_for_service_key is True
+        return authorized_space
 
     monkeypatch.setattr(flow_access_context_module, "enforce_flow_scope", fake_enforce)
     run_contract_service.get_run_contract.return_value = FlowRunContractPublic(
@@ -59,7 +61,9 @@ async def test_get_flow_run_contract_enforces_scope_and_returns_contract(monkeyp
         container=container,
     )
 
-    run_contract_service.get_run_contract.assert_awaited_once_with(flow_id=flow_id)
+    run_contract_service.get_run_contract.assert_awaited_once_with(
+        flow_id=flow_id, space=authorized_space
+    )
     assert result.published_flow_version == 2
 
 

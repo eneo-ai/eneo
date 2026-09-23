@@ -9,13 +9,14 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient, Response
 
 from eneo.database.tables.flow_tables import FlowRuns, FlowStepResults
+from eneo.files.file_content_loader import FileContentLoader
 from eneo.flows.api import (
     flow_run_lifecycle_router,
     flow_run_retry_router,
@@ -30,6 +31,7 @@ from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.main.config import get_settings, set_settings
+from eneo.object_content.content import ObjectContentUnavailableError
 from tests.integration.flows.test_flow_live_transcription_session import (
     _published_flow,
 )
@@ -307,3 +309,56 @@ async def test_retry_and_regeneration_keep_an_accepted_choice_after_the_service_
     stored = await _stored_inputs(db_container, flow.flow_id)
     for child in (retried.json()["run"], regenerated.json()["run"]):
         assert stored[child["id"]]["speaker_labels"] is False
+
+
+async def test_the_contract_and_the_live_route_read_no_attachment_content(
+    client, flow_process_auth_headers, db_container, monkeypatch: pytest.MonkeyPatch
+):
+    headers = dict(flow_process_auth_headers)
+    flow = await _published_flow(client, headers, db_container)
+    upload = await client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("policy.txt", b"Intern policy", "text/plain")},
+        headers=headers,
+    )
+    assert upload.status_code == 200, upload.text
+    published = await client.get(f"/api/v1/flows/{flow.flow_id}/", headers=headers)
+    assert published.status_code == 200, published.text
+    draft = await client.post(
+        "/api/v1/flows/",
+        json={
+            "space_id": published.json()["space_id"],
+            "name": f"Unrelated {uuid4().hex[:8]}",
+            "steps": [],
+        },
+        headers=headers,
+    )
+    assert draft.status_code == 201, draft.text
+    unrelated = await client.post(
+        f"/api/v1/flows/{draft.json()['id']}/assistants/",
+        json={"name": f"unrelated-{uuid4().hex[:8]}"},
+        headers=headers,
+    )
+    assert unrelated.status_code == 201, unrelated.text
+    attached = await client.patch(
+        f"/api/v1/flows/{draft.json()['id']}/assistants/{unrelated.json()['id']}/",
+        json={"attachments": [{"id": upload.json()["id"]}]},
+        headers=headers,
+    )
+    assert attached.status_code == 200, attached.text
+    load_attachment_groups = FileContentLoader.load_attachment_groups
+
+    async def unreadable_attachment_content(self, groups, **kwargs):
+        if any(group.files for group in groups):
+            raise ObjectContentUnavailableError("Attachment content is unreadable.")
+        return await load_attachment_groups(self, groups, **kwargs)
+
+    monkeypatch.setattr(
+        FileContentLoader, "load_attachment_groups", unreadable_attachment_content
+    )
+
+    contract = await _contract(client, headers, flow.flow_id)
+    session = await client.post(flow.sessions_path, headers=headers)
+
+    assert contract["transcription"]["live"] == {"available": True, "reason": None}
+    assert session.status_code == 201, session.text

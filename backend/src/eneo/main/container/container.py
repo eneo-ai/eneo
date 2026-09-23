@@ -1637,7 +1637,6 @@ class Container(containers.DeclarativeContainer):
         flow_service=flow_service,
         flow_version_repo=flow_version_repo,
         settings_service=settings_service,
-        space_repo=space_repo,
         ticket_store=providers.Factory(
             LiveTranscriptionTicketStore, redis_client=redis_client
         ),
@@ -1649,7 +1648,6 @@ class Container(containers.DeclarativeContainer):
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
         template_asset_repo=flow_template_asset_repo,
-        space_repo=space_repo,
         settings=providers.Callable(get_settings),
     )
     ai_builder_repo = providers.Factory(

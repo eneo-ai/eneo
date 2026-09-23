@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject
-from eneo.flows.runtime.transcription import resolve_transcription_model_for_step
+from eneo.flows.runtime.transcription import select_transcription_model
 from eneo.flows.transcription_config import (
     FlowTranscriptionConfigError,
     parse_transcription_config,
@@ -24,7 +24,7 @@ from eneo.transcription_models.domain.realtime import speaks_realtime_dialect
 if TYPE_CHECKING:
     from eneo.flows.domain.runtime import RuntimeStep
     from eneo.main.config import Settings
-    from eneo.spaces.space_repo import SpaceRepository
+    from eneo.spaces.space import Space
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
@@ -53,17 +53,18 @@ def _unavailable(
     return LiveTranscriptionAvailability(model=None, reason=reason)
 
 
-async def resolve_live_transcription(
+def resolve_live_transcription(
     *,
     wizard_metadata: FlowPersistedJsonObject | None,
-    space_repo: SpaceRepository,
+    space: Space,
     step: RuntimeStep,
     settings: Settings,
 ) -> LiveTranscriptionAvailability:
     """Resolve the model a live session on ``step`` would stream to.
 
-    The model is found exactly as the run's transcription finds it, through the
-    step's assistant.
+    ``space`` is the flow's space the caller was authorized in, which is also
+    the step's space; the model is picked from it exactly as the run's
+    transcription picks it, without loading the space's applications again.
     """
     try:
         config = parse_transcription_config({"wizard": wizard_metadata})
@@ -77,11 +78,8 @@ async def resolve_live_transcription(
     ):
         return _unavailable("transcription_service_mode")
     try:
-        model = await resolve_transcription_model_for_step(
-            space_repo=space_repo,
-            assistant_id=step.assistant_id,
-            config=config,
-            step_order=step.step_order,
+        model = select_transcription_model(
+            space, config=config, step_order=step.step_order
         )
     except TypedIOValidationException:
         return _unavailable("model_unavailable")

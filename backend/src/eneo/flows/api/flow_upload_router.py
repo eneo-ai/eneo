@@ -188,7 +188,7 @@ async def get_flow_run_contract(
         get_container(with_user=True, with_module_user=True, with_upload_admission=True)
     ),
 ):
-    await flow_access_context.enforce_flow_scope(
+    space = await flow_access_context.enforce_flow_scope(
         request,
         container,
         flow_id=id,
@@ -196,7 +196,9 @@ async def get_flow_run_contract(
         allow_service_key_principals=True,
         require_published_for_service_key=True,
     )
-    return await container.flow_run_contract_service().get_run_contract(flow_id=id)
+    return await container.flow_run_contract_service().get_run_contract(
+        flow_id=id, space=space
+    )
 
 
 @router.post(
