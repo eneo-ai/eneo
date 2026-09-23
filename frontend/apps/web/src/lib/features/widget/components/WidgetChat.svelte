@@ -15,7 +15,7 @@
   import { launcherColors } from "../contrast";
   import { isHttpUrl, linkHost } from "../urls";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
-  import { MessageSquarePlus, ThumbsDown, ThumbsUp, X } from "lucide-svelte";
+  import { Check, MessageSquarePlus, ThumbsDown, ThumbsUp, X } from "lucide-svelte";
   import { solveWithAltcha } from "../altcha";
   import { createEmbedBridge } from "../embedBridge";
   import { VisitorSession, isTokenRejected, isWidgetUnavailable } from "../visitorSession";
@@ -51,6 +51,10 @@
   let coolingDown = $state(false);
   let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
   let feedbackGiven = $state<Record<string, 1 | -1>>({});
+  // The optional comment after a vote, offered only when the widget stores it.
+  let feedbackText = $state("");
+  let feedbackTextSent = $state<Record<string, true>>({});
+  let sendingFeedbackText = $state(false);
   // Shown while the backend has not yet confirmed the question (first chunk).
   let pendingQuestion = $state<string | null>(null);
 
@@ -259,13 +263,38 @@
         feedback: { value }
       });
       feedbackGiven = { ...feedbackGiven, [sessionId]: value };
-      announcement = m.widget_feedback_thanks();
     } catch (error) {
       if (isTokenRejected(error) && !retried) {
         session.invalidate();
         return feedback(value, true);
       }
       errorMessage = describe(error);
+    }
+  }
+
+  async function sendFeedbackText(retried = false): Promise<void> {
+    const sessionId = chat.currentConversation.id;
+    const value = sessionId ? feedbackGiven[sessionId] : undefined;
+    const text = feedbackText.trim();
+    if (!sessionId || !value || !text || sendingFeedbackText) return;
+    sendingFeedbackText = true;
+    try {
+      await session.ensureToken();
+      await client.conversations.leaveFeedback({
+        conversation: { id: sessionId },
+        feedback: { value, text }
+      });
+      feedbackTextSent = { ...feedbackTextSent, [sessionId]: true };
+      feedbackText = "";
+    } catch (error) {
+      if (isTokenRejected(error) && !retried) {
+        session.invalidate();
+        sendingFeedbackText = false;
+        return sendFeedbackText(true);
+      }
+      errorMessage = describe(error);
+    } finally {
+      sendingFeedbackText = false;
     }
   }
 </script>
@@ -399,6 +428,43 @@
             <ThumbsDown class="size-4" aria-hidden="true" />
           </button>
         </div>
+        {#if given}
+          {@const sent = feedbackTextSent[chat.currentConversation.id]}
+          <!-- A live status, so the acknowledgement is read out as well as seen. -->
+          <p class="text-secondary mt-2 flex items-center gap-1.5 text-xs" role="status">
+            <Check class="text-positive-default size-3.5 shrink-0" aria-hidden="true" />
+            {sent ? m.widget_feedback_received() : m.widget_feedback_thanks()}
+          </p>
+          {#if initial.config.collects_feedback_text && !sent}
+            <form
+              class="mt-2 flex flex-col gap-2"
+              onsubmit={(event) => {
+                event.preventDefault();
+                void sendFeedbackText();
+              }}
+            >
+              <label for="widget-feedback-text" class="text-secondary text-xs">
+                {m.widget_feedback_more()}
+              </label>
+              <textarea
+                id="widget-feedback-text"
+                class="border-default bg-primary text-primary focus-visible:ring-default w-full resize-y rounded-lg border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+                rows="2"
+                maxlength="2000"
+                placeholder={m.widget_feedback_more_placeholder()}
+                bind:value={feedbackText}></textarea>
+              <div>
+                <button
+                  type="submit"
+                  class="widget-feedback-send focus-visible:ring-default rounded-lg px-3 py-1.5 text-sm font-medium focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+                  disabled={!feedbackText.trim() || sendingFeedbackText}
+                >
+                  {m.widget_feedback_send()}
+                </button>
+              </div>
+            </form>
+          {/if}
+        {/if}
       {/if}
     {/if}
   </div>
@@ -487,6 +553,11 @@
 </div>
 
 <style>
+  .widget-feedback-send {
+    background: var(--widget-accent);
+    color: var(--widget-on-accent);
+  }
+
   /* A tinted header uses the widget's own colours; text is derived for contrast. */
   .widget-header-tinted {
     background: var(--widget-header);

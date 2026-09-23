@@ -33,6 +33,7 @@ from eneo.widgets.presentation.public_widget_models import (
     VisitorSessionRequest,
     WidgetAsk,
     WidgetChallenge,
+    WidgetFeedback,
     WidgetPublicConfig,
 )
 
@@ -80,6 +81,7 @@ async def get_widget_config(request: Request, response: Response, widget: Active
         max_question_chars=widget.limits.max_question_chars,
         token_generation=widget.token_generation,
         show_sources=widget.show_sources,
+        collects_feedback_text=widget.privacy.store_feedback_text,
         single_turn=widget.privacy.never_persists,
         frame_ancestors=frame_ancestor_sources(widget.allowed_origins),
     )
@@ -213,10 +215,13 @@ async def get_widget_session(
 async def leave_widget_feedback(
     request: Request,
     session_id: UUID,
-    feedback: SessionFeedback,
+    feedback: WidgetFeedback,
     container: VisitorContainer,
 ):
+    text = (feedback.text or "").strip() or None
     session = await container.widget_ask_service().leave_feedback(
-        _principal(request), session_id, feedback
+        _principal(request),
+        session_id,
+        SessionFeedback(value=feedback.value, text=text),
     )
     return to_session_public(session)

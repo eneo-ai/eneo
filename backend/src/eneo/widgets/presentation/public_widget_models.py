@@ -3,7 +3,7 @@
 # Licensed under the MIT License.
 
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -30,6 +30,12 @@ class WidgetPublicConfig(BaseModel):
     token_generation: int
     show_sources: bool = Field(
         description="False when answers are shown without citations or a source list."
+    )
+    collects_feedback_text: bool = Field(
+        description=(
+            "True when the widget stores what a visitor writes with a vote; the"
+            " embed page only offers a comment box then."
+        )
     )
     single_turn: bool = Field(
         description=(
@@ -102,3 +108,12 @@ class VisitorSession(BaseModel):
             " pseudonym and its conversations."
         )
     )
+
+
+class WidgetFeedback(BaseModel):
+    """A visitor's vote on the answer, with an optional comment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: Literal[-1, 1]
+    text: Optional[str] = Field(default=None, max_length=2000)

@@ -22381,6 +22381,19 @@ export interface components {
       revision: number;
     };
     /**
+     * WidgetFeedback
+     * @description A visitor's vote on the answer, with an optional comment.
+     */
+    WidgetFeedback: {
+      /**
+       * Value
+       * @enum {integer}
+       */
+      value: -1 | 1;
+      /** Text */
+      text?: string | null;
+    };
+    /**
      * WidgetLanguage
      * @enum {string}
      */
@@ -22669,6 +22682,11 @@ export interface components {
        * @description False when answers are shown without citations or a source list.
        */
       show_sources: boolean;
+      /**
+       * Collects Feedback Text
+       * @description True when the widget stores what a visitor writes with a vote; the embed page only offers a comment box then.
+       */
+      collects_feedback_text: boolean;
       /**
        * Single Turn
        * @description True when the widget stores nothing after the answer: no follow-up questions, feedback or restore; every question starts a new conversation.
@@ -36788,7 +36806,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["SessionFeedback"];
+        "application/json": components["schemas"]["WidgetFeedback"];
       };
     };
     responses: {

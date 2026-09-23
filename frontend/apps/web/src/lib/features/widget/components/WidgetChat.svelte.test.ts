@@ -109,6 +109,7 @@ function config(overrides: Partial<WidgetPublicConfig> = {}): WidgetPublicConfig
     max_question_chars: 2000,
     token_generation: 0,
     show_sources: true,
+    collects_feedback_text: true,
     single_turn: false,
     frame_ancestors: [],
     ...overrides
@@ -166,6 +167,32 @@ describe("WidgetChat", () => {
     // The stored conversation is remembered and can be rated.
     await expect.element(page.getByText("widget_feedback_prompt")).toBeVisible();
     expect(JSON.parse(localStorage.getItem("eneo-widget:wgt_test")!).session_id).toBe("session-1");
+  });
+
+  test("a vote is acknowledged and can carry an optional comment", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await vi.waitFor(() => expect(fake.release).not.toBeNull());
+    await releaseAnswer();
+
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
+    await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_thanks");
+    expect(fake.feedback.at(-1)).toEqual({
+      conversation: { id: "session-1" },
+      feedback: { value: 1 }
+    });
+
+    const send = page.getByRole("button", { name: "widget_feedback_send" });
+    await expect.element(send).toBeDisabled();
+    await userEvent.fill(page.getByLabelText("widget_feedback_more"), "Svaret saknade öppettider.");
+    await userEvent.click(send);
+
+    await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_received");
+    expect(fake.feedback.at(-1)).toEqual({
+      conversation: { id: "session-1" },
+      feedback: { value: 1, text: "Svaret saknade öppettider." }
+    });
+    expect(document.querySelector("#widget-feedback-text")).toBeNull();
   });
 
   test("a single-turn widget offers a new question instead of follow-up or feedback", async () => {
