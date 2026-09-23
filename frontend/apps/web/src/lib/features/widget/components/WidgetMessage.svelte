@@ -179,28 +179,32 @@
                         <span class="sr-only">{sourceIndex + 1}. </span>
                         <span class="min-w-0 break-words">{source.title}</span>
                       </span>
-                      <span class="text-secondary text-xs">{m.widget_source_document()}</span>
-                      <button
-                        type="button"
-                        class="text-accent-default focus-visible:ring-accent-default mt-1 inline-flex w-fit items-center gap-1 rounded-md text-xs underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                        aria-label={m.widget_copy_reference_for({ title: source.title })}
-                        onclick={() => copyReference(source)}
-                      >
-                        {#if copiedId === source.id}
-                          <Check class="size-3.5" aria-hidden="true" />
-                          {m.widget_reference_copied()}
-                        {:else}
-                          <Copy class="size-3.5" aria-hidden="true" />
-                          {m.widget_copy_reference()}
+                      {#if !source.document}
+                        <span class="text-secondary text-xs">{m.widget_source_tool()}</span>
+                      {:else}
+                        <span class="text-secondary text-xs">{m.widget_source_document()}</span>
+                        <button
+                          type="button"
+                          class="text-accent-default focus-visible:ring-accent-default mt-1 inline-flex w-fit items-center gap-1 rounded-md text-xs underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                          aria-label={m.widget_copy_reference_for({ title: source.title })}
+                          onclick={() => copyReference(source)}
+                        >
+                          {#if copiedId === source.id}
+                            <Check class="size-3.5" aria-hidden="true" />
+                            {m.widget_reference_copied()}
+                          {:else}
+                            <Copy class="size-3.5" aria-hidden="true" />
+                            {m.widget_copy_reference()}
+                          {/if}
+                        </button>
+                        {#if copyFailedId === source.id}
+                          <p class="text-secondary text-xs">{m.widget_reference_copy_failed()}</p>
+                          <p class="text-primary text-xs break-all select-all">
+                            {sourceReferenceText(source, appOrigin())}
+                          </p>
                         {/if}
-                      </button>
-                      {#if copyFailedId === source.id}
-                        <p class="text-secondary text-xs">{m.widget_reference_copy_failed()}</p>
-                        <p class="text-primary text-xs break-all select-all">
-                          {sourceReferenceText(source, appOrigin())}
-                        </p>
+                        <p class="text-secondary text-xs">{m.widget_source_request_hint()}</p>
                       {/if}
-                      <p class="text-secondary text-xs">{m.widget_source_request_hint()}</p>
                     {/if}
                   </div>
                 </li>

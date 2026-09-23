@@ -4898,6 +4898,7 @@
   "widget_sources_count_other": "{count} källor",
   "widget_sources_hide": "Dölj källor",
   "widget_source_document": "Uppladdat dokument, ingen länk",
+  "widget_source_tool": "Från en tjänst som assistenten använde, ingen länk",
   "widget_source_reference_id": "Dokument-ID",
   "widget_copy_reference_for": "Kopiera referens för {title}",
   "widget_copy_reference": "Kopiera referens",

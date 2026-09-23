@@ -4898,6 +4898,7 @@
   "widget_sources_count_other": "{count} sources",
   "widget_sources_hide": "Hide sources",
   "widget_source_document": "Uploaded document, no link",
+  "widget_source_tool": "From a service the assistant used, no link",
   "widget_source_reference_id": "Document ID",
   "widget_copy_reference_for": "Copy reference for {title}",
   "widget_copy_reference": "Copy reference",

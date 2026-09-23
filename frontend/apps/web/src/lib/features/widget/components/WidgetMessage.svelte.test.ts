@@ -249,6 +249,74 @@ describe("WidgetMessage sources", () => {
     ).toBe("[]");
   });
 
+  test("numbers the tool results an answer cites as sources after the knowledge", async () => {
+    const tool = (
+      id: string,
+      uri: string,
+      meta: Record<string, unknown> | null,
+      content?: string
+    ) => ({
+      id,
+      uri,
+      meta,
+      content: content ?? null,
+      mime_type: "text/plain"
+    });
+    render(WidgetMessage, {
+      message: {
+        ...message(
+          'Skatten betalas i april <inref id="c0ffee01"/> <inref id="c0ffee02"/>. ' +
+            'Klockan är 14 <inref id="c0ffee03"/>. Källa <inref id="c0ffee05"/>.'
+        ),
+        mcp_tool_references: [
+          // Two passages of one page cited side by side: one source, one marker.
+          tool(
+            "c0ffee01-0000-4000-8000-000000000001",
+            "https://www.skatteverket.se/skatt#chunk-1",
+            {
+              title: "Skatteverket"
+            }
+          ),
+          tool(
+            "c0ffee02-0000-4000-8000-000000000002",
+            "https://www.skatteverket.se/skatt#chunk-2",
+            {
+              title: "Skatteverket"
+            }
+          ),
+          tool("c0ffee03-0000-4000-8000-000000000003", "time://now", { title: "Aktuell tid" }),
+          tool("c0ffee04-0000-4000-8000-000000000004", "https://ociterad.example", {
+            title: "Ociterad"
+          }),
+          // The older shape: raw passage, no metadata.
+          tool("c0ffee05-0000-4000-8000-000000000005", "https://example.org/sida", null, "Utdrag")
+        ]
+      } as unknown as ConversationMessage,
+      index: 0,
+      isLast: true,
+      isLoading: false
+    });
+
+    const citations = page.getByRole("link", { name: /widget_citation_label/ });
+    await expect.element(citations.first()).toBeVisible();
+    expect(citations.elements().map((citation) => citation.textContent)).toEqual(["3", "4", "5"]);
+
+    const toggle = page.getByRole("button", { name: /widget_sources_count_other/ });
+    await expect.element(toggle).toHaveTextContent('{"count":5}');
+    await toggle.click();
+    await expect
+      .element(page.getByRole("link", { name: /Skatteverket/ }))
+      .toHaveAttribute("href", "https://www.skatteverket.se/skatt#chunk-1");
+    await expect.element(page.getByRole("link", { name: /example\.org/ })).toBeVisible();
+    await expect.element(page.getByText("Aktuell tid")).toBeVisible();
+    await expect.element(page.getByText("widget_source_tool")).toBeVisible();
+    expect(page.getByText("Ociterad").elements()).toHaveLength(0);
+    // Only the knowledge document can be looked up in Eneo by its id.
+    expect(page.getByRole("button", { name: /widget_copy_reference_for/ }).elements()).toHaveLength(
+      1
+    );
+  });
+
   test("an inline citation opens the list and focuses its source", async () => {
     renderMessage(`Bygglov kostar pengar <inref id="${FILE_ID.slice(0, 8)}"/>.`);
 
