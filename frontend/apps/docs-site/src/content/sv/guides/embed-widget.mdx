@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@0793cab42dbc
+translationSource: guides/embed-widget.mdx@619340bd9ee6
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -140,11 +140,13 @@ medan dina övriga ändringar fortsätter att sparas; ändra värdet så skickas
 igen. Statusraden listar alla ändringar som inte har sparats.
 
 På en aktiv widget går det inte att tömma beskrivningen under titeln eller
-listan över tillåtna webbplatser. Ändringen avvisas så att widgeten fortsätter
-att fungera. Om en aktiv widget slutar fungera som den är konfigurerad,
-till exempel för att assistenten inte längre är publicerad, visar statusraden,
-fliken **Publicera** och organisationens översikt vad som behöver åtgärdas.
-Till dess ser besökare ett kort meddelande om att chatten inte är tillgänglig.
+listan över tillåtna webbplatser, så att widgeten fortsätter att fungera. Ett
+fält du tömmer ligger kvar som en osparad ändring (du får en fråga om du lämnar
+sidan) och sparas så snart widgeten pausas. Om en aktiv widget slutar fungera
+som den är konfigurerad, till exempel för att assistenten inte längre är
+publicerad, visar statusraden, fliken **Publicera** och organisationens översikt
+vad som behöver åtgärdas. Till dess ser besökare ett kort meddelande om att
+chatten inte är tillgänglig.
 
 Om någon annan ändrar widgeten medan du redigerar stannar det automatiska
 sparandet, och dina osparade värden ligger kvar. Kopiera det du vill behålla
@@ -182,7 +184,8 @@ källor de returnerar listas fortfarande när källor visas.
 **Återkoppling.** När widgeten sparar konversationer (lagringstid över `0`) kan
 besökaren ge konversationen tumme upp eller ner under det senaste svaret och
 ändra sig senare; rösten ligger kvar vid följdfrågor. Rösterna räknas i
-widgetens användningsstatistik och i organisationens översikt. Med **Spara
+widgetens användningsstatistik och i organisationens översikt på den dag
+konversationen började, även när en röst ändras senare. Med **Spara
 fritextåterkoppling** påslaget (av som standard) följs rösten av en länk ("Vill
 du berätta mer?", efter tumme ner "Berätta gärna vad som saknades") som öppnar
 en dialog med en kommentarsruta (högst 2 000 tecken). Besökaren kan låta bli
@@ -280,15 +283,15 @@ in i webbplatsen:
 Under **Admin → Webbwidgetar** ser en organisationsadministratör alla
 organisationens widgetar (var de finns, om de är aktiva, frågor och token de
 senaste 7 och 30 dagarna, blockerade anrop och dagens budget). Under fliken
-**Policy** sätter administratören de tak som alla widgetar måste hålla sig
-inom: högsta dagliga tokenbudget (standard 2 000 000), intervallet för
-lagringstid (standard 0–365 dagar) och om widgetar får köras utan botskydd (av
-som standard). Bara administratörer ändrar policyn. Alla med behörigheten för
-webbwidgetar kan läsa den, så widgetredigeraren visar gränserna under fliken
-**Regler** och markerar värden utanför dem innan de sparas; kvarstående
-policybrott visas som aktiveringshinder. Antalet widgetar är inte begränsat.
-Varje aktivering är ett administratörsbeslut, och översikten håller den publika
-ytan synlig.
+**Policy** sätter administratören de tak som alla widgetar måste hålla sig inom:
+högsta dagliga tokenbudget (standard 2 000 000, högst 2 000 000 000),
+intervallet för lagringstid (standard 0–365 dagar) och om widgetar får köras
+utan botskydd (av som standard). Bara administratörer ändrar policyn. Alla med
+behörigheten för webbwidgetar kan läsa den, så widgetredigeraren visar gränserna
+under fliken **Regler** och markerar värden utanför dem innan de sparas;
+kvarstående policybrott visas som aktiveringshinder. Antalet widgetar är inte
+begränsat. Varje aktivering är ett administratörsbeslut, och översikten håller
+den publika ytan synlig.
 
 Policyn gäller befintliga widgetar så som den ser ut nu, inte bara vid senare
 ändringar:
@@ -364,18 +367,24 @@ att ladda om när mallen har ändrat deras widget.
   widgetens tillåtna origins. En webbplats som inte är listad får en tom ram.
   En pausad widget visar i stället ett kort meddelande om att chatten inte är
   tillgänglig, på alla webbplatser, så att knappen aldrig öppnar en tom panel.
+- **Widgetar i en avstängd organisation** behandlas som pausade i hela den
+  publika ytan: chatten visar meddelandet om att den inte är tillgänglig, och
+  inga utmaningar eller besökartoken lämnas ut.
 - **Svar kan inte föra data vidare.** Chattsidans Content Security Policy
   tillåter bara bilder från Eneo och logotypens adress samt anslutningar till
   Eneos API, så en bildlänk som hamnar i ett svar kan inte skicka besökarens
   fråga vidare till tredje part.
 - **Besökartoken** är JWT:er knutna till en widget och en pseudonym
-  besökaridentitet. De gäller i 15 minuter och förnyas automatiskt. Paus eller
+  besökaridentitet. De gäller i 15 minuter och förnyas automatiskt. De
+  signeras med en egen nyckel som härleds från backendens `JWT_SECRET`, så en
+  besökartoken godtas aldrig som en användares inloggning. Paus eller
   ändringar av tillåtna webbplatser, begränsningar, integritetsinställningar
   eller botskydd gör alla utfärdade token ogiltiga, liksom en policyändring som
   förbjuder widgetar utan botskydd.
 - **ALTCHA** är en beräkningsuppgift som körs i er egen installation, utan
   CAPTCHA-leverantör, kakor eller fingeravtryck. En widget utan botskydd kräver
-  att organisationens policy tillåter det.
+  att organisationens policy tillåter det. En utmaning signeras för den widget
+  som utfärdade den, och bara den widgeten godtar lösningen.
 - **Begränsningarna stänger vid fel som standard.** Redis skyddar
   anropsfrekvens och återanvändning av utmaningar. Den dagliga budgeten och
   pågående reservationer lagras i PostgreSQL, så förlorad Redis-data nollställer
@@ -385,7 +394,9 @@ att ladda om när mallen har ändrat deras widget.
   verktygsanrop. Ett fel innan strömningen börjar släpper reservationen. Osäker
   användning efter ett avbrott förblir debiterad för dagen. Reservationen är en
   uppskattning för att avgöra om ett anrop kan starta, inte ett hårt tak för
-  modellens svar; den faktiska användningen kan bli högre.
+  modellens svar; den faktiska användningen kan bli högre. En widget vars
+  dagliga budget är mindre än reservationen reserverar i stället hela budgeten
+  och besvarar därför en fråga per dag.
 - **Laddaren** serveras från er Eneo-origin med `nosniff`, öppen CORS (krävs
   för `integrity`) och en ETag; den låsta varianten ändras aldrig. De sparade
   inställningar laddaren läser är widgetens publika visningsinställningar och
@@ -425,6 +436,10 @@ adress, om inte backend får veta hur många proxyer som står framför den: sä
 rubrik än `X-Forwarded-For`) på backend. Utan det delar alla besökare på en
 och samma kvot, och hela webbplatsen stryps så snart de första besökarna har
 förbrukat tilldelningen per IP-adress.
+
+De IP-baserade gränserna räknar en IPv4-adress för sig och en IPv6-adress per
+/64-nät, eftersom en anslutning oftast har ett helt /64-nät och annars skulle
+kunna använda en ny adress för varje anrop.
 
 ### Personuppgifter och lagring [#personal-data-and-cookies]
 
