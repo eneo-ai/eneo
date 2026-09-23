@@ -16,7 +16,7 @@ def _migration():
     config.set_main_option(
         "script_location", str(Path(__file__).resolve().parents[3] / "alembic")
     )
-    revision = ScriptDirectory.from_config(config).get_revision("202609181000")
+    revision = ScriptDirectory.from_config(config).get_revision("202609231000")
     assert revision is not None
     return revision.module
 
