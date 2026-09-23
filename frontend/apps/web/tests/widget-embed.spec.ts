@@ -19,7 +19,11 @@ const DENIED_ORIGIN = `http://127.0.0.1:${DENIED_PORT}`;
 
 type Widget = { id: string; public_id: string; status: string; revision: number };
 
-async function createActiveWidget(page: Page, request: APIRequestContext): Promise<Widget> {
+async function createActiveWidget(
+  page: Page,
+  request: APIRequestContext,
+  settings: Record<string, unknown> = {}
+): Promise<Widget> {
   const space = await backendFetch(page, request, "/api/v1/spaces/", {
     method: "POST",
     data: { name: uniqueName("widget e2e space") }
@@ -75,7 +79,8 @@ async function createActiveWidget(page: Page, request: APIRequestContext): Promi
           title: "Fråga kommunen",
           welcome: "Hej! Vad kan jag hjälpa dig med?",
           subtitle: "Du chattar med en AI-assistent. Svaren kan innehålla fel."
-        }
+        },
+        ...settings
       }
     }),
     "configure widget"
@@ -158,7 +163,10 @@ test.describe("embeddable widget", () => {
         body: consoleLines.join("\n"),
         contentType: "text/plain"
       });
-    const widget = await createActiveWidget(page, request);
+    // Comments are stored, so the vote offers the comment dialog.
+    const widget = await createActiveWidget(page, request, {
+      privacy: { retention_days: 30, store_feedback_text: true }
+    });
     const loaderOrigin = baseURL!.replace(/\/$/, "");
 
     // The loader route: cacheable, CORS-open (for SRI) and never sniffable.
@@ -168,6 +176,12 @@ test.describe("embeddable widget", () => {
     expect(loader.headers()["access-control-allow-origin"]).toBe("*");
     expect(loader.headers()["cache-control"]).toContain("max-age=3600");
     expect(loader.headers()["x-content-type-options"]).toBe("nosniff");
+
+    // What the loader reads before it shows the launcher, from any host page.
+    const settings = await request.get(`${loaderOrigin}/widget/settings/${widget.public_id}`);
+    expect(settings.status()).toBe(200);
+    expect(settings.headers()["access-control-allow-origin"]).toBe("*");
+    expect(await settings.json()).toMatchObject({ language: "sv", position: "bottom-right" });
 
     // The embed page tells the browser exactly who may frame it.
     const embed = await request.get(
@@ -188,6 +202,8 @@ test.describe("embeddable widget", () => {
     await expect(launcher).toHaveAttribute("aria-haspopup", "dialog");
     await expect(launcher).toHaveAttribute("aria-expanded", "false");
     await expect(launcher).toHaveAccessibleName("Öppna chatt");
+    // Hidden until the loader has read the saved settings.
+    await expect(launcher).toBeVisible();
 
     // Open with the keyboard: Tab to the launcher, Enter opens the panel.
     await launcher.focus();
@@ -240,6 +256,24 @@ test.describe("embeddable widget", () => {
       .poll(() => page.evaluate(() => (window as never as { __events: string[] }).__events))
       .toContain("conversation_started");
 
+    // The send arrow and the comment dialog's Send are submit buttons: they
+    // only work when the loader's sandbox allows forms, which Enter alone
+    // never proved.
+    await composer.fill("Och en fråga till?");
+    await frame.getByRole("button", { name: "Skicka", exact: true }).click();
+    await expect(frame.getByText(MOCK_REPLY)).toHaveCount(2, { timeout: 45_000 });
+    await expect(composer).toBeFocused();
+
+    const helpful = frame.getByRole("button", { name: "Bra svar" });
+    await helpful.click();
+    await frame.getByRole("button", { name: "Vill du berätta mer?" }).click();
+    const dialog = frame.getByRole("dialog");
+    await dialog.getByRole("textbox").fill("Tydligt och snabbt svar.");
+    await dialog.getByRole("button", { name: "Skicka" }).click();
+    await expect(frame.getByRole("status")).toHaveText(/Tack, vi har tagit emot din återkoppling/);
+    await expect(dialog).toBeHidden();
+    await expect(helpful).toBeFocused();
+
     // WCAG check of the open panel (host page + iframe).
     const results = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
@@ -270,6 +304,41 @@ test.describe("embeddable widget", () => {
     expect(await paused.text()).toContain("Chatten är pausad");
     const config = await request.get(`${BACKEND_URL}/api/v1/widgets/${widget.public_id}/config/`);
     expect(config.status()).toBe(404);
+  });
+
+  test("the saved language and position reach a site without a new snippet", async ({
+    page,
+    request,
+    baseURL
+  }) => {
+    // The host page is Swedish and its snippet carries neither setting.
+    const widget = await createActiveWidget(page, request, {
+      language: "en",
+      theme: { position: "bottom-left" }
+    });
+    const loaderOrigin = baseURL!.replace(/\/$/, "");
+    hostHtml = hostPage(loaderOrigin, widget.public_id);
+    await page.goto(`${HOST_ORIGIN}/index.html`);
+
+    const launcher = page.locator("eneo-widget button.launcher");
+    await expect(launcher).toHaveAccessibleName("Open chat");
+    await expect(launcher).toBeVisible();
+    const box = await launcher.boundingBox();
+    expect(box!.x + box!.width).toBeLessThan(page.viewportSize()!.width / 2);
+
+    await launcher.click();
+    const frame = page.frameLocator("eneo-widget iframe");
+    await expect(frame.getByRole("textbox", { name: "Your question" })).toBeVisible({
+      timeout: 20_000
+    });
+
+    // A frame or link that still asks for Swedish is moved to English.
+    const query = `?origin=${encodeURIComponent(HOST_ORIGIN)}`;
+    const swedish = await request.get(`${loaderOrigin}/embed/${widget.public_id}${query}`, {
+      maxRedirects: 0
+    });
+    expect(swedish.status()).toBe(307);
+    expect(swedish.headers()["location"]).toBe(`/en/embed/${widget.public_id}${query}`);
   });
 
   test("on a phone a paused widget can still be dismissed from the launcher", async ({
