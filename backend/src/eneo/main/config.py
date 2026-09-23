@@ -360,9 +360,9 @@ class Settings(BaseSettings):
     flow_audio_max_decoded_bytes: int = 2 * 1024 * 1024 * 1024
     # Live transcription preview. A recording streams audio, silence included,
     # the whole time, so the idle timeout only ends a paused or stalled client.
-    # The final-text wait covers only the audio the model server has not decoded
-    # when the recording stops, so it does not grow with the recording's length;
-    # raise it for a slow (CPU) model server.
+    # The final-text wait covers the audio the model server has not decoded yet
+    # when the recording stops; a server that falls behind (a CPU server, a busy
+    # GPU) needs longer.
     flow_live_transcription_idle_timeout_seconds: int = Field(default=300, gt=0)
     flow_live_transcription_final_text_timeout_seconds: int = Field(default=60, gt=0)
     # External transcription service: when set, flow transcribe-only steps

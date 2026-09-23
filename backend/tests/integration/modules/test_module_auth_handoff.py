@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import time
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
@@ -21,6 +22,12 @@ from eneo.authentication.auth_models import (
 )
 from eneo.database.database import get_session_with_transaction
 from eneo.modules.module import ModuleCreate
+from eneo.modules.module_auth import (
+    MODULE_HANDOFF_AT_CLAIM,
+    MODULE_TENANT_ID_CLAIM,
+    MODULE_USER_ID_CLAIM,
+    module_audience,
+)
 from eneo.tenants.tenant import TenantBase
 from eneo.users.user import UserAdd, UserState
 from tests.integration.module_session_support import (
@@ -802,8 +809,15 @@ async def test_a_module_token_for_a_user_of_another_tenant_is_unauthenticated(
                 tenant_id=other_tenant.id,
             )
         )
+        # everything the broker mints into a module token, for the other tenant
         stranger_token = container.auth_service().create_access_token_for_user(
-            stranger, audience=f"eneo-module:{enabled_module.name}"
+            stranger,
+            audience=module_audience(enabled_module.name),
+            extra_claims={
+                MODULE_HANDOFF_AT_CLAIM: int(time.time()),
+                MODULE_USER_ID_CLAIM: str(stranger.id),
+                MODULE_TENANT_ID_CLAIM: str(stranger.tenant_id),
+            },
         )
 
     response = await client.get(

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -68,6 +69,7 @@ class LiveStack:
     flow: LiveFlow
     model_server: FakeRealtimeServer
     base_url: str
+    server: uvicorn.Server
 
     async def open_session(self) -> dict[str, object]:
         response = await self.client.post(self.flow.sessions_path, headers=self.headers)
@@ -241,7 +243,7 @@ def _bearer(headers: Mapping[str, str]) -> str:
 
 
 @asynccontextmanager
-async def _served(app: FastAPI) -> AsyncIterator[str]:
+async def _served(app: FastAPI) -> AsyncIterator[tuple[str, uvicorn.Server]]:
     server = uvicorn.Server(
         uvicorn.Config(
             app, host="127.0.0.1", port=0, lifespan="off", log_level="warning"
@@ -254,7 +256,7 @@ async def _served(app: FastAPI) -> AsyncIterator[str]:
                 serving.result()
             await asyncio.sleep(0.01)
         port = server.servers[0].sockets[0].getsockname()[1]
-        yield f"ws://127.0.0.1:{port}"
+        yield f"ws://127.0.0.1:{port}", server
     finally:
         server.should_exit = True
         await serving
@@ -265,11 +267,14 @@ async def live_stack(
     client, app, flow_process_auth_headers, db_container
 ) -> AsyncIterator[LiveStack]:
     headers = dict(flow_process_auth_headers)
-    async with fake_realtime_server() as model_server, _served(app) as base_url:
+    async with (
+        fake_realtime_server() as model_server,
+        _served(app) as (base_url, server),
+    ):
         flow = await _published_flow(
             client, headers, db_container, endpoint=_provider_endpoint(model_server)
         )
-        yield LiveStack(client, headers, flow, model_server, base_url)
+        yield LiveStack(client, headers, flow, model_server, base_url, server)
 
 
 async def test_an_admitted_session_streams_the_preview_through_the_flows_model(
@@ -368,6 +373,39 @@ async def test_a_page_on_the_apis_own_host_opens_the_socket_behind_a_proxy(
         additional_headers={"X-Forwarded-Host": "eneo.example.se"},
     ) as socket:
         assert json.loads(await socket.recv())["type"] == "ready"
+
+
+class _Records(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.ERROR)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
+async def test_a_browser_that_leaves_mid_session_ends_the_socket_cleanly(
+    live_stack: LiveStack,
+):
+    records = _Records()
+    uvicorn_errors = logging.getLogger("uvicorn.error")
+    uvicorn_errors.addHandler(records)
+    try:
+        session = await live_stack.open_session()
+        async with connect(
+            live_stack.socket_url(session),
+            subprotocols=_subprotocols(session["ticket"]),
+        ) as socket:
+            assert json.loads(await socket.recv())["type"] == "ready"
+            await socket.send(TENTH_OF_A_SECOND)
+        # the browser is gone; wait until the server has finished the connection
+        async with asyncio.timeout(5):
+            while live_stack.server.server_state.tasks:
+                await asyncio.sleep(0.01)
+    finally:
+        uvicorn_errors.removeHandler(records)
+
+    assert records.messages == []
 
 
 async def test_realtime_switched_off_after_admission_ends_the_session(

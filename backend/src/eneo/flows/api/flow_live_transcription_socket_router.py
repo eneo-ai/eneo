@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 import sqlalchemy as sa
 from dependency_injector import providers
-from fastapi import APIRouter, WebSocket, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from eneo.allowed_origins.get_origin_callback import get_origin
 from eneo.database.database import sessionmanager
@@ -215,5 +215,5 @@ async def _load_upstream_target(grant: LiveTranscriptionGrant) -> _UpstreamTarge
 async def _close_quietly(websocket: WebSocket) -> None:
     try:
         await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
-    except RuntimeError:
-        pass  # already closed by the client
+    except (WebSocketDisconnect, RuntimeError):
+        pass  # the client has already gone
