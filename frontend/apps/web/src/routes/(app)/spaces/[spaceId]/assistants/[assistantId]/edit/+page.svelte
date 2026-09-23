@@ -291,9 +291,6 @@
           title={m.name()}
           description={m.assistant_name_description()}
           hasChanges={$currentChanges.diff.name !== undefined}
-          revertFn={() => {
-            discardChanges("name");
-          }}
           let:aria
         >
           <input
@@ -308,9 +305,6 @@
           title={m.description()}
           description={m.assistant_description_description()}
           hasChanges={$currentChanges.diff.description !== undefined}
-          revertFn={() => {
-            discardChanges("description");
-          }}
           let:aria
         >
           <textarea
@@ -337,9 +331,6 @@
           title={m.prompt()}
           description={m.describe_assistant_behavior()}
           hasChanges={$currentChanges.diff.prompt !== undefined}
-          revertFn={() => {
-            discardChanges("prompt");
-          }}
           fullWidth
           let:aria
         >
@@ -437,7 +428,6 @@
               title={m.skills()}
               description={m.skills_editor_description()}
               hasChanges={$currentChanges.diff.skill_bindings !== undefined}
-              revertFn={() => discardChanges("skill_bindings")}
             >
               <SkillBindingsEditor
                 bind:bindings={$update.skill_bindings}
@@ -471,10 +461,6 @@
           title={m.attachments()}
           description={m.attach_further_instructions()}
           hasChanges={$currentChanges.diff.attachments !== undefined}
-          revertFn={() => {
-            cancelUploadsAndClearQueue();
-            discardChanges("attachments");
-          }}
         >
           <AssistantSettingsAttachments bind:cancelUploadsAndClearQueue
           ></AssistantSettingsAttachments>
@@ -486,11 +472,6 @@
           hasChanges={$currentChanges.diff.groups !== undefined ||
             $currentChanges.diff.websites !== undefined ||
             $currentChanges.diff.integration_knowledge_list !== undefined}
-          revertFn={() => {
-            discardChanges("groups");
-            discardChanges("websites");
-            discardChanges("integration_knowledge_list");
-          }}
         >
           <div>
             <SelectKnowledge
@@ -508,11 +489,6 @@
           hasChanges={$currentChanges.diff.groups !== undefined ||
             $currentChanges.diff.websites !== undefined ||
             $currentChanges.diff.integration_knowledge_list !== undefined}
-          revertFn={() => {
-            discardChanges("groups");
-            discardChanges("websites");
-            discardChanges("integration_knowledge_list");
-          }}
         >
           <div>
             <SelectKnowledge
@@ -530,9 +506,6 @@
           title={m.completion_model()}
           description={m.this_model_will_be_used()}
           hasChanges={$currentChanges.diff.completion_model !== undefined}
-          revertFn={() => {
-            discardChanges("completion_model");
-          }}
           let:aria
         >
           {#if lockedModel}
@@ -557,9 +530,6 @@
           title={m.model_behaviour()}
           description={m.select_preset_behavior()}
           hasChanges={hasBehaviorChanges}
-          revertFn={() => {
-            discardChanges("completion_model_kwargs");
-          }}
           let:aria
         >
           <SelectBehaviourV2
@@ -575,9 +545,6 @@
             title={m.model_settings()}
             description={m.model_settings_description()}
             hasChanges={$currentChanges.diff.completion_model_kwargs !== undefined}
-            revertFn={() => {
-              discardChanges("completion_model_kwargs");
-            }}
           >
             <SelectModelSpecificSettings
               bind:kwArgs={$update.completion_model_kwargs}
@@ -594,9 +561,6 @@
             title={m.attachments_open_files_label()}
             description=""
             hasChanges={$currentChanges.diff.inline_file_text !== undefined}
-            revertFn={() => {
-              discardChanges("inline_file_text");
-            }}
             let:aria
           >
             <svelte:fragment slot="description">
@@ -630,9 +594,6 @@
           title={m.knowledge_mode()}
           description={m.knowledge_mode_description()}
           hasChanges={$currentChanges.diff.knowledge_mode !== undefined}
-          revertFn={() => {
-            discardChanges("knowledge_mode");
-          }}
           let:aria
         >
           <div class="border-default flex h-14 border-b py-2">
@@ -665,10 +626,6 @@
           description={m.select_mcp_servers_description()}
           hasChanges={$currentChanges.diff.mcp_servers !== undefined ||
             $currentChanges.diff.mcp_tools !== undefined}
-          revertFn={() => {
-            discardChanges("mcp_servers");
-            discardChanges("mcp_tools");
-          }}
         >
           {#if mcpEnforced}
             <!-- Policy GRANTs these servers to the personal assistant; they are
@@ -708,9 +665,6 @@
             title={m.capabilities()}
             description={m.capabilities_row_description()}
             hasChanges={$currentChanges.diff.enabled_capabilities !== undefined}
-            revertFn={() => {
-              discardChanges("enabled_capabilities");
-            }}
           >
             <div class="border-default overflow-hidden rounded-xl border">
               {#each CAPABILITIES as capability (capability.purpose)}
@@ -741,9 +695,6 @@
         {/if}
         <Settings.Row
           hasChanges={$currentChanges.diff.data_retention_days !== undefined}
-          revertFn={() => {
-            discardChanges("data_retention_days");
-          }}
           title={m.conversation_retention_title()}
           description={m.conversation_retention_assistant_description()}
           let:labelId
@@ -791,9 +742,6 @@
 
           <Settings.Row
             hasChanges={$currentChanges.diff.insight_enabled !== undefined}
-            revertFn={() => {
-              discardChanges("insight_enabled");
-            }}
             title={m.insights()}
             description={m.insights_description()}
             let:aria
