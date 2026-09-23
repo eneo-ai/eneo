@@ -15,7 +15,11 @@ import {
   readSessionRecords,
   scanRecoverableSessionsForSteps
 } from "$lib/features/audio/flowRunRecordingSession";
-import { RETRY_BACKOFF_MS, SEGMENT_ROTATION_MS } from "$lib/features/audio/recordingSession";
+import {
+  RETRY_BACKOFF_MS,
+  ROTATION_OVERLAP_MS,
+  SEGMENT_ROTATION_MS
+} from "$lib/features/audio/recordingSession";
 import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
 import { m } from "$lib/paraglide/messages";
 import FlowRunDialog from "./FlowRunDialog.svelte";
@@ -93,12 +97,17 @@ describe("FlowRunDialog recording rotation", () => {
     const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
     await openDialogAndStartRecording(upload);
 
-    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
-    await flush();
+    await rotate();
+    // Both recorders capture the stream for the overlap, then the replaced one stops.
+    expect(media.recorders).toHaveLength(2);
+    expect(media.recorders[0]?.state).toBe("recording");
+    vi.advanceTimersByTime(ROTATION_OVERLAP_MS - 1);
+    expect(media.recorders[0]?.state).toBe("recording");
+    vi.advanceTimersByTime(1);
+    expect(media.recorders[0]?.state).toBe("inactive");
     media.recorders[0]?.finish();
     await flush();
 
-    expect(media.recorders).toHaveLength(2);
     expect(media.recorders[1]?.stream).toBe(media.stream);
     expect(media.recorders[1]?.state).toBe("recording");
     expect(media.track.stop).not.toHaveBeenCalled();
@@ -109,18 +118,20 @@ describe("FlowRunDialog recording rotation", () => {
     expect(screen.getByLabelText(m.stop_recording())).toBeTruthy();
   });
 
-  it("persists and uploads both segments once when the user stops during a rotation", async () => {
+  it("persists and uploads both segments once when the user stops during the overlap", async () => {
     const pendingUploads: PendingUpload[] = [];
     const upload = vi.fn(({ file }: { file: File }) => pendingUpload(pendingUploads, file));
     await openDialogAndStartRecording(upload);
+    const statesAtRelease = recorderStatesAtRelease();
 
-    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
-    await flush();
-    // The replaced recorder has not handed over its file when the user stops.
+    await rotate();
     await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    // The stop ends the overlap at once.
+    expect(media.recorders.map(({ state }) => state)).toEqual(["inactive", "inactive"]);
     media.recorders[0]?.finish();
     media.recorders[1]?.finish();
     await flush();
+    await endOverlap();
 
     expect(persistedSegments()).toEqual([
       { segmentIndex: 0, reason: "rotation" },
@@ -138,7 +149,7 @@ describe("FlowRunDialog recording rotation", () => {
     ]);
     expect(screen.getByText(/-seg00-/)).toBeTruthy();
     expect(screen.getByText(/-seg01-/)).toBeTruthy();
-    expect(media.track.stop).toHaveBeenCalledOnce();
+    expect(statesAtRelease).toEqual([["inactive", "inactive"]]);
     expect(media.contexts[0]?.close).toHaveBeenCalledOnce();
 
     // The session ended with the recording, so no rotation reaches the idle recorder.
@@ -146,6 +157,64 @@ describe("FlowRunDialog recording rotation", () => {
     await flush();
     expect(media.recorders).toHaveLength(2);
     expect(screen.getByLabelText(m.start_recording())).toBeTruthy();
+  });
+
+  it("delivers both segments once when the live recorder fails during the overlap", async () => {
+    const upload = vi.fn(async ({ file }: { file: File }) => uploadedFile(file.name, file.name));
+    await openDialogAndStartRecording(upload);
+    const statesAtRelease = recorderStatesAtRelease();
+
+    await rotate();
+    media.recorders[1]?.dispatchEvent(new Event("error"));
+    expect(media.recorders.map(({ state }) => state)).toEqual(["inactive", "inactive"]);
+    media.recorders[0]?.finish();
+    media.recorders[1]?.finish();
+    await flush();
+    await endOverlap();
+
+    expect(persistedSegments()).toEqual([
+      { segmentIndex: 0, reason: "rotation" },
+      { segmentIndex: 1, reason: "error" }
+    ]);
+    expect(statesAtRelease).toEqual([["inactive", "inactive"]]);
+    expect(screen.getByText(m.recording_session_reconnecting())).toBeTruthy();
+  });
+
+  it("delivers both segments once when the dialog is closed during the overlap", async () => {
+    const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
+    await openDialogAndStartRecording(upload);
+    const statesAtRelease = recorderStatesAtRelease();
+
+    await rotate();
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_run_trigger_close() }));
+    await fireEvent.click(screen.getByRole("button", { name: "Stäng ändå" }));
+    // Closing stops the recording first, so both segments reach the local store.
+    expect(media.recorders.map(({ state }) => state)).toEqual(["inactive", "inactive"]);
+    media.recorders[0]?.finish();
+    media.recorders[1]?.finish();
+    await flush();
+
+    expect(persistedSegments()).toEqual([
+      { segmentIndex: 0, reason: "rotation" },
+      { segmentIndex: 1, reason: "manual" }
+    ]);
+    expect(statesAtRelease).toEqual([["inactive", "inactive"]]);
+  });
+
+  it("keeps the replaced segment when the recorder unmounts during the overlap", async () => {
+    const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
+    const { unmount } = await openDialogAndStartRecording(upload);
+    const statesAtRelease = recorderStatesAtRelease();
+
+    await rotate();
+    unmount();
+    media.recorders[0]?.finish();
+    media.recorders[1]?.finish();
+    await flush();
+
+    // The segment in progress goes with the unmount; the completed one does not.
+    expect(persistedSegments()).toEqual([{ segmentIndex: 0, reason: "rotation" }]);
+    expect(statesAtRelease).toEqual([["inactive", "inactive"]]);
   });
 
   it.each(["upload", "persistence"] as const)(
@@ -158,16 +227,15 @@ describe("FlowRunDialog recording rotation", () => {
       await openDialogAndStartRecording(upload);
 
       for (const finished of [0, 1]) {
-        vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
-        await flush();
+        await rotate();
         expect(media.recorders).toHaveLength(finished + 2);
+        await endOverlap();
         media.recorders[finished]?.finish();
         await flush();
       }
       expect(screen.getByLabelText(m.stop_recording())).toBeTruthy();
 
-      vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
-      await flush();
+      await rotate();
       media.recorders[2]?.finish();
       await flush();
 
@@ -211,13 +279,14 @@ describe("FlowRunDialog recording rotation", () => {
     expect(media.recorders[2]?.state).toBe("recording");
   });
 
-  it("keeps the run blocked until Retry uploads an earlier segment whose upload failed", async () => {
+  it("keeps the run blocked until Retry uploads an earlier segment, then submits in segment order", async () => {
     const pendingUploads: PendingUpload[] = [];
     const upload = vi.fn(({ file }: { file: File }) => pendingUpload(pendingUploads, file));
-    await openDialogAndStartRecording(upload);
+    const create = vi.fn(async () => ({ id: "run-1" }));
+    await openDialogAndStartRecording(upload, { create });
 
-    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
-    await flush();
+    await rotate();
+    await endOverlap();
     media.recorders[0]?.finish();
     await flush();
     pendingUploads[0]?.reject(new Error("Network down"));
@@ -243,7 +312,20 @@ describe("FlowRunDialog recording rotation", () => {
       [0, "segment-0"]
     ]);
     expect(failedRecordingAlert()).toBeNull();
-    expect(nextButton().disabled).toBe(false);
+    // The retried segment 0 uploaded last but is listed and submitted first.
+    expect(screen.getAllByText(/-seg0\d-/).map(({ textContent }) => textContent)).toEqual([
+      pendingUploads[2]?.file.name,
+      pendingUploads[1]?.file.name
+    ]);
+    await fireEvent.click(nextButton());
+    await flush();
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_run_trigger_confirm() }));
+    await flush();
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step_inputs: { "step-audio": { file_ids: ["segment-0", "segment-1"] } }
+      })
+    );
   });
 
   it("offers save for later and discard only once capture stops and every segment is persisted", async () => {
@@ -251,8 +333,8 @@ describe("FlowRunDialog recording rotation", () => {
     const upload = vi.fn(({ file }: { file: File }) => pendingUpload(pendingUploads, file));
     await openDialogAndStartRecording(upload);
 
-    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
-    await flush();
+    await rotate();
+    await endOverlap();
     media.recorders[0]?.finish();
     await flush();
     pendingUploads[0]?.reject(new Error("Network down"));
@@ -285,8 +367,8 @@ describe("FlowRunDialog recording rotation", () => {
     const upload = vi.fn(async ({ file }: { file: File }) => uploadedFile("segment-0", file.name));
     await openDialogAndStartRecording(upload);
 
-    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
-    await flush();
+    await rotate();
+    await endOverlap();
     media.recorders[0]?.finish();
     await flush();
     media.recorders[1]?.dispatchEvent(new Event("error"));
@@ -324,6 +406,52 @@ describe("FlowRunDialog recording rotation", () => {
     await flush();
     expect(media.recorders).toHaveLength(3);
     expect(media.recorders[2]?.state).toBe("recording");
+  });
+
+  it("keeps the dialog on a recording step until capture stops and the segment is persisted", async () => {
+    const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
+    renderDialog(upload, { steps: [firstAudioStep, { ...audioStep, step_order: 2 }] });
+    await screen.findByText("First audio");
+    await fireEvent.click(nextButton());
+    await screen.findByText("Audio input");
+    vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
+    await fireEvent.click(screen.getByLabelText(m.start_recording()));
+    await flush();
+
+    const back = screen.getByRole("button", { name: "Tillbaka" }) as HTMLButtonElement;
+    const firstPageDot = screen.getByRole("button", {
+      name: "Steg 1 i flödet"
+    }) as HTMLButtonElement;
+    expect(back.disabled).toBe(true);
+    expect(firstPageDot.disabled).toBe(true);
+    const reasonId = back.getAttribute("aria-describedby") ?? "";
+    expect(document.getElementById(reasonId)?.textContent?.trim()).toBe(
+      "Stoppa inspelningen för steg 2: Audio input."
+    );
+    expect(firstPageDot.getAttribute("aria-describedby")).toBe(reasonId);
+    await fireEvent.click(back);
+    await fireEvent.click(firstPageDot);
+    await flush();
+    expect(screen.getByText("Audio input")).toBeTruthy();
+    expect(media.recorders[0]?.state).toBe("recording");
+
+    let finishPersisting = () => {};
+    vi.mocked(persistRecordingSegment).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishPersisting = () => resolve({ degraded: false });
+        })
+    );
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+    expect(back.disabled).toBe(true);
+
+    finishPersisting();
+    await flush();
+    expect(back.disabled).toBe(false);
+    await fireEvent.click(back);
+    expect(await screen.findByText("First audio")).toBeTruthy();
   });
 
   it("counts recovered segments whose upload fails and retries them in segment order", async () => {
@@ -378,7 +506,22 @@ function pendingUpload(pendingUploads: PendingUpload[], file: File) {
 // the fake clock.
 const flush = () => vi.advanceTimersByTimeAsync(0);
 
-function renderDialog(upload: (args: { file: File; stepId: string }) => Promise<UploadedFile>) {
+// The session's rotation: the next recorder starts, the replaced one keeps
+// running until the overlap ends.
+async function rotate() {
+  vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
+  await flush();
+}
+
+async function endOverlap() {
+  vi.advanceTimersByTime(ROTATION_OVERLAP_MS);
+  await flush();
+}
+
+type Upload = (args: { file: File; stepId: string }) => Promise<UploadedFile>;
+type DialogOptions = { create?: () => Promise<unknown>; steps?: FlowRunContractStepInput[] };
+
+function renderDialog(upload: Upload, options: DialogOptions = {}) {
   return render(FlowRunDialog, {
     open: true,
     flow: {
@@ -386,20 +529,29 @@ function renderDialog(upload: (args: { file: File; stepId: string }) => Promise<
       name: "Recording flow",
       steps: [{ id: "step-audio" }]
     } as unknown as Flow,
-    eneo: buildEneo(upload),
+    eneo: buildEneo(upload, options),
     lastInputPayload: null
   });
 }
 
-async function openDialogAndStartRecording(
-  upload: (args: { file: File; stepId: string }) => Promise<UploadedFile>
-) {
-  renderDialog(upload);
+async function openDialogAndStartRecording(upload: Upload, options: DialogOptions = {}) {
+  const rendered = renderDialog(upload, options);
   await screen.findByText("Audio input");
   vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
   await fireEvent.click(screen.getByLabelText(m.start_recording()));
   await flush();
   expect(media.recorders).toHaveLength(1);
+  return rendered;
+}
+
+// The recorders' states each time the microphone is released: it must not be
+// released while any of them still records.
+function recorderStatesAtRelease() {
+  const states: RecordingState[][] = [];
+  media.track.stop.mockImplementation(() => {
+    states.push(media.recorders.map(({ state }) => state));
+  });
+  return states;
 }
 
 function persistedSegments() {
@@ -478,6 +630,7 @@ function installFakeMedia() {
     // What a browser does shortly after stop(): hand over the last chunk (none
     // when nothing was captured), then report that the recorder stopped.
     finish({ withAudio = true }: { withAudio?: boolean } = {}) {
+      if (this.state !== "inactive") throw new Error("A recorder finishes only after stop()");
       if (withAudio) {
         const chunk = Object.assign(new Event("dataavailable"), {
           data: new Blob(["audio"], { type: this.mimeType })
@@ -550,6 +703,13 @@ const audioStep: FlowRunContractStepInput = {
   max_file_size_bytes: 1_000_000
 };
 
+const firstAudioStep: FlowRunContractStepInput = {
+  ...audioStep,
+  step_id: "step-first",
+  label: "First audio",
+  required: false
+};
+
 const audioStepSnapshot = {
   publishedFlowVersion: 7,
   maxFiles: 10,
@@ -558,12 +718,15 @@ const audioStepSnapshot = {
   inputFormat: "audio"
 };
 
-function buildEneo(upload: (args: { file: File; stepId: string }) => Promise<UploadedFile>): Eneo {
+function buildEneo(
+  upload: Upload,
+  { create = vi.fn(async () => ({ id: "run-1" })), steps = [audioStep] }: DialogOptions = {}
+): Eneo {
   const contract: FlowRunContract = {
     flow_id: "flow-1",
     published_flow_version: 7,
     form_fields: [],
-    steps_requiring_input: [audioStep],
+    steps_requiring_input: steps,
     template_readiness: []
   };
   return {
@@ -572,7 +735,7 @@ function buildEneo(upload: (args: { file: File; stepId: string }) => Promise<Upl
       steps: { runtimeFiles: { upload } },
       runs: {
         deriveUploadIntentIdempotencyKey: vi.fn(async () => "derived-key"),
-        create: vi.fn()
+        create
       }
     },
     files: { delete: vi.fn(async () => undefined) }

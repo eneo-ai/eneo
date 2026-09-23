@@ -4,6 +4,11 @@ import type { ContractSnapshot } from "./recordingSessionStore";
 import type { RecordingStopReason } from "./recordedAudioFile";
 
 export const SEGMENT_ROTATION_MS = 20 * 60 * 1000;
+// Chromium's MediaRecorder drops the last 9-71 ms before stop() (measured
+// 2026-09-23: the audio still waiting for its next Opus packet), so a rotated
+// recorder keeps capturing this long after the next one starts: the two files
+// overlap instead of leaving a gap.
+export const ROTATION_OVERLAP_MS = 150;
 // Rotation records on only while fewer finished segments than this wait for
 // upload; the rotation that would reach it stops the recording instead.
 export const MAX_SEGMENTS_AWAITING_UPLOAD = 3;
@@ -82,6 +87,18 @@ export function buildSegmentFilenameBase(
   const iso = new Date(capturedAt).toISOString().replace(/[:.]/g, "-");
   const seg = segmentIndex.toString().padStart(2, "0");
   return `${RECORDING_FILENAME_PREFIX}${sessionId}-seg${seg}-${iso}`;
+}
+
+// The inverse of buildSegmentFilenameBase, for a file named by the recorder;
+// null for any other name.
+const SEGMENT_FILENAME_RE =
+  /^recording-([0-9a-fA-F-]+)-seg(\d{2,4})-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}(?:-\d+)?Z\.[A-Za-z0-9]+$/;
+
+export function parseSegmentFilename(
+  name: string
+): { sessionId: string; segmentIndex: number } | null {
+  const match = SEGMENT_FILENAME_RE.exec(name);
+  return match ? { sessionId: match[1] ?? "", segmentIndex: Number(match[2]) } : null;
 }
 
 export function segmentExtensionFromMime(mimeType: string): string {

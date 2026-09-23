@@ -1,5 +1,5 @@
 import type { UploadedFile } from "@eneo/eneo-js";
-import type { SessionState } from "$lib/features/audio/recordingSession";
+import { parseSegmentFilename, type SessionState } from "$lib/features/audio/recordingSession";
 import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
 import {
   bumpSegmentCountInState,
@@ -157,7 +157,7 @@ export class FlowRunFileInputState {
   recordUploadedFile(stepId: string, file: UploadedFile): void {
     this.#runtimeFilesByStepId = {
       ...this.#runtimeFilesByStepId,
-      [stepId]: [...(this.#runtimeFilesByStepId[stepId] ?? []), file]
+      [stepId]: inSegmentOrder([...(this.#runtimeFilesByStepId[stepId] ?? []), file])
     };
   }
 
@@ -419,6 +419,26 @@ export class FlowRunFileInputState {
 
 function addUnique(values: string[], value: string): string[] {
   return values.includes(value) ? values : [...values, value];
+}
+
+// A step's files go to the run in list order, so recorded segments take their
+// slots in session, then segment, order whatever order their uploads finished
+// in (a retried segment must not follow a later one); other files keep their
+// places.
+function inSegmentOrder(files: UploadedFile[]): UploadedFile[] {
+  const segments = files.flatMap((file, slot) => {
+    const segment = parseSegmentFilename(file.name ?? "");
+    return segment ? [{ file, slot, ...segment }] : [];
+  });
+  const sorted = segments.toSorted(
+    (a, b) => a.sessionId.localeCompare(b.sessionId) || a.segmentIndex - b.segmentIndex
+  );
+  const ordered = [...files];
+  segments.forEach(({ slot }, position) => {
+    const next = sorted[position];
+    if (next) ordered[slot] = next.file;
+  });
+  return ordered;
 }
 
 function isSegment(pending: PreparedRecordedSegment, segment: PreparedRecordedSegment): boolean {

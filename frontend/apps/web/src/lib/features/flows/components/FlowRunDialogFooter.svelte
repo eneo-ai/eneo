@@ -14,7 +14,9 @@
     isReviewPage,
     showReuseLastInput,
     showPrevious,
+    canGoPrevious = true,
     nextDisabledReason,
+    reasonId,
     labels,
     onCancelClose,
     onGoNext,
@@ -31,7 +33,11 @@
     isReviewPage: boolean;
     showReuseLastInput: boolean;
     showPrevious: boolean;
+    // False while a step records: going back would drop its recording.
+    canGoPrevious?: boolean;
     nextDisabledReason: string | undefined;
+    // The id of the line that says why navigation is disabled.
+    reasonId: string;
     labels: FlowRunDialogLabels;
     onCancelClose: () => void;
     onGoNext: () => void;
@@ -86,6 +92,7 @@
       <div class="order-1 flex-grow sm:order-2">
         {#if !isReviewPage && !canGoNext && nextDisabledReason}
           <p
+            id={reasonId}
             class="text-secondary text-sm leading-relaxed sm:text-right"
             role="status"
             aria-live="polite"
@@ -123,6 +130,9 @@
           <Button
             variant="outline"
             onclick={onGoPrevious}
+            disabled={!canGoPrevious}
+            title={canGoPrevious ? undefined : nextDisabledReason}
+            aria-describedby={canGoPrevious ? undefined : reasonId}
             class="order-2 w-full sm:order-none sm:w-auto"
           >
             {labels.previous}
@@ -145,6 +155,7 @@
             onclick={onGoNext}
             disabled={!canGoNext}
             title={nextDisabledReason}
+            aria-describedby={!canGoNext && nextDisabledReason ? reasonId : undefined}
             class="order-1 w-full min-w-[7rem] sm:order-none sm:w-auto"
           >
             {labels.next}

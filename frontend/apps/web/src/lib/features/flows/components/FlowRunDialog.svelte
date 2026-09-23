@@ -115,7 +115,7 @@
   // drives the recorder via the imperative startExternal/stopExternal API.
   type RecorderImperativeRef = {
     startExternal: () => Promise<void>;
-    stopExternal: (reason: RecordingStopReason) => void;
+    stopExternal: (reason: RecordingStopReason) => Promise<void>;
   };
   const recordingSessionsByStepId: Record<string, RecordingSession | null> = {};
   const recorderRefsByStepId: Record<string, RecorderImperativeRef | null> = {};
@@ -128,6 +128,7 @@
   const uploadTailsByStepId = new Map<string, Promise<void>>();
 
   const AUDIO_ACCEPT_FILTER = "audio/*,video/webm,video/mp4";
+  const NAVIGATION_REASON_ID = "flow-run-navigation-reason";
   const locale = (getLocale() === "en" ? "en" : "sv") as FlowLocale;
   const labels = getFlowRunDialogLabels(locale);
 
@@ -268,8 +269,9 @@
       ? canStartRecording(fileInputState.segmentsAwaitingUpload(currentRuntimeStep.step_id))
       : true
   );
-  // Save for later and discard end the whole recording, so they wait until
-  // capture has stopped and every segment is in the local store.
+  // Capture has stopped and every segment is in the local store. Until then
+  // no page change (leaving the step unmounts its recorder, which drops the
+  // segment in progress) and no save for later or discard.
   const recordingSettled = $derived(
     !fileInputState.hasActiveRecording && !fileInputState.hasPersistingRecordedSegments
   );
@@ -358,6 +360,18 @@
     }
   });
 
+  // Closing unmounts the recorder, which drops a recording still running. So
+  // the recording stops as the dialog starts to close, and the reset waits
+  // until its segments have been handed over and their local save started.
+  let closingRecordings: Promise<unknown> | null = null;
+  function handleOpenChange(isOpen: boolean) {
+    if (isOpen) return;
+    const stops = fileInputState.recordingStepIdsSnapshot.map((stepId) =>
+      recorderRefsByStepId[stepId]?.stopExternal("manual")
+    );
+    closingRecordings = stops.length > 0 ? Promise.all(stops) : null;
+  }
+
   // Reset runs only once the close animation is fully complete and bits-ui
   // has unmounted the dialog content tree. Doing it inside an `$effect` that
   // tracked `open` cascaded through `isDirty` → `closeBehavior` → bits-ui
@@ -367,9 +381,17 @@
   // close cleanup — the docs explicitly warn against using `$effect` to
   // synchronise state.
   function handleOpenChangeComplete(isOpen: boolean) {
-    if (!isOpen) {
+    if (isOpen) return;
+    const closing = closingRecordings;
+    closingRecordings = null;
+    if (!closing) {
       resetDialogState();
+      return;
     }
+    void closing.then(() => {
+      // Reopened meanwhile: keep the state the user came back to.
+      if (!open) resetDialogState();
+    });
   }
 
   function resetDialogState() {
@@ -721,7 +743,7 @@
         }
       },
       stopSegment: (reason) => {
-        recorderRefsByStepId[stepId]?.stopExternal(reason);
+        void recorderRefsByStepId[stepId]?.stopExternal(reason);
       },
       segmentsAwaitingUpload: () => fileInputState.segmentsAwaitingUpload(stepId)
     };
@@ -990,7 +1012,7 @@
   }
 
   function goToPreviousPage() {
-    if (currentPageIndex <= 0) return;
+    if (currentPageIndex <= 0 || !recordingSettled) return;
     currentPageIndex -= 1;
     focusPageHeading();
   }
@@ -1003,7 +1025,7 @@
 
   function goToPageById(pageId: FlowRunWizardPage["id"]) {
     const nextIndex = wizardPages.findIndex((page) => page.id === pageId);
-    if (nextIndex < 0) return;
+    if (nextIndex < 0 || (nextIndex !== currentPageIndex && !recordingSettled)) return;
     currentPageIndex = nextIndex;
     focusPageHeading();
   }
@@ -1019,10 +1041,11 @@
 
   function getDisabledNextReason(): string | undefined {
     if (isSubmitting) return undefined;
-    if (currentPageProgressBlockers.length > 0) {
-      return currentPageProgressBlockers[0]?.title;
-    }
-    return undefined;
+    // While the step records, stopping is what unlocks both Next and Tillbaka.
+    const recording = currentPageProgressBlockers.find(
+      (blocker) => blocker.kind === "recording-in-progress"
+    );
+    return (recording ?? currentPageProgressBlockers[0])?.title;
   }
 
   async function continueResumedSession(stepId: string, hint: SessionRecoveryHint) {
@@ -1182,7 +1205,11 @@
   }
 </script>
 
-<Dialog.Root bind:open onOpenChangeComplete={handleOpenChangeComplete}>
+<Dialog.Root
+  bind:open
+  onOpenChange={handleOpenChange}
+  onOpenChangeComplete={handleOpenChangeComplete}
+>
   <Dialog.Content
     class="!flex max-h-[92vh] min-h-[24rem] !max-w-5xl flex-col !gap-0 overflow-hidden !rounded-xl !p-0 sm:min-h-[30rem]"
     showCloseButton={false}
@@ -1233,6 +1260,8 @@
         {progressLabel}
         {currentInputPosition}
         {runtimeInputTotal}
+        navigationLocked={!recordingSettled}
+        navigationReasonId={NAVIGATION_REASON_ID}
         onGoToPage={goToPageById}
       />
 
@@ -1330,7 +1359,9 @@
       {isReviewPage}
       {showReuseLastInput}
       {showPrevious}
+      canGoPrevious={recordingSettled}
       {nextDisabledReason}
+      reasonId={NAVIGATION_REASON_ID}
       {labels}
       onCancelClose={handleCancelClose}
       onGoNext={goToNextPage}

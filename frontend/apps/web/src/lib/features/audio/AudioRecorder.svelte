@@ -19,6 +19,7 @@
   import { buildRecordedAudioFile } from "./recordedAudioFile";
   import type { RecordingStopReason } from "./recordedAudioFile";
   import { downloadRecordedAudioFile } from "./downloadRecordedAudioFile";
+  import { ROTATION_OVERLAP_MS } from "./recordingSession";
 
   // Every stop reports once. `blob` is null when nothing was captured, so a
   // caller still hears a failure to retry, or the user's own stop.
@@ -73,6 +74,13 @@
   let handleStreamEnded: ((event: Event) => void) | null = null;
   let animationFrameId: number | null = null;
   let discardRecordingOnStop = false;
+  // Recorders a rotation replaced; each still finishes its own segment.
+  const replacedRecorders = new WeakSet<MediaRecorder>();
+  // Settles once a recorder's stop has been handled.
+  const recorderStops = new WeakMap<MediaRecorder, Promise<void>>();
+  // The replaced recorder still capturing the rotation overlap.
+  let overlappingRecorder: MediaRecorder | null = null;
+  let overlapTimer: ReturnType<typeof setTimeout> | null = null;
   let isDestroyed = false;
   let lastResetToken: unknown = resetToken;
   let activeAudioBitsPerSecond = SPEECH_OPUS_BITRATE;
@@ -551,7 +559,14 @@
     const initialMimeType = recorder.mimeType || recordingOptions.mimeType || "";
     const chunks: Blob[] = [];
     const segmentStartedAt = dayjs();
-    const isLive = () => mediaRecorder === recorder;
+    const isReplaced = () => replacedRecorders.has(recorder);
+    let stopHandled = () => {};
+    recorderStops.set(
+      recorder,
+      new Promise<void>((resolve) => {
+        stopHandled = resolve;
+      })
+    );
     const finishedSegment = () => {
       const mimeType =
         recorder.mimeType ||
@@ -574,7 +589,7 @@
         chunks.push(event.data);
         // A replaced recorder's last chunk belongs to its own file, not to
         // the live segment's size and stall bookkeeping.
-        if (!isLive()) return;
+        if (isReplaced()) return;
         const now = performance.now();
         const maxBytesValue =
           typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
@@ -612,7 +627,7 @@
       console.error(errorMsg, event);
       recordingStats.errors.push(errorMsg);
       // A replaced recorder failing to finish its file must not stop the live one.
-      if (!isLive()) return;
+      if (isReplaced()) return;
       setRecordingErrorState(errorMsg, event.error);
       recordingState = "error";
       setStopReason("error");
@@ -620,10 +635,19 @@
     });
 
     recorder.addEventListener("stop", () => {
-      if (!isLive()) {
+      try {
+        finishStop();
+      } finally {
+        stopHandled();
+      }
+    });
+
+    function finishStop() {
+      if (isReplaced()) {
         // Rotation replaced this recorder: hand its file over and leave the
-        // stream, the meter and the live recorder alone.
-        if (!discardRecordingOnStop && chunks.length > 0) {
+        // stream, the meter and the live recorder alone. The segment is
+        // complete, so not even an unmount drops it.
+        if (chunks.length > 0) {
           onRecordingDone({ ...finishedSegment(), reason: "rotation" });
         }
         return;
@@ -671,7 +695,7 @@
         reason,
         durationMs: segment?.durationMs ?? 0
       });
-    });
+    }
 
     recorder.addEventListener("pause", () => {
       console.warn("MediaRecorder was paused unexpectedly");
@@ -687,13 +711,14 @@
     return recorder;
   }
 
-  // Rotation starts the next segment's recorder on the live stream before
-  // stopping the current one, so no audio falls between the two files and the
-  // microphone, AudioContext and meter keep running. The replaced recorder
-  // hands its file over with the "rotation" reason once it stops.
+  // Rotation starts the next segment's recorder on the live stream and stops
+  // the current one ROTATION_OVERLAP_MS later, while the microphone,
+  // AudioContext and meter keep running. The replaced recorder hands its file
+  // over with the "rotation" reason once it stops.
   function rotateSegment() {
     const replaced = mediaRecorder;
     if (!isRecording || !mediaStream || !replaced || replaced.state === "inactive") return;
+    void stopOverlappingRecorder();
     try {
       mediaRecorder = startSegmentRecorder(mediaStream);
     } catch (error) {
@@ -702,16 +727,36 @@
       recordingStats.errors.push("Segment rotation failed: " + formatMediaError(error));
       return;
     }
+    replacedRecorders.add(replaced);
+    overlappingRecorder = replaced;
+    overlapTimer = setTimeout(() => void stopOverlappingRecorder(), ROTATION_OVERLAP_MS);
     // The new file starts empty: the size limit and the stall watchdog
     // measure it from zero.
     recordingStats.totalBytes = 0;
     recordingStats.lastChunkTime = performance.now();
     firstChunkSeen = false;
     requestDataPendingAt = null;
-    replaced.stop();
   }
 
-  function stopRecording() {
+  // Ends the rotation overlap now; settles once the replaced recorder has
+  // handed over its file.
+  function stopOverlappingRecorder(): Promise<void> {
+    if (overlapTimer !== null) {
+      clearTimeout(overlapTimer);
+      overlapTimer = null;
+    }
+    const recorder = overlappingRecorder;
+    overlappingRecorder = null;
+    if (!recorder) return Promise.resolve();
+    if (recorder.state !== "inactive") recorder.stop();
+    return recorderStops.get(recorder) ?? Promise.resolve();
+  }
+
+  // Stops the recording, the replaced recorder of an overlap first, so its
+  // file comes before the final one and the stream outlives both. Settles
+  // once every stopped recorder has handed over its file.
+  function stopRecording(): Promise<void> {
+    const overlapStopped = stopOverlappingRecorder();
     stopStallChecker();
     detachVisibilityHandler();
     if (isRecording) {
@@ -720,9 +765,10 @@
       recordingState = "processing";
     }
 
+    const live = mediaRecorder;
     try {
-      if (mediaRecorder && mediaRecorder.state !== "inactive") {
-        mediaRecorder.stop();
+      if (live && live.state !== "inactive") {
+        live.stop();
       }
     } catch (error) {
       const errorMsg =
@@ -732,6 +778,9 @@
       recordingStats.errors.push(errorMsg);
       recordingState = "error";
     }
+    return Promise.all([overlapStopped, live ? recorderStops.get(live) : undefined]).then(
+      () => undefined
+    );
   }
 
   function toggleRecording(e: Event) {
@@ -756,14 +805,15 @@
   }
 
   // "rotation" finishes the current segment and records on; any other reason
-  // stops and labels the finished recording with it.
-  export function stopExternal(reason: RecordingStopReason = "manual"): void {
+  // stops and labels the finished recording with it, and settles once every
+  // segment has been handed over.
+  export function stopExternal(reason: RecordingStopReason = "manual"): Promise<void> {
     if (reason === "rotation") {
       rotateSegment();
-      return;
+      return Promise.resolve();
     }
     setStopReason(reason);
-    stopRecording();
+    return stopRecording();
   }
 
   const onAnimationFrame = () => {
@@ -1001,10 +1051,14 @@
 
   function disposeRecorder() {
     isDestroyed = true;
-    discardRecordingOnStop = true;
     clearCompletedRecording();
+    // A replaced recorder's segment is complete, so it is still handed over.
+    void stopOverlappingRecorder();
 
+    // A recording still running at unmount is dropped; one stopped just
+    // before (the dialog stops it as it closes) still hands over its file.
     if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      discardRecordingOnStop = true;
       try {
         mediaRecorder.stop();
       } catch (e) {

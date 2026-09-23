@@ -9,6 +9,8 @@
     progressLabel,
     currentInputPosition,
     runtimeInputTotal,
+    navigationLocked = false,
+    navigationReasonId,
     onGoToPage
   }: {
     wizardPages: FlowRunWizardPage[];
@@ -17,6 +19,10 @@
     progressLabel: string;
     currentInputPosition: number;
     runtimeInputTotal: number;
+    // True while a step records: leaving it would drop its recording.
+    navigationLocked?: boolean;
+    // The id of the line that says why navigation is disabled.
+    navigationReasonId?: string;
     onGoToPage: (pageId: FlowRunWizardPage["id"]) => void;
   } = $props();
 </script>
@@ -59,7 +65,7 @@
       {#each wizardPages as page, pageIndex (page.id)}
         {@const isCompleted = pageIndex < currentPageIndex}
         {@const isCurrent = pageIndex === currentPageIndex}
-        {@const isClickable = isCompleted}
+        {@const isClickable = isCompleted && !navigationLocked}
         <button
           type="button"
           title={page.title}
@@ -69,6 +75,7 @@
             : 'bg-hover-default'}"
           aria-label={page.title}
           aria-current={isCurrent ? "step" : undefined}
+          aria-describedby={isCompleted && navigationLocked ? navigationReasonId : undefined}
           disabled={!isClickable}
           class:cursor-pointer={isClickable}
           class:cursor-default={!isClickable}

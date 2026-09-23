@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { UploadedFile } from "@eneo/eneo-js";
+import { buildSegmentFilenameBase } from "$lib/features/audio/recordingSession";
 import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
 import { FlowRunFileInputState } from "./FlowRunFileInputState.svelte";
 
@@ -19,6 +20,15 @@ function uploadedFile(id: string): UploadedFile {
     mimetype: "audio/webm",
     size: 128,
     created_at: "2026-05-01T08:00:00.000Z"
+  };
+}
+
+// An uploaded recorded segment, named the way the recorder names its files.
+function uploadedSegment(id: string, sessionId: string, segmentIndex: number): UploadedFile {
+  const capturedAt = Date.UTC(2026, 4, 1, 8, segmentIndex);
+  return {
+    ...uploadedFile(id),
+    name: `${buildSegmentFilenameBase(sessionId, segmentIndex, capturedAt)}.webm`
   };
 }
 
@@ -122,6 +132,35 @@ describe("FlowRunFileInputState", () => {
     expect(state.uploadingStepIdsSnapshot).toEqual(["step-b"]);
     expect(state.getUploadError("step-a")).toBeNull();
     expect(state.getSkippedMessage("step-a")).toBeNull();
+  });
+
+  it("keeps a step's recorded segments in segment order whatever order they upload in", () => {
+    const state = new FlowRunFileInputState();
+    const sessionA = "0a1b2c3d-0000-4000-8000-000000000001";
+    const sessionB = "0b1b2c3d-0000-4000-8000-000000000002";
+
+    state.recordUploadedFile("step-a", uploadedFile("notes"));
+    state.recordUploadedFile("step-a", uploadedSegment("b-0", sessionB, 0));
+    state.recordUploadedFile("step-a", uploadedSegment("a-1", sessionA, 1));
+    state.recordUploadedFile("step-a", uploadedFile("slides"));
+    state.recordUploadedFile("step-a", uploadedSegment("a-0", sessionA, 0));
+
+    // Segments take the segment slots in session, then segment, order; the
+    // other files keep their places.
+    expect(state.getUploadedFiles("step-a").map(({ id }) => id)).toEqual([
+      "notes",
+      "a-0",
+      "a-1",
+      "slides",
+      "b-0"
+    ]);
+    expect(state.runtimeFilesSnapshot["step-a"]?.map(({ id }) => id)).toEqual([
+      "notes",
+      "a-0",
+      "a-1",
+      "slides",
+      "b-0"
+    ]);
   });
 
   it("keeps a step active until all of its uploads finish", () => {

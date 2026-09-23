@@ -109,7 +109,10 @@
     // session controller can call startExternal/stopExternal during retries.
     onRecorderRef?: (
       stepId: string,
-      ref: { startExternal: () => Promise<void>; stopExternal: () => void } | null
+      ref: {
+        startExternal: () => Promise<void>;
+        stopExternal: (reason?: RecordingStopReason) => Promise<void>;
+      } | null
     ) => void;
     onSessionRetry?: () => void;
     onSessionDismissFailure?: () => void;
@@ -138,7 +141,7 @@
 
   let recorderRef = $state<{
     startExternal: () => Promise<void>;
-    stopExternal: () => void;
+    stopExternal: (reason?: RecordingStopReason) => Promise<void>;
   } | null>(null);
 
   // Push the live ref up to the dialog every time it changes so the
