@@ -54633,6 +54633,8 @@ export interface operations {
         offset?: number;
         /** @description Filter runs by one or more status values. Repeat `status=` to request multiple statuses. */
         status?: components["schemas"]["FlowRunStatus"][] | null;
+        /** @description Only return runs the caller started, within the runs the caller may see. A module session counts as its signed-in user. */
+        mine?: boolean;
       };
       header?: never;
       path: {
