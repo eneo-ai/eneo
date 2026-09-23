@@ -3,7 +3,8 @@
   import { getEneo } from "$lib/core/Eneo";
   import { IconRefresh } from "@eneo/icons/refresh";
   import type { Website } from "@eneo/eneo-js";
-  import { Button, Dialog, Tooltip } from "@eneo/ui";
+  import { Button, Dialog } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
@@ -32,12 +33,26 @@
 
 <Dialog.Root bind:isOpen={showDialog}>
   <Dialog.Trigger let:trigger asFragment>
-    <Tooltip text={isDisabled ? m.cant_sync_while_crawl_running() : undefined}>
-      <Button is={trigger} variant="primary" disabled={isDisabled}>
+    {#if isDisabled}
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <span {...props} class="block">
+              <Button is={trigger} variant="primary" disabled>
+                <IconRefresh></IconRefresh>
+                {m.sync_now()}</Button
+              >
+            </span>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content>{m.cant_sync_while_crawl_running()}</Tooltip.Content>
+      </Tooltip.Root>
+    {:else}
+      <Button is={trigger} variant="primary">
         <IconRefresh></IconRefresh>
         {m.sync_now()}</Button
       >
-    </Tooltip>
+    {/if}
   </Dialog.Trigger>
   <Dialog.Content width="small">
     <Dialog.Title>{m.sync_website()}</Dialog.Title>

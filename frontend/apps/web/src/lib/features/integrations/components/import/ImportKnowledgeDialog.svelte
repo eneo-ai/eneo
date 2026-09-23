@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Button, Dialog, Tooltip } from "@eneo/ui";
+  import { Button, Dialog } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getAvailableIntegrations } from "../../AvailableIntegrations";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { writable } from "svelte/store";
@@ -157,14 +158,23 @@
                   {@render integrationSelector(integration)}
                 </button>
               {:else}
-                <Tooltip
-                  text={integration.connected
-                    ? undefined
-                    : m.enable_integration_in_account_settings({ name: integration.name })}
-                  class="cursor-not-allowed opacity-70 *:pointer-events-none"
-                >
-                  {@render integrationSelector(integration)}
-                </Tooltip>
+                <Tooltip.Root>
+                  <Tooltip.Trigger>
+                    {#snippet child({ props })}
+                      <div
+                        {...props}
+                        role="button"
+                        aria-disabled="true"
+                        class="cursor-not-allowed opacity-70 *:pointer-events-none"
+                      >
+                        {@render integrationSelector(integration)}
+                      </div>
+                    {/snippet}
+                  </Tooltip.Trigger>
+                  <Tooltip.Content>
+                    {m.enable_integration_in_account_settings({ name: integration.name })}
+                  </Tooltip.Content>
+                </Tooltip.Root>
               {/if}
             {/each}
           {/if}

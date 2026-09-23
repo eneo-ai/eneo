@@ -2,7 +2,9 @@
   import type { Attachment } from "../AttachmentManager";
   import { IconCheck } from "@eneo/icons/check";
   import { IconCancel } from "@eneo/icons/cancel";
-  import { Button, ProgressBar } from "@eneo/ui";
+  import { Button } from "@eneo/ui";
+  import { Progress } from "$lib/components/ui/progress/index.js";
+  import { m } from "$lib/paraglide/messages";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatFileType } from "$lib/core/formatting/formatFileType";
   import { IconTrash } from "@eneo/icons/trash";
@@ -39,7 +41,11 @@
 
     {#if attachment.progress < 100}
       <div transition:fade={{ duration: 150 }}>
-        <ProgressBar progress={attachment.progress}></ProgressBar>
+        <Progress
+          value={attachment.progress}
+          class="h-2"
+          aria-label={m.upload_progress_for({ name: attachment.file.name })}
+        />
       </div>
     {/if}
   </div>

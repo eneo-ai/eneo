@@ -7,9 +7,9 @@
 <script lang="ts">
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Tooltip } from "@eneo/ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { derived } from "svelte/store";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
@@ -177,11 +177,7 @@
         server,
         $currentSpace.security_classification
       )}
-      <Tooltip
-        text={meetsClassification
-          ? undefined
-          : m.mcp_server_does_not_meet_security_classification()}
-      >
+      {#snippet serverBlock()}
         <div
           class="border-default border-b last:border-b-0"
           class:pointer-events-none={!meetsClassification}
@@ -285,7 +281,19 @@
             </div>
           {/if}
         </div>
-      </Tooltip>
+      {/snippet}
+      {#if meetsClassification}
+        {@render serverBlock()}
+      {:else}
+        <Tooltip.Root>
+          <Tooltip.Trigger tabindex={-1}>
+            {#snippet child({ props })}
+              <div {...props}>{@render serverBlock()}</div>
+            {/snippet}
+          </Tooltip.Trigger>
+          <Tooltip.Content>{m.mcp_server_does_not_meet_security_classification()}</Tooltip.Content>
+        </Tooltip.Root>
+      {/if}
     {/each}
   </div>
 </Settings.Row>

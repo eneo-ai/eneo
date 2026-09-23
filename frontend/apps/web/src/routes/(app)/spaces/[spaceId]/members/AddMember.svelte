@@ -6,7 +6,8 @@
 
 <script lang="ts">
   import { IconSearch } from "@eneo/icons/search";
-  import { Button, Dialog, Select, Tooltip } from "@eneo/ui";
+  import { Button, Dialog, Select } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import type { UserSparse } from "@eneo/eneo-js";
@@ -121,12 +122,7 @@
                     class="hover:bg-hover-default data-[highlighted]:bg-secondary flex items-center gap-1 rounded-md px-2 py-1 hover:cursor-pointer data-[disabled]:pointer-events-none data-[disabled]:!cursor-not-allowed data-[disabled]:opacity-30 data-[disabled]:hover:bg-transparent"
                     class:opacity-70={isMember}
                   >
-                    <Tooltip
-                      text={isMember
-                        ? m.user_already_member({ space: $currentSpace.name })
-                        : undefined}
-                      class="pointer-events-auto flex w-full"
-                    >
+                    {#snippet userLabel()}
                       <div class="px-2">
                         <MemberChip member={user}></MemberChip>
                       </div>
@@ -134,7 +130,27 @@
                       <span class=" text-primary truncate py-1">
                         {user.email}
                       </span>
-                    </Tooltip>
+                    {/snippet}
+                    {#if isMember}
+                      <Tooltip.Root>
+                        <Tooltip.Trigger>
+                          {#snippet child({ props })}
+                            <div
+                              {...props}
+                              tabindex={undefined}
+                              class="pointer-events-auto flex w-full"
+                            >
+                              {@render userLabel()}
+                            </div>
+                          {/snippet}
+                        </Tooltip.Trigger>
+                        <Tooltip.Content>
+                          {m.user_already_member({ space: $currentSpace.name })}
+                        </Tooltip.Content>
+                      </Tooltip.Root>
+                    {:else}
+                      {@render userLabel()}
+                    {/if}
                   </li>
                 {/each}
               {:else}

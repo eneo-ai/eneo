@@ -4,11 +4,12 @@
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { type Website } from "@eneo/eneo-js";
-  import { Dialog, Button, Select, Tooltip } from "@eneo/ui";
+  import { Dialog, Button, Select } from "@eneo/ui";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import { tick } from "svelte";
@@ -473,19 +474,26 @@
           />
         </Field.Field>
       {:else}
-        <Tooltip text={m.option_only_basic_crawls()}>
-          <Field.Field
-            orientation="horizontal"
-            class="border-default hover:bg-hover-dimmer p-4 px-6 opacity-40"
-          >
-            <Field.Label for={downloadFilesId}>{m.download_analyse_files()}</Field.Label>
-            <Switch
-              id={downloadFilesId}
-              disabled
-              checked={editableWebsite.download_files ?? false}
-            />
-          </Field.Field>
-        </Tooltip>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            {#snippet child({ props })}
+              <div {...props}>
+                <Field.Field
+                  orientation="horizontal"
+                  class="border-default hover:bg-hover-dimmer p-4 px-6 opacity-40"
+                >
+                  <Field.Label for={downloadFilesId}>{m.download_analyse_files()}</Field.Label>
+                  <Switch
+                    id={downloadFilesId}
+                    disabled
+                    checked={editableWebsite.download_files ?? false}
+                  />
+                </Field.Field>
+              </div>
+            {/snippet}
+          </Tooltip.Trigger>
+          <Tooltip.Content>{m.option_only_basic_crawls()}</Tooltip.Content>
+        </Tooltip.Root>
       {/if}
 
       {#if mode === "create"}

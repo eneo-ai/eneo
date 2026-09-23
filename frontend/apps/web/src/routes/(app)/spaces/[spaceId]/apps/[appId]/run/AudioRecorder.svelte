@@ -1,7 +1,7 @@
 <script lang="ts">
   import { IconMicrophone } from "@eneo/icons/microphone";
   import { IconStop } from "@eneo/icons/stop";
-  import { Tooltip } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { onDestroy, onMount } from "svelte";
 
   import dayjs from "dayjs";
@@ -469,20 +469,28 @@
 
 <div class="flex flex-col items-center justify-center gap-2">
   <div data-is-recording={isRecording} data-state={recordingState} class="recording-widget">
-    <Tooltip text={isRecording ? m.stop_recording() : m.start_recording()}>
-      <button
-        class="record-button"
-        on:click={toggleRecording}
-        data-is-recording={isRecording}
-        disabled={recordingState === "processing"}
-      >
-        {#if !isRecording}
-          <IconMicrophone />
-        {:else}
-          <IconStop />
-        {/if}
-      </button>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger>
+        {#snippet child({ props })}
+          <button
+            {...props}
+            type="button"
+            class="record-button"
+            on:click={toggleRecording}
+            data-is-recording={isRecording}
+            disabled={recordingState === "processing"}
+            aria-label={isRecording ? m.stop_recording() : m.start_recording()}
+          >
+            {#if !isRecording}
+              <IconMicrophone />
+            {:else}
+              <IconStop />
+            {/if}
+          </button>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content>{isRecording ? m.stop_recording() : m.start_recording()}</Tooltip.Content>
+    </Tooltip.Root>
 
     {#if isRecording}
       <div class="recording-stats">

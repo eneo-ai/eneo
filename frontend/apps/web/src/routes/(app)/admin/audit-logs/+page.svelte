@@ -5,8 +5,9 @@
   import { writable } from "svelte/store";
   import { SvelteDate, SvelteSet, SvelteURLSearchParams } from "svelte/reactivity";
   import { Page } from "$lib/components/layout";
-  import { Button, Input, Dropdown, ProgressBar } from "@eneo/ui";
+  import { Button, Input, Dropdown } from "@eneo/ui";
   import { Input as TextInput } from "$lib/components/ui/input/index.js";
+  import { Progress } from "$lib/components/ui/progress/index.js";
   import * as m from "$lib/paraglide/messages";
   import type { components, UserSparse } from "@eneo/eneo-js";
   import type { CalendarDate } from "@internationalized/date";
@@ -863,7 +864,14 @@
               </span>
               <span class="text-default font-medium">{exportProgress}%</span>
             </div>
-            <ProgressBar progress={exportProgress} />
+            <Progress
+              value={exportProgress}
+              class="h-2"
+              indicatorClass={exportProgress === 100 ? "bg-positive-default" : undefined}
+              aria-label={exportStatus === "pending"
+                ? m.audit_export_preparing()
+                : m.audit_exporting()}
+            />
             {#if exportTotalRecords > 0}
               <span class="text-muted text-xs">
                 {exportProcessedRecords.toLocaleString()} / {exportTotalRecords.toLocaleString()}

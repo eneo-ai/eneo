@@ -19,7 +19,7 @@
     ImageModel,
     TranscriptionModel
   } from "@eneo/eneo-js";
-  import { Tooltip } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import {
     formatCostPerImage,
     formatCostPerMillionTokens,
@@ -99,15 +99,16 @@
   })();
 </script>
 
-<Tooltip text={tooltip}>
-  <span
+<Tooltip.Root>
+  <Tooltip.Trigger
     class="
       border-dimmer bg-surface-dimmer text-muted
-      inline-flex items-center rounded-md border font-mono tabular-nums
+      inline-flex cursor-default items-center rounded-md border font-mono tabular-nums
       {dense ? 'px-1.5 py-0 text-[11px]' : 'px-2 py-0.5 text-xs'}
     "
     aria-label={`${tooltip}: ${chipText}`}
   >
     {chipText}
-  </span>
-</Tooltip>
+  </Tooltip.Trigger>
+  <Tooltip.Content>{tooltip}</Tooltip.Content>
+</Tooltip.Root>

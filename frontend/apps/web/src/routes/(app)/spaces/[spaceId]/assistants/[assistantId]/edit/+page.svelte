@@ -3,9 +3,11 @@
   import OpenFilesHelp from "$lib/features/assistants/components/OpenFilesHelp.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
 
-  import { Button, Tooltip } from "@eneo/ui";
+  import { Button } from "@eneo/ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
+  import { Button as UIButton } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { IconSparkles } from "@eneo/icons/sparkles";
   import { afterNavigate, beforeNavigate, invalidate } from "$app/navigation";
 
@@ -289,9 +291,6 @@
           title={m.name()}
           description={m.assistant_name_description()}
           hasChanges={$currentChanges.diff.name !== undefined}
-          revertFn={() => {
-            discardChanges("name");
-          }}
           let:aria
         >
           <input
@@ -306,9 +305,6 @@
           title={m.description()}
           description={m.assistant_description_description()}
           hasChanges={$currentChanges.diff.description !== undefined}
-          revertFn={() => {
-            discardChanges("description");
-          }}
           let:aria
         >
           <textarea
@@ -335,29 +331,36 @@
           title={m.prompt()}
           description={m.describe_assistant_behavior()}
           hasChanges={$currentChanges.diff.prompt !== undefined}
-          revertFn={() => {
-            discardChanges("prompt");
-          }}
           fullWidth
           let:aria
         >
           <div slot="toolbar" class="text-secondary flex items-center gap-1">
             {#if promptGuideAvailability}
-              <Tooltip
-                text={promptGuideAvailability.available
-                  ? m.prompt_guide_button_tooltip()
-                  : promptGuideDisabledTooltip(promptGuideAvailability.disabled_reason)}
-              >
-                <Button
-                  variant="simple"
-                  padding="icon-leading"
-                  disabled={!promptGuideAvailability.available}
-                  on:click={() => (isModalOpen = true)}
-                >
-                  <IconSparkles />
-                  {m.prompt_guide_button()}
-                </Button>
-              </Tooltip>
+              {@const available = promptGuideAvailability.available}
+              <Tooltip.Root>
+                <Tooltip.Trigger onclick={available ? () => (isModalOpen = true) : undefined}>
+                  {#snippet child({ props })}
+                    {#if available}
+                      <UIButton {...props} variant="ghost">
+                        <IconSparkles />
+                        {m.prompt_guide_button()}
+                      </UIButton>
+                    {:else}
+                      <span {...props} class="inline-flex">
+                        <UIButton variant="ghost" disabled>
+                          <IconSparkles />
+                          {m.prompt_guide_button()}
+                        </UIButton>
+                      </span>
+                    {/if}
+                  {/snippet}
+                </Tooltip.Trigger>
+                <Tooltip.Content>
+                  {available
+                    ? m.prompt_guide_button_tooltip()
+                    : promptGuideDisabledTooltip(promptGuideAvailability.disabled_reason)}
+                </Tooltip.Content>
+              </Tooltip.Root>
             {/if}
             {#if !promptLocked}
               <PromptVersionDialog
@@ -425,7 +428,6 @@
               title={m.skills()}
               description={m.skills_editor_description()}
               hasChanges={$currentChanges.diff.skill_bindings !== undefined}
-              revertFn={() => discardChanges("skill_bindings")}
             >
               <SkillBindingsEditor
                 bind:bindings={$update.skill_bindings}
@@ -459,10 +461,6 @@
           title={m.attachments()}
           description={m.attach_further_instructions()}
           hasChanges={$currentChanges.diff.attachments !== undefined}
-          revertFn={() => {
-            cancelUploadsAndClearQueue();
-            discardChanges("attachments");
-          }}
         >
           <AssistantSettingsAttachments bind:cancelUploadsAndClearQueue
           ></AssistantSettingsAttachments>
@@ -474,11 +472,6 @@
           hasChanges={$currentChanges.diff.groups !== undefined ||
             $currentChanges.diff.websites !== undefined ||
             $currentChanges.diff.integration_knowledge_list !== undefined}
-          revertFn={() => {
-            discardChanges("groups");
-            discardChanges("websites");
-            discardChanges("integration_knowledge_list");
-          }}
         >
           <div>
             <SelectKnowledge
@@ -496,11 +489,6 @@
           hasChanges={$currentChanges.diff.groups !== undefined ||
             $currentChanges.diff.websites !== undefined ||
             $currentChanges.diff.integration_knowledge_list !== undefined}
-          revertFn={() => {
-            discardChanges("groups");
-            discardChanges("websites");
-            discardChanges("integration_knowledge_list");
-          }}
         >
           <div>
             <SelectKnowledge
@@ -518,9 +506,6 @@
           title={m.completion_model()}
           description={m.this_model_will_be_used()}
           hasChanges={$currentChanges.diff.completion_model !== undefined}
-          revertFn={() => {
-            discardChanges("completion_model");
-          }}
           let:aria
         >
           {#if lockedModel}
@@ -545,9 +530,6 @@
           title={m.model_behaviour()}
           description={m.select_preset_behavior()}
           hasChanges={hasBehaviorChanges}
-          revertFn={() => {
-            discardChanges("completion_model_kwargs");
-          }}
           let:aria
         >
           <SelectBehaviourV2
@@ -563,9 +545,6 @@
             title={m.model_settings()}
             description={m.model_settings_description()}
             hasChanges={$currentChanges.diff.completion_model_kwargs !== undefined}
-            revertFn={() => {
-              discardChanges("completion_model_kwargs");
-            }}
           >
             <SelectModelSpecificSettings
               bind:kwArgs={$update.completion_model_kwargs}
@@ -582,9 +561,6 @@
             title={m.attachments_open_files_label()}
             description=""
             hasChanges={$currentChanges.diff.inline_file_text !== undefined}
-            revertFn={() => {
-              discardChanges("inline_file_text");
-            }}
             let:aria
           >
             <svelte:fragment slot="description">
@@ -618,9 +594,6 @@
           title={m.knowledge_mode()}
           description={m.knowledge_mode_description()}
           hasChanges={$currentChanges.diff.knowledge_mode !== undefined}
-          revertFn={() => {
-            discardChanges("knowledge_mode");
-          }}
           let:aria
         >
           <div class="border-default flex h-14 border-b py-2">
@@ -653,10 +626,6 @@
           description={m.select_mcp_servers_description()}
           hasChanges={$currentChanges.diff.mcp_servers !== undefined ||
             $currentChanges.diff.mcp_tools !== undefined}
-          revertFn={() => {
-            discardChanges("mcp_servers");
-            discardChanges("mcp_tools");
-          }}
         >
           {#if mcpEnforced}
             <!-- Policy GRANTs these servers to the personal assistant; they are
@@ -696,9 +665,6 @@
             title={m.capabilities()}
             description={m.capabilities_row_description()}
             hasChanges={$currentChanges.diff.enabled_capabilities !== undefined}
-            revertFn={() => {
-              discardChanges("enabled_capabilities");
-            }}
           >
             <div class="border-default overflow-hidden rounded-xl border">
               {#each CAPABILITIES as capability (capability.purpose)}
@@ -729,9 +695,6 @@
         {/if}
         <Settings.Row
           hasChanges={$currentChanges.diff.data_retention_days !== undefined}
-          revertFn={() => {
-            discardChanges("data_retention_days");
-          }}
           title={m.conversation_retention_title()}
           description={m.conversation_retention_assistant_description()}
           let:labelId
@@ -779,20 +742,12 @@
 
           <Settings.Row
             hasChanges={$currentChanges.diff.insight_enabled !== undefined}
-            revertFn={() => {
-              discardChanges("insight_enabled");
-            }}
             title={m.insights()}
             description={m.insights_description()}
             let:aria
           >
             <div class="border-default flex h-14 border-b py-2">
-              <Tooltip
-                text={data.assistant.permissions?.includes("insight_toggle")
-                  ? undefined
-                  : m.only_space_admins_toggle()}
-                class="w-full"
-              >
+              {#snippet insightSwitch()}
                 <RadioGroup.Root
                   value={$update.insight_enabled ? "on" : "off"}
                   onValueChange={(v) => ($update.insight_enabled = v === "on")}
@@ -813,7 +768,19 @@
                     </Field.Field>
                   </Field.Label>
                 </RadioGroup.Root>
-              </Tooltip>
+              {/snippet}
+              {#if data.assistant.permissions?.includes("insight_toggle")}
+                {@render insightSwitch()}
+              {:else}
+                <Tooltip.Root>
+                  <Tooltip.Trigger>
+                    {#snippet child({ props })}
+                      <div {...props} class="w-full">{@render insightSwitch()}</div>
+                    {/snippet}
+                  </Tooltip.Trigger>
+                  <Tooltip.Content>{m.only_space_admins_toggle()}</Tooltip.Content>
+                </Tooltip.Root>
+              {/if}
             </div>
           </Settings.Row>
         </Settings.Group>

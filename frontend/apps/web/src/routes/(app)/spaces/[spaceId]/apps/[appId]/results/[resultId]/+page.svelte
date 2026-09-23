@@ -3,7 +3,9 @@
   import { IconCopy } from "@eneo/icons/copy";
   import { IconDownload } from "@eneo/icons/download";
   import { IconPrint } from "@eneo/icons/print";
-  import { Button, Markdown, Tooltip } from "@eneo/ui";
+  import { Button, Markdown } from "@eneo/ui";
+  import { Button as UIButton } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import dayjs from "dayjs";
   import utc from "dayjs/plugin/utc";
@@ -140,19 +142,48 @@
   <div
     class="hidden-in-print border-default bg-primary absolute -right-[5.5rem] z-10 flex flex-col gap-1 rounded-lg border p-1 shadow"
   >
-    <Tooltip text={m.print_save_type_pdf({ type })} placement="left">
-      <Button on:click={print} padding="icon">
-        <IconPrint size="md" />
-      </Button>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger onclick={print}>
+        {#snippet child({ props })}
+          <UIButton
+            {...props}
+            variant="ghost"
+            size="icon"
+            aria-label={m.print_save_type_pdf({ type })}
+          >
+            <IconPrint size="md" />
+          </UIButton>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content side="left">{m.print_save_type_pdf({ type })}</Tooltip.Content>
+    </Tooltip.Root>
 
-    <Tooltip text={m.download_type_raw_text({ type })} placement="left">
-      <Button on:click={() => downloadAsText(text)} padding="icon"><IconDownload /></Button>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger onclick={() => downloadAsText(text)}>
+        {#snippet child({ props })}
+          <UIButton
+            {...props}
+            variant="ghost"
+            size="icon"
+            aria-label={m.download_type_raw_text({ type })}
+          >
+            <IconDownload />
+          </UIButton>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content side="left">{m.download_type_raw_text({ type })}</Tooltip.Content>
+    </Tooltip.Root>
 
-    <Tooltip text={m.copy_type({ type })} placement="left">
-      <Button on:click={() => copyText(text)} padding="icon"><IconCopy /></Button>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger onclick={() => copyText(text)}>
+        {#snippet child({ props })}
+          <UIButton {...props} variant="ghost" size="icon" aria-label={m.copy_type({ type })}>
+            <IconCopy />
+          </UIButton>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content side="left">{m.copy_type({ type })}</Tooltip.Content>
+    </Tooltip.Root>
   </div>
 {/snippet}
 

@@ -10,7 +10,7 @@
   import ChatComposer from "./ChatComposer.svelte";
   import { fade } from "svelte/transition";
   import { browser } from "$app/environment";
-  import { Tooltip } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getChatService } from "../../ChatService.svelte";
   import { chatCapabilityAvailable } from "../../chatCapabilities";
   import { getAppContext } from "$lib/core/AppContext";
@@ -157,12 +157,14 @@
   >
     {#if showScrollToBottom}
       <div transition:fade={{ duration: 150 }} class="absolute -top-12">
-        <Tooltip text={m.scroll_to_bottom()}>
-          <button
+        <Tooltip.Root>
+          <Tooltip.Trigger
             class="border-stronger bg-primary ring-default hover:bg-secondary flex gap-1 rounded-full border px-1.5 py-1.5 shadow-lg ring-offset-0 hover:ring-2"
-            onclick={scrollToBottom}><IconArrowDownToLine></IconArrowDownToLine></button
+            aria-label={m.scroll_to_bottom()}
+            onclick={scrollToBottom}><IconArrowDownToLine></IconArrowDownToLine></Tooltip.Trigger
           >
-        </Tooltip>
+          <Tooltip.Content>{m.scroll_to_bottom()}</Tooltip.Content>
+        </Tooltip.Root>
       </div>
     {/if}
     <ChatComposer {scrollToBottom} {onNewConversation}></ChatComposer>

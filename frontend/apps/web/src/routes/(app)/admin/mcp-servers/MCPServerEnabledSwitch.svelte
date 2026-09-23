@@ -9,8 +9,8 @@
   import { getEneo } from "$lib/core/Eneo";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
-  import { Tooltip } from "@eneo/ui";
   import { Switch } from "$lib/components/ui/switch/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
@@ -81,7 +81,18 @@
 </script>
 
 <div class="flex items-center">
-  <Tooltip text={tooltip}>
-    <Switch checked={isOn} onCheckedChange={() => toggleEnabled()} aria-label={mcpServer.name} />
-  </Tooltip>
+  <Tooltip.Root>
+    <Tooltip.Trigger tabindex={-1}>
+      {#snippet child({ props })}
+        <div {...props}>
+          <Switch
+            checked={isOn}
+            onCheckedChange={() => toggleEnabled()}
+            aria-label={mcpServer.name}
+          />
+        </div>
+      {/snippet}
+    </Tooltip.Trigger>
+    <Tooltip.Content>{tooltip}</Tooltip.Content>
+  </Tooltip.Root>
 </div>

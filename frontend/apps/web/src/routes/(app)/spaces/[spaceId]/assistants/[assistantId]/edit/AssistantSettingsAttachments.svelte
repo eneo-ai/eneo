@@ -1,7 +1,9 @@
 <script lang="ts">
   import { IconCancel } from "@eneo/icons/cancel";
   import { IconTrash } from "@eneo/icons/trash";
-  import { Button, ProgressBar } from "@eneo/ui";
+  import { Button } from "@eneo/ui";
+  import { Progress } from "$lib/components/ui/progress/index.js";
+  import { m } from "$lib/paraglide/messages";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatFileType } from "$lib/core/formatting/formatFileType";
   import { getEneo } from "$lib/core/Eneo";
@@ -131,7 +133,12 @@
         </span>
       </div>
 
-      <ProgressBar progress={upload.progress}></ProgressBar>
+      <Progress
+        value={upload.progress}
+        class="h-2"
+        indicatorClass={upload.progress === 100 ? "bg-positive-default" : undefined}
+        aria-label={m.upload_progress_for({ name: upload.file.name })}
+      />
     </div>
 
     <div class="min-w-8">
