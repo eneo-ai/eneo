@@ -1,12 +1,30 @@
-from datetime import date
+import json
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
-from eneo.ai_models.completion_models.completion_model import ResponseType
+from eneo.ai_models.completion_models.completion_model import (
+    Completion,
+    McpToolReference,
+    ResponseType,
+    ToolCallMetadata,
+)
+from eneo.assistants.api import assistant_protocol
+from eneo.assistants.api.assistant_models import AssistantResponse
+from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobInDBWithScore
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.questions.question import (
+    McpToolReferencePublic,
+    Question,
+    ToolAssistant,
+    ToolCallInfo,
+    UseTools,
+)
+from eneo.sessions.session import SessionFeedback, SessionInDB
+from eneo.sessions.session_protocol import to_session_public
 from eneo.widgets.application import widget_ask_service as module
 from eneo.widgets.application.widget_ask_service import (
     SessionNotOwnedError,
@@ -20,6 +38,15 @@ from eneo.widgets.domain.exceptions import (
 )
 from eneo.widgets.domain.visitor import VisitorClaims, WidgetPrincipal
 from eneo.widgets.domain.widget import Widget, WidgetLimits, WidgetPrivacy
+from tests.fixtures import TEST_MODEL_CHATGPT
+
+INTERNAL_MODEL = TEST_MODEL_CHATGPT.model_copy(
+    update={
+        "base_url": "https://llm.internal.kommun.se/v1",
+        "litellm_model_name": "azure/gpt-internal",
+    }
+)
+RESOURCE_CONTENT = "Ärende 2026-123: personuppgifter"
 
 
 def _widget(**overrides) -> Widget:
@@ -36,23 +63,92 @@ def _principal(widget: Widget) -> WidgetPrincipal:
 
 async def _chunks():
     for text in ("Hej", " där"):
-        yield SimpleNamespace(text=text)
+        yield Completion(text=text, response_type=ResponseType.TEXT)
+
+
+def _blob() -> InfoBlobInDBWithScore:
+    return InfoBlobInDBWithScore(
+        id=uuid4(),
+        title="Intern rutin",
+        url="https://intranet.kommun.se/rutin",
+        embedding_model_id=uuid4(),
+        user_id=uuid4(),
+        tenant_id=uuid4(),
+        size=10,
+        source_id=uuid4(),
+        version_state="active",
+        text="Öppettider",
+        original_available=True,
+        score=0.9,
+    )
+
+
+def _ask_result(session, answer) -> AssistantResponse:
+    """What AssistantService.ask returns for a stream: every retrieved
+    document and the full model record."""
+    return AssistantResponse.model_construct(
+        session=session,
+        question="q",
+        question_id=uuid4(),
+        files=[],
+        answer=answer,
+        info_blobs=[_blob()],
+        completion_model=INTERNAL_MODEL,
+        tools=UseTools(assistants=[ToolAssistant(id=uuid4(), handle="Intern")]),
+        mcp_tool_references=[],
+    )
+
+
+def _stored_question() -> Question:
+    question = Question(
+        id=uuid4(),
+        created_at=datetime(2026, 9, 23, tzinfo=timezone.utc),
+        question="Öppettider?",
+        answer="10–18.",
+        num_tokens_question=10,
+        num_tokens_answer=5,
+        tenant_id=uuid4(),
+        session_id=uuid4(),
+        completion_model=INTERNAL_MODEL,
+        assistant_id=uuid4(),
+        reasoning="Instruktionen säger…",
+        info_blobs=[InfoBlobInDB(**_blob().model_dump(exclude={"score"}))],
+        mcp_tool_references=[
+            McpToolReferencePublic(
+                id=uuid4(),
+                uri="https://casefiles.kommun.se/2026-123",
+                content=RESOURCE_CONTENT,
+                meta={"title": "Ärende 2026-123"},
+                tool_call_id="call_1",
+                mcp_tool_name="casefiles__search",
+            )
+        ],
+        tool_calls=[
+            ToolCallInfo(
+                server_name="casefiles",
+                tool_name="search",
+                arguments={"query": "bibliotek"},
+                tool_call_id="call_1",
+                result=RESOURCE_CONTENT,
+                meta={"gen_ai.request.model": "internal"},
+            )
+        ],
+    )
+    question.assistant_name = "Intern assistent"
+    return question
+
+
+def _stored_session(questions: int = 1) -> SessionInDB:
+    return SessionInDB(
+        id=uuid4(), name="s", questions=[_stored_question() for _ in range(questions)]
+    )
 
 
 def _service(*, ask_result=None, session_questions=0, tokens=(120, 80)):
     assistant_service = MagicMock()
-    session_obj = SimpleNamespace(
-        id=uuid4(), questions=[object()] * session_questions, feedback_value=None
-    )
+    session_obj = _stored_session(session_questions)
     assistant_service.ask = AsyncMock(
-        return_value=ask_result
-        or SimpleNamespace(
-            session=session_obj,
-            answer=_chunks(),
-            question="q",
-            question_id=uuid4(),
-            completion_model=object(),
-        )
+        return_value=ask_result or _ask_result(session_obj, _chunks())
     )
     session_service = MagicMock()
     session_service.get_session_by_uuid = AsyncMock(return_value=session_obj)
@@ -194,104 +290,193 @@ async def test_ask_streams_then_settles_budget_and_records_usage():
     deps.usage.delete_session.assert_not_awaited()
 
 
-async def test_ask_strips_references_when_sources_are_hidden():
-    async def cited():
-        yield SimpleNamespace(text="Hej", reference_chunks=[object()])
+async def _visitor_events(response) -> list[tuple[str, dict]]:
+    """The SSE events the public ask route sends for this response."""
+    sse = await assistant_protocol.to_conversation_response(
+        response=response, stream=True, show_pricing=False
+    )
+    return [(event.event, json.loads(event.data)) async for event in sse.body_iterator]
 
-    service, _ = _service(
-        ask_result=SimpleNamespace(
-            session=SimpleNamespace(id=uuid4(), questions=[], feedback_value=None),
-            answer=cited(),
-            question="q",
-            question_id=uuid4(),
-            completion_model=object(),
-        )
+
+def _tool_event() -> Completion:
+    return Completion(
+        text="",
+        response_type=ResponseType.TOOL_CALL,
+        tool_calls_metadata=[
+            ToolCallMetadata(
+                server_name="casefiles",
+                tool_name="search",
+                arguments={"query": "bibliotek"},
+                tool_call_id="call_1",
+                result_status="success",
+                result=RESOURCE_CONTENT,
+                mcp_tool_name="casefiles__search",
+                meta={"gen_ai.request.model": "internal"},
+            )
+        ],
+        mcp_tool_references=[
+            McpToolReference(
+                id=uuid4(),
+                tool_call_id="call_1",
+                mcp_tool_name="casefiles__search",
+                uri="https://casefiles.kommun.se/2026-123",
+                mime_type="text/plain",
+                content=RESOURCE_CONTENT,
+                meta={"title": "Ärende 2026-123", "internal_id": 42},
+                order=0,
+            )
+        ],
+    )
+
+
+async def _answer_with_everything():
+    yield Completion(
+        reasoning_content="Instruktionen säger…", response_type=ResponseType.REASONING
+    )
+    yield _tool_event()
+    yield Completion(
+        text="Hej", response_type=ResponseType.TEXT, reference_chunks=[_blob()]
+    )
+
+
+async def _ask_as_visitor(widget: Widget) -> list[tuple[str, dict]]:
+    service, deps = _service()
+    deps.assistant_service.ask.return_value = _ask_result(
+        deps.session, _answer_with_everything()
     )
     response = await service.ask(
-        _principal(_widget(show_sources=False)),
-        question="Hej?",
-        session_id=None,
-        client_ip="203.0.113.1",
+        _principal(widget), question="Hej?", session_id=None, client_ip=None
     )
-    chunks = [chunk async for chunk in response.answer]
-    assert [chunk.reference_chunks for chunk in chunks] == [None]
+    return await _visitor_events(response)
 
 
-async def test_ask_hides_tool_activity_but_keeps_its_citations():
-    async def chunks():
-        yield SimpleNamespace(
-            text="",
-            response_type=ResponseType.TOOL_CALL,
-            tool_calls_metadata=[object()],
-            mcp_tool_references=None,
-            reference_chunks=None,
-        )
-        yield SimpleNamespace(
-            text="",
-            response_type=ResponseType.TOOL_CALL,
-            tool_calls_metadata=[object()],
-            mcp_tool_references=[object()],
-            reference_chunks=None,
-        )
-        yield SimpleNamespace(
-            text="Hej",
-            response_type=ResponseType.TEXT,
-            tool_calls_metadata=None,
-            mcp_tool_references=None,
-            reference_chunks=None,
-        )
+async def test_stream_never_carries_model_reasoning_or_tool_internals():
+    events = await _ask_as_visitor(_widget())
+    payload = json.dumps(events)
 
-    service, _ = _service(
-        ask_result=SimpleNamespace(
-            session=SimpleNamespace(id=uuid4(), questions=[], feedback_value=None),
-            answer=chunks(),
-            question="q",
-            question_id=uuid4(),
-            completion_model=object(),
-        )
-    )
-    response = await service.ask(
-        _principal(_widget(show_tool_activity=False)),
-        question="Hej?",
-        session_id=None,
-        client_ip="203.0.113.1",
-    )
-    out = [chunk async for chunk in response.answer]
-    assert [chunk.response_type for chunk in out] == [
-        ResponseType.TOOL_CALL,
-        ResponseType.TEXT,
-    ]
-    assert out[0].tool_calls_metadata is None
-    assert out[0].mcp_tool_references
+    assert [event for event, _ in events] == ["first_chunk", "tool_call", "text"]
+    first = events[0][1]
+    assert first["completion_model"] is None
+    assert first["tools"] == {"assistants": []}
+    # Retrieved documents are not listed up front; cited ones come with text.
+    assert first["references"] == []
+    assert events[2][1]["references"][0]["metadata"]["title"] == "Intern rutin"
+    for leaked in (RESOURCE_CONTENT, "llm.internal", "internal_id", "Instruktionen"):
+        assert leaked not in payload
+    tool = events[1][1]
+    assert [call["tool_name"] for call in tool["tools"]] == ["search"]
+    assert tool["tools"][0]["meta"] is None
+    assert tool["mcp_tool_references"][0]["meta"] == {"title": "Ärende 2026-123"}
 
 
-async def test_get_session_strips_tool_calls_when_activity_is_hidden():
-    question = SimpleNamespace(info_blobs=[object()], tool_calls=[object()])
-    service, deps = _service()
-    deps.session_service.get_session_by_uuid = AsyncMock(
-        return_value=SimpleNamespace(id=uuid4(), questions=[question])
-    )
+async def test_hidden_sources_never_leave_the_server():
+    events = await _ask_as_visitor(_widget(show_sources=False))
+    payload = json.dumps(events)
 
-    session = await service.get_session(
-        _principal(_widget(show_tool_activity=False)), uuid4()
-    )
-
-    assert session.questions[0].tool_calls is None
-    assert session.questions[0].info_blobs  # sources still shown
+    assert events[0][1]["references"] == []
+    assert all(data.get("references", []) == [] for _, data in events)
+    assert all(data.get("mcp_tool_references", []) == [] for _, data in events)
+    assert "intranet.kommun.se" not in payload
+    assert "casefiles.kommun.se" not in payload
+    # Tool activity is still shown.
+    assert [event for event, _ in events] == ["first_chunk", "tool_call", "text"]
 
 
-async def test_get_session_strips_references_when_sources_are_hidden():
-    question = SimpleNamespace(info_blobs=[object()], tool_calls=[object()])
-    service, deps = _service()
-    deps.session_service.get_session_by_uuid = AsyncMock(
-        return_value=SimpleNamespace(id=uuid4(), questions=[question])
-    )
+async def test_hidden_tool_activity_keeps_tool_sources_but_names_no_tool():
+    events = await _ask_as_visitor(_widget(show_tool_activity=False))
+    payload = json.dumps(events)
+
+    tool_events = [data for event, data in events if event == "tool_call"]
+    assert [event["tools"] for event in tool_events] == [[]]
+    [ref] = tool_events[0]["mcp_tool_references"]
+    assert ref["uri"] == "https://casefiles.kommun.se/2026-123"
+    assert ref["tool_call_id"] is None and ref["mcp_tool_name"] is None
+    assert "casefiles__search" not in payload
+    assert '"search"' not in payload
+
+
+async def test_restore_never_carries_model_reasoning_or_tool_internals():
+    service, deps = _service(session_questions=1)
+
+    session = await service.get_session(_principal(_widget()), uuid4())
+    [message] = to_session_public(session).model_dump(mode="json")["messages"]
+    payload = json.dumps(message)
+
+    assert message["completion_model"] is None
+    assert message["reasoning"] is None
+    assert message["tools"] == {"assistants": []}
+    assert message["tool_calls"][0]["result"] is None
+    assert message["tool_calls"][0]["meta"] is None
+    assert message["mcp_tool_references"][0]["content"] is None
+    for leaked in (RESOURCE_CONTENT, "llm.internal", "Intern assistent"):
+        assert leaked not in payload
+    assert message["references"]
+
+
+async def test_restore_strips_every_reference_when_sources_are_hidden():
+    service, _ = _service(session_questions=1)
 
     session = await service.get_session(
         _principal(_widget(show_sources=False)), uuid4()
     )
+    [message] = to_session_public(session).model_dump(mode="json")["messages"]
 
-    assert session.questions[0].info_blobs == []
+    assert message["references"] == []
+    assert message["mcp_tool_references"] == []
+    assert message["tool_calls"]
+
+
+async def test_restore_strips_tool_calls_when_activity_is_hidden():
+    service, _ = _service(session_questions=1)
+
+    session = await service.get_session(
+        _principal(_widget(show_tool_activity=False)), uuid4()
+    )
+    [message] = to_session_public(session).model_dump(mode="json")["messages"]
+
+    assert message["tool_calls"] == []
+    assert message["mcp_tool_references"][0]["mcp_tool_name"] is None
+    assert message["references"]  # sources still shown
+
+
+async def test_feedback_response_is_filtered_like_the_restore():
+    service, deps = _service(session_questions=1)
+
+    session = await service.leave_feedback(
+        _principal(_widget(show_sources=False, show_tool_activity=False)),
+        uuid4(),
+        SessionFeedback(value=1),
+    )
+    [message] = to_session_public(session).model_dump(mode="json")["messages"]
+
+    assert message["completion_model"] is None
+    assert message["reasoning"] is None
+    assert message["references"] == []
+    assert message["mcp_tool_references"] == []
+    assert message["tool_calls"] == []
+    assert (
+        deps.session_service.leave_feedback.await_args.kwargs["keep_existing_text"]
+        is True
+    )
+
+
+async def test_settlement_reads_the_cumulative_tokens_of_every_provider_round():
+    async def row(*values):
+        result = MagicMock()
+        result.first.return_value = values
+        return result
+
+    session = MagicMock()
+    # Three tool rounds billed 4 800 prompt tokens; the last request alone
+    # had 1 800.
+    session.execute = AsyncMock(return_value=await row(4_800, 300, 1_800, 120))
+    assert await WidgetAskService._question_tokens(session, uuid4()) == (4_800, 300)
+
+    session.execute = AsyncMock(return_value=await row(None, None, 1_800, 120))
+    assert await WidgetAskService._question_tokens(session, uuid4()) == (1_800, 120)
+
+    session.execute = AsyncMock(return_value=await row(None, None, None, None))
+    assert await WidgetAskService._question_tokens(session, uuid4()) == (0, 0)
 
 
 async def test_retention_zero_deletes_the_session_after_streaming():
@@ -439,8 +624,6 @@ async def test_follow_up_requires_owned_session_and_respects_turn_limit(fake_db)
 
 async def test_feedback_text_is_dropped_unless_stored():
     service, deps = _service()
-    feedback = SimpleNamespace(value=1, text="bra svar")
-    from eneo.sessions.session import SessionFeedback
 
     await service.leave_feedback(
         _principal(_widget()), uuid4(), SessionFeedback(value=1, text="bra svar")
@@ -457,12 +640,9 @@ async def test_feedback_text_is_dropped_unless_stored():
     assert (
         deps.session_service.leave_feedback.await_args.kwargs["feedback"].text == "fel"
     )
-    del feedback
 
 
 async def test_feedback_moves_the_daily_counters_with_the_vote():
-    from eneo.sessions.session import SessionFeedback
-
     service, deps = _service()
     widget = _widget()
     principal = _principal(widget)
@@ -498,22 +678,3 @@ async def test_feedback_moves_the_daily_counters_with_the_vote():
     await service.leave_feedback(principal, uuid4(), SessionFeedback(value=-1))
     kwargs = deps.usage.record.await_args.kwargs
     assert (kwargs["helpful"], kwargs["unhelpful"]) == (-1, 1)
-
-
-async def test_settlement_reads_the_cumulative_tokens_of_every_provider_round():
-    async def row(*values):
-        result = MagicMock()
-        result.first.return_value = values
-        return result
-
-    session = MagicMock()
-    # Three tool rounds billed 4 800 prompt tokens; the last request alone
-    # had 1 800.
-    session.execute = AsyncMock(return_value=await row(4_800, 300, 1_800, 120))
-    assert await WidgetAskService._question_tokens(session, uuid4()) == (4_800, 300)
-
-    session.execute = AsyncMock(return_value=await row(None, None, 1_800, 120))
-    assert await WidgetAskService._question_tokens(session, uuid4()) == (1_800, 120)
-
-    session.execute = AsyncMock(return_value=await row(None, None, None, None))
-    assert await WidgetAskService._question_tokens(session, uuid4()) == (0, 0)

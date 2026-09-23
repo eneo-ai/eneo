@@ -12,10 +12,7 @@ from zoneinfo import ZoneInfo
 import sqlalchemy as sa
 from anyio import CancelScope
 
-from eneo.ai_models.completion_models.completion_model import (
-    Completion,
-    ResponseType,
-)
+from eneo.ai_models.completion_models.completion_model import Completion
 from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
@@ -26,6 +23,7 @@ from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.main.logging import get_logger
 from eneo.sessions.session import SessionFeedback, SessionInDB
+from eneo.widgets.application.visitor_view import VisitorView
 from eneo.widgets.application.widget_limits import (
     BudgetReservation,
     WidgetBudget,
@@ -118,12 +116,7 @@ class WidgetAskService:
         self, principal: WidgetPrincipal, session_id: UUID
     ) -> SessionInDB:
         session = await self._owned_session(principal.widget, session_id)
-        for question in session.questions:
-            if not principal.widget.show_sources:
-                question.info_blobs = []
-            if not principal.widget.show_tool_activity:
-                question.tool_calls = None
-        return session
+        return VisitorView(principal.widget).session(session)
 
     async def leave_feedback(
         self, principal: WidgetPrincipal, session_id: UUID, feedback: SessionFeedback
@@ -153,7 +146,7 @@ class WidgetAskService:
                 helpful=(feedback.value == 1) - (previous == 1),
                 unhelpful=(feedback.value == -1) - (previous == -1),
             )
-        return updated
+        return VisitorView(widget).session(updated)
 
     # --- ask --------------------------------------------------------------
 
@@ -225,19 +218,17 @@ class WidgetAskService:
                 except Exception:
                     logger.exception("Widget budget release failed")
             raise
-        # Visitors never learn which model answers; the first chunk would
-        # otherwise carry the full model record.
-        response.completion_model = None  # type: ignore[assignment]
         answer = response.answer
         assert not isinstance(answer, str)
-        response.answer = self._settled(
+        visible = VisitorView(widget).response(response)
+        visible.answer = self._settled(
             answer.__aiter__(),
             widget=widget,
             session_id=response.session.id,
             question_id=response.question_id,
             reservation=reservation,
         )
-        return response
+        return visible
 
     async def _settled(
         self,
@@ -248,24 +239,13 @@ class WidgetAskService:
         question_id: UUID | None,
         reservation: BudgetReservation,
     ) -> AsyncIterator[Completion]:
+        view = VisitorView(widget)
         completed = False
         try:
             async for chunk in answer:
-                # Hidden sources never leave the server: the visitor gets
-                # neither citation targets nor document titles.
-                if not widget.show_sources:
-                    chunk.reference_chunks = None
-                # Hidden tool activity: the tools ran, but which ones stays
-                # internal. A tool event that only carried citations keeps
-                # them; one that carried nothing else is dropped.
-                if (
-                    not widget.show_tool_activity
-                    and chunk.response_type == ResponseType.TOOL_CALL
-                ):
-                    chunk.tool_calls_metadata = None
-                    if not chunk.mcp_tool_references:
-                        continue
-                yield chunk
+                visible = view.chunk(chunk)
+                if visible is not None:
+                    yield visible
             completed = True
         finally:
             with CancelScope(shield=True):
