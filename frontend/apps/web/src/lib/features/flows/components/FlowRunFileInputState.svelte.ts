@@ -1,11 +1,12 @@
 import type { UploadedFile } from "@eneo/eneo-js";
 import type { SessionState } from "$lib/features/audio/recordingSession";
-import type { SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
+import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
 import {
   bumpSegmentCountInState,
   clearStepSessionInState,
   emptyRecordingSessionState,
   ensureSessionIdInState,
+  makeReuploadFileFromRecord,
   type RecordingSessionState
 } from "$lib/features/audio/flowRunRecordingSession";
 
@@ -16,17 +17,22 @@ export type PreparedRecordedSegment = {
   segmentIndex: number;
 };
 
+export type PendingRecordedSegment = PreparedRecordedSegment & {
+  file: File;
+  state: "persisting" | "uploading" | "failed";
+};
+
 export class FlowRunFileInputState {
   #runtimeFilesByStepId = $state<Record<string, UploadedFile[]>>({});
-  #recordedFilesByStepId = $state<Record<string, File | null>>({});
+  // Recorded segments not uploaded yet, in segment order, from arrival until
+  // their own upload succeeds. Retry, the upload backlog and the run blockers
+  // all read this one collection.
+  #pendingSegmentsByStepId = $state<Record<string, PendingRecordedSegment[]>>({});
   #recorderResetTokensByStepId = $state<Record<string, number>>({});
   #uploadErrorsByStepId = $state<Record<string, string | null>>({});
   #recordingNoticesByStepId = $state<Record<string, string | null>>({});
   #skippedMessagesByStepId = $state<Record<string, string | null>>({});
   #activeUploadCountByStepId = $state<Record<string, number>>({});
-  // Persisted recorded segments whose upload has not succeeded: queued, in
-  // flight or failed.
-  #segmentsAwaitingUploadByStepId = $state<Record<string, number>>({});
   #recordingStepIds = $state<string[]>([]);
   #draggingStepId = $state<string | null>(null);
   #recordingSessionState = $state<RecordingSessionState>(emptyRecordingSessionState());
@@ -47,13 +53,19 @@ export class FlowRunFileInputState {
   }
 
   get localRecordingStepIds(): string[] {
-    return Object.entries(this.#recordedFilesByStepId)
-      .filter(([, file]) => file !== null)
+    return Object.entries(this.#pendingSegmentsByStepId)
+      .filter(([, segments]) => segments.length > 0)
       .map(([stepId]) => stepId);
   }
 
   get hasLocalRecordedFiles(): boolean {
     return this.localRecordingStepIds.length > 0;
+  }
+
+  get hasPersistingRecordedSegments(): boolean {
+    return Object.values(this.#pendingSegmentsByStepId).some((segments) =>
+      segments.some((segment) => segment.state === "persisting")
+    );
   }
 
   get hasRuntimeFiles(): boolean {
@@ -81,7 +93,13 @@ export class FlowRunFileInputState {
   }
 
   segmentsAwaitingUpload(stepId: string): number {
-    return this.#segmentsAwaitingUploadByStepId[stepId] ?? 0;
+    return this.#pendingSegmentsByStepId[stepId]?.length ?? 0;
+  }
+
+  failedRecordedSegments(stepId: string): PendingRecordedSegment[] {
+    return (this.#pendingSegmentsByStepId[stepId] ?? []).filter(
+      (segment) => segment.state === "failed"
+    );
   }
 
   isStepRecording(stepId: string): boolean {
@@ -90,10 +108,6 @@ export class FlowRunFileInputState {
 
   isDraggingStep(stepId: string): boolean {
     return this.#draggingStepId === stepId;
-  }
-
-  getRecordedFile(stepId: string): File | null {
-    return this.#recordedFilesByStepId[stepId] ?? null;
   }
 
   getRecorderResetToken(stepId: string): number {
@@ -220,42 +234,52 @@ export class FlowRunFileInputState {
     return { sessionId: ensured.sessionId, segmentIndex: bumped.segmentIndex };
   }
 
+  // Reserved as the segment arrives, before it is written to the local store,
+  // so it already counts toward the backlog and blocks the run.
+  recordedSegmentArrived(stepId: string, segment: PreparedRecordedSegment, file: File): void {
+    this.#setPendingSegments(stepId, [
+      ...(this.#pendingSegmentsByStepId[stepId] ?? []),
+      { ...segment, file, state: "persisting" }
+    ]);
+  }
+
   recordSegmentPersistence({
     stepId,
-    file,
+    segment,
     notice,
     degraded
   }: {
     stepId: string;
-    file: File;
+    segment: PreparedRecordedSegment;
     notice: string | null;
     degraded: boolean;
   }): void {
     if (degraded) {
       this.#recordingSessionState = { ...this.#recordingSessionState, storageDegraded: true };
     }
-    this.#recordedFilesByStepId = { ...this.#recordedFilesByStepId, [stepId]: file };
     this.#recordingNoticesByStepId = { ...this.#recordingNoticesByStepId, [stepId]: notice };
-    this.#segmentsAwaitingUploadByStepId = {
-      ...this.#segmentsAwaitingUploadByStepId,
-      [stepId]: this.segmentsAwaitingUpload(stepId) + 1
-    };
+    this.#setPendingSegmentState(stepId, segment, "uploading");
   }
 
-  // Only the uploaded file leaves the preserved slot: a later segment preserved
-  // meanwhile still needs its own upload, and its retry if that fails.
-  recordedSegmentUploaded(stepId: string, file: File): void {
-    if (this.#recordedFilesByStepId[stepId] === file) {
-      this.#recordedFilesByStepId = { ...this.#recordedFilesByStepId, [stepId]: null };
-    }
-    this.#segmentsAwaitingUploadByStepId = {
-      ...this.#segmentsAwaitingUploadByStepId,
-      [stepId]: Math.max(0, this.segmentsAwaitingUpload(stepId) - 1)
-    };
+  recordedSegmentUploading(stepId: string, segment: PreparedRecordedSegment): void {
+    this.#setPendingSegmentState(stepId, segment, "uploading");
+  }
+
+  recordedSegmentFailed(stepId: string, segment: PreparedRecordedSegment): void {
+    this.#setPendingSegmentState(stepId, segment, "failed");
+  }
+
+  recordedSegmentUploaded(stepId: string, segment: PreparedRecordedSegment): void {
+    this.#setPendingSegments(
+      stepId,
+      (this.#pendingSegmentsByStepId[stepId] ?? []).filter(
+        (pending) => !isSegment(pending, segment)
+      )
+    );
   }
 
   discardStepRecording(stepId: string): void {
-    this.#recordedFilesByStepId = { ...this.#recordedFilesByStepId, [stepId]: null };
+    this.#setPendingSegments(stepId, []);
     this.#recorderResetTokensByStepId = {
       ...this.#recorderResetTokensByStepId,
       [stepId]: (this.#recorderResetTokensByStepId[stepId] ?? 0) + 1
@@ -264,7 +288,6 @@ export class FlowRunFileInputState {
     this.#recordingNoticesByStepId = { ...this.#recordingNoticesByStepId, [stepId]: null };
     this.#skippedMessagesByStepId = { ...this.#skippedMessagesByStepId, [stepId]: null };
     this.#runtimeFilesByStepId = { ...this.#runtimeFilesByStepId, [stepId]: [] };
-    this.#segmentsAwaitingUploadByStepId = { ...this.#segmentsAwaitingUploadByStepId, [stepId]: 0 };
     this.#recordingStepIds = this.#recordingStepIds.filter((id) => id !== stepId);
     this.#recordingSessionState = clearStepSessionInState(this.#recordingSessionState, stepId);
     this.forgetSessionPhase(stepId);
@@ -288,7 +311,21 @@ export class FlowRunFileInputState {
     };
   }
 
-  attachRecoveredSession(stepId: string, sessionId: string, segmentCount: number): void {
+  // Recovered segments without an upload join the pending ones. New segments
+  // continue after the highest recovered index: a removed segment leaves a
+  // gap, and reusing an index would overwrite that record in the store.
+  attachRecoveredSession(stepId: string, sessionId: string, records: SegmentRecord[]): void {
+    this.#setPendingSegments(stepId, [
+      ...(this.#pendingSegmentsByStepId[stepId] ?? []),
+      ...records
+        .filter((record) => !record.uploadedFileId)
+        .map((record) => ({
+          sessionId: record.sessionId,
+          segmentIndex: record.segmentIndex,
+          file: makeReuploadFileFromRecord(record),
+          state: "uploading" as const
+        }))
+    ]);
     this.#recordingSessionState = {
       ...this.#recordingSessionState,
       sessionIdsByStepId: {
@@ -297,7 +334,7 @@ export class FlowRunFileInputState {
       },
       segmentCountsByStepId: {
         ...this.#recordingSessionState.segmentCountsByStepId,
-        [stepId]: segmentCount
+        [stepId]: Math.max(-1, ...records.map((record) => record.segmentIndex)) + 1
       },
       resumeHintsByStepId: {
         ...this.#recordingSessionState.resumeHintsByStepId,
@@ -347,20 +384,43 @@ export class FlowRunFileInputState {
 
   #reset(): void {
     this.#runtimeFilesByStepId = {};
-    this.#recordedFilesByStepId = {};
+    this.#pendingSegmentsByStepId = {};
     this.#recorderResetTokensByStepId = {};
     this.#uploadErrorsByStepId = {};
     this.#recordingNoticesByStepId = {};
     this.#skippedMessagesByStepId = {};
     this.#activeUploadCountByStepId = {};
-    this.#segmentsAwaitingUploadByStepId = {};
     this.#recordingStepIds = [];
     this.#draggingStepId = null;
     this.#recordingSessionState = emptyRecordingSessionState();
     this.#sessionPhaseByStepId = {};
   }
+
+  #setPendingSegmentState(
+    stepId: string,
+    segment: PreparedRecordedSegment,
+    state: PendingRecordedSegment["state"]
+  ): void {
+    this.#setPendingSegments(
+      stepId,
+      (this.#pendingSegmentsByStepId[stepId] ?? []).map((pending) =>
+        isSegment(pending, segment) ? { ...pending, state } : pending
+      )
+    );
+  }
+
+  #setPendingSegments(stepId: string, segments: PendingRecordedSegment[]): void {
+    this.#pendingSegmentsByStepId = {
+      ...this.#pendingSegmentsByStepId,
+      [stepId]: segments.toSorted((a, b) => a.segmentIndex - b.segmentIndex)
+    };
+  }
 }
 
 function addUnique(values: string[], value: string): string[] {
   return values.includes(value) ? values : [...values, value];
+}
+
+function isSegment(pending: PreparedRecordedSegment, segment: PreparedRecordedSegment): boolean {
+  return pending.sessionId === segment.sessionId && pending.segmentIndex === segment.segmentIndex;
 }

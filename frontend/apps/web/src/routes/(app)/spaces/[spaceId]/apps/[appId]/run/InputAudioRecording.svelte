@@ -157,6 +157,8 @@
       isRecording = active;
     }}
     onRecordingDone={({ blob, mimeType, reason }) => {
+      // Nothing was captured; the recorder shows its own error.
+      if (!blob) return;
       audioFile = buildRecordedAudioFile({
         blob,
         mimeType,

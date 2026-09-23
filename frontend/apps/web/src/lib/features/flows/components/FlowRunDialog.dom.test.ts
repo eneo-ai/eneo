@@ -395,7 +395,9 @@ describe("FlowRunDialog recording upload reconciliation", () => {
     await waitFor(() => expect(persistRecordingSegment).toHaveBeenCalledOnce());
 
     vi.useFakeTimers();
+    // The segment still being persisted makes the dialog dirty.
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_trigger_close() }));
+    await fireEvent.click(screen.getByRole("button", { name: "Stäng ändå" }));
     await vi.runAllTimersAsync();
     expect(screen.queryByText("Audio input")).toBeNull();
     vi.useRealTimers();
@@ -572,7 +574,9 @@ describe("FlowRunDialog recording upload reconciliation", () => {
     await waitFor(() => expect(upload).toHaveBeenCalledOnce());
 
     vi.useFakeTimers();
+    // The recovered segment still uploading makes the dialog dirty.
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_trigger_close() }));
+    await fireEvent.click(screen.getByRole("button", { name: "Stäng ändå" }));
     await vi.runAllTimersAsync();
     vi.useRealTimers();
 

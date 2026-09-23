@@ -20,8 +20,10 @@
   import type { RecordingStopReason } from "./recordedAudioFile";
   import { downloadRecordedAudioFile } from "./downloadRecordedAudioFile";
 
+  // Every stop reports once. `blob` is null when nothing was captured, so a
+  // caller still hears a failure to retry, or the user's own stop.
   export let onRecordingDone: (params: {
-    blob: Blob;
+    blob: Blob | null;
     mimeType: string;
     reason: RecordingStopReason;
     // Captured at finalize-time from the rAF tick clock; useful so callers
@@ -40,6 +42,8 @@
   type RecordingStartOrigin = "user" | "external";
   export let maxBytes: number | null = null;
   export let resetToken: unknown = 0;
+  // False while the caller cannot take another recording; stopping stays possible.
+  export let canStart = true;
 
   let isRecording: boolean = false;
   let startedRecordingAt = dayjs();
@@ -624,10 +628,12 @@
         }
         return;
       }
+      if (discardRecordingOnStop) {
+        releaseMediaCapture();
+        return;
+      }
+      let segment: ReturnType<typeof finishedSegment> | null = null;
       try {
-        if (discardRecordingOnStop) {
-          return;
-        }
         recordingState = "processing";
 
         if (chunks.length === 0) {
@@ -635,19 +641,14 @@
           setRecordingErrorState(errorMsg);
           recordingStats.errors.push(errorMsg);
           recordingState = "error";
-          setStopReason("error");
-          return;
+        } else {
+          completedRecordingAt = dayjs();
+          segment = finishedSegment();
+          recordedMimeType = segment.mimeType;
+          recordedBlob = segment.blob;
+          audioURL = URL.createObjectURL(recordedBlob);
+          recordingState = "complete";
         }
-
-        completedRecordingAt = dayjs();
-        const segment = finishedSegment();
-        recordedMimeType = segment.mimeType;
-        recordedBlob = segment.blob;
-        audioURL = URL.createObjectURL(recordedBlob);
-        const reason = stopReason;
-        resetStopReason();
-        onRecordingDone({ ...segment, reason });
-        recordingState = "complete";
       } catch (error) {
         const errorMsg =
           "Failed to process recording: " +
@@ -656,10 +657,20 @@
         setRecordingErrorState(errorMsg, error);
         recordingStats.errors.push(errorMsg);
         recordingState = "error";
-        setStopReason("error");
+        segment = null;
       } finally {
         releaseMediaCapture();
       }
+      // Reported whether or not there is audio: an error or stall that
+      // captured nothing still has to reach the caller's retry loop.
+      const reason = stopReason;
+      resetStopReason();
+      onRecordingDone({
+        blob: segment?.blob ?? null,
+        mimeType: segment?.mimeType ?? "",
+        reason,
+        durationMs: segment?.durationMs ?? 0
+      });
     });
 
     recorder.addEventListener("pause", () => {
@@ -726,6 +737,7 @@
   function toggleRecording(e: Event) {
     e.preventDefault();
     if (!isRecording) {
+      if (!canStart) return;
       void startRecording("user");
     } else {
       stopRecording();
@@ -1024,7 +1036,9 @@
           class="record-button"
           onclick={toggleRecording}
           data-is-recording={isRecording}
-          disabled={recordingState === "preparing" || recordingState === "processing"}
+          disabled={recordingState === "preparing" ||
+            recordingState === "processing" ||
+            (!isRecording && !canStart)}
           aria-label={isRecording ? m.stop_recording() : m.start_recording()}
         >
           {#if !isRecording}

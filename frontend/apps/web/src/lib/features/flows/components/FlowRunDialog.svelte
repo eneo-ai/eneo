@@ -22,6 +22,7 @@
   import type { RecordingStopReason } from "$lib/features/audio/recordedAudioFile";
   import {
     buildSegmentFilenameBase,
+    canStartRecording,
     RecordingSession,
     type RecordingSessionDeps,
     type SessionState
@@ -72,7 +73,10 @@
   import FlowRunDialogWizardHeader from "./FlowRunDialogWizardHeader.svelte";
   import FlowRunDialogFreeformPage from "./FlowRunDialogFreeformPage.svelte";
   import FlowRunDialogFooter from "./FlowRunDialogFooter.svelte";
-  import { FlowRunFileInputState } from "./FlowRunFileInputState.svelte";
+  import {
+    FlowRunFileInputState,
+    type PreparedRecordedSegment
+  } from "./FlowRunFileInputState.svelte";
   import { FlowRunLaunchInputState } from "./FlowRunLaunchInputState.svelte";
   import { onDestroy, onMount } from "svelte";
 
@@ -254,8 +258,20 @@
   const currentStepUploadedFiles = $derived(
     currentRuntimeStep ? fileInputState.getUploadedFiles(currentRuntimeStep.step_id) : []
   );
-  const currentStepRecordedFile = $derived(
-    currentRuntimeStep ? fileInputState.getRecordedFile(currentRuntimeStep.step_id) : null
+  const currentStepHasFailedRecording = $derived(
+    currentRuntimeStep
+      ? fileInputState.failedRecordedSegments(currentRuntimeStep.step_id).length > 0
+      : false
+  );
+  const currentStepCanStartRecording = $derived(
+    currentRuntimeStep
+      ? canStartRecording(fileInputState.segmentsAwaitingUpload(currentRuntimeStep.step_id))
+      : true
+  );
+  // Save for later and discard end the whole recording, so they wait until
+  // capture has stopped and every segment is in the local store.
+  const recordingSettled = $derived(
+    !fileInputState.hasActiveRecording && !fileInputState.hasPersistingRecordedSegments
   );
   const currentStepRecorderResetToken = $derived(
     currentRuntimeStep ? fileInputState.getRecorderResetToken(currentRuntimeStep.step_id) : 0
@@ -272,8 +288,13 @@
   const currentStepUploadError = $derived(
     currentRuntimeStep ? fileInputState.getUploadError(currentRuntimeStep.step_id) : null
   );
+  // A full upload backlog refuses new recordings; the notice says why.
   const currentStepRecordingNotice = $derived(
-    currentRuntimeStep ? fileInputState.getRecordingNotice(currentRuntimeStep.step_id) : null
+    currentRuntimeStep
+      ? currentStepCanStartRecording
+        ? fileInputState.getRecordingNotice(currentRuntimeStep.step_id)
+        : m.recording_stopped_upload_backlog()
+      : null
   );
   const currentStepSkippedMessage = $derived(
     currentRuntimeStep ? fileInputState.getSkippedMessage(currentRuntimeStep.step_id) : null
@@ -718,7 +739,8 @@
       // RecordingSession only manages recorder lifecycle and retry state.
       // The session knows how to take over a queued retry; let it cancel
       // its own retry timer rather than disposing the session here.
-      if (phase === "reconnecting") {
+      // An idle session stopped retrying at a full backlog; it begins anew.
+      if (phase === "reconnecting" || phase === "idle") {
         existing.beginRecordingExternal();
         return existing;
       }
@@ -761,12 +783,21 @@
   }
 
   function retryRecordingSession(stepId: string) {
+    const operationGeneration = dialogGeneration;
+    const operationFlowId = flow.id;
     disposeRecordingSession(stepId);
     const ref = recorderRefsByStepId[stepId];
-    if (!ref) return;
-    void ref.startExternal().catch((error) => {
-      console.warn("Manual retry failed", error);
-    });
+    if (!ref || !canStartRecording(fileInputState.segmentsAwaitingUpload(stepId))) return;
+    // The recorder reports this start as external, which never creates a
+    // session; without one the recording would never rotate.
+    void ref
+      .startExternal()
+      .then(() => {
+        if (!isStale(operationGeneration, operationFlowId)) ensureRecordingSessionForStep(stepId);
+      })
+      .catch((error) => {
+        console.warn("Manual retry failed", error);
+      });
   }
 
   function dismissSessionFailure(stepId: string) {
@@ -801,14 +832,16 @@
   }
 
   async function downloadRecordedFile(step: FlowRunContractStepInput) {
-    const file = fileInputState.getRecordedFile(step.step_id);
-    if (!file) {
+    const failed = fileInputState.failedRecordedSegments(step.step_id);
+    if (failed.length === 0) {
       toast.error(m.recording_not_found());
       return;
     }
 
     try {
-      await downloadRecordedAudioFile(file);
+      for (const segment of failed) {
+        if ((await downloadRecordedAudioFile(segment.file)) === "cancelled") break;
+      }
     } catch (error) {
       console.error("Failed to save recording:", error);
       toast.error(m.recording_save_failed());
@@ -818,36 +851,60 @@
   async function retryRecordedFileUpload(step: DialogRuntimeStepInput) {
     const operationGeneration = dialogGeneration;
     const operationFlowId = flow.id;
-    const file = fileInputState.getRecordedFile(step.step_id);
-    if (!file) {
-      openFilePicker(step);
-      return;
+    const failed = fileInputState.failedRecordedSegments(step.step_id);
+    // All of them leave "failed" at once, so a second click cannot upload one twice.
+    for (const segment of failed) {
+      fileInputState.recordedSegmentUploading(step.step_id, segment);
     }
+    for (const segment of failed) {
+      await uploadRecordedSegment(step, segment, operationGeneration, operationFlowId);
+      if (isStale(operationGeneration, operationFlowId)) return;
+    }
+  }
 
+  // Uploads one pending recorded segment and settles it: gone once uploaded
+  // and marked in the local store, otherwise failed, where Retry picks it up.
+  async function uploadRecordedSegment(
+    step: FlowRunContractStepInput,
+    segment: PreparedRecordedSegment & { file: File },
+    operationGeneration: number,
+    operationFlowId: string
+  ) {
     const result = await uploadFilesForStep(
       step,
-      [file],
+      [segment.file],
       { clearRecordingNotice: false },
       operationGeneration,
       operationFlowId
     );
     if (isStale(operationGeneration, operationFlowId)) return;
-    if (result.uploadedCount > 0 && !result.failed) {
-      fileInputState.recordedSegmentUploaded(step.step_id, file);
+    const uploaded = result.failed ? undefined : result.uploadedFiles[0];
+    if (!uploaded) {
+      fileInputState.recordedSegmentFailed(step.step_id, segment);
+      return;
     }
+    await markSegmentUploaded({
+      flowId: operationFlowId,
+      stepId: step.step_id,
+      sessionId: segment.sessionId,
+      segmentIndex: segment.segmentIndex,
+      uploadedFileId: uploaded.id
+    });
+    if (isStale(operationGeneration, operationFlowId)) return;
+    fileInputState.recordedSegmentUploaded(step.step_id, segment);
   }
 
   async function handleRecordedAudio(
     step: FlowRunContractStepInput,
-    params: { blob: Blob; mimeType: string; reason: RecordingStopReason; durationMs: number }
+    params: { blob: Blob | null; mimeType: string; reason: RecordingStopReason; durationMs: number }
   ) {
     const operationGeneration = dialogGeneration;
     const operationFlowId = flow.id;
-    const prepared = fileInputState.prepareRecordedSegment(step.step_id);
-    // Hand the reason to the session controller as soon as the segment
-    // arrives, so a recording started while this upload runs gets a fresh
+    // Hand the reason to the session controller as soon as the recorder
+    // reports it, so a recording started while this upload runs gets a fresh
     // session. A rotation records on; error/stall trip the reconnect retry
-    // loop; every other reason closes out the session.
+    // loop, also when nothing was captured; every other reason closes out the
+    // session.
     const session = recordingSessionsByStepId[step.step_id];
     if (session && params.reason !== "rotation") {
       if (params.reason === "error" || params.reason === "stall") {
@@ -856,6 +913,8 @@
         disposeRecordingSession(step.step_id);
       }
     }
+    if (!params.blob) return;
+    const prepared = fileInputState.prepareRecordedSegment(step.step_id);
     const capturedAt = Date.now();
     const filenameBase = buildSegmentFilenameBase(
       prepared.sessionId,
@@ -867,6 +926,7 @@
       mimeType: params.mimeType,
       fileNameBase: filenameBase
     });
+    fileInputState.recordedSegmentArrived(step.step_id, prepared, file);
 
     // Persist before upload so a refresh during the upload still leaves
     // the captured audio recoverable from IndexedDB.
@@ -888,32 +948,11 @@
     if (isStale(operationGeneration, operationFlowId)) return;
     fileInputState.recordSegmentPersistence({
       stepId: step.step_id,
-      file,
+      segment: prepared,
       notice: recordingNoticeForReason(params.reason),
       degraded: persistResult.degraded
     });
-    const result = await uploadFilesForStep(
-      step,
-      [file],
-      { clearRecordingNotice: false },
-      operationGeneration,
-      operationFlowId
-    );
-    if (isStale(operationGeneration, operationFlowId)) return;
-    if (result.uploadedCount > 0 && !result.failed) {
-      const uploaded = result.uploadedFiles[0];
-      if (uploaded?.id) {
-        await markSegmentUploaded({
-          flowId: operationFlowId,
-          stepId: step.step_id,
-          sessionId: prepared.sessionId,
-          segmentIndex: prepared.segmentIndex,
-          uploadedFileId: uploaded.id
-        });
-        if (isStale(operationGeneration, operationFlowId)) return;
-      }
-      fileInputState.recordedSegmentUploaded(step.step_id, file);
-    }
+    await uploadRecordedSegment(step, { ...prepared, file }, operationGeneration, operationFlowId);
   }
 
   async function downloadUploadedFile(file: UploadedFile) {
@@ -971,7 +1010,7 @@
 
   function retryUpload(step: DialogRuntimeStepInput) {
     fileInputState.retryRequested(step.step_id);
-    if (fileInputState.getRecordedFile(step.step_id)) {
+    if (fileInputState.failedRecordedSegments(step.step_id).length > 0) {
       void retryRecordedFileUpload(step);
     } else {
       openFilePicker(step);
@@ -1025,7 +1064,7 @@
       }
 
       if (isStale(operationGeneration, operationFlowId)) return;
-      fileInputState.attachRecoveredSession(stepId, hint.sessionId, records.length);
+      fileInputState.attachRecoveredSession(stepId, hint.sessionId, records);
       goToPageById(runtimeStepPageId(stepId));
 
       // Process records in segment-index order so the per-segment
@@ -1033,35 +1072,18 @@
       // order. Mixing reattach + re-upload would otherwise leave the
       // re-uploaded segments at the tail of the file input state.
       for (const record of records) {
+        if (isStale(operationGeneration, operationFlowId)) return;
         if (record.uploadedFileId) {
-          if (isStale(operationGeneration, operationFlowId)) return;
           const synthesized = synthesizeUploadedFileFromRecord(record);
           fileInputState.recordUploadedFile(stepId, synthesized);
           continue;
         }
-
-        const reuploadFile = makeReuploadFileFromRecord(record);
-        const result = await uploadFilesForStep(
+        await uploadRecordedSegment(
           step,
-          [reuploadFile],
-          { clearRecordingNotice: false },
+          { ...record, file: makeReuploadFileFromRecord(record) },
           operationGeneration,
           operationFlowId
         );
-        if (isStale(operationGeneration, operationFlowId)) return;
-        if (result.uploadedCount > 0 && !result.failed) {
-          const uploaded = result.uploadedFiles[0];
-          if (uploaded?.id) {
-            await markSegmentUploaded({
-              flowId: operationFlowId,
-              stepId,
-              sessionId: hint.sessionId,
-              segmentIndex: record.segmentIndex,
-              uploadedFileId: uploaded.id
-            });
-            if (isStale(operationGeneration, operationFlowId)) return;
-          }
-        }
       }
     } finally {
       if (!isStale(operationGeneration, operationFlowId)) {
@@ -1242,7 +1264,7 @@
           <FlowRunDialogRuntimeStep
             step={currentRuntimeStep}
             files={currentStepUploadedFiles}
-            recordedFile={currentStepRecordedFile}
+            hasFailedRecording={currentStepHasFailedRecording}
             recorderResetToken={currentStepRecorderResetToken}
             fileCount={currentStepFileCount}
             remainingSlots={currentStepRemainingSlots}
@@ -1257,14 +1279,17 @@
             showResumePrompt={fileInputState.isResumePromptForStep(currentRuntimeStep.step_id)}
             resumeBusy={fileInputState.isResumeBusyForStep(currentRuntimeStep.step_id)}
             storageDegraded={fileInputState.isStorageDegraded}
+            canStartRecording={currentStepCanStartRecording}
             onOpenFilePicker={() => openFilePicker(currentRuntimeStep)}
             onRemoveFile={(fileId) => removeFile(currentRuntimeStep.step_id, fileId)}
             onDownloadUploadedFile={(file) => void downloadUploadedFile(file)}
             onRetryUpload={() => retryUpload(currentRuntimeStep)}
             onDownloadRecordedAudio={() => void downloadRecordedFile(currentRuntimeStep)}
             onRetryRecordedAudio={() => void retryRecordedFileUpload(currentRuntimeStep)}
-            onDiscardRecordedAudio={() => void discardRecordedFile(currentRuntimeStep.step_id)}
-            onSaveForLater={saveForLater}
+            onDiscardRecordedAudio={recordingSettled
+              ? () => void discardRecordedFile(currentRuntimeStep.step_id)
+              : undefined}
+            onSaveForLater={recordingSettled ? saveForLater : undefined}
             onContinueResume={(hint) =>
               void continueResumedSession(currentRuntimeStep.step_id, hint)}
             onDiscardResume={(hint) => void discardResumedSession(currentRuntimeStep.step_id, hint)}

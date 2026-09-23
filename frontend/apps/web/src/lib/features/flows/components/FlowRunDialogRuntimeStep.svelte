@@ -27,7 +27,7 @@
   let {
     step,
     files,
-    recordedFile,
+    hasFailedRecording,
     recorderResetToken,
     fileCount,
     remainingSlots,
@@ -42,6 +42,7 @@
     showResumePrompt = false,
     resumeBusy = false,
     storageDegraded = false,
+    canStartRecording = true,
     sessionPhase = "idle",
     onOpenFilePicker,
     onRemoveFile,
@@ -65,7 +66,8 @@
   }: {
     step: FlowRunContractStepInput;
     files: UploadedFile[];
-    recordedFile: File | null;
+    // Recorded segments whose upload failed are waiting for Retry.
+    hasFailedRecording: boolean;
     recorderResetToken: number;
     fileCount: number;
     remainingSlots: number;
@@ -80,6 +82,7 @@
     showResumePrompt?: boolean;
     resumeBusy?: boolean;
     storageDegraded?: boolean;
+    canStartRecording?: boolean;
     // The session-level state surfaces a "trying to reconnect" hint and a
     // paused-failed CTA right next to the recorder so the user knows the
     // system is still working without scrolling.
@@ -90,13 +93,13 @@
     onRetryUpload: () => void;
     onDownloadRecordedAudio: () => void;
     onRetryRecordedAudio: () => void;
-    onDiscardRecordedAudio: () => void;
+    onDiscardRecordedAudio?: () => void;
     onSaveForLater?: () => void;
     onContinueResume?: (hint: SessionRecoveryHint) => void;
     onDiscardResume?: (hint: SessionRecoveryHint) => void;
     onDismissResumePrompt?: () => void;
     onRecordingDone: (params: {
-      blob: Blob;
+      blob: Blob | null;
       mimeType: string;
       reason: RecordingStopReason;
       durationMs: number;
@@ -361,6 +364,7 @@
           bind:this={recorderRef}
           maxBytes={step.max_file_size_bytes ?? null}
           resetToken={recorderResetToken}
+          canStart={canStartRecording}
           {onRecordingDone}
           onRecordingStateChange={onRecordingStateChange ?? (() => {})}
         />
@@ -398,7 +402,7 @@
           </Alert.Root>
         {/if}
 
-        {#if recordedFile && uploadError}
+        {#if hasFailedRecording}
           <Alert.Root
             class="border-warning-default/30 bg-warning-dimmer/60 text-warning-stronger mt-4"
           >
@@ -420,10 +424,12 @@
                   {m.recording_save_for_later()}
                 </Button>
               {/if}
-              <Button variant="ghost" size="sm" onclick={onDiscardRecordedAudio}>
-                <IconTrash data-icon="inline-start" />
-                {m.discard()}
-              </Button>
+              {#if onDiscardRecordedAudio}
+                <Button variant="ghost" size="sm" onclick={onDiscardRecordedAudio}>
+                  <IconTrash data-icon="inline-start" />
+                  {m.discard()}
+                </Button>
+              {/if}
             </div>
           </Alert.Root>
         {/if}
@@ -440,7 +446,7 @@
       </div>
     {/if}
 
-    {#if uploadError && !recordedFile}
+    {#if uploadError && !hasFailedRecording}
       <div
         class="border-negative-default/30 bg-negative-dimmer text-negative-stronger mt-3 rounded-md border px-3.5 py-2.5 text-sm"
         role="alert"

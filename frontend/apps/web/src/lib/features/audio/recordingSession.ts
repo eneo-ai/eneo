@@ -12,6 +12,12 @@ export const MAX_RETRY_ATTEMPTS = 3;
 export const RETRY_WALL_CLOCK_CAP_MS = 30_000;
 const RECORDING_FILENAME_PREFIX = "recording-";
 
+// A new recording adds at least one more segment, so no start (by the user, a
+// retry or the paused-failed retry) is allowed once the backlog is full.
+export function canStartRecording(segmentsAwaitingUpload: number): boolean {
+  return segmentsAwaitingUpload < MAX_SEGMENTS_AWAITING_UPLOAD;
+}
+
 export type SessionState = "idle" | "recording" | "reconnecting" | "paused-failed";
 
 export type SegmentStartOutcome = { ok: true } | { ok: false; error: unknown };
@@ -305,6 +311,12 @@ export class RecordingSession {
       // Dispose or a fresh start can land between scheduling and firing;
       // bail without touching state if either happened.
       if (this._disposed || this._state !== "reconnecting" || this._sessionId !== sessionId) {
+        return;
+      }
+      // Stop retrying rather than add to a full backlog; the caller shows
+      // the backlog notice while it stays full.
+      if (!canStartRecording(this.deps.segmentsAwaitingUpload())) {
+        this.transitionTo("idle");
         return;
       }
       this._retryAttempts += 1;

@@ -188,6 +188,24 @@ describe("RecordingSession lifecycle", () => {
     session.dispose();
   });
 
+  it("stops retrying instead of starting a recording while the upload backlog is full", async () => {
+    vi.useFakeTimers();
+    const startSegment = vi.fn(async () => ({ ok: true as const }));
+    const states: string[] = [];
+    const session = new RecordingSession(
+      makeDeps({ startSegment, segmentsAwaitingUpload: () => MAX_SEGMENTS_AWAITING_UPLOAD }),
+      { onStateChange: (state) => states.push(state) }
+    );
+
+    session.beginRecordingExternal();
+    session.notifyHardFailure();
+    await vi.advanceTimersByTimeAsync(RETRY_BACKOFF_MS[0]);
+
+    expect(startSegment).not.toHaveBeenCalled();
+    expect(states).toEqual(["recording", "reconnecting", "idle"]);
+    session.dispose();
+  });
+
   it("moves to paused-failed after retry attempts are exhausted", async () => {
     vi.useFakeTimers();
     const startSegment = vi.fn(async () => ({ ok: false as const, error: new Error("denied") }));

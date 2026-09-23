@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { UploadedFile } from "@eneo/eneo-js";
-import type { SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
+import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
 import { FlowRunFileInputState } from "./FlowRunFileInputState.svelte";
 
 const snapshot = {
@@ -28,6 +28,34 @@ function recordingFile(name = "clip.webm"): File {
   });
 }
 
+// A recorded segment that arrived and reached the local store.
+function persistedSegment(
+  state: FlowRunFileInputState,
+  stepId: string,
+  { notice = null, degraded = false }: { notice?: string | null; degraded?: boolean } = {}
+) {
+  const segment = state.prepareRecordedSegment(stepId);
+  state.recordedSegmentArrived(stepId, segment, recordingFile(`seg${segment.segmentIndex}.webm`));
+  state.recordSegmentPersistence({ stepId, segment, notice, degraded });
+  return segment;
+}
+
+function segmentRecord(segmentIndex: number, uploadedFileId: string | null): SegmentRecord {
+  return {
+    flowId: "flow-1",
+    stepId: "step-a",
+    sessionId: "session-a",
+    segmentIndex,
+    blob: new Blob(["audio"], { type: "audio/webm" }),
+    mimeType: "audio/webm",
+    durationMs: 1_000,
+    capturedAt: Date.UTC(2026, 4, 1, 8, segmentIndex),
+    uploadedFileId,
+    reason: "rotation",
+    contractSnapshot: snapshot
+  };
+}
+
 function recoveryHint(stepId: string, sessionId: string): SessionRecoveryHint {
   return {
     flowId: "flow-1",
@@ -46,7 +74,8 @@ describe("FlowRunFileInputState", () => {
     const state = new FlowRunFileInputState();
 
     expect(state.getUploadedFiles("missing")).toEqual([]);
-    expect(state.getRecordedFile("missing")).toBeNull();
+    expect(state.segmentsAwaitingUpload("missing")).toBe(0);
+    expect(state.failedRecordedSegments("missing")).toEqual([]);
     expect(state.getRecorderResetToken("missing")).toBe(0);
     expect(state.getUploadError("missing")).toBeNull();
     expect(state.getRecordingNotice("missing")).toBeNull();
@@ -65,13 +94,7 @@ describe("FlowRunFileInputState", () => {
     state.recordUploadedFile("step-a", uploadedFile("file-a"));
     state.recordUploadedFile("step-b", uploadedFile("file-b"));
     state.recordSkippedFiles("step-a", "too many files");
-    state.prepareRecordedSegment("step-a");
-    state.recordSegmentPersistence({
-      stepId: "step-a",
-      file: recordingFile(),
-      notice: "recording stopped",
-      degraded: false
-    });
+    persistedSegment(state, "step-a", { notice: "recording stopped" });
 
     const session = state.removeUploadedFile("step-a", "file-a");
 
@@ -119,7 +142,11 @@ describe("FlowRunFileInputState", () => {
 
   it("preserves recorded files and discards a step as one state transition", () => {
     const state = new FlowRunFileInputState();
-    const prepared = state.prepareRecordedSegment("step-a");
+    const prepared = persistedSegment(state, "step-a", {
+      notice: "saved after error",
+      degraded: true
+    });
+    state.recordedSegmentFailed("step-a", prepared);
     state.recordUploadedFile("step-a", uploadedFile("file-a"));
     state.recordUploadedFile("step-b", uploadedFile("file-b"));
     state.recordUploadFailure("step-a", "upload failed");
@@ -127,17 +154,12 @@ describe("FlowRunFileInputState", () => {
     state.recordSkippedFiles("step-a", "skipped");
     state.recordingStarted("step-a");
     state.syncSessionPhase("step-a", "paused-failed");
-    state.recordSegmentPersistence({
-      stepId: "step-a",
-      file: recordingFile(),
-      notice: "saved after error",
-      degraded: true
-    });
 
     state.discardStepRecording("step-a");
 
     expect(prepared.segmentIndex).toBe(0);
-    expect(state.getRecordedFile("step-a")).toBeNull();
+    expect(state.failedRecordedSegments("step-a")).toEqual([]);
+    expect(state.localRecordingStepIds).toEqual([]);
     expect(state.getRecorderResetToken("step-a")).toBe(1);
     expect(state.getUploadError("step-a")).toBeNull();
     expect(state.getRecordingNotice("step-a")).toBeNull();
@@ -166,31 +188,65 @@ describe("FlowRunFileInputState", () => {
     expect(firstB.sessionId).not.toBe(firstA.sessionId);
   });
 
-  it("keeps recorded segments awaiting upload until their own upload succeeds", () => {
+  it("tracks each recorded segment from its arrival until its own upload succeeds", () => {
     const state = new FlowRunFileInputState();
-    const rotated = recordingFile("rotated.webm");
-    const final = recordingFile("final.webm");
-    for (const file of [rotated, final]) {
+    const first = state.prepareRecordedSegment("step-a");
+    const second = state.prepareRecordedSegment("step-a");
+    state.recordedSegmentArrived("step-a", first, recordingFile("first.webm"));
+    state.recordedSegmentArrived("step-a", second, recordingFile("second.webm"));
+
+    // Counted and blocking the run while still being written to the store.
+    expect(state.segmentsAwaitingUpload("step-a")).toBe(2);
+    expect(state.hasPersistingRecordedSegments).toBe(true);
+    expect(state.localRecordingStepIds).toEqual(["step-a"]);
+
+    for (const segment of [first, second]) {
       state.recordSegmentPersistence({
         stepId: "step-a",
-        file,
+        segment,
         notice: "upload pending",
         degraded: false
       });
     }
-    expect(state.segmentsAwaitingUpload("step-a")).toBe(2);
+    expect(state.hasPersistingRecordedSegments).toBe(false);
 
-    // An earlier segment finishing its upload must not drop the preserved
-    // later one, whose upload may still fail.
-    state.recordedSegmentUploaded("step-a", rotated);
+    // The earlier upload fails and the later one succeeds: only the later one leaves.
+    state.recordedSegmentFailed("step-a", first);
+    state.recordedSegmentUploaded("step-a", second);
     expect(state.segmentsAwaitingUpload("step-a")).toBe(1);
-    expect(state.getRecordedFile("step-a")).toBe(final);
+    expect(state.failedRecordedSegments("step-a").map(({ file }) => file.name)).toEqual([
+      "first.webm"
+    ]);
+    expect(state.localRecordingStepIds).toEqual(["step-a"]);
 
-    state.recordedSegmentUploaded("step-a", final);
+    state.recordedSegmentUploading("step-a", first);
+    expect(state.failedRecordedSegments("step-a")).toEqual([]);
+    state.recordedSegmentUploaded("step-a", first);
     expect(state.segmentsAwaitingUpload("step-a")).toBe(0);
-    expect(state.getRecordedFile("step-a")).toBeNull();
+    expect(state.localRecordingStepIds).toEqual([]);
     expect(state.getRecorderResetToken("step-a")).toBe(0);
     expect(state.getRecordingNotice("step-a")).toBe("upload pending");
+  });
+
+  it("tracks recovered segments that still need an upload and numbers new ones after them", () => {
+    const state = new FlowRunFileInputState();
+
+    // Segment 1 was removed before the session was saved, leaving a gap.
+    state.attachRecoveredSession("step-a", "session-a", [
+      segmentRecord(0, "file-0"),
+      segmentRecord(2, null)
+    ]);
+
+    expect(state.segmentsAwaitingUpload("step-a")).toBe(1);
+    expect(state.hasPersistingRecordedSegments).toBe(false);
+    expect(state.prepareRecordedSegment("step-a")).toEqual({
+      sessionId: "session-a",
+      segmentIndex: 3
+    });
+    state.recordedSegmentFailed("step-a", { sessionId: "session-a", segmentIndex: 2 });
+    expect(state.failedRecordedSegments("step-a").map(({ segmentIndex }) => segmentIndex)).toEqual([
+      2
+    ]);
   });
 
   it("owns recoverable-session prompt, attach, discard, and busy transitions", () => {
@@ -205,7 +261,7 @@ describe("FlowRunFileInputState", () => {
     expect(state.beginResumeAction("step-b")).toBe(false);
     expect(state.isResumeBusyForStep("step-a")).toBe(true);
 
-    state.attachRecoveredSession("step-a", "session-a", 3);
+    state.attachRecoveredSession("step-a", "session-a", [segmentRecord(0, "file-0")]);
     state.finishResumeAction();
 
     expect(state.getResumeHint("step-a")).toBeNull();
@@ -234,12 +290,7 @@ describe("FlowRunFileInputState", () => {
     state.recordingStarted("step-a");
     state.dragEnteredStep("step-a");
     state.applyResumeScan({ "step-a": [recoveryHint("step-a", "session-a")] }, "step-a");
-    state.recordSegmentPersistence({
-      stepId: "step-a",
-      file: recordingFile(),
-      notice: "notice",
-      degraded: true
-    });
+    persistedSegment(state, "step-a", { notice: "notice", degraded: true });
 
     state.resetForDialogClose();
 
@@ -248,7 +299,6 @@ describe("FlowRunFileInputState", () => {
     expect(state.hasActiveRecording).toBe(false);
     expect(state.isDraggingStep("step-a")).toBe(false);
     expect(state.getResumeHint("step-a")).toBeNull();
-    expect(state.getRecordedFile("step-a")).toBeNull();
     expect(state.segmentsAwaitingUpload("step-a")).toBe(0);
     expect(state.isStorageDegraded).toBe(false);
 

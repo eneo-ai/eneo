@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import type {
   Eneo,
   Flow,
@@ -10,9 +10,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   markSegmentUploaded,
-  persistRecordingSegment
+  persistRecordingSegment,
+  purgeSession,
+  readSessionRecords,
+  scanRecoverableSessionsForSteps
 } from "$lib/features/audio/flowRunRecordingSession";
-import { SEGMENT_ROTATION_MS } from "$lib/features/audio/recordingSession";
+import { RETRY_BACKOFF_MS, SEGMENT_ROTATION_MS } from "$lib/features/audio/recordingSession";
+import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
 import { m } from "$lib/paraglide/messages";
 import FlowRunDialog from "./FlowRunDialog.svelte";
 
@@ -56,11 +60,18 @@ vi.mock("$lib/components/toast", () => ({
 // performance.now and requestAnimationFrame stay real so the stall watchdog
 // and the level meter see a healthy microphone while hours of fake time pass.
 const FAKED_CLOCK = ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] as const;
+const LOCAL_RECORDING_BLOCKER =
+  "Slutför uppladdningen eller kassera inspelningen för steg 1: Audio input.";
 
 let media: ReturnType<typeof installFakeMedia>;
 
 beforeEach(() => {
   media = installFakeMedia();
+  vi.mocked(markSegmentUploaded).mockReset().mockResolvedValue(undefined);
+  vi.mocked(persistRecordingSegment).mockReset().mockResolvedValue({ degraded: false });
+  vi.mocked(purgeSession).mockReset().mockResolvedValue(undefined);
+  vi.mocked(readSessionRecords).mockReset().mockResolvedValue([]);
+  vi.mocked(scanRecoverableSessionsForSteps).mockReset().mockResolvedValue({});
 });
 
 afterEach(async () => {
@@ -100,12 +111,7 @@ describe("FlowRunDialog recording rotation", () => {
 
   it("persists and uploads both segments once when the user stops during a rotation", async () => {
     const pendingUploads: PendingUpload[] = [];
-    const upload = vi.fn(
-      ({ file }: { file: File }) =>
-        new Promise<UploadedFile>((resolve) => {
-          pendingUploads.push({ file, resolve });
-        })
-    );
+    const upload = vi.fn(({ file }: { file: File }) => pendingUpload(pendingUploads, file));
     await openDialogAndStartRecording(upload);
 
     vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
@@ -126,11 +132,7 @@ describe("FlowRunDialog recording rotation", () => {
     await flush();
 
     expect(upload).toHaveBeenCalledTimes(2);
-    expect(
-      vi
-        .mocked(markSegmentUploaded)
-        .mock.calls.map(([args]) => [args.segmentIndex, args.uploadedFileId])
-    ).toEqual([
+    expect(markedSegments()).toEqual([
       [0, "segment-0"],
       [1, "segment-1"]
     ]);
@@ -146,34 +148,45 @@ describe("FlowRunDialog recording rotation", () => {
     expect(screen.getByLabelText(m.start_recording())).toBeTruthy();
   });
 
-  it("stops with a visible message when a rotation would leave three segments waiting for upload", async () => {
-    const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
-    await openDialogAndStartRecording(upload);
+  it.each(["upload", "persistence"] as const)(
+    "stops, and refuses a restart, while three segments wait for their %s",
+    async (pendingStage) => {
+      if (pendingStage === "persistence") {
+        vi.mocked(persistRecordingSegment).mockImplementation(() => new Promise(() => undefined));
+      }
+      const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
+      await openDialogAndStartRecording(upload);
 
-    for (const finished of [0, 1]) {
+      for (const finished of [0, 1]) {
+        vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
+        await flush();
+        expect(media.recorders).toHaveLength(finished + 2);
+        media.recorders[finished]?.finish();
+        await flush();
+      }
+      expect(screen.getByLabelText(m.stop_recording())).toBeTruthy();
+
       vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
       await flush();
-      expect(media.recorders).toHaveLength(finished + 2);
-      media.recorders[finished]?.finish();
+      media.recorders[2]?.finish();
       await flush();
+
+      expect(media.recorders).toHaveLength(3);
+      expect(persistedSegments().map(({ reason }) => reason)).toEqual([
+        "rotation",
+        "rotation",
+        "backlog"
+      ]);
+      expect(screen.getByText(m.recording_stopped_upload_backlog())).toBeTruthy();
+      expect(media.track.stop).toHaveBeenCalledOnce();
+
+      const start = screen.getByLabelText(m.start_recording()) as HTMLButtonElement;
+      expect(start.disabled).toBe(true);
+      await fireEvent.click(start);
+      await flush();
+      expect(media.recorders).toHaveLength(3);
     }
-    expect(screen.getByLabelText(m.stop_recording())).toBeTruthy();
-
-    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
-    await flush();
-    media.recorders[2]?.finish();
-    await flush();
-
-    expect(media.recorders).toHaveLength(3);
-    expect(persistedSegments().map(({ reason }) => reason)).toEqual([
-      "rotation",
-      "rotation",
-      "backlog"
-    ]);
-    expect(screen.getByText(m.recording_stopped_upload_backlog())).toBeTruthy();
-    expect(screen.getByLabelText(m.start_recording())).toBeTruthy();
-    expect(media.track.stop).toHaveBeenCalledOnce();
-  });
+  );
 
   it("gives a recording started while the last segment uploads its own rotation schedule", async () => {
     const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
@@ -197,21 +210,176 @@ describe("FlowRunDialog recording rotation", () => {
     expect(media.recorders).toHaveLength(3);
     expect(media.recorders[2]?.state).toBe("recording");
   });
+
+  it("keeps the run blocked until Retry uploads an earlier segment whose upload failed", async () => {
+    const pendingUploads: PendingUpload[] = [];
+    const upload = vi.fn(({ file }: { file: File }) => pendingUpload(pendingUploads, file));
+    await openDialogAndStartRecording(upload);
+
+    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
+    await flush();
+    media.recorders[0]?.finish();
+    await flush();
+    pendingUploads[0]?.reject(new Error("Network down"));
+    await flush();
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[1]?.finish();
+    await flush();
+    pendingUploads[1]?.resolve(uploadedFile("segment-1", pendingUploads[1].file.name));
+    await flush();
+
+    expect(screen.getByText(/-seg01-/)).toBeTruthy();
+    expect(nextButton().disabled).toBe(true);
+    expect(screen.getByText(LOCAL_RECORDING_BLOCKER)).toBeTruthy();
+
+    await fireEvent.click(retryInFailedRecordingAlert());
+    await flush();
+    expect(pendingUploads[2]?.file.name).toMatch(/-seg00-/);
+    pendingUploads[2]?.resolve(uploadedFile("segment-0", pendingUploads[2].file.name));
+    await flush();
+
+    expect(markedSegments()).toEqual([
+      [1, "segment-1"],
+      [0, "segment-0"]
+    ]);
+    expect(failedRecordingAlert()).toBeNull();
+    expect(nextButton().disabled).toBe(false);
+  });
+
+  it("offers save for later and discard only once capture stops and every segment is persisted", async () => {
+    const pendingUploads: PendingUpload[] = [];
+    const upload = vi.fn(({ file }: { file: File }) => pendingUpload(pendingUploads, file));
+    await openDialogAndStartRecording(upload);
+
+    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
+    await flush();
+    media.recorders[0]?.finish();
+    await flush();
+    pendingUploads[0]?.reject(new Error("Network down"));
+    await flush();
+
+    // Capture continues: Retry is offered, the actions that end the recording are not.
+    expect(queryInFailedRecordingAlert("Försök igen")).toBeTruthy();
+    expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeNull();
+    expect(queryInFailedRecordingAlert(m.discard())).toBeNull();
+
+    let finishPersisting = () => {};
+    vi.mocked(persistRecordingSegment).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishPersisting = () => resolve({ degraded: false });
+        })
+    );
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[1]?.finish();
+    await flush();
+    expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeNull();
+
+    finishPersisting();
+    await flush();
+    expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeTruthy();
+    expect(queryInFailedRecordingAlert(m.discard())).toBeTruthy();
+  });
+
+  it("retries when the replacement recorder fails before it captures any audio", async () => {
+    const upload = vi.fn(async ({ file }: { file: File }) => uploadedFile("segment-0", file.name));
+    await openDialogAndStartRecording(upload);
+
+    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
+    await flush();
+    media.recorders[0]?.finish();
+    await flush();
+    media.recorders[1]?.dispatchEvent(new Event("error"));
+    media.recorders[1]?.finish({ withAudio: false });
+    await flush();
+
+    expect(screen.getByText(m.recording_session_reconnecting())).toBeTruthy();
+    vi.advanceTimersByTime(RETRY_BACKOFF_MS[0]);
+    await flush();
+    expect(media.recorders).toHaveLength(3);
+    expect(media.recorders[2]?.state).toBe("recording");
+    expect(persistedSegments()).toEqual([{ segmentIndex: 0, reason: "rotation" }]);
+  });
+
+  it("rotates a recording started again from the paused-failed retry", async () => {
+    const upload = vi.fn(async ({ file }: { file: File }) => uploadedFile("segment-0", file.name));
+    await openDialogAndStartRecording(upload);
+
+    // Every automatic retry fails, so the session ends in paused-failed.
+    RETRY_BACKOFF_MS.forEach(() =>
+      media.getUserMedia.mockRejectedValueOnce(new Error("Microphone busy"))
+    );
+    media.recorders[0]?.dispatchEvent(new Event("error"));
+    media.recorders[0]?.finish();
+    await flush();
+    for (const backoff of RETRY_BACKOFF_MS) {
+      vi.advanceTimersByTime(backoff);
+      await flush();
+    }
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_session_paused_retry() }));
+    await flush();
+    expect(media.recorders).toHaveLength(2);
+
+    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
+    await flush();
+    expect(media.recorders).toHaveLength(3);
+    expect(media.recorders[2]?.state).toBe("recording");
+  });
+
+  it("counts recovered segments whose upload fails and retries them in segment order", async () => {
+    vi.mocked(scanRecoverableSessionsForSteps).mockResolvedValue({
+      "step-audio": [recoveryHint()]
+    });
+    vi.mocked(readSessionRecords).mockResolvedValue([
+      segmentRecord(0, "recovered-0"),
+      segmentRecord(1),
+      segmentRecord(2),
+      segmentRecord(3)
+    ]);
+    let failUploads = true;
+    const upload = vi.fn(async ({ file }: { file: File }) => {
+      if (failUploads) throw new Error("Network down");
+      return uploadedFile(`uploaded-${file.name}`, file.name);
+    });
+    renderDialog(upload);
+
+    await fireEvent.click(
+      await screen.findByRole("button", { name: m.recording_resume_continue_recording() })
+    );
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(requireFailedRecordingAlert()).toBeTruthy());
+
+    const start = screen.getByLabelText(m.start_recording()) as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+    expect(screen.getByText(m.recording_stopped_upload_backlog())).toBeTruthy();
+
+    failUploads = false;
+    await fireEvent.click(retryInFailedRecordingAlert());
+    await waitFor(() => expect(markSegmentUploaded).toHaveBeenCalledTimes(3));
+    expect(markedSegments().map(([segmentIndex]) => segmentIndex)).toEqual([1, 2, 3]);
+    await waitFor(() => expect(start.disabled).toBe(false));
+    expect(failedRecordingAlert()).toBeNull();
+  });
 });
 
 type PendingUpload = {
   file: File;
   resolve: (file: UploadedFile) => void;
+  reject: (error: Error) => void;
 };
+
+function pendingUpload(pendingUploads: PendingUpload[], file: File) {
+  return new Promise<UploadedFile>((resolve, reject) => {
+    pendingUploads.push({ file, resolve, reject });
+  });
+}
 
 // Lets awaited work (getUserMedia, persistence, the upload queue) settle under
 // the fake clock.
 const flush = () => vi.advanceTimersByTimeAsync(0);
 
-async function openDialogAndStartRecording(
-  upload: (args: { file: File; stepId: string }) => Promise<UploadedFile>
-) {
-  render(FlowRunDialog, {
+function renderDialog(upload: (args: { file: File; stepId: string }) => Promise<UploadedFile>) {
+  return render(FlowRunDialog, {
     open: true,
     flow: {
       id: "flow-1",
@@ -221,6 +389,12 @@ async function openDialogAndStartRecording(
     eneo: buildEneo(upload),
     lastInputPayload: null
   });
+}
+
+async function openDialogAndStartRecording(
+  upload: (args: { file: File; stepId: string }) => Promise<UploadedFile>
+) {
+  renderDialog(upload);
   await screen.findByText("Audio input");
   vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
   await fireEvent.click(screen.getByLabelText(m.start_recording()));
@@ -232,6 +406,39 @@ function persistedSegments() {
   return vi
     .mocked(persistRecordingSegment)
     .mock.calls.map(([args]) => ({ segmentIndex: args.segmentIndex, reason: args.reason }));
+}
+
+function markedSegments() {
+  return vi
+    .mocked(markSegmentUploaded)
+    .mock.calls.map(([args]) => [args.segmentIndex, args.uploadedFileId]);
+}
+
+function nextButton() {
+  return screen.getByRole("button", { name: "Nästa" }) as HTMLButtonElement;
+}
+
+// The step's alert for recorded audio whose upload failed.
+function failedRecordingAlert(): HTMLElement | null {
+  return (
+    screen
+      .queryAllByRole("alert")
+      .find((alert) => within(alert).queryByText(m.recording_last_clip_ready())) ?? null
+  );
+}
+
+function requireFailedRecordingAlert(): HTMLElement {
+  const alert = failedRecordingAlert();
+  if (!alert) throw new Error("The failed recording alert is not shown");
+  return alert;
+}
+
+function retryInFailedRecordingAlert() {
+  return within(requireFailedRecordingAlert()).getByRole("button", { name: "Försök igen" });
+}
+
+function queryInFailedRecordingAlert(name: string) {
+  return within(requireFailedRecordingAlert()).queryByRole("button", { name });
 }
 
 function installFakeMedia() {
@@ -246,6 +453,7 @@ function installFakeMedia() {
   });
   const recorders: FakeMediaRecorder[] = [];
   const contexts: FakeAudioContext[] = [];
+  const getUserMedia = vi.fn(async (): Promise<unknown> => stream);
 
   class FakeMediaRecorder extends EventTarget {
     static isTypeSupported = () => true;
@@ -267,13 +475,15 @@ function installFakeMedia() {
 
     requestData() {}
 
-    // What a browser does shortly after stop(): hand over the last chunk,
-    // then report that the recorder stopped.
-    finish() {
-      const chunk = Object.assign(new Event("dataavailable"), {
-        data: new Blob(["audio"], { type: this.mimeType })
-      });
-      this.dispatchEvent(chunk);
+    // What a browser does shortly after stop(): hand over the last chunk (none
+    // when nothing was captured), then report that the recorder stopped.
+    finish({ withAudio = true }: { withAudio?: boolean } = {}) {
+      if (withAudio) {
+        const chunk = Object.assign(new Event("dataavailable"), {
+          data: new Blob(["audio"], { type: this.mimeType })
+        });
+        this.dispatchEvent(chunk);
+      }
       this.dispatchEvent(new Event("stop"));
     }
   }
@@ -303,7 +513,7 @@ function installFakeMedia() {
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
-    value: { getUserMedia: vi.fn(async () => stream) }
+    value: { getUserMedia }
   });
   Object.defineProperty(URL, "createObjectURL", {
     configurable: true,
@@ -319,6 +529,7 @@ function installFakeMedia() {
     stream,
     recorders,
     contexts,
+    getUserMedia,
     uninstall() {
       vi.unstubAllGlobals();
       Reflect.deleteProperty(navigator, "mediaDevices");
@@ -337,6 +548,14 @@ const audioStep: FlowRunContractStepInput = {
   accepted_mimetypes: ["audio/webm"],
   max_files: 10,
   max_file_size_bytes: 1_000_000
+};
+
+const audioStepSnapshot = {
+  publishedFlowVersion: 7,
+  maxFiles: 10,
+  maxFileSizeBytes: 1_000_000,
+  acceptedMimetypes: ["audio/webm"],
+  inputFormat: "audio"
 };
 
 function buildEneo(upload: (args: { file: File; stepId: string }) => Promise<UploadedFile>): Eneo {
@@ -368,4 +587,33 @@ function uploadedFile(id: string, name: string): UploadedFile {
     size: 5,
     created_at: "2026-09-23T00:00:00Z"
   } as UploadedFile;
+}
+
+function recoveryHint(): SessionRecoveryHint {
+  return {
+    flowId: "flow-1",
+    stepId: "step-audio",
+    sessionId: "session-1",
+    segmentCount: 4,
+    totalDurationMs: 4_000,
+    earliestCapturedAt: Date.UTC(2026, 8, 23),
+    uploadedCount: 1,
+    contractSnapshot: audioStepSnapshot
+  };
+}
+
+function segmentRecord(segmentIndex: number, uploadedFileId: string | null = null): SegmentRecord {
+  return {
+    flowId: "flow-1",
+    stepId: "step-audio",
+    sessionId: "session-1",
+    segmentIndex,
+    blob: new Blob(["recording"], { type: "audio/webm" }),
+    mimeType: "audio/webm",
+    durationMs: 1_000,
+    capturedAt: Date.UTC(2026, 8, 23, 9, segmentIndex),
+    uploadedFileId,
+    reason: "rotation",
+    contractSnapshot: audioStepSnapshot
+  };
 }
