@@ -7,6 +7,7 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import { toast } from "$lib/components/toast";
   import { getEneo } from "$lib/core/Eneo";
+  import { assignLocation } from "$lib/core/navigation";
   import { sourceReferenceText } from "$lib/features/widget/widgetMessageContext";
   import { m } from "$lib/paraglide/messages";
 
@@ -39,7 +40,7 @@
         infoBlobId: data.id,
         contentDisposition: "attachment"
       });
-      window.location.assign(response.url);
+      assignLocation(response.url);
     } catch {
       toast.error(m.error_downloading_original());
     } finally {
