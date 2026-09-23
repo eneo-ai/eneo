@@ -3110,7 +3110,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 180 actions with their enabled status for the modal UI.
+     * @description Retrieve all 181 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -5527,6 +5527,40 @@ export interface paths {
      *     typed 409 conflict.
      */
     delete: operations["delete_flow_runtime_file"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/steps/{step_id}/live-transcription-sessions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start a live transcription preview
+     * @description Admit a live transcription preview for one audio step of a published flow and
+     *     return a single-use ticket for the WebSocket at `websocket_path`.
+     *
+     *     Connect within 30 seconds, offering the subprotocols `eneo-live.v1` and
+     *     `ticket.<ticket>`. Send the recording as binary frames of mono 16-bit
+     *     little-endian PCM at 16 kHz and a text frame `{"type": "stop"}` when it ends.
+     *     The socket answers `ready`, `transcript.delta` (text to append),
+     *     `transcript.done` (the full preview text) and `error` (`code`, `message`,
+     *     `retryable`) events.
+     *
+     *     The preview is not the run's transcript. Upload the recording as a runtime file
+     *     and create the run as usual; the flow's transcription model then produces the
+     *     transcript the run uses. Live preview is only available when the flow's own
+     *     transcription model transcribes and that model supports realtime; otherwise
+     *     this route answers 409 `flow_live_transcription_unavailable` with a `reason`.
+     */
+    post: operations["create_flow_live_transcription_session"];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -11467,6 +11501,7 @@ export interface components {
       | "flow_run_retention_policy_changed"
       | "flow_run_history_purged"
       | "flow_run_created"
+      | "flow_live_transcription_started"
       | "flow_run_completed"
       | "flow_run_failed"
       | "flow_run_redispatched"
@@ -13493,7 +13528,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 82,
+     *           "action_count": 83,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -16870,6 +16905,7 @@ export interface components {
       | "flow_webhook_delivery_failed"
       | "flow_runtime_file_empty"
       | "flow_runtime_file_attached"
+      | "flow_live_transcription_unavailable"
       | "flow_evidence_audit_logging_failed"
       | "flow_evidence_export_reason_required"
       | "flow_evidence_export_too_large"
@@ -17608,6 +17644,107 @@ export interface components {
      * @enum {string}
      */
     FlowInputType: "text" | "json" | "image" | "audio" | "document" | "file" | "any";
+    /** FlowLiveTranscriptionModelPublic */
+    FlowLiveTranscriptionModelPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Name
+       * @description Display name of the transcription model.
+       */
+      name: string;
+    };
+    /**
+     * FlowLiveTranscriptionSessionPublic
+     * @description An admitted live transcription session, ready to connect.
+     * @example {
+     *       "expires_at": "2026-09-23T10:15:30Z",
+     *       "max_seconds": 18000,
+     *       "model": {
+     *         "id": "7d0c7a8e-8b4c-4c1e-9d3e-2f4b6a1c9e10",
+     *         "name": "Pianissimo"
+     *       },
+     *       "sample_rate": 16000,
+     *       "subprotocol": "eneo-live.v1",
+     *       "ticket": "Pq0cX5WnU1kz0dY8Gm7wQ2vJ4hR9sT3bA6eL1fN8xC0",
+     *       "websocket_path": "/api/v1/live-transcription"
+     *     }
+     */
+    FlowLiveTranscriptionSessionPublic: {
+      /**
+       * Expires At
+       * Format: date-time
+       */
+      expires_at: string;
+      /**
+       * Max Seconds
+       * @description Longest audio the session accepts, the flow audio duration limit.
+       */
+      max_seconds: number;
+      model: components["schemas"]["FlowLiveTranscriptionModelPublic"];
+      /**
+       * Sample Rate
+       * @description Send mono 16-bit little-endian PCM at this rate, as binary frames.
+       * @default 16000
+       * @constant
+       */
+      sample_rate?: 16000;
+      /**
+       * Subprotocol
+       * @default eneo-live.v1
+       * @constant
+       */
+      subprotocol?: "eneo-live.v1";
+      /**
+       * Ticket
+       * @description Single-use ticket for the WebSocket. Offer it as the subprotocol `ticket.<ticket>` next to `eneo-live.v1`. It expires after 30 seconds.
+       */
+      ticket: string;
+      /**
+       * Websocket Path
+       * @description Path of the live transcription WebSocket on this API host.
+       */
+      websocket_path: string;
+    };
+    /** FlowLiveTranscriptionUnavailableContext */
+    FlowLiveTranscriptionUnavailableContext: {
+      /**
+       * Reason
+       * @description `transcription_disabled`: the flow does not transcribe audio. `transcription_service_mode`: an external service transcribes with its own model. `model_unavailable`: the flow's transcription model is not available in its space. `model_not_realtime`: the model does not support realtime.
+       * @enum {string}
+       */
+      reason:
+        | "transcription_disabled"
+        | "transcription_service_mode"
+        | "model_unavailable"
+        | "model_not_realtime";
+    };
+    /**
+     * FlowLiveTranscriptionUnavailableError
+     * @description 409 body when live preview cannot start for the flow.
+     */
+    FlowLiveTranscriptionUnavailableError: {
+      /**
+       * Code
+       * @constant
+       */
+      code: "flow_live_transcription_unavailable";
+      context: components["schemas"]["FlowLiveTranscriptionUnavailableContext"];
+      /** Details */
+      details?: {
+        [key: string]: unknown;
+      } | null;
+      eneo_error_code: components["schemas"]["ErrorCodes"];
+      /** Error Id */
+      error_id?: string | null;
+      /** Message */
+      message: string;
+      /** Request Id */
+      request_id?: string | null;
+    };
     /**
      * FlowMappedExecutionPolicyPublic
      * @example {
@@ -34511,6 +34648,12 @@ export interface components {
       provider_id: string;
       /** @description Security classification */
       security_classification?: components["schemas"]["ModelId"] | null;
+      /**
+       * Supports Realtime
+       * @description The provider serves this model over the realtime WebSocket that live transcription uses. Only providers of type vLLM qualify.
+       * @default false
+       */
+      supports_realtime?: boolean;
     };
     /** TenantTranscriptionModelUpdate */
     TenantTranscriptionModelUpdate: {
@@ -34551,6 +34694,11 @@ export interface components {
        * @description Model stability (stable, experimental)
        */
       stability?: string | null;
+      /**
+       * Supports Realtime
+       * @description Turn live transcription on or off for this model. Only providers of type vLLM qualify.
+       */
+      supports_realtime?: boolean | null;
     };
     /** TenantUpdatePublic */
     TenantUpdatePublic: {
@@ -35106,6 +35254,11 @@ export interface components {
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Stability */
       stability?: string | null;
+      /**
+       * Supports Realtime
+       * @default false
+       */
+      supports_realtime?: boolean;
       /** Tenant Id */
       tenant_id?: string | null;
     };
@@ -35175,6 +35328,11 @@ export interface components {
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Stability */
       stability?: string | null;
+      /**
+       * Supports Realtime
+       * @default false
+       */
+      supports_realtime?: boolean;
       /** Tenant Id */
       tenant_id?: string | null;
     };
@@ -57249,6 +57407,110 @@ export interface operations {
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_flow_live_transcription_session: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the published flow. */
+        id: string;
+        /** @description Identifier of the published step that takes audio. */
+        step_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowLiveTranscriptionSessionPublic"];
+        };
+      };
+      /** @description Flow is not published, or the step does not take audio. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_run_unknown_step_input",
+           *       "eneo_error_code": 9007,
+           *       "message": "Live transcription needs a published step that takes audio."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: the caller may not run this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "API key space scope does not match requested flow."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Not found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Live transcription is not available for this flow. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_live_transcription_unavailable",
+           *       "context": {
+           *         "reason": "model_not_realtime"
+           *       },
+           *       "eneo_error_code": 9057,
+           *       "message": "Live transcription is not available for this flow."
+           *     }
+           */
+          "application/json": components["schemas"]["FlowLiveTranscriptionUnavailableError"];
         };
       };
       /** @description Validation Error */
