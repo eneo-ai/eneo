@@ -1,10 +1,10 @@
 /* eslint-disable eneo/no-raw-color -- fixtures use literal widget colours */
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { EneoError, type WidgetPublicConfig } from "@eneo/eneo-js";
 import { parseWidgetSettings } from "../../../../../../../../packages/widget-loader/src/protocol";
 
 const backend = vi.hoisted(() => ({
-  config: (async () => ({})) as () => Promise<unknown>,
+  config: (async () => ({})) as (fetch: typeof globalThis.fetch) => Promise<unknown>,
   publicIds: [] as string[]
 }));
 
@@ -13,10 +13,18 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@eneo/eneo-js")>();
   return {
     ...actual,
-    createWidgetClient: ({ publicId }: { publicId: string }) => {
-      backend.publicIds.push(publicId);
-      return { config: () => backend.config() };
-    }
+    createWidgetClient: ({
+      publicId,
+      fetch
+    }: {
+      publicId: string;
+      fetch: typeof globalThis.fetch;
+    }) => ({
+      config: () => {
+        backend.publicIds.push(publicId);
+        return backend.config(fetch);
+      }
+    })
   };
 });
 
@@ -26,19 +34,35 @@ function config(theme: Partial<WidgetPublicConfig["theme"]>, language = "en"): W
   return { public_id: "wgt_x", name: "Chatten", theme, language } as WidgetPublicConfig;
 }
 
-const request = () => GET({ params: { publicId: "wgt_x" }, fetch } as never);
+// Answers are cached per widget, so every test asks for its own.
+const request = (publicId: string, fetch: typeof globalThis.fetch = globalThis.fetch) =>
+  GET({ params: { publicId }, fetch } as never);
+
+const asked = (publicId: string) => backend.publicIds.filter((id) => id === publicId).length;
+
+/** A backend that never answers; the request fails only once it is aborted. */
+const hangingFetch: typeof globalThis.fetch = (_input, init) =>
+  new Promise((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () =>
+      reject(new DOMException("aborted", "AbortError"))
+    );
+  });
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("GET /widget/settings/[publicId]", () => {
   test("answers any host page with the saved language, position and colours", async () => {
     backend.config = async () =>
       config({ position: "bottom-left", primary_color: "#1F4E79", primary_color_dark: "#9CC7F0" });
 
-    const response = await request();
+    const response = await request("wgt_saved");
 
     expect(response.status).toBe(200);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("cache-control")).toBe("public, max-age=60");
-    expect(backend.publicIds.at(-1)).toBe("wgt_x");
+    expect(backend.publicIds.at(-1)).toBe("wgt_saved");
     const body = await response.json();
     expect(body).toEqual({
       language: "en",
@@ -55,22 +79,74 @@ describe("GET /widget/settings/[publicId]", () => {
   test("places a widget without a saved position bottom right and leaves auto to the host", async () => {
     backend.config = async () => config({}, "auto");
 
-    const body = await (await request()).json();
+    const body = await (await request("wgt_auto")).json();
 
     expect(body.position).toBe("bottom-right");
     expect(body.language).toBe("auto");
     expect(parseWidgetSettings(body)?.language).toBeNull();
   });
 
-  test("answers 404 without caching for a paused, draft or unknown widget", async () => {
+  test("answers 404, kept by no browser, for a paused, draft or unknown widget", async () => {
     backend.config = async () => {
       throw new EneoError("Not found", "SERVER", 404, 0);
     };
 
-    const response = await request();
+    const response = await request("wgt_unknown");
 
     expect(response.status).toBe(404);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  test("asks the backend once a minute per widget, however many pages load it", async () => {
+    vi.useFakeTimers();
+    backend.config = async () => config({ primary_color: "#1F4E79" });
+
+    const first = await Promise.all([request("wgt_busy"), request("wgt_busy")]);
+    vi.advanceTimersByTime(20_000);
+    const later = await request("wgt_busy");
+
+    expect(asked("wgt_busy")).toBe(1);
+    expect(first.map((response) => response.status)).toEqual([200, 200]);
+    expect(await later.json()).toEqual(await first[0].json());
+    // A browser never keeps it longer than the server still does.
+    expect(later.headers.get("cache-control")).toBe("public, max-age=40");
+
+    vi.advanceTimersByTime(41_000);
+    await request("wgt_busy");
+    expect(asked("wgt_busy")).toBe(2);
+  });
+
+  test("remembers an unknown widget only for a few seconds", async () => {
+    vi.useFakeTimers();
+    backend.config = async () => {
+      throw new EneoError("Not found", "SERVER", 404, 0);
+    };
+
+    expect((await request("wgt_gone")).status).toBe(404);
+    expect((await request("wgt_gone")).status).toBe(404);
+    expect(asked("wgt_gone")).toBe(1);
+
+    vi.advanceTimersByTime(6_000);
+    await request("wgt_gone");
+    expect(asked("wgt_gone")).toBe(2);
+  });
+
+  test("answers a slow backend before the loader stops waiting after 3 s", async () => {
+    vi.useFakeTimers();
+    backend.config = (fetch) => fetch("http://backend/api/v1/widgets/wgt_slow/config/");
+
+    const pending = request("wgt_slow", hangingFetch);
+    await vi.advanceTimersByTimeAsync(2_999);
+    const response = await pending;
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+
+    // A timeout is not remembered: the next page view asks again.
+    backend.config = async () => config({});
+    expect((await request("wgt_slow")).status).toBe(200);
+    expect(asked("wgt_slow")).toBe(2);
   });
 });
