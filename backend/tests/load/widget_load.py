@@ -21,7 +21,8 @@ provider). From inside that stack's backend container:
     python tests/load/widget_load.py --base-url http://localhost:8000 \
         --public-id wgt_… --visitors 200 --messages 3
 
-See docs/adr/embeddable-widgets/04-review.md for the recorded results.
+Recorded results from the 2026-09-17 run are in the description of the
+widgets pull request (eneo-ai/eneo#867).
 """
 
 from __future__ import annotations
