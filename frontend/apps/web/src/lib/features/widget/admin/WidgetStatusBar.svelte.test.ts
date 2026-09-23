@@ -68,6 +68,26 @@ describe("WidgetStatusBar", () => {
     await expect.element(page.getByText("widget_admin_blockers_title")).toBeVisible();
   });
 
+  test("a paused widget tells a non-admin, without a tooltip, why it cannot be resumed", async () => {
+    renderBar(new WidgetAutosave(widget({ status: "paused" }), vi.fn()), false);
+    const resume = page.getByRole("button", { name: "widget_admin_resume" });
+    await expect.element(page.getByText("widget_admin_resume_admin_only")).toBeVisible();
+    await expect.element(resume).toHaveAttribute("aria-disabled", "true");
+    await expect.element(resume).toHaveAccessibleDescription("widget_admin_resume_admin_only");
+  });
+
+  test("a blocked widget's activate button is described by what blocks it", async () => {
+    renderBar(
+      new WidgetAutosave(
+        widget({ status: "draft", activated_at: null, activation_blockers: ["subtitle_empty"] }),
+        vi.fn()
+      )
+    );
+    await expect
+      .element(page.getByRole("button", { name: "widget_admin_activate" }))
+      .toHaveAccessibleDescription(/widget_admin_blocker_subtitle_empty/);
+  });
+
   test("lists what the server refused so it can be found on any tab", async () => {
     const autosave = new WidgetAutosave(
       widget(),

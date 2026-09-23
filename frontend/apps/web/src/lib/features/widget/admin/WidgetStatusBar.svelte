@@ -98,6 +98,23 @@
         ? m.widget_admin_activate_blocked()
         : null
   );
+  // The tooltip never opens on touch, so the reason is also written out below.
+  const adminOnlyNote = $derived(
+    isAdmin || blockers.length > 0
+      ? null
+      : widget.status === "draft"
+        ? m.widget_admin_ready_for_admin()
+        : widget.status === "paused"
+          ? m.widget_admin_resume_admin_only()
+          : null
+  );
+  const activateReasonId = $derived(
+    blockers.length > 0
+      ? "widget-status-blockers"
+      : adminOnlyNote
+        ? "widget-status-admin-only"
+        : null
+  );
 </script>
 
 <section
@@ -147,7 +164,15 @@
           <Tooltip.Root>
             <Tooltip.Trigger>
               {#snippet child({ props })}
-                <Button {...props} variant="default" aria-disabled="true" class="opacity-50">
+                <Button
+                  {...props}
+                  variant="default"
+                  aria-disabled="true"
+                  aria-describedby={[props["aria-describedby"], activateReasonId]
+                    .filter(Boolean)
+                    .join(" ") || undefined}
+                  class="opacity-50"
+                >
                   {widget.status === "paused" ? m.widget_admin_resume() : m.widget_admin_activate()}
                 </Button>
               {/snippet}
@@ -185,7 +210,10 @@
   {#if blockers.length > 0}
     <!-- An active widget with blockers is live but not serving as configured
          (an unpublished assistant, no allowed website, no AI disclosure). -->
-    <div class="bg-warning-dimmer text-warning-stronger rounded-lg px-3 py-2 text-sm">
+    <div
+      id="widget-status-blockers"
+      class="bg-warning-dimmer text-warning-stronger rounded-lg px-3 py-2 text-sm"
+    >
       <p class="font-medium">
         {widget.status === "active"
           ? m.widget_admin_active_issues_title()
@@ -197,8 +225,8 @@
         {/each}
       </ul>
     </div>
-  {:else if widget.status === "draft" && !isAdmin}
-    <p class="text-secondary text-sm">{m.widget_admin_ready_for_admin()}</p>
+  {:else if adminOnlyNote}
+    <p id="widget-status-admin-only" class="text-secondary text-sm">{adminOnlyNote}</p>
   {/if}
 </section>
 
