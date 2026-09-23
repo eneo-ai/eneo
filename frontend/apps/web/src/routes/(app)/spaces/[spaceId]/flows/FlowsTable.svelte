@@ -199,16 +199,15 @@
           bind:value={query}
           aria-label={m.flow_list_search_aria()}
           placeholder={m.flow_list_search_placeholder()}
-          class="bg-primary h-[2.125rem] w-full pl-9 text-sm max-sm:h-[44px]"
+          class="bg-primary h-9 w-full pl-9 text-sm max-sm:h-[44px]"
         />
       </div>
       <!-- One choice of three. Clicking the chosen option again keeps it
-           rather than leaving no filter selected. spacing={1}: the joined
-           (spacing 0) look keys off a data-horizontal attribute bits-ui never
-           sets, so joined items render square. -->
+           rather than leaving no filter selected. -->
       <ToggleGroup.Root
         type="single"
         variant="outline"
+        size="lg"
         spacing={0}
         bind:value={
           () => filter,
@@ -325,7 +324,7 @@
                   <a
                     href={rowHref(row)}
                     title={rowName(row)}
-                    class="text-primary focus-visible:ring-ring truncate rounded-sm text-sm font-semibold outline-none before:absolute before:inset-0 before:content-[''] focus-visible:ring-2"
+                    class="text-primary focus-visible:ring-ring line-clamp-2 rounded-sm text-sm font-semibold break-words outline-none before:absolute before:inset-0 before:content-[''] focus-visible:ring-2"
                   >
                     {rowName(row)}
                   </a>

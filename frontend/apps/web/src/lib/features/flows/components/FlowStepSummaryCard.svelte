@@ -82,7 +82,8 @@
     <span class="text-secondary min-w-0 truncate" title={source}>
       <span class="text-primary font-medium">{source}</span> · {getInputTypeLabel(
         step.input_type
-      )}{#if summaryModel?.readsInSections}{" · "}{m.flow_step_summary_reads_in_sections()}{/if}
+      )}{#if summaryModel?.readsInSections}
+        · {m.flow_step_summary_reads_in_sections()}{/if}
     </span>
 
     <span class="text-muted" aria-hidden="true">&rarr;</span>

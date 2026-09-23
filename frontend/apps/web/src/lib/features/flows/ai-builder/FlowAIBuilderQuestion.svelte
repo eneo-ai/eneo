@@ -669,7 +669,7 @@
                   </Label>
                   <NativeSelect.Root
                     id={typeId}
-                    class="w-full"
+                    class="bg-primary w-full"
                     bind:value={field.fieldType}
                     {disabled}
                   >
@@ -699,7 +699,7 @@
                   </Label>
                   <NativeSelect.Root
                     id={purposeId}
-                    class="w-full"
+                    class="bg-primary w-full"
                     bind:value={field.purpose}
                     aria-label={`${field.label.trim() || field.variableName.trim() || m.ai_builder_question_field_label()}: ${question.question}`}
                     {disabled}
