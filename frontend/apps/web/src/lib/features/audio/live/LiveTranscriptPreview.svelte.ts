@@ -4,7 +4,10 @@ import { PCM16_PROCESSOR } from "./pcm16-worklet.js";
 // the app's `script-src 'self'` refuses worklet modules from data: URLs.
 import workletUrl from "./pcm16-worklet.js?url&no-inline";
 
-export type LiveTranscriptStatus = "idle" | "connecting" | "listening" | "interrupted" | "finished";
+// "unavailable": the session never reached listening. "interrupted": it was
+// listening and ended while the recording went on.
+export type LiveTranscriptStatus =
+  "idle" | "connecting" | "listening" | "interrupted" | "unavailable" | "finished";
 
 // The recorder's own graph: the preview listens to the microphone the
 // recording already uses, on the context that already runs at its rate.
@@ -22,6 +25,9 @@ type LiveServerMessage =
   | { type: "error"; code: string; message: string; retryable: boolean };
 
 const LIVE_PROTOCOL = "eneo-live.v1";
+// Audio waits for the socket this long (15 s of 100 ms frames, 480 kB). A
+// session that has not opened by then is unavailable; audio is never dropped.
+export const MAX_QUEUED_FRAMES = 150;
 // Frames are 100 ms (3.2 kB), so a socket holding this much has fallen minutes
 // behind the microphone. The preview then ends visibly; it never drops audio.
 const MAX_BUFFERED_BYTES = 1024 * 1024;
@@ -43,7 +49,9 @@ export class LiveTranscriptPreview {
   #socket: WebSocket | null = null;
   #node: AudioWorkletNode | null = null;
   #source: MediaStreamAudioSourceNode | null = null;
+  #queue: ArrayBuffer[] = [];
   #finalTextTimer: ReturnType<typeof setTimeout> | undefined;
+  #onListening: (() => void) | undefined;
   // Bumped whenever a session ends, so a start still awaiting its ticket or
   // worklet knows it was overtaken.
   #generation = 0;
@@ -69,7 +77,12 @@ export class LiveTranscriptPreview {
 
   async start(
     graph: RecorderAudioGraph,
-    { eneo, flowId, stepId }: { eneo: Eneo; flowId: string; stepId: string }
+    {
+      eneo,
+      flowId,
+      stepId,
+      onListening
+    }: { eneo: Eneo; flowId: string; stepId: string; onListening?: () => void }
   ): Promise<void> {
     this.#teardown();
     const generation = this.#generation;
@@ -78,10 +91,17 @@ export class LiveTranscriptPreview {
     this.#status = "connecting";
     this.#errorCode = null;
     this.#sessionText = "";
+    this.#onListening = onListening;
 
     try {
-      const session = await eneo.flows.liveTranscription.createSession({ id: flowId, stepId });
-      await graph.context.audioWorklet.addModule(workletUrl);
+      // The worklet loads while the ticket is issued and taps the recording as
+      // soon as it can, so the preview hears it from the first word.
+      const [session] = await Promise.all([
+        eneo.flows.liveTranscription.createSession({ id: flowId, stepId }),
+        graph.context.audioWorklet.addModule(workletUrl).then(() => {
+          if (generation === this.#generation) this.#tap(graph);
+        })
+      ]);
       if (generation !== this.#generation) return;
 
       const socket = new WebSocket(liveSocketUrl(eneo.client.baseUrl, session.websocket_path), [
@@ -90,7 +110,7 @@ export class LiveTranscriptPreview {
       ]);
       this.#socket = socket;
       socket.onopen = () => {
-        if (socket === this.#socket) this.#listen(socket, graph);
+        if (socket === this.#socket) this.#flush(socket);
       };
       socket.onmessage = (event: MessageEvent) => {
         if (socket === this.#socket && typeof event.data === "string") {
@@ -109,9 +129,10 @@ export class LiveTranscriptPreview {
   // until it arrives. The recorder calls this while releasing its graph, so it
   // must not throw.
   stop(): void {
-    if (this.#status !== "connecting" && this.#status !== "listening") return;
+    if (this.#status === "idle" || this.#status === "finished") return;
     const socket = this.#socket;
     const awaitsFinalText = this.#status === "listening" && socket?.readyState === WebSocket.OPEN;
+    // A notice about the recording going on is no longer true.
     this.#status = "finished";
     if (!socket || !awaitsFinalText) {
       this.#teardown();
@@ -126,39 +147,56 @@ export class LiveTranscriptPreview {
     this.#teardown();
   }
 
-  #listen(socket: WebSocket, graph: RecorderAudioGraph) {
-    try {
-      // Mono in, no output: nothing of the microphone reaches the speakers.
-      const node = new AudioWorkletNode(graph.context, PCM16_PROCESSOR, {
-        numberOfInputs: 1,
-        numberOfOutputs: 0,
-        channelCount: 1,
-        channelCountMode: "explicit",
-        channelInterpretation: "speakers"
-      });
-      node.port.onmessage = (event: MessageEvent<ArrayBuffer>) =>
-        this.#sendFrame(socket, event.data);
-      graph.source.connect(node);
-      this.#node = node;
-      this.#source = graph.source;
-    } catch {
-      this.#end("audio_unavailable");
+  // Mono in, no output: nothing of the microphone reaches the speakers.
+  #tap(graph: RecorderAudioGraph) {
+    const node = new AudioWorkletNode(graph.context, PCM16_PROCESSOR, {
+      numberOfInputs: 1,
+      numberOfOutputs: 0,
+      channelCount: 1,
+      channelCountMode: "explicit",
+      channelInterpretation: "speakers"
+    });
+    node.port.onmessage = (event: MessageEvent<ArrayBuffer>) => this.#takeFrame(event.data);
+    graph.source.connect(node);
+    this.#node = node;
+    this.#source = graph.source;
+  }
+
+  #takeFrame(frame: ArrayBuffer) {
+    const socket = this.#socket;
+    if (socket?.readyState === WebSocket.OPEN) {
+      this.#send(socket, frame);
+      return;
+    }
+    if (this.#queue.length === MAX_QUEUED_FRAMES) {
+      this.#end("connect_timeout");
+      return;
+    }
+    this.#queue.push(frame);
+  }
+
+  // The waiting audio goes first, in order, then the live frames follow.
+  #flush(socket: WebSocket) {
+    for (const frame of this.#queue.splice(0)) {
+      if (!this.#send(socket, frame)) return;
     }
   }
 
-  #sendFrame(socket: WebSocket, frame: ArrayBuffer) {
-    if (socket !== this.#socket || socket.readyState !== WebSocket.OPEN) return;
+  #send(socket: WebSocket, frame: ArrayBuffer): boolean {
     if (socket.bufferedAmount + frame.byteLength > MAX_BUFFERED_BYTES) {
       this.#end("backpressure");
-      return;
+      return false;
     }
     socket.send(frame);
+    return true;
   }
 
   #receive(message: LiveServerMessage) {
     switch (message.type) {
       case "ready":
-        if (this.#status === "connecting") this.#status = "listening";
+        if (this.#status !== "connecting") return;
+        this.#status = "listening";
+        this.#onListening?.();
         return;
       case "transcript.delta":
         this.#append(message.text);
@@ -182,11 +220,11 @@ export class LiveTranscriptPreview {
     this.#pieces = [...this.#pieces, { id: this.#nextPieceId++, text }];
   }
 
-  // The session is over. While recording goes on, that is an interruption the
-  // user is told about; the text so far stays.
+  // The session is over while the recording goes on: the user is told whether
+  // live text never got going or stopped, and the text so far stays.
   #end(code: string) {
     if (this.#status === "connecting" || this.#status === "listening") {
-      this.#status = "interrupted";
+      this.#status = this.#status === "connecting" ? "unavailable" : "interrupted";
       this.#errorCode = code;
     }
     this.#teardown();
@@ -195,6 +233,7 @@ export class LiveTranscriptPreview {
   #teardown() {
     this.#generation += 1;
     this.#detachAudio();
+    this.#queue = [];
     clearTimeout(this.#finalTextTimer);
     this.#finalTextTimer = undefined;
     const socket = this.#socket;

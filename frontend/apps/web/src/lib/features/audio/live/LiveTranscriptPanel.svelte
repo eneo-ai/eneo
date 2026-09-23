@@ -16,9 +16,8 @@
   const active = $derived(status === "connecting" || status === "listening");
   const hasText = $derived(pieces.length > 0);
   // After the recording, an empty panel would only say that nobody spoke.
-  const visible = $derived(
-    active || status === "interrupted" || (status === "finished" && hasText)
-  );
+  const ended = $derived(status === "interrupted" || status === "unavailable");
+  const visible = $derived(active || ended || (status === "finished" && hasText));
 
   let log = $state<HTMLElement | null>(null);
 
@@ -63,13 +62,20 @@
       </span>
     </div>
 
-    {#if status === "interrupted"}
+    {#if ended}
+      <!-- A preview that never got going is not an interruption. -->
       <Alert.Root
         class="border-warning-default/30 bg-warning-dimmer/70 text-warning-stronger mt-2 rounded-[9px] px-3.5 py-2.5 text-[0.8125rem]"
       >
-        <Alert.Title>{m.live_transcription_interrupted()}</Alert.Title>
+        <Alert.Title>
+          {status === "interrupted"
+            ? m.live_transcription_interrupted()
+            : m.live_transcription_unavailable()}
+        </Alert.Title>
         <Alert.Description class="text-warning-stronger text-[0.8125rem]">
-          {m.live_transcription_interrupted_detail()}
+          {status === "interrupted"
+            ? m.live_transcription_interrupted_detail()
+            : m.live_transcription_unavailable_detail()}
         </Alert.Description>
       </Alert.Root>
     {/if}

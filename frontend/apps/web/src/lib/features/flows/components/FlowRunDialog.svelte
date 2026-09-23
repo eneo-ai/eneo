@@ -1326,6 +1326,7 @@
             flowId={flow.id}
             transcription={runContract?.transcription ?? null}
             {launchInputState}
+            recording={fileInputState.isStepRecording(currentRuntimeStep.step_id)}
             files={currentStepUploadedFiles}
             hasFailedRecording={currentStepHasFailedRecording}
             recorderResetToken={currentStepRecorderResetToken}

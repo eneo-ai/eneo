@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EneoError, type Eneo, type FlowLiveTranscriptionSession } from "@eneo/eneo-js";
-import { LiveTranscriptPreview, type RecorderAudioGraph } from "./LiveTranscriptPreview.svelte";
+import {
+  LiveTranscriptPreview,
+  MAX_QUEUED_FRAMES,
+  type RecorderAudioGraph
+} from "./LiveTranscriptPreview.svelte";
 import {
   FakeLiveSocket,
   FakeWorkletNode,
+  frameTags,
   installLiveTranscriptFakes,
   liveSession
 } from "./liveTranscriptTestFakes";
@@ -17,7 +22,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function setup(createSession = vi.fn(async () => liveSession)) {
+function setup(
+  createSession: () => Promise<FlowLiveTranscriptionSession> = vi.fn(async () => liveSession)
+) {
   const addModule = vi.fn(async () => undefined);
   const source = { connect: vi.fn(), disconnect: vi.fn() };
   const graph = {
@@ -29,8 +36,29 @@ function setup(createSession = vi.fn(async () => liveSession)) {
     client: { baseUrl: new URL("https://eneo.example.test") }
   } as unknown as Eneo;
   const preview = new LiveTranscriptPreview();
-  const start = () => preview.start(graph, { eneo, flowId: "flow-1", stepId: "step-audio" });
-  return { preview, start, createSession, addModule, source };
+  const onListening = vi.fn();
+  const start = () =>
+    preview.start(graph, { eneo, flowId: "flow-1", stepId: "step-audio", onListening });
+  return { preview, start, createSession, addModule, source, onListening };
+}
+
+// A ticket the test answers, so audio can arrive before it does.
+function pendingTicket() {
+  let issue: (session: FlowLiveTranscriptionSession) => void = () => {};
+  let refuse: (error: unknown) => void = () => {};
+  const request = vi.fn(
+    () =>
+      new Promise<FlowLiveTranscriptionSession>((resolve, reject) => {
+        issue = resolve;
+        refuse = reject;
+      })
+  );
+  return { request, issue: () => issue(liveSession), refuse: (error: unknown) => refuse(error) };
+}
+
+async function tapped() {
+  await vi.waitFor(() => expect(FakeWorkletNode.instances).toHaveLength(1));
+  return FakeWorkletNode.instances[0];
 }
 
 function texts(preview: LiveTranscriptPreview) {
@@ -46,6 +74,25 @@ async function listening(harness: ReturnType<typeof setup>) {
 }
 
 describe("LiveTranscriptPreview", () => {
+  it("keeps the recording's first words: audio waits in order until the socket opens", async () => {
+    const ticket = pendingTicket();
+    const harness = setup(ticket.request);
+    const started = harness.start();
+
+    const node = await tapped();
+    expect(harness.source.connect).toHaveBeenCalledWith(node);
+    node.frame(1);
+    ticket.issue();
+    await started;
+    const socket = FakeLiveSocket.instances[0];
+    node.frame(2);
+    expect(socket.frames).toHaveLength(0);
+
+    socket.open();
+    node.frame(3);
+    expect(frameTags(socket)).toEqual([1, 2, 3]);
+  });
+
   it("streams the recorder's audio and shows the committed text until the final text", async () => {
     const harness = setup();
     const started = harness.start();
@@ -58,11 +105,11 @@ describe("LiveTranscriptPreview", () => {
     expect(socket.protocols).toEqual(["eneo-live.v1", "ticket.t0k3n"]);
 
     socket.open();
-    const node = FakeWorkletNode.instances[0];
-    expect(harness.source.connect).toHaveBeenCalledWith(node);
     socket.receive({ type: "ready", sample_rate: 16000, max_seconds: 18000 });
     expect(harness.preview.status).toBe("listening");
+    expect(harness.onListening).toHaveBeenCalledOnce();
 
+    const node = FakeWorkletNode.instances[0];
     node.frame();
     socket.receive({ type: "transcript.delta", text: "Hej" });
     socket.receive({ type: "transcript.delta", text: " och välkomna" });
@@ -82,7 +129,7 @@ describe("LiveTranscriptPreview", () => {
     expect(harness.preview.status).toBe("finished");
   });
 
-  it("ends as interrupted with the code of an error event and sends no more audio", async () => {
+  it("ends as interrupted with the code of an error event, and as finished with the recording", async () => {
     const harness = setup();
     const { socket, node } = await listening(harness);
 
@@ -98,6 +145,9 @@ describe("LiveTranscriptPreview", () => {
     expect(harness.preview.errorCode).toBe("upstream_closed");
     expect(socket.frames).toHaveLength(0);
     expect(harness.source.disconnect).toHaveBeenCalledWith(node);
+
+    harness.preview.stop();
+    expect(harness.preview.status).toBe("finished");
   });
 
   it("ends as interrupted when the socket drops", async () => {
@@ -124,44 +174,70 @@ describe("LiveTranscriptPreview", () => {
     expect(socket.close).toHaveBeenCalled();
   });
 
-  it("leaves the recorder's audio untouched when the ticket is refused", async () => {
-    const harness = setup(
-      vi.fn(async () => {
-        throw new EneoError(
-          "Live transcription is not available for this flow.",
-          "RESPONSE",
-          409,
-          9057,
-          {
-            code: "flow_live_transcription_unavailable",
-            context: { reason: "model_not_realtime" },
-            eneo_error_code: 9057,
-            message: "Live transcription is not available for this flow."
-          }
-        );
+  it("is unavailable when the ticket is refused, and lets go of the recorder's audio", async () => {
+    const ticket = pendingTicket();
+    const harness = setup(ticket.request);
+    const started = harness.start();
+    const node = await tapped();
+    node.frame();
+
+    ticket.refuse(
+      new EneoError("Live transcription is not available for this flow.", "RESPONSE", 409, 9057, {
+        code: "flow_live_transcription_unavailable",
+        context: { reason: "model_not_realtime" },
+        eneo_error_code: 9057,
+        message: "Live transcription is not available for this flow."
       })
     );
+    await started;
 
-    await harness.start();
-
-    expect(harness.preview.status).toBe("interrupted");
+    expect(harness.preview.status).toBe("unavailable");
     expect(harness.preview.errorCode).toBe("model_not_realtime");
     expect(FakeLiveSocket.instances).toHaveLength(0);
-    expect(harness.addModule).not.toHaveBeenCalled();
-    expect(harness.source.connect).not.toHaveBeenCalled();
+    expect(harness.source.disconnect).toHaveBeenCalledWith(node);
+    expect(node.port.close).toHaveBeenCalled();
   });
 
-  it("opens no socket when the recording stops before the ticket arrives", async () => {
-    let issueTicket: (value: FlowLiveTranscriptionSession) => void = () => {};
-    const harness = setup(vi.fn(() => new Promise((resolve) => (issueTicket = resolve))));
+  it("is unavailable, visibly, when the socket has not opened within the waiting audio's bound", async () => {
+    const harness = setup();
+    await harness.start();
+    const socket = FakeLiveSocket.instances[0];
+    const node = FakeWorkletNode.instances[0];
 
+    for (let index = 0; index < MAX_QUEUED_FRAMES; index += 1) node.frame();
+    expect(harness.preview.status).toBe("connecting");
+    node.frame();
+
+    expect(harness.preview.status).toBe("unavailable");
+    expect(harness.preview.errorCode).toBe("connect_timeout");
+    expect(socket.close).toHaveBeenCalled();
+    expect(harness.source.disconnect).toHaveBeenCalledWith(node);
+    socket.open();
+    expect(socket.frames).toHaveLength(0);
+  });
+
+  it("lets go of everything when the recording stops while audio waits for the socket", async () => {
+    const ticket = pendingTicket();
+    const harness = setup(ticket.request);
     const started = harness.start();
+    const node = await tapped();
+    node.frame();
+
     harness.preview.stop();
-    issueTicket(liveSession);
+    ticket.issue();
     await started;
 
     expect(harness.preview.status).toBe("finished");
+    expect(harness.source.disconnect).toHaveBeenCalledWith(node);
     expect(FakeLiveSocket.instances).toHaveLength(0);
-    expect(harness.source.connect).not.toHaveBeenCalled();
+
+    // The next recording sends its own audio only.
+    const restarted = harness.start();
+    await vi.waitFor(() => expect(FakeWorkletNode.instances).toHaveLength(2));
+    FakeWorkletNode.instances[1].frame(7);
+    ticket.issue();
+    await restarted;
+    FakeLiveSocket.instances[0].open();
+    expect(frameTags(FakeLiveSocket.instances[0])).toEqual([7]);
   });
 });

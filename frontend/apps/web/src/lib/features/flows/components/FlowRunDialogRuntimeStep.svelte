@@ -16,6 +16,7 @@
   import { IconTrash } from "@eneo/icons/trash";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -44,6 +45,7 @@
     flowId,
     transcription,
     launchInputState,
+    recording,
     files,
     hasFailedRecording,
     recorderResetToken,
@@ -90,6 +92,8 @@
     // flow transcribes no audio.
     transcription: FlowRunContractTranscription | null;
     launchInputState: FlowRunLaunchInputState;
+    // Whether this step's recorder is recording.
+    recording: boolean;
     files: UploadedFile[];
     // Recorded segments whose upload failed are waiting for Retry.
     hasFailedRecording: boolean;
@@ -208,7 +212,12 @@
     if (!graph) {
       livePreview.stop();
     } else if (liveTextOn) {
-      void livePreview.start(graph, { eneo, flowId, stepId: step.step_id });
+      void livePreview.start(graph, {
+        eneo,
+        flowId,
+        stepId: step.step_id,
+        onListening: () => launchInputState.markLiveSessionStarted()
+      });
     }
   }
 
@@ -290,117 +299,140 @@
       </div>
     {/if}
 
-    <div
-      class="{fileCount > 0
-        ? 'mt-4 py-3.5'
-        : 'mt-6 min-h-[132px] py-6 sm:min-h-[100px]'} flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 text-center transition-[background-color,border-color,scale,min-height,padding,margin] duration-(--duration-quick) ease-[var(--ease-smooth-out)] {dragging
-        ? 'border-accent-default bg-accent-dimmer scale-[1.02]'
-        : fileCount > 0
-          ? 'border-positive-default/30 bg-positive-dimmer/10'
-          : 'border-default bg-secondary/5'} {remainingSlots > 0 && !dragging
-        ? 'hover:border-accent-default hover:bg-secondary/15'
-        : ''} {remainingSlots <= 0 ? 'pointer-events-none opacity-50' : ''}"
-      ondragover={onDragOver}
-      ondragleave={onDragLeave}
-      ondrop={onDrop}
-      onclick={onOpenFilePicker}
-      role="button"
-      tabindex={remainingSlots <= 0 ? -1 : 0}
-      aria-label="{m.upload_file()} — {getStepLabel(step)}"
-      aria-disabled={remainingSlots <= 0 ? "true" : undefined}
-      onkeydown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onOpenFilePicker();
-        }
-      }}
-    >
-      {#if isUploading}
-        <IconLoadingSpinner class="text-accent-default size-6 animate-spin" />
-        <span class="text-secondary text-sm">{m.loading()}</span>
-      {:else if fileCount > 0}
-        <div class="flex items-center gap-2.5">
-          <div
-            class="bg-positive-default/10 flex size-8 shrink-0 items-center justify-center rounded-full"
-          >
-            <IconCheck class="text-positive-stronger size-4" />
-          </div>
-          <span class="text-sm font-medium">{labels.selectedFiles(fileCount)}</span>
-        </div>
-        {#if remainingSlots > 0}
-          <span class="text-muted text-sm">{labels.runtimeUploadHint}</span>
-        {:else}
-          <span class="text-muted text-sm">{labels.maxFilesReached}</span>
-        {/if}
-      {:else}
-        <IconUploadCloud class="text-muted size-7" />
-        <span class="text-secondary text-sm">{labels.runtimeUploadHint}</span>
-      {/if}
-    </div>
-
-    {#if acceptedMimetypes.length > 0}
-      <details
-        bind:open={allowedTypesOpen}
-        class="border-default bg-secondary/5 mt-3 rounded-lg border px-3 py-2.5"
+    {#snippet uploadArea()}
+      <div
+        class="{fileCount > 0
+          ? 'mt-4 py-3.5'
+          : 'mt-6 min-h-[132px] py-6 sm:min-h-[100px]'} flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 text-center transition-[background-color,border-color,scale,min-height,padding,margin] duration-(--duration-quick) ease-[var(--ease-smooth-out)] {dragging
+          ? 'border-accent-default bg-accent-dimmer scale-[1.02]'
+          : fileCount > 0
+            ? 'border-positive-default/30 bg-positive-dimmer/10'
+            : 'border-default bg-secondary/5'} {remainingSlots > 0 && !dragging
+          ? 'hover:border-accent-default hover:bg-secondary/15'
+          : ''} {remainingSlots <= 0 ? 'pointer-events-none opacity-50' : ''}"
+        ondragover={onDragOver}
+        ondragleave={onDragLeave}
+        ondrop={onDrop}
+        onclick={onOpenFilePicker}
+        role="button"
+        tabindex={remainingSlots <= 0 ? -1 : 0}
+        aria-label="{m.upload_file()} — {getStepLabel(step)}"
+        aria-disabled={remainingSlots <= 0 ? "true" : undefined}
+        onkeydown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onOpenFilePicker();
+          }
+        }}
       >
-        <summary
-          class="focus-visible:ring-ring flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 text-sm font-medium focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+        {#if isUploading}
+          <IconLoadingSpinner class="text-accent-default size-6 animate-spin" />
+          <span class="text-secondary text-sm">{m.loading()}</span>
+        {:else if fileCount > 0}
+          <div class="flex items-center gap-2.5">
+            <div
+              class="bg-positive-default/10 flex size-8 shrink-0 items-center justify-center rounded-full"
+            >
+              <IconCheck class="text-positive-stronger size-4" />
+            </div>
+            <span class="text-sm font-medium">{labels.selectedFiles(fileCount)}</span>
+          </div>
+          {#if remainingSlots > 0}
+            <span class="text-muted text-sm">{labels.runtimeUploadHint}</span>
+          {:else}
+            <span class="text-muted text-sm">{labels.maxFilesReached}</span>
+          {/if}
+        {:else}
+          <IconUploadCloud class="text-muted size-7" />
+          <span class="text-secondary text-sm">{labels.runtimeUploadHint}</span>
+        {/if}
+      </div>
+
+      {#if acceptedMimetypes.length > 0}
+        <details
+          bind:open={allowedTypesOpen}
+          class="border-default bg-secondary/5 mt-3 rounded-lg border px-3 py-2.5"
         >
-          <ChevronRight
-            class="text-secondary size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {allowedTypesOpen
-              ? 'rotate-90'
-              : ''}"
-            aria-hidden="true"
-          />
-          {labels.allowedTypesToggle}
-        </summary>
-        <p class="text-secondary mt-2 max-w-prose text-sm leading-relaxed">
-          {friendlyMimeNames(acceptedMimetypes).join(", ")}
-        </p>
-        <details bind:open={technicalMimeOpen} class="mt-2">
           <summary
-            class="text-muted focus-visible:ring-ring flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 text-sm hover:underline focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+            class="focus-visible:ring-ring flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 text-sm font-medium focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
           >
             <ChevronRight
-              class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {technicalMimeOpen
+              class="text-secondary size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {allowedTypesOpen
                 ? 'rotate-90'
                 : ''}"
               aria-hidden="true"
             />
-            {labels.technicalMimeToggle}
+            {labels.allowedTypesToggle}
           </summary>
-          <p
-            class="text-muted mt-1.5 max-w-prose text-xs leading-relaxed break-all"
-            title={acceptedMimetypes.join(", ")}
-          >
-            {acceptedMimetypes.join(", ")}
+          <p class="text-secondary mt-2 max-w-prose text-sm leading-relaxed">
+            {friendlyMimeNames(acceptedMimetypes).join(", ")}
           </p>
+          <details bind:open={technicalMimeOpen} class="mt-2">
+            <summary
+              class="text-muted focus-visible:ring-ring flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 text-sm hover:underline focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+            >
+              <ChevronRight
+                class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {technicalMimeOpen
+                  ? 'rotate-90'
+                  : ''}"
+                aria-hidden="true"
+              />
+              {labels.technicalMimeToggle}
+            </summary>
+            <p
+              class="text-muted mt-1.5 max-w-prose text-xs leading-relaxed break-all"
+              title={acceptedMimetypes.join(", ")}
+            >
+              {acceptedMimetypes.join(", ")}
+            </p>
+          </details>
         </details>
-      </details>
-    {/if}
+      {/if}
 
-    {#if step.max_files != null}
-      <span
-        class="mt-2 inline-flex text-sm"
-        class:text-accent-stronger={fileCount > 0 && remainingSlots > 0}
-        class:text-warning-stronger={remainingSlots <= 0}
-        class:text-secondary={fileCount === 0}
-      >
-        {m.flow_run_files_count({
-          current: String(fileCount),
-          limit: String(step.max_files)
-        })}
-      </span>
-    {/if}
+      {#if step.max_files != null}
+        <span
+          class="mt-2 inline-flex text-sm"
+          class:text-accent-stronger={fileCount > 0 && remainingSlots > 0}
+          class:text-warning-stronger={remainingSlots <= 0}
+          class:text-secondary={fileCount === 0}
+        >
+          {m.flow_run_files_count({
+            current: String(fileCount),
+            limit: String(step.max_files)
+          })}
+        </span>
+      {/if}
 
-    {#if skippedMessage}
-      <p
-        class="border-warning-default/30 bg-warning-dimmer text-warning-stronger mt-3 rounded-md border px-3.5 py-2.5 text-sm"
-        role="status"
-        aria-live="polite"
-      >
-        {skippedMessage}
-      </p>
+      {#if skippedMessage}
+        <p
+          class="border-warning-default/30 bg-warning-dimmer text-warning-stronger mt-3 rounded-md border px-3.5 py-2.5 text-sm"
+          role="status"
+          aria-live="polite"
+        >
+          {skippedMessage}
+        </p>
+      {/if}
+    {/snippet}
+
+    {#if recording}
+      <!-- While the step records, the upload area folds into one line so the
+           recorder and its live text stay in view. -->
+      <Collapsible.Root class="mt-3">
+        <Collapsible.Trigger
+          class="group focus-visible:ring-ring flex min-h-8 items-center gap-1.5 rounded-sm text-sm font-medium outline-none focus-visible:ring-2"
+        >
+          <ChevronRight
+            class="text-secondary size-3.5 shrink-0 group-data-[state=open]:rotate-90 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out)"
+            aria-hidden="true"
+          />
+          {m.recording_upload_file_instead()}
+        </Collapsible.Trigger>
+        <Collapsible.Content>
+          {@render uploadArea()}
+        </Collapsible.Content>
+      </Collapsible.Root>
+    {:else}
+      {@render uploadArea()}
     {/if}
 
     {#if supportsAudioRecording}
@@ -460,7 +492,9 @@
                     id="{uid}-speaker-labels-help"
                     class="text-secondary text-[0.8125rem] leading-[1.6]"
                   >
-                    {m.speaker_labels_help()}
+                    {launchInputState.speakerLabelsOffForStreaming(transcription)
+                      ? m.speaker_labels_off_while_streaming()
+                      : m.speaker_labels_help()}
                   </Field.Description>
                 </Field.Content>
               </Field.Field>

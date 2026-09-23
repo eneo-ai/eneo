@@ -40,6 +40,16 @@ describe("LiveTranscriptPanel", () => {
     expect(screen.queryByText(m.live_transcription_listening())).toBeNull();
   });
 
+  it("says live text is not available when the preview never started", () => {
+    render(LiveTranscriptPanel, { status: "unavailable", pieces: [] });
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain(m.live_transcription_unavailable());
+    expect(alert.textContent).toContain(m.live_transcription_unavailable_detail());
+    expect(alert.textContent).not.toContain(m.live_transcription_interrupted());
+    expect(screen.queryByRole("log")).toBeNull();
+  });
+
   it("marks the text as a draft once the recording is done", () => {
     render(LiveTranscriptPanel, { status: "finished", pieces: spoken });
 

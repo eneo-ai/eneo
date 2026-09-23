@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { FlowRunContractTranscription } from "@eneo/eneo-js";
 import type { NormalizedFlowFormField } from "$lib/features/flows/flowFormSchema";
 import { FlowRunLaunchInputState } from "./FlowRunLaunchInputState.svelte";
 
@@ -89,5 +90,19 @@ describe("FlowRunLaunchInputState", () => {
     expect(state.formValuesSnapshot).toEqual({});
     expect(state.freeformText).toBe("");
     expect(state.hasDirtyInput).toBe(false);
+  });
+
+  it("starts a new dialog from the flow's speaker default after live text streamed", () => {
+    const state = new FlowRunLaunchInputState();
+    const transcription: FlowRunContractTranscription = {
+      live: { available: true, reason: null },
+      speaker_labels: { selectable: true, required: false, default: true }
+    };
+    state.markLiveSessionStarted();
+    expect(state.speakerLabels(transcription)).toBe(false);
+
+    state.reset();
+
+    expect(state.speakerLabels(transcription)).toBe(true);
   });
 });

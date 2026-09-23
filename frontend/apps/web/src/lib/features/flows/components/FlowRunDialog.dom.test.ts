@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/sv
 import type {
   Eneo,
   Flow,
+  FlowLiveTranscriptionSession,
   FlowRun,
   FlowRunContract,
   FlowRunContractStepInput,
@@ -17,6 +18,11 @@ import {
   readSessionRecords,
   scanRecoverableSessionsForSteps
 } from "$lib/features/audio/flowRunRecordingSession";
+import {
+  FakeLiveSocket,
+  installLiveTranscriptFakes,
+  liveSession
+} from "$lib/features/audio/live/liveTranscriptTestFakes";
 import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
 import { m } from "$lib/paraglide/messages";
 import FlowRunDialog from "./FlowRunDialog.svelte";
@@ -46,44 +52,40 @@ vi.mock("$lib/features/audio/AudioRecorder.svelte", () => ({
         durationMs: number;
       }) => void;
       onRecordingStateChange?: (active: boolean, meta: { origin: "user" }) => void;
+      onAudioGraph?: (graph: unknown) => void;
     }
   ) => {
-    const startButton = document.createElement("button");
-    startButton.type = "button";
-    startButton.textContent = "Start test recording";
-    startButton.addEventListener("click", () => {
+    // Like the real recorder: the audio graph comes before the recording starts.
+    // At the end the graph goes, the last segment is handed over, and the
+    // recording ends once that segment is reported.
+    const graph = {
+      context: { audioWorklet: { addModule: async () => undefined } },
+      source: { connect: () => undefined, disconnect: () => undefined }
+    };
+    const finish = (reason: "manual" | "stall") => {
+      props.onAudioGraph?.(null);
+      props.onRecordingDone({
+        blob: new Blob(["recording"], { type: "audio/webm" }),
+        mimeType: "audio/webm",
+        reason,
+        durationMs: 1_000
+      });
+      props.onRecordingStateChange?.(false, { origin: "user" });
+    };
+    const addButton = (label: string, onClick: () => void) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", onClick);
+      anchor.parentNode?.insertBefore(button, anchor);
+    };
+
+    addButton("Start test recording", () => {
+      props.onAudioGraph?.(graph);
       props.onRecordingStateChange?.(true, { origin: "user" });
     });
-    anchor.parentNode?.insertBefore(startButton, anchor);
-
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = "Finish test recording";
-    // Like the recorder, the recording ends once its last segment is reported.
-    button.addEventListener("click", () => {
-      props.onRecordingDone({
-        blob: new Blob(["recording"], { type: "audio/webm" }),
-        mimeType: "audio/webm",
-        reason: "manual",
-        durationMs: 1_000
-      });
-      props.onRecordingStateChange?.(false, { origin: "user" });
-    });
-    anchor.parentNode?.insertBefore(button, anchor);
-
-    const stalledButton = document.createElement("button");
-    stalledButton.type = "button";
-    stalledButton.textContent = "Finish stalled test recording";
-    stalledButton.addEventListener("click", () => {
-      props.onRecordingDone({
-        blob: new Blob(["recording"], { type: "audio/webm" }),
-        mimeType: "audio/webm",
-        reason: "stall",
-        durationMs: 1_000
-      });
-      props.onRecordingStateChange?.(false, { origin: "user" });
-    });
-    anchor.parentNode?.insertBefore(stalledButton, anchor);
+    addButton("Finish test recording", () => finish("manual"));
+    addButton("Finish stalled test recording", () => finish("stall"));
   }
 }));
 
@@ -118,6 +120,7 @@ afterEach(async () => {
   });
   vi.clearAllMocks();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 beforeEach(() => {
@@ -750,40 +753,61 @@ describe("FlowRunDialog transcription options", () => {
     expect(screen.queryByText(m.speaker_labels_required()) !== null).toBe(requiredLine);
   });
 
-  it("keeps speaker labels off while live text is on, unless the user chose them", async () => {
-    renderDialog(buildEneo({ upload: vi.fn(), transcription: offeredTranscription(true) }));
+  it("keeps the flow's speaker default until live text streams, and keeps an explicit choice", async () => {
+    installLiveTranscriptFakes();
+    renderDialog(
+      buildEneo({
+        upload: vi.fn(() => new Promise<UploadedFile>(() => undefined)),
+        transcription: offeredTranscription(true),
+        createSession: vi.fn(async () => liveSession)
+      })
+    );
     const liveText = await screen.findByRole("switch", { name: m.live_transcription_toggle() });
     const speakers = screen.getByRole("switch", { name: m.speaker_labels_toggle() });
     const checked = (element: HTMLElement) => element.getAttribute("aria-checked");
 
+    // Nothing has streamed: the flow's own setting, whatever the live switch says.
     expect(checked(liveText)).toBe("true");
-    expect(checked(speakers)).toBe("false");
+    expect(checked(speakers)).toBe("true");
     expect(describedBy(liveText)).toBe(m.live_transcription_toggle_help());
     expect(describedBy(speakers)).toBe(m.speaker_labels_help());
 
-    await fireEvent.click(liveText);
-    expect(checked(speakers)).toBe("true");
-    await fireEvent.click(liveText);
-    expect(checked(speakers)).toBe("false");
+    await recordWithLiveText();
+    await waitFor(() => expect(checked(speakers)).toBe("false"));
+    expect(describedBy(speakers)).toBe(m.speaker_labels_off_while_streaming());
 
     await fireEvent.click(speakers);
-    await fireEvent.click(liveText);
-    await fireEvent.click(liveText);
-    expect(checked(liveText)).toBe("true");
+    expect(checked(speakers)).toBe("true");
+    expect(describedBy(speakers)).toBe(m.speaker_labels_help());
+
+    await fireEvent.click(screen.getByRole("button", { name: "Finish test recording" }));
+    await recordWithLiveText();
     expect(checked(speakers)).toBe("true");
   });
 
   it.each([
-    { contract: "offers the choice", transcription: offeredTranscription(true), sent: false },
     {
-      contract: "decides itself",
+      run: "the flow's default when it only uploads",
+      transcription: offeredTranscription(true),
+      turnOff: false,
+      sent: true
+    },
+    {
+      run: "the user's own choice",
+      transcription: offeredTranscription(true),
+      turnOff: true,
+      sent: false
+    },
+    {
+      run: "no choice when the flow decides",
       transcription: {
         live: { available: true, reason: null },
         speaker_labels: { selectable: false, required: false, default: true }
       } satisfies FlowRunContractTranscription,
+      turnOff: false,
       sent: undefined
     }
-  ])("creates the run with a speaker choice only when the flow $contract", async (options) => {
+  ])("creates the run with $run", async (options) => {
     const upload = vi.fn(async ({ file }: { file: File }) => uploadedFile("file-1", file.name));
     const deriveUploadIntentIdempotencyKey = vi.fn(async () => "derived-key");
     const create = vi.fn(async () => ({ id: "run-1" }) as FlowRun);
@@ -796,6 +820,9 @@ describe("FlowRunDialog transcription options", () => {
       })
     );
     await screen.findByText("Audio input");
+    if (options.turnOff) {
+      await fireEvent.click(screen.getByRole("switch", { name: m.speaker_labels_toggle() }));
+    }
 
     await fireEvent.drop(screen.getByRole("button", { name: /Audio input/ }), {
       dataTransfer: { files: [new File(["audio"], "audio.webm", { type: "audio/webm" })] }
@@ -816,6 +843,40 @@ describe("FlowRunDialog transcription options", () => {
     expect("speaker_labels" in runRequest).toBe(options.sent !== undefined);
   });
 });
+
+describe("FlowRunDialog recording layout", () => {
+  it("folds the step's upload area into one control while the step records", async () => {
+    renderDialog(buildEneo({ upload: vi.fn(() => new Promise<UploadedFile>(() => undefined)) }));
+    await screen.findByText("Audio input");
+    const dropzone = () => screen.queryByRole("button", { name: /Audio input/ });
+    const uploadInstead = () =>
+      screen.queryByRole("button", { name: m.recording_upload_file_instead() });
+    expect(uploadInstead()).toBeNull();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Start test recording" }));
+    expect(dropzone()).toBeNull();
+    expect(uploadInstead()?.getAttribute("aria-expanded")).toBe("false");
+
+    await fireEvent.click(uploadInstead() as HTMLElement);
+    expect(dropzone()).not.toBeNull();
+    expect(uploadInstead()?.getAttribute("aria-expanded")).toBe("true");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Finish test recording" }));
+    expect(uploadInstead()).toBeNull();
+    expect(dropzone()).not.toBeNull();
+  });
+});
+
+// Starts a recording whose live text reaches "Lyssnar".
+async function recordWithLiveText() {
+  const opened = FakeLiveSocket.instances.length;
+  await fireEvent.click(screen.getByRole("button", { name: "Start test recording" }));
+  await waitFor(() => expect(FakeLiveSocket.instances).toHaveLength(opened + 1));
+  const socket = FakeLiveSocket.instances[opened];
+  socket.open();
+  socket.receive({ type: "ready", sample_rate: 16000, max_seconds: 18000 });
+  await screen.findByText(m.live_transcription_listening());
+}
 
 function offeredTranscription(speakerDefault: boolean): FlowRunContractTranscription {
   return {
@@ -884,13 +945,15 @@ function buildEneo({
   deriveUploadIntentIdempotencyKey = vi.fn(async () => "derived-key"),
   create = vi.fn(async () => ({ id: "run-1" }) as FlowRun),
   steps = [runtimeStep],
-  transcription = null
+  transcription = null,
+  createSession = vi.fn()
 }: {
   upload: (args: { file: File; stepId: string }) => Promise<UploadedFile>;
   deriveUploadIntentIdempotencyKey?: ReturnType<typeof vi.fn>;
   create?: ReturnType<typeof vi.fn>;
   steps?: FlowRunContractStepInput[];
   transcription?: FlowRunContractTranscription | null;
+  createSession?: () => Promise<FlowLiveTranscriptionSession>;
 }): Eneo {
   const contract: FlowRunContract = {
     flow_id: "flow-1",
@@ -905,6 +968,7 @@ function buildEneo({
       runContract: {
         get: vi.fn(async () => contract)
       },
+      liveTranscription: { createSession },
       steps: {
         runtimeFiles: { upload }
       },
@@ -915,7 +979,8 @@ function buildEneo({
     },
     files: {
       delete: vi.fn(async () => undefined)
-    }
+    },
+    client: { baseUrl: new URL("https://eneo.example.test") }
   } as unknown as Eneo;
 }
 

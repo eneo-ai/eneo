@@ -7,6 +7,8 @@ export class FlowRunLaunchInputState {
   #formValues = $state<Record<string, unknown>>({});
   #freeformText = $state("");
   #liveTextOn = $state(true);
+  // Whether a recording's live text has streamed in this dialog.
+  #liveSessionStarted = $state(false);
   // The user's own speaker-label choice; null until they make one.
   #speakerLabelsChoice = $state<boolean | null>(null);
 
@@ -31,15 +33,29 @@ export class FlowRunLaunchInputState {
   }
 
   // The run's `speaker_labels`, or undefined when the flow leaves the run no
-  // choice. Labels add waiting time after the recording, so they stay off while
-  // live text is on and follow the flow's setting otherwise; the user's own
-  // choice wins over both.
+  // choice. The user's own choice wins. Otherwise labels are off once live text
+  // has streamed, since they add waiting time after the recording, and a run
+  // that only uploads keeps the flow's own setting.
   speakerLabels(
     transcription: FlowRunContractTranscription | null | undefined
   ): boolean | undefined {
     if (!transcription?.speaker_labels.selectable) return undefined;
-    const liveText = transcription.live.available && this.#liveTextOn;
-    return this.#speakerLabelsChoice ?? (liveText ? false : transcription.speaker_labels.default);
+    return (
+      this.#speakerLabelsChoice ??
+      (this.#liveSessionStarted ? false : transcription.speaker_labels.default)
+    );
+  }
+
+  // Whether streaming, rather than the user or the flow, turned labels off.
+  speakerLabelsOffForStreaming(
+    transcription: FlowRunContractTranscription | null | undefined
+  ): boolean {
+    return (
+      this.#speakerLabelsChoice === null &&
+      this.#liveSessionStarted &&
+      transcription?.speaker_labels.selectable === true &&
+      transcription.speaker_labels.default
+    );
   }
 
   setFreeformText(value: string): void {
@@ -57,6 +73,10 @@ export class FlowRunLaunchInputState {
     this.#liveTextOn = value;
   }
 
+  markLiveSessionStarted(): void {
+    this.#liveSessionStarted = true;
+  }
+
   setSpeakerLabels(value: boolean): void {
     this.#speakerLabelsChoice = value;
   }
@@ -70,6 +90,7 @@ export class FlowRunLaunchInputState {
     this.#formValues = {};
     this.#freeformText = "";
     this.#liveTextOn = true;
+    this.#liveSessionStarted = false;
     this.#speakerLabelsChoice = null;
   }
 }

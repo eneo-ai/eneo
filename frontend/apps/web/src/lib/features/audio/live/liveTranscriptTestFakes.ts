@@ -66,7 +66,8 @@ export class FakeLiveSocket {
   }
 }
 
-// The worklet node; `frame()` is the processor posting 100 ms of audio.
+// The worklet node; `frame(tag)` is the processor posting 100 ms of audio whose
+// first byte is `tag`, so a test can tell frames apart.
 export class FakeWorkletNode {
   static instances: FakeWorkletNode[] = [];
 
@@ -82,9 +83,15 @@ export class FakeWorkletNode {
     FakeWorkletNode.instances.push(this);
   }
 
-  frame() {
-    this.port.onmessage?.({ data: new ArrayBuffer(3200) });
+  frame(tag = 0) {
+    const frame = new ArrayBuffer(3200);
+    new Uint8Array(frame)[0] = tag;
+    this.port.onmessage?.({ data: frame });
   }
+}
+
+export function frameTags(socket: FakeLiveSocket): number[] {
+  return socket.frames.map((frame) => new Uint8Array(frame as ArrayBuffer)[0]);
 }
 
 export function installLiveTranscriptFakes() {
