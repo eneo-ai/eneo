@@ -2,7 +2,10 @@
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import { IconEdit } from "@eneo/icons/edit";
   import { IconTrash } from "@eneo/icons/trash";
-  import { Button, Dialog, Dropdown } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import type { AppSparse } from "@eneo/eneo-js";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -28,7 +31,7 @@
     try {
       await eneo.apps.delete(app);
       refreshCurrentSpace();
-      $showDeleteDialog = false;
+      showDeleteDialog = false;
     } catch (e) {
       toastError(e, m.could_not_delete_app());
       console.error(e);
@@ -37,7 +40,7 @@
   }
 
   let isProcessing = false;
-  let showDeleteDialog: Dialog.OpenState;
+  let showDeleteDialog = false;
   const showPublishDialog = writable(false);
 
   let showActions = (["edit", "publish", "delete"] as const).some((permission) =>
@@ -46,30 +49,41 @@
 </script>
 
 {#if showActions}
-  <Dropdown.Root>
-    <Dropdown.Trigger let:trigger asFragment>
-      <Button variant="on-fill" is={trigger} disabled={false} padding="icon">
-        <IconEllipsis />
-      </Button>
-    </Dropdown.Trigger>
-    <Dropdown.Menu let:item>
-      {#if app.permissions?.includes("edit")}
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger>
+      {#snippet child({ props })}
         <Button
-          is={item}
-          href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${app.id}/edit`)}
-          padding="icon-leading"
+          {...props}
+          variant="ghost"
+          size="icon"
+          class="hover:bg-hover-on-fill hover:text-primary"
+          aria-label={m.actions()}
         >
-          <IconEdit size="sm" />
-          {m.edit()}</Button
-        >
+          <IconEllipsis />
+        </Button>
+      {/snippet}
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Content align="end">
+      {#if app.permissions?.includes("edit")}
+        <DropdownMenu.Item>
+          {#snippet child({ props })}
+            <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+            <a
+              {...props}
+              href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${app.id}/edit`)}
+            >
+              <IconEdit size="sm" />
+              {m.edit()}
+            </a>
+            <!-- eslint-enable svelte/no-navigation-without-resolve -->
+          {/snippet}
+        </DropdownMenu.Item>
       {/if}
       {#if app.permissions?.includes("publish")}
-        <Button
-          is={item}
-          on:click={() => {
+        <DropdownMenu.Item
+          onSelect={() => {
             $showPublishDialog = true;
           }}
-          padding="icon-leading"
         >
           {#if app.published}
             <IconArrowDownToLine size="sm"></IconArrowDownToLine>
@@ -78,37 +92,37 @@
             <IconArrowUpToLine size="sm"></IconArrowUpToLine>
             {m.publish()}
           {/if}
-        </Button>
+        </DropdownMenu.Item>
       {/if}
       {#if app.permissions?.includes("delete")}
-        <Button
-          is={item}
+        <DropdownMenu.Item
           variant="destructive"
-          on:click={() => {
-            $showDeleteDialog = true;
+          onSelect={() => {
+            showDeleteDialog = true;
           }}
-          padding="icon-leading"
         >
-          <IconTrash size="sm" />{m.delete()}</Button
-        >
+          <IconTrash size="sm" />{m.delete()}
+        </DropdownMenu.Item>
       {/if}
-    </Dropdown.Menu>
-  </Dropdown.Root>
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
 {/if}
 
-<Dialog.Root alert bind:isOpen={showDeleteDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.delete_app()}</Dialog.Title>
-    <Dialog.Description>{m.confirm_delete_app()}</Dialog.Description>
+<AlertDialog.Root bind:open={showDeleteDialog}>
+  <AlertDialog.Content class={dialogLayout.content("small")}>
+    <AlertDialog.Header class={dialogLayout.header}>
+      <AlertDialog.Title>{m.delete_app()}</AlertDialog.Title>
+      <AlertDialog.Description>{m.confirm_delete_app()}</AlertDialog.Description>
+    </AlertDialog.Header>
 
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={deleteService}
+    <AlertDialog.Footer class={dialogLayout.footer}>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <Button variant="destructive" onclick={deleteService}
         >{isProcessing ? m.deleting() : m.delete()}</Button
       >
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
 
 <PublishingDialog
   resource={app}

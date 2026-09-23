@@ -1,7 +1,7 @@
 <script lang="ts">
   import { IconCancel } from "@eneo/icons/cancel";
   import { IconTrash } from "@eneo/icons/trash";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { Progress } from "$lib/components/ui/progress/index.js";
   import { m } from "$lib/paraglide/messages";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
@@ -87,8 +87,9 @@
     <div class="min-w-8">
       <Button
         variant="destructive"
-        padding="icon"
-        on:click={() => {
+        size="icon"
+        aria-label={m.remove_file({ fileName: file.name })}
+        onclick={() => {
           removeFile(file);
         }}
       >
@@ -123,7 +124,12 @@
     </div>
 
     <div class="min-w-8">
-      <Button variant="destructive" padding="icon" on:click={() => upload.remove()}>
+      <Button
+        variant="destructive"
+        size="icon"
+        aria-label={m.remove_file({ fileName: upload.file.name })}
+        onclick={() => upload.remove()}
+      >
         <IconCancel />
       </Button>
     </div>

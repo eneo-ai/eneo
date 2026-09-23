@@ -6,7 +6,11 @@
   import { IconEdit } from "@eneo/icons/edit";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import { IconTrash } from "@eneo/icons/trash";
-  import { Button, Dialog, Dropdown } from "@eneo/ui";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { untrack } from "svelte";
@@ -32,8 +36,8 @@
   let isDeleting = $state(false);
   let newWrapperName = $state(untrack(() => wrapperName));
 
-  let showRenameDialog = $state<Dialog.OpenState>();
-  let showDeleteDialog = $state<Dialog.OpenState>();
+  let showRenameDialog = $state(false);
+  let showDeleteDialog = $state(false);
 
   async function renameWrapper() {
     const nextName = newWrapperName.trim();
@@ -47,7 +51,7 @@
         name: nextName
       });
       refreshCurrentSpace();
-      $showRenameDialog = false;
+      showRenameDialog = false;
     } catch (error) {
       console.error(error);
       toastError(error, m.integration_rename_error());
@@ -64,7 +68,7 @@
         wrapper_id: wrapperId
       });
       refreshCurrentSpace();
-      $showDeleteDialog = false;
+      showDeleteDialog = false;
     } catch (error) {
       console.error(error);
       toastError(error, m.integration_delete_error());
@@ -75,68 +79,69 @@
 
   function openRenameDialog() {
     newWrapperName = wrapperName;
-    $showRenameDialog = true;
+    showRenameDialog = true;
   }
 </script>
 
 {#if canEdit || canDelete}
-  <Dropdown.Root>
-    <Dropdown.Trigger let:trigger asFragment>
-      <Button is={trigger} padding="icon" class="h-8 w-8">
-        <IconEllipsis />
-      </Button>
-    </Dropdown.Trigger>
-    <Dropdown.Menu let:item>
-      {#if canEdit}
-        <Button is={item} on:click={openRenameDialog} padding="icon-leading">
-          <IconEdit size="sm" />{m.rename_wrapper()}
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger>
+      {#snippet child({ props })}
+        <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+          <IconEllipsis />
         </Button>
+      {/snippet}
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Content align="end">
+      {#if canEdit}
+        <DropdownMenu.Item onSelect={openRenameDialog}>
+          <IconEdit size="sm" />{m.rename_wrapper()}
+        </DropdownMenu.Item>
       {/if}
       {#if canDelete}
-        <Button
-          is={item}
-          variant="destructive"
-          on:click={() => {
-            $showDeleteDialog = true;
-          }}
-          padding="icon-leading"
-        >
+        <DropdownMenu.Item variant="destructive" onSelect={() => (showDeleteDialog = true)}>
           <IconTrash size="sm" />{m.delete_wrapper()}
-        </Button>
+        </DropdownMenu.Item>
       {/if}
-    </Dropdown.Menu>
-  </Dropdown.Root>
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
 {/if}
 
-<Dialog.Root bind:isOpen={showRenameDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.rename_wrapper()}</Dialog.Title>
-    <Dialog.Section scrollable={false}>
-      <Field.Field class="px-4 py-4">
-        <Field.Label for={`${uid}-name`}>{m.sharepoint_wrapper_name_label()}</Field.Label>
-        <Input id={`${uid}-name`} bind:value={newWrapperName} />
-      </Field.Field>
-    </Dialog.Section>
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="primary" on:click={renameWrapper} disabled={!newWrapperName.trim()}>
+<Dialog.Root bind:open={showRenameDialog}>
+  <Dialog.Content class={dialogLayout.content()} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{m.rename_wrapper()}</Dialog.Title>
+    </Dialog.Header>
+    <div class={dialogLayout.body}>
+      <div class={dialogLayout.section}>
+        <Field.Field class="px-4 py-4">
+          <Field.Label for={`${uid}-name`}>{m.sharepoint_wrapper_name_label()}</Field.Label>
+          <Input id={`${uid}-name`} bind:value={newWrapperName} />
+        </Field.Field>
+      </div>
+    </div>
+    <Dialog.Footer class={dialogLayout.footer}>
+      <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
+      <Button onclick={renameWrapper} disabled={!newWrapperName.trim()}>
         {isRenaming ? m.saving() : m.save()}
       </Button>
-    </Dialog.Controls>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root alert bind:isOpen={showDeleteDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.delete_wrapper()}</Dialog.Title>
-    <Dialog.Description>
-      {m.confirm_delete_sharepoint_wrapper({ wrapperName, count: itemCount })}
-    </Dialog.Description>
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={deleteWrapper}>
+<AlertDialog.Root bind:open={showDeleteDialog}>
+  <AlertDialog.Content class={dialogLayout.content()}>
+    <AlertDialog.Header class={dialogLayout.header}>
+      <AlertDialog.Title>{m.delete_wrapper()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.confirm_delete_sharepoint_wrapper({ wrapperName, count: itemCount })}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer class={dialogLayout.footer}>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <Button variant="destructive" onclick={deleteWrapper}>
         {isDeleting ? m.deleting() : m.delete()}
       </Button>
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

@@ -4,7 +4,11 @@
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEdit } from "@eneo/icons/edit";
   import { IconRefresh } from "@eneo/icons/refresh";
-  import { Button, Dialog, Dropdown } from "@eneo/ui";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -35,7 +39,7 @@
         space: $currentSpace
       });
       refreshCurrentSpace();
-      $showDeleteDialog = false;
+      showDeleteDialog = false;
     } catch (e) {
       toastError(e, m.integration_delete_error());
       console.error(e);
@@ -52,7 +56,7 @@
         name: newName
       });
       refreshCurrentSpace();
-      $showRenameDialog = false;
+      showRenameDialog = false;
     } catch (e) {
       toastError(e, m.integration_rename_error());
       console.error(e);
@@ -68,107 +72,100 @@
         space: $currentSpace
       });
       refreshCurrentSpace();
-      $showSyncDialog = false;
+      showSyncDialog = false;
     } catch (e) {
       console.error(e);
     }
     isSyncing = false;
   }
 
-  let showDeleteDialog: Dialog.OpenState;
-  let showRenameDialog: Dialog.OpenState;
-  let showSyncDialog: Dialog.OpenState;
+  let showDeleteDialog = false;
+  let showRenameDialog = false;
+  let showSyncDialog = false;
 </script>
 
-<Dropdown.Root>
-  <Dropdown.Trigger let:trigger asFragment>
-    <Button is={trigger} padding="icon">
-      <IconEllipsis />
-    </Button>
-  </Dropdown.Trigger>
-  <Dropdown.Menu let:item>
+<DropdownMenu.Root>
+  <DropdownMenu.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+        <IconEllipsis />
+      </Button>
+    {/snippet}
+  </DropdownMenu.Trigger>
+  <DropdownMenu.Content align="end">
     {#if knowledgeItem.permissions?.includes("edit")}
-      <Button
-        is={item}
-        on:click={() => {
+      <DropdownMenu.Item
+        onSelect={() => {
           newName = knowledgeItem.name;
-          $showRenameDialog = true;
+          showRenameDialog = true;
         }}
-        padding="icon-leading"
       >
-        <IconEdit size="sm" />{m.rename()}</Button
-      >
+        <IconEdit size="sm" />{m.rename()}
+      </DropdownMenu.Item>
     {/if}
     {#if knowledgeItem.integration_type === "sharepoint" && knowledgeItem.permissions?.includes("edit")}
-      <Button
-        is={item}
-        on:click={() => {
-          $showSyncDialog = true;
-        }}
-        padding="icon-leading"
-      >
-        <IconRefresh size="sm" />{m.trigger_full_sync()}</Button
-      >
+      <DropdownMenu.Item onSelect={() => (showSyncDialog = true)}>
+        <IconRefresh size="sm" />{m.trigger_full_sync()}
+      </DropdownMenu.Item>
     {/if}
     {#if knowledgeItem.permissions?.includes("delete")}
-      <Button
-        is={item}
-        variant="destructive"
-        on:click={() => {
-          $showDeleteDialog = true;
-        }}
-        padding="icon-leading"
-      >
-        <IconTrash size="sm" />{m.delete()}</Button
-      >
+      <DropdownMenu.Item variant="destructive" onSelect={() => (showDeleteDialog = true)}>
+        <IconTrash size="sm" />{m.delete()}
+      </DropdownMenu.Item>
     {/if}
-  </Dropdown.Menu>
-</Dropdown.Root>
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
 
-<Dialog.Root bind:isOpen={showRenameDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.integration_rename_title()}</Dialog.Title>
-    <Dialog.Section scrollable={false}>
-      <Field.Field class="px-4 py-4">
-        <Field.Label for={nameId}>{m.name()}</Field.Label>
-        <Input id={nameId} bind:value={newName} />
-      </Field.Field>
-    </Dialog.Section>
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="primary" on:click={renameKnowledge} disabled={!newName.trim()}
+<Dialog.Root bind:open={showRenameDialog}>
+  <Dialog.Content class={dialogLayout.content()} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{m.integration_rename_title()}</Dialog.Title>
+    </Dialog.Header>
+    <div class={dialogLayout.body}>
+      <div class={dialogLayout.section}>
+        <Field.Field class="px-4 py-4">
+          <Field.Label for={nameId}>{m.name()}</Field.Label>
+          <Input id={nameId} bind:value={newName} />
+        </Field.Field>
+      </div>
+    </div>
+    <Dialog.Footer class={dialogLayout.footer}>
+      <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
+      <Button onclick={renameKnowledge} disabled={!newName.trim()}
         >{isRenaming ? m.saving() : m.save()}</Button
       >
-    </Dialog.Controls>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root alert bind:isOpen={showSyncDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.trigger_full_sync()}</Dialog.Title>
-    <Dialog.Description>
-      {m.confirm_full_sync({ knowledgeName: knowledgeItem.name })}
-    </Dialog.Description>
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="primary" on:click={triggerFullSync}
-        >{isSyncing ? m.syncing() : m.start_full_sync()}</Button
-      >
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+<AlertDialog.Root bind:open={showSyncDialog}>
+  <AlertDialog.Content class={dialogLayout.content()}>
+    <AlertDialog.Header class={dialogLayout.header}>
+      <AlertDialog.Title>{m.trigger_full_sync()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.confirm_full_sync({ knowledgeName: knowledgeItem.name })}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer class={dialogLayout.footer}>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <Button onclick={triggerFullSync}>{isSyncing ? m.syncing() : m.start_full_sync()}</Button>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
 
-<Dialog.Root alert bind:isOpen={showDeleteDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.delete_integration_knowledge()}</Dialog.Title>
-    <Dialog.Description>
-      {m.confirm_delete_integration_knowledge({ knowledgeName: knowledgeItem.name })}
-    </Dialog.Description>
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={deleteKnowledge}
+<AlertDialog.Root bind:open={showDeleteDialog}>
+  <AlertDialog.Content class={dialogLayout.content()}>
+    <AlertDialog.Header class={dialogLayout.header}>
+      <AlertDialog.Title>{m.delete_integration_knowledge()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.confirm_delete_integration_knowledge({ knowledgeName: knowledgeItem.name })}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer class={dialogLayout.footer}>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <Button variant="destructive" onclick={deleteKnowledge}
         >{isDeleting ? m.deleting() : m.delete()}</Button
       >
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

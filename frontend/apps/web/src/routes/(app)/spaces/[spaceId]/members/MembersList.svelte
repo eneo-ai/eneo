@@ -6,7 +6,6 @@
 
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Button } from "@eneo/ui";
   import { derived } from "svelte/store";
   import MemberChip from "$lib/features/spaces/components/MemberChip.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -31,8 +30,8 @@
 </script>
 
 {#if $members.length > 0}
-  <Button
-    unstyled
+  <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+  <a
     class="hover:bg-hover-default -mr-2 flex cursor-pointer rounded-lg p-2 pl-4"
     href={localizeHref(`/spaces/${$currentSpace.routeId}/members`)}
     aria-label={m.go_to_members_page_for_this_space()}
@@ -40,5 +39,6 @@
     {#each $members as member (member)}
       <MemberChip {member}></MemberChip>
     {/each}
-  </Button>
+  </a>
+  <!-- eslint-enable svelte/no-navigation-without-resolve -->
 {/if}

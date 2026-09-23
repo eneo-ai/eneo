@@ -2,7 +2,7 @@
   import { Page, Settings } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
 
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import AppSettingsInput from "./AppSettingsInput.svelte";
   import { afterNavigate, beforeNavigate } from "$app/navigation";
 
@@ -163,15 +163,14 @@
         <Button
           variant="destructive"
           disabled={$isSaving}
-          on:click={() => {
+          onclick={() => {
             cancelUploadsAndClearQueue();
             discardChanges();
           }}>{m.discard_all_changes()}</Button
         >
         <Button
-          variant="positive"
-          class="w-32"
-          on:click={async () => {
+          class="bg-positive-default hover:bg-positive-stronger w-32"
+          onclick={async () => {
             cancelUploadsAndClearQueue();
             $update.completion_model_kwargs = filterSupportedModelKwargs(
               $update.completion_model_kwargs,
@@ -188,7 +187,7 @@
         {#if showSavesChangedNotice}
           <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
         {/if}
-        <Button variant="primary" class="w-32" href={previousRoute}>{m.done()}</Button>
+        <Button class="w-32" href={previousRoute}>{m.done()}</Button>
       {/if}
     </Page.Flex>
   </Page.Header>

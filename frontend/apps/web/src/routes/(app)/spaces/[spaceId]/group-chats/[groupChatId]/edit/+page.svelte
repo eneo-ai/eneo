@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
@@ -128,15 +128,14 @@
         <Button
           variant="destructive"
           disabled={$isSaving}
-          on:click={() => {
+          onclick={() => {
             discardChanges();
           }}>{m.discard_all_changes()}</Button
         >
 
         <Button
-          variant="positive"
-          class="w-32"
-          on:click={async () => {
+          class="bg-positive-default hover:bg-positive-stronger w-32"
+          onclick={async () => {
             if (!(await saveChanges())) return;
             showSavesChangedNotice = true;
             setTimeout(() => {
@@ -148,7 +147,7 @@
         {#if showSavesChangedNotice}
           <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
         {/if}
-        <Button variant="primary" class="w-32" href={previousRoute}>{m.done()}</Button>
+        <Button class="w-32" href={previousRoute}>{m.done()}</Button>
       {/if}
     </Page.Flex>
   </Page.Header>

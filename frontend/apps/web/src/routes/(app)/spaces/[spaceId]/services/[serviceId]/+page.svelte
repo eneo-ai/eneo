@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
@@ -76,7 +76,7 @@
             <Field.Label for={inputId}>{m.input()}</Field.Label>
             <Textarea id={inputId} bind:value={playgroundInput} rows={4} class="h-full" />
           </Field.Field>
-          <Button variant="primary" on:click={runService}>
+          <Button onclick={runService}>
             {#if runningService}{m.running()}{:else}
               {m.run_this_service()}{/if}</Button
           >
@@ -90,9 +90,8 @@
           </div>
 
           <Button
-            variant="primary"
             class="mt-3"
-            on:click={() => {
+            onclick={() => {
               navigator.clipboard.writeText(playgroundOutput);
             }}>{m.copy_response()}</Button
           >
