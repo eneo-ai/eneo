@@ -69,6 +69,13 @@ describe("wordDiff", () => {
     expect(marked.map((part) => part.text)).toEqual(["Gammal rad."]);
   });
 
+  it("calls a changed number of line breaks a line break", () => {
+    const view = markedView(wordDiff("A\n\nB", "A\nB")!);
+    expect(view.filter((part) => part.marker)).toEqual([
+      { kind: "removed", text: "¶", marker: "break" }
+    ]);
+  });
+
   it("keeps a step reference whole", () => {
     expect(
       show(

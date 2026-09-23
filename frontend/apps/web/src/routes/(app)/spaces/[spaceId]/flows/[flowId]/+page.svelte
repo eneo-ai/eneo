@@ -41,8 +41,7 @@
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
-  import { getStepSourceLine } from "$lib/features/flows/flowStepMaterial";
-  import { buildContext } from "$lib/features/flows/components/flowPromptVariables";
+  import { stepSourceLines } from "$lib/features/flows/flowStepMaterial";
   import {
     answerLabel,
     contractFieldCount,
@@ -170,14 +169,7 @@
   // the Builder use, so the Builder can ask about that part.
   function stepPartNow(step: FlowStep, intent?: AIBuilderStepIntent): string | null {
     if (intent === "underlag") {
-      const steps = $update.steps;
-      return (
-        getStepSourceLine(
-          step,
-          steps.find((candidate) => candidate.step_order === step.step_order - 1),
-          buildContext(steps, formSchemaMetadata, transcriptionEnabled, step.step_order)
-        )?.text ?? null
-      );
+      return stepReads[$update.steps.findIndex((candidate) => candidate.id === step.id)] ?? null;
     }
     if (intent === "format") {
       const answer = answerLabel(step.output_type, contractFieldCount(step.output_contract));
@@ -381,15 +373,6 @@
   // A request that travelled with a package import arrives in navigation
   // state, is handed to the Builder once, and is dropped from the history
   // entry so back or reload cannot replay it.
-  const stepChoices = $derived(
-    $update.steps
-      .filter((step) => step.id)
-      .map((step) => ({
-        id: step.id!,
-        name: step.user_description?.trim() || m.flow_step_unnamed(),
-        order: step.step_order
-      }))
-  );
   $effect(() => {
     const carried = page.state.aiBuilderPrefill;
     if (!carried || !canUseAIBuilder || !aiBuilderHost) return;
@@ -446,6 +429,23 @@
     typeof wizardMetadata.transcription_enabled === "boolean"
       ? wizardMetadata.transcription_enabled
       : hasAudioInputStep
+  );
+  // What each step reads, in the step list's words, for the Builder's rows.
+  const stepReads = $derived(
+    stepSourceLines($update.steps, formSchemaMetadata, transcriptionEnabled).map(
+      (line) => line?.text ?? null
+    )
+  );
+  const stepChoices = $derived(
+    $update.steps
+      .map((step, index) => ({ step, reads: stepReads[index] }))
+      .filter(({ step }) => step.id)
+      .map(({ step, reads }) => ({
+        id: step.id!,
+        name: step.user_description?.trim() || m.flow_step_unnamed(),
+        order: step.step_order,
+        reads
+      }))
   );
   const isTranscriptionSkipped = $derived(!transcriptionEnabled);
   const transcriptionModelId = $derived(

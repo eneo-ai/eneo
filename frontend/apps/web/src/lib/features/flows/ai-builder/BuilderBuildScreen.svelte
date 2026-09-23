@@ -38,6 +38,40 @@
       ? [...flowSteps].sort((a, b) => a.order - b.order)
       : null
   );
+  // A long flow keeps the rows that matter while Eneo works: a one-step change
+  // shows its step and the steps around it, a whole-flow change its first
+  // steps; the rest reads as one row.
+  const WHOLE_FLOW_ROWS = 6;
+  type PlanningRow =
+    | { kind: "step"; step: AIBuilderStepChoice }
+    | { kind: "gap"; first: number; last: number; unchanged: boolean };
+  const planningRows = $derived.by((): PlanningRow[] => {
+    if (!knownSteps) return [];
+    const rows: PlanningRow[] = [];
+    let run: AIBuilderStepChoice[] = [];
+    const endRun = (unchanged: boolean) => {
+      if (run.length >= 2) {
+        rows.push({ kind: "gap", first: run[0].order, last: run[run.length - 1].order, unchanged });
+      } else {
+        rows.push(...run.map((step) => ({ kind: "step" as const, step })));
+      }
+      run = [];
+    };
+    knownSteps.forEach((step, index) => {
+      const shown =
+        targetStepNumber === null
+          ? index < WHOLE_FLOW_ROWS || knownSteps.length <= WHOLE_FLOW_ROWS + 1
+          : Math.abs(step.order - targetStepNumber) <= 1;
+      if (shown) {
+        endRun(targetStepNumber !== null);
+        rows.push({ kind: "step", step });
+      } else {
+        run.push(step);
+      }
+    });
+    endRun(targetStepNumber !== null);
+    return rows;
+  });
 
   // Planning usually finishes within a minute; past that the wait deserves a
   // calm word so nobody wonders whether the page froze. Real time, not progress.
@@ -115,26 +149,53 @@
         aria-hidden="true"
       >
         {#if knownSteps}
-          {#each knownSteps as step (step.id)}
-            {@const changing = targetStepNumber === null || targetStepNumber === step.order}
-            <div
-              class="border-dimmer bg-secondary flex min-h-[3.625rem] items-center gap-3 rounded-[10px] border px-3 py-3"
-            >
-              <span
-                class="bg-tertiary text-secondary inline-flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-bold"
+          {#each planningRows as row (row.kind === "gap" ? `gap-${row.first}` : row.step.id)}
+            {#if row.kind === "gap"}
+              <div
+                class="border-default text-secondary flex min-h-11 items-center rounded-[10px] border border-dashed px-3 py-2.5 text-xs"
               >
-                {step.order}
-              </span>
-              <div class="flex min-w-0 flex-1 flex-col gap-[0.4375rem]">
-                <span class="text-primary truncate text-[0.8125rem] font-semibold">{step.name}</span
-                >
-                {#if changing}
-                  <Skeleton class="bg-tertiary h-[0.5625rem] w-2/5 rounded" />
-                {:else}
-                  <span class="text-secondary text-xs">{m.ai_builder_node_unchanged()}</span>
-                {/if}
+                {row.unchanged
+                  ? m.ai_builder_diagram_gap({ first: String(row.first), last: String(row.last) })
+                  : m.ai_builder_build_more_steps({
+                      first: String(row.first),
+                      last: String(row.last)
+                    })}
               </div>
-            </div>
+            {:else}
+              {@const step = row.step}
+              {@const changing = targetStepNumber === null || targetStepNumber === step.order}
+              <div
+                class="flex min-h-[3.625rem] items-center gap-3 rounded-[10px] border px-3 py-3 {changing
+                  ? 'border-accent-default/30 bg-accent-dimmer/40'
+                  : 'border-dimmer bg-primary'}"
+              >
+                <span
+                  class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-bold {changing
+                    ? 'bg-accent-dimmer text-accent-stronger'
+                    : 'bg-secondary text-secondary'}"
+                >
+                  {step.order}
+                </span>
+                <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span class="text-primary truncate text-[0.8125rem] font-semibold">
+                    {step.name}
+                  </span>
+                  {#if step.reads}
+                    <span class="text-secondary truncate text-xs">{step.reads}</span>
+                  {/if}
+                  {#if changing}
+                    <Skeleton class="bg-tertiary mt-1.5 h-[0.5625rem] w-2/5 rounded" />
+                  {/if}
+                </div>
+                <span
+                  class="inline-flex h-[1.3125rem] shrink-0 items-center rounded-full px-2 text-xs font-semibold {changing
+                    ? 'bg-accent-dimmer text-accent-stronger'
+                    : 'bg-secondary text-secondary'}"
+                >
+                  {changing ? m.ai_builder_node_changes() : m.ai_builder_node_unchanged()}
+                </span>
+              </div>
+            {/if}
           {/each}
         {:else}
           {#each Array.from({ length: Math.max(1, Math.min(stepCount, 12)) }) as _, i (i)}

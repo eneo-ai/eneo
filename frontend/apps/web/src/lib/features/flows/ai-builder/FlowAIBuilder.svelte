@@ -537,9 +537,14 @@
   );
   // The plan surface claims the failure from the moment it arrives inside
   // the stream until the settled failure surface is up, so the turn alert
-  // never shows the same error first.
+  // never shows the same error first - but only while that surface is the
+  // screen. A generation that fails without a plan drops the phase back to
+  // the composer, and a claim held there would leave the failure unsaid
+  // until the page was reloaded.
+  const planSurfaceShowsFailure = $derived(screen === "build" || screen === "review");
   const planSurfaceClaimsError = $derived(
     planSurfaceOwnsError &&
+      planSurfaceShowsFailure &&
       (service.isStreaming || service.streamState === "failed" || restoredGenerationFailure)
   );
 
@@ -1167,7 +1172,12 @@
   <AlertDialog.Content>
     <AlertDialog.Header>
       <AlertDialog.Title>{m.ai_builder_discard_change_title()}</AlertDialog.Title>
-      <AlertDialog.Description>{m.ai_builder_discard_change_body()}</AlertDialog.Description>
+      <AlertDialog.Description>
+        <!-- Only a published flow has a running version to be unaffected. -->
+        {flowIsPublished
+          ? m.ai_builder_discard_change_body_published()
+          : m.ai_builder_discard_change_body()}
+      </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer class="border-border">
       <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>

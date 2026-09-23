@@ -137,6 +137,8 @@ export interface AIBuilderStepChoice {
   id: string;
   name: string;
   order: number;
+  /** What the step reads, in the step list's words ("Läser föregående steg"). */
+  reads?: string | null;
 }
 
 /** A request carried into the Builder from outside its conversation (a

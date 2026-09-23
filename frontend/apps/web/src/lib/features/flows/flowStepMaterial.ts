@@ -3,6 +3,7 @@ import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
 import { FLOW_INPUT_ALIASES } from "./flowFormSchema";
 import { parseFlowInputBindings } from "./flowInputBindings";
+import { buildContext } from "./components/flowPromptVariables";
 import { getRuntimeInputConfig } from "./flowRuntimeInputConfig";
 import {
   classifyVariable,
@@ -205,6 +206,27 @@ export function getStepSourceLine(
     case "web_address":
       return sourceLine([m.flow_step_reads_web()]);
   }
+}
+
+/**
+ * Every step's source line, in the words the step panel uses: the step list's
+ * captions and the AI Builder's step rows read the same line. A template step
+ * names its template instead, so it has none.
+ */
+export function stepSourceLines(
+  steps: FlowStep[],
+  formSchema: Parameters<typeof buildContext>[1],
+  transcriptionEnabled: boolean
+): (StepSourceLine | null)[] {
+  return steps.map((step) =>
+    step.output_mode === "template_fill"
+      ? null
+      : getStepSourceLine(
+          step,
+          steps.find((candidate) => candidate.step_order === step.step_order - 1),
+          buildContext(steps, formSchema, transcriptionEnabled, step.step_order)
+        )
+  );
 }
 
 /**

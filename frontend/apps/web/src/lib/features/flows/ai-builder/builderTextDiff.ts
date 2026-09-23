@@ -132,18 +132,18 @@ export function markedView(parts: DiffPart[]): MarkedPart[] {
   let change: DiffPart[] = [];
   const endChange = () => {
     if (change.length > 0 && change.every((part) => part.plain)) {
-      const width = (kind: DiffPart["kind"]) =>
+      // Which side had more of it: line breaks first, then any spacing.
+      const count = (kind: DiffPart["kind"], pattern: RegExp) =>
         change
           .filter((part) => part.kind === kind)
-          .reduce((sum, part) => sum + part.text.length, 0);
-      const broken = (kind: DiffPart["kind"]) =>
-        change.some((part) => part.kind === kind && part.text.includes("\n"));
-      const isBreak = broken("removed") !== broken("added");
+          .reduce((sum, part) => sum + (part.text.match(pattern)?.length ?? 0), 0);
+      const breaks = count("removed", /\n/g) - count("added", /\n/g);
+      const isBreak = breaks !== 0;
       const kind = isBreak
-        ? broken("removed")
+        ? breaks > 0
           ? "removed"
           : "added"
-        : width("removed") > width("added")
+        : count("removed", /\s/g) > count("added", /\s/g)
           ? "removed"
           : "added";
       view.push({ kind, text: isBreak ? "¶" : "·", marker: isBreak ? "break" : "space" });

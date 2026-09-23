@@ -2288,6 +2288,19 @@
                 </Button>
               {/if}
             </div>
+            {#if service.latestUserRequest}
+              <!-- What was asked, beside the choice of sending it again. -->
+              <div class="border-dimmer mt-5 border-t pt-4">
+                <h3 class="text-primary text-[0.8125rem] font-bold">
+                  {m.ai_builder_requirements_user_request()}
+                </h3>
+                <p
+                  class="text-secondary mt-1 line-clamp-4 text-[0.8125rem] leading-relaxed break-words whitespace-pre-wrap"
+                >
+                  <q>{service.latestUserRequest}</q>
+                </p>
+              </div>
+            {/if}
             <div class="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1">
               {#if generationFailure.technical}
                 {@const technical = generationFailure.technical}

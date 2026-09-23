@@ -10,8 +10,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import { parseValidationError } from "$lib/features/flows/flowStepValidationMessages";
   import FlowAddStepDialog from "./FlowAddStepDialog.svelte";
-  import { buildContext } from "./flowPromptVariables";
-  import { getStepSourceLine, groupStepSources } from "$lib/features/flows/flowStepMaterial";
+  import { groupStepSources, stepSourceLines } from "$lib/features/flows/flowStepMaterial";
   import FileInput from "@lucide/svelte/icons/file-input";
   import { cn } from "$lib/utils.js";
   import type { FlowFormSchemaMetadata } from "$lib/features/flows/flowFormSchema";
@@ -42,17 +41,7 @@
   const mode = getFlowUserMode();
   const uid = $props.id();
   // Where each step's material comes from, in the words the step panel uses.
-  const sourceLines = $derived(
-    steps.map((step) =>
-      step.output_mode === "template_fill"
-        ? null // names its template instead
-        : getStepSourceLine(
-            step,
-            steps.find((candidate) => candidate.step_order === step.step_order - 1),
-            buildContext(steps, formSchema, transcriptionEnabled, step.step_order)
-          )
-    )
-  );
+  const sourceLines = $derived(stepSourceLines(steps, formSchema, transcriptionEnabled));
   // Per step, the index of the step whose caption says what it reads.
   const captionOf = $derived(groupStepSources(sourceLines));
   const captionId = (index: number) => `${uid}-reads-${index}`;

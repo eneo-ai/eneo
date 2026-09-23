@@ -16,6 +16,7 @@
     flowId?: string | null;
     resumeSessionId?: string | null;
     canReview?: boolean;
+    flowIsPublished?: boolean;
     stepChoices?: AIBuilderStepChoice[] | null;
     onpackage?: (detail: { file: File; text: string }) => void;
     /** Test hook: receive the service instance to drive live session changes. */
@@ -30,6 +31,7 @@
     flowId = null,
     resumeSessionId = null,
     canReview = false,
+    flowIsPublished = false,
     stepChoices = null,
     onpackage,
     onservice,
@@ -78,6 +80,7 @@
   {targetKind}
   {resumeSessionId}
   {canReview}
+  {flowIsPublished}
   {stepChoices}
   {onpackage}
 />

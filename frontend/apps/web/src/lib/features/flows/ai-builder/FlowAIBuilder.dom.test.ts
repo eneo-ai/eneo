@@ -474,6 +474,7 @@ interface ShellProps {
   flowId?: string | null;
   resumeSessionId?: string | null;
   canReview?: boolean;
+  flowIsPublished?: boolean;
   stepChoices?: { id: string; name: string; order: number }[] | null;
   onpackage?: (detail: { file: File; text: string }) => void;
 }
@@ -3949,6 +3950,36 @@ describe("FlowAIBuilder edit host contract", () => {
       message: "Ändra bara det här steget",
       edit_context: SAVED_STEP_SCOPE.editContext
     });
+  });
+
+  it("promises an unaffected published version only when the flow is published", async () => {
+    // Starting over is offered only when there is work to discard.
+    const openDiscard = async (flowIsPublished: boolean) => {
+      const { service } = renderShell({
+        fetch: makeFetch({ created: editSession() }).fetch,
+        stream: makeStream().stream,
+        targetKind: "edit",
+        flowId: "flow-1",
+        flowIsPublished
+      });
+      await waitFor(() => expect(service().hasSession).toBe(true));
+      service().seedState({
+        messages: [{ role: "user", content: "Byt rubrik", timestamp: 1 }]
+      });
+      await fireEvent.click(
+        await screen.findByRole("button", { name: m.ai_builder_start_fresh() })
+      );
+      await screen.findByText(m.ai_builder_discard_change_title());
+    };
+
+    // A draft was never published, so nothing of it is running.
+    await openDiscard(false);
+    expect(screen.getByText(m.ai_builder_discard_change_body())).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_discard_change_body_published())).toBeNull();
+    cleanup();
+
+    await openDiscard(true);
+    expect(screen.getByText(m.ai_builder_discard_change_body_published())).toBeTruthy();
   });
 
   it("asks about the part of the step the menu chose, with quick picks for what it reads", async () => {
