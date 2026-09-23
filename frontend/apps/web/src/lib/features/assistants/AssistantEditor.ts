@@ -26,7 +26,7 @@ function initAssistantEditor(data: {
     },
     defaults: {
       prompt: { description: "", text: "" },
-      insight_enabled: false,
+      insight_enabled: false as boolean,
       // Widened so the editor's inverted "open files" switch can write false.
       inline_file_text: true as boolean,
       // On-demand knowledge is opt-in. Missing values must preserve the

@@ -1,7 +1,10 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { Page, Settings } from "$lib/components/layout";
-  import { Button, Input } from "@eneo/ui";
+  import { Button } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { m } from "$lib/paraglide/messages";
@@ -20,6 +23,7 @@
   import HelpTooltip from "../../../../models/components/HelpTooltip.svelte";
 
   let { data } = $props();
+  const uid = $props.id();
 
   const eneo = $derived(data.eneo);
 
@@ -259,14 +263,29 @@
           description={m.wizard_attachments_description()}
           hasChanges={false}
           fullWidth
+          let:aria
         >
           <HelpTooltip slot="title" text={m.wizard_attachments_help()} />
           <div class="flex flex-col gap-4">
-            <Input.RadioSwitch
-              bind:value={wizardAttachmentsEnabled}
-              labelTrue={m.enabled()}
-              labelFalse={m.disabled()}
-            />
+            <RadioGroup.Root
+              value={wizardAttachmentsEnabled ? "on" : "off"}
+              onValueChange={(v) => (wizardAttachmentsEnabled = v === "on")}
+              class="grid w-full grid-cols-2 gap-2"
+              {...aria}
+            >
+              <Field.Label for={`${uid}-attachments-on`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="on" id={`${uid}-attachments-on`} />
+                  <span>{m.enabled()}</span>
+                </Field.Field>
+              </Field.Label>
+              <Field.Label for={`${uid}-attachments-off`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="off" id={`${uid}-attachments-off`} />
+                  <span>{m.disabled()}</span>
+                </Field.Field>
+              </Field.Label>
+            </RadioGroup.Root>
 
             {#if wizardAttachmentsEnabled}
               <div
@@ -279,11 +298,14 @@
                   >
                 </label>
 
-                <Input.Text
-                  bind:value={wizardAttachmentsTitle}
-                  placeholder={m.wizard_attachments_title_placeholder()}
-                  label={m.title()}
-                />
+                <Field.Field>
+                  <Field.Label for={`${uid}-attachments-title`}>{m.title()}</Field.Label>
+                  <Input
+                    id={`${uid}-attachments-title`}
+                    bind:value={wizardAttachmentsTitle}
+                    placeholder={m.wizard_attachments_title_placeholder()}
+                  />
+                </Field.Field>
 
                 <div class="flex flex-col gap-1">
                   <label
@@ -307,14 +329,29 @@
           description={m.wizard_collections_description()}
           hasChanges={false}
           fullWidth
+          let:aria
         >
           <HelpTooltip slot="title" text={m.wizard_collections_help()} />
           <div class="flex flex-col gap-4">
-            <Input.RadioSwitch
-              bind:value={wizardCollectionsEnabled}
-              labelTrue={m.enabled()}
-              labelFalse={m.disabled()}
-            />
+            <RadioGroup.Root
+              value={wizardCollectionsEnabled ? "on" : "off"}
+              onValueChange={(v) => (wizardCollectionsEnabled = v === "on")}
+              class="grid w-full grid-cols-2 gap-2"
+              {...aria}
+            >
+              <Field.Label for={`${uid}-collections-on`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="on" id={`${uid}-collections-on`} />
+                  <span>{m.enabled()}</span>
+                </Field.Field>
+              </Field.Label>
+              <Field.Label for={`${uid}-collections-off`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="off" id={`${uid}-collections-off`} />
+                  <span>{m.disabled()}</span>
+                </Field.Field>
+              </Field.Label>
+            </RadioGroup.Root>
 
             {#if wizardCollectionsEnabled}
               <div
@@ -327,11 +364,14 @@
                   >
                 </label>
 
-                <Input.Text
-                  bind:value={wizardCollectionsTitle}
-                  placeholder={m.wizard_collections_title_placeholder()}
-                  label={m.title()}
-                />
+                <Field.Field>
+                  <Field.Label for={`${uid}-collections-title`}>{m.title()}</Field.Label>
+                  <Input
+                    id={`${uid}-collections-title`}
+                    bind:value={wizardCollectionsTitle}
+                    placeholder={m.wizard_collections_title_placeholder()}
+                  />
+                </Field.Field>
 
                 <div class="flex flex-col gap-1">
                   <label

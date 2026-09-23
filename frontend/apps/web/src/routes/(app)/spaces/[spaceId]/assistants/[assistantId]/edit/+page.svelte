@@ -3,7 +3,9 @@
   import OpenFilesHelp from "$lib/features/assistants/components/OpenFilesHelp.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
 
-  import { Button, Input, Tooltip } from "@eneo/ui";
+  import { Button, Tooltip } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { IconSparkles } from "@eneo/icons/sparkles";
   import { afterNavigate, beforeNavigate, invalidate } from "$app/navigation";
 
@@ -42,6 +44,7 @@
   import { untrack } from "svelte";
 
   let { data } = $props();
+  const uid = $props.id();
 
   // Help assistants have logging permanently disabled (PRD §6); surface the
   // explanation in the security section on their edit page. `is_help_assistant`
@@ -582,18 +585,31 @@
             revertFn={() => {
               discardChanges("inline_file_text");
             }}
+            let:aria
           >
             <svelte:fragment slot="description">
               <OpenFilesHelp />
             </svelte:fragment>
             <div class="border-default flex h-14 border-b py-2">
-              <Input.RadioSwitch
-                bind:value={
-                  () => !$update.inline_file_text, (on) => ($update.inline_file_text = !on)
-                }
-                labelTrue={m.enable()}
-                labelFalse={m.disable()}
-              ></Input.RadioSwitch>
+              <RadioGroup.Root
+                value={$update.inline_file_text ? "off" : "on"}
+                onValueChange={(v) => ($update.inline_file_text = v !== "on")}
+                class="grid w-full grid-cols-2 gap-2"
+                {...aria}
+              >
+                <Field.Label for={`${uid}-open-files-on`} class="font-normal">
+                  <Field.Field orientation="horizontal">
+                    <RadioGroup.Item value="on" id={`${uid}-open-files-on`} />
+                    <span>{m.enable()}</span>
+                  </Field.Field>
+                </Field.Label>
+                <Field.Label for={`${uid}-open-files-off`} class="font-normal">
+                  <Field.Field orientation="horizontal">
+                    <RadioGroup.Item value="off" id={`${uid}-open-files-off`} />
+                    <span>{m.disable()}</span>
+                  </Field.Field>
+                </Field.Label>
+              </RadioGroup.Root>
             </div>
           </Settings.Row>
         {/if}
@@ -605,16 +621,28 @@
           revertFn={() => {
             discardChanges("knowledge_mode");
           }}
+          let:aria
         >
           <div class="border-default flex h-14 border-b py-2">
-            <Input.RadioSwitch
-              bind:value={
-                () => $update.knowledge_mode !== "inject",
-                (v) => ($update.knowledge_mode = v ? "tool" : "inject")
-              }
-              labelTrue={m.knowledge_mode_tool()}
-              labelFalse={m.knowledge_mode_inject()}
-            ></Input.RadioSwitch>
+            <RadioGroup.Root
+              value={$update.knowledge_mode !== "inject" ? "on" : "off"}
+              onValueChange={(v) => ($update.knowledge_mode = v === "on" ? "tool" : "inject")}
+              class="grid w-full grid-cols-2 gap-2"
+              {...aria}
+            >
+              <Field.Label for={`${uid}-knowledge-mode-on`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="on" id={`${uid}-knowledge-mode-on`} />
+                  <span>{m.knowledge_mode_tool()}</span>
+                </Field.Field>
+              </Field.Label>
+              <Field.Label for={`${uid}-knowledge-mode-off`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="off" id={`${uid}-knowledge-mode-off`} />
+                  <span>{m.knowledge_mode_inject()}</span>
+                </Field.Field>
+              </Field.Label>
+            </RadioGroup.Root>
           </div>
         </Settings.Row>
       </Settings.Group>
@@ -756,6 +784,7 @@
             }}
             title={m.insights()}
             description={m.insights_description()}
+            let:aria
           >
             <div class="border-default flex h-14 border-b py-2">
               <Tooltip
@@ -764,12 +793,26 @@
                   : m.only_space_admins_toggle()}
                 class="w-full"
               >
-                <Input.RadioSwitch
-                  bind:value={$update.insight_enabled}
-                  labelTrue={m.enable_insights()}
-                  labelFalse={m.disable_insights()}
+                <RadioGroup.Root
+                  value={$update.insight_enabled ? "on" : "off"}
+                  onValueChange={(v) => ($update.insight_enabled = v === "on")}
                   disabled={!data.assistant.permissions?.includes("insight_toggle")}
-                ></Input.RadioSwitch>
+                  class="grid w-full grid-cols-2 gap-2"
+                  {...aria}
+                >
+                  <Field.Label for={`${uid}-insights-on`} class="font-normal">
+                    <Field.Field orientation="horizontal">
+                      <RadioGroup.Item value="on" id={`${uid}-insights-on`} />
+                      <span>{m.enable_insights()}</span>
+                    </Field.Field>
+                  </Field.Label>
+                  <Field.Label for={`${uid}-insights-off`} class="font-normal">
+                    <Field.Field orientation="horizontal">
+                      <RadioGroup.Item value="off" id={`${uid}-insights-off`} />
+                      <span>{m.disable_insights()}</span>
+                    </Field.Field>
+                  </Field.Label>
+                </RadioGroup.Root>
               </Tooltip>
             </div>
           </Settings.Row>

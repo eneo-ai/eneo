@@ -6,11 +6,18 @@
 
 <script lang="ts">
   import { getAppContext } from "$lib/core/AppContext";
-  import { Dialog, Button, Input } from "@eneo/ui";
+  import { Dialog, Button } from "@eneo/ui";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
   const { updateUserInfo } = getAppContext();
+
+  const firstNameId = useId();
+  const lastNameId = useId();
+  const displayNameId = useId();
 
   export let firstName: string;
   export let lastName: string;
@@ -49,34 +56,46 @@
     <Dialog.Title>{m.change_your_name()}</Dialog.Title>
 
     <Dialog.Section>
-      <Input.Text
-        bind:value={firstName}
-        label={m.first_name()}
-        description={m.first_name_description()}
-        maxlength="200"
-        type="text"
-        required
-        class="border-dimmer hover:bg-hover-dimmer justify-between border-b px-4 py-4"
-      ></Input.Text>
+      <Field.Field class="border-dimmer hover:bg-hover-dimmer justify-between border-b px-4 py-4">
+        <Field.Label for={firstNameId}>
+          {m.first_name()}
+          <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+        </Field.Label>
+        <Input
+          id={firstNameId}
+          bind:value={firstName}
+          maxlength={200}
+          type="text"
+          required
+          aria-describedby={`${firstNameId}-description`}
+        />
+        <Field.Description id={`${firstNameId}-description`}>
+          {m.first_name_description()}
+        </Field.Description>
+      </Field.Field>
 
-      <Input.Text
-        bind:value={lastName}
-        label={m.last_name()}
-        required
-        maxlength="200"
-        type="text"
-        class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4"
-      ></Input.Text>
+      <Field.Field class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4">
+        <Field.Label for={lastNameId}>
+          {m.last_name()}
+          <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+        </Field.Label>
+        <Input id={lastNameId} bind:value={lastName} required maxlength={200} type="text" />
+      </Field.Field>
 
-      <Input.Text
-        bind:value={displayName}
-        label={m.full_name()}
-        description={m.full_name_description()}
-        placeholder={displayNamePlaceholder}
-        maxlength="200"
-        type="text"
-        class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4"
-      ></Input.Text>
+      <Field.Field class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4">
+        <Field.Label for={displayNameId}>{m.full_name()}</Field.Label>
+        <Input
+          id={displayNameId}
+          bind:value={displayName}
+          placeholder={displayNamePlaceholder}
+          maxlength={200}
+          type="text"
+          aria-describedby={`${displayNameId}-description`}
+        />
+        <Field.Description id={`${displayNameId}-description`}>
+          {m.full_name_description()}
+        </Field.Description>
+      </Field.Field>
     </Dialog.Section>
 
     <Dialog.Controls let:close>

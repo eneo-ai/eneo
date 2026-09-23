@@ -8,7 +8,9 @@
   import { beforeNavigate } from "$app/navigation";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { initSpaceSettingsEditor } from "$lib/features/spaces/SpaceSettingsEditor";
-  import { Button, Dialog, Input } from "@eneo/ui";
+  import { Button, Dialog } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import SelectEmbeddingModels from "./SelectEmbeddingModels.svelte";
   import EditNameAndDescription from "./EditNameAndDescription.svelte";
   import SelectCompletionModels from "./SelectCompletionModels.svelte";
@@ -33,6 +35,7 @@
   const eneo = getEneo();
 
   let { data } = $props();
+  const uid = $props.id();
   let models = $state(untrack(() => data.models));
   let completionModels = $derived(
     models.completionModels.filter(
@@ -282,13 +285,19 @@
                   <p class="border-default hover:bg-hover-dimmer border-b px-7 py-4">
                     {m.confirm_delete_space_message({ space: $currentSpace.name })}
                   </p>
-                  <Input.Text
-                    bind:value={deleteConfirmation}
-                    label={m.enter_space_name_to_confirm()}
-                    required
-                    placeholder={$currentSpace.name}
-                    class=" border-default hover:bg-hover-dimmer px-4 py-4"
-                  ></Input.Text>
+                  <Field.Field class="border-default hover:bg-hover-dimmer px-4 py-4">
+                    <Field.Label for={`${uid}-delete-confirmation`}>
+                      {m.enter_space_name_to_confirm()}
+                      <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span
+                      >
+                    </Field.Label>
+                    <Input
+                      id={`${uid}-delete-confirmation`}
+                      bind:value={deleteConfirmation}
+                      required
+                      placeholder={$currentSpace.name}
+                    />
+                  </Field.Field>
                 </Dialog.Section>
 
                 {#if showStillDeletingMessage}

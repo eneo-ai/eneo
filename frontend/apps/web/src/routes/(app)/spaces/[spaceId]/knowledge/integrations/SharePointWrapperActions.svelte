@@ -6,7 +6,9 @@
   import { IconEdit } from "@eneo/icons/edit";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import { IconTrash } from "@eneo/icons/trash";
-  import { Button, Dialog, Dropdown, Input } from "@eneo/ui";
+  import { Button, Dialog, Dropdown } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { untrack } from "svelte";
 
   interface Props {
@@ -18,6 +20,7 @@
   }
 
   let { wrapperId, wrapperName, itemCount, canEdit, canDelete }: Props = $props();
+  const uid = $props.id();
 
   const eneo = getEneo();
   const {
@@ -109,11 +112,10 @@
   <Dialog.Content width="small">
     <Dialog.Title>{m.rename_wrapper()}</Dialog.Title>
     <Dialog.Section scrollable={false}>
-      <Input.Text
-        bind:value={newWrapperName}
-        label={m.sharepoint_wrapper_name_label()}
-        class="px-4 py-4"
-      />
+      <Field.Field class="px-4 py-4">
+        <Field.Label for={`${uid}-name`}>{m.sharepoint_wrapper_name_label()}</Field.Label>
+        <Input id={`${uid}-name`} bind:value={newWrapperName} />
+      </Field.Field>
     </Dialog.Section>
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>

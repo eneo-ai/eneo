@@ -75,6 +75,7 @@
   /*     - lib/components/ui/radio-group/radio-group-item.svelte       */
   /*     - lib/components/ui/field/field-label.svelte                  */
   /*     - lib/components/ui/badge/badge.svelte (default + link)       */
+  /*     - lib/components/ui/slider/slider.svelte (range)              */
   /*   Any future shadcn component that uses bg-primary / text-primary-*/
   /*   foreground in its checked/active state needs the same patch.    */
   /*                                                                   */

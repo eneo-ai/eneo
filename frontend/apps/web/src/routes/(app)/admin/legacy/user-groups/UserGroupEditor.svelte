@@ -9,9 +9,14 @@
   import { makeEditable } from "$lib/core/editable";
   import { getEneo } from "$lib/core/Eneo";
   import type { UserGroup } from "@eneo/eneo-js";
-  import { Dialog, Button, Input } from "@eneo/ui";
+  import { Dialog, Button } from "@eneo/ui";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
+
+  const nameId = useId();
 
   const emptyUserGroup: UserGroup = {
     id: "",
@@ -90,13 +95,21 @@
 
     <Dialog.Section>
       <div class="hover:bg-hover-dimmer">
-        <Input.Text
-          bind:value={editableUserGroup.name}
-          label={m.group_name()}
-          descripton={m.descriptive_name_for_group()}
-          required
-          class="border-default px-4 py-4  {mode === 'create' ? 'border-b' : ''}"
-        ></Input.Text>
+        <Field.Field class="border-default px-4 py-4 {mode === 'create' ? 'border-b' : ''}">
+          <Field.Label for={nameId}>
+            {m.group_name()}
+            <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+          </Field.Label>
+          <Input
+            id={nameId}
+            bind:value={editableUserGroup.name}
+            required
+            aria-describedby={`${nameId}-description`}
+          />
+          <Field.Description id={`${nameId}-description`}>
+            {m.descriptive_name_for_group()}
+          </Field.Description>
+        </Field.Field>
       </div>
     </Dialog.Section>
 

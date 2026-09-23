@@ -3,7 +3,11 @@
   import { resolve } from "$app/paths";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Button, Dialog, Input } from "@eneo/ui";
+  import { Button, Dialog } from "@eneo/ui";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
@@ -17,6 +21,9 @@
   let newServiceName = "";
   let openServiceAfterCreation = true;
   let isProcessing = false;
+  const nameId = useId();
+  const openAfterId = useId();
+
   async function createService() {
     if (newServiceName === "") return;
     isProcessing = true;
@@ -51,18 +58,20 @@
     <Dialog.Title>{m.create_a_new_service()}</Dialog.Title>
 
     <Dialog.Section>
-      <Input.Text
-        bind:value={newServiceName}
-        label={m.name()}
-        required
-        class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
-      ></Input.Text>
+      <Field.Field class="border-default hover:bg-hover-dimmer border-b px-4 py-4">
+        <Field.Label for={nameId}>
+          {m.name()}
+          <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+        </Field.Label>
+        <Input id={nameId} bind:value={newServiceName} required />
+      </Field.Field>
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Input.Switch bind:value={openServiceAfterCreation} class="flex-row-reverse p-2"
-        >{m.open_service_editor_after_creation()}</Input.Switch
-      >
+      <Field.Field orientation="horizontal" class="w-auto p-2">
+        <Switch id={openAfterId} bind:checked={openServiceAfterCreation} />
+        <Field.Label for={openAfterId}>{m.open_service_editor_after_creation()}</Field.Label>
+      </Field.Field>
       <div class="flex-grow"></div>
       <Button is={close}>{m.cancel()}</Button>
       <Button variant="primary" on:click={createService} disabled={isProcessing}

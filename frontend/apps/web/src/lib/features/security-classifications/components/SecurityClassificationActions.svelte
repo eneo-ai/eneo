@@ -5,7 +5,10 @@
 -->
 
 <script lang="ts">
-  import { Button, Dialog, Dropdown, Input } from "@eneo/ui";
+  import { Button, Dialog, Dropdown } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { writable } from "svelte/store";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
   import { type SecurityClassification } from "@eneo/eneo-js";
@@ -23,6 +26,7 @@
   };
 
   const { classification }: Props = $props();
+  const uid = $props.id();
   let name = $derived(classification.name);
   let description = $derived(classification.description ?? "");
   let hasChanges = $derived(
@@ -141,20 +145,34 @@
     <Dialog.Title>{m.edit_security_classification()}</Dialog.Title>
 
     <Dialog.Section>
-      <Input.Text
-        bind:value={name}
-        label={m.name()}
-        description={m.recognisable_display_name()}
-        required
-        class="border-default hover:bg-hover-dimmer border-b p-4"
-      ></Input.Text>
+      <Field.Field class="border-default hover:bg-hover-dimmer border-b p-4">
+        <Field.Label for={`${uid}-name`}>
+          {m.name()}
+          <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+        </Field.Label>
+        <Input
+          id={`${uid}-name`}
+          bind:value={name}
+          required
+          aria-describedby={`${uid}-name-description`}
+        />
+        <Field.Description id={`${uid}-name-description`}>
+          {m.recognisable_display_name()}
+        </Field.Description>
+      </Field.Field>
 
-      <Input.TextArea
-        label={m.description()}
-        class="border-default hover:bg-hover-dimmer border-b p-4"
-        description={m.describe_when_classification_chosen()}
-        bind:value={description}
-      ></Input.TextArea>
+      <Field.Field class="border-default hover:bg-hover-dimmer border-b p-4">
+        <Field.Label for={`${uid}-description`}>{m.description()}</Field.Label>
+        <Textarea
+          id={`${uid}-description`}
+          bind:value={description}
+          rows={4}
+          aria-describedby={`${uid}-description-description`}
+        />
+        <Field.Description id={`${uid}-description-description`}>
+          {m.describe_when_classification_chosen()}
+        </Field.Description>
+      </Field.Field>
     </Dialog.Section>
 
     <Dialog.Controls let:close>

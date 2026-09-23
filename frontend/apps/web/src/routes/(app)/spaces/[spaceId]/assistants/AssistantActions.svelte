@@ -4,7 +4,10 @@
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import { IconMove } from "@eneo/icons/move";
-  import { Button, Dialog, Dropdown, Input, Select } from "@eneo/ui";
+  import { Button, Dialog, Dropdown, Select } from "@eneo/ui";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived, writable } from "svelte/store";
@@ -69,6 +72,7 @@
   });
   let moveDestination: { id: string } | undefined = undefined;
   let moveResources: boolean = false;
+  const moveResourcesId = useId();
 
   let showActions = (["edit", "publish", "delete"] as const).some((permission) =>
     assistant.permissions?.includes(permission)
@@ -164,9 +168,10 @@
         class="border-default hover:bg-hover-dimmer rounded-t-md border-b px-4 py-4"
         >{m.destination()}</Select.Simple
       >
-      <Input.Switch bind:value={moveResources} class="hover:bg-hover-dimmer px-4 py-4"
-        >{m.include_assistants_knowledge()}</Input.Switch
-      >
+      <Field.Field orientation="horizontal" class="hover:bg-hover-dimmer px-4 py-4">
+        <Field.Label for={moveResourcesId}>{m.include_assistants_knowledge()}</Field.Label>
+        <Switch id={moveResourcesId} bind:checked={moveResources} />
+      </Field.Field>
       {#if moveResources}
         <p
           class="label-warning border-label-default bg-label-dimmer text-label-stronger mx-4 mb-3 rounded-md border px-2 py-1 text-sm"

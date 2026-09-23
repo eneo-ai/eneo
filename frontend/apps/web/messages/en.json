@@ -504,6 +504,8 @@
   "website_pages_indexed_with_files": "{successPages} of {totalPages} pages, {successFiles} of {totalFiles} files",
   "website_all_pages_indexed": "All {count} pages indexed",
   "website_crawl_in_progress": "Crawl in progress",
+  "website_select": "Select {name}",
+  "websites_select_all": "Select all websites",
   "create_anyway": "Create anyway",
   "go_back": "Go back",
   "filter_apps_placeholder": "Filter apps...",

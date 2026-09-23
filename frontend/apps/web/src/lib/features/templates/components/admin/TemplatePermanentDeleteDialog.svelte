@@ -6,7 +6,9 @@
 
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
-  import { Button, Dialog, Input } from "@eneo/ui";
+  import { Button, Dialog } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo.js";
   import { invalidate } from "$app/navigation";
@@ -26,6 +28,7 @@
     template: Template;
     type: "assistant" | "app";
   } = $props();
+  const uid = $props.id();
 
   const eneo = getEneo();
 
@@ -105,16 +108,19 @@
         </div>
 
         <!-- Confirmation input -->
-        <Input.Text
-          id="template-name-confirm"
-          bind:inputElement
-          bind:value={confirmationText}
-          placeholder={template.name}
-          label={m.permanent_delete_type_to_confirm({ word: template.name })}
-          autocomplete="off"
-          autocorrect="off"
-          spellcheck={false}
-        />
+        <Field.Field>
+          <Field.Label for={`${uid}-confirm`}>
+            {m.permanent_delete_type_to_confirm({ word: template.name })}
+          </Field.Label>
+          <Input
+            id={`${uid}-confirm`}
+            bind:value={confirmationText}
+            placeholder={template.name}
+            autocomplete="off"
+            autocorrect="off"
+            spellcheck={false}
+          />
+        </Field.Field>
 
         {#if errorMessage}
           <div class="bg-negative-default/10 text-negative-default rounded-lg px-3 py-2 text-sm">

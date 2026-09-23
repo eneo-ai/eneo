@@ -6,6 +6,7 @@
   import { SvelteDate, SvelteSet, SvelteURLSearchParams } from "svelte/reactivity";
   import { Page } from "$lib/components/layout";
   import { Button, Input, Dropdown, ProgressBar } from "@eneo/ui";
+  import { Input as TextInput } from "$lib/components/ui/input/index.js";
   import * as m from "$lib/paraglide/messages";
   import type { components, UserSparse } from "@eneo/eneo-js";
   import type { CalendarDate } from "@internationalized/date";
@@ -39,6 +40,7 @@
   type ActionType = components["schemas"]["ActionType"];
 
   let { data } = $props();
+  const uid = $props.id();
 
   const eneo = getEneo();
 
@@ -1038,20 +1040,20 @@
               <div class="space-y-3" transition:slide={{ duration: 200 }}>
                 <div class="bg-primary space-y-3 rounded-lg p-4">
                   <div class="max-w-xl">
-                    <!-- svelte-ignore a11y_label_has_associated_control -->
-                    <label class="text-default mb-2 block text-xs font-semibold"
+                    <label
+                      for={`${uid}-retention-days`}
+                      class="text-default mb-2 block text-xs font-semibold"
                       >{m.audit_retention_period_label()}</label
                     >
                     <div class="mb-4 flex flex-col items-start gap-2 sm:flex-row sm:items-center">
                       <div class="flex items-center gap-2">
-                        <!-- @ts-ignore Input.Text type="number" binding -->
-                        <Input.Text
+                        <TextInput
+                          id={`${uid}-retention-days`}
                           bind:value={retentionInputValue}
                           type="number"
                           min="1"
                           max="2555"
-                          class="w-20"
-                          inputClass="text-center text-sm font-medium"
+                          class="w-20 text-center text-sm font-medium"
                         />
                         <span class="text-muted text-xs">
                           {m.audit_retention_days_unit()}

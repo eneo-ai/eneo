@@ -5,12 +5,16 @@
 -->
 
 <script lang="ts">
-  import { Button, Dialog, Input } from "@eneo/ui";
+  import { Button, Dialog } from "@eneo/ui";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { getSpacesManager } from "../SpacesManager";
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
 
   const spaces = getSpacesManager();
+  const nameId = useId();
 
   export let includeTrigger: boolean;
   export let forwardToNewSpace: boolean;
@@ -49,12 +53,13 @@
     <Dialog.Title>{m.create_new_space()}</Dialog.Title>
 
     <Dialog.Section>
-      <Input.Text
-        bind:value={newSpaceName}
-        label={m.name()}
-        required
-        class="hover:bg-hover-dimmer px-4 py-4"
-      ></Input.Text>
+      <Field.Field class="hover:bg-hover-dimmer px-4 py-4">
+        <Field.Label for={nameId}>
+          {m.name()}
+          <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+        </Field.Label>
+        <Input id={nameId} bind:value={newSpaceName} required />
+      </Field.Field>
     </Dialog.Section>
 
     <Dialog.Controls let:close>

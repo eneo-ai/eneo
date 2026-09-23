@@ -8,11 +8,13 @@
 
 <script lang="ts" generics="T extends CompletionModel | EmbeddingModel | TranscriptionModel">
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
-  import { Input, Tooltip } from "@eneo/ui";
+  import { Tooltip } from "@eneo/ui";
   import { ChevronRight, Loader2, ShieldAlert } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";
 
   import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
 
   import { groupModelsByVendor, prettifyProviderType } from "../groupModels";
@@ -42,6 +44,7 @@
   };
 
   let { models, selectedIds, loadingIds, onToggle }: Props<T> = $props();
+  const uid = $props.id();
 
   const sortedModels = $derived(sortModels([...models]));
   const modelGroups = $derived(groupModelsByVendor(sortedModels, m.model_group_other()));
@@ -171,15 +174,8 @@
                 class:opacity-80={isLoading}
               >
                 <div class="py-3 pr-4 pl-3">
-                  <Input.Switch
-                    value={isSelected}
-                    sideEffect={() => {
-                      if (meetsClassification && !isLoading) {
-                        onToggle(model);
-                      }
-                    }}
-                  >
-                    <div class="flex min-w-0 items-start gap-3">
+                  <Field.Field orientation="horizontal" class="gap-4">
+                    <div class="flex min-w-0 flex-1 items-start gap-3">
                       <div
                         class="border-dimmer bg-surface-dimmer mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border"
                       >
@@ -207,7 +203,10 @@
                         </div>
 
                         {#if details.length > 0}
-                          <dl class="mt-1.5 flex min-w-0 flex-wrap gap-1.5">
+                          <dl
+                            id={`${uid}-${model.id}-details`}
+                            class="mt-1.5 flex min-w-0 flex-wrap gap-1.5"
+                          >
                             {#each details as detail (`${detail.label}-${detail.value}`)}
                               <div
                                 class="border-dimmer bg-surface-dimmer inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs"
@@ -225,7 +224,19 @@
                         {/if}
                       </div>
                     </div>
-                  </Input.Switch>
+                    <Switch
+                      checked={isSelected}
+                      onCheckedChange={() => {
+                        if (meetsClassification && !isLoading) {
+                          onToggle(model);
+                        }
+                      }}
+                      aria-label={displayName(model)}
+                      aria-describedby={details.length > 0
+                        ? `${uid}-${model.id}-details`
+                        : undefined}
+                    />
+                  </Field.Field>
                 </div>
               </div>
             </Tooltip>

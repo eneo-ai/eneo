@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Button, Input, Select } from "@eneo/ui";
+  import { Button, Select } from "@eneo/ui";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import * as m from "$lib/paraglide/messages";
   import { Shield, ArrowRight } from "lucide-svelte";
   import { slide, fade, fly } from "svelte/transition";
@@ -211,7 +212,7 @@
               {m.audit_access_description_label()}
               <span class="text-red-600 dark:text-red-400">*</span>
             </label>
-            <Input.TextArea
+            <Textarea
               id="description-field"
               bind:value={description}
               rows={4}

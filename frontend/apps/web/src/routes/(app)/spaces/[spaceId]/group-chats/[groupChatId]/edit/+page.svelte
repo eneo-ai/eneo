@@ -1,7 +1,10 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
-  import { Button, Input } from "@eneo/ui";
+  import { Button } from "@eneo/ui";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { afterNavigate, beforeNavigate } from "$app/navigation";
   import { fade } from "svelte/transition";
   import { page } from "$app/state";
@@ -13,6 +16,10 @@
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
 
   export let data;
+
+  const mentionsId = useId();
+  const responseLabelsId = useId();
+  const insightsId = useId();
 
   const {
     state: { currentSpace },
@@ -198,13 +205,28 @@
           revertFn={() => {
             discardChanges("allow_mentions");
           }}
+          let:aria
         >
           <div class="border-default flex h-14 border-b py-2">
-            <Input.RadioSwitch
-              bind:value={$update.allow_mentions}
-              labelTrue={m.enable_mentions()}
-              labelFalse={m.disable_mentions()}
-            ></Input.RadioSwitch>
+            <RadioGroup.Root
+              value={$update.allow_mentions ? "on" : "off"}
+              onValueChange={(v) => ($update.allow_mentions = v === "on")}
+              class="grid w-full grid-cols-2 gap-2"
+              {...aria}
+            >
+              <Field.Label for={`${mentionsId}-on`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="on" id={`${mentionsId}-on`} />
+                  <span>{m.enable_mentions()}</span>
+                </Field.Field>
+              </Field.Label>
+              <Field.Label for={`${mentionsId}-off`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="off" id={`${mentionsId}-off`} />
+                  <span>{m.disable_mentions()}</span>
+                </Field.Field>
+              </Field.Label>
+            </RadioGroup.Root>
           </div>
         </Settings.Row>
 
@@ -215,13 +237,28 @@
           revertFn={() => {
             discardChanges("show_response_label");
           }}
+          let:aria
         >
           <div class="border-default flex h-14 border-b py-2">
-            <Input.RadioSwitch
-              bind:value={$update.show_response_label}
-              labelTrue={m.show_labels()}
-              labelFalse={m.hide_labels()}
-            ></Input.RadioSwitch>
+            <RadioGroup.Root
+              value={$update.show_response_label ? "on" : "off"}
+              onValueChange={(v) => ($update.show_response_label = v === "on")}
+              class="grid w-full grid-cols-2 gap-2"
+              {...aria}
+            >
+              <Field.Label for={`${responseLabelsId}-on`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="on" id={`${responseLabelsId}-on`} />
+                  <span>{m.show_labels()}</span>
+                </Field.Field>
+              </Field.Label>
+              <Field.Label for={`${responseLabelsId}-off`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="off" id={`${responseLabelsId}-off`} />
+                  <span>{m.hide_labels()}</span>
+                </Field.Field>
+              </Field.Label>
+            </RadioGroup.Root>
           </div>
         </Settings.Row>
       </Settings.Group>
@@ -246,13 +283,28 @@
               }}
               title={m.insights()}
               description={m.collect_insights_about_group_chat_usage()}
+              let:aria
             >
               <div class="border-default flex h-14 border-b py-2">
-                <Input.RadioSwitch
-                  bind:value={$update.insight_enabled}
-                  labelTrue={m.enable_insights()}
-                  labelFalse={m.disable_insights()}
-                ></Input.RadioSwitch>
+                <RadioGroup.Root
+                  value={$update.insight_enabled ? "on" : "off"}
+                  onValueChange={(v) => ($update.insight_enabled = v === "on")}
+                  class="grid w-full grid-cols-2 gap-2"
+                  {...aria}
+                >
+                  <Field.Label for={`${insightsId}-on`} class="font-normal">
+                    <Field.Field orientation="horizontal">
+                      <RadioGroup.Item value="on" id={`${insightsId}-on`} />
+                      <span>{m.enable_insights()}</span>
+                    </Field.Field>
+                  </Field.Label>
+                  <Field.Label for={`${insightsId}-off`} class="font-normal">
+                    <Field.Field orientation="horizontal">
+                      <RadioGroup.Item value="off" id={`${insightsId}-off`} />
+                      <span>{m.disable_insights()}</span>
+                    </Field.Field>
+                  </Field.Label>
+                </RadioGroup.Root>
               </div>
             </Settings.Row>
           {/if}

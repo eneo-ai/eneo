@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { Button, Input } from "@eneo/ui";
+  import { Button } from "@eneo/ui";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import * as m from "$lib/paraglide/messages";
   import type { components } from "@eneo/eneo-js";
@@ -275,9 +278,10 @@
         <Search
           class="text-muted pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2"
         />
-        <Input.Text
+        <Input
           bind:value={searchQuery}
           placeholder={m.audit_config_search_placeholder()}
+          aria-label={m.search()}
           class="h-11 pl-10 text-sm"
         />
       </div>
@@ -341,9 +345,10 @@
                 </span>
               </button>
               <div class="flex flex-shrink-0 items-center gap-3">
-                <Input.Switch
-                  value={category.enabled}
-                  sideEffect={() => toggleAllInCategory(category.category, !category.enabled)}
+                <Switch
+                  checked={category.enabled}
+                  onCheckedChange={(next) => toggleAllInCategory(category.category, next)}
+                  aria-label={getCategoryLabel(category.category)}
                 />
               </div>
             </div>
@@ -385,13 +390,14 @@
                       >
                     </div>
                     <div class="flex-shrink-0 pt-0.5">
-                      <Input.Checkbox
+                      <Checkbox
                         checked={action.enabled}
                         onCheckedChange={(next) => {
                           if (next !== action.enabled) {
                             toggleAction(action.action, action.category);
                           }
                         }}
+                        aria-label={getActionLabel(action.action)}
                       />
                     </div>
                   </div>

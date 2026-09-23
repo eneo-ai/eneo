@@ -4,7 +4,9 @@
   import TemplateSelector from "$lib/features/templates/components/TemplateSelector.svelte";
   import TemplateWizard from "$lib/features/templates/components/wizard/TemplateWizard.svelte";
   import { getTemplateController } from "$lib/features/templates/TemplateController";
-  import { Button, Dialog, Input } from "@eneo/ui";
+  import { Button, Dialog } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import CreateAppBackdrop from "./CreateAppBackdrop.svelte";
   import { m } from "$lib/paraglide/messages";
   import type { Settings } from "@eneo/eneo-js";
@@ -24,6 +26,7 @@
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let { settings, triggerSnippet }: { settings: Settings; triggerSnippet?: Snippet<[any]> } =
     $props();
+  const uid = $props.id();
 
   let openAppAfterCreation = $state(false);
   let userTouchedToggle = $state(false);
@@ -85,13 +88,16 @@
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Input.Switch
-        bind:value={openAppAfterCreation}
-        class="flex-row-reverse p-2"
-        sideEffect={() => {
-          userTouchedToggle = true;
-        }}>{m.open_app_editor_after_creation()}</Input.Switch
-      >
+      <Field.Field orientation="horizontal" class="w-auto p-2">
+        <Switch
+          id={`${uid}-open-editor`}
+          bind:checked={openAppAfterCreation}
+          onCheckedChange={() => {
+            userTouchedToggle = true;
+          }}
+        />
+        <Field.Label for={`${uid}-open-editor`}>{m.open_app_editor_after_creation()}</Field.Label>
+      </Field.Field>
       <div class="flex-grow"></div>
 
       {#if $currentStep === "wizard"}

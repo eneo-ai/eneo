@@ -1,6 +1,8 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout";
-  import { Button, Dropdown, Input } from "@eneo/ui";
+  import { Button, Dropdown } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import { invalidate } from "$app/navigation";
   import { writable } from "svelte/store";
@@ -32,6 +34,7 @@
 
   type Provider = components["schemas"]["MCPServerSettingsPublic"];
   let { data }: { data: PageData } = $props();
+  const uid = $props.id();
   setSecurityContext(untrack(() => data.securityClassifications));
   const open = writable(false);
   const tabController = writable("functions");
@@ -302,9 +305,12 @@
         <p class="text-secondary mb-4 max-w-[72ch] text-sm">{m.tools_connections_description()}</p>
         <MCPServersTable mcpServers={external}>
           {#snippet filters()}
-            <Input.Switch bind:value={showFunctionServers} class="border-0 p-0 text-sm">
-              {m.tools_show_function_servers()}
-            </Input.Switch>
+            <Field.Field orientation="horizontal" class="w-auto gap-4">
+              <Field.Label for={`${uid}-show-function-servers`}>
+                {m.tools_show_function_servers()}
+              </Field.Label>
+              <Switch id={`${uid}-show-function-servers`} bind:checked={showFunctionServers} />
+            </Field.Field>
           {/snippet}
           {#snippet actions()}
             <Button size="sm" variant="primary" onclick={() => configure("general")}

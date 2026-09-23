@@ -5,7 +5,9 @@
 -->
 
 <script lang="ts">
-  import { Button, Input } from "@eneo/ui";
+  import { Button } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import type { Snippet } from "svelte";
   import { AlertTriangle, ChevronRight } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
@@ -26,6 +28,7 @@
   };
 
   const { mcpServers, actions, filters }: Props = $props();
+  const uid = $props.id();
 
   const eneo = getEneo();
 
@@ -69,14 +72,15 @@
 <div class="flex w-full flex-col">
   <!-- Filter bar -->
   <div class="flex flex-wrap items-center justify-between gap-4 pt-2 pb-4">
-    <Input.Text
-      bind:value={filterValue}
-      label={m.filter()}
-      class="max-w-md flex-grow"
-      placeholder="{m.filter()} {m.mcp_servers()}..."
-      hiddenLabel={true}
-      inputClass="!px-4 !rounded-lg !bg-secondary/50"
-    />
+    <Field.Field class="max-w-md flex-grow">
+      <Field.Label for={`${uid}-filter`} class="sr-only">{m.filter()}</Field.Label>
+      <Input
+        id={`${uid}-filter`}
+        bind:value={filterValue}
+        placeholder="{m.filter()} {m.mcp_servers()}..."
+        class="bg-secondary/50 rounded-lg px-4"
+      />
+    </Field.Field>
     {#if filters}
       <div class="shrink-0">{@render filters()}</div>
     {/if}
