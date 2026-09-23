@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@ac36dabc8da0
+translationSource: guides/embed-widget.mdx@5a3b5b69d956
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -410,19 +410,19 @@ att ladda om när mallen har ändrat deras widget.
 Driftsansvariga kan justera den publika widgetytan med miljövariabler på
 backend. Standardvärdena passar de flesta installationer.
 
-| Variabel                                 | Standard           | Betydelse                                                                                                                                                                                                |
-| ---------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WIDGET_VISITOR_TOKEN_TTL_SECONDS`       | `900`              | Livslängd för en besökartoken. Chatten förnyar den automatiskt.                                                                                                                                          |
-| `WIDGET_VISITOR_TOKEN_GRACE_SECONDS`     | `3600`             | Hur länge en utgången token fortfarande kan styrka besökarens identitet vid förnyelse, utan ny beräkningsuppgift.                                                                                        |
-| `WIDGET_PREVIEW_TOKEN_TTL_SECONDS`       | `3600`             | Livslängd för token bakom förhandsvisningen och **Testa i Eneo**. Den förnyas aldrig.                                                                                                                    |
-| `WIDGET_ALTCHA_COST`                     | `1000`             | Hashiterationer per försök i beräkningsuppgiften (minst 1000). Höj värdet för en widget som missbrukas.                                                                                                  |
-| `WIDGET_ALTCHA_KEY_PREFIX`               | `0`                | Ett till fyra hexadecimala tecken som varje försök måste träffa; varje extra tecken gör uppgiften 16 gånger dyrare.                                                                                      |
-| `WIDGET_ALTCHA_CHALLENGE_TTL_SECONDS`    | `300`              | Hur länge en utmaning gäller.                                                                                                                                                                            |
-| `WIDGET_CHALLENGE_RATE_LIMIT_PER_MINUTE` | `60`               | Anrop efter utmaningar, och separat efter besökartoken, per widget, IP-adress och minut.                                                                                                                 |
-| `WIDGET_RATE_LIMIT_FAIL_OPEN`            | `false`            | Vad som händer när Redis inte svarar: `false` nekar widgettrafik (`503`); `true` hoppar över begränsningarna och kontrollen av återanvända utmaningar, så en löst uppgift kan användas igen under tiden. |
-| `WIDGET_BUDGET_TIMEZONE`                 | `Europe/Stockholm` | Tidszon vars midnatt startar ett nytt budgetdygn.                                                                                                                                                        |
-| `WIDGET_BUDGET_RESERVATION_TOKENS`       | `8000`             | Token som reserveras mot den dagliga budgeten före varje svar och avräknas mot den uppmätta användningen efteråt. En uppskattning för att släppa in anrop, inte ett tak för ett svar.                    |
-| `WIDGET_RETRIEVAL_CHUNKS`                | `30`               | Antal kunskapsavsnitt som hämtas för varje besökarfråga.                                                                                                                                                 |
+| Variabel                                 | Standard           | Betydelse                                                                                                                                                                                                    |
+| ---------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `WIDGET_VISITOR_TOKEN_TTL_SECONDS`       | `900`              | Livslängd för en besökartoken. Chatten förnyar den automatiskt.                                                                                                                                              |
+| `WIDGET_VISITOR_TOKEN_GRACE_SECONDS`     | `3600`             | Hur länge en utgången token fortfarande kan styrka besökarens identitet vid förnyelse, utan ny beräkningsuppgift.                                                                                            |
+| `WIDGET_PREVIEW_TOKEN_TTL_SECONDS`       | `3600`             | Livslängd för token bakom förhandsvisningen och **Testa i Eneo**. Förhandsvisningen får en ny token strax innan den går ut. Det gör inte **Testa i Eneo**, så ta bort widgeten från sidan och visa den igen. |
+| `WIDGET_ALTCHA_COST`                     | `1000`             | Hashiterationer per försök i beräkningsuppgiften (minst 1000). Höj värdet för en widget som missbrukas.                                                                                                      |
+| `WIDGET_ALTCHA_KEY_PREFIX`               | `0`                | Ett till fyra hexadecimala tecken som varje försök måste träffa; varje extra tecken gör uppgiften 16 gånger dyrare.                                                                                          |
+| `WIDGET_ALTCHA_CHALLENGE_TTL_SECONDS`    | `300`              | Hur länge en utmaning gäller.                                                                                                                                                                                |
+| `WIDGET_CHALLENGE_RATE_LIMIT_PER_MINUTE` | `60`               | Anrop efter utmaningar, och separat efter besökartoken, per widget, IP-adress och minut.                                                                                                                     |
+| `WIDGET_RATE_LIMIT_FAIL_OPEN`            | `false`            | Vad som händer när Redis inte svarar: `false` nekar widgettrafik (`503`); `true` hoppar över begränsningarna och kontrollen av återanvända utmaningar, så en löst uppgift kan användas igen under tiden.     |
+| `WIDGET_BUDGET_TIMEZONE`                 | `Europe/Stockholm` | Tidszon vars midnatt startar ett nytt budgetdygn.                                                                                                                                                            |
+| `WIDGET_BUDGET_RESERVATION_TOKENS`       | `8000`             | Token som reserveras mot den dagliga budgeten före varje svar och avräknas mot den uppmätta användningen efteråt. En uppskattning för att släppa in anrop, inte ett tak för ett svar.                        |
+| `WIDGET_RETRIEVAL_CHUNKS`                | `30`               | Antal kunskapsavsnitt som hämtas för varje besökarfråga.                                                                                                                                                     |
 
 Begränsningarna per widget (meddelanden per besökare och per IP-adress,
 frågelängd, konversationslängd och daglig budget) sätts under fliken **Regler**
@@ -430,12 +430,13 @@ för varje widget, inom organisationens policy.
 
 ### Bakom en omvänd proxy [#behind-a-reverse-proxy]
 
-Gränserna per besökare bygger på besökarens IP-adress så som Eneo ser den.
-Bakom Traefik, Dokploy, nginx eller någon annan omvänd proxy är det proxyns
-adress, om inte backend får veta hur många proxyer som står framför den: sätt
+De IP-baserade gränserna (meddelanden per IP-adress samt anrop efter utmaningar
+och besökartoken) bygger på klientens IP-adress så som Eneo ser den. Bakom
+Traefik, Dokploy, nginx eller någon annan omvänd proxy är det proxyns adress, om
+inte backend får veta hur många proxyer som står framför den: sätt
 `TRUSTED_PROXY_COUNT` (och `TRUSTED_PROXY_HEADERS` om proxyn använder en annan
-rubrik än `X-Forwarded-For`) på backend. Utan det delar alla besökare på en
-och samma kvot, och hela webbplatsen stryps så snart de första besökarna har
+rubrik än `X-Forwarded-For`) på backend. Utan det delar alla besökare på en och
+samma kvot, och hela webbplatsen stryps så snart de första besökarna har
 förbrukat tilldelningen per IP-adress.
 
 De IP-baserade gränserna räknar en IPv4-adress för sig och en IPv6-adress per
