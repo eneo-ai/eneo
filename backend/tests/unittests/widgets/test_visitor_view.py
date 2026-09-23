@@ -192,8 +192,13 @@ def test_hidden_sources_strip_cited_documents_from_text():
     )
 
 
-def test_tool_event_keeps_the_call_and_holds_back_its_resources():
+def test_tool_event_keeps_the_call_and_the_argument_the_widget_shows():
     original = _tool_chunk()
+    original.tool_calls_metadata[0].arguments = {
+        "limit": 10,
+        "query": "bibliotek",
+        "email": "anna@kommun.se",
+    }
 
     [visible] = VisitorView(_widget()).events(original)
 
@@ -216,12 +221,39 @@ def test_tool_event_keeps_the_call_and_holds_back_its_resources():
     ]
     assert event["mcp_tool_references"] == []
     assert SECRET_CONTENT not in json.dumps(event)
+    assert "anna@kommun.se" not in json.dumps(event)
     # The stream's own objects keep their content: the answer's references
     # are persisted from them after the stream ends.
     assert original.mcp_tool_references is not None
     assert original.mcp_tool_references[0].content == SECRET_CONTENT
     assert original.tool_calls_metadata is not None
     assert original.tool_calls_metadata[0].result == SECRET_CONTENT
+    assert "email" in original.tool_calls_metadata[0].arguments
+
+
+@pytest.mark.parametrize(
+    ("arguments", "shown"),
+    [
+        ({"q": "öppettider", "id": "7"}, {"q": "öppettider"}),
+        (
+            {"query": " ", "timezone": "Europe/Stockholm"},
+            {"timezone": "Europe/Stockholm"},
+        ),
+        ({"limit": 5, "filter": "open"}, {"filter": "open"}),
+        ({"limit": 5}, {}),
+        ({}, {}),
+        (None, None),
+    ],
+)
+def test_only_one_argument_leaves_the_server(arguments, shown):
+    call = replace(_tool_call(), arguments=arguments)
+    chunk = Completion(
+        text="", response_type=ResponseType.TOOL_CALL, tool_calls_metadata=[call]
+    )
+
+    [event] = _stream(VisitorView(_widget()), chunk)
+
+    assert event["tools"][0]["arguments"] == shown
 
 
 def test_a_tool_resource_reaches_the_visitor_only_once_the_answer_cites_it():
@@ -364,7 +396,7 @@ def _stored_session() -> SessionInDB:
             ToolCallInfo(
                 server_name="casefiles",
                 tool_name="search_casefiles",
-                arguments={"query": "bibliotek"},
+                arguments={"query": "bibliotek", "email": "anna@kommun.se"},
                 tool_call_id="call_1",
                 result=SECRET_CONTENT,
                 meta={"gen_ai.request.model": "internal-model"},
@@ -394,7 +426,13 @@ def test_restored_messages_never_carry_internal_data(overrides):
     assert message["skill_provenance"] is None
     assert message["tools"] == {"assistants": []}
     assert SECRET_CONTENT not in payload
-    for leaked in ("llm.internal", "gpt-internal", "Intern assistent", "internal_id"):
+    for leaked in (
+        "llm.internal",
+        "gpt-internal",
+        "Intern assistent",
+        "internal_id",
+        "anna@kommun.se",
+    ):
         assert leaked not in payload
     assert message["skill_context_tokens"] is None
     assert message["context_prompt_tokens"] is None

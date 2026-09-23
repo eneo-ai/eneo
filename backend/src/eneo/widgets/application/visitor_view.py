@@ -5,7 +5,7 @@
 
 import re
 from dataclasses import replace
-from typing import Any
+from typing import Any, Optional
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
@@ -29,6 +29,22 @@ from eneo.widgets.domain.widget import Widget
 # is implementation detail.
 DISPLAY_META_KEYS = frozenset({"title", "sourceType", "pageRange", "section"})
 
+# The one argument the widget shows beside a tool's name, looked up in the
+# order the widget uses (widgetToolSteps.argumentDetail) and falling back to
+# the first text argument. Web search labels read `query` or `q`.
+DISPLAY_ARGUMENT_KEYS = (
+    "query",
+    "q",
+    "search",
+    "timezone",
+    "location",
+    "url",
+    "path",
+    "name",
+    "title",
+    "id",
+)
+
 # A citation marker split across two text chunks is found in the tail of the
 # previous chunk plus the next one.
 _MARKER_TAIL = len('<inref id="00000000"/>') - 1
@@ -43,8 +59,9 @@ class VisitorView:
     cleared, so the embed page drives the same client code as the app.
 
     Never shown: the model record, reasoning, token counts, the assistant and
-    Skills behind the answer, tool results and tool ``_meta``, and the raw
-    content of tool resources. With ``show_sources`` off no reference of any kind leaves the server. With
+    Skills behind the answer, tool results and tool ``_meta``, the raw content
+    of tool resources, and any tool argument beyond the one the widget shows.
+    With ``show_sources`` off no reference of any kind leaves the server. With
     ``show_tool_activity`` off no tool call does. A resource a tool returned
     reaches the visitor only once the answer cites it, on a tool event with an
     empty tool list, so the stream carries what a restore does.
@@ -98,7 +115,12 @@ class VisitorView:
     def _tool_events(self, chunk: Completion) -> list[Completion]:
         calls: list[ToolCallMetadata] = (
             [
-                replace(call, result=None, meta=None)
+                replace(
+                    call,
+                    result=None,
+                    meta=None,
+                    arguments=self._shown_argument(call.arguments),
+                )
                 for call in chunk.tool_calls_metadata or []
             ]
             if self.widget.show_tool_activity
@@ -187,16 +209,32 @@ class VisitorView:
             }
         )
 
-    @staticmethod
-    def _stored_call(call: ToolCallInfo) -> ToolCallInfo:
+    def _stored_call(self, call: ToolCallInfo) -> ToolCallInfo:
         return call.model_copy(
-            update={"result": None, "meta": None, "generated_file_ids": None}
+            update={
+                "result": None,
+                "meta": None,
+                "generated_file_ids": None,
+                "arguments": self._shown_argument(call.arguments),
+            }
         )
 
     def _stored_reference(self, ref: McpToolReferencePublic) -> McpToolReferencePublic:
         return ref.model_copy(update=self._reference_changes(ref.meta))
 
     # --- shared -------------------------------------------------------------
+
+    @staticmethod
+    def _shown_argument(
+        arguments: Optional[dict[str, object]],
+    ) -> Optional[dict[str, object]]:
+        if not arguments:
+            return arguments
+        for key in (*DISPLAY_ARGUMENT_KEYS, *arguments):
+            value = arguments.get(key)
+            if isinstance(value, str) and value.strip():
+                return {key: value}
+        return {}
 
     def _reference_changes(self, meta: dict[str, Any]) -> dict[str, Any]:
         """One rule for a tool resource, streamed or restored: its title and

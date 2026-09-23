@@ -61,6 +61,7 @@ TOOL_RESULT = "RAW TOOL RESULT 2026-123"
 RESOURCE_CONTENT = "Personnummer 19XX i ärende 2026-123"
 PRIVATE_META = "internal-row-42"
 TOOL_META = "internal-tool-model"
+CASE_EMAIL = "anna.andersson@example.se"
 UNCITED_URI = "https://arenden.kommun.se/2026-999"
 UNCITED_TITLE = "Ärende 2026-999: Namn Namnsson"
 ASSISTANT_NAME = "Kommunassistenten"
@@ -262,7 +263,7 @@ async def visitor_pipeline(
                     ToolCallMetadata(
                         server_name="Arendesystem",
                         tool_name="run",
-                        arguments={"query": "bibliotek"},
+                        arguments={"query": "bibliotek", "email": CASE_EMAIL},
                         tool_call_id="call_1",
                         result_status="success",
                         result=TOOL_RESULT,
@@ -354,6 +355,7 @@ def _assert_no_internal_data(payload: str) -> None:
         PRIVATE_META,
         TOOL_META,
         ASSISTANT_NAME,
+        CASE_EMAIL,
         UNCITED_URI,
         UNCITED_TITLE,
     ):
@@ -410,6 +412,7 @@ async def test_visitor_runs_the_assistant_as_configured_and_sees_only_its_answer
     assert [
         (call["tool_name"], call["result"], call["meta"]) for call in tool["tools"]
     ] == [("run", None, None)]
+    assert tool["tools"][0]["arguments"] == {"query": "bibliotek"}
     assert tool["mcp_tool_references"] == []
     # The cited resource arrives just before the text that cites it.
     cited = events[2][1]
