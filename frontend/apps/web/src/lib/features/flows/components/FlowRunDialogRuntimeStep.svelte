@@ -215,7 +215,11 @@
       livePreview.stop();
       return;
     }
-    if (!liveTextOn) return;
+    // A new recording: whatever the preview showed belonged to the last one.
+    if (!liveTextOn) {
+      livePreview.discard();
+      return;
+    }
     return livePreview.start(graph, {
       eneo,
       flowId,

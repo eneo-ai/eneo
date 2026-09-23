@@ -785,6 +785,32 @@ describe("FlowRunDialog transcription options", () => {
     expect(checked(speakers)).toBe("true");
   });
 
+  it("does not bring back an earlier draft after a recording without live text", async () => {
+    installLiveTranscriptFakes();
+    renderDialog(
+      buildEneo({
+        upload: vi.fn(() => new Promise<UploadedFile>(() => undefined)),
+        transcription: offeredTranscription(true),
+        createSession: vi.fn(async () => liveSession)
+      })
+    );
+    const liveText = await screen.findByRole("switch", { name: m.live_transcription_toggle() });
+
+    const first = await recordWithLiveText();
+    first.receive({ type: "transcript.delta", text: "Anna talar" });
+    await screen.findByText("Anna talar");
+    await fireEvent.click(screen.getByRole("button", { name: "Finish test recording" }));
+    await fireEvent.click(liveText);
+    await fireEvent.click(screen.getByRole("button", { name: "Start test recording" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Finish test recording" }));
+    await fireEvent.click(liveText);
+
+    expect(liveText.getAttribute("aria-checked")).toBe("true");
+    expect(FakeLiveSocket.instances).toHaveLength(1);
+    expect(screen.queryByText("Anna talar")).toBeNull();
+    expect(screen.queryByRole("log")).toBeNull();
+  });
+
   it("starts the live text afresh after the last recording was discarded", async () => {
     installLiveTranscriptFakes();
     renderDialog(
