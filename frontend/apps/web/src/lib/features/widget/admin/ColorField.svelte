@@ -106,7 +106,8 @@
           ? m.widget_admin_contrast_dark_fail({ ratio })
           : m.widget_admin_contrast_fail({ ratio });
       default:
-        return m.widget_admin_contrast_invalid();
+        // Not a colour: the field's error already says so.
+        return "";
     }
   });
   const invalid = $derived(current !== "" && !isHexColor(current));

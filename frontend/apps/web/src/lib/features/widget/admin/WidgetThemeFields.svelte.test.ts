@@ -82,6 +82,23 @@ describe("WidgetThemeFields contrast", () => {
       )
     );
   });
+
+  test("an invalid colour is described once, by its error", async () => {
+    renderFields();
+    const live = primary()
+      .element()
+      .closest("[data-slot=field]")
+      ?.querySelector("[aria-live=polite]");
+    await userEvent.fill(primary(), "#1F4E");
+    await expect.element(primary()).toHaveAttribute("aria-invalid", "true");
+    await expect.element(primary()).toHaveAccessibleDescription(/widget_admin_contrast_invalid/);
+    const description = (primary().element().getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(description.match(/widget_admin_contrast_invalid/g)).toHaveLength(1);
+    expect(live?.textContent).not.toContain("widget_admin_contrast_invalid");
+  });
 });
 
 describe("WidgetThemeFields locks", () => {
