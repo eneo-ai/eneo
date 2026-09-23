@@ -9,6 +9,7 @@ Paths are relative to the deployment API base. Prefer `runtime_paths` from `GET 
 | Status behavior                     | `GET /flows/runs/status-capabilities/`                                     |
 | Capacity snapshot                   | `GET /flows/runs/capacity/`                                                |
 | List published Flows                | `GET /flows/?space_id={space_id}&limit={limit}&offset={offset}`            |
+| List across the user's spaces       | `GET /flows/?published_only=true&limit={limit}&offset={offset}`            |
 | Published projection and paths      | `GET /flows/{flow_id}/published/`                                          |
 | Current run contract                | `GET /flows/{flow_id}/run-contract/`                                       |
 | Runtime-safe graph                  | `GET /flows/{flow_id}/graph/`                                              |
@@ -71,6 +72,7 @@ Always keep an unknown-code branch that shows a generic failure, records the raw
 | Code                                        | Recovery                                                                    |
 | ------------------------------------------- | --------------------------------------------------------------------------- |
 | `flow_not_published`                        | Ask for publication or select another published Flow.                       |
+| `flow_service_key_space_id_required`        | Send `space_id` for the space the key is scoped to.                         |
 | `flow_run_stale_version`                    | Refetch published projection and run contract, then rebuild the request.    |
 | `flow_run_idempotency_conflict`             | Reuse the original request or choose a new key for a genuinely new request. |
 | `flow_run_reserved_input_payload_key`       | Remove runtime-owned keys from `input_payload_json`.                        |

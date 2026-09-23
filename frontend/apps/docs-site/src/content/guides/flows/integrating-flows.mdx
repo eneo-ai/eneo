@@ -103,7 +103,14 @@ Polling is the only mechanism a caller controls for observing run status, becaus
 
 ### Choose a published Flow
 
-The worked example starts with a known Flow id. If your app needs discovery, call `GET /api/v1/flows/?space_id={space_id}&limit=50&offset=0`. A service key sees only published Flows in its scoped space. `count` is the number of items in the current page, not the total; increase `offset` while `has_more` is true. After choosing an id, `GET /api/v1/flows/{id}/published/` returns the runtime-safe projection and canonical runtime paths. Do not use the draft `GET /api/v1/flows/{id}/` view from a service-key runtime app.
+The worked example starts with a known Flow id. If your app needs discovery, list flows with `GET /api/v1/flows/?published_only=true&limit=50&offset=0`, adding `space_id={space_id}` to cover one space.
+
+- **Without `space_id`**, a signed-in user, a user-owned API key, or a module session gets the flows of every space the user belongs to: their personal space, spaces shared with them directly or through a group, and the organization space if they are one of its admins. A space-scoped API key narrows the list to its space, so a module key scoped to a space the user does not belong to returns an empty list.
+- **A service key must send `space_id`**, because a key belongs to no spaces. Without it the request returns `400` with code `flow_service_key_space_id_required`. A service key sees only published Flows in its scoped space.
+
+Drafts appear only in spaces where the caller may edit flows, so an app that runs flows sends `published_only=true` to get published flows only. Each item carries `space_name` next to `space_id`: group the list on `space_id` and show `space_name` as the heading. Items come oldest first. `count` is the number of items in the current page, not the total; increase `offset` while `has_more` is true (`limit` is 1 to 200, default 50).
+
+Seeing a flow in the list does not mean the caller may run it or that it is ready to run. After choosing an id, `GET /api/v1/flows/{id}/published/` returns the runtime-safe projection and canonical runtime paths. Do not use the draft `GET /api/v1/flows/{id}/` view from a service-key runtime app.
 
 ## Sequence overview
 

@@ -16,15 +16,15 @@ or:
 X-API-Key: <service-key>
 ```
 
-Service keys are for trusted server-side clients. A service key lists published Flows only within its scope and later sees only its own runs. A user token with edit rights can also see drafts in the list, so keep only items whose `published_version` is non-null before presenting a runnable Flow. Use the published projection rather than the draft/current-definition endpoint:
+Service keys are for trusted server-side clients. A service key must send `space_id` (otherwise `400 flow_service_key_space_id_required`), lists published Flows only within its scope, and later sees only its own runs. A user principal (a user token, a user-owned key, or a module session) may omit `space_id` to list the Flows of every space the user belongs to: personal, shared directly or through a group, and the organization space for its admins. A space-scoped key narrows that list to its space. Drafts appear where the caller may edit Flows, so send `published_only=true` before presenting runnable Flows. Items carry `space_name`; group them on `space_id`. Use the published projection rather than the draft/current-definition endpoint:
 
 ```http
-GET /flows/?space_id={space_id}&limit=50&offset=0
+GET /flows/?space_id={space_id}&published_only=true&limit=50&offset=0
 GET /flows/{flow_id}/published/
 GET /flows/{flow_id}/run-contract/
 ```
 
-Page lists using `has_more`, not the current page's `count`.
+Page lists using `has_more`, not the current page's `count`; items come oldest first. A listed Flow promises neither run permission nor readiness.
 
 The published response contains server-relative `runtime_paths`. Preserve trailing slashes exactly. Flow runtime endpoints use them except `GET .../evidence/export`.
 

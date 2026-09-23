@@ -610,7 +610,7 @@ When the run contract's `transcription.speaker_labels.selectable` is `true`, the
 
 #### How `input_payload_json` maps to form fields
 
-If the run contract exposes `form_fields`, send those values inside `input_payload_json` using the published field names as keys. The backend validates the values against the published field type and required/optional settings.
+If the run contract exposes `form_fields`, send those values inside `input_payload_json` using the published field names as keys. The backend validates the values against the published field type and required/optional settings. An optional field that you leave out or send as `null` reads as its empty value (`""` for text, `[]` for list and multiselect, `null` for number, date, and select), so leaving it out and sending it empty are the same request.
 
 Reserved `input_payload_json` keys: `expected_flow_version`, `file_ids`, `speaker_labels`, `step_inputs`, `transcript_regeneration`, `transkribering`. These keys are owned by Flow run orchestration, so use different form field names and keep runtime file bindings in top-level `step_inputs`.
 
@@ -1617,6 +1617,7 @@ Service-key clients can read published runtime projections and run published flo
 | ------------------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------- |
 | `flow_service_key_admin_required`          | A non-admin service key reads `GET /api/v1/flows/{id}/`              | Use an admin/owner service key or call the published endpoint |
 | `flow_service_key_principal_not_supported` | A service key calls a Flow endpoint that still requires a user token | Use a user token, or switch to a published runtime endpoint   |
+| `flow_service_key_space_id_required`       | A service key lists flows with `GET /api/v1/flows/` without `space_id` | Send `space_id` for the space the key is scoped to          |
 
 `flow_service_key_admin_required` includes an API-adapter hint with an endpoint template:
 

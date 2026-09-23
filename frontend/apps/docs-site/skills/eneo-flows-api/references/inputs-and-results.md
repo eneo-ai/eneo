@@ -22,7 +22,7 @@ Supported runtime file formats are determined by each returned step contract. Do
 
 ## Form values
 
-Form field types include text, number, date, select, multiselect, and list. Send values under their published names inside `input_payload_json`.
+Form field types include text, number, date, select, multiselect, and list. Send values under their published names inside `input_payload_json`. An optional field left out or sent as `null` reads as its empty value (`""` for text, `[]` for list and multiselect, `null` for number, date, and select), so leaving it out and sending it empty are the same request.
 
 The server rejects these runtime-owned keys when a consumer sends them inside `input_payload_json`:
 
