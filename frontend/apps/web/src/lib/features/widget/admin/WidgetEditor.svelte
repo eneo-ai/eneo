@@ -394,6 +394,7 @@
                 subtitleRequired={current.status === "active"
                   ? m.widget_admin_blocker_subtitle_empty()
                   : undefined}
+                onQuestionsHeld={(held) => autosave.markDraft("texts.suggested_questions", held)}
                 onChange={(change) => autosave.patch({ texts: { ...current.texts, ...change } })}
               />
             </Card.Content>

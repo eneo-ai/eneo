@@ -65,7 +65,7 @@ const budget = () => page.getByLabelText("widget_admin_daily_budget", { exact: t
 describe("WidgetRulesFields origins", () => {
   test("a pasted page address is flagged at the field and never sent", async () => {
     const save = vi.fn(async (update: WidgetUpdate) => widget(update as Partial<Widget>));
-    setup(widget(), save);
+    const { autosave } = setup(widget(), save);
     await userEvent.fill(origins(), "https://www.kommun.se\nhttps://www.kommun.se/kontakt");
     await userEvent.tab();
 
@@ -77,6 +77,8 @@ describe("WidgetRulesFields origins", () => {
       );
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(save).not.toHaveBeenCalled();
+    // The valid new line is held back with the bad one: leaving must ask first.
+    expect(autosave.stranded).toBe(true);
 
     await userEvent.fill(origins(), "HTTPS://WWW.Kommun.se/\nhttps://*.kommun.se");
     await userEvent.tab();
@@ -88,6 +90,7 @@ describe("WidgetRulesFields origins", () => {
     // Settled on the canonical form the server stores.
     await expect.element(origins()).toHaveValue("https://www.kommun.se\nhttps://*.kommun.se");
     await expect.element(origins()).toHaveAttribute("aria-invalid", "false");
+    expect(autosave.stranded).toBe(false);
   });
 
   test("follows the saved list after a reload instead of keeping a stale copy", async () => {

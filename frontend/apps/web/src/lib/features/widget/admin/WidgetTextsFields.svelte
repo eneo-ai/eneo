@@ -28,6 +28,8 @@
      * message instead of being sent to a server that refuses it.
      */
     subtitleRequired?: string;
+    /** Told whether the suggested questions hold edits that cannot be sent yet. */
+    onQuestionsHeld?: (held: boolean) => void;
   };
 
   let {
@@ -38,7 +40,8 @@
     lockedFields = new Set<LockedTextField>(),
     lockHint = "",
     errors = {},
-    subtitleRequired
+    subtitleRequired,
+    onQuestionsHeld
   }: Props = $props();
 
   const id = (name: string) => `${idPrefix}-${name}`;
@@ -156,6 +159,7 @@
         id={id("questions")}
         questions={texts.suggested_questions ?? []}
         error={errors.suggested_questions}
+        onHeld={onQuestionsHeld}
         onChange={(questions) => onChange({ suggested_questions: questions })}
       />
     </Field.Field>

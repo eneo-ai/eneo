@@ -135,7 +135,8 @@ describe("SuggestedQuestionsEditor and the save's echo", () => {
 
   test("a repeated question is flagged at the row and never sent", async () => {
     const onChange = vi.fn<(questions: string[]) => void>();
-    render(SuggestedQuestionsEditor, { questions: ["Öppettider?"], onChange });
+    const onHeld = vi.fn<(held: boolean) => void>();
+    render(SuggestedQuestionsEditor, { questions: ["Öppettider?"], onChange, onHeld });
 
     await userEvent.click(page.getByRole("button", { name: "widget_admin_questions_add" }));
     const second = page.getByRole("textbox").nth(1);
@@ -145,10 +146,13 @@ describe("SuggestedQuestionsEditor and the save's echo", () => {
     await expect.element(second).toHaveAttribute("aria-invalid", "true");
     await expect.element(second).toHaveAccessibleDescription("widget_admin_questions_duplicate");
     expect(onChange).not.toHaveBeenCalled();
+    // The page is told the rows hold an edit it cannot save yet.
+    expect(onHeld).toHaveBeenLastCalledWith(true);
 
     await userEvent.type(second, "idag");
     await userEvent.tab();
     expect(onChange).toHaveBeenLastCalledWith(["Öppettider?", "Öppettider? idag"]);
     await expect.element(second).toHaveAttribute("aria-invalid", "false");
+    expect(onHeld).toHaveBeenLastCalledWith(false);
   });
 });

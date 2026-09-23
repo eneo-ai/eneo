@@ -22,9 +22,11 @@
     id?: string;
     /** Why the server refused the saved list. */
     error?: string;
+    /** Told whether the rows hold edits that cannot be sent yet (a repeated question). */
+    onHeld?: (held: boolean) => void;
   };
 
-  let { questions, onChange, id = "widget-questions", error = "" }: Props = $props();
+  let { questions, onChange, id = "widget-questions", error = "", onHeld }: Props = $props();
 
   // What the API stores for a list of rows: whitespace collapsed, blanks dropped.
   const clean = (texts: string[]) => texts.map(collapseWhitespace).filter(Boolean);
@@ -57,6 +59,12 @@
     return rows
       .filter((_, index) => texts[index] && texts.indexOf(texts[index]) < index)
       .map((row) => row.key);
+  });
+
+  $effect(() => {
+    const held = duplicates.length > 0;
+    untrack(() => onHeld?.(held));
+    return () => untrack(() => onHeld?.(false));
   });
 
   function emit() {

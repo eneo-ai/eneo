@@ -311,6 +311,19 @@ describe("WidgetAutosave refusals", () => {
     expect(autosave.stranded).toBe(true);
   });
 
+  it("counts a draft a field holds back as unsaved until it is released", () => {
+    const autosave = new WidgetAutosave(widget(), vi.fn(), { delay: 10 });
+    expect(autosave.unsaved).toBe(false);
+
+    autosave.markDraft("allowed_origins", true);
+    expect(autosave.unsaved).toBe(true);
+    expect(autosave.stranded).toBe(true);
+
+    autosave.markDraft("allowed_origins", false);
+    expect(autosave.unsaved).toBe(false);
+    expect(autosave.stranded).toBe(false);
+  });
+
   it("a failure that names no field keeps everything pending, as before", async () => {
     const save = vi.fn().mockRejectedValue(new EneoError("down", "RESPONSE", 503, 0));
     const autosave = new WidgetAutosave(widget(), save, { delay: 10 });

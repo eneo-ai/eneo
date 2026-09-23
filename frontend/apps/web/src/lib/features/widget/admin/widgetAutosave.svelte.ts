@@ -1,4 +1,5 @@
 import type { Widget, WidgetTemplate, WidgetTemplateUpdate, WidgetUpdate } from "@eneo/eneo-js";
+import { untrack } from "svelte";
 import { isStaleEditorError, widgetFieldErrors } from "./errors";
 
 export type AutosaveStatus = "idle" | "saving" | "saved" | "error" | "conflict" | "refused";
@@ -34,6 +35,8 @@ export class Autosave<Resource extends object, Update extends object> {
   error = $state<unknown>(null);
   /** Field paths the server refused, each with the message to show at the field. */
   refusals = $state<Record<string, string>>({});
+  /** Edits a field keeps to itself because they cannot be sent as they are. */
+  #drafts = $state<Record<string, true>>({});
 
   #save: (update: Update, baseline: Resource) => Promise<Resource>;
   #fieldErrors: (error: unknown) => Record<string, string>;
@@ -67,15 +70,36 @@ export class Autosave<Resource extends object, Update extends object> {
     return Object.keys(this.#refused).length > 0;
   }
 
+  get hasDrafts(): boolean {
+    return Object.keys(this.#drafts).length > 0;
+  }
+
   /** Something would be lost if the page went away right now. */
   get unsaved(): boolean {
-    return this.hasPending || this.hasRefused || this.status === "saving";
+    return this.hasPending || this.hasRefused || this.hasDrafts || this.status === "saving";
   }
 
   /** Edits that saving on the way out cannot rescue, so leaving should ask first. */
   get stranded(): boolean {
-    if (this.hasRefused) return true;
+    if (this.hasRefused || this.hasDrafts) return true;
     return (this.status === "error" || this.status === "conflict") && this.hasPending;
+  }
+
+  /**
+   * Register an edit a field holds back because it cannot be sent yet (an
+   * invalid line, a repeated question), so leaving the page asks before it is
+   * lost. Safe to call from an effect.
+   */
+  markDraft(key: string, held: boolean): void {
+    untrack(() => {
+      if (held === key in this.#drafts) return;
+      if (held) {
+        this.#drafts = { ...this.#drafts, [key]: true };
+      } else {
+        const { [key]: _released, ...rest } = this.#drafts;
+        this.#drafts = rest;
+      }
+    });
   }
 
   /** Merge a change into the widget and schedule a save. */

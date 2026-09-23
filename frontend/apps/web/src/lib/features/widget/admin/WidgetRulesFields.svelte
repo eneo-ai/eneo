@@ -110,6 +110,19 @@
     if ((widget.allowed_origins ?? []).length === 0) return blockerLabel("allowed_origins_empty");
     return undefined;
   });
+  // Lines that cannot be sent yet hold back the valid ones with them.
+  $effect(() => {
+    const held =
+      (parsedOrigins.invalid.length > 0 || parsedOrigins.tooMany || emptiedWhileActive) &&
+      origins.text.trim() !== (widget.allowed_origins ?? []).join("\n");
+    autosave.markDraft("allowed_origins", held);
+    return () => autosave.markDraft("allowed_origins", false);
+  });
+  $effect(() => {
+    autosave.markDraft("rule-numbers", Object.keys(rangeErrors).length > 0);
+    return () => autosave.markDraft("rule-numbers", false);
+  });
+
   function commitOrigins() {
     originsTouched = true;
     if (parsedOrigins.invalid.length > 0 || parsedOrigins.tooMany || emptiedWhileActive) return;
