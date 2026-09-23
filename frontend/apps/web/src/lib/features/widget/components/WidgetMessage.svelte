@@ -15,6 +15,7 @@
   import { linkHost } from "../urls";
   import { widgetToolSteps } from "../widgetToolSteps";
   import WidgetInref from "./WidgetInref.svelte";
+  import WidgetQuestionBubble from "./WidgetQuestionBubble.svelte";
   import WidgetToolActivity from "./WidgetToolActivity.svelte";
   import TypingIndicator from "$lib/features/chat/components/conversation/TypingIndicator.svelte";
 
@@ -94,11 +95,7 @@
 </script>
 
 <li class="flex flex-col gap-3">
-  <div class="flex justify-end">
-    <p class="widget-bubble max-w-[85%] rounded-br-sm px-3.5 py-2 text-sm whitespace-pre-wrap">
-      <span class="sr-only">{m.widget_you()}: </span>{message.question}
-    </p>
-  </div>
+  <WidgetQuestionBubble text={message.question} />
 
   <div class="flex flex-col gap-2">
     <span class="sr-only">{m.widget_assistant()}: </span>
@@ -232,11 +229,5 @@
   }
   .widget-answer :global(.prose :is(code, pre)) {
     font-size: 0.8125rem;
-  }
-  .widget-bubble {
-    background: var(--widget-accent);
-    color: var(--widget-on-accent);
-    border-radius: var(--widget-radius);
-    border-bottom-right-radius: 4px;
   }
 </style>

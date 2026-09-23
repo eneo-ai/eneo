@@ -23,6 +23,7 @@
   import { VisitorSession, isTokenRejected, isWidgetUnavailable } from "../visitorSession";
   import WidgetComposer from "./WidgetComposer.svelte";
   import WidgetMessage from "./WidgetMessage.svelte";
+  import WidgetQuestionBubble from "./WidgetQuestionBubble.svelte";
   import TypingIndicator from "$lib/features/chat/components/conversation/TypingIndicator.svelte";
 
   type Props = {
@@ -383,11 +384,7 @@
           {/each}
           {#if showPending && pendingQuestion !== null}
             <li class="flex flex-col gap-3">
-              <div class="flex justify-end">
-                <p class="widget-bubble max-w-[85%] px-3.5 py-2 text-sm whitespace-pre-wrap">
-                  <span class="sr-only">{m.widget_you()}: </span>{pendingQuestion}
-                </p>
-              </div>
+              <WidgetQuestionBubble text={pendingQuestion} />
               <TypingIndicator />
             </li>
           {/if}
@@ -445,7 +442,7 @@
               class="text-accent-default focus-visible:ring-default mt-1 w-fit rounded-md text-xs underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
               onclick={() => (feedbackDialogOpen = true)}
             >
-              {m.widget_feedback_more()}
+              {given === -1 ? m.widget_feedback_more_negative() : m.widget_feedback_more()}
             </button>
           {/if}
         {/if}
@@ -523,7 +520,9 @@
           rows="4"
           maxlength="2000"
           aria-label={m.widget_feedback_more_title()}
-          placeholder={m.widget_feedback_more_placeholder()}
+          placeholder={feedbackGiven[chat.currentConversation.id] === -1
+            ? m.widget_feedback_more_placeholder_negative()
+            : m.widget_feedback_more_placeholder()}
           bind:value={feedbackText}></textarea>
         <Dialog.Footer>
           <Dialog.Close>
@@ -606,12 +605,6 @@
   .widget-new-question {
     border-color: var(--widget-accent);
     border-radius: var(--widget-radius);
-  }
-  .widget-bubble {
-    background: var(--widget-accent);
-    color: var(--widget-on-accent);
-    border-radius: var(--widget-radius);
-    border-bottom-right-radius: 4px;
   }
   /* Full opacity: the derived text colour is what passes the contrast check. */
   .widget-header-tinted .widget-header-muted {

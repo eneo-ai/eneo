@@ -4820,6 +4820,8 @@
   "widget_feedback_more_title": "Tell us more",
   "widget_feedback_more_body": "Your comment is stored together with your vote. Please do not include personal data.",
   "widget_feedback_more_placeholder": "What was good, or what was missing?",
+  "widget_feedback_more_negative": "Tell us what was missing",
+  "widget_feedback_more_placeholder_negative": "What was missing, or what went wrong?",
   "widget_feedback_send": "Send",
   "widget_feedback_sending": "Sending…",
   "widget_feedback_received": "Thank you, we have received your feedback.",

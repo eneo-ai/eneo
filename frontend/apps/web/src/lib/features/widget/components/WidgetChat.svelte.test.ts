@@ -175,8 +175,13 @@ describe("WidgetChat", () => {
     await vi.waitFor(() => expect(fake.release).not.toBeNull());
     await releaseAnswer();
 
-    await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
+    // A negative vote asks what was missing; a positive one asks for more.
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_unhelpful" }));
     await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_thanks");
+    await expect
+      .element(page.getByRole("button", { name: "widget_feedback_more_negative" }))
+      .toBeVisible();
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
     expect(fake.feedback.at(-1)).toEqual({
       conversation: { id: "session-1" },
       feedback: { value: 1 }
