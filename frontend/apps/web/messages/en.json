@@ -4969,6 +4969,7 @@
   "widget_admin_could_not_archive": "Could not archive the widget",
   "widget_admin_archive_title": "Archive this widget?",
   "widget_admin_archive_description": "The widget stops serving visitors immediately and the install snippet stops working. Conversations are kept until their retention period ends. This cannot be undone.",
+  "widget_admin_archived_note": "The widget is archived and no longer answers visitors. You can create a new widget for the assistant below.",
   "widget_admin_blockers_title": "Before this widget can be activated",
   "widget_admin_ready_for_admin": "Ready for activation. Ask a tenant admin to activate the widget.",
   "widget_admin_resume_admin_only": "Only tenant admins can resume the widget. Ask a tenant admin to resume it.",

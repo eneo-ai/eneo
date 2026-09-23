@@ -47,6 +47,8 @@
     policy: WidgetPolicy | null;
     release: LoaderRelease | null;
     templates?: WidgetTemplate[];
+    /** An archived widget cannot be edited, so the page takes the editor away. */
+    onArchived?: () => void;
   };
 
   let {
@@ -56,7 +58,8 @@
     isAdmin,
     policy,
     release,
-    templates: allTemplates = []
+    templates: allTemplates = [],
+    onArchived
   }: Props = $props();
   // Widgets follow a template's published release, so drafts are not offered.
   const templates = $derived(allTemplates.filter((t) => t.published_at != null));
@@ -238,7 +241,10 @@
     onReload={async () => autosave.reload(await eneo.widgets.get({ id: widget.id }))}
     onActivate={lifecycle(eneo.widgets.activate)}
     onPause={lifecycle(eneo.widgets.pause)}
-    onArchive={lifecycle(eneo.widgets.archive)}
+    onArchive={async () => {
+      await lifecycle(eneo.widgets.archive)();
+      onArchived?.();
+    }}
   />
 
   <Tabs.Root bind:value={tab.value} class="gap-6">

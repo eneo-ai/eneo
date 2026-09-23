@@ -4969,6 +4969,7 @@
   "widget_admin_could_not_archive": "Widgeten kunde inte arkiveras",
   "widget_admin_archive_title": "Arkivera widgeten?",
   "widget_admin_archive_description": "Widgeten slutar omedelbart att svara besökare och installationskoden slutar fungera. Konversationer behålls tills deras lagringstid går ut. Det går inte att ångra.",
+  "widget_admin_archived_note": "Widgeten är arkiverad och svarar inte längre besökare. Du kan skapa en ny widget för assistenten nedan.",
   "widget_admin_blockers_title": "Innan widgeten kan aktiveras",
   "widget_admin_ready_for_admin": "Klar att aktiveras. Be en organisationsadministratör att aktivera widgeten.",
   "widget_admin_resume_admin_only": "Endast organisationsadministratörer kan återuppta widgeten. Be en organisationsadministratör att återuppta den.",
