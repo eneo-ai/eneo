@@ -668,6 +668,44 @@ async def test_widget_templates(
 
 
 @pytest.mark.integration
+async def test_null_fields_are_refused_on_a_template_linked_widget(
+    client, admin_token, space_with_assistant
+):
+    space_id, assistant_id = space_with_assistant
+    resp = await client.post(
+        "/api/v1/admin/widget-templates/",
+        json={"name": "Kommunblå"},
+        headers=_auth(admin_token),
+    )
+    template_id = resp.json()["id"]
+    resp = await client.post(
+        f"/api/v1/admin/widget-templates/{template_id}/publish/",
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/widgets/",
+        json={"target_id": assistant_id, "name": "Chatt", "template_id": template_id},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 201, resp.text
+    widget = resp.json()
+
+    for field in ["texts", "theme", "language", "limits", "name"]:
+        resp = await client.patch(
+            f"/api/v1/widgets/{widget['id']}/",
+            json={"revision": widget["revision"], field: None},
+            headers=_auth(admin_token),
+        )
+        assert resp.status_code == 422, (field, resp.text)
+    resp = await client.get(
+        f"/api/v1/widgets/{widget['id']}/", headers=_auth(admin_token)
+    )
+    assert resp.json()["revision"] == widget["revision"]
+    assert resp.json()["texts"] == widget["texts"]
+
+
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_widget_overview(
     client, admin_token, regular_user_token, space_with_assistant, db_container

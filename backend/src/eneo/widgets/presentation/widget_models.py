@@ -4,10 +4,10 @@
 
 
 from datetime import date, datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from eneo.widgets.domain.widget import (
     BotProtection,
@@ -84,21 +84,42 @@ class WidgetTemplateInUseResponse(BaseModel):
     detail: WidgetTemplateInUseDetail
 
 
+_WHOLE_GROUP = (
+    "Replaces the whole group: a field left out of it takes its default, so"
+    " send the current values along with the changed ones."
+)
+
+
 class WidgetUpdate(BaseModel):
+    """Only the fields sent are changed; a field left out keeps its value.
+    Null is refused: there is nothing to reset a field to."""
+
     model_config = ConfigDict(extra="forbid")
 
     revision: int = Field(ge=0)
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    texts: Optional[WidgetTexts] = None
-    theme: Optional[WidgetTheme] = None
-    limits: Optional[WidgetLimits] = None
-    privacy: Optional[WidgetPrivacy] = None
+    texts: Optional[WidgetTexts] = Field(default=None, description=_WHOLE_GROUP)
+    theme: Optional[WidgetTheme] = Field(default=None, description=_WHOLE_GROUP)
+    limits: Optional[WidgetLimits] = Field(default=None, description=_WHOLE_GROUP)
+    privacy: Optional[WidgetPrivacy] = Field(default=None, description=_WHOLE_GROUP)
     language: Optional[WidgetLanguage] = None
     allowed_origins: Optional[list[str]] = Field(default=None, max_length=20)
     bot_protection: Optional[BotProtection] = None
     show_sources: Optional[bool] = None
     show_tool_activity: Optional[bool] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_nulls(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            nulls = sorted(str(key) for key, value in data.items() if value is None)
+            if nulls:
+                raise ValueError(
+                    f"{', '.join(nulls)} cannot be null; leave a field out to"
+                    " keep its value."
+                )
+        return data
 
     @field_validator("allowed_origins")
     @classmethod

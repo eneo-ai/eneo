@@ -23066,15 +23066,23 @@ export interface components {
       /** Logo File Id */
       logo_file_id?: string | null;
     };
-    /** WidgetUpdate */
+    /**
+     * WidgetUpdate
+     * @description Only the fields sent are changed; a field left out keeps its value.
+     *     Null is refused: there is nothing to reset a field to.
+     */
     WidgetUpdate: {
       /** Revision */
       revision: number;
       /** Name */
       name?: string | null;
+      /** @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones. */
       texts?: components["schemas"]["WidgetTexts"] | null;
+      /** @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones. */
       theme?: components["schemas"]["WidgetTheme"] | null;
+      /** @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones. */
       limits?: components["schemas"]["WidgetLimits"] | null;
+      /** @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones. */
       privacy?: components["schemas"]["WidgetPrivacy"] | null;
       language?: components["schemas"]["WidgetLanguage"] | null;
       /** Allowed Origins */
