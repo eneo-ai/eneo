@@ -73,9 +73,11 @@ When `transcription.live.available` is true, an app can show preview text while 
 1. Request a ticket for the audio step with `POST /flows/{flow_id}/steps/{step_id}/live-transcription-sessions/` (no body, `201`). It needs the same access as creating a run.
 2. Within 30 seconds, open a WebSocket to the returned `websocket_path`, resolved against the deployment origin, offering the subprotocols `eneo-live.v1` and `ticket.<ticket>`. A ticket opens one socket.
 3. After the `ready` event, send binary frames of mono 16-bit little-endian PCM at 16 kHz, 2 bytes to 64 KiB each with an even length, then the text frame `{"type": "stop"}`.
-4. Append the `text` of each `transcript.delta`. `transcript.done` carries the full preview; an `error` event carries `code`, `message`, and `retryable`. The socket closes after either.
+4. Append the `text` of each `transcript.delta`. `transcript.done` carries the full preview text of that session; an `error` event carries `code`, `message`, and `retryable`. The socket closes after either.
 
-The ticket request returns `409 flow_live_transcription_unavailable` with the reason in `context.reason` when live text is unavailable. Keep service keys and module tokens on the server; a browser-facing app relays the socket through its own backend. For the full protocol, limits, and relay pattern, read "Show live text while recording" in the Integrating Flows guide, and for every socket code, "Live transcription socket codes" in the Flow error reference, both on docs.eneo.ai.
+Each ticket starts a fresh session. While the recording runs, a `retryable` error may start a new session: keep the text already shown and append after it. After `stop`, never request a new ticket; keep the preview text you have and go on with the upload and run.
+
+The ticket request returns `409 flow_live_transcription_unavailable` with the reason in `context.reason` when live text is unavailable. Keep service keys and module tokens on the server. The socket checks only the ticket and the page's origin: it accepts the API's own host, an origin the operator allows, a loopback host, or a server-side client without an `Origin` header. So the backend can pass the ticket to its own browser when Eneo accepts that origin, or relay the socket when Eneo does not accept it or all traffic stays on the server. For the full protocol, limits, and both connection patterns, read "Show live text while recording" in the Integrating Flows guide, and for every socket code, "Live transcription socket codes" in the Flow error reference, both on docs.eneo.ai.
 
 ## Closed final-result union
 

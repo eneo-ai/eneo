@@ -150,9 +150,11 @@ response, and closes the socket after it:
 }
 ```
 
-Branch on `code`. When `retryable` is `true`, request a new ticket to continue
-the preview. The failure affects only the preview: the run transcribes the
-uploaded recording. See [Show live text while recording](/guides/flows/integrating-flows#show-live-text-while-recording).
+Branch on `code`. The failure affects only the preview: the run transcribes the
+uploaded recording. `retryable` alone does not decide the next step, because a
+new ticket starts a fresh session and cannot recover text after `stop`. See
+[When a session ends with an error](/guides/flows/integrating-flows#when-a-session-ends-with-an-error)
+for what to do while the recording runs and after it stops.
 
 | `code` | When | `retryable` |
 | --- | --- | --- |

@@ -62,9 +62,9 @@ lifetimes. None of them can substitute for another.
 
 Audience scoping isolates the tokens in both directions: a module user token
 is rejected by every normal Eneo API route (wrong audience), and a normal Eneo
-session JWT is rejected by module-facing routes. Routes under `/api/v1/flows/`
-are the exception: they accept a module user token together with its module's
-`sk_` key (see [Call Flows as the signed-in user](#call-flows-as-the-signed-in-user)).
+session JWT is rejected by module-facing routes. Most routes under
+`/api/v1/flows/` are the exception: they accept a module user token together
+with its module's `sk_` key (see [Call Flows as the signed-in user](#call-flows-as-the-signed-in-user)).
 A token minted for one module cannot be replayed against another module's
 routes.
 
@@ -189,13 +189,19 @@ user:
 - **The user is the actor.** Runs the module creates belong to the user, and
   the audit log records the user as the actor.
 
-This includes starting a live transcription session. Relay its WebSocket
-through the module's backend, as described in
+This includes requesting a live transcription ticket. The socket itself checks
+only the ticket and the page's origin, so the module's backend can pass the
+ticket to its browser when Eneo accepts the module's origin, or relay the
+socket itself; see
 [Show live text while recording](/guides/flows/integrating-flows#show-live-text-while-recording).
 
-The Flow AI Builder routes (`/api/v1/flows/ai-builder/`), Flow package export
-(`/api/v1/flows/{id}/package-exports/`) and every route outside
-`/api/v1/flows/` refuse the pair.
+Other resource routes refuse the pair: the Flow AI Builder routes
+(`/api/v1/flows/ai-builder/`), Flow package export
+(`/api/v1/flows/{id}/package-exports/`), and every resource route outside
+`/api/v1/flows/`. The broker's own routes under `/api/v1/module-auth/` follow
+the handoff above, and two of them take this same pair: token refresh
+(`POST /api/v1/module-auth/{module_key}/token/refresh/`) and session validation
+(`GET /api/v1/module-auth/{module_key}/session/`).
 
 | Request | Result |
 | --- | --- |

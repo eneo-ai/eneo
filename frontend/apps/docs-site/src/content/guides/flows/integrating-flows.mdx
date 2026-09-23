@@ -1235,7 +1235,7 @@ Before you start, read `transcription.live.available` from the run contract. Whe
 2. **Open the WebSocket within 30 seconds.** Connect to `websocket_path` on the API host, with `wss://` when the API uses HTTPS, and offer two subprotocols: `eneo-live.v1` and `ticket.<ticket>`. A ticket opens one socket only.
 3. **Wait for `ready`.** Then send the recording as binary frames of mono 16-bit little-endian PCM at 16 kHz. Each frame holds 2 bytes to 64 KiB, an even number of bytes. Keep sending for as long as the recording runs, silence included.
 4. **Show the text.** Append the `text` of each `transcript.delta` event to the preview.
-5. **Stop.** When the recording ends, send the text frame `{"type": "stop"}`. Eneo answers with `transcript.done`, which carries the full preview text, and closes the socket.
+5. **Stop.** When the recording ends, send the text frame `{"type": "stop"}`. Eneo answers with `transcript.done`, which carries the full preview text of this session, and closes the socket.
 6. **Upload and run.** Upload the recording to the audio step and create the run, as in the [worked example](#worked-end-to-end-example).
 
 The session works when the socket sends `ready` after it opens. If the socket sends `error` instead, its `code` says why.
@@ -1248,10 +1248,18 @@ The session works when the socket sends `ready` after it opens. If the socket se
 | App to Eneo | `{"type": "stop"}`                                                              | The recording has ended. Any other text frame ends the session with `invalid_message`                      |
 | Eneo to app | `{"type": "ready", "sample_rate": 16000, "max_seconds": 18000}`                 | Eneo has connected to the model server. Start sending audio                                                 |
 | Eneo to app | `{"type": "transcript.delta", "text": " världen"}`                              | Text to append to the preview                                                                               |
-| Eneo to app | `{"type": "transcript.done", "text": "Hej världen"}`                            | The full preview text after `stop`. The socket then closes                                                  |
+| Eneo to app | `{"type": "transcript.done", "text": "Hej världen"}`                            | The full preview text of this session after `stop`. The socket then closes                                  |
 | Eneo to app | `{"type": "error", "code": "idle_timeout", "message": "...", "retryable": false}` | The session has ended. The socket then closes                                                               |
 
-`message` is for people; branch on `code`. When `retryable` is `true`, request a new ticket to continue the preview; the recording itself is unaffected. Every code is listed in [Live transcription socket codes](/guides/flows/reference/errors#live-transcription-socket-codes).
+`message` is for people; branch on `code`. Every code is listed in [Live transcription socket codes](/guides/flows/reference/errors#live-transcription-socket-codes).
+
+#### When a session ends with an error
+
+An `error` event ends the session, and nothing carries over to a new one: each ticket starts a fresh session on the model server, and its `transcript.done` covers only that session's audio. The recording in your app is unaffected, and so is the run, which transcribes the uploaded file.
+
+- **While the recording runs**, if `retryable` is `true`, you can request a new ticket and start a fresh session for the rest of the recording. Keep the text you already show, and append the new session's text after it. Speech from the gap between the sessions is missing from the preview, not from the run.
+- **After you sent `stop`**, do not request a new ticket: a new session cannot recover the final text. Keep the preview text you have, and go on with the upload and the run.
+- **If `retryable` is `false`**, go on without live text.
 
 #### Limits and refusals
 
@@ -1261,15 +1269,14 @@ The session works when the socket sends `ready` after it opens. If the socket se
 
 The ticket request answers `400 flow_not_published` for an unpublished flow (`404` for a service key), `400 flow_run_unknown_step_input` when the step does not take audio, `403` when the caller may not run the flow, and `409 flow_live_transcription_unavailable` when live text is not available. The `409` response carries one of the `live.reason` values in `context.reason`.
 
-#### Relay the socket through your backend
+#### Connect from the browser or through your backend
 
-Service keys and module tokens must stay on your server, and the socket accepts a browser page only when the page is served from the API's own host or from an origin the operator allows. An app that calls Eneo with server-side credentials therefore relays the socket through its own backend:
+The socket checks only the ticket and the page's origin. It does not authenticate with a service key or a module token, so those stay on your server. Eneo accepts a page served from the API's own host, from an origin the operator allows, or from a loopback host (`localhost`, `127.0.0.1`, or `::1`). It also accepts a server-side client that sends no `Origin` header.
 
-1. The browser streams the audio frames to your backend over a WebSocket of your own.
-2. Your backend requests the ticket and opens the Eneo socket. A server-side client that sends no `Origin` header is accepted.
-3. Your backend forwards audio frames to Eneo and events back to the browser.
+- **Connect from the browser** when Eneo accepts your app's origin. Your backend requests the ticket with its credentials and passes the ticket to its signed-in browser, which opens the socket directly.
+- **Relay through your backend** when Eneo does not accept your app's origin, or when you keep all traffic on your server. Your backend requests the ticket, opens the socket, and forwards audio frames from the browser to Eneo and events back.
 
-The relay works when the browser receives `ready` through your backend. A module requests the ticket with its `sk_` key and the user's module token; see [Call Flows as the signed-in user](/docs/module-authentication#call-flows-as-the-signed-in-user).
+Either way, the connection works when the browser receives `ready`. A module requests the ticket with its `sk_` key and the user's module token; see [Call Flows as the signed-in user](/docs/module-authentication#call-flows-as-the-signed-in-user).
 
 ## A complete minimal client
 
