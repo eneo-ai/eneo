@@ -50,61 +50,59 @@
       {#each $attachments as attachment (attachment.id)}
         {@const Icon = pickFileIcon(attachment.file.type)}
         {@const isUploading = attachment.status === "uploading" || attachment.status === "queued"}
-        <Tooltip.Provider delayDuration={250}>
-          <Tooltip.Root>
-            <Tooltip.Trigger>
-              {#snippet child({ props })}
+        <Tooltip.Root delayDuration={250}>
+          <Tooltip.Trigger>
+            {#snippet child({ props })}
+              <div
+                {...props}
+                role="listitem"
+                class="group border-default bg-primary hover:border-stronger hover:bg-secondary relative flex h-11 min-w-0 items-center gap-2 rounded-lg border py-1.5 pr-2 pl-1.5 shadow-sm transition-all"
+              >
                 <div
-                  {...props}
-                  role="listitem"
-                  class="group border-default bg-primary hover:border-stronger hover:bg-secondary relative flex h-11 min-w-0 items-center gap-2 rounded-lg border py-1.5 pr-2 pl-1.5 shadow-sm transition-all"
+                  class="bg-accent-dimmer text-accent-stronger flex size-8 flex-shrink-0 items-center justify-center rounded-md"
                 >
-                  <div
-                    class="bg-accent-dimmer text-accent-stronger flex size-8 flex-shrink-0 items-center justify-center rounded-md"
-                  >
-                    {#if isUploading}
-                      <Loader2 class="size-4 animate-spin" aria-hidden="true" />
-                    {:else}
-                      <Icon class="size-4" aria-hidden="true" />
-                    {/if}
-                  </div>
-
-                  <div class="flex min-w-0 flex-1 flex-col leading-tight">
-                    <span class="text-default truncate text-sm font-medium">
-                      {attachment.file.name}
-                    </span>
-                    <span class="text-tertiary truncate text-[11px] tabular-nums">
-                      {#if isUploading}
-                        {attachment.progress}%
-                      {:else}
-                        {formatFileType(attachment.file.type) || "FILE"} · {formatBytes(
-                          attachment.file.size
-                        )}
-                      {/if}
-                    </span>
-                  </div>
-
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label={m.remove_this_attachment()}
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      attachment.remove();
-                    }}
-                    class="text-tertiary hover:text-on-fill hover:bg-negative-default size-5 flex-shrink-0 rounded-full opacity-60 transition-all group-hover:opacity-100"
-                  >
-                    <X class="size-3" aria-hidden="true" />
-                  </Button>
+                  {#if isUploading}
+                    <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+                  {:else}
+                    <Icon class="size-4" aria-hidden="true" />
+                  {/if}
                 </div>
-              {/snippet}
-            </Tooltip.Trigger>
-            <Tooltip.Content side="top" class="max-w-[320px]">
-              <p class="break-all">{attachment.file.name}</p>
-            </Tooltip.Content>
-          </Tooltip.Root>
-        </Tooltip.Provider>
+
+                <div class="flex min-w-0 flex-1 flex-col leading-tight">
+                  <span class="text-default truncate text-sm font-medium">
+                    {attachment.file.name}
+                  </span>
+                  <span class="text-tertiary truncate text-[11px] tabular-nums">
+                    {#if isUploading}
+                      {attachment.progress}%
+                    {:else}
+                      {formatFileType(attachment.file.type) || "FILE"} · {formatBytes(
+                        attachment.file.size
+                      )}
+                    {/if}
+                  </span>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={m.remove_this_attachment()}
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    attachment.remove();
+                  }}
+                  class="text-tertiary hover:text-on-fill hover:bg-negative-default size-5 flex-shrink-0 rounded-full opacity-60 transition-all group-hover:opacity-100"
+                >
+                  <X class="size-3" aria-hidden="true" />
+                </Button>
+              </div>
+            {/snippet}
+          </Tooltip.Trigger>
+          <Tooltip.Content side="top" class="max-w-[320px]">
+            <p class="break-all">{attachment.file.name}</p>
+          </Tooltip.Content>
+        </Tooltip.Root>
       {/each}
     </div>
   </div>

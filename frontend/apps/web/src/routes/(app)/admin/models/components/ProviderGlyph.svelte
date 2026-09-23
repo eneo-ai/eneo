@@ -43,7 +43,7 @@
   class="
     {sizeConfig.chip}
     {sizeConfig.radius}
-    bg-surface-dimmer dark:bg-surface-dimmest
+    bg-secondary dark:bg-secondary
     border-dimmer flex
     items-center justify-center border
     shadow-[inset_0_1px_2px_oklch(0%_0_0/0.05)]

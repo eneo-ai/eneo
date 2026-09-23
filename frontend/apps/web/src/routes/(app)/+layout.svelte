@@ -158,7 +158,7 @@
     </nav>
   </header>
 
-  <main class="border-box bg-primary relative z-10 flex-grow overflow-clip transition-all">
+  <main class="bg-primary relative z-10 flex-grow overflow-clip transition-all">
     <slot />
   </main>
 </div>

@@ -209,16 +209,6 @@
       "count": 1
     }
   },
-  "src/lib/components/toast/Toaster.svelte": {
-    "eneo/no-raw-color": {
-      "count": 3
-    }
-  },
-  "src/routes/(app)/admin/mcp-servers/MCPServerPrimaryCell.svelte": {
-    "eneo/no-raw-color": {
-      "count": 14
-    }
-  },
   "src/routes/(app)/admin/mcp-servers/MCPToolsPanel.svelte": {
     "eneo/no-raw-color": {
       "count": 19

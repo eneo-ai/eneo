@@ -11,7 +11,7 @@
 <a
   aria-label={app.name}
   href={localizeHref(`/dashboard/app/${app.id}`)}
-  class="group border-default bg-dimmer text-stronger hover:bg-default hover:text-on-fill relative flex aspect-square flex-col items-start gap-2 border-t p-2 px-4"
+  class="group border-default bg-secondary text-primary hover:bg-accent-default hover:text-on-fill relative flex aspect-square flex-col items-start gap-2 border-t p-2 px-4"
 >
   <h4 class="line-clamp-2 pt-1 font-mono text-sm">
     {m.dashboard_app_tile_label({ name: app.name })}

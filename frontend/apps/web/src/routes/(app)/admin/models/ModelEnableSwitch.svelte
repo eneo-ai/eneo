@@ -66,21 +66,19 @@
 </script>
 
 <div class="-ml-3 flex items-center gap-4">
-  <Tooltip.Provider delayDuration={150}>
-    <Tooltip.Root>
-      <Tooltip.Trigger>
-        {#snippet child({ props })}
-          <span {...props}>
-            <Switch
-              checked={model.is_org_enabled}
-              onCheckedChange={handleCheckedChange}
-              disabled={isDisabled}
-              aria-label={`${modelLabel} — ${tooltip}`}
-            />
-          </span>
-        {/snippet}
-      </Tooltip.Trigger>
-      <Tooltip.Content>{tooltip}</Tooltip.Content>
-    </Tooltip.Root>
-  </Tooltip.Provider>
+  <Tooltip.Root delayDuration={150}>
+    <Tooltip.Trigger>
+      {#snippet child({ props })}
+        <span {...props}>
+          <Switch
+            checked={model.is_org_enabled}
+            onCheckedChange={handleCheckedChange}
+            disabled={isDisabled}
+            aria-label={`${modelLabel} — ${tooltip}`}
+          />
+        </span>
+      {/snippet}
+    </Tooltip.Trigger>
+    <Tooltip.Content>{tooltip}</Tooltip.Content>
+  </Tooltip.Root>
 </div>

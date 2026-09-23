@@ -11,18 +11,16 @@
   const showDeleteDialog = writable(false);
 </script>
 
-<Tooltip.Provider>
-  <Tooltip.Root>
-    <Tooltip.Trigger
-      class={buttonVariants({ variant: "outline", size: "icon" })}
-      aria-label={m.sharepoint_setup_fixture_open()}
-      onclick={() => ($showConfigDialog = true)}
-    >
-      <FlaskConical aria-hidden="true" />
-    </Tooltip.Trigger>
-    <Tooltip.Content>{m.sharepoint_setup_fixture_open()}</Tooltip.Content>
-  </Tooltip.Root>
-</Tooltip.Provider>
+<Tooltip.Root>
+  <Tooltip.Trigger
+    class={buttonVariants({ variant: "outline", size: "icon" })}
+    aria-label={m.sharepoint_setup_fixture_open()}
+    onclick={() => ($showConfigDialog = true)}
+  >
+    <FlaskConical aria-hidden="true" />
+  </Tooltip.Trigger>
+  <Tooltip.Content>{m.sharepoint_setup_fixture_open()}</Tooltip.Content>
+</Tooltip.Root>
 
 <SharePointAppConfigDialog
   openController={showConfigDialog}

@@ -479,9 +479,7 @@
     showCloseButton={false}
     restoreScrollDelay={0}
   >
-    <Dialog.Header
-      class="from-surface-dimmer/50 gap-6 bg-gradient-to-b to-transparent px-6 pt-6 pb-4"
-    >
+    <Dialog.Header class="from-secondary/50 gap-6 bg-gradient-to-b to-transparent px-6 pt-6 pb-4">
       <Dialog.Title>{m.add_provider_and_models()}</Dialog.Title>
       <Stepper
         {steps}

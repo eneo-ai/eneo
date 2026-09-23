@@ -106,16 +106,16 @@
     onclick={() => (dialogOpen = true)}
     class="flex h-11 w-11 items-center justify-center rounded-lg border transition-colors
       {value
-      ? 'border-strong bg-subtle hover:bg-hover-subtle'
-      : 'border-strong bg-component hover:bg-hover-subtle border-dashed'}"
+      ? 'border-stronger bg-subtle hover:bg-hover-dimmer'
+      : 'border-stronger bg-primary hover:bg-hover-dimmer border-dashed'}"
     title={value ? m.change_icon_current({ iconName: value }) : m.choose_icon_optional()}
     aria-label={value ? m.change_icon_current({ iconName: value }) : m.choose_template_icon()}
   >
     {#if selectedIconComponent}
       {@const SelectedIcon = selectedIconComponent}
-      <SelectedIcon class="h-5 w-5 text-text" />
+      <SelectedIcon class="h-5 w-5 text-default" />
     {:else}
-      <Sparkles class="text-text-dimmer h-5 w-5" />
+      <Sparkles class="text-muted h-5 w-5" />
     {/if}
   </button>
 {:else}
@@ -127,15 +127,15 @@
       <button
         type="button"
         onclick={() => (dialogOpen = true)}
-        class="border-strong bg-component hover:bg-hover-subtle flex h-10 min-w-10 items-center gap-2 rounded-lg border px-3 transition-colors"
+        class="border-stronger bg-primary hover:bg-hover-dimmer flex h-10 min-w-10 items-center gap-2 rounded-lg border px-3 transition-colors"
       >
         {#if selectedIconComponent}
           {@const SelectedIcon = selectedIconComponent}
-          <SelectedIcon class="h-5 w-5 text-text" />
-          <span class="text-text text-sm">{value}</span>
+          <SelectedIcon class="h-5 w-5 text-default" />
+          <span class="text-default text-sm">{value}</span>
         {:else}
-          <Sparkles class="text-text-dimmer h-5 w-5" />
-          <span class="text-text-dimmer text-sm">{m.choose_icon()}</span>
+          <Sparkles class="text-muted h-5 w-5" />
+          <span class="text-muted text-sm">{m.choose_icon()}</span>
         {/if}
       </button>
 
@@ -183,13 +183,13 @@
               aria-label={m.search_icons()}
               class="border-default bg-primary ring-default w-full rounded-lg border py-2 pr-3 pl-10 focus-within:ring-2 focus-visible:ring-2"
             />
-            <Search class="text-text-dimmer absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+            <Search class="text-muted absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
           </div>
 
           <!-- Popular icons (when no search) -->
           {#if !searchQuery}
             <div>
-              <h4 class="text-text-dimmer mb-2 text-xs font-medium tracking-wide uppercase">
+              <h4 class="text-muted mb-2 text-xs font-medium tracking-wide uppercase">
                 {m.popular_icons()}
               </h4>
               <div class="grid grid-cols-4 gap-3 sm:grid-cols-6 md:grid-cols-8">
@@ -200,7 +200,7 @@
                   <button
                     type="button"
                     onclick={() => handleIconClick(iconName)}
-                    class="hover:bg-hover-subtle relative flex h-11 w-11 items-center justify-center rounded-lg transition-colors
+                    class="hover:bg-hover-dimmer relative flex h-11 w-11 items-center justify-center rounded-lg transition-colors
                     {isSelected
                       ? 'bg-accent-dimmer border-accent-stronger border-2'
                       : 'border-2 border-transparent'}"
@@ -210,7 +210,7 @@
                   >
                     {#if IconComp}
                       <IconComp
-                        class="h-5 w-5 {isSelected ? 'text-accent-stronger' : 'text-text'}"
+                        class="h-5 w-5 {isSelected ? 'text-accent-stronger' : 'text-default'}"
                       />
                     {/if}
                     {#if isSelected}
@@ -230,7 +230,7 @@
 
           <!-- All icons / Search results -->
           {#if searchQuery && filteredIcons.length > 0}
-            <div class="border-strong max-h-96 overflow-y-auto rounded-lg border p-3">
+            <div class="border-stronger max-h-96 overflow-y-auto rounded-lg border p-3">
               <div class="grid grid-cols-4 gap-3 sm:grid-cols-6 md:grid-cols-8">
                 {#each filteredIcons.slice(0, 200) as iconName (iconName)}
                   {@const IconComp = getIconComponent(iconName)}
@@ -239,7 +239,7 @@
                   <button
                     type="button"
                     onclick={() => handleIconClick(iconName)}
-                    class="hover:bg-hover-subtle relative flex h-11 w-11 items-center justify-center rounded-lg transition-colors
+                    class="hover:bg-hover-dimmer relative flex h-11 w-11 items-center justify-center rounded-lg transition-colors
                     {isSelected
                       ? 'bg-accent-dimmer border-accent-stronger border-2'
                       : 'border-2 border-transparent'}"
@@ -249,7 +249,7 @@
                   >
                     {#if IconComp}
                       <IconComp
-                        class="h-5 w-5 {isSelected ? 'text-accent-stronger' : 'text-text'}"
+                        class="h-5 w-5 {isSelected ? 'text-accent-stronger' : 'text-default'}"
                       />
                     {/if}
                     {#if isSelected}
@@ -264,13 +264,13 @@
               </div>
 
               {#if filteredIcons.length > 200}
-                <div class="text-text-dimmer mt-3 text-center text-xs">
+                <div class="text-muted mt-3 text-center text-xs">
                   {m.showing_first_icons({ total: filteredIcons.length })}
                 </div>
               {/if}
             </div>
           {:else if searchQuery}
-            <div class="text-text-dimmer flex items-center justify-center py-12 text-sm">
+            <div class="text-muted flex items-center justify-center py-12 text-sm">
               {m.no_icons_found({ query: searchQuery })}
             </div>
           {/if}

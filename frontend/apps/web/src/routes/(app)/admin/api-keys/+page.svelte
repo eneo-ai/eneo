@@ -691,7 +691,7 @@
                       onclick={() => (showSearchScopeDropdown = !showSearchScopeDropdown)}
                       aria-haspopup="listbox"
                       aria-expanded={showSearchScopeDropdown}
-                      class="text-muted bg-subtle/80 border-default/40 hover:bg-hover hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition-all duration-150 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
+                      class="text-muted bg-subtle/80 border-default/40 hover:bg-hover-default hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition-all duration-150 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
                     >
                       {searchScope === "entity"
                         ? m.audit_search_scope_entity()
@@ -782,7 +782,7 @@
                   <button
                     type="button"
                     onclick={clearSearch}
-                    class="text-muted hover:text-default hover:bg-hover focus-visible:ring-accent-default absolute top-1/2 right-2 -translate-y-1/2 rounded-md p-1.5 transition-all duration-150 focus-visible:ring-2 focus-visible:outline-none"
+                    class="text-muted hover:text-default hover:bg-hover-default focus-visible:ring-accent-default absolute top-1/2 right-2 -translate-y-1/2 rounded-md p-1.5 transition-all duration-150 focus-visible:ring-2 focus-visible:outline-none"
                     aria-label={m.audit_search_clear()}
                   >
                     <X class="h-4 w-4" />

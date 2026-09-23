@@ -334,7 +334,7 @@
                         class="bg-secondary text-muted inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
                       >
                         <span class="text-positive-default">{enabledToolCount}</span>
-                        <span class="text-dimmer">/</span>
+                        <span class="text-muted">/</span>
                         <span>{toolCount}</span>
                       </span>
                     {/if}
@@ -392,7 +392,7 @@
                   >
                     {m.mcp_all_on()}
                   </button>
-                  <span class="text-dimmer">|</span>
+                  <span class="text-muted">|</span>
                   <button
                     type="button"
                     class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"

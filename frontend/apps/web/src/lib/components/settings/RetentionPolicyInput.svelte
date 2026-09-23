@@ -96,7 +96,7 @@
           else if (inputValue < 1) inputValue = 1;
         }}
       />
-      <span class="text-default-dimmer text-sm">{m.conversation_retention_days()}</span>
+      <span class="text-muted text-sm">{m.conversation_retention_days()}</span>
     </div>
   {/if}
 </div>

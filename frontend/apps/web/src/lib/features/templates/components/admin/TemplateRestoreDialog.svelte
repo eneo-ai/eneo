@@ -53,7 +53,7 @@
       <Undo class="text-positive-default shrink-0" size={20} aria-hidden="true" />
       <div class="flex flex-col gap-1">
         <div class="text-default font-semibold">{template.name}</div>
-        <div class="text-dimmer text-sm">{m.template_will_be_restored()}</div>
+        <div class="text-muted text-sm">{m.template_will_be_restored()}</div>
       </div>
     </div>
   </div>

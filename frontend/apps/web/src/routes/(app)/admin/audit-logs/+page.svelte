@@ -957,7 +957,7 @@
             class={`flex items-center justify-center gap-2 rounded-md px-6 py-2.5 text-sm font-semibold transition-all duration-150 ${
               activeTab === "logs"
                 ? "bg-accent-default text-on-fill ring-accent-default/20 shadow-accent-default/25 shadow-md ring-1"
-                : "text-muted hover:text-default hover:bg-hover hover:scale-[1.02] active:scale-[0.98]"
+                : "text-muted hover:text-default hover:bg-hover-default hover:scale-[1.02] active:scale-[0.98]"
             }`}
           >
             <FileText class="h-4 w-4" />
@@ -968,7 +968,7 @@
             class={`flex items-center justify-center gap-2 rounded-md px-6 py-2.5 text-sm font-semibold transition-all duration-150 ${
               activeTab === "config"
                 ? "bg-accent-default text-on-fill ring-accent-default/20 shadow-accent-default/25 shadow-md ring-1"
-                : "text-muted hover:text-default hover:bg-hover hover:scale-[1.02] active:scale-[0.98]"
+                : "text-muted hover:text-default hover:bg-hover-default hover:scale-[1.02] active:scale-[0.98]"
             }`}
           >
             <Settings class="h-4 w-4" />
@@ -1225,7 +1225,7 @@
                           ? m.audit_search_scope_entity()
                           : m.audit_search_scope_user()
                     })}
-                    class="text-muted bg-subtle/80 border-default/40 hover:bg-hover hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center
+                    class="text-muted bg-subtle/80 border-default/40 hover:bg-hover-default hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center
                     gap-1.5 rounded-md border px-2.5
                     text-xs font-semibold transition-all
                     duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1"
@@ -1306,7 +1306,7 @@
                 {#if searchQuery.length > 0}
                   <button
                     onclick={clearSearch}
-                    class="text-muted hover:text-default hover:bg-hover focus-visible:ring-accent-default absolute top-1/2 right-2 -translate-y-1/2
+                    class="text-muted hover:text-default hover:bg-hover-default focus-visible:ring-accent-default absolute top-1/2 right-2 -translate-y-1/2
                     rounded-md p-1.5 transition-all
                     duration-150 focus:outline-none focus-visible:ring-2"
                     aria-label={m.audit_search_clear()}
@@ -1387,7 +1387,7 @@
                     class={`focus-visible:ring-accent-default px-4 py-2 text-xs font-semibold transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset ${
                       activePreset === 7
                         ? "bg-accent-default text-white shadow-sm"
-                        : "text-muted hover:bg-hover hover:text-default active:scale-95"
+                        : "text-muted hover:bg-hover-default hover:text-default active:scale-95"
                     }`}
                   >
                     {m.audit_date_7d()}
@@ -1398,7 +1398,7 @@
                     class={`border-default/40 focus-visible:ring-accent-default border-x px-4 py-2 text-xs font-semibold transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset ${
                       activePreset === 30
                         ? "bg-accent-default border-x-transparent text-white shadow-sm"
-                        : "text-muted hover:bg-hover hover:text-default active:scale-95"
+                        : "text-muted hover:bg-hover-default hover:text-default active:scale-95"
                     }`}
                   >
                     {m.audit_date_30d()}
@@ -1409,7 +1409,7 @@
                     class={`focus-visible:ring-accent-default px-4 py-2 text-xs font-semibold transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset ${
                       activePreset === 90
                         ? "bg-accent-default text-white shadow-sm"
-                        : "text-muted hover:bg-hover hover:text-default active:scale-95"
+                        : "text-muted hover:bg-hover-default hover:text-default active:scale-95"
                     }`}
                   >
                     {m.audit_date_90d()}
@@ -1502,7 +1502,7 @@
                                 role="option"
                                 aria-selected={isSelected}
                                 tabindex={showActionDropdown ? 0 : -1}
-                                class={`bg-primary hover:bg-hover focus:bg-hover focus-visible:ring-accent-default/50 flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm
+                                class={`bg-primary hover:bg-hover-default focus:bg-hover-default focus-visible:ring-accent-default/50 flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm
                               transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset sm:py-2
                               ${isSelected ? "bg-accent-default/5" : ""}`}
                                 onclick={() => toggleAction(option.value as ActionType)}
@@ -1756,11 +1756,13 @@
                       {@const isExpanded = expandedRows.has(log.id || index.toString())}
                       <!-- Main Row -->
                       <tr
-                        class="hover:bg-hover/70 cursor-pointer transition-colors duration-150"
+                        class="hover:bg-hover-default/70 cursor-pointer transition-colors duration-150"
                         onclick={() => toggleRowExpansion(log.id || index.toString())}
                       >
                         <td class="px-4 py-3">
-                          <div class="hover:bg-hover rounded-md p-1 transition-colors duration-150">
+                          <div
+                            class="hover:bg-hover-default rounded-md p-1 transition-colors duration-150"
+                          >
                             <IconChevronDown
                               class={`text-muted h-5 w-5 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
                             />
@@ -1895,7 +1897,7 @@
                                           log.metadata,
                                           log.id || index.toString()
                                         )}
-                                      class="text-muted hover:bg-hover hover:text-default flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-all duration-150 hover:scale-105 active:scale-95"
+                                      class="text-muted hover:bg-hover-default hover:text-default flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-all duration-150 hover:scale-105 active:scale-95"
                                       aria-label={m.audit_copy_json()}
                                     >
                                       {#if copiedRowId === (log.id || index.toString())}

@@ -560,7 +560,7 @@
                       class="rounded-full border px-2.5 py-1 text-xs transition-all duration-150
                              {activePresetDays === preset.days
                         ? 'bg-accent-dimmer border-accent-default text-accent-default font-medium'
-                        : 'border-default text-secondary hover:bg-hover-dimmer hover:border-border-stronger'}"
+                        : 'border-default text-secondary hover:bg-hover-dimmer hover:border-stronger'}"
                       onclick={() => setPreset(preset.days)}
                     >
                       {preset.label}
@@ -585,7 +585,7 @@
 
               <div class="h-[600px]">
                 <div
-                  class="border-default hover:border-border-stronger relative flex h-full w-full items-stretch overflow-clip rounded-lg border
+                  class="border-default hover:border-stronger relative flex h-full w-full items-stretch overflow-clip rounded-lg border
                          shadow-sm transition-all duration-200 hover:shadow"
                 >
                   {#if !analyticsData}
