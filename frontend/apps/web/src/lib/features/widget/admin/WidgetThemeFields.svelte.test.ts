@@ -110,3 +110,26 @@ describe("WidgetThemeFields errors", () => {
     error.remove();
   });
 });
+
+describe("WidgetThemeFields logo", () => {
+  const PIXEL =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
+  test("a new saved logo replaces the error a broken one left", async () => {
+    const screen = render(WidgetThemeFields, {
+      theme: { primary_color: "#1F4E79", radius: 12, logo_url: "data:image/png;base64,broken" },
+      onChange: vi.fn()
+    });
+    await expect.element(page.getByText("widget_admin_logo_broken")).toBeVisible();
+
+    // A template applied or a reload after a conflict brings another address.
+    await screen.rerender({
+      theme: { primary_color: "#1F4E79", radius: 12, logo_url: PIXEL } as WidgetTheme
+    });
+    await expect.element(page.getByText("widget_admin_logo_broken")).not.toBeInTheDocument();
+    await expect
+      .element(page.getByLabelText("widget_admin_logo_url", { exact: true }))
+      .toHaveValue(PIXEL);
+    await vi.waitFor(() => expect(document.querySelector(`img[src="${PIXEL}"]`)).not.toBeNull());
+  });
+});

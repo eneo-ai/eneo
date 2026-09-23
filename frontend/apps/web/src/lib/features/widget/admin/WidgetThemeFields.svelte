@@ -56,6 +56,7 @@
       lastSavedLogo = saved;
       logoDraft = saved;
       logoInvalid = false;
+      logoBroken = false;
     }
   });
 
