@@ -11,10 +11,16 @@ from contextlib import closing
 from time import monotonic, sleep
 from uuid import uuid4
 
+import psycopg2
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.exc import DBAPIError
 from testcontainers.postgres import PostgresContainer
 
 from alembic import command
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from alembic.script import ScriptDirectory
 from tests.integration.migrations import test_file_icon_staged_backfill_expand as expand
 
 cleanup_database = expand.cleanup_database
@@ -180,6 +186,107 @@ def test_upgrade_keeps_chat_writes_flowing_while_it_waits_on_a_writer(database):
         )
         == []
     )
+    assert _fetch(
+        database,
+        "SELECT tgname::text FROM pg_trigger WHERE tgrelid = 'questions'::regclass "
+        "AND tgname = 'delete_question_owned_log'",
+    ) == [("delete_question_owned_log",)]
+
+
+def _chat_traffic(database_url: str, tenant_id: str, user_id: str) -> None:
+    """What chat requests do, each allowed to wait on a lock for 2 seconds."""
+    with closing(_autocommit(database_url)) as writer:
+        with writer.cursor() as cursor:
+            cursor.execute("SET lock_timeout = '2s'")
+            cursor.execute("SELECT count(*) FROM sessions")
+            cursor.execute(
+                "INSERT INTO sessions (user_id, name) VALUES (%s, 'chat') RETURNING id",
+                (user_id,),
+            )
+            (session_id,) = cursor.fetchone()
+            cursor.execute(
+                "INSERT INTO questions (question, answer, num_tokens_question, "
+                "num_tokens_answer, tenant_id, session_id) "
+                "VALUES ('q', 'a', 1, 1, %s, %s) RETURNING id",
+                (tenant_id, session_id),
+            )
+            (question_id,) = cursor.fetchone()
+            cursor.execute("DELETE FROM questions WHERE id = %s", (question_id,))
+
+
+def test_upgrade_never_queues_chat_traffic_behind_an_open_transaction(database):
+    tenant_id, user_id = _seed_tenant_and_user(database)
+    config = expand._alembic_config(database)
+    # A request transaction that read the session it streams an answer for.
+    blocker = expand._connect(database)
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        with blocker.cursor() as cursor:
+            cursor.execute("SELECT count(*) FROM sessions")
+        upgrade = executor.submit(command.upgrade, config, WIDGET_HEAD)
+        sleep(1)
+        assert not upgrade.done()
+
+        _chat_traffic(database, tenant_id, user_id)
+    finally:
+        blocker.rollback()
+        blocker.close()
+        executor.shutdown(wait=True)
+    upgrade.result()
+
+    assert _fetch(
+        database,
+        "SELECT count(*) FROM pg_constraint WHERE conrelid = 'sessions'::regclass "
+        "AND conname = 'ck_sessions_single_principal' AND convalidated",
+    ) == [(1,)]
+
+
+def _question_log_cleanup_step(database_url: str, migration) -> None:
+    engine = create_engine(database_url, isolation_level="AUTOCOMMIT")
+    try:
+        with engine.connect() as connection:
+            with Operations.context(MigrationContext.configure(connection)):
+                migration._install_question_log_cleanup()
+    finally:
+        engine.dispose()
+
+
+def test_trigger_step_never_queues_chat_writes_and_gives_up_in_bounded_time(
+    database, monkeypatch
+):
+    tenant_id, user_id = _seed_tenant_and_user(database)
+    config = expand._alembic_config(database)
+    command.upgrade(config, WIDGET_HEAD)
+    migration = ScriptDirectory.from_config(config).get_revision(WIDGET_HEAD).module
+    # A long request transaction that wrote a question; re-running the step
+    # replaces the trigger, which needs ACCESS EXCLUSIVE on questions.
+    blocker = expand._connect(database)
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        with blocker.cursor() as cursor:
+            cursor.execute("LOCK TABLE questions IN ROW EXCLUSIVE MODE")
+        step = executor.submit(_question_log_cleanup_step, database, migration)
+        sleep(1)
+        assert not step.done()
+
+        _chat_traffic(database, tenant_id, user_id)
+    finally:
+        blocker.rollback()
+        executor.shutdown(wait=True)
+    step.result()
+
+    monkeypatch.setattr(migration, "_LOCK_RETRY_SECONDS", 0.5)
+    try:
+        with blocker.cursor() as cursor:
+            cursor.execute("LOCK TABLE questions IN ROW EXCLUSIVE MODE")
+        started = monotonic()
+        with pytest.raises(DBAPIError) as refused:
+            _question_log_cleanup_step(database, migration)
+        assert isinstance(refused.value.orig, psycopg2.errors.LockNotAvailable)
+        assert monotonic() - started < 5
+    finally:
+        blocker.rollback()
+        blocker.close()
     assert _fetch(
         database,
         "SELECT tgname::text FROM pg_trigger WHERE tgrelid = 'questions'::regclass "
