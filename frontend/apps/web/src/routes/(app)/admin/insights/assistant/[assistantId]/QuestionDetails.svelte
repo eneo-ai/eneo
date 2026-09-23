@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { getEneo } from "$lib/core/Eneo";
-  import { CodeBlock } from "@eneo/ui";
+  import CodeBlock from "$lib/components/CodeBlock.svelte";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";

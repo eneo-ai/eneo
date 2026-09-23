@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Markdown } from "@eneo/ui";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import MessageEneoInfoBlob from "./MessageEneoInfoBlob.svelte";
   import McpImageAttachments from "./McpImageAttachments.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";

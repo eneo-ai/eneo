@@ -5,7 +5,7 @@
   import { toStore } from "svelte/store";
   import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
   import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
-  import { Markdown } from "@eneo/ui";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import Message from "./Message.svelte";
   import ChatComposer from "./ChatComposer.svelte";
   import { fade } from "svelte/transition";

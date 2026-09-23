@@ -20,8 +20,8 @@
   } = $props();
 </script>
 
-<!-- NOTE: `z-[100]` instead of upstream's `z-50` so tooltips stay above the legacy
-  `@eneo/ui` Dialog (`z-[51]`) as well as shadcn overlays. -->
+<!-- NOTE: `z-[100]` instead of upstream's `z-50` so tooltips stay above the app's own
+  stacked layers (page header `z-[60]`, space selector overlay `z-[70]`/`z-[80]`) and dialogs. -->
 <TooltipPortal {...portalProps}>
   <TooltipPrimitive.Content
     bind:ref

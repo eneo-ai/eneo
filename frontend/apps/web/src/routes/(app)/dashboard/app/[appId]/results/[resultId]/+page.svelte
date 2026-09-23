@@ -3,7 +3,7 @@
   import { IconDownload } from "@eneo/icons/download";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconPrint } from "@eneo/icons/print";
-  import { Markdown } from "@eneo/ui";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import dayjs from "dayjs";

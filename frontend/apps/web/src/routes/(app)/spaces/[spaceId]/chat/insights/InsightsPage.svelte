@@ -13,7 +13,7 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconSendArrow } from "@eneo/icons/send-arrow";
   import { IconSparkles } from "@eneo/icons/sparkles";
-  import { Markdown } from "@eneo/ui";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import DateRangePicker from "$lib/components/DateRangePicker.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";

@@ -9,6 +9,16 @@
       "count": 1
     }
   },
+  "src/lib/components/CodeBlock.svelte": {
+    "eneo/no-raw-color": {
+      "count": 35
+    }
+  },
+  "src/lib/components/chart/theme.ts": {
+    "eneo/no-raw-color": {
+      "count": 90
+    }
+  },
   "src/lib/components/ui/alert-dialog/alert-dialog-overlay.svelte": {
     "eneo/no-raw-color": {
       "count": 1
