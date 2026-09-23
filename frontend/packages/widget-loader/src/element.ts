@@ -17,9 +17,12 @@ export const CONNECTED_EVENT = "eneo-widget:connected";
 
 const MOBILE_BREAKPOINT = 640;
 const CLOSE_ANIMATION_MS = 180;
-// No `allow-forms`: the embed page submits nothing, its composer is a button
-// and fetch, and its CSP already pins form-action to itself.
-const SANDBOX = "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox";
+// `allow-forms`: the composer and the comment dialog are forms, and a sandbox
+// without it drops their submit event before any handler runs. Nothing is
+// ever really submitted: the handlers prevent it and the embed CSP pins
+// form-action to the Eneo origin.
+const SANDBOX =
+  "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
 
 type Labels = { open: string; close: string; title: string; unread: (count: number) => string };
 

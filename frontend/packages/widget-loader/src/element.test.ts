@@ -96,12 +96,39 @@ describe("opening", () => {
     );
     expect(frame.getAttribute("sandbox")).toContain("allow-scripts");
     expect(frame.getAttribute("sandbox")).toContain("allow-same-origin");
+    expect(frame.getAttribute("sandbox")).toContain("allow-forms");
     expect(frame.getAttribute("sandbox")).not.toContain("allow-top-navigation");
     expect(frame.getAttribute("referrerpolicy")).toBe("strict-origin");
     expect(frame.title).toBe("Chat");
     expect(element.hasAttribute("open")).toBe(true);
     expect(launcherOf(element).getAttribute("aria-expanded")).toBe("true");
     expect(element.shadowRoot!.querySelector(".panel")!.hasAttribute("hidden")).toBe(false);
+  });
+
+  it("lets the embed page's forms submit inside the sandbox", async () => {
+    // The composer's send arrow and the comment dialog's Send are submit
+    // buttons; a sandbox without allow-forms drops the submit event itself.
+    async function submitsIn(sandbox: string): Promise<number> {
+      const frame = document.createElement("iframe");
+      frame.setAttribute("sandbox", sandbox);
+      frame.srcdoc = '<form><button type="submit">Skicka</button></form>';
+      const loaded = new Promise((resolve) => frame.addEventListener("load", resolve));
+      document.body.appendChild(frame);
+      await loaded;
+      let submits = 0;
+      frame.contentDocument!.querySelector("form")!.addEventListener("submit", (event) => {
+        event.preventDefault();
+        submits += 1;
+      });
+      frame.contentDocument!.querySelector("button")!.click();
+      return submits;
+    }
+
+    const element = mount();
+    element.openPanel();
+    const sandbox = frameOf(element)!.getAttribute("sandbox")!;
+    expect(await submitsIn(sandbox)).toBe(1);
+    expect(await submitsIn(sandbox.replace("allow-forms", ""))).toBe(0);
   });
 
   it("passes a pinned colour scheme along so the first paint matches", () => {
