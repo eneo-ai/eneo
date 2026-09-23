@@ -320,6 +320,7 @@ async def get_flow_graph(
             speaker_identification_available=(
                 get_settings().flow_transcription_service_configured
             ),
+            speaker_labels=versioned_view.speaker_labels,
         )
 
     published_access = await require_flow_published_runtime_access(

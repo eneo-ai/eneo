@@ -2995,7 +2995,9 @@ async def test_get_run_versioned_view_loads_run_definition_and_results(user):
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
     assert flow.id is not None
-    run = _run(user=user, flow_id=flow.id)
+    run = _run(user=user, flow_id=flow.id).model_copy(
+        update={"input_payload_json": {"input": "value", "speaker_labels": False}}
+    )
     version = _runtime_version(user=user, flow=flow, version=run.flow_version)
     step_result = FlowStepResultAnnotation.model_validate(
         _step_result_record(run, step_order=1)
@@ -3021,6 +3023,7 @@ async def test_get_run_versioned_view_loads_run_definition_and_results(user):
     assert result.published_definition.flow_id == run.flow_id
     assert result.published_definition.schema_version == FLOW_DEFINITION_SCHEMA_VERSION
     assert result.step_results == (step_result,)
+    assert result.speaker_labels is False
     flow_run_repo.get.assert_awaited_once_with(
         run_id=run.id,
         tenant_id=user.tenant_id,

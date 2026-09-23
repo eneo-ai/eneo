@@ -278,6 +278,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Rename caller-owned payload fields that collide with reserved keys.",
         user_action="Rename the input field and try again.",
     ),
+    FlowApiErrorCode.RUN_SPEAKER_LABELS_NOT_SELECTABLE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The run chose speaker labels, but the run contract offers no such choice for this flow.",
+        consumer_action="Send speaker_labels only when the run contract marks speaker labels as selectable.",
+        user_action="Reload the flow and start the run again.",
+    ),
     FlowApiErrorCode.RUN_INPUT_PAYLOAD_TOO_LARGE: _entry(
         category="Run input",
         surfaced_through="API error response",

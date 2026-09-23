@@ -37,6 +37,7 @@ class FlowApiErrorCode(str, Enum):
     RUN_STEP_INPUT_MIMETYPE_REJECTED = "flow_run_step_input_mimetype_rejected"
     RUN_AGGREGATE_MAX_FILES_EXCEEDED = "flow_run_aggregate_max_files_exceeded"
     RUN_RESERVED_INPUT_PAYLOAD_KEY = "flow_run_reserved_input_payload_key"
+    RUN_SPEAKER_LABELS_NOT_SELECTABLE = "flow_run_speaker_labels_not_selectable"
     RUN_INPUT_PAYLOAD_TOO_LARGE = "flow_run_input_payload_too_large"
     RUN_INPUT_EXCEEDS_LIMIT = "flow_run_input_exceeds_limit"
     INPUT_REQUIRED_FIELD_MISSING = "flow_input_required_field_missing"

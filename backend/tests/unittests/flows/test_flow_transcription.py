@@ -652,6 +652,47 @@ async def test_audio_resolve_passes_no_language_for_auto(spool_contract, user):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored_choice", "diarize"), [({}, True), ({"speaker_labels": False}, False)]
+)
+async def test_audio_resolve_lets_the_runs_speaker_choice_replace_the_flow_default(
+    spool_contract, user, stored_choice, diarize
+):
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    file = _audio_file(name="meeting.wav")
+    file_service.get_files_by_ids.return_value = [file]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.get_space_by_assistant = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    transcriber.transcribe = AsyncMock(return_value=_transcribed("ok"))
+    run = _run(user=user, payload=stored_choice)
+    _patch_run_input_payload(flow_run_repo, run)
+
+    await executor._resolve_step_input(
+        step=_runtime_step(),
+        context=executor.variable_resolver.build_context(run.input_payload_json, []),
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_diarization": True,
+            }
+        },
+        requested_file_ids=[file.id],
+    )
+
+    assert transcriber.transcribe.await_args.kwargs["diarize"] is diarize
+
+
+@pytest.mark.asyncio
 async def test_audio_resolve_ignores_shared_file_transcription_cache(
     spool_contract, user
 ):

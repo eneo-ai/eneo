@@ -76,6 +76,7 @@ from eneo.flows.published_definition import (
     parse_published_definition,
     published_definition_checksum,
 )
+from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     AuditLoggingUnavailableException,
     BadRequestException,
@@ -186,6 +187,77 @@ async def test_get_flow_graph_keeps_run_version_snapshot_visible_after_unpublish
     flow_run_service.get_run.assert_not_awaited()
     flow_run_service.list_step_results.assert_not_awaited()
     container.flow_version_repo.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("speaker_labels", "marked"), [(None, True), (False, None)])
+async def test_get_flow_graph_says_speakers_are_labelled_only_when_the_run_labels_them(
+    monkeypatch: pytest.MonkeyPatch, speaker_labels: bool | None, marked: bool | None
+):
+    container = MagicMock()
+    flow_run_service = AsyncMock()
+    container.flow_service.return_value = AsyncMock()
+    container.flow_run_service.return_value = flow_run_service
+    _enable_space_access(container)
+    flow_id = uuid4()
+    flow = _flow(flow_id)
+    container.flow_service.return_value.get_flow.return_value = flow
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(), tenant_id=flow.tenant_id, permissions=[Permission.FLOWS]
+    )
+    run = _run(flow_id=flow_id, tenant_id=flow.tenant_id)
+    assistant_id = uuid4()
+    flow_run_service.get_run_versioned_view.return_value = FlowRunVersionedView(
+        published_definition=parse_published_definition(
+            {
+                "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+                "flow_id": str(flow_id),
+                "metadata_json": {
+                    "wizard": {
+                        "transcription_enabled": True,
+                        "transcription_diarization": True,
+                    }
+                },
+                "steps": [
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 1,
+                        "assistant_id": str(assistant_id),
+                        "assistant_snapshot": assistant_snapshot(assistant_id),
+                        "input_source": "flow_input",
+                        "input_type": "audio",
+                        "input_config": {
+                            "runtime_input": {"enabled": True, "input_format": "audio"}
+                        },
+                        "output_mode": "transcribe_only",
+                        "output_type": "text",
+                    }
+                ],
+            },
+            flow_version=run.flow_version,
+        ),
+        step_results=(),
+        speaker_labels=speaker_labels,
+    )
+    with_service = get_settings().model_copy(
+        update={
+            "flow_transcription_service_url": "http://speaker-service.invalid",
+            "flow_transcription_service_api_key": "service-key",
+        }
+    )
+    monkeypatch.setattr(
+        "eneo.flows.api.flow_run_steps_router.get_settings", lambda: with_service
+    )
+
+    graph = await get_flow_graph(
+        id=flow_id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        run_id=run.id,
+        container=container,
+    )
+
+    [audio_node] = [node for node in graph.nodes if node.input_type == "audio"]
+    assert audio_node.speaker_identification is marked
 
 
 @pytest.mark.asyncio

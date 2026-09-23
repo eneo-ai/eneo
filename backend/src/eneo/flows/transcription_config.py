@@ -18,6 +18,10 @@ class FlowTranscriptionConfig:
     language: str
     diarization: bool
 
+    def diarize(self, speaker_labels: bool | None) -> bool:
+        """Whether speakers are labelled: the run's own choice, else the flow's."""
+        return self.diarization if speaker_labels is None else speaker_labels
+
 
 def parse_transcription_config(
     definition_metadata: dict[str, Any] | None,

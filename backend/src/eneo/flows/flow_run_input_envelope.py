@@ -12,12 +12,15 @@ TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE = (
     "The run's transcript predates the current format. Start a new run."
 )
 TRANSCRIPT_REGENERATION_KEY = "transcript_regeneration"
+# The run's own speaker-label choice; absent means the flow's default.
+SPEAKER_LABELS_KEY = "speaker_labels"
 
 _REMOVED_TOP_LEVEL_RUNTIME_FILE_IDS_KEY = "file_ids"
 _PERSISTED_RUNTIME_INPUT_KEYS = frozenset(
     {
         EXPECTED_FLOW_VERSION_KEY,
         FLOW_INPUT_TRANSCRIPTION_KEY,
+        SPEAKER_LABELS_KEY,
         TRANSCRIPT_REGENERATION_KEY,
     }
 )
@@ -69,11 +72,21 @@ def read_semantic_flow_input_payload(
     }
 
 
+def read_speaker_labels_choice(
+    input_payload_json: FlowPersistedJsonObject | None,
+) -> bool | None:
+    choice = (input_payload_json or {}).get(SPEAKER_LABELS_KEY)
+    return choice if isinstance(choice, bool) else None
+
+
 def build_initial_run_input_envelope(
     *,
     normalized_inline_payload: FlowPersistedJsonObject | None,
     flow_version: int,
+    speaker_labels: bool | None = None,
 ) -> FlowPersistedJsonObject:
     payload = dict(normalized_inline_payload or {})
     payload[EXPECTED_FLOW_VERSION_KEY] = flow_version
+    if speaker_labels is not None:
+        payload[SPEAKER_LABELS_KEY] = speaker_labels
     return payload

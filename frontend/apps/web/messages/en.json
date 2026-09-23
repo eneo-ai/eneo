@@ -5424,6 +5424,7 @@
   "flow_error_flow_run_invalid_step_inputs": "The step input file IDs are invalid. Check the file IDs and try again.",
   "flow_error_flow_run_required_step_input_missing": "Required files are missing. Add them and start the run again.",
   "flow_error_flow_run_reserved_input_payload_key": "What is sent in contains field names that Eneo already uses. Rename those fields and try again.",
+  "flow_error_flow_run_speaker_labels_not_selectable": "This flow does not let you choose whether speakers are labelled. Reload the flow and start the run again.",
   "flow_error_flow_run_runtime_input_disabled": "This step does not accept files when the flow runs. Reload the flow and attach the files to a step that accepts them.",
   "flow_error_flow_run_stale_version": "The published version of the flow changed before the run started. Reload the flow and submit again.",
   "flow_error_flow_run_retry_source_not_failed": "Only failed runs can be retried from the failed step. Start a new run instead.",

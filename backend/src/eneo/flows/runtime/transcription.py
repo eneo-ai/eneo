@@ -880,6 +880,7 @@ async def resolve_and_transcribe_audio_for_step(
     open_audio_download: OpenAudioDownload,
     transcription_call_observer: "ProviderCallObserver | None" = None,
     max_speakers: int | None = None,
+    speaker_labels: bool | None = None,
     source_preparation: TranscriptSourcePreparation | None = None,
 ) -> FlowTranscriptionResult:
     try:
@@ -926,7 +927,7 @@ async def resolve_and_transcribe_audio_for_step(
         max_inline_text_bytes=max_inline_text_bytes,
         open_audio_download=open_audio_download,
         transcription_call_observer=transcription_call_observer,
-        diarize=transcription_config.diarization,
+        diarize=transcription_config.diarize(speaker_labels),
         max_speakers=max_speakers,
         source_preparation=source_preparation,
     )

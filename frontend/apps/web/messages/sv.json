@@ -5424,6 +5424,7 @@
   "flow_error_flow_run_invalid_step_inputs": "Stegets fil-ID:n är ogiltiga. Kontrollera fil-ID:n och försök igen.",
   "flow_error_flow_run_required_step_input_missing": "Filer som krävs saknas. Lägg till filerna och starta körningen igen.",
   "flow_error_flow_run_reserved_input_payload_key": "Det som skickas in innehåller fältnamn som Eneo redan använder. Byt namn på fälten och försök igen.",
+  "flow_error_flow_run_speaker_labels_not_selectable": "Det går inte att välja om talare ska märkas upp i det här flödet. Läs in flödet igen och starta körningen på nytt.",
   "flow_error_flow_run_runtime_input_disabled": "Det här steget tar inte emot filer vid körning. Läs in flödet igen och lägg filerna i ett steg som tar emot filer.",
   "flow_error_flow_run_stale_version": "Den publicerade versionen av flödet ändrades innan körningen startade. Läs in flödet igen och skicka på nytt.",
   "flow_error_flow_run_retry_source_not_failed": "Bara misslyckade körningar kan köras om från det misslyckade steget. Starta en ny körning i stället.",

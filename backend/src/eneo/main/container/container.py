@@ -1649,6 +1649,8 @@ class Container(containers.DeclarativeContainer):
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
         template_asset_repo=flow_template_asset_repo,
+        space_repo=space_repo,
+        settings=providers.Callable(get_settings),
     )
     ai_builder_repo = providers.Factory(
         AIBuilderRepository,

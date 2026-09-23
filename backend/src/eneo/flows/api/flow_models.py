@@ -902,6 +902,16 @@ class FlowRunCreateRequest(BaseModel):
             "input in the run contract."
         ),
     )
+    speaker_labels: bool | None = Field(
+        default=None,
+        description=(
+            "Whether this run's transcription labels speakers. Send it only when "
+            "`transcription.speaker_labels.selectable` in the run contract is true; "
+            "otherwise the request is refused with 422 "
+            "`flow_run_speaker_labels_not_selectable`. Null or omitted uses the "
+            "flow's default. Labelling speakers makes the run take longer."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod

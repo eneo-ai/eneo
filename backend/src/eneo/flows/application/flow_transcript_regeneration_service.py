@@ -44,6 +44,7 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_run_input_envelope import (
     read_semantic_flow_input_payload,
+    read_speaker_labels_choice,
 )
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
@@ -328,6 +329,7 @@ class FlowTranscriptRegenerationService:
             input_payload_json=read_semantic_flow_input_payload(
                 source.input_payload_json
             ),
+            speaker_labels=read_speaker_labels_choice(source.input_payload_json),
             expected_flow_version=source.flow_version,
             step_inputs=step_inputs,
             idempotency_key=key,

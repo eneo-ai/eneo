@@ -153,6 +153,19 @@ async def test_reuses_completed_prefix_and_preserves_creation_inputs(context):
     assert context.source.status == "failed"
 
 
+async def test_retry_keeps_the_source_runs_speaker_choice(context):
+    context.source.input_payload_json = {
+        **context.source.input_payload_json,
+        "speaker_labels": False,
+    }
+
+    await context.service.retry_from_failed_step(**context.request)
+
+    args = context.service.run_service.create_run.await_args.kwargs
+    assert args["speaker_labels"] is False
+    assert args["input_payload_json"] == {"question": "Summarize"}
+
+
 async def test_replay_returns_same_child_without_new_creation_or_audit(context):
     await context.service.retry_from_failed_step(**context.request)
     seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]

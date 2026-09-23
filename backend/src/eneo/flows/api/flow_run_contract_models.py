@@ -6,6 +6,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from eneo.flows.api.flow_live_transcription_models import (
+    FlowLiveTranscriptionAvailabilityPublic,
+)
 from eneo.flows.domain.text_processing import TextProcessingMode
 from eneo.flows.enums import (
     FlowOutputMode,
@@ -118,6 +121,10 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
             "message_code": None,
         }
     ],
+    "transcription": {
+        "live": {"available": True, "reason": None},
+        "speaker_labels": {"selectable": True, "required": False, "default": True},
+    },
 }
 
 
@@ -465,6 +472,33 @@ class FlowTextProcessingStepPublic(BaseModel):
     item_schema: dict[str, Any]
 
 
+class FlowSpeakerLabelsOptionPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    selectable: bool = Field(
+        description=(
+            "Whether a run may choose with `speaker_labels` on run creation. False "
+            "when no transcription service labels speakers or the flow requires "
+            "labels."
+        )
+    )
+    required: bool = Field(
+        description="Whether the flow needs speaker labels, because a step maps speakers to names."
+    )
+    default: bool = Field(
+        description="The flow's own speaker-label setting, which applies when a run makes no choice."
+    )
+
+
+class FlowTranscriptionContractPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    live: FlowLiveTranscriptionAvailabilityPublic = Field(
+        description="Whether the audio step can show a live transcript preview while recording."
+    )
+    speaker_labels: FlowSpeakerLabelsOptionPublic
+
+
 class FlowRunContractPublic(BaseModel):
     model_config = ConfigDict(
         extra="forbid", json_schema_extra={"example": FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE}
@@ -518,4 +552,13 @@ class FlowRunContractPublic(BaseModel):
     )
     template_readiness: list[FlowTemplateReadinessPublic] = Field(
         default_factory=lambda: cast(list[FlowTemplateReadinessPublic], [])
+    )
+    transcription: FlowTranscriptionContractPublic | None = Field(
+        default=None,
+        description=(
+            "Options for a flow that transcribes recorded audio: whether the audio "
+            "step can show a live transcript preview, and whether a run may choose "
+            "speaker labels with `speaker_labels` on run creation. Null when the "
+            "flow transcribes no audio."
+        ),
     )

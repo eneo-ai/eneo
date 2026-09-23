@@ -134,6 +134,8 @@ Use this endpoint before rendering a run form to discover:
   and the effective `expires_after_seconds` review window
 - aggregate file limits
 - published template readiness and capability state
+- for a flow that transcribes audio, whether a live transcript preview is available and
+  whether the run may choose `speaker_labels`
 
 Recommended consumer flow:
 1. Render `form_fields` as the run form.

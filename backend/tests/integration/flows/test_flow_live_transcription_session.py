@@ -137,6 +137,8 @@ async def _published_flow(
     endpoint: str = UNREACHABLE_ENDPOINT,
     supports_realtime: bool = True,
     audio: bool = True,
+    input_required: bool = True,
+    wizard: Mapping[str, object] | None = None,
 ) -> LiveFlow:
     space_id = await _create_space(client, headers)
     model = await _create_transcription_model(
@@ -179,7 +181,7 @@ async def _published_flow(
             "input_config": {
                 "runtime_input": {
                     "enabled": True,
-                    "required": True,
+                    "required": input_required,
                     "input_format": "audio",
                     "description": "Spela in mötet.",
                 }
@@ -196,6 +198,7 @@ async def _published_flow(
                     "transcription_enabled": audio,
                     "transcription_model": {"id": model["id"]},
                     "transcription_language": "sv",
+                    **(wizard or {}),
                 }
             },
         },

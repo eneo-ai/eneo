@@ -44,6 +44,8 @@ and create the run as usual; the flow's transcription model then produces the
 transcript the run uses. Live preview is only available when the flow's own
 transcription model transcribes and that model supports realtime; otherwise
 this route answers 409 `flow_live_transcription_unavailable` with a `reason`.
+The run contract's `transcription.live` reports the same availability and
+reason, so a client can decide before recording whether to offer the preview.
 """
 
 

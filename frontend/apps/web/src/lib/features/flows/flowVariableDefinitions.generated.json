@@ -33,6 +33,7 @@
     "expected_flow_version",
     "file_ids",
     "json",
+    "speaker_labels",
     "step_inputs",
     "structured",
     "text",

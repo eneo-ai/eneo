@@ -6,7 +6,7 @@ from eneo.flows.domain.flow_run_recovery_policy import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunAbandonmentFacts
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, ValidationException
 
 
 class FlowBadRequestException(BadRequestException):
@@ -22,6 +22,14 @@ class FlowBadRequestException(BadRequestException):
         context: dict[str, object] | None = None,
     ) -> None:
         super().__init__(message, code=code.value, context=context)
+        self.code = code
+
+
+class FlowValidationException(ValidationException):
+    """A well-formed Flow request the server cannot accept (422), with a code."""
+
+    def __init__(self, message: str, *, code: FlowApiErrorCode) -> None:
+        super().__init__(message)
         self.code = code
 
 

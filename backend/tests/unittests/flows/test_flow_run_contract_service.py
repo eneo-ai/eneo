@@ -29,6 +29,7 @@ from eneo.flows.published_definition import (
     FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
     published_definition_checksum,
 )
+from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from tests.flow_snapshot_fixtures import assistant_snapshot
 
@@ -136,13 +137,95 @@ def _service(
     settings_service: AsyncMock,
     flow_version_repo: AsyncMock,
     template_asset_repo: AsyncMock | None = None,
+    space_repo: AsyncMock | None = None,
+    settings: Settings | None = None,
 ) -> FlowRunContractService:
     return FlowRunContractService(
         flow_service=flow_service,
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
         template_asset_repo=template_asset_repo or AsyncMock(),
+        space_repo=space_repo or AsyncMock(),
+        settings=settings or get_settings(),
     )
+
+
+@pytest.mark.asyncio
+async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose() -> (
+    None
+):
+    audio_step = _step(step_order=1, input_type="audio")
+    mapping_assistant_id = uuid4()
+    flow = _flow(step=audio_step).model_copy(update={"published_version": 1})
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    settings_service = AsyncMock()
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    versions = AsyncMock()
+    versions.get.return_value = _published_version(
+        version=1,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "metadata_json": {
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_model": {"id": str(uuid4())},
+                }
+            },
+            "steps": [
+                {
+                    "step_id": str(audio_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(audio_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(audio_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "audio",
+                    "input_config": {
+                        "runtime_input": {"enabled": True, "input_format": "audio"}
+                    },
+                    "output_mode": "transcribe_only",
+                    "output_type": "text",
+                },
+                {
+                    "step_id": str(uuid4()),
+                    "step_order": 2,
+                    "assistant_id": str(mapping_assistant_id),
+                    "assistant_snapshot": assistant_snapshot(mapping_assistant_id),
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_mode": "speaker_mapping",
+                    "output_type": "json",
+                    "review_policy": {"mode": "edit"},
+                },
+            ],
+        },
+    )
+    space_repo = AsyncMock()
+    space_repo.get_space_by_assistant.return_value = SimpleNamespace(
+        transcription_models=[]
+    )
+    with_service = get_settings().model_copy(
+        update={
+            "flow_transcription_service_url": "http://speaker-service.invalid",
+            "flow_transcription_service_api_key": "service-key",
+        }
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=versions,
+        space_repo=space_repo,
+        settings=with_service,
+    ).get_run_contract(flow_id=flow.id)
+
+    assert contract.transcription is not None
+    assert contract.transcription.speaker_labels.model_dump() == {
+        "selectable": False,
+        "required": True,
+        "default": True,
+    }
 
 
 @pytest.mark.asyncio

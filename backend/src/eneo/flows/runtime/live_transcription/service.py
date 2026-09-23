@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.flows.enums import FlowRuntimeInputFormat
@@ -80,7 +80,7 @@ class LiveTranscriptionSessionService:
             wizard_metadata=runtime_inputs.definition.metadata().wizard,
             space_repo=self.space_repo,
             step=spec.step,
-            external_service_mode=self._external_service_mode(),
+            settings=self.settings,
         )
         if availability.model is None:
             raise ConflictException(
@@ -109,8 +109,3 @@ class LiveTranscriptionSessionService:
             flow_version=published.published_version,
             model=availability.model,
         )
-
-    def _external_service_mode(self) -> Literal["full", "diarize"] | None:
-        if not self.settings.flow_transcription_service_configured:
-            return None
-        return self.settings.flow_transcription_service_mode

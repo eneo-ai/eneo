@@ -3,27 +3,34 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
+from eneo.flows.api.flow_live_transcription_models import (
+    FlowLiveTranscriptionAvailabilityPublic,
+)
 from eneo.flows.api.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
     FlowOutputDelivery,
     FlowReviewStepContractPublic,
     FlowRunContractPublic,
     FlowRuntimeInputContractPublic,
+    FlowSpeakerLabelsOptionPublic,
     FlowTemplateReadinessPublic,
     FlowTextProcessingStepPublic,
+    FlowTranscriptionContractPublic,
     FormFieldPublic,
     default_runtime_upload_policy_public,
 )
-from eneo.flows.domain.flow import Flow, FlowTemplateAsset
+from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowTemplateAsset
 from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.step_mapped_execution import single_mapped_array_key
 from eneo.flows.domain.text_processing import text_processing_config
 from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
+    FlowRuntimeInputFormat,
     FlowTemplateAssetStatus,
     final_step_output_type,
 )
@@ -41,9 +48,19 @@ from eneo.flows.published_runtime import (
     FlowRuntimePublicationIntent,
     FlowRuntimeSettingsSource,
     FlowRuntimeVersionSource,
+    PublishedRuntimeInputs,
     load_published_runtime_inputs,
 )
+from eneo.flows.runtime.live_transcription.admission import resolve_live_transcription
+from eneo.flows.transcription_config import (
+    FlowTranscriptionConfigError,
+    parse_transcription_config,
+)
 from eneo.main.exceptions import NotFoundException
+
+if TYPE_CHECKING:
+    from eneo.main.config import Settings
+    from eneo.spaces.space_repo import SpaceRepository
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +75,8 @@ class FlowRunContractService:
     settings_service: FlowRuntimeSettingsSource
     flow_version_repo: FlowRuntimeVersionSource
     template_asset_repo: _FlowTemplateAssetRepositoryProtocol
+    space_repo: SpaceRepository
+    settings: Settings
 
     async def get_run_contract(self, *, flow_id: UUID) -> FlowRunContractPublic:
         runtime_inputs = await load_published_runtime_inputs(
@@ -87,6 +106,32 @@ class FlowRunContractService:
                 published_version=published.published_version,
                 steps=runtime_inputs.steps,
             ),
+            transcription=await self._transcription(runtime_inputs),
+        )
+
+    async def _transcription(
+        self, runtime_inputs: PublishedRuntimeInputs
+    ) -> FlowTranscriptionContractPublic | None:
+        wizard_metadata = runtime_inputs.definition.metadata().wizard
+        speaker_labels = speaker_labels_option(
+            runtime_inputs.steps,
+            wizard_metadata=wizard_metadata,
+            service_configured=self.settings.flow_transcription_service_configured,
+        )
+        audio_step = _audio_input_step(runtime_inputs.steps)
+        if speaker_labels is None or audio_step is None:
+            return None
+        live = await resolve_live_transcription(
+            wizard_metadata=wizard_metadata,
+            space_repo=self.space_repo,
+            step=audio_step,
+            settings=self.settings,
+        )
+        return FlowTranscriptionContractPublic(
+            live=FlowLiveTranscriptionAvailabilityPublic(
+                available=live.available, reason=live.reason
+            ),
+            speaker_labels=speaker_labels,
         )
 
     async def _template_readiness(
@@ -194,6 +239,46 @@ def build_final_output_contract(
         delivery=_output_delivery(output_type=output_type, output_mode=output_mode),
         output_contract=final_step.output_contract,
     )
+
+
+def speaker_labels_option(
+    steps: Sequence[RuntimeStep],
+    *,
+    wizard_metadata: FlowPersistedJsonObject | None,
+    service_configured: bool,
+) -> FlowSpeakerLabelsOptionPublic | None:
+    """The speaker-label choice a run gets; None when the flow transcribes no audio.
+
+    Only an external transcription service labels speakers, so without one there
+    is nothing to choose, and a step that maps speakers to names needs the labels.
+    """
+    if _audio_input_step(steps) is None:
+        return None
+    try:
+        config = parse_transcription_config({"wizard": wizard_metadata})
+    except FlowTranscriptionConfigError:
+        return None
+    if not config.enabled:
+        return None
+    required = any(
+        step.output_mode == FlowOutputMode.SPEAKER_MAPPING.value for step in steps
+    )
+    return FlowSpeakerLabelsOptionPublic(
+        selectable=service_configured and not required,
+        required=required,
+        default=config.diarization,
+    )
+
+
+def _audio_input_step(steps: Sequence[RuntimeStep]) -> RuntimeStep | None:
+    for step in sorted(steps, key=lambda item: item.step_order):
+        runtime_input = build_runtime_input_config(step.input_config)
+        if (
+            runtime_input.enabled
+            and runtime_input.input_format is FlowRuntimeInputFormat.AUDIO
+        ):
+            return step
+    return None
 
 
 def _output_delivery(

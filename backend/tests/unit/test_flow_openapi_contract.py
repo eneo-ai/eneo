@@ -1845,11 +1845,14 @@ def test_openapi_run_contract_response_schemas_are_closed(
     schemas = openapi_spec.get("components", {}).get("schemas", {})
     run_contract_schemas = {
         "FlowFinalOutputContractPublic",
+        "FlowLiveTranscriptionAvailabilityPublic",
         "FlowReviewStepContractPublic",
         "FlowRunContractPublic",
         "FlowRuntimeInputContractPublic",
         "FlowRuntimeUploadPolicyPublic",
+        "FlowSpeakerLabelsOptionPublic",
         "FlowTemplateReadinessPublic",
+        "FlowTranscriptionContractPublic",
         "FormFieldPublic",
     }
 
@@ -1860,6 +1863,43 @@ def test_openapi_run_contract_response_schemas_are_closed(
     ]
 
     assert missing_closed_schema == []
+
+
+def test_openapi_documents_transcription_options_and_the_run_speaker_choice(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec["components"]["schemas"]
+    transcription = _resolve_component_ref(
+        openapi_spec,
+        _non_null_schema(
+            schemas["FlowRunContractPublic"]["properties"]["transcription"]
+        ),
+    )
+    live = schemas["FlowLiveTranscriptionAvailabilityPublic"]["properties"]
+    speaker_choice = schemas["FlowRunCreateRequest"]["properties"]["speaker_labels"]
+    operation = _get_operation(openapi_spec, "/api/v1/flows/{id}/runs/", "post")
+    unprocessable = operation["responses"]["422"]["content"]["application/json"]
+
+    assert set(transcription["properties"]) == {"live", "speaker_labels"}
+    assert set(live) == {"available", "reason"}
+    assert _extract_enum_values(openapi_spec, _non_null_schema(live["reason"])) == {
+        "transcription_disabled",
+        "transcription_service_mode",
+        "model_unavailable",
+        "model_not_realtime",
+    }
+    assert set(schemas["FlowSpeakerLabelsOptionPublic"]["properties"]) == {
+        "selectable",
+        "required",
+        "default",
+    }
+    assert {option.get("type") for option in speaker_choice["anyOf"]} == {
+        "boolean",
+        "null",
+    }
+    assert "run contract" in speaker_choice["description"]
+    assert "flow_run_speaker_labels_not_selectable" in operation["description"]
+    assert unprocessable["schema"] == {"$ref": "#/components/schemas/GeneralError"}
 
 
 def test_openapi_flow_run_status_capabilities_guides_consumer_lifecycle(

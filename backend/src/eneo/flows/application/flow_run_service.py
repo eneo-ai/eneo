@@ -49,17 +49,24 @@ from eneo.flows.enums import (
     is_terminal_flow_run_status,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_api_exceptions import (
+    FlowBadRequestException,
+    FlowValidationException,
+)
 from eneo.flows.flow_input_limits import (
     FlowInputLimits,
     resolve_flow_input_limits_from_source,
 )
-from eneo.flows.flow_run_contract_service import build_final_output_contract
+from eneo.flows.flow_run_contract_service import (
+    build_final_output_contract,
+    speaker_labels_option,
+)
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     TRANSCRIPT_REGENERATION_KEY,
     build_initial_run_input_envelope,
+    read_speaker_labels_choice,
 )
 from eneo.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
 from eneo.flows.flow_run_payload_validation import (
@@ -172,6 +179,7 @@ class FlowRuntimeCapacity:
 class FlowRunVersionedView:
     published_definition: PublishedFlowDefinition
     step_results: Sequence[FlowStepResultAnnotation]
+    speaker_labels: bool | None = None
 
 
 def _token_usage(usage: FlowRunUsage | None) -> FlowRunTokenUsage | None:
@@ -340,6 +348,7 @@ class FlowRunService:
         idempotency_key: str | None = None,
         prefix_seed: FlowRunPrefixSeed | None = None,
         purpose: FlowRunPurpose = FlowRunPurpose.PRODUCTION,
+        speaker_labels: bool | None = None,
     ) -> CreateRunResult:
         idempotency_key = self._validate_idempotency_key(idempotency_key)
         if run_label is not None:
@@ -371,6 +380,7 @@ class FlowRunService:
             run_label=run_label,
             step_inputs=step_inputs,
             purpose=purpose,
+            speaker_labels=speaker_labels,
         )
         if prefix_seed is not None:
             payload = {
@@ -481,12 +491,25 @@ class FlowRunService:
         run_label: str | None,
         step_inputs: FlowRunStepInputs | None,
         purpose: FlowRunPurpose,
+        speaker_labels: bool | None,
     ) -> _PreparedRunCreation:
         normalized_inline_payload = normalize_and_validate_flow_run_payload(
             metadata=definition.metadata(),
             payload=input_payload_json,
         )
         reject_reserved_input_payload_keys(normalized_inline_payload)
+        if speaker_labels is not None:
+            option = speaker_labels_option(
+                definition.runtime_steps(),
+                wizard_metadata=definition.metadata().wizard,
+                service_configured=get_settings().flow_transcription_service_configured,
+            )
+            if option is None or not option.selectable:
+                raise FlowValidationException(
+                    "Speaker labels cannot be chosen for this flow. Read "
+                    "transcription.speaker_labels in the run contract.",
+                    code=FlowApiErrorCode.RUN_SPEAKER_LABELS_NOT_SELECTABLE,
+                )
         normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
         preseed_steps: list[PreseedStep] = [
             {
@@ -535,6 +558,7 @@ class FlowRunService:
         prepared_payload = build_initial_run_input_envelope(
             normalized_inline_payload=normalized_inline_payload,
             flow_version=flow_version,
+            speaker_labels=speaker_labels,
         )
         request_fingerprint = self._build_idempotency_fingerprint(
             tenant_id=self.user.tenant_id,
@@ -805,6 +829,7 @@ class FlowRunService:
         return FlowRunVersionedView(
             published_definition=published_definition,
             step_results=tuple(step_results),
+            speaker_labels=read_speaker_labels_choice(run.input_payload_json),
         )
 
     async def get_run_with_result_files_and_usage(

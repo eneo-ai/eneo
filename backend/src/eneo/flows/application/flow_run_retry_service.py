@@ -32,6 +32,7 @@ from eneo.flows.flow_run_input_envelope import (
     TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE,
     TRANSCRIPT_REGENERATION_KEY,
     read_semantic_flow_input_payload,
+    read_speaker_labels_choice,
 )
 from eneo.flows.flow_run_payload_validation import ensure_inline_payload_size_allowed
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
@@ -317,6 +318,7 @@ class FlowRunRetryService:
             input_payload_json=read_semantic_flow_input_payload(
                 source.input_payload_json
             ),
+            speaker_labels=read_speaker_labels_choice(source.input_payload_json),
             expected_flow_version=source.flow_version,
             step_inputs={
                 step.step_id: FlowRunStepInputFiles(file_ids=tuple(files[step.id]))

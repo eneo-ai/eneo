@@ -2,6 +2,7 @@
 export type FlowRunReservedInputPayloadKey =
   | "expected_flow_version"
   | "file_ids"
+  | "speaker_labels"
   | "step_inputs"
   | "transcript_regeneration"
   | "transkribering";

@@ -23,6 +23,7 @@ from eneo.transcription_models.domain.realtime import speaks_realtime_dialect
 
 if TYPE_CHECKING:
     from eneo.flows.domain.runtime import RuntimeStep
+    from eneo.main.config import Settings
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
@@ -57,14 +58,12 @@ async def resolve_live_transcription(
     wizard_metadata: FlowPersistedJsonObject | None,
     space_repo: SpaceRepository,
     step: RuntimeStep,
-    external_service_mode: Literal["full", "diarize"] | None,
+    settings: Settings,
 ) -> LiveTranscriptionAvailability:
     """Resolve the model a live session on ``step`` would stream to.
 
     The model is found exactly as the run's transcription finds it, through the
-    step's assistant. ``external_service_mode`` is the deployment's
-    transcription service mode, or None when no service is configured and the
-    flow's model transcribes.
+    step's assistant.
     """
     try:
         config = parse_transcription_config({"wizard": wizard_metadata})
@@ -72,7 +71,10 @@ async def resolve_live_transcription(
         return _unavailable("transcription_disabled")
     if not config.enabled:
         return _unavailable("transcription_disabled")
-    if external_service_mode == "full":
+    if (
+        settings.flow_transcription_service_configured
+        and settings.flow_transcription_service_mode == "full"
+    ):
         return _unavailable("transcription_service_mode")
     try:
         model = await resolve_transcription_model_for_step(
