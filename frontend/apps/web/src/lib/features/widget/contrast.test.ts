@@ -63,5 +63,19 @@ describe("themeColors", () => {
       light: { accent: "#1F4E79", on_accent: "#FFFFFF" },
       dark: { accent: "#9CC7F0", on_accent: "#111111" }
     });
+    expect(launcherColors({ ...theme, color_scheme: "auto" })).toEqual(launcherColors(theme));
+  });
+
+  it("paints a widget pinned to one scheme in that scheme's colour on every host", () => {
+    const lightOnly = { light: { accent: "#1F4E79", on_accent: "#FFFFFF" } };
+    expect(launcherColors({ ...theme, color_scheme: "light" })).toEqual({
+      ...lightOnly,
+      dark: lightOnly.light
+    });
+    const darkOnly = { accent: "#9CC7F0", on_accent: "#111111" };
+    expect(launcherColors({ ...theme, color_scheme: "dark" })).toEqual({
+      light: darkOnly,
+      dark: darkOnly
+    });
   });
 });
