@@ -8,7 +8,8 @@
   import { IconCopy } from "@eneo/icons/copy";
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
-  import { Button, Dropdown, Tooltip } from "@eneo/ui";
+  import { Button, Dropdown } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
   import LinkReference from "$lib/features/knowledge/components/LinkReference.svelte";
   import McpResourceSnippetModal from "./McpResourceSnippetModal.svelte";
@@ -20,6 +21,9 @@
   const { current, isLast } = getMessageContext();
   const message = $derived(current());
   const preferredCopyFormat = $derived(getPreferredAssistantCopyFormat(settings));
+  const copyLabel = $derived(
+    preferredCopyFormat === "richtext" ? m.copy_as_richtext() : m.copy_as_markdown()
+  );
 
   let referencesExpanded = $state(false);
   let showCopiedMessage = $state(false);
@@ -86,20 +90,18 @@
 >
   <div class="flex gap-2">
     <div class="flex gap-[1px]">
-      <Tooltip
-        text={preferredCopyFormat === "richtext" ? m.copy_as_richtext() : m.copy_as_markdown()}
-      >
-        <Button
-          on:click={() => handleCopy()}
-          unstyled
-          class="border-default hover:bg-hover-stronger flex gap-2 rounded-l-lg border p-1.5 shadow-sm"
-          padding="icon"
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          onclick={() => handleCopy()}
+          class="border-default hover:bg-hover-stronger flex cursor-pointer gap-2 rounded-l-lg border p-1.5 shadow-sm"
           ><IconCopy />
+          <span class="sr-only">{copyLabel}</span>
           {#if showCopiedMessage}
             <span class="pr-2">{m.copied()}</span>
           {/if}
-        </Button>
-      </Tooltip>
+        </Tooltip.Trigger>
+        <Tooltip.Content>{copyLabel}</Tooltip.Content>
+      </Tooltip.Root>
       <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
         <Dropdown.Trigger asFragment let:trigger>
           <Button

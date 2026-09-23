@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { WebsiteSparse } from "@eneo/eneo-js";
-  import { Label } from "@eneo/ui";
+  import StatusBadge, { type StatusBadgeColor } from "$lib/components/StatusBadge.svelte";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import dayjs from "dayjs";
@@ -18,7 +18,7 @@
   // eslint-disable-next-line svelte/no-immutable-reactive-statements
   $: dayjs.locale(getLocale());
   /* TODO colours */
-  function statusInfo(): { label: string; color: Label.LabelColor; tooltip?: string } {
+  function statusInfo(): { label: string; color: StatusBadgeColor; tooltip?: string } {
     const skipReason = website.latest_crawl?.result_location;
     const skipTooltip = skipReason?.toLowerCase().startsWith(SKIPPED_PREFIX)
       ? m.crawl_skipped_duplicate()
@@ -105,4 +105,4 @@
   }
 </script>
 
-<Label.Single item={statusInfo()}></Label.Single>
+<StatusBadge item={statusInfo()} />

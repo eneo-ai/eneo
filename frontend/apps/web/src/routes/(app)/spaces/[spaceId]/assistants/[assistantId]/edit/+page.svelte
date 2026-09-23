@@ -3,9 +3,11 @@
   import OpenFilesHelp from "$lib/features/assistants/components/OpenFilesHelp.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
 
-  import { Button, Tooltip } from "@eneo/ui";
+  import { Button } from "@eneo/ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
+  import { Button as UIButton } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { IconSparkles } from "@eneo/icons/sparkles";
   import { afterNavigate, beforeNavigate, invalidate } from "$app/navigation";
 
@@ -343,21 +345,31 @@
         >
           <div slot="toolbar" class="text-secondary flex items-center gap-1">
             {#if promptGuideAvailability}
-              <Tooltip
-                text={promptGuideAvailability.available
-                  ? m.prompt_guide_button_tooltip()
-                  : promptGuideDisabledTooltip(promptGuideAvailability.disabled_reason)}
-              >
-                <Button
-                  variant="simple"
-                  padding="icon-leading"
-                  disabled={!promptGuideAvailability.available}
-                  on:click={() => (isModalOpen = true)}
-                >
-                  <IconSparkles />
-                  {m.prompt_guide_button()}
-                </Button>
-              </Tooltip>
+              {@const available = promptGuideAvailability.available}
+              <Tooltip.Root>
+                <Tooltip.Trigger onclick={available ? () => (isModalOpen = true) : undefined}>
+                  {#snippet child({ props })}
+                    {#if available}
+                      <UIButton {...props} variant="ghost">
+                        <IconSparkles />
+                        {m.prompt_guide_button()}
+                      </UIButton>
+                    {:else}
+                      <span {...props} class="inline-flex">
+                        <UIButton variant="ghost" disabled>
+                          <IconSparkles />
+                          {m.prompt_guide_button()}
+                        </UIButton>
+                      </span>
+                    {/if}
+                  {/snippet}
+                </Tooltip.Trigger>
+                <Tooltip.Content>
+                  {available
+                    ? m.prompt_guide_button_tooltip()
+                    : promptGuideDisabledTooltip(promptGuideAvailability.disabled_reason)}
+                </Tooltip.Content>
+              </Tooltip.Root>
             {/if}
             {#if !promptLocked}
               <PromptVersionDialog
@@ -787,12 +799,7 @@
             let:aria
           >
             <div class="border-default flex h-14 border-b py-2">
-              <Tooltip
-                text={data.assistant.permissions?.includes("insight_toggle")
-                  ? undefined
-                  : m.only_space_admins_toggle()}
-                class="w-full"
-              >
+              {#snippet insightSwitch()}
                 <RadioGroup.Root
                   value={$update.insight_enabled ? "on" : "off"}
                   onValueChange={(v) => ($update.insight_enabled = v === "on")}
@@ -813,7 +820,19 @@
                     </Field.Field>
                   </Field.Label>
                 </RadioGroup.Root>
-              </Tooltip>
+              {/snippet}
+              {#if data.assistant.permissions?.includes("insight_toggle")}
+                {@render insightSwitch()}
+              {:else}
+                <Tooltip.Root>
+                  <Tooltip.Trigger>
+                    {#snippet child({ props })}
+                      <div {...props} class="w-full">{@render insightSwitch()}</div>
+                    {/snippet}
+                  </Tooltip.Trigger>
+                  <Tooltip.Content>{m.only_space_admins_toggle()}</Tooltip.Content>
+                </Tooltip.Root>
+              {/if}
             </div>
           </Settings.Row>
         </Settings.Group>

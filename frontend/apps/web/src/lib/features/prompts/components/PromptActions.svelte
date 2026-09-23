@@ -7,7 +7,8 @@
 <script lang="ts">
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
-  import { Button, Dialog, Dropdown, Tooltip } from "@eneo/ui";
+  import { Button, Dialog, Dropdown } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getPromptManager } from "../PromptManager";
   import type { PromptSparse } from "@eneo/eneo-js";
   import { IconInfo } from "@eneo/icons/info";
@@ -40,9 +41,13 @@
 
 <div class="flex w-full items-center justify-end gap-2">
   {#if description}
-    <Tooltip text={description} class="text-accent-stronger pointer-events-auto z-[1000]">
-      <IconInfo></IconInfo>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger class="text-accent-stronger pointer-events-auto z-[1000] cursor-default">
+        <IconInfo></IconInfo>
+        <span class="sr-only">{description}</span>
+      </Tooltip.Trigger>
+      <Tooltip.Content>{description}</Tooltip.Content>
+    </Tooltip.Root>
   {/if}
   <Dropdown.Root>
     <Dropdown.Trigger let:trigger asFragment>

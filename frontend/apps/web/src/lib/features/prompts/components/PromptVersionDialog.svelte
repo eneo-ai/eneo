@@ -6,7 +6,9 @@
 
 <script lang="ts">
   import { IconHistory } from "@eneo/icons/history";
-  import { Dialog, Button, Tooltip } from "@eneo/ui";
+  import { Dialog } from "@eneo/ui";
+  import { buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import PromptTable from "./PromptTable.svelte";
   import PromptPreview from "./PromptPreview.svelte";
   import { getEneo } from "$lib/core/Eneo";
@@ -31,9 +33,23 @@
 
 <Dialog.Root openController={showPromptVersionDialog}>
   <Dialog.Trigger asFragment let:trigger>
-    <Tooltip text={m.show_prompt_history()}>
-      <Button is={trigger} padding="icon"><IconHistory /></Button>
-    </Tooltip>
+    {@const { action: dialogTriggerAction, ...dialogTriggerAttrs } = trigger[0]}
+    <Tooltip.Root>
+      <Tooltip.Trigger>
+        {#snippet child({ props })}
+          <button
+            {...dialogTriggerAttrs}
+            {...props}
+            use:dialogTriggerAction
+            class={buttonVariants({ variant: "ghost", size: "icon" })}
+            aria-label={m.show_prompt_history()}
+          >
+            <IconHistory />
+          </button>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content>{m.show_prompt_history()}</Tooltip.Content>
+    </Tooltip.Root>
   </Dialog.Trigger>
   <Dialog.Content width="large">
     <Dialog.Title>{title}</Dialog.Title>

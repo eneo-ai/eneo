@@ -5,8 +5,9 @@
 -->
 
 <script lang="ts">
-  import { Button, Tooltip } from "@eneo/ui";
+  import { Button } from "@eneo/ui";
   import { Switch } from "$lib/components/ui/switch/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { RefreshCw, AlertTriangle, Trash2, Check, Pencil, X, ShieldAlert } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
@@ -441,28 +442,38 @@
 
                     <!-- Approve/Reject buttons -->
                     <div class="flex shrink-0 items-center gap-1">
-                      <Tooltip text={m.approve()} placement="top">
-                        <button
-                          type="button"
-                          class="flex h-7 w-7 items-center justify-center rounded-md text-green-600 transition-colors hover:bg-green-500/10 disabled:opacity-50"
-                          onclick={() => approveTool(tool.id)}
-                          disabled={reviewingToolId === tool.id}
-                          aria-label="{m.approve()} {tool.name}"
-                        >
-                          <Check class="h-4 w-4" />
-                        </button>
-                      </Tooltip>
-                      <Tooltip text={m.reject()} placement="top">
-                        <button
-                          type="button"
-                          class="flex h-7 w-7 items-center justify-center rounded-md text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-50"
-                          onclick={() => rejectTool(tool.id)}
-                          disabled={reviewingToolId === tool.id}
-                          aria-label="{m.reject()} {tool.name}"
-                        >
-                          <X class="h-4 w-4" />
-                        </button>
-                      </Tooltip>
+                      <Tooltip.Root>
+                        <Tooltip.Trigger onclick={() => approveTool(tool.id)}>
+                          {#snippet child({ props })}
+                            <button
+                              {...props}
+                              type="button"
+                              class="flex h-7 w-7 items-center justify-center rounded-md text-green-600 transition-colors hover:bg-green-500/10 disabled:opacity-50"
+                              disabled={reviewingToolId === tool.id}
+                              aria-label="{m.approve()} {tool.name}"
+                            >
+                              <Check class="h-4 w-4" />
+                            </button>
+                          {/snippet}
+                        </Tooltip.Trigger>
+                        <Tooltip.Content>{m.approve()}</Tooltip.Content>
+                      </Tooltip.Root>
+                      <Tooltip.Root>
+                        <Tooltip.Trigger onclick={() => rejectTool(tool.id)}>
+                          {#snippet child({ props })}
+                            <button
+                              {...props}
+                              type="button"
+                              class="flex h-7 w-7 items-center justify-center rounded-md text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                              disabled={reviewingToolId === tool.id}
+                              aria-label="{m.reject()} {tool.name}"
+                            >
+                              <X class="h-4 w-4" />
+                            </button>
+                          {/snippet}
+                        </Tooltip.Trigger>
+                        <Tooltip.Content>{m.reject()}</Tooltip.Content>
+                      </Tooltip.Root>
                     </div>
                   </div>
                 </div>
@@ -498,28 +509,38 @@
                             }
                           }}
                         />
-                        <Tooltip text={m.save()} placement="top">
-                          <button
-                            type="button"
-                            class="text-positive-default hover:bg-positive-dimmer flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50"
-                            onclick={() => saveRename(tool)}
-                            disabled={renameSaving}
-                            aria-label={m.save()}
-                          >
-                            <Check class="h-3.5 w-3.5" />
-                          </button>
-                        </Tooltip>
-                        <Tooltip text={m.cancel()} placement="top">
-                          <button
-                            type="button"
-                            class="text-muted hover:bg-hover-dimmer flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50"
-                            onclick={cancelRename}
-                            disabled={renameSaving}
-                            aria-label={m.cancel()}
-                          >
-                            <X class="h-3.5 w-3.5" />
-                          </button>
-                        </Tooltip>
+                        <Tooltip.Root>
+                          <Tooltip.Trigger onclick={() => saveRename(tool)}>
+                            {#snippet child({ props })}
+                              <button
+                                {...props}
+                                type="button"
+                                class="text-positive-default hover:bg-positive-dimmer flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+                                disabled={renameSaving}
+                                aria-label={m.save()}
+                              >
+                                <Check class="h-3.5 w-3.5" />
+                              </button>
+                            {/snippet}
+                          </Tooltip.Trigger>
+                          <Tooltip.Content>{m.save()}</Tooltip.Content>
+                        </Tooltip.Root>
+                        <Tooltip.Root>
+                          <Tooltip.Trigger onclick={cancelRename}>
+                            {#snippet child({ props })}
+                              <button
+                                {...props}
+                                type="button"
+                                class="text-muted hover:bg-hover-dimmer flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+                                disabled={renameSaving}
+                                aria-label={m.cancel()}
+                              >
+                                <X class="h-3.5 w-3.5" />
+                              </button>
+                            {/snippet}
+                          </Tooltip.Trigger>
+                          <Tooltip.Content>{m.cancel()}</Tooltip.Content>
+                        </Tooltip.Root>
                       </div>
                       <p class="text-muted mt-1 text-xs leading-snug">
                         {m.mcp_display_name_hint()}
@@ -543,23 +564,36 @@
                             >{tool.name}</span
                           >
                         {/if}
-                        <Tooltip text={m.mcp_rename_tool()} placement="top">
-                          <button
-                            type="button"
-                            class="text-muted hover:text-default hover:bg-hover-dimmer flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors"
-                            onclick={() => startRename(tool)}
-                            aria-label="{m.mcp_rename_tool()}: {tool.name}"
-                          >
-                            <Pencil class="h-3 w-3" />
-                          </button>
-                        </Tooltip>
+                        <Tooltip.Root>
+                          <Tooltip.Trigger onclick={() => startRename(tool)}>
+                            {#snippet child({ props })}
+                              <button
+                                {...props}
+                                type="button"
+                                class="text-muted hover:text-default hover:bg-hover-dimmer flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors"
+                                aria-label="{m.mcp_rename_tool()}: {tool.name}"
+                              >
+                                <Pencil class="h-3 w-3" />
+                              </button>
+                            {/snippet}
+                          </Tooltip.Trigger>
+                          <Tooltip.Content>{m.mcp_rename_tool()}</Tooltip.Content>
+                        </Tooltip.Root>
                       </div>
                       {#if description}
-                        <Tooltip text={description} placement="bottom">
-                          <p class="text-muted cursor-help truncate text-xs leading-snug">
-                            {description}
-                          </p>
-                        </Tooltip>
+                        <Tooltip.Root>
+                          <Tooltip.Trigger>
+                            {#snippet child({ props })}
+                              <p
+                                {...props}
+                                class="text-muted cursor-help truncate text-xs leading-snug"
+                              >
+                                {description}
+                              </p>
+                            {/snippet}
+                          </Tooltip.Trigger>
+                          <Tooltip.Content side="bottom">{description}</Tooltip.Content>
+                        </Tooltip.Root>
                       {/if}
                     {/if}
                   </div>

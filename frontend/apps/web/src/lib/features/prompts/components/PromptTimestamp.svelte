@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Label } from "@eneo/ui";
+  import StatusBadge from "$lib/components/StatusBadge.svelte";
   import dayjs from "dayjs";
   import utc from "dayjs/plugin/utc";
 
@@ -24,6 +24,6 @@
   <span>{dayjs(prompt.created_at).format("HH:mm")}</span>
 
   {#if prompt.is_selected}
-    <Label.Single item={{ label: m.latest(), color: "green" }}></Label.Single>
+    <StatusBadge item={{ label: m.latest(), color: "green" }} />
   {/if}
 </div>

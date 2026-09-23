@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { WebsiteSparse } from "@eneo/eneo-js";
-  import { Label } from "@eneo/ui";
+  import StatusBadge, { type StatusBadgeColor } from "$lib/components/StatusBadge.svelte";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import dayjs from "dayjs";
@@ -18,7 +18,7 @@
   // eslint-disable-next-line svelte/no-immutable-reactive-statements
   $: dayjs.locale(getLocale());
 
-  const intervalLabels: Record<string, { label: string; color: Label.LabelColor }> = {
+  const intervalLabels: Record<string, { label: string; color: StatusBadgeColor }> = {
     daily: {
       color: "green",
       label: m.every_day()
@@ -76,4 +76,4 @@
   };
 </script>
 
-<Label.Single item={intervalItem}></Label.Single>
+<StatusBadge item={intervalItem} />

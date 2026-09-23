@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { CrawlRun } from "@eneo/eneo-js";
-  import { Label } from "@eneo/ui";
+  import StatusBadge, { type StatusBadgeColor } from "$lib/components/StatusBadge.svelte";
   import { m } from "$lib/paraglide/messages";
 
   export let crawl: CrawlRun;
@@ -42,7 +42,7 @@
     return `${m.failure_reasons_tooltip()}:\n${lines}`;
   }
 
-  function totalLabel(): { label: string; color: Label.LabelColor } {
+  function totalLabel(): { label: string; color: StatusBadgeColor } {
     if ((crawl.files_downloaded ?? 0) > 0) {
       return {
         color: "blue",
@@ -59,7 +59,7 @@
     }
   }
 
-  function failedLabel(): { label: string; color: Label.LabelColor; tooltip?: string } {
+  function failedLabel(): { label: string; color: StatusBadgeColor; tooltip?: string } {
     const tooltip = getFailureTooltip();
 
     if (crawl.pages_failed && crawl.files_failed) {
@@ -83,7 +83,7 @@
     }
   }
 
-  function successLabel(): { label: string; color: Label.LabelColor } {
+  function successLabel(): { label: string; color: StatusBadgeColor } {
     if (successPages && successFiles) {
       return {
         color: "green",
@@ -102,7 +102,7 @@
     }
   }
 
-  function crawlStatus(): { label: string; color: Label.LabelColor; tooltip?: string } {
+  function crawlStatus(): { label: string; color: StatusBadgeColor; tooltip?: string } {
     const reason = crawl.result_location ?? undefined;
     const skipTooltip = crawl.result_location?.toLowerCase().startsWith(SKIPPED_PREFIX)
       ? m.crawl_skipped_duplicate()
@@ -149,14 +149,14 @@
 
 <div class="flex w-full items-center gap-2 {cls}" style="justify-content: flex-{align}">
   {#if crawl.status === "complete"}
-    <Label.Single capitalize={false} item={totalLabel()}></Label.Single>
+    <StatusBadge capitalize={false} item={totalLabel()} />
     {#if successPages || successFiles}
-      <Label.Single capitalize={false} item={successLabel()}></Label.Single>
+      <StatusBadge capitalize={false} item={successLabel()} />
     {/if}
     {#if crawl.pages_failed || crawl.files_failed}
-      <Label.Single capitalize={false} item={failedLabel()}></Label.Single>
+      <StatusBadge capitalize={false} item={failedLabel()} />
     {/if}
   {:else}
-    <Label.Single capitalize={false} item={crawlStatus()}></Label.Single>
+    <StatusBadge capitalize={false} item={crawlStatus()} />
   {/if}
 </div>

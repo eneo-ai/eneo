@@ -7,9 +7,9 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Tooltip } from "@eneo/ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";
@@ -424,14 +424,15 @@
                           >{tool.name}</span
                         >
                         {#if tool.description}
-                          <Tooltip text={tool.description} placement="bottom">
-                            <p
+                          <Tooltip.Root>
+                            <Tooltip.Trigger
                               id={`${uid}-${server.id}-${tool.id}-description`}
-                              class="text-muted cursor-help truncate text-xs leading-snug"
+                              class="text-muted block w-full cursor-help truncate text-left text-xs leading-snug"
                             >
                               {tool.description}
-                            </p>
-                          </Tooltip>
+                            </Tooltip.Trigger>
+                            <Tooltip.Content side="bottom">{tool.description}</Tooltip.Content>
+                          </Tooltip.Root>
                         {/if}
                       </div>
                       <Switch

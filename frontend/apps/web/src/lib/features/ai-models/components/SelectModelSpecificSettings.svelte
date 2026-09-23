@@ -1,9 +1,9 @@
 <script lang="ts">
   import { IconQuestionMark } from "@eneo/icons/question-mark";
-  import { Tooltip } from "@eneo/ui";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Slider } from "$lib/components/ui/slider/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import type { ModelKwargs } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import {
@@ -175,9 +175,13 @@
   >
     <div class="flex items-center gap-2">
       <p class="w-36" aria-label={getKwargLabel(kwargName)}>{getKwargLabel(kwargName)}</p>
-      <Tooltip text={getKwargTooltip(kwargName)}>
-        <IconQuestionMark class="text-muted hover:text-primary" />
-      </Tooltip>
+      <Tooltip.Root>
+        <Tooltip.Trigger class="cursor-default">
+          <IconQuestionMark class="text-muted hover:text-primary" />
+          <span class="sr-only">{getKwargTooltip(kwargName)}</span>
+        </Tooltip.Trigger>
+        <Tooltip.Content>{getKwargTooltip(kwargName)}</Tooltip.Content>
+      </Tooltip.Root>
     </div>
 
     {#if isSelectKwargName(kwargName)}

@@ -11,7 +11,9 @@
 
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
-  import { Button, Tooltip } from "@eneo/ui";
+  import { Button } from "@eneo/ui";
+  import { Button as UIButton } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { IconSparkles } from "@eneo/icons/sparkles";
   import { IconInfo } from "@eneo/icons/info";
   import { beforeNavigate, invalidate } from "$app/navigation";
@@ -179,21 +181,31 @@
         >
           <div slot="toolbar" class="text-secondary flex items-center gap-1">
             {#if !isPromptGuide && data.promptGuideAvailability}
-              <Tooltip
-                text={data.promptGuideAvailability.available
-                  ? m.prompt_guide_button_tooltip()
-                  : promptGuideDisabledTooltip(data.promptGuideAvailability.disabled_reason)}
-              >
-                <Button
-                  variant="simple"
-                  padding="icon-leading"
-                  disabled={!data.promptGuideAvailability.available}
-                  on:click={() => (isModalOpen = true)}
-                >
-                  <IconSparkles />
-                  {m.prompt_guide_button()}
-                </Button>
-              </Tooltip>
+              {@const available = data.promptGuideAvailability.available}
+              <Tooltip.Root>
+                <Tooltip.Trigger onclick={available ? () => (isModalOpen = true) : undefined}>
+                  {#snippet child({ props })}
+                    {#if available}
+                      <UIButton {...props} variant="ghost">
+                        <IconSparkles />
+                        {m.prompt_guide_button()}
+                      </UIButton>
+                    {:else}
+                      <span {...props} class="inline-flex">
+                        <UIButton variant="ghost" disabled>
+                          <IconSparkles />
+                          {m.prompt_guide_button()}
+                        </UIButton>
+                      </span>
+                    {/if}
+                  {/snippet}
+                </Tooltip.Trigger>
+                <Tooltip.Content>
+                  {available
+                    ? m.prompt_guide_button_tooltip()
+                    : promptGuideDisabledTooltip(data.promptGuideAvailability.disabled_reason)}
+                </Tooltip.Content>
+              </Tooltip.Root>
             {/if}
             <PromptVersionDialog
               title={m.prompt_history_for({ name: $resource.name })}

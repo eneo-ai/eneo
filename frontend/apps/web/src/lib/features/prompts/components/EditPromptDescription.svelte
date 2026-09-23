@@ -6,10 +6,11 @@
 
 <script lang="ts">
   import { getAppContext } from "$lib/core/AppContext";
-  import { Button, Dialog, Tooltip } from "@eneo/ui";
+  import { Button, Dialog } from "@eneo/ui";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getPromptManager } from "../PromptManager";
   import type { Prompt } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
@@ -26,11 +27,24 @@
 
 <Dialog.Root>
   <Dialog.Trigger asFragment let:trigger>
-    <Tooltip text={!isPromptCreatedByUser ? m.only_author_can_change_description() : undefined}>
-      <Button variant="outlined" disabled={!isPromptCreatedByUser} is={trigger}
+    {#if isPromptCreatedByUser}
+      <Button variant="outlined" is={trigger}
         >{prompt.description ? m.edit_description() : m.add_description()}</Button
       >
-    </Tooltip>
+    {:else}
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <span {...props} class="flex">
+              <Button variant="outlined" disabled is={trigger}
+                >{prompt.description ? m.edit_description() : m.add_description()}</Button
+              >
+            </span>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content>{m.only_author_can_change_description()}</Tooltip.Content>
+      </Tooltip.Root>
+    {/if}
   </Dialog.Trigger>
 
   <Dialog.Content width="medium" form>

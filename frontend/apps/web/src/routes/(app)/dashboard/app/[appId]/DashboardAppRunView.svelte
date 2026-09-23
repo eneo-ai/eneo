@@ -1,6 +1,7 @@
 <script lang="ts">
   import { IconPlay } from "@eneo/icons/play";
-  import { Button, Tooltip } from "@eneo/ui";
+  import { Button } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { getEneo } from "$lib/core/Eneo";
   import { type App, type AppRunInput } from "@eneo/eneo-js";
@@ -91,7 +92,7 @@
   <div class="flex flex-grow flex-col gap-4 px-4 pb-4">
     <DashboardAppInput app={$app} bind:inputData={inputs}></DashboardAppInput>
 
-    <Tooltip text={hasData ? undefined : m.input_data_required_tooltip()}>
+    {#snippet runButton()}
       <Button
         disabled={!hasData || isSubmitting}
         variant="primary"
@@ -101,7 +102,19 @@
         <IconPlay />
         {isSubmitting ? m.submitting() : m.submit()}
       </Button>
-    </Tooltip>
+    {/snippet}
+    {#if hasData}
+      {@render runButton()}
+    {:else}
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <span {...props} class="block">{@render runButton()}</span>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content>{m.input_data_required_tooltip()}</Tooltip.Content>
+      </Tooltip.Root>
+    {/if}
   </div>
 </div>
 

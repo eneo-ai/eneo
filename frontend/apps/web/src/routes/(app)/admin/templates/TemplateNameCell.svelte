@@ -1,6 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Tooltip } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import {
     loadLucideIconOrNull,
     type LucideIconComponent
@@ -52,11 +52,16 @@
   </div>
   {#if description}
     {#if showTooltip}
-      <Tooltip text={description} placement="bottom">
-        <span class="text-dimmer line-clamp-1 max-w-[40ch] text-sm break-all">
-          {description}
-        </span>
-      </Tooltip>
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <span {...props} class="text-dimmer line-clamp-1 max-w-[40ch] text-sm break-all">
+              {description}
+            </span>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content side="bottom">{description}</Tooltip.Content>
+      </Tooltip.Root>
     {:else}
       <span class="text-dimmer line-clamp-1 text-sm break-all">
         {description}
