@@ -757,11 +757,25 @@ export class FlowAIBuilderDriver {
     plan: ProposedPlan | null,
     attemptedClientTurnId?: string
   ): void {
+    // A snapshot can name another model than the one on screen - a turn sent
+    // from a second tab moves the session on - so the effort is judged against
+    // the model this install leaves in place.
+    const modelBefore = this.effectiveModel?.id ?? null;
     this.#state.session = session;
     this.#applyCommittedTurnOutcome(session, attemptedClientTurnId);
     this.#hydrateMessagesFromConversation(session.conversation ?? []);
     this.#state.currentPlan = plan;
+    this.#dropEffortOfAnotherModel(modelBefore);
     this.#notify();
+  }
+
+  /** An effort belongs to the model it was chosen for, explicit or default;
+   *  carried to another model it is refused on send or silently wrong. Every
+   *  place that can change which model is effective passes what it was. */
+  #dropEffortOfAnotherModel(modelBefore: string | null): void {
+    if ((this.effectiveModel?.id ?? null) !== modelBefore) {
+      this.#state.selectedReasoningEffort = null;
+    }
   }
 
   async discardSession(sessionId: string): Promise<void> {
@@ -1876,11 +1890,7 @@ export class FlowAIBuilderDriver {
       )
         ? (result.default_model_id ?? null)
         : null;
-      // An effort belongs to the model it was chosen for, explicit or default;
-      // carried to another model it is refused on send or silently wrong.
-      if ((this.effectiveModel?.id ?? null) !== modelBefore) {
-        this.#state.selectedReasoningEffort = null;
-      }
+      this.#dropEffortOfAnotherModel(modelBefore);
       this.#state.modelLoadStatus = "loaded";
       this.#notify();
     } catch {

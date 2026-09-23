@@ -84,17 +84,22 @@ function regroup(raw: DiffPart[]): DiffPart[] {
   let added = "";
   // A change is marked from its first to its last visible character, line by
   // line: the spaces and line breaks around and inside it stay on their side,
-  // unmarked, so no empty line carries a mark. Splitting on the newline
-  // itself keeps this linear; scanning every whitespace run for one does not.
-  const BLANK_EDGES = /^([^\S\n]*)([\s\S]*?)([^\S\n]*)$/;
+  // unmarked, so no empty line carries a mark. Split on the newline, then take
+  // the edges off with trimStart/trimEnd: both are linear in the line, where a
+  // regex with two optional whitespace runs backtracks across a long one.
   const pushChange = (kind: "removed" | "added", text: string) => {
     text.split("\n").forEach((line, index) => {
       if (index > 0) parts.push({ kind, text: "\n", plain: true });
       if (!line) return;
-      const [, lead, core, trail] = BLANK_EDGES.exec(line) ?? ["", "", line, ""];
-      if (lead) parts.push({ kind, text: lead, plain: true });
-      if (core) parts.push({ kind, text: core });
-      if (trail) parts.push({ kind, text: trail, plain: true });
+      const lead = line.length - line.trimStart().length;
+      if (lead === line.length) {
+        parts.push({ kind, text: line, plain: true });
+        return;
+      }
+      const trail = line.length - line.trimEnd().length;
+      if (lead) parts.push({ kind, text: line.slice(0, lead), plain: true });
+      parts.push({ kind, text: line.slice(lead, line.length - trail) });
+      if (trail) parts.push({ kind, text: line.slice(line.length - trail), plain: true });
     });
   };
   const flush = () => {

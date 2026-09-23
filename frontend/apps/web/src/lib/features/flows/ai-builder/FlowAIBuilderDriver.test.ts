@@ -887,6 +887,58 @@ describe("FlowAIBuilderDriver", () => {
       expect(driver.effectiveModel?.id).toBe(DEFAULT_MODEL_ID);
     });
 
+    it("drops an effort the refreshed session's model does not take", async () => {
+      // A turn sent from a second tab moves the session on to a model of its
+      // own. The effort was chosen against the model that was on screen; the
+      // server refuses it for a model that advertises none, so it goes with
+      // the model it belonged to.
+      const onAlternate = makeSession({
+        latest_plan_id: null,
+        latest_turn: {
+          client_turn_id: "11111111-1111-4111-8111-111111111121",
+          state: "committed",
+          user_message_id: "11111111-1111-4111-8111-111111111122",
+          error: null,
+          requires_duplicate_provider_spend_acknowledgement: false,
+          retry_request: {
+            client_turn_id: "11111111-1111-4111-8111-111111111121",
+            message: "Bygg ett flöde",
+            model_id: ALTERNATE_MODEL_ID,
+            ui_language: "sv",
+            acknowledge_duplicate_provider_spend: false
+          }
+        }
+      });
+      const fetch = vi.fn(async () => onAlternate);
+      const { driver, stream } = makeDriver({
+        fetchImpl: fetch,
+        streamImpl: vi.fn(async (_path, _init, handlers) => {
+          completeStream(handlers);
+        })
+      });
+      driver.seedState({
+        session: makeSession({ latest_plan_id: null }),
+        availableModels: [
+          makeModel({ reasoning_effort_options: ["low", "high"] }),
+          makeModel({ id: ALTERNATE_MODEL_ID, name: "Alternate model" })
+        ],
+        defaultModelId: DEFAULT_MODEL_ID
+      });
+      driver.selectReasoningEffort("high");
+      expect(driver.effectiveModel?.id).toBe(DEFAULT_MODEL_ID);
+
+      expect(await driver.refreshSession()).toBe(true);
+
+      expect(driver.effectiveModel?.id).toBe(ALTERNATE_MODEL_ID);
+      expect(driver.state.selectedReasoningEffort).toBeNull();
+      expect(driver.modelSendBlock).toBeNull();
+
+      await driver.sendMessage("Och lägg till en sammanfattning");
+      const body = stream.mock.calls[0]?.[1].requestBody["application/json"];
+      expect(body.model_id).toBe(ALTERNATE_MODEL_ID);
+      expect(body.reasoning_effort).toBeUndefined();
+    });
+
     it("keeps the choice and its effort when a listing fails", async () => {
       const fetch = vi.fn(async () => {
         throw new Error("listing failed");

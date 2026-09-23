@@ -929,6 +929,39 @@ describe("BuilderReviewScreen plan document", () => {
     expect(removed.some((text) => text.includes(m.ai_builder_change_diff_break()))).toBe(true);
   });
 
+  it("strikes the words of a removed run, not the line breaks between them", async () => {
+    // The marked view reads as the new text: the breaks inside a removed run
+    // keep the struck lines apart but belong to no change, so they carry
+    // neither a mark nor a second "removed" for a reader who hears the page.
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: scopedStepEditState({}, [
+        {
+          field: "instructions",
+          previous: "Svara exakt:\n- beslut\n- skäl",
+          current: "Svara exakt:"
+        }
+      ])
+    });
+
+    const changes = screen.getByTestId("step-field-changes");
+    await fireEvent.click(
+      within(changes).getByRole("button", { name: m.ai_builder_change_show_before_after() })
+    );
+    const diff = await within(changes).findByTestId("instruction-diff");
+    // A change across lines opens side by side; the marked view is one click away.
+    await fireEvent.click(
+      within(diff).getByRole("radio", { name: m.ai_builder_change_diff_marked() })
+    );
+    const announced = [...diff.querySelectorAll("p del .sr-only")].filter((label) =>
+      label.textContent?.startsWith(m.ai_builder_change_diff_removed())
+    );
+    expect(announced).toHaveLength(2);
+    expect([...diff.querySelectorAll("p del")].every((del) => del.textContent?.trim() !== "")).toBe(
+      true
+    );
+  });
+
   it("keeps a change of chosen results inspectable when the reading stays the same", async () => {
     const chosen = (field: string) => ({
       source_refs: [{ step_ref: "step_a", output: "structured", field_path: field }]

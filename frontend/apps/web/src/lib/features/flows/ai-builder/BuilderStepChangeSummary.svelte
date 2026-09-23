@@ -381,7 +381,11 @@
               class="bg-primary text-primary m-0 px-4 py-3.5 text-[0.8125rem] leading-[1.8] break-words whitespace-pre-wrap"
             >
               {#each markedParts as part, index (index)}
-                {#if part.kind === "same"}
+                <!-- Whitespace at a change's edge, and the line breaks inside a
+                     removed run, belong to their side unmarked: struck through
+                     they would draw a mark over an empty line and announce a
+                     second removal for the gap between two struck phrases. -->
+                {#if part.kind === "same" || part.plain}
                   {@render readable(part.text)}
                 {:else if part.kind === "removed"}
                   <del class={REMOVED}
