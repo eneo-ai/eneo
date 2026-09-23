@@ -119,6 +119,21 @@ describe("getStepSourceLine", () => {
     );
   });
 
+  it("resolves chosen results named by step as well as by number", () => {
+    const chosen = (...stepRefs: string[]) =>
+      step({
+        step_order: 3,
+        output_mode: "compose_text",
+        input_bindings: {
+          source_refs: stepRefs.map((step_ref) => ({ step_ref, output: "text" }))
+        } as never
+      });
+    expect(lineFor(chosen("Läs"))?.text).toBe(reads(m.flow_step_reads_step({ step: 1 })));
+    expect(lineFor(chosen("Läs", "step_2"))?.text).toBe(
+      reads(m.flow_step_reads_steps_numbered({ steps: list(["1", "2"]) }))
+    );
+  });
+
   it("names up to three earlier steps and counts more", () => {
     expect(
       lineFor(

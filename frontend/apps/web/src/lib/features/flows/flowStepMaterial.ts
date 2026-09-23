@@ -2,7 +2,7 @@ import type { FlowStep } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
 import { FLOW_INPUT_ALIASES } from "./flowFormSchema";
-import { getFlowStepUnderlag, parseFlowInputBindings } from "./flowInputBindings";
+import { parseFlowInputBindings } from "./flowInputBindings";
 import { getRuntimeInputConfig } from "./flowRuntimeInputConfig";
 import {
   classifyVariable,
@@ -174,15 +174,15 @@ export function getStepSourceLine(
       const upload = material.kind === "own_text" && material.withUpload;
       const form = tokens.some((token) => classifyVariable(token, context) === "field");
       const flowInput = tokens.some((token) => readsFlowInput(token, context));
-      // Every way to read an earlier step: chosen results, step_N paths, a
-      // step's name and the previous-step alias. Later or missing steps read nothing.
+      // Every way to read an earlier step, through one resolver: chosen results
+      // and text references alike may name a step by number or by name, and
+      // the text may use the previous-step alias. Later or missing steps read nothing.
+      const references = [
+        ...(bindings.status === "valid" ? bindings.sourceRefs.map((ref) => ref.stepRef) : []),
+        ...tokens
+      ];
       const orders = [
-        ...new Set([
-          ...(getFlowStepUnderlag(step)?.stepOrders ?? []).filter(
-            (order) => order < step.step_order && context.stepOutputTypes.has(order)
-          ),
-          ...tokens.flatMap((token) => referencedStepOrder(token, context) ?? [])
-        ])
+        ...new Set(references.flatMap((reference) => referencedStepOrder(reference, context) ?? []))
       ].sort((a, b) => a - b);
       const inputs = [
         ...(upload ? [m.flow_step_reads_upload()] : []),
