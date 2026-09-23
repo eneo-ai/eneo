@@ -125,6 +125,11 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
         "live": {"available": True, "reason": None},
         "speaker_labels": {"selectable": True, "required": False, "default": True},
     },
+    "security_classification": {
+        "name": "Open information",
+        "description": "Do not upload personal data.",
+        "security_level": 0,
+    },
 }
 
 
@@ -499,6 +504,27 @@ class FlowTranscriptionContractPublic(BaseModel):
     speaker_labels: FlowSpeakerLabelsOptionPublic
 
 
+class FlowSecurityClassificationPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        description="The classification's name as the organization set it, to show users."
+    )
+    description: str | None = Field(
+        default=None,
+        description=(
+            "What information the classification allows, as the organization "
+            "wrote it. Null when it has no description."
+        ),
+    )
+    security_level: int = Field(
+        description=(
+            "The classification's rank among the organization's classifications. "
+            "A higher level allows more sensitive information."
+        )
+    )
+
+
 class FlowRunContractPublic(BaseModel):
     model_config = ConfigDict(
         extra="forbid", json_schema_extra={"example": FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE}
@@ -560,5 +586,13 @@ class FlowRunContractPublic(BaseModel):
             "step can show a live transcript preview, and whether a run may choose "
             "speaker labels with `speaker_labels` on run creation. Null when the "
             "flow transcribes no audio."
+        ),
+    )
+    security_classification: FlowSecurityClassificationPublic | None = Field(
+        default=None,
+        description=(
+            "The security classification of the flow's space, which tells users "
+            "what information the flow may take. Null when the space has none or "
+            "the organization has turned security classifications off."
         ),
     )

@@ -15,6 +15,7 @@ from eneo.flows.api.flow_run_contract_models import (
     FlowReviewStepContractPublic,
     FlowRunContractPublic,
     FlowRuntimeInputContractPublic,
+    FlowSecurityClassificationPublic,
     FlowSpeakerLabelsOptionPublic,
     FlowTemplateReadinessPublic,
     FlowTextProcessingStepPublic,
@@ -109,6 +110,7 @@ class FlowRunContractService:
                 steps=runtime_inputs.steps,
             ),
             transcription=self._transcription(runtime_inputs, space),
+            security_classification=_security_classification(space),
         )
 
     def _transcription(
@@ -281,6 +283,19 @@ def _audio_input_step(steps: Sequence[RuntimeStep]) -> RuntimeStep | None:
         ):
             return step
     return None
+
+
+def _security_classification(space: Space) -> FlowSecurityClassificationPublic | None:
+    # The space settings' rule: a classification shows only while the
+    # organization has security classifications turned on.
+    classification = space.security_classification
+    if classification is None or not classification.security_enabled:
+        return None
+    return FlowSecurityClassificationPublic(
+        name=classification.name,
+        description=classification.description,
+        security_level=classification.security_level,
+    )
 
 
 def _output_delivery(

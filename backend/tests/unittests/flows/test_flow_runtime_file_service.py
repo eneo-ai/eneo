@@ -287,7 +287,10 @@ async def test_step_upload_and_run_contract_share_runtime_input_spec(
         flow_version_repo=flow_version_repo,
         template_asset_repo=AsyncMock(),
         settings=get_settings(),
-    ).get_run_contract(flow_id=flow.id, space=SimpleNamespace(transcription_models=[]))
+    ).get_run_contract(
+        flow_id=flow.id,
+        space=SimpleNamespace(transcription_models=[], security_classification=None),
+    )
     service = _service(
         flow_service=flow_service,
         file_service=file_service,

@@ -1863,6 +1863,7 @@ def test_openapi_run_contract_response_schemas_are_closed(
         "FlowRunContractPublic",
         "FlowRuntimeInputContractPublic",
         "FlowRuntimeUploadPolicyPublic",
+        "FlowSecurityClassificationPublic",
         "FlowSpeakerLabelsOptionPublic",
         "FlowTemplateReadinessPublic",
         "FlowTranscriptionContractPublic",
@@ -1876,6 +1877,24 @@ def test_openapi_run_contract_response_schemas_are_closed(
     ]
 
     assert missing_closed_schema == []
+
+
+def test_openapi_run_contract_documents_the_spaces_security_classification(
+    openapi_spec: dict,
+) -> None:
+    field = openapi_spec["components"]["schemas"]["FlowRunContractPublic"][
+        "properties"
+    ]["security_classification"]
+    classification = _resolve_component_ref(openapi_spec, _non_null_schema(field))
+
+    assert _schema_allows_null(field)
+    assert set(classification["properties"]) == {
+        "name",
+        "description",
+        "security_level",
+    }
+    assert set(classification["required"]) == {"name", "security_level"}
+    assert "turned security classifications off" in field["description"]
 
 
 def test_openapi_documents_transcription_options_and_the_run_speaker_choice(
