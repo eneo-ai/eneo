@@ -200,16 +200,21 @@
   });
 
   const blockers = $derived(current.activation_blockers ?? []);
-  // What an active widget exposes besides knowledge: the assistant's general
-  // MCP servers and its enabled capabilities, named as the editor sees them.
-  const visitorTools = $derived([
-    ...(assistant.mcp_servers ?? [])
-      .filter((server) => server.purpose === "general" && server.is_enabled)
-      .map((server) => server.name),
-    ...(assistant.enabled_capabilities ?? []).map(
-      (purpose) => getCapability(purpose)?.label() ?? purpose
+  // What an active widget exposes besides knowledge, as the backend serves
+  // visitors: the assistant's general MCP servers as configured, and web
+  // search only through an external provider (VISITOR_CAPABILITY_PURPOSES in
+  // assistant_service.py). Image generation never.
+  const VISITOR_CAPABILITIES: ReadonlySet<string> = new Set(["web_search"]);
+  const visitorServers = $derived(
+    (assistant.mcp_servers ?? []).filter(
+      (server) => server.purpose === "general" && server.is_enabled
     )
-  ]);
+  );
+  const visitorCapabilities = $derived(
+    (assistant.enabled_capabilities ?? [])
+      .filter((purpose) => VISITOR_CAPABILITIES.has(purpose))
+      .map((purpose) => getCapability(purpose)?.label() ?? purpose)
+  );
   const showPreview = $derived(tab.value === "content" || tab.value === "appearance");
 </script>
 
@@ -504,13 +509,17 @@
                 <p class="text-secondary text-sm">{m.widget_admin_visitor_access_description()}</p>
                 <ul class="mt-1 list-disc pl-5 text-sm">
                   <li>{m.widget_admin_visitor_access_knowledge()}</li>
-                  {#each visitorTools as tool (tool)}
-                    <li>{tool}</li>
+                  {#each visitorServers as server (server.id)}
+                    <li>{server.name}</li>
                   {/each}
-                  {#if visitorTools.length > 0 && !(current.show_tool_activity ?? true)}
+                  {#each visitorCapabilities as capability (capability)}
+                    <li>{m.widget_admin_visitor_access_capability({ name: capability })}</li>
+                  {/each}
+                  {#if visitorServers.length + visitorCapabilities.length > 0 && !(current.show_tool_activity ?? true)}
                     <li class="text-secondary">{m.widget_admin_visitor_access_hidden()}</li>
                   {/if}
                 </ul>
+                <p class="text-secondary text-sm">{m.widget_admin_visitor_access_never()}</p>
               </section>
             </Card.Content>
           </Card.Root>

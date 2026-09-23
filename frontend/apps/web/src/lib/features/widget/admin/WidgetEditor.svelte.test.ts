@@ -59,7 +59,7 @@ function widget(overrides: Partial<Widget> = {}): Widget {
   } as unknown as Widget;
 }
 
-function renderEditor(current: Widget) {
+function renderEditor(current: Widget, assistant: Partial<Assistant> = {}) {
   const update = vi.fn(async ({ update: patch }: { update: Partial<Widget> }) => ({
     ...current,
     ...patch
@@ -73,7 +73,12 @@ function renderEditor(current: Widget) {
   } as unknown as Eneo;
   render(WidgetEditor, {
     widget: current,
-    assistant: { id: "a1", published: true, mcp_servers: [] } as unknown as Assistant,
+    assistant: {
+      id: "a1",
+      published: true,
+      mcp_servers: [],
+      ...assistant
+    } as unknown as Assistant,
     eneo,
     isAdmin: true,
     policy: null,
@@ -115,6 +120,56 @@ describe("WidgetEditor", () => {
     await expect.element(page.getByRole("heading", { level: 2, name: "general" })).toBeVisible();
     await expect
       .element(page.getByRole("heading", { level: 2, name: "widget_admin_texts" }))
+      .toBeVisible();
+  });
+
+  test("visitor access lists what visitors get and what they never get", async () => {
+    renderEditor(widget(), {
+      mcp_servers: [
+        { id: "m1", name: "Kommunens ärenden", purpose: "general", is_enabled: true },
+        { id: "m2", name: "Avstängd server", purpose: "general", is_enabled: false },
+        { id: "m3", name: "Sökleverantören", purpose: "web_search", is_enabled: true }
+      ],
+      enabled_capabilities: ["web_search", "image_generation"]
+    } as unknown as Partial<Assistant>);
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_publish/ }));
+    const access = page.getByRole("region", { name: "widget_admin_visitor_access" });
+    await expect.element(access).toBeVisible();
+    expect(
+      access
+        .getByRole("listitem")
+        .elements()
+        .map((item) => item.textContent?.trim())
+    ).toEqual([
+      "widget_admin_visitor_access_knowledge",
+      "Kommunens ärenden",
+      "widget_admin_visitor_access_capability(web_search)"
+    ]);
+    await expect.element(access.getByText("widget_admin_visitor_access_never")).toBeVisible();
+  });
+
+  test("image generation alone is not reported as a hidden tool", async () => {
+    renderEditor(widget({ show_tool_activity: false }), {
+      enabled_capabilities: ["image_generation"]
+    } as unknown as Partial<Assistant>);
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_publish/ }));
+    const access = page.getByRole("region", { name: "widget_admin_visitor_access" });
+    await expect.element(access).toBeVisible();
+    expect(access.getByRole("listitem").elements()).toHaveLength(1);
+    expect(access.getByText("widget_admin_visitor_access_hidden").elements()).toHaveLength(0);
+  });
+
+  test("tools that run with activity off are marked as not shown", async () => {
+    renderEditor(widget({ show_tool_activity: false }), {
+      enabled_capabilities: ["web_search"]
+    } as unknown as Partial<Assistant>);
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_publish/ }));
+    await expect
+      .element(
+        page
+          .getByRole("region", { name: "widget_admin_visitor_access" })
+          .getByText("widget_admin_visitor_access_hidden")
+      )
       .toBeVisible();
   });
 });

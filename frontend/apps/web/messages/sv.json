@@ -4915,6 +4915,8 @@
   "widget_admin_visitor_access": "Besökare får tillgång till",
   "widget_admin_visitor_access_description": "Det widgeten exponerar medan den är aktiv. Besökare är anonyma, så ingen användaridentitet vidarebefordras till en verktygsserver och inget verktygsanrop väntar på godkännande.",
   "widget_admin_visitor_access_knowledge": "Kunskap: assistentens samlingar och webbplatser",
+  "widget_admin_visitor_access_capability": "{name}, när ytan tillåter det och organisationens leverantör är en extern tjänst",
+  "widget_admin_visitor_access_never": "Aldrig tillgängligt för besökare: bildgenerering, filuppladdning, bilder som verktyg returnerar och Eneos inbyggda verktygsleverantörer.",
   "widget_activity": "Aktivitet",
   "widget_activity_via": "via {server}",
   "widget_activity_done": "Klart",

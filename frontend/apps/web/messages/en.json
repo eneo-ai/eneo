@@ -4915,6 +4915,8 @@
   "widget_admin_visitor_access": "Visitors get access to",
   "widget_admin_visitor_access_description": "What the widget exposes while it is active. Visitors are anonymous, so no user identity is ever forwarded to a tool server and no tool call waits for approval.",
   "widget_admin_visitor_access_knowledge": "Knowledge: the assistant's collections and websites",
+  "widget_admin_visitor_access_capability": "{name}, when the space allows it and the organisation's provider is an external service",
+  "widget_admin_visitor_access_never": "Never available to visitors: image generation, file uploads, images returned by tools and Eneo's built-in tool providers.",
   "widget_activity": "Activity",
   "widget_activity_via": "via {server}",
   "widget_activity_done": "Done",
