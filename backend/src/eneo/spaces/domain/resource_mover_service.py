@@ -25,7 +25,7 @@ class ResourceMoverService:
         actor_manager: "ActorManager",
         group_service: "GroupService",
         skill_repo: "SkillRepo",
-        widget_repo: "WidgetRepo | None" = None,
+        widget_repo: "WidgetRepo",
     ):
         super().__init__()
         self.space_service = space_service
@@ -33,11 +33,7 @@ class ResourceMoverService:
         self.actor_manager = actor_manager
         self.group_service = group_service
         self.skill_repo = skill_repo
-        if widget_repo is None:
-            from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
-
-            widget_repo = WidgetRepoImpl(space_repo.session)
-        self.widget_repo: "WidgetRepo" = widget_repo
+        self.widget_repo = widget_repo
 
     async def link_website_to_space(self, website_id: "UUID", space_id: "UUID"):
         source_space = await self.space_service.get_space_by_website(website_id)

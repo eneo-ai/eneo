@@ -43,6 +43,7 @@ async def test_bound_assistant_cannot_move_between_spaces() -> None:
         actor_manager=actor_manager,
         group_service=AsyncMock(),
         skill_repo=skill_repo,
+        widget_repo=AsyncMock(),
     )
 
     with pytest.raises(BadRequestException, match="Remove.*Skill bindings"):
