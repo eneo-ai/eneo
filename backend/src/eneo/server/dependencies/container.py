@@ -124,8 +124,8 @@ def get_container(
                     container=container,
                 )
             except NotFoundException as exc:
-                # An unknown module in an unverified claim is a credential failure;
-                # answering 404 would reveal which module keys exist.
+                # An unknown module named by an unverified claim is a credential
+                # failure like any other, so it answers 401 rather than 404.
                 raise AuthenticationException(
                     "Could not validate credentials."
                 ) from exc
