@@ -62,8 +62,11 @@ lifetimes. None of them can substitute for another.
 
 Audience scoping isolates the tokens in both directions: a module user token
 is rejected by every normal Eneo API route (wrong audience), and a normal Eneo
-session JWT is rejected by module-facing routes. A token minted for one module
-cannot be replayed against another module's routes.
+session JWT is rejected by module-facing routes. Routes under `/api/v1/flows/`
+are the exception: they accept a module user token together with its module's
+`sk_` key (see [Call Flows as the signed-in user](#call-flows-as-the-signed-in-user)).
+A token minted for one module cannot be replayed against another module's
+routes.
 
 ## Login handoff, step by step
 
@@ -162,6 +165,47 @@ Which users may enter a module is decided by tenant assignment: any active
 user in a tenant with the module enabled can complete the handoff. Per-user,
 per-resource authorization is the job of the resource routes, which execute as
 the real user.
+
+## Call Flows as the signed-in user
+
+A module can run flows for the user who signed in to it. Send the module's
+`sk_` key and the user's module token on the same request to a route under
+`/api/v1/flows/`:
+
+```http
+X-API-Key: sk_...
+Authorization: Bearer <module user token>
+```
+
+Eneo checks the pair as for any module resource call. The key passes normal
+API-key authentication, including its scope and its `flows` resource
+permission, and it must be the key registered for the token's module. The token
+and the user are then validated against live state. The request runs as the
+user:
+
+- **Access needs both credentials.** The key's scope and `flows` permission
+  apply, and so does the user's own access to the space and the flow. A
+  tenant-wide key does not let a user run a flow that the user cannot run.
+- **The user is the actor.** Runs the module creates belong to the user, and
+  the audit log records the user as the actor.
+
+This includes starting a live transcription session. Relay its WebSocket
+through the module's backend, as described in
+[Show live text while recording](/guides/flows/integrating-flows#show-live-text-while-recording).
+
+The Flow AI Builder routes (`/api/v1/flows/ai-builder/`), Flow package export
+(`/api/v1/flows/{id}/package-exports/`) and every route outside
+`/api/v1/flows/` refuse the pair.
+
+| Request | Result |
+| --- | --- |
+| Module token without the `sk_` key | `401` |
+| The pair on a route that does not accept it | `401` |
+| `sk_` key without the `flows` resource permission | `403` |
+| Token of one module with another module's key | `403`, message `API key is not registered for this module.` |
+
+To verify the setup, call `GET /api/v1/flows/runs/capacity/` with the pair. The
+response is `200`, and its `tenant_id` is the user's tenant.
 
 ## Lifetimes, refresh and long-running work
 
