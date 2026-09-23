@@ -643,9 +643,9 @@ async def test_approval_renders_the_name_of_a_speaker_split_at_the_pause() -> No
 
 
 @pytest.mark.parametrize(
-    ("occurrences", "second_line"),
+    ("occurrences", "speaker_edits", "second_line"),
     [
-        ([], "SPEAKER_01: Hallå."),
+        ([], [], "SPEAKER_01: Hallå."),
         (
             [
                 {
@@ -656,12 +656,27 @@ async def test_approval_renders_the_name_of_a_speaker_split_at_the_pause() -> No
                     "corrected": "Hallå där.",
                 }
             ],
+            [],
             "SPEAKER_01: Hallå där.",
+        ),
+        # The split stays but its words are gone: an empty line, nobody named.
+        (
+            [
+                {
+                    "segment_index": 1,
+                    "char_start": 0,
+                    "char_end": 6,
+                    "original": "Hallå.",
+                    "corrected": "",
+                }
+            ],
+            [SPLIT_EDIT],
+            "SPEAKER_05: ",
         ),
     ],
 )
 async def test_approval_drops_the_name_of_a_split_the_corrections_undid(
-    occurrences, second_line
+    occurrences, speaker_edits, second_line
 ) -> None:
     checkpoint = _checkpoint(_payload(SOURCE))
     checkpoint = checkpoint.model_copy(
@@ -690,7 +705,7 @@ async def test_approval_drops_the_name_of_a_split_the_corrections_undid(
         return_value=checkpoint
     )
     undone = _correction_set(checkpoint).model_copy(
-        update={"occurrences_json": occurrences, "speaker_edits_json": []}
+        update={"occurrences_json": occurrences, "speaker_edits_json": speaker_edits}
     )
     service.transcript_corrections_repo = AsyncMock(
         get_for_step=AsyncMock(return_value=undone)
