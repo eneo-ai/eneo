@@ -59,6 +59,9 @@
   } from "$lib/features/flows/flowRuntimeInputConfig";
   import { updateTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
   import FlowStepAIMenu from "./FlowStepAIMenu.svelte";
+  import FlowStepRequestPreview from "./FlowStepRequestPreview.svelte";
+  import Eye from "@lucide/svelte/icons/eye";
+  import { describeStepMaterial, getStepMaterial } from "$lib/features/flows/flowStepMaterial";
   import { getFlowStepUxCopy } from "$lib/features/flows/flowStepUxCopy";
   import {
     collectTemplateStepReferenceOrders,
@@ -694,6 +697,17 @@
   const isTranscribeOnly = $derived(activeStep?.output_mode === "transcribe_only");
 
   // Instruction & input template derived
+  let requestPreviewOpen = $state(false);
+  const stepUsesAI = $derived(
+    activeStep !== null &&
+      !isTemplateFill &&
+      !isTranscribeOnly &&
+      outputModeUsesCompletionModel(activeStep.output_mode)
+  );
+  const previewMaterialSentence = $derived.by(() => {
+    const material = activeStep ? getStepMaterial(activeStep, previousStep) : null;
+    return material ? m.flow_material_reads({ what: describeStepMaterial(material) }) : null;
+  });
   const instructionText = $derived(
     assistantState.assistant &&
       typeof assistantState.assistant === "object" &&
@@ -984,19 +998,110 @@
           <!-- A published flow can be changed here too: the Builder proposes, and
                approving unpublishes the flow until it is published again. Hiding
                this hid the feature from the people whose flows are published. -->
-          {#if onEditStepWithAI && activeStep.id}
-            <FlowStepAIMenu
-              usesAI={!isTemplateFill &&
-                !isTranscribeOnly &&
-                outputModeUsesCompletionModel(activeStep.output_mode)}
-              hasInstruction={instructionText.trim().length > 0}
-              onRequest={(request) => onEditStepWithAI?.(activeStep, request)}
+          <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            {#if stepUsesAI}
+              <!-- What the AI will actually get: instruction, material and the
+                   answer's fields, with variables named in words. -->
+              <Button variant="outline" size="sm" onclick={() => (requestPreviewOpen = true)}>
+                <Eye data-icon="inline-start" aria-hidden="true" />
+                {m.flow_request_preview_open()}
+              </Button>
+            {/if}
+            {#if onEditStepWithAI && activeStep.id}
+              <FlowStepAIMenu
+                usesAI={stepUsesAI}
+                hasInstruction={instructionText.trim().length > 0}
+                onRequest={(request) => onEditStepWithAI?.(activeStep, request)}
+              />
+            {/if}
+          </div>
+        </div>
+        {#if stepUsesAI}
+          <FlowStepRequestPreview
+            bind:open={requestPreviewOpen}
+            step={activeStep}
+            {steps}
+            {formSchema}
+            {instructionText}
+            ownText={inputTemplateText}
+            materialSentence={previewMaterialSentence}
+            {isAdvancedMode}
+            transcriptionEnabled={transcriptionEnabled && hasAudioInputSteps}
+          />
+        {/if}
+
+        <!-- Purpose first, the way the AI receives the step: what it should do
+             (the instruction), what it reads, what it hands on. -->
+        <FlowStepChapter
+          title={m.flow_chapter_what()}
+          status={chapterTaskStatus}
+          statusTone={stepAiWork?.missing ? "warning" : "default"}
+          initialOpen={defaultOpenChapter === "task"}
+          resetKey={activeStepStateKey}
+          requestOpen={taskRequestOpen}
+        >
+          <FlowStepSection>
+            <Settings.Row
+              title={m.flow_step_name()}
+              description=""
+              help={m.flow_step_name_help()}
+              density="compact"
+              fullWidth
+              let:aria
+            >
+              <div class="flex max-w-xl flex-col gap-2">
+                <Input
+                  {...aria}
+                  bind:ref={nameInputEl}
+                  value={activeStep.user_description ?? ""}
+                  placeholder={m.flow_step_name_placeholder()}
+                  disabled={isPublished}
+                  onfocus={() => {
+                    stepNameBeforeEdit = activeStep.user_description ?? "";
+                  }}
+                  oninput={(e) => updateStep("user_description", e.currentTarget.value || null)}
+                  onchange={() => void handleCommittedStepRename()}
+                />
+                {#if shouldShowTemplateBodyTextHint( { steps, activeStep, isTemplateFill, isTranscribeOnly } )}
+                  <p
+                    class="bg-accent-dimmer/30 text-accent-stronger rounded-lg px-3 py-2 text-xs leading-relaxed"
+                  >
+                    {m.flow_template_fill_step_name_hint()}
+                  </p>
+                {/if}
+              </div>
+            </Settings.Row>
+          </FlowStepSection>
+
+          {#if !isTemplateFill && !isTranscribeOnly && outputModeUsesCompletionModel(activeStep.output_mode)}
+            <FlowStepBehaviorSection
+              step={activeStep}
+              {isPublished}
+              {isAdvancedMode}
+              {isTranscribeOnly}
+              instructionMissing={stepAiWork?.missing ?? false}
+              focusInstruction={focusInstructionPending}
+              onInstructionFocused={() => (focusInstructionPending = false)}
+              assistant={assistantState.assistant}
+              assistantLoading={assistantState.loading}
+              onImproveInstructionWithAI={onEditStepWithAI && activeStep.id
+                ? (request) => onEditStepWithAI?.(activeStep, request)
+                : undefined}
+              availableModels={$currentSpace.completion_models}
+              {steps}
+              {formSchema}
+              {transcriptionEnabled}
+              {hasAudioInputSteps}
+              {stepUxCopy}
+              {instructionText}
+              loadPromptVersions={(id) => flowEditor.listAssistantPrompts(id)}
+              onAssistantFieldChange={(detail) => updateAssistantField(detail.field, detail.value)}
+              onInstructionDraft={(detail) => queueInstructionDraft(detail.value)}
+              onInstructionCommit={(detail) => void updateInstruction(detail.value)}
             />
           {/if}
-        </div>
+        </FlowStepChapter>
 
-        <!-- In reading order: what the step reads, what the AI does with it,
-             what it gives the next step. -->
         <FlowStepChapter
           title={m.flow_chapter_input()}
           status={chapterInputStatus}
@@ -1103,76 +1208,6 @@
               onInputSourcesChange={(detail) => updateInputSources(detail.sourceRefs)}
               onInputSourceChange={(detail) =>
                 handleInputSourceChange(detail.value as FlowStep["input_source"])}
-            />
-          {/if}
-        </FlowStepChapter>
-
-        <FlowStepChapter
-          title={m.flow_chapter_what()}
-          status={chapterTaskStatus}
-          statusTone={stepAiWork?.missing ? "warning" : "default"}
-          initialOpen={defaultOpenChapter === "task"}
-          resetKey={activeStepStateKey}
-          requestOpen={taskRequestOpen}
-        >
-          <FlowStepSection>
-            <Settings.Row
-              title={m.flow_step_name()}
-              description=""
-              help={m.flow_step_name_help()}
-              density="compact"
-              fullWidth
-              let:aria
-            >
-              <div class="flex max-w-xl flex-col gap-2">
-                <Input
-                  {...aria}
-                  bind:ref={nameInputEl}
-                  value={activeStep.user_description ?? ""}
-                  placeholder={m.flow_step_name_placeholder()}
-                  disabled={isPublished}
-                  onfocus={() => {
-                    stepNameBeforeEdit = activeStep.user_description ?? "";
-                  }}
-                  oninput={(e) => updateStep("user_description", e.currentTarget.value || null)}
-                  onchange={() => void handleCommittedStepRename()}
-                />
-                {#if shouldShowTemplateBodyTextHint( { steps, activeStep, isTemplateFill, isTranscribeOnly } )}
-                  <p
-                    class="bg-accent-dimmer/30 text-accent-stronger rounded-lg px-3 py-2 text-xs leading-relaxed"
-                  >
-                    {m.flow_template_fill_step_name_hint()}
-                  </p>
-                {/if}
-              </div>
-            </Settings.Row>
-          </FlowStepSection>
-
-          {#if !isTemplateFill && !isTranscribeOnly && outputModeUsesCompletionModel(activeStep.output_mode)}
-            <FlowStepBehaviorSection
-              step={activeStep}
-              {isPublished}
-              {isAdvancedMode}
-              {isTranscribeOnly}
-              instructionMissing={stepAiWork?.missing ?? false}
-              focusInstruction={focusInstructionPending}
-              onInstructionFocused={() => (focusInstructionPending = false)}
-              assistant={assistantState.assistant}
-              assistantLoading={assistantState.loading}
-              onImproveInstructionWithAI={onEditStepWithAI && activeStep.id
-                ? (request) => onEditStepWithAI?.(activeStep, request)
-                : undefined}
-              availableModels={$currentSpace.completion_models}
-              {steps}
-              {formSchema}
-              {transcriptionEnabled}
-              {hasAudioInputSteps}
-              {stepUxCopy}
-              {instructionText}
-              loadPromptVersions={(id) => flowEditor.listAssistantPrompts(id)}
-              onAssistantFieldChange={(detail) => updateAssistantField(detail.field, detail.value)}
-              onInstructionDraft={(detail) => queueInstructionDraft(detail.value)}
-              onInstructionCommit={(detail) => void updateInstruction(detail.value)}
             />
           {/if}
         </FlowStepChapter>

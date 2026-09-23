@@ -2,7 +2,8 @@ import {
   isFlowFormFieldBareAliasSafe,
   PRIMARY_FLOW_INPUT_KEYS,
   RESERVED_RUNTIME_VARIABLES,
-  SECTION_RUNTIME_VARIABLES
+  SECTION_RUNTIME_VARIABLES,
+  STEP_INPUT_KEYS
 } from "./flowFormSchema";
 
 const TEMPLATE_TOKEN_PATTERN_SOURCE = String.raw`\{\{\s*([^{}]+)\s*\}\}`;
@@ -274,7 +275,16 @@ function analyzeTemplateToken(
     }
   }
 
-  if (token.startsWith("flow.input.") || token.startsWith("step_input.")) {
+  if (token.startsWith("step_input.")) {
+    // The upload has a closed set of keys (STEP_INPUT_KEY_SHAPES, published
+    // through the manifest); the runtime refuses any other one
+    // (template_reference_analyzer: unknown_step_input_key).
+    const key = token.slice("step_input.".length).split(".", 1)[0] ?? "";
+    return STEP_INPUT_KEYS.has(key)
+      ? { token, kind: "valid", category: "technical" }
+      : { token, kind: "invalid", category: "unknown", reason: "unknown_variable" };
+  }
+  if (token.startsWith("flow.input.")) {
     return { token, kind: "valid", category: "technical" };
   }
 

@@ -22,6 +22,42 @@ function step(partial: Partial<FlowStep>): FlowStep {
 }
 
 describe("getChapterOutputStatus", () => {
+  it("counts the answer's fields and leaves the usual AI processing unsaid", () => {
+    const contract = {
+      type: "object",
+      properties: {
+        sektioner: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { underlag: { type: "object" }, oklarheter: { type: "array" } }
+          }
+        }
+      }
+    };
+    expect(
+      getChapterOutputStatus(
+        step({ output_type: "json", output_mode: "pass_through", output_contract: contract }),
+        false
+      )
+    ).toBe(
+      `${m.flow_output_type_simple_structured()} · ${m.flow_chapter_output_fields({ count: "2" })}`
+    );
+    expect(
+      getChapterOutputStatus(
+        step({
+          output_type: "json",
+          output_mode: "pass_through",
+          output_contract: contract,
+          input_config: { text_processing: { mode: "process_each_section" } }
+        }),
+        false
+      )
+    ).toBe(
+      `${m.flow_output_type_simple_structured()} · ${m.flow_chapter_output_fields_per_section({ count: "2" })}`
+    );
+  });
+
   it("appends the mode label after the output label when a mode label exists", () => {
     expect(
       getChapterOutputStatus(step({ output_type: "text", output_mode: "transcribe_only" }))

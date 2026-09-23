@@ -148,11 +148,13 @@ describe("analyzeTemplateTokens invalid tokens", () => {
     expect(classifyVariable("flow_input.", context)).toBe("unknown");
   });
 
-  it("does not apply form-field typo detection to step_input paths", () => {
-    const unresolved = collectInvalidTokens("{{step_input.datm}}", context);
-
-    expect(unresolved).toEqual([]);
-    expect(classifyVariable("step_input.datm", context)).toBe("technical");
+  it("accepts only the upload keys the runtime knows", () => {
+    expect(collectInvalidTokens("{{step_input.text}} {{step_input.file_ids}}", context)).toEqual(
+      []
+    );
+    // The runtime refuses an unknown key (unknown_step_input_key), so the editor does too.
+    expect(collectInvalidTokens("{{step_input.datm}}", context)).toEqual(["step_input.datm"]);
+    expect(classifyVariable("step_input.datm", context)).toBe("unknown");
   });
 
   it("does not flag unknown single-segment flow_input references when no form fields are declared", () => {

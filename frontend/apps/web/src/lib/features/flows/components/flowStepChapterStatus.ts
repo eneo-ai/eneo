@@ -1,6 +1,7 @@
 import type { FlowStep, SecurityClassification } from "@eneo/eneo-js";
 import { getTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
 import { m } from "$lib/paraglide/messages";
+import { describeAnswerFields } from "$lib/features/flows/flowStepRequestPreview";
 import {
   describeStepMaterialAsSummary,
   getStepMaterial
@@ -27,9 +28,24 @@ function getOutputTypeDisplay(step: FlowStep, isAdvancedMode: boolean): string {
 }
 
 export function getChapterOutputStatus(step: FlowStep, isAdvancedMode = true): string {
-  const modeLabel = OUTPUT_MODES.find((option) => option.value === step.output_mode)?.label ?? "";
-  const outputLabel = getOutputTypeDisplay(step, isAdvancedMode);
-  return modeLabel ? `${outputLabel} · ${modeLabel}` : outputLabel;
+  const parts = [getOutputTypeDisplay(step, isAdvancedMode)];
+  // How much the answer holds, in words: "6 fält" says more than "JSON".
+  const answer = describeAnswerFields(step);
+  if (answer.kind === "fields" && answer.fields.length > 0) {
+    const count = String(answer.fields.length);
+    parts.push(
+      answer.perSection
+        ? m.flow_chapter_output_fields_per_section({ count })
+        : m.flow_chapter_output_fields({ count })
+    );
+  }
+  // Processing with the AI is what almost every step does; only other modes
+  // are worth naming.
+  if (step.output_mode !== "pass_through") {
+    const modeLabel = OUTPUT_MODES.find((option) => option.value === step.output_mode)?.label;
+    if (modeLabel) parts.push(modeLabel);
+  }
+  return parts.join(" · ");
 }
 
 export function getChapterControlStatus(
