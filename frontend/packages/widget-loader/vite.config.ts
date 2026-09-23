@@ -1,9 +1,24 @@
 import { readFileSync } from "node:fs";
-import { defineConfig } from "vitest/config";
+import { defineConfig, type Plugin } from "vitest/config";
+import { minifyCss } from "./scripts/minify-css.mjs";
 
 const pkg = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8")) as {
   version: string;
 };
+
+const STYLES_LITERAL = /(export const styles = `)([\s\S]*?)(`;)/;
+
+/** The stylesheet string ships collapsed; esbuild leaves string contents alone. */
+function minifyStyles(): Plugin {
+  return {
+    name: "eneo-minify-styles",
+    apply: "build",
+    transform(code, id) {
+      if (!id.endsWith("/src/styles.ts")) return null;
+      return code.replace(STYLES_LITERAL, (_, open, css, close) => open + minifyCss(css) + close);
+    }
+  };
+}
 
 // A classic IIFE for every CMS: no module syntax, no polyfills, es2019 so the
 // bundle stays small and runs in anything that has custom elements. The
@@ -13,6 +28,7 @@ export default defineConfig(({ command }) => ({
   define: {
     __LOADER_VERSION__: JSON.stringify(pkg.version)
   },
+  plugins: [minifyStyles()],
   optimizeDeps: {
     esbuildOptions: { target: "es2022" }
   },
