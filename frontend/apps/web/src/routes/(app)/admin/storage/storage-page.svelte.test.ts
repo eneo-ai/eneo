@@ -411,7 +411,12 @@ describe("admin storage settings page", () => {
     await expect.element(page.getByText(/^storage_settings_last_changed/)).toBeVisible();
     await expect
       .element(page.getByRole("link", { name: "storage_settings_object_store_docs" }))
-      .toHaveAttribute("href", "https://docs.eneo.ai/guides/object-content-storage");
+      .toHaveAttribute(
+        "href",
+        expect.stringMatching(
+          /^https:\/\/docs\.eneo\.ai\/(dev|v\d+\.\d+)\/guides\/object-content-storage$/
+        )
+      );
   });
 
   test("tests and saves the first connection without changing the storage target", async () => {
