@@ -214,7 +214,8 @@ async def get_widget_session(
     response_model=SessionPublic,
     description=(
         "Leave feedback on one of the visitor's own sessions. Free text is"
-        " dropped unless the widget stores feedback text."
+        " dropped unless the widget stores feedback text; a vote without text"
+        " keeps the comment stored earlier."
     ),
     responses=responses.get_responses([401, 404]),
 )

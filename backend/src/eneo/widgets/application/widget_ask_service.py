@@ -136,8 +136,13 @@ class WidgetAskService:
         previous = await self.usage_repo.lock_feedback(session.id)
         if not widget.privacy.store_feedback_text:
             feedback = SessionFeedback(value=feedback.value, text=None)
+        # The embed page sends a changed vote without the comment it sent
+        # earlier; only a new comment replaces the stored one.
         updated = await self.session_service.leave_feedback(
-            session_id=session_id, assistant_id=widget.target_id, feedback=feedback
+            session_id=session_id,
+            assistant_id=widget.target_id,
+            feedback=feedback,
+            keep_existing_text=True,
         )
         # Daily counters follow the vote: a changed vote moves between the
         # columns on the day it changes, in the same transaction as the vote.

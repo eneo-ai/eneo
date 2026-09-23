@@ -553,3 +553,58 @@ async def test_zero_retention_answer_leaves_no_session_behind(
             resp = await client.post(url, json=body, headers=_auth(token))
         assert resp.status_code == 404, resp.text
         assert resp.json()["detail"]["code"] == "session_not_owned"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_changing_the_vote_keeps_the_visitors_comment(
+    client, admin_token, active_widget, fake_assistant_ask
+):
+    await _patch_widget(
+        client,
+        admin_token,
+        active_widget["id"],
+        privacy={"retention_days": 30, "store_feedback_text": True},
+    )
+    public_id = active_widget["public_id"]
+    token = await _mint(client, public_id)
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Hej"},
+        headers=_auth(token),
+    )
+    session_id = _sse_events(resp.text)[0][1]["session_id"]
+    feedback_url = f"/api/v1/widgets/{public_id}/sessions/{session_id}/feedback/"
+
+    async def stored() -> tuple[int | None, str | None]:
+        async with sessionmanager.session() as db, db.begin():
+            row = (
+                await db.execute(
+                    sa.select(Sessions.feedback_value, Sessions.feedback_text).where(
+                        Sessions.id == UUID(session_id)
+                    )
+                )
+            ).one()
+        return row.feedback_value, row.feedback_text
+
+    resp = await client.post(
+        feedback_url,
+        json={"value": -1, "text": "Fel öppettider för biblioteket"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert await stored() == (-1, "Fel öppettider för biblioteket")
+
+    # The embed page sends a changed vote without the comment.
+    for body in ({"value": 1}, {"value": -1, "text": "  "}):
+        resp = await client.post(feedback_url, json=body, headers=_auth(token))
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["feedback"]["text"] == "Fel öppettider för biblioteket"
+    assert await stored() == (-1, "Fel öppettider för biblioteket")
+
+    # A new comment replaces the stored one.
+    resp = await client.post(
+        feedback_url, json={"value": 1, "text": "Nu stämmer det"}, headers=_auth(token)
+    )
+    assert resp.status_code == 200, resp.text
+    assert await stored() == (1, "Nu stämmer det")
