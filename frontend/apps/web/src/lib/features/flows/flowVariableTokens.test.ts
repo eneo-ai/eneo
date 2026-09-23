@@ -155,6 +155,14 @@ describe("analyzeTemplateTokens invalid tokens", () => {
     // The runtime refuses an unknown key (unknown_step_input_key), so the editor does too.
     expect(collectInvalidTokens("{{step_input.datm}}", context)).toEqual(["step_input.datm"]);
     expect(classifyVariable("step_input.datm", context)).toBe("unknown");
+    // A list takes one numeric index; a single value takes nothing after it.
+    expect(collectInvalidTokens("{{step_input.file_ids.0}}", context)).toEqual([]);
+    expect(
+      collectInvalidTokens(
+        "{{step_input.text.rubrik}} {{step_input.file_ids.first}} {{step_input.file_ids.0.id}}",
+        context
+      )
+    ).toEqual(["step_input.text.rubrik", "step_input.file_ids.first", "step_input.file_ids.0.id"]);
   });
 
   it("does not flag unknown single-segment flow_input references when no form fields are declared", () => {

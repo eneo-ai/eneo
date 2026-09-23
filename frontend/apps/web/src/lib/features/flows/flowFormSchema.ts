@@ -47,8 +47,10 @@ const RESERVED_FORM_FIELD_INPUT_KEYS = new Set(flowVariableDefinitions.reservedF
 export const RESERVED_RUNTIME_VARIABLES = new Set(flowVariableDefinitions.reservedRuntimeVariables);
 /** Runtime variables a step exposes only while it reads its material section by section. */
 export const SECTION_RUNTIME_VARIABLES = new Set(flowVariableDefinitions.sectionRuntimeVariables);
-/** The keys a step can read from what is uploaded when the flow runs (`step_input.<key>`). */
-export const STEP_INPUT_KEYS = new Set(flowVariableDefinitions.stepInputKeys);
+/** What each `step_input.<key>` holds when the flow runs: one value (scalar) or a list (sequence). */
+export const STEP_INPUT_KEY_SHAPES: ReadonlyMap<string, string> = new Map(
+  Object.entries(flowVariableDefinitions.stepInputKeyShapes)
+);
 const FLOW_FORM_STEP_ALIAS_PATTERN = /^step_\d+($|[._])/i;
 
 export type FlowFormFieldNameIssue = "namespace_head" | "primary_input_key" | "step_alias" | "dot";

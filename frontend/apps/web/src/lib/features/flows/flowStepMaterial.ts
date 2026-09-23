@@ -2,8 +2,11 @@ import type { FlowStep } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import { parseFlowInputBindings } from "./flowInputBindings";
 import { getRuntimeInputConfig } from "./flowRuntimeInputConfig";
-import { STEP_INPUT_KEYS } from "./flowFormSchema";
-import { collectTemplateStepReferenceOrders, extractTemplateTokens } from "./flowVariableTokens";
+import {
+  collectTemplateStepReferenceOrders,
+  extractTemplateTokens,
+  isValidStepInputPath
+} from "./flowVariableTokens";
 
 /**
  * What the AI reads in a step, in the runtime's order
@@ -32,14 +35,14 @@ type PreviousStep = Pick<FlowStep, "step_order" | "user_description"> | null | u
 
 /**
  * True when the text reads the upload through a reference the runtime
- * accepts (`consumes_runtime_input`): a whole token naming a known
- * `step_input` key. A typo or an unclosed token does not count.
+ * accepts (`consumes_runtime_input`): a whole token with a valid
+ * `step_input` path. A typo or an unclosed token does not count.
  */
 export function ownTextIncludesUpload(text: string): boolean {
-  return extractTemplateTokens(text).some((token) => {
-    const [head, key, ...rest] = token.split(".");
-    return head === "step_input" && rest.length === 0 && STEP_INPUT_KEYS.has(key ?? "");
-  });
+  return extractTemplateTokens(text).some(
+    (token) =>
+      token.startsWith("step_input.") && isValidStepInputPath(token.slice("step_input.".length))
+  );
 }
 
 /** What the step reads when it has no text of its own; null when the source is unknown. */

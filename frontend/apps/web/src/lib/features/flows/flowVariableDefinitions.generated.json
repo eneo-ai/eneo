@@ -10,7 +10,12 @@
     "transkribering"
   ],
   "sectionRuntimeVariables": ["section_index"],
-  "stepInputKeys": ["extracted_text_length", "file_ids", "input_format", "text"],
+  "stepInputKeyShapes": {
+    "extracted_text_length": "scalar",
+    "file_ids": "sequence",
+    "input_format": "scalar",
+    "text": "scalar"
+  },
   "formFieldNamespaceHeads": ["flow", "flow_input", "step_input"],
   "primaryFlowInputKeys": [
     "file_ids",

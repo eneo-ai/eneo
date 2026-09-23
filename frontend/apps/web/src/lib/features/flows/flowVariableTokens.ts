@@ -3,8 +3,20 @@ import {
   PRIMARY_FLOW_INPUT_KEYS,
   RESERVED_RUNTIME_VARIABLES,
   SECTION_RUNTIME_VARIABLES,
-  STEP_INPUT_KEYS
+  STEP_INPUT_KEY_SHAPES
 } from "./flowFormSchema";
+
+/**
+ * The runtime's rule for what follows `step_input.`
+ * (template_reference_analyzer._validate_step_input_path): a known key, then
+ * nothing after a single value, or one numeric index after a list.
+ */
+export function isValidStepInputPath(path: string): boolean {
+  const [key = "", ...rest] = path.split(".").filter(Boolean);
+  const shape = STEP_INPUT_KEY_SHAPES.get(key);
+  if (rest.length === 0) return shape !== undefined;
+  return shape === "sequence" && rest.length === 1 && /^\d+$/.test(rest[0] ?? "");
+}
 
 const TEMPLATE_TOKEN_PATTERN_SOURCE = String.raw`\{\{\s*([^{}]+)\s*\}\}`;
 const TEMPLATE_TOKEN_PATTERN = new RegExp(TEMPLATE_TOKEN_PATTERN_SOURCE, "g");
@@ -276,11 +288,7 @@ function analyzeTemplateToken(
   }
 
   if (token.startsWith("step_input.")) {
-    // The upload has a closed set of keys (STEP_INPUT_KEY_SHAPES, published
-    // through the manifest); the runtime refuses any other one
-    // (template_reference_analyzer: unknown_step_input_key).
-    const key = token.slice("step_input.".length).split(".", 1)[0] ?? "";
-    return STEP_INPUT_KEYS.has(key)
+    return isValidStepInputPath(token.slice("step_input.".length))
       ? { token, kind: "valid", category: "technical" }
       : { token, kind: "invalid", category: "unknown", reason: "unknown_variable" };
   }
