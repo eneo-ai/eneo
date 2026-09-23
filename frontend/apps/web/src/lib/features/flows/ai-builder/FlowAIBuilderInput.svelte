@@ -277,6 +277,18 @@
     });
   }
 
+  // A quick pick adds to what is written: straight after an open stem
+  // ("... så att det läser "), after a comma once something already follows.
+  export function append(text: string) {
+    const trimmed = inputValue.replace(/\s+$/, "");
+    inputValue = trimmed && inputValue === trimmed ? `${trimmed}, ${text}` : `${inputValue}${text}`;
+    requestAnimationFrame(() => {
+      textareaEl?.focus();
+      textareaEl?.setSelectionRange(inputValue.length, inputValue.length);
+      autosizeTextarea();
+    });
+  }
+
   // A failure whose fix is attaching a file lands the user on that control,
   // not in the text box: the card named the file, so the caret is not where
   // the work is. Focus, never click - opening a file dialog the user did not

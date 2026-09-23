@@ -40,6 +40,15 @@
   import { EneoError, type FlowRun, type FlowStep, type TranscriptionModel } from "@eneo/eneo-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
+  import { getStepSourceLine } from "$lib/features/flows/flowStepMaterial";
+  import { buildContext } from "$lib/features/flows/components/flowPromptVariables";
+  import {
+    answerLabel,
+    contractFieldCount,
+    inSentence
+  } from "$lib/features/flows/ai-builder/builderStepPhrases";
+  import type { AIBuilderStepIntent } from "$lib/features/flows/ai-builder/protocol";
   import {
     FlowSaveFailedError,
     FlowSaveIncompleteError,
@@ -157,7 +166,31 @@
     setActiveTab("ai-builder");
   }
 
-  async function openStepInAIBuilder(step: FlowStep, request?: string) {
+  // What the part the menu asks about is now, in the words the step list and
+  // the Builder use, so the Builder can ask about that part.
+  function stepPartNow(step: FlowStep, intent?: AIBuilderStepIntent): string | null {
+    if (intent === "underlag") {
+      const steps = $update.steps;
+      return (
+        getStepSourceLine(
+          step,
+          steps.find((candidate) => candidate.step_order === step.step_order - 1),
+          buildContext(steps, formSchemaMetadata, transcriptionEnabled, step.step_order)
+        )?.text ?? null
+      );
+    }
+    if (intent === "format") {
+      const answer = answerLabel(step.output_type, contractFieldCount(step.output_contract));
+      return m.ai_builder_task_current_answers({ answer: inSentence(answer, getLocale()) });
+    }
+    return null;
+  }
+
+  async function openStepInAIBuilder(
+    step: FlowStep,
+    request?: string,
+    intent?: AIBuilderStepIntent
+  ) {
     if (!step.id) return;
     try {
       await flowEditor.flushSaves();
@@ -182,7 +215,9 @@
       editContext: { kind: "saved_flow_step", flow_step_id: step.id },
       stepName: step.user_description?.trim() || m.flow_step_unnamed(),
       stepNumber: step.step_order,
-      request
+      request,
+      intent,
+      current: stepPartNow(step, intent)
     });
   }
 

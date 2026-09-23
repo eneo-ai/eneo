@@ -2,8 +2,10 @@
   import { BUILDER_COLUMN } from "./builderColumns";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { getLocale } from "$lib/paraglide/runtime";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
-  import type { AIBuilderEditContext, AIBuilderStepChoice } from "./protocol";
+  import { inSentence } from "./builderStepPhrases";
+  import type { AIBuilderEditContext, AIBuilderStepChoice, AIBuilderStepIntent } from "./protocol";
 
   interface Props {
     targetKind: "create" | "edit";
@@ -19,6 +21,12 @@
     onselectstep?: (choice: AIBuilderStepChoice) => void;
     requireStepScope?: boolean;
     onpackage?: (detail: { file: File; text: string }) => void;
+    /** The part of the step the editor's menu asked about, and what it is now. */
+    stepIntent?: AIBuilderStepIntent | null;
+    stepNow?: string | null;
+    stepNumber?: number | null;
+    /** The flow's steps, for the quick picks of what a step can read. */
+    flowSteps?: AIBuilderStepChoice[] | null;
   }
 
   let {
@@ -33,8 +41,60 @@
     stepChoices = null,
     onselectstep,
     requireStepScope = false,
-    onpackage
+    onpackage,
+    stepIntent = null,
+    stepNow = null,
+    stepNumber = null,
+    flowSteps = null
   }: Props = $props();
+
+  const locale = $derived(getLocale());
+  // The menu asked about one part of the step: the heading asks about that part
+  // in the words of the review's strip (Läser, Gör, Svarar med).
+  const INTENT_TITLE: Record<AIBuilderStepIntent, (inputs: { step: string }) => string> = {
+    underlag: m.ai_builder_task_title_step_reads,
+    instruction: m.ai_builder_task_title_step_does,
+    format: m.ai_builder_task_title_step_answers
+  };
+  const intentTitle = $derived(
+    stepIntent && stepNumber ? INTENT_TITLE[stepIntent]({ step: String(stepNumber) }) : null
+  );
+  // What a step can read, one click each: the flow input, the nearest earlier
+  // steps and all of them. A long flow offers the four nearest; the reader
+  // names an older step in their own words.
+  const NEAREST_PICKS = 4;
+  const earlierSteps = $derived(
+    stepIntent === "underlag" && stepNumber
+      ? (flowSteps ?? [])
+          .filter((step) => step.order < stepNumber)
+          .sort((a, b) => a.order - b.order)
+      : []
+  );
+  const picks = $derived.by(() => {
+    if (stepIntent !== "underlag" || !stepNumber) return [];
+    const earlier = earlierSteps.slice(-NEAREST_PICKS);
+    return [
+      {
+        key: "flow_input",
+        label: m.ai_builder_reads_flow_input(),
+        text: inSentence(m.ai_builder_reads_flow_input(), locale)
+      },
+      ...earlier.map((step) => ({
+        key: step.id,
+        label: m.ai_builder_step_choice_item({ step: step.order, name: step.name }),
+        text: m.ai_builder_task_pick_step({ step: String(step.order), name: step.name })
+      })),
+      ...(stepNumber > 2
+        ? [
+            {
+              key: "all_previous",
+              label: m.ai_builder_step_all_previous(),
+              text: inSentence(m.ai_builder_step_all_previous(), locale)
+            }
+          ]
+        : [])
+    ];
+  });
 
   let inputRef = $state<FlowAIBuilderInput | undefined>();
 
@@ -66,12 +126,19 @@
     >
       {#if !isEdit}
         {m.ai_builder_task_title()}
+      {:else if intentTitle}
+        {intentTitle}
       {:else if editContextLabel}
         {m.ai_builder_task_title_edit_step()}
       {:else}
         {m.ai_builder_task_title_edit()}
       {/if}
     </h2>
+    {#if intentTitle && stepNow}
+      <p class="text-primary mt-2 text-[0.9375rem] font-medium">
+        {m.ai_builder_task_now({ what: inSentence(stepNow, locale) })}
+      </p>
+    {/if}
     <p class="text-secondary mt-2 max-w-[54ch] text-[0.9375rem] leading-relaxed text-pretty">
       {isEdit ? m.ai_builder_task_intro_edit() : m.ai_builder_task_intro()}
     </p>
@@ -95,6 +162,30 @@
       />
     </div>
     <p class="text-secondary mt-2 px-0.5 text-xs">{m.ai_builder_task_model_note()}</p>
+
+    {#if picks.length > 0}
+      <div class="mt-5">
+        <h3 class="text-primary text-[0.8125rem] font-bold">{m.ai_builder_task_picks_label()}</h3>
+        <div class="mt-2 flex flex-wrap gap-2">
+          {#each picks as pick (pick.key)}
+            <Button
+              variant="outline"
+              size="sm"
+              class="rounded-full font-normal max-sm:h-[44px]"
+              onclick={() => inputRef?.append(pick.text)}
+            >
+              {pick.label}
+            </Button>
+          {/each}
+        </div>
+        <p class="text-secondary mt-2 text-xs">
+          {m.ai_builder_task_picks_hint()}
+          {#if earlierSteps.length > NEAREST_PICKS}
+            {m.ai_builder_task_picks_hint_older()}
+          {/if}
+        </p>
+      </div>
+    {/if}
 
     {#if isEdit && onopenreview}
       <div

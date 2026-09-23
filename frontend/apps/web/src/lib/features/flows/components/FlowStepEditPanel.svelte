@@ -59,6 +59,7 @@
   } from "$lib/features/flows/flowRuntimeInputConfig";
   import { updateTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
   import FlowStepAIMenu from "./FlowStepAIMenu.svelte";
+  import type { AIBuilderStepIntent } from "$lib/features/flows/ai-builder/protocol";
   import FlowStepRequestPreview from "./FlowStepRequestPreview.svelte";
   import { buildContext } from "./flowPromptVariables";
   import Eye from "@lucide/svelte/icons/eye";
@@ -187,7 +188,7 @@
     onAddSpeakerMappingStep?: () => void;
     onBuildFlowWithAI?: () => void;
     /** Opens the AI Builder on a step, optionally with a request waiting in the composer. */
-    onEditStepWithAI?: (step: FlowStep, request?: string) => void;
+    onEditStepWithAI?: (step: FlowStep, request?: string, intent?: AIBuilderStepIntent) => void;
   } = $props();
 
   // ---------------------------------------------------------------------------
@@ -1035,7 +1036,7 @@
               <FlowStepAIMenu
                 usesAI={stepUsesAI}
                 hasInstruction={instructionText.trim().length > 0}
-                onRequest={(request) => onEditStepWithAI?.(activeStep, request)}
+                onRequest={(request, intent) => onEditStepWithAI?.(activeStep, request, intent)}
               />
             {/if}
           </div>
@@ -1110,7 +1111,7 @@
               assistantLoadFailed={assistantState.loadFailed}
               onRetryAssistantLoad={() => assistantState.retryLoad()}
               onImproveInstructionWithAI={onEditStepWithAI && activeStep.id
-                ? (request) => onEditStepWithAI?.(activeStep, request)
+                ? (request) => onEditStepWithAI?.(activeStep, request, "instruction")
                 : undefined}
               availableModels={$currentSpace.completion_models}
               {steps}
@@ -1175,7 +1176,7 @@
               assistant={assistantState.assistant}
               assistantLoading={assistantState.loading}
               onImproveInstructionWithAI={onEditStepWithAI && activeStep.id
-                ? (request) => onEditStepWithAI?.(activeStep, request)
+                ? (request) => onEditStepWithAI?.(activeStep, request, "instruction")
                 : undefined}
               availableModels={$currentSpace.completion_models}
               {steps}

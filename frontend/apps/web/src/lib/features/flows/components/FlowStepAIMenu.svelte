@@ -3,6 +3,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { m } from "$lib/paraglide/messages";
+  import type { AIBuilderStepIntent } from "$lib/features/flows/ai-builder/protocol";
 
   /**
    * One entry point for changing a step with the AI Builder. Each intent opens
@@ -17,14 +18,15 @@
     /** The step has an AI instruction (a completion step). */
     usesAI: boolean;
     hasInstruction: boolean;
-    /** `undefined` opens the Builder on the step with an empty composer. */
-    onRequest: (request?: string) => void;
+    /** `undefined` opens the Builder on the step with an empty composer; the
+     *  intent names the part of the step the request is about. */
+    onRequest: (request?: string, intent?: AIBuilderStepIntent) => void;
   } = $props();
 
   const intents = $derived(
     [
       usesAI && {
-        key: "instruction",
+        key: "instruction" as const,
         label: hasInstruction
           ? m.flow_step_ai_menu_improve_instruction()
           : m.flow_step_ai_menu_write_instruction(),
@@ -34,13 +36,13 @@
           : m.flow_step_ai_request_write_instruction()
       },
       {
-        key: "underlag",
+        key: "underlag" as const,
         label: m.flow_step_ai_menu_underlag(),
         description: m.flow_step_ai_menu_underlag_desc(),
         request: m.flow_step_ai_request_underlag()
       },
       usesAI && {
-        key: "format",
+        key: "format" as const,
         label: m.flow_step_ai_menu_format(),
         description: m.flow_step_ai_menu_format_desc(),
         request: m.flow_step_ai_request_format()
@@ -63,7 +65,7 @@
       {#each intents as intent (intent.key)}
         <DropdownMenu.Item
           class="flex-col items-start gap-0.5 py-2 whitespace-normal"
-          onclick={() => onRequest(intent.request)}
+          onclick={() => onRequest(intent.request, intent.key)}
         >
           <span class="text-primary text-sm font-medium">{intent.label}</span>
           <span class="text-secondary text-xs leading-relaxed">{intent.description}</span>

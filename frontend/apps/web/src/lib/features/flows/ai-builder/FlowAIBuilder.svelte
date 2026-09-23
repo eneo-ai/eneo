@@ -1051,6 +1051,10 @@
           onselectstep={selectStepChoice}
           {requireStepScope}
           onpackage={targetKind === "create" ? onpackage : undefined}
+          stepIntent={service.savedFlowStepScope?.intent ?? null}
+          stepNow={service.savedFlowStepScope?.current ?? null}
+          stepNumber={service.activeStepScope?.stepNumber ?? null}
+          flowSteps={stepChoices}
         />
       {:else if screen === "question" && questionMessage}
         <BuilderQuestionScreen

@@ -72,7 +72,8 @@
         <ul class="text-primary flex list-none flex-col gap-2 p-0">
           <li class="flex items-start gap-2.5">
             <IconPencil class="text-secondary mt-0.5 size-4 shrink-0" aria-hidden="true" />
-            {changedStepLine ?? m.ai_builder_approve_dialog_steps_edit_all({ count: changedStepCount })}
+            {changedStepLine ??
+              m.ai_builder_approve_dialog_steps_edit_all({ count: changedStepCount })}
           </li>
           {#if unchangedStepCount > 0}
             <li class="flex items-start gap-2.5">
