@@ -5346,6 +5346,7 @@
   "widget_admin_overview_blocked": "Kan inte aktiveras: {reasons}",
   "widget_admin_name_required": "Ange ett namn.",
   "widget_admin_origins_refused": "Listan kunde inte sparas. Varje rad får bara innehålla schema, värd och eventuell port, till exempel https://www.kommun.se.",
+  "widget_admin_questions_duplicate": "Frågan finns redan i listan.",
   "widget_admin_questions_refused": "Förslagsfrågorna får inte vara tomma eller upprepas.",
   "widget_admin_value_refused": "Värdet godtogs inte. Ändra det så sparas det igen.",
   "widget_admin_error_values_refused": "Vissa värden godtogs inte. De är markerade i formuläret; dina andra ändringar sparas som vanligt.",
