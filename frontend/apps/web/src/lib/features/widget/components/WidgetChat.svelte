@@ -60,6 +60,9 @@
   let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
   // Shown while the backend has not yet confirmed the question (first chunk).
   let pendingQuestion = $state<string | null>(null);
+  // The conversation whose first answer is in. Its feedback stays mounted
+  // through follow-up questions, so a vote is not lost to the next one.
+  let rateableSession = $state<string | null>(null);
 
   // Props are fixed for the lifetime of the page; capture them once.
   const initial = untrack(() => ({ client, config, hostOrigin, onSession, onTheme, previewToken }));
@@ -126,6 +129,7 @@
       // ChatService toasts and swallows load errors for the signed-in app;
       // here a gone session must be forgotten, not announced.
       await chat.loadConversation({ id: sessionId }, { rethrow: true });
+      rateableSession = chat.currentConversation.id;
     } catch (error) {
       // A gone session (retention, a new visitor identity) is not worth showing.
       session.rememberSession(null);
@@ -168,17 +172,22 @@
     }
   }
 
+  /** The turn exists on the server: remember it and tell the host page one began. */
+  function keepConversation(wasNew: boolean) {
+    const sessionId = chat.currentConversation.id;
+    if (!sessionId) return;
+    if (!singleTurn) session.rememberSession(sessionId);
+    // The host page only learns that a conversation began, never its id.
+    if (wasNew) bridge.conversationStarted();
+    rateableSession = sessionId;
+  }
+
   async function ask(question: string, retried: boolean): Promise<void> {
     const wasNew = !chat.currentConversation.id;
     try {
       await session.ensureToken();
       await chat.askQuestion(question);
-      const sessionId = chat.currentConversation.id;
-      if (sessionId) {
-        if (!singleTurn) session.rememberSession(sessionId);
-        // The host page only learns that a conversation began, never its id.
-        if (wasNew) bridge.conversationStarted();
-      }
+      keepConversation(wasNew);
       announcement = m.widget_answer_complete();
     } catch (error) {
       if (isTokenRejected(error) && !retried) {
@@ -320,11 +329,12 @@
           {/if}
         </ol>
       </div>
-      {#if !singleTurn && chat.currentConversation.id && !chat.askQuestion.isLoading}
+      {#if !singleTurn && chat.currentConversation.id && rateableSession === chat.currentConversation.id}
         <WidgetFeedback
           sessionId={chat.currentConversation.id}
           collectsText={config.collects_feedback_text}
           restored={chat.currentConversation.feedback ?? null}
+          disabled={status === "sending" || chat.askQuestion.isLoading}
           submit={submitFeedback}
         />
       {/if}

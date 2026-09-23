@@ -36,7 +36,9 @@ const fake = vi.hoisted(() => ({
   // Rejects the next feedback call when set, then clears itself.
   failNextFeedback: false,
   // A stored conversation the fake returns on restore, when set.
-  restored: null as null | Record<string, unknown>
+  restored: null as null | Record<string, unknown>,
+  // Answer texts for the next asks, in order; the default after that.
+  answers: [] as string[]
 }));
 
 vi.mock("@eneo/eneo-js", async (importOriginal) => {
@@ -73,9 +75,10 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
           await new Promise<void>((resolve) => {
             fake.release = resolve;
           });
-          const session_id = `session-${++fake.sessions}`;
+          // A follow-up continues the conversation it was asked in.
+          const session_id = conversation?.id || `session-${++fake.sessions}`;
           callbacks?.onFirstChunk?.({
-            id: `message-${fake.sessions}`,
+            id: `message-${fake.asks.length}`,
             session_id,
             question,
             answer: "",
@@ -84,7 +87,8 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
             generated_files: [],
             tools: { assistants: [] }
           });
-          callbacks?.onText?.({ answer: "Svaret från assistenten.", session_id, references: [] });
+          const answer = fake.answers.shift() ?? "Svaret från assistenten.";
+          callbacks?.onText?.({ answer, session_id, references: [] });
           return {};
         },
         get: async () => {
@@ -160,12 +164,21 @@ const suggestion = () => page.getByRole("button", { name: "Vad har biblioteket f
 const composer = () => page.getByRole("textbox", { name: "widget_input_label" });
 const answers = () => document.querySelectorAll("[data-widget-chat] [role='log'] li");
 
-async function releaseAnswer() {
+async function releaseAnswer(text = "Svaret från assistenten.") {
   await vi.waitFor(() => expect(fake.release).not.toBeNull());
   const release = fake.release!;
   fake.release = null;
   release();
-  await expect.element(page.getByText("Svaret från assistenten.")).toBeVisible();
+  await expect.element(page.getByText(text)).toBeVisible();
+}
+
+/** Ask a follow-up through the composer and let its answer arrive. */
+async function askFollowUp(question: string, answer: string) {
+  fake.answers.push(answer);
+  await userEvent.fill(composer(), question);
+  await userEvent.keyboard("{Enter}");
+  await releaseAnswer(answer);
+  await expect.element(composer()).toBeEnabled();
 }
 
 beforeEach(() => {
@@ -175,6 +188,7 @@ beforeEach(() => {
   fake.sessions = 0;
   fake.restored = null;
   fake.failNextFeedback = false;
+  fake.answers.length = 0;
   localStorage.clear();
   delete document.documentElement.dataset.theme;
 });
@@ -301,6 +315,102 @@ describe("WidgetChat", () => {
       .element(page.getByRole("button", { name: "widget_feedback_more_negative" }))
       .toBeVisible();
     expect(fake.feedback).toHaveLength(0);
+  });
+
+  test("a vote survives a follow-up question", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    const helpful = page.getByRole("button", { name: "widget_feedback_helpful" });
+    await userEvent.click(helpful);
+    await expect.element(helpful).toHaveAttribute("aria-pressed", "true");
+
+    await askFollowUp("Och på lördagar?", "Lördagar har biblioteket stängt.");
+
+    await expect.element(helpful).toHaveAttribute("aria-pressed", "true");
+    await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_thanks");
+    expect(fake.feedback).toHaveLength(1);
+  });
+
+  test("a restored vote the visitor changed stays changed after a follow-up", async () => {
+    localStorage.setItem(
+      "eneo-widget:wgt_test",
+      JSON.stringify({
+        visitor_id: "11111111-1111-4111-8111-111111111111",
+        visitor_key: "key",
+        token: "visitor-token",
+        expires_at: Date.now() + 600_000,
+        session_id: "session-9"
+      })
+    );
+    fake.restored = {
+      id: "session-9",
+      name: "Tidigare",
+      messages: [
+        {
+          id: "message-9",
+          question: "Hej?",
+          answer: "Hej där.",
+          references: [],
+          files: [],
+          tools: { assistants: [] }
+        }
+      ],
+      feedback: { value: -1, text: null }
+    };
+    renderApp();
+    const helpful = page.getByRole("button", { name: "widget_feedback_helpful" });
+    const unhelpful = page.getByRole("button", { name: "widget_feedback_unhelpful" });
+    await expect.element(unhelpful).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(helpful);
+    await expect.element(helpful).toHaveAttribute("aria-pressed", "true");
+
+    await askFollowUp("En fråga till", "Ett svar till.");
+
+    await expect.element(helpful).toHaveAttribute("aria-pressed", "true");
+    await expect.element(unhelpful).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("a sent comment stays acknowledged when the vote changes after a follow-up", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_unhelpful" }));
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_more_negative" }));
+    const dialog = page.getByRole("dialog");
+    await userEvent.fill(dialog.getByRole("textbox"), "Fel öppettider.");
+    await userEvent.click(dialog.getByRole("button", { name: "widget_feedback_send" }));
+    await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_received");
+    await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
+
+    await askFollowUp("Och på lördagar?", "Lördagar har biblioteket stängt.");
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
+
+    // The server keeps the stored comment for a vote without text, so the
+    // acknowledgement still holds and no second comment is offered.
+    expect(fake.feedback.at(-1)).toEqual({
+      conversation: { id: "session-1" },
+      feedback: { value: 1 }
+    });
+    await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_received");
+    expect(page.getByRole("button", { name: /widget_feedback_more/ }).elements()).toHaveLength(0);
+  });
+
+  test("the comment dialog closes in the widget's language and leaves focus on the vote", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    const helpful = page.getByRole("button", { name: "widget_feedback_helpful" });
+    await userEvent.click(helpful);
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_more" }));
+    const dialog = page.getByRole("dialog");
+    await expect.element(dialog.getByRole("button", { name: "close" })).toBeVisible();
+
+    await userEvent.fill(dialog.getByRole("textbox"), "Tydligt svar.");
+    await userEvent.keyboard("{Tab}{Tab}{Enter}");
+
+    await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
+    await vi.waitFor(() => expect(document.activeElement).toBe(helpful.element()));
   });
 
   test("the send arrow sends and hands focus back to the question field", async () => {
