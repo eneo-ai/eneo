@@ -3445,7 +3445,7 @@ export interface paths {
     put?: never;
     /**
      * Ask Widget
-     * @description Ask the widget's assistant as a visitor. Always streams Server-Sent Events. Pass `session_id` to continue one of the visitor's own sessions; tools, uploads and MCP servers are never available here.
+     * @description Ask the widget's assistant as a visitor. Always streams Server-Sent Events. Pass `session_id` to continue one of the visitor's own sessions. The assistant answers as configured, with its MCP servers and web search, and its knowledge is always injected; image generation, images returned by tools and uploads are not available to visitors. The stream never carries the model, reasoning or tool results; references and tool calls follow the widget's `show_sources` and `show_tool_activity`.
      */
     post: operations["ask_widget_api_v1_widgets__public_id__ask__post"];
     delete?: never;
@@ -3463,7 +3463,7 @@ export interface paths {
     };
     /**
      * Get Widget Session
-     * @description Restore one of the visitor's own sessions after a reload.
+     * @description Restore one of the visitor's own sessions after a reload, filtered like the stream.
      */
     get: operations["get_widget_session_api_v1_widgets__public_id__sessions__session_id___get"];
     put?: never;
@@ -3485,7 +3485,7 @@ export interface paths {
     put?: never;
     /**
      * Leave Widget Feedback
-     * @description Leave feedback on one of the visitor's own sessions. Free text is dropped unless the widget stores feedback text.
+     * @description Leave feedback on one of the visitor's own sessions. Free text is dropped unless the widget stores feedback text; a vote without text keeps the comment stored earlier. Returns the session filtered like the stream.
      */
     post: operations["leave_widget_feedback_api_v1_widgets__public_id__sessions__session_id__feedback__post"];
     delete?: never;
@@ -22513,7 +22513,10 @@ export interface components {
        * @enum {integer}
        */
       value: -1 | 1;
-      /** Text */
+      /**
+       * Text
+       * @description A comment with the vote. Replaces the stored comment; leave it out (or blank) to change only the vote and keep the comment.
+       */
       text?: string | null;
     };
     /**
