@@ -1,12 +1,20 @@
-import { cleanup, render, screen, within } from "@testing-library/svelte";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/svelte";
 import type { FlowStep } from "@eneo/eneo-js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 
 import FlowStepRequestPreview from "./FlowStepRequestPreview.svelte";
 
-afterEach(() => {
+afterEach(async () => {
+  vi.useFakeTimers();
   cleanup();
+  vi.runOnlyPendingTimers();
+  vi.useRealTimers();
+  // Bits UI releases its body scroll lock after dialog teardown completes;
+  // a timer left behind fires after the environment is gone.
+  await waitFor(() => {
+    expect(document.body.style.overflow).not.toBe("hidden");
+  });
 });
 
 const step = {
