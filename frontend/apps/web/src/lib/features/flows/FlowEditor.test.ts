@@ -33,6 +33,7 @@ function makeFlow(metadataJson: Flow["metadata_json"] = null, overrides: Partial
     id: "00000000-0000-0000-0000-000000000001",
     tenant_id: "tenant-1",
     space_id: "space-1",
+    space_name: "Space",
     name: "Flow",
     description: null,
     published_version: null,

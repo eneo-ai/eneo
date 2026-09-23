@@ -93,6 +93,7 @@ export function makeTestFlow(): Flow {
     name: "Testflöde",
     tenant_id: "tenant-1",
     space_id: "space-1",
+    space_name: "Testyta",
     step_count: 1,
     draft_revision: 0,
     steps: [],
