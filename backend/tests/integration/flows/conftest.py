@@ -381,13 +381,18 @@ async def flow_process_auth_headers(
 
 @pytest.fixture
 def create_published_compose_text_flow() -> Callable[
-    [AsyncClient, Mapping[str, str]], Awaitable[PublishedComposeTextFlow]
+    ..., Awaitable[PublishedComposeTextFlow]
 ]:
     async def _create(
         client: AsyncClient,
         headers: Mapping[str, str],
+        *,
+        name: str | None = None,
+        output_mode: str = "compose_text",
+        output_type: str = "text",
     ) -> PublishedComposeTextFlow:
         suffix = uuid4().hex[:8]
+        name = name or f"Flow process proof {suffix}"
         space_response = await client.post(
             "/api/v1/spaces/",
             json={"name": f"flow-process-proof-{suffix}"},
@@ -400,7 +405,7 @@ def create_published_compose_text_flow() -> Callable[
             "/api/v1/flows/",
             json={
                 "space_id": space_id,
-                "name": f"Flow process proof {suffix}",
+                "name": name,
                 "description": "Deterministic broker and worker process proof.",
                 "steps": [],
             },
@@ -420,7 +425,7 @@ def create_published_compose_text_flow() -> Callable[
         update_response = await client.patch(
             f"/api/v1/flows/{flow_id}/",
             json={
-                "name": f"Flow process proof {suffix}",
+                "name": name,
                 "description": "Deterministic broker and worker process proof.",
                 "steps": [
                     {
@@ -429,8 +434,8 @@ def create_published_compose_text_flow() -> Callable[
                         "user_description": "Return the submitted text unchanged.",
                         "input_source": "flow_input",
                         "input_type": "text",
-                        "output_mode": "compose_text",
-                        "output_type": "text",
+                        "output_mode": output_mode,
+                        "output_type": output_type,
                     }
                 ],
             },

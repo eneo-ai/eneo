@@ -21,6 +21,7 @@ from eneo.flows.runtime.document_rendering.limits import (
     DocumentRenderLimits,
     ensure_source_within_limits,
 )
+from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import (
     OutputFormatProcessingContext,
@@ -109,6 +110,7 @@ class OutputRuntimeDeps:
     validate_against_contract: ValidateAgainstContractFn
     render_document: RenderDocumentFn
     render_structured_document: RenderStructuredDocumentFn
+    file_names: GeneratedFileNames
     document_render_limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS
 
 
@@ -163,7 +165,9 @@ async def _persist_rendered_artifact(
     deps: OutputRuntimeDeps,
 ) -> list[dict[str, str | int]]:
     checksum = hashlib.sha256(artifact.blob).hexdigest()
-    name = f"step_{step.step_order}_output.{step.output_type}"
+    name = deps.file_names.name(
+        step_order=step.step_order, output_type=step.output_type
+    )
     file_record = await save_generated_flow_file(
         file_service=deps.file_service,
         run=run,

@@ -93,6 +93,7 @@ from eneo.flows.runtime.executor import (
     StepInputValue,
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
 from eneo.flows.runtime.step_execution_result import (
     StepExecutionResult,
@@ -621,6 +622,12 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
             file_max_size_bytes=100_000_000, audio_max_size_bytes=100_000_000
         ),
     )
+    # What execute_claimed derives from the pinned definition before any step.
+    executor.generated_file_names = GeneratedFileNames.for_run(
+        flow_name="Nämndmöte",
+        steps=(),
+        run_created_at=datetime(2026, 9, 23, 12, tzinfo=timezone.utc),
+    )
     return executor, flow_repo, flow_run_repo, flow_version_repo
 
 
@@ -783,6 +790,69 @@ def _attempt_start() -> FlowStepAttemptStart:
         resolved_timeout_seconds=1200,
         input_text_length=12,
         input_tokens_estimate=3,
+    )
+
+
+@pytest.mark.asyncio
+async def test_documents_are_named_from_the_pinned_definition_and_creation_day(user):
+    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
+    # Created a minute before midnight: the names keep that day, whenever it runs.
+    run = _run(status=FlowRunStatus.RUNNING, user=user).model_copy(
+        update={"created_at": datetime(2026, 9, 1, 23, 59, tzinfo=timezone.utc)}
+    )
+    flow_run_repo.get = AsyncMock(return_value=run)
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_version_repo.get = AsyncMock(
+        return_value=_published_flow_version(
+            flow_id=run.flow_id,
+            version=run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum=None,
+            definition_json={
+                "name": "Nämndmöte",
+                "steps": [
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": order,
+                        "assistant_id": str(uuid4()),
+                        "user_description": description,
+                        "input_source": source,
+                        "input_type": "text",
+                        "output_mode": "render_verbatim",
+                        "output_type": "pdf",
+                    }
+                    for order, description, source in (
+                        (1, "Protokoll", "flow_input"),
+                        (2, "Beslut", "previous_step"),
+                    )
+                ],
+            },
+            created_at=run.created_at,
+            updated_at=run.created_at,
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+    # The first check after the steps are parsed; the run stops there.
+    executor._validate_assistant_snapshots = AsyncMock(
+        side_effect=BadRequestException("stop after naming")
+    )
+
+    await executor.execute(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    names = executor._file_names()
+    assert (
+        names.name(step_order=1, output_type="pdf")
+        == "Nämndmöte Protokoll 2026-09-01.pdf"
+    )
+    assert (
+        names.name(step_order=2, output_type="pdf") == "Nämndmöte Beslut 2026-09-01.pdf"
     )
 
 

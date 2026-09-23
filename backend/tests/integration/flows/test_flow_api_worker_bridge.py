@@ -340,3 +340,72 @@ async def test_broker_accepted_delivery_loss_recovers_through_scheduled_redispat
             )
         ).all()
     assert terminal_audit_rows == [("flow_run_completed", "completed")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_generated_pdf_downloads_under_the_flow_name_and_run_day(
+    client,
+    flow_process_auth_headers,
+    create_published_compose_text_flow,
+    flow_broker_worker_seam,
+) -> None:
+    flow = await create_published_compose_text_flow(
+        client,
+        flow_process_auth_headers,
+        name="Nämndmöte: protokoll",
+        output_mode="render_verbatim",
+        output_type="pdf",
+    )
+    await flow_broker_worker_seam.start_worker()
+    # Text that already is a PDF is stored as it is, so no renderer is needed.
+    pdf_text = "%PDF-1.4\n%%EOF"
+    create_response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/",
+        json={
+            "expected_flow_version": flow.published_version,
+            "input_payload_json": {"text": pdf_text},
+        },
+        headers={
+            **flow_process_auth_headers,
+            "Idempotency-Key": f"flow-file-name-proof:{uuid4().hex}",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    run_id = create_response.json()["id"]
+
+    completed_run, _ = await flow_broker_worker_seam.wait_for_public_run_status(
+        client=client,
+        headers=flow_process_auth_headers,
+        flow_id=flow.flow_id,
+        run_id=run_id,
+        expected_status="completed",
+        timeout_seconds=30,
+    )
+
+    run_day = (
+        datetime.fromisoformat(str(completed_run["created_at"]))
+        .astimezone(timezone.utc)
+        .date()
+        .isoformat()
+    )
+    result = completed_run["result"]
+    assert isinstance(result, dict)
+    assert result["kind"] == "artifact"
+    [artifact] = result["files"]
+    assert artifact["name"] == f"Nämndmöte protokoll {run_day}.pdf"
+
+    signed_url_response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/{run_id}"
+        f"/artifacts/{artifact['file_id']}/signed-url/",
+        json={"expires_in": 60, "content_disposition": "attachment"},
+        headers=flow_process_auth_headers,
+    )
+    assert signed_url_response.status_code == 200, signed_url_response.text
+    download_response = await client.get(signed_url_response.json()["url"])
+    assert download_response.status_code == 200, download_response.text
+    assert download_response.content == pdf_text.encode("latin-1")
+    assert download_response.headers["content-disposition"] == (
+        f'attachment; filename="Namndmote protokoll {run_day}.pdf"; '
+        f"filename*=UTF-8''N%C3%A4mndm%C3%B6te%20protokoll%20{run_day}.pdf"
+    )

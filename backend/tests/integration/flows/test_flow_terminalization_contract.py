@@ -49,6 +49,7 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.runtime import tasks as flow_runtime_tasks
+from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.step_execution_result import (
     WebhookDeliveryIntent,
     WebhookPayloadRef,
@@ -1746,6 +1747,11 @@ async def test_template_resumed_after_recovery_cannot_publish_file_content(
                         file_service=container.file_service(),
                         template_asset_repo=container.flow_template_asset_repo(),
                         logger=logging.getLogger(__name__),
+                        file_names=GeneratedFileNames.for_run(
+                            flow_name="Terminalization",
+                            steps=(),
+                            run_created_at=run.created_at,
+                        ),
                     ),
                 )
 

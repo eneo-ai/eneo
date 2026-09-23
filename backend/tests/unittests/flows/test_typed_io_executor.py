@@ -67,6 +67,7 @@ from eneo.flows.runtime.executor import (
     StepInputValue,
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
 from eneo.flows.runtime.step_execution_runtime import json_mode_cache_key
@@ -203,6 +204,12 @@ def _build_executor(
         input_limits=FlowInputLimits(
             file_max_size_bytes=100_000_000, audio_max_size_bytes=100_000_000
         ),
+    )
+    # What execute_claimed derives from the pinned definition before any step.
+    executor.generated_file_names = GeneratedFileNames.for_run(
+        flow_name="Nämndmöte",
+        steps=(),
+        run_created_at=datetime(2026, 9, 23, 12, tzinfo=timezone.utc),
     )
     return executor, flow_repo, flow_run_repo, flow_version_repo
 
@@ -5047,7 +5054,7 @@ async def test_document_outputs_generate_downloadable_artifacts(
     assert artifact["size"] > 0
     executor.file_service.save_generated_file.assert_awaited_once_with(
         payload=f"{output_type}:Rapport".encode(),
-        name=f"step_{step.step_order}_output{expected_ext}",
+        name=f"Nämndmöte 2026-09-23{expected_ext}",
         mimetype=expected_mimetype,
         file_type=FileType.DOCUMENT,
     )

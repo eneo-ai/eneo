@@ -154,11 +154,15 @@ test("a browser-authored flow can be reviewed and downloads a PDF artifact", asy
     "Deterministic browser PDF artifact Flow"
   );
 
+  // The run names its PDF "<flow name> <YYYY-MM-DD>.pdf" by the UTC day it was
+  // created; a run started across midnight may take either day.
+  const dayBeforeRun = new Date().toISOString().slice(0, 10);
   const { runTable, evidenceToggle } = await startRunFromWizard(
     page,
     flow,
     uniqueName("PDF run input")
   );
+  const dayAfterRun = new Date().toISOString().slice(0, 10);
 
   const evidencePanel = await expandedRunPanel(page, evidenceToggle);
   await expect(evidencePanel.getByRole("heading", { name: REVIEW_CHECKPOINT_LABEL })).toBeVisible({
@@ -177,7 +181,9 @@ test("a browser-authored flow can be reviewed and downloads a PDF artifact", asy
   const downloadPromise = page.waitForEvent("download");
   await downloadButton.click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe("step_2_output.pdf");
+  expect([dayBeforeRun, dayAfterRun].map((day) => `${flow.name} ${day}.pdf`)).toContain(
+    download.suggestedFilename()
+  );
   expect(await download.failure()).toBeNull();
 
   const cancelledRun = await startRunFromWizard(page, flow, uniqueName("cancelled run input"));

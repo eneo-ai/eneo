@@ -44,6 +44,7 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
 from eneo.flows.runtime import template_fill_runtime as template_fill_runtime_module
+from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
 from eneo.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
@@ -245,6 +246,11 @@ def _runtime_deps(
         file_service=file_service,
         template_asset_repo=template_asset_repo,
         logger=_logger(),
+        file_names=GeneratedFileNames.for_run(
+            flow_name="Nämndmöte",
+            steps=(),
+            run_created_at=datetime(2026, 9, 23, 12, tzinfo=timezone.utc),
+        ),
     )
 
 
@@ -444,7 +450,7 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
     assert output.artifacts == [
         {
             "file_id": str(file_service.save_generated_file.return_value.id),
-            "name": "step_2_output.docx",
+            "name": "Nämndmöte 2026-09-23.docx",
             "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "size": len(file_service.save_generated_file.await_args.kwargs["payload"]),
             "checksum": hashlib.sha256(
@@ -474,7 +480,7 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
     assert '"title": "Social medias påverkan"' in output.input_text
     file_service.save_generated_file.assert_awaited_once()
     save_kwargs = file_service.save_generated_file.await_args.kwargs
-    assert save_kwargs["name"] == "step_2_output.docx"
+    assert save_kwargs["name"] == "Nämndmöte 2026-09-23.docx"
     assert (
         save_kwargs["mimetype"]
         == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

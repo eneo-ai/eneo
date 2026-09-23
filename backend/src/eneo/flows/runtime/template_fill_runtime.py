@@ -29,6 +29,7 @@ from eneo.flows.runtime.docx_template_runtime import (
     extract_docx_text,
     render_docx_template,
 )
+from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.output_runtime import save_generated_flow_file
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.exceptions import (
@@ -49,6 +50,7 @@ class TemplateFillRuntimeDeps:
     file_service: FileService
     template_asset_repo: FlowTemplateAssetRepository
     logger: logging.Logger
+    file_names: GeneratedFileNames
 
 
 @dataclass(frozen=True)
@@ -185,7 +187,9 @@ async def complete_template_fill_step(
             context=prepared.resolved_bindings,
             step_order=step.step_order,
         )
-        filename = f"step_{step.step_order}_output.docx"
+        filename = deps.file_names.name(
+            step_order=step.step_order, output_type=step.output_type
+        )
         deps.logger.debug(
             "flow_executor.template_fill.template_rendered run_id=%s step_order=%d template_file_id=%s filename=%s size=%d",
             run.id,

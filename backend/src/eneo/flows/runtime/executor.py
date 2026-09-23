@@ -155,6 +155,7 @@ from eneo.flows.runtime.execution_heartbeat import (
 from eneo.flows.runtime.execution_state_builder import build_run_execution_state
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.flow_runtime_trace import trace_flow_step
+from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.http_audit import (
     HttpAuditDeps,
 )
@@ -615,6 +616,8 @@ class FlowRunExecutor:
         self.transcriber = transcriber
         # Per-run diarization bound, derived from the run input once steps are known.
         self.max_speakers_hint: int | None = None
+        # Per-run document names, derived from the pinned definition with the steps.
+        self.generated_file_names: GeneratedFileNames | None = None
         self.variable_resolver = FlowVariableResolver()
         self.http_request_timeout_seconds = resolved_config.http_request_timeout_seconds
         self.http_max_timeout_seconds = resolved_config.http_max_timeout_seconds
@@ -752,6 +755,11 @@ class FlowRunExecutor:
             )
             steps = published_definition.runtime_steps()
             self.max_speakers_hint = resolve_max_speakers(steps, run.input_payload_json)
+            self.generated_file_names = GeneratedFileNames.for_run(
+                flow_name=published_definition.name,
+                steps=steps,
+                run_created_at=run.created_at,
+            )
         except PublishedDefinitionChecksumMismatchError as exc:
             await self._terminalize_run(
                 run_id=run_id,
@@ -1451,7 +1459,13 @@ class FlowRunExecutor:
             file_service=self.file_service,
             template_asset_repo=self.template_asset_repo,
             logger=logger,
+            file_names=self._file_names(),
         )
+
+    def _file_names(self) -> GeneratedFileNames:
+        if self.generated_file_names is None:
+            raise RuntimeError("A step ran before the run's definition was parsed.")
+        return self.generated_file_names
 
     def _build_step_execution_runtime_deps(
         self,
@@ -2983,6 +2997,7 @@ class FlowRunExecutor:
             render_structured_document=(
                 self.document_render_service.render_structured_document
             ),
+            file_names=self._file_names(),
             document_render_limits=self.document_render_service.limits,
         )
         return await process_typed_output_runtime(

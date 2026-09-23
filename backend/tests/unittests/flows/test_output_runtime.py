@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -11,6 +12,7 @@ import pytest
 from eneo.files.file_models import FileType
 from eneo.flows.enums import FlowStepPhase
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
+from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.output_runtime import (
     OutputRuntimeDeps,
     TypedOutputProcessingResult,
@@ -22,6 +24,12 @@ from eneo.flows.runtime.step_deadline import (
     step_deadline_scope,
 )
 from eneo.main.exceptions import TypedIOValidationException
+
+_FILE_NAMES = GeneratedFileNames.for_run(
+    flow_name="Nämndmöte",
+    steps=(),
+    run_created_at=datetime(2026, 9, 23, 12, tzinfo=timezone.utc),
+)
 
 
 @dataclass
@@ -43,6 +51,7 @@ async def test_process_typed_output_json_with_contract_validation() -> None:
 
     deps = OutputRuntimeDeps(
         file_service=SimpleNamespace(save_generated_file=AsyncMock()),
+        file_names=_FILE_NAMES,
         compile_validators=lambda steps: {("output", 1): object()},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -78,6 +87,7 @@ async def test_process_typed_output_json_without_compiled_validator_skips_contra
 
     deps = OutputRuntimeDeps(
         file_service=SimpleNamespace(save_generated_file=AsyncMock()),
+        file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=_unexpected_validate,
@@ -121,6 +131,7 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
     mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     deps = OutputRuntimeDeps(
         file_service=file_service,
+        file_names=_FILE_NAMES,
         compile_validators=compile_validators,
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -149,7 +160,7 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
     assert result.artifacts == [
         {
             "file_id": str(file_id),
-            "name": "step_3_output.docx",
+            "name": "Nämndmöte 2026-09-23.docx",
             "mimetype": mimetype,
             "size": len(blob),
             "checksum": hashlib.sha256(blob).hexdigest(),
@@ -158,7 +169,7 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
     ]
     file_service.save_generated_file.assert_awaited_once_with(
         payload=blob,
-        name="step_3_output.docx",
+        name="Nämndmöte 2026-09-23.docx",
         mimetype=mimetype,
         file_type=FileType.DOCUMENT,
     )
@@ -179,6 +190,7 @@ async def test_process_typed_output_pdf_preserves_pdf_bytes_from_model() -> None
 
     deps = OutputRuntimeDeps(
         file_service=file_service,
+        file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -199,10 +211,10 @@ async def test_process_typed_output_pdf_preserves_pdf_bytes_from_model() -> None
     assert result.structured_output is None
     assert result.artifacts is not None
     assert result.artifacts[0]["mimetype"] == "application/pdf"
-    assert result.artifacts[0]["name"] == "step_8_output.pdf"
+    assert result.artifacts[0]["name"] == "Nämndmöte 2026-09-23.pdf"
     file_service.save_generated_file.assert_awaited_once_with(
         payload=raw_pdf.encode("latin-1"),
-        name="step_8_output.pdf",
+        name="Nämndmöte 2026-09-23.pdf",
         mimetype="application/pdf",
         file_type=FileType.DOCUMENT,
     )
@@ -216,6 +228,7 @@ async def test_process_typed_output_pdf_bytes_obeys_document_render_limits() -> 
 
     deps = OutputRuntimeDeps(
         file_service=file_service,
+        file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -268,6 +281,7 @@ async def test_process_typed_output_docx_renders_validated_structured_contract()
 
     deps = OutputRuntimeDeps(
         file_service=file_service,
+        file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"structured": 1},
         validate_against_contract=_validate,
@@ -333,6 +347,7 @@ async def test_process_typed_output_prunes_extra_item_properties_before_validati
 
     deps = OutputRuntimeDeps(
         file_service=SimpleNamespace(save_generated_file=AsyncMock()),
+        file_names=_FILE_NAMES,
         compile_validators=lambda steps: {("output", 4): object()},
         parse_json_output=lambda text: parsed,
         validate_against_contract=_validate,
@@ -379,6 +394,7 @@ async def test_process_typed_output_docx_treats_empty_contract_as_structured() -
 
     deps = OutputRuntimeDeps(
         file_service=file_service,
+        file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: ["legacy", "data"],
         validate_against_contract=lambda data, schema, label: None,
@@ -414,6 +430,7 @@ async def test_process_typed_output_docx_without_contract_does_not_parse_json() 
 
     deps = OutputRuntimeDeps(
         file_service=file_service,
+        file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=_parse_not_expected,
         validate_against_contract=lambda data, schema, label: None,
@@ -447,6 +464,7 @@ async def test_process_typed_output_unknown_type_returns_empty() -> None:
 
     deps = OutputRuntimeDeps(
         file_service=file_service,
+        file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -482,6 +500,7 @@ async def test_process_typed_output_json_contract_violation_propagates() -> None
 
     deps = OutputRuntimeDeps(
         file_service=file_service,
+        file_names=_FILE_NAMES,
         compile_validators=lambda steps: {("output", 7): object()},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=_raise_contract,
@@ -514,6 +533,7 @@ async def test_process_typed_output_render_failure_propagates() -> None:
 
     deps = OutputRuntimeDeps(
         file_service=file_service,
+        file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -545,6 +565,7 @@ async def test_process_typed_output_file_service_failure_propagates() -> None:
 
     deps = OutputRuntimeDeps(
         file_service=file_service,
+        file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
