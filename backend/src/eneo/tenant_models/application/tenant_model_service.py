@@ -65,6 +65,7 @@ from eneo.model_providers.infrastructure.model_provider_repository import (
 from eneo.security_classifications.tenant_validation import (
     resolve_tenant_security_classification,
 )
+from eneo.transcription_models.domain.realtime import speaks_realtime_dialect
 from eneo.transcription_models.domain.transcription_model_repo import (
     TranscriptionModelRepository,
 )
@@ -116,6 +117,14 @@ async def _validate_active_provider(
     if not provider.is_active:
         raise BadRequestException("Model provider is not active")
     return provider
+
+
+def _require_realtime_dialect(provider_type: str) -> None:
+    if not speaks_realtime_dialect(provider_type):
+        raise BadRequestException(
+            "Live transcription needs a provider of type vLLM, which serves the "
+            "realtime API (for example vadsa)."
+        )
 
 
 async def _unset_other_defaults(
@@ -716,9 +725,11 @@ class TenantTranscriptionModelService:
     async def create(
         self, payload: "TenantTranscriptionModelCreate"
     ) -> "TranscriptionModel":
-        await _validate_active_provider(
+        provider = await _validate_active_provider(
             self.session, payload.provider_id, self.user.tenant_id
         )
+        if payload.supports_realtime:
+            _require_realtime_dialect(provider.provider_type)
         await _validate_unique_display_name(
             self.session,
             TranscriptionModels,
@@ -759,6 +770,7 @@ class TenantTranscriptionModelService:
                 is_enabled=payload.is_active,
                 is_default=payload.is_default,
                 security_classification_id=classification_id,
+                supports_realtime=payload.supports_realtime,
             )
         )
         self.session.add(new_model)
@@ -832,6 +844,13 @@ class TenantTranscriptionModelService:
                     self.user.tenant_id,
                 )
             )
+        if payload.supports_realtime is not None:
+            if payload.supports_realtime:
+                provider = await ModelProviderRepository(
+                    session=self.session, tenant_id=self.user.tenant_id
+                ).get_by_id(model.provider_id)
+                _require_realtime_dialect(provider.provider_type)
+            model.supports_realtime = payload.supports_realtime
 
         await self.session.flush()
 

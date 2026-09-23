@@ -39,6 +39,7 @@ class TranscriptionModelPublic(BaseModel):
     provider_type: Optional[str] = None
     deprecation_date: Optional[str] = None
     migrated_to_model_id: Optional[UUID] = None
+    supports_realtime: bool = False
 
     @classmethod
     def from_domain(cls, model: TranscriptionModel):
@@ -71,6 +72,7 @@ class TranscriptionModelPublic(BaseModel):
             provider_type=model.provider_type,
             deprecation_date=model.litellm_deprecation_date,
             migrated_to_model_id=model.migrated_to_model_id,
+            supports_realtime=model.supports_realtime,
         )
 
 

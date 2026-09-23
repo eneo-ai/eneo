@@ -50,6 +50,13 @@ class TenantTranscriptionModelCreate(BaseModel):
     security_classification: ModelId | None = Field(
         default=None, description="Security classification"
     )
+    supports_realtime: bool = Field(
+        default=False,
+        description=(
+            "The provider serves this model over the realtime WebSocket that live "
+            "transcription uses. Only providers of type vLLM qualify."
+        ),
+    )
 
 
 class TenantTranscriptionModelUpdate(BaseModel):
@@ -67,6 +74,13 @@ class TenantTranscriptionModelUpdate(BaseModel):
     is_default: bool | None = Field(None, description="Set as tenant default")
     security_classification: ModelId | None = Field(
         None, description="Security classification reference (null clears it)"
+    )
+    supports_realtime: bool | None = Field(
+        None,
+        description=(
+            "Turn live transcription on or off for this model. Only providers of "
+            "type vLLM qualify."
+        ),
     )
 
 

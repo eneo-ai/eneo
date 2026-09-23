@@ -126,6 +126,10 @@ class TranscriptionModels(BasePublic):
     org: Mapped[Optional[str]] = mapped_column()
     base_url: Mapped[str] = mapped_column()
 
+    # True when the provider serves this model over the realtime WebSocket that
+    # live transcription uses (vLLM dialect); see transcription_models/domain/realtime.py.
+    supports_realtime: Mapped[bool] = mapped_column(server_default="False")
+
     # USD per minute of audio processed. NULL = unknown / self-hosted.
     # Numeric(20, 6) = 14 integer digits → cap is < 10^14 USD/minute, matching
     # MAX_COST_INPUT in the frontend admin form (see
