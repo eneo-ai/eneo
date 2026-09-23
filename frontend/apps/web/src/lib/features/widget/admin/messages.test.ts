@@ -9,4 +9,10 @@ describe.each(Object.entries(catalogs))("widget admin copy (%s)", (_locale, mess
   it("starts the overview link's accessible name with its visible text", () => {
     expect(messages.widget_admin_overview_open.startsWith(messages.widget_admin_open)).toBe(true);
   });
+
+  it("sends an editor without allowed websites to a tab that exists", () => {
+    expect(messages.widget_admin_blocker_allowed_origins_empty).toContain(
+      messages.widget_admin_tab_rules
+    );
+  });
 });

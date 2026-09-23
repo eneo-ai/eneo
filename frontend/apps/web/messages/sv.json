@@ -4971,7 +4971,7 @@
   "widget_admin_archive_description": "Widgeten slutar omedelbart att svara besökare och installationskoden slutar fungera. Konversationer behålls tills deras lagringstid går ut. Det går inte att ångra.",
   "widget_admin_blockers_title": "Innan widgeten kan aktiveras",
   "widget_admin_ready_for_admin": "Klar att aktiveras. Be en organisationsadministratör att aktivera widgeten.",
-  "widget_admin_blocker_allowed_origins_empty": "Lägg till minst en tillåten webbplats under Placering.",
+  "widget_admin_blocker_allowed_origins_empty": "Lägg till minst en tillåten webbplats på fliken Regler.",
   "widget_admin_blocker_subtitle_empty": "Beskrivningen under rubriken får inte vara tom.",
   "widget_admin_blocker_legal_texts_lock_subtitle": "Beskrivningen under rubriken får inte vara tom så länge mallen låser upplysning och sidfot.",
   "widget_admin_blocker_target_not_published": "Publicera assistenten i dess yta först.",
