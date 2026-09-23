@@ -182,9 +182,14 @@ describe("WidgetChat", () => {
       feedback: { value: 1 }
     });
 
-    const send = page.getByRole("button", { name: "widget_feedback_send" });
+    // The comment is opt-in: a link opens a dialog, nothing is asked inline.
+    expect(page.getByRole("dialog").elements()).toHaveLength(0);
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_more" }));
+    const dialog = page.getByRole("dialog");
+    await expect.element(dialog).toBeVisible();
+    const send = dialog.getByRole("button", { name: "widget_feedback_send" });
     await expect.element(send).toBeDisabled();
-    await userEvent.fill(page.getByLabelText("widget_feedback_more"), "Svaret saknade öppettider.");
+    await userEvent.fill(dialog.getByRole("textbox"), "Svaret saknade öppettider.");
     await userEvent.click(send);
 
     await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_received");
@@ -192,7 +197,8 @@ describe("WidgetChat", () => {
       conversation: { id: "session-1" },
       feedback: { value: 1, text: "Svaret saknade öppettider." }
     });
-    expect(document.querySelector("#widget-feedback-text")).toBeNull();
+    await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
+    expect(page.getByRole("button", { name: "widget_feedback_more" }).elements()).toHaveLength(0);
   });
 
   test("a single-turn widget offers a new question instead of follow-up or feedback", async () => {

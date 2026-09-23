@@ -15,6 +15,8 @@
   import { launcherColors } from "../contrast";
   import { isHttpUrl, linkHost } from "../urls";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { Check, MessageSquarePlus, ThumbsDown, ThumbsUp, X } from "lucide-svelte";
   import { solveWithAltcha } from "../altcha";
   import { createEmbedBridge } from "../embedBridge";
@@ -55,6 +57,7 @@
   let feedbackText = $state("");
   let feedbackTextSent = $state<Record<string, true>>({});
   let sendingFeedbackText = $state(false);
+  let feedbackDialogOpen = $state(false);
   // Shown while the backend has not yet confirmed the question (first chunk).
   let pendingQuestion = $state<string | null>(null);
 
@@ -286,6 +289,7 @@
       });
       feedbackTextSent = { ...feedbackTextSent, [sessionId]: true };
       feedbackText = "";
+      feedbackDialogOpen = false;
     } catch (error) {
       if (isTokenRejected(error) && !retried) {
         session.invalidate();
@@ -380,7 +384,7 @@
           {#if showPending && pendingQuestion !== null}
             <li class="flex flex-col gap-3">
               <div class="flex justify-end">
-                <p class="widget-bubble max-w-[85%] px-4 py-2 text-base whitespace-pre-wrap">
+                <p class="widget-bubble max-w-[85%] px-3.5 py-2 text-sm whitespace-pre-wrap">
                   <span class="sr-only">{m.widget_you()}: </span>{pendingQuestion}
                 </p>
               </div>
@@ -436,33 +440,13 @@
             {sent ? m.widget_feedback_received() : m.widget_feedback_thanks()}
           </p>
           {#if initial.config.collects_feedback_text && !sent}
-            <form
-              class="mt-2 flex flex-col gap-2"
-              onsubmit={(event) => {
-                event.preventDefault();
-                void sendFeedbackText();
-              }}
+            <button
+              type="button"
+              class="text-accent-default focus-visible:ring-default mt-1 w-fit rounded-md text-xs underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+              onclick={() => (feedbackDialogOpen = true)}
             >
-              <label for="widget-feedback-text" class="text-secondary text-xs">
-                {m.widget_feedback_more()}
-              </label>
-              <textarea
-                id="widget-feedback-text"
-                class="border-default bg-primary text-primary focus-visible:ring-default w-full resize-y rounded-lg border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
-                rows="2"
-                maxlength="2000"
-                placeholder={m.widget_feedback_more_placeholder()}
-                bind:value={feedbackText}></textarea>
-              <div>
-                <button
-                  type="submit"
-                  class="widget-feedback-send focus-visible:ring-default rounded-lg px-3 py-1.5 text-sm font-medium focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
-                  disabled={!feedbackText.trim() || sendingFeedbackText}
-                >
-                  {m.widget_feedback_send()}
-                </button>
-              </div>
-            </form>
+              {m.widget_feedback_more()}
+            </button>
           {/if}
         {/if}
       {/if}
@@ -521,6 +505,40 @@
     {/if}
   </footer>
 
+  <Dialog.Root bind:open={feedbackDialogOpen}>
+    <Dialog.Content class="max-w-[calc(100%-2rem)] sm:max-w-md">
+      <form
+        class="flex flex-col gap-4"
+        onsubmit={(event) => {
+          event.preventDefault();
+          void sendFeedbackText();
+        }}
+      >
+        <Dialog.Header>
+          <Dialog.Title>{m.widget_feedback_more_title()}</Dialog.Title>
+          <Dialog.Description>{m.widget_feedback_more_body()}</Dialog.Description>
+        </Dialog.Header>
+        <textarea
+          class="border-default bg-primary text-primary focus-visible:ring-default w-full resize-y rounded-lg border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+          rows="4"
+          maxlength="2000"
+          aria-label={m.widget_feedback_more_title()}
+          placeholder={m.widget_feedback_more_placeholder()}
+          bind:value={feedbackText}></textarea>
+        <Dialog.Footer>
+          <Dialog.Close>
+            {#snippet child({ props })}
+              <Button variant="outline" {...props}>{m.cancel()}</Button>
+            {/snippet}
+          </Dialog.Close>
+          <Button type="submit" disabled={!feedbackText.trim() || sendingFeedbackText}>
+            {sendingFeedbackText ? m.widget_feedback_sending() : m.widget_feedback_send()}
+          </Button>
+        </Dialog.Footer>
+      </form>
+    </Dialog.Content>
+  </Dialog.Root>
+
   <AlertDialog.Root bind:open={confirmStartOver}>
     <AlertDialog.Content class="max-w-[calc(100%-2rem)] sm:max-w-sm">
       <AlertDialog.Header>
@@ -553,11 +571,6 @@
 </div>
 
 <style>
-  .widget-feedback-send {
-    background: var(--widget-accent);
-    color: var(--widget-on-accent);
-  }
-
   /* A tinted header uses the widget's own colours; text is derived for contrast. */
   .widget-header-tinted {
     background: var(--widget-header);
