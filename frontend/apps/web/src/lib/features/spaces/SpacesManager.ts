@@ -93,7 +93,6 @@ function SpacesManager(data: SpacesManagerParams) {
     }
   }
 
-  /** Will create a new space and return it on success. Will return null on failure and show an alert */
   /** Will update a given space. If no space is specified will update the current space. */
   async function updateSpace(
     update: Parameters<typeof eneo.spaces.update>[0]["update"],

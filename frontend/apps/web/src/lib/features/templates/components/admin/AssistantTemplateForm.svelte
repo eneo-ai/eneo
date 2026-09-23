@@ -136,7 +136,7 @@
             {...aria}
             rows={4}
             bind:value={promptText}
-            class="min-h-24 px-6 py-4 text-lg md:text-lg"
+            class="min-h-36 px-6 py-4 text-lg md:text-lg"
           />
         </Settings.Row>
       </Settings.Group>

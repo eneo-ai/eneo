@@ -61,5 +61,6 @@
   description={m.do_you_really_want_to_disconnect_name({ name: integration.name })}
   confirmLabel={m.disconnect()}
   width="dynamic"
+  errorContext={m.could_not_disconnect()}
   onConfirm={disconnect}
 />

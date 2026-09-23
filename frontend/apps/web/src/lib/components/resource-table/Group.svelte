@@ -73,27 +73,33 @@
   }
 </script>
 
+<!-- `aria-expanded:bg-transparent` cancels the button's open-state fill: the toggle is a plain heading. -->
 {#snippet groupTitle()}
+  {@const visibleTitle = title?.trim()}
   <Button
     variant="ghost"
     size="icon"
-    tabindex={-1}
-    aria-hidden="true"
+    tabindex={visibleTitle ? -1 : undefined}
+    aria-hidden={visibleTitle ? "true" : undefined}
+    aria-expanded={visibleTitle ? undefined : isOpen}
+    aria-label={visibleTitle ? undefined : toggleLabel}
     onclick={toggleOpen}
-    class="font-mono font-medium"
+    class="font-mono font-medium aria-expanded:bg-transparent"
   >
     <IconChevronDown class={cn("w-5 transition-all", isOpen ? "rotate-0" : "-rotate-90")} />
   </Button>
   {@render titlePrefix?.()}
-  <Button
-    variant="ghost"
-    aria-expanded={isOpen}
-    aria-label={toggleLabel}
-    onclick={toggleOpen}
-    class="-ml-2 font-mono font-medium"
-  >
-    <span>{title}</span>
-  </Button>
+  {#if visibleTitle}
+    <Button
+      variant="ghost"
+      aria-expanded={isOpen}
+      aria-label={toggleLabel}
+      onclick={toggleOpen}
+      class="-ml-2 font-mono font-medium aria-expanded:bg-transparent"
+    >
+      <span>{title}</span>
+    </Button>
+  {/if}
 {/snippet}
 
 {#if $displayType === "list"}

@@ -7,7 +7,6 @@
   export let website: WebsiteSparse;
   const SKIPPED_PREFIX = "skipped duplicate crawl";
 
-  // eslint-disable-next-line svelte/no-immutable-reactive-statements
   /* TODO colours */
   function statusInfo(): { label: string; color: StatusBadgeColor; tooltip?: string } {
     const skipReason = website.latest_crawl?.result_location;
@@ -53,14 +52,14 @@
           return {
             color: "yellow",
             label: m.synced_with_warnings(),
-            tooltip: `${m.synced_on({ date: completed.format("YYYY-MM-DD HH:mm") })} - ${failureText}`
+            tooltip: `${m.synced_on({ date: formatDateTime(completed) })} - ${failureText}`
           };
         }
 
         return {
           color: Date.now() - new Date(completed).getTime() < 10 * DAY_MS ? "green" : "yellow",
           label,
-          tooltip: m.synced_on({ date: completed.format("YYYY-MM-DD HH:mm") })
+          tooltip: m.synced_on({ date: formatDateTime(completed) })
         };
       }
       case "in progress":

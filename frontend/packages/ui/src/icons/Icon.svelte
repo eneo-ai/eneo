@@ -13,6 +13,8 @@
   } & IconProps;
 </script>
 
+<!-- The `icon-size-*` class contains "size-" on purpose: shadcn buttons and menus resize descendant
+     svgs unless their class has "size-", and these icons should keep their own default size there. -->
 <svg
   xmlns="http://www.w3.org/2000/svg"
   fill="none"
@@ -21,6 +23,7 @@
   stroke-width="1.5"
   data-size={size}
   {...$$restProps}
+  class="icon-size-{size} {$$restProps.class ?? ''}"
 >
   <!-- eslint-disable svelte/no-at-html-tags -->
   {@html src}

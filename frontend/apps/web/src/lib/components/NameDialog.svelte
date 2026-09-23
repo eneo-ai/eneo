@@ -126,7 +126,13 @@
         <Dialog.Close class={buttonVariants({ variant: "outline" })} disabled={pending}>
           {m.cancel()}
         </Dialog.Close>
-        <Button type="submit" disabled={pending || !canSubmit} aria-busy={pending}>
+        <Button
+          type="submit"
+          disabled={!canSubmit}
+          aria-disabled={pending}
+          aria-busy={pending}
+          class={pending ? "pointer-events-none opacity-50" : undefined}
+        >
           {pending && pendingLabel ? pendingLabel : submitLabel}
         </Button>
       </Dialog.Footer>

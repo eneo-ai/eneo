@@ -26,6 +26,10 @@
 
   let { type, text, fileName, printElement, floating = false, class: className }: Props = $props();
 
+  const typeLabel = $derived(
+    (type === "output" ? m.output() : m.transcription()).toLocaleLowerCase()
+  );
+
   const variant = $derived(floating ? "ghost" : "outline");
   const tooltipSide = $derived(floating ? "left" : "bottom");
 
@@ -55,34 +59,56 @@
     className
   )}
 >
-  <Tooltip.Root>
-    <Tooltip.Trigger onclick={print}>
-      {#snippet child({ props })}
-        <Button {...props} {variant} size="icon" aria-label={m.print_save_type_pdf({ type })}>
-          <IconPrint size="md" />
-        </Button>
-      {/snippet}
-    </Tooltip.Trigger>
-    <Tooltip.Content side={tooltipSide}>{m.print_save_type_pdf({ type })}</Tooltip.Content>
-  </Tooltip.Root>
+  {#if printElement}
+    <Tooltip.Root>
+      <Tooltip.Trigger onclick={print}>
+        {#snippet child({ props })}
+          <Button
+            {...props}
+            {variant}
+            size="icon"
+            aria-label={m.print_save_type_pdf({ type: typeLabel })}
+          >
+            <IconPrint size="md" />
+          </Button>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content side={tooltipSide}
+        >{m.print_save_type_pdf({ type: typeLabel })}</Tooltip.Content
+      >
+    </Tooltip.Root>
+  {/if}
 
   <Tooltip.Root>
     <Tooltip.Trigger onclick={download}>
       {#snippet child({ props })}
-        <Button {...props} {variant} size="icon" aria-label={m.download_type_raw_text({ type })}>
+        <Button
+          {...props}
+          {variant}
+          size="icon"
+          aria-label={m.download_type_raw_text({ type: typeLabel })}
+        >
           <IconDownload />
         </Button>
       {/snippet}
     </Tooltip.Trigger>
-    <Tooltip.Content side={tooltipSide}>{m.download_type_raw_text({ type })}</Tooltip.Content>
+    <Tooltip.Content side={tooltipSide}
+      >{m.download_type_raw_text({ type: typeLabel })}</Tooltip.Content
+    >
   </Tooltip.Root>
 
   <Tooltip.Root>
     <Tooltip.Trigger>
       {#snippet child({ props })}
-        <CopyButton {...props} {text} {variant} disabled={!text} label={m.copy_type({ type })} />
+        <CopyButton
+          {...props}
+          {text}
+          {variant}
+          disabled={!text}
+          label={m.copy_type({ type: typeLabel })}
+        />
       {/snippet}
     </Tooltip.Trigger>
-    <Tooltip.Content side={tooltipSide}>{m.copy_type({ type })}</Tooltip.Content>
+    <Tooltip.Content side={tooltipSide}>{m.copy_type({ type: typeLabel })}</Tooltip.Content>
   </Tooltip.Root>
 </div>
