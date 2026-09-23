@@ -5,7 +5,7 @@
   import { writable } from "svelte/store";
   import { SvelteDate, SvelteSet, SvelteURLSearchParams } from "svelte/reactivity";
   import { Page } from "$lib/components/layout";
-  import { Input } from "@eneo/ui";
+  import DateRangePicker from "$lib/components/DateRangePicker.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
@@ -1373,7 +1373,7 @@
 
               <!-- Filters Row (second) -->
               <div class="flex flex-wrap items-center gap-2 sm:gap-3 lg:gap-4">
-                <Input.DateRange bind:value={dateRange} />
+                <DateRangePicker bind:value={dateRange} />
 
                 <!-- Quick filter buttons (connected button group) -->
                 <div

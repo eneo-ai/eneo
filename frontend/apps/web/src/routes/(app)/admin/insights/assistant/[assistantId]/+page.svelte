@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { Page } from "$lib/components/layout";
-  import { Input } from "@eneo/ui";
+  import DateRangePicker from "$lib/components/DateRangePicker.svelte";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
@@ -70,8 +70,8 @@
     class="filter-bar border-default bg-primary mx-6 mt-3 mb-1 flex flex-wrap items-center justify-between gap-4 rounded-lg border px-4 py-2.5"
     style="--delay: 0ms"
   >
-    <Input.DateRange bind:value={timeframe} class="border-0 p-0"
-      >{m.included_timeframe()}</Input.DateRange
+    <DateRangePicker bind:value={timeframe} class="border-0 p-0"
+      >{m.included_timeframe()}</DateRangePicker
     >
     <Field.Field orientation="horizontal" class="w-auto gap-4">
       <Field.Label for={includeFollowupsId}>{m.include_follow_up_questions()}</Field.Label>

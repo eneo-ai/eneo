@@ -6,7 +6,8 @@
 
 <script lang="ts">
   import { page } from "$app/stores";
-  import { Table, Input } from "@eneo/ui";
+  import { Table } from "@eneo/ui";
+  import DateRangePicker from "$lib/components/DateRangePicker.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Page } from "$lib/components/layout";
   import SimpleTextCell from "$lib/components/layout/SimpleTextCell.svelte";
@@ -281,7 +282,7 @@
     </Page.Title>
 
     <Page.Flex>
-      <Input.DateRange bind:value={dateRange} />
+      <DateRangePicker bind:value={dateRange} />
     </Page.Flex>
   </Page.Header>
 
