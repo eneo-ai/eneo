@@ -21,6 +21,13 @@
     type FlowStepEffectiveInputSource
   } from "$lib/features/flows/flowInputBindings";
   import type { FlowStepUxCopy } from "$lib/features/flows/flowStepUxCopy";
+  import { outputModeUsesCompletionModel } from "$lib/features/flows/flowStepTypes";
+  import {
+    describeStepMaterial,
+    getDefaultStepMaterial,
+    getStepMaterial,
+    ownTextIncludesUpload
+  } from "$lib/features/flows/flowStepMaterial";
 
   let {
     step,
@@ -128,7 +135,7 @@
   const uploadLeftOut = $derived(
     runtimeInputEnabled &&
       inputTemplateText.trim().length > 0 &&
-      !/\{\{\s*step_input\./.test(inputTemplateText)
+      !ownTextIncludesUpload(inputTemplateText)
   );
   const shouldShowInputTemplateEditor = $derived(
     hasInputTemplateOverride || (showInputTemplate && inputTemplateEditingAllowed)
@@ -158,35 +165,23 @@
     return groups;
   });
 
-  // What the step reads when it has no text of its own: the one sentence
-  // that answers "what does the AI get here" (runtime order:
-  // input_bindings.question, then chosen results, then the step's source).
-  const defaultMaterial = $derived.by((): string | null => {
-    if (selectedSourceRefs.length > 0) return m.flow_material_what_sources();
-    if (runtimeInputEnabled) return m.flow_material_what_upload();
-    if (step.input_source === "previous_step" && step.step_order > 1) {
-      const previous = steps.find((candidate) => candidate.step_order === step.step_order - 1);
-      if (previous) {
-        return m.flow_material_what_previous({
-          step: stepLabel(previous.step_order, previous.user_description ?? null)
-        });
-      }
-    }
-    if (step.input_source === "all_previous_steps" && step.step_order > 1) {
-      return m.flow_material_what_all_previous();
-    }
-    if (step.input_source === "http_get") return m.flow_material_what_http();
-    if (step.input_source === "flow_input") return m.flow_material_what_flow_input();
-    return null;
+  // Compose and verbatim steps build their answer without the AI; the block
+  // says "the step" there, not "the AI".
+  const usesAI = $derived(outputModeUsesCompletionModel(step.output_mode));
+  const materialTitle = $derived(usesAI ? m.flow_material_title() : m.flow_material_title_step());
+  const materialReads = $derived(usesAI ? m.flow_material_reads : m.flow_material_reads_step);
+  const previousStep = $derived(
+    steps.find((candidate) => candidate.step_order === step.step_order - 1) ?? null
+  );
+  // One owner (flowStepMaterial) for what the AI reads, shared with the
+  // chapter summary and the request preview.
+  const defaultMaterial = $derived.by(() => {
+    const material = getDefaultStepMaterial(step, previousStep);
+    return material ? describeStepMaterial(material) : null;
   });
-  const ownTextIncludesUpload = $derived(/\{\{\s*step_input\./.test(inputTemplateText));
-  const currentMaterial = $derived.by((): string | null => {
-    if (!hasInputTemplateOverride) return defaultMaterial;
-    if (selectedSourceRefs.length > 0) return m.flow_material_what_own_text_and_sources();
-    if (runtimeInputEnabled && ownTextIncludesUpload) {
-      return m.flow_material_what_own_text_with_upload();
-    }
-    return m.flow_material_what_own_text();
+  const currentMaterial = $derived.by(() => {
+    const material = getStepMaterial(step, previousStep);
+    return material ? describeStepMaterial(material, { below: true }) : null;
   });
   const chosenSources = $derived(
     effectiveInputSources.filter(
@@ -295,15 +290,15 @@
   }
 </script>
 
-<FlowStepSection title={m.flow_material_title()} {collapsible} {resetKey} status={templateStatus}>
+<FlowStepSection title={materialTitle} {collapsible} {resetKey} status={templateStatus}>
   <div class="flex max-w-3xl flex-col gap-4 px-2">
     {#if currentMaterial}
       <!-- The one answer this block owes: what the AI gets in this step. -->
       <div class="flex items-start gap-1">
         <p class="text-primary text-sm leading-relaxed" aria-live="polite">
-          {m.flow_material_reads({ what: currentMaterial })}
+          {materialReads({ what: currentMaterial })}
         </p>
-        <Settings.InfoTip title={m.flow_material_title()} text={m.flow_material_help()} />
+        <Settings.InfoTip title={materialTitle} text={m.flow_material_help()} />
       </div>
     {/if}
 
@@ -380,7 +375,7 @@
                 collisionPadding={16}
                 class="w-[min(28rem,calc(100vw-2rem))] p-0"
               >
-                <Command.Root>
+                <Command.Root label={m.flow_input_material_picker_search()}>
                   <Command.Input placeholder={m.flow_input_material_picker_search()} />
                   <Command.List class="max-h-[min(22rem,60vh)]">
                     <Command.Empty>{m.flow_input_material_no_options()}</Command.Empty>

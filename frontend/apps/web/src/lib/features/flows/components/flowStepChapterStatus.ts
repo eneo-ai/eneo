@@ -1,7 +1,10 @@
 import type { FlowStep, SecurityClassification } from "@eneo/eneo-js";
 import { getTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
 import { m } from "$lib/paraglide/messages";
-import { describeUnderlag, getFlowStepUnderlag } from "$lib/features/flows/flowInputBindings";
+import {
+  describeStepMaterialAsSummary,
+  getStepMaterial
+} from "$lib/features/flows/flowStepMaterial";
 import { OUTPUT_MODES } from "$lib/features/flows/flowStepTypes";
 import {
   getEnkelAwareOutputTypeLabel,
@@ -75,21 +78,11 @@ export function getChapterInputStatus({
   hasKnowledge: boolean;
   hasAttachments: boolean;
 }): string {
-  // Explicit underlag is the whole step input; the input source describes
-  // only a step without it.
-  const underlag = getFlowStepUnderlag(step);
-  const source =
-    underlag !== null
-      ? describeUnderlag(underlag)
-      : step.input_source === "previous_step" && previousStep
-        ? `${m.flow_input_template_effective_step({ step: previousStep.step_order })}${
-            previousStep.user_description ? `: ${previousStep.user_description}` : ""
-          }`
-        : step.input_source === "all_previous_steps"
-          ? m.flow_input_source_all_previous_steps()
-          : step.input_source === "http_get"
-            ? m.flow_input_source_http_get()
-            : m.flow_input_source_flow_input();
+  // The same phrase the material block leads with (flowStepMaterial owns it).
+  const material = getStepMaterial(step, previousStep);
+  const source = material
+    ? describeStepMaterialAsSummary(material)
+    : m.flow_input_source_flow_input();
   const extra =
     hasKnowledge || hasAttachments
       ? m.flow_chapter_input_extra_active()

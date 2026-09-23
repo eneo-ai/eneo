@@ -80,7 +80,7 @@ describe("task and material chapter summaries", () => {
         hasKnowledge: true,
         hasAttachments: false
       })
-    ).toBe("Steg 1: Transkribera ljud · Kunskap eller filer tillagda");
+    ).toBe("Svaret från Steg 1: Transkribera ljud · Kunskap eller filer tillagda");
   });
 
   it("names the underlag instead of an inactive all-previous source", () => {
@@ -95,7 +95,7 @@ describe("task and material chapter summaries", () => {
         hasKnowledge: false,
         hasAttachments: false
       })
-    ).toBe("Underlag: Steg 2 · Ingen extra kunskap eller filer");
+    ).toBe("Din egen text med svar från Steg 2 · Ingen extra kunskap eller filer");
   });
 });
 

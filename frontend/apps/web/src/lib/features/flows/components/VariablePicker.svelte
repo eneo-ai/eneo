@@ -37,6 +37,7 @@
     transcriptionEnabled = false,
     sectionVariablesAvailable = false,
     uploadVariableAvailable = false,
+    classifyToken,
     onInsert
   }: {
     steps: VariablePickerContext["steps"];
@@ -48,6 +49,8 @@
     sectionVariablesAvailable?: boolean;
     /** Offer the text of the file uploaded when the flow runs (custom text of an upload step). */
     uploadVariableAvailable?: boolean;
+    /** The editor's own classifier, so an entry wears the colour its token gets in the text. */
+    classifyToken?: (token: string) => VariableCategory;
     onInsert?: (variable: string) => void;
   } = $props();
 
@@ -228,7 +231,7 @@
     {/snippet}
   </Popover.Trigger>
   <Popover.Content align="start" class="w-[min(30rem,calc(100vw-2rem))] p-0">
-    <Command.Root>
+    <Command.Root label={m.flow_variable_search_placeholder()}>
       <Command.Input placeholder={m.flow_variable_search_placeholder()} />
       <Command.List class="max-h-[min(24rem,60vh)]">
         <Command.Empty>{m.flow_variable_search_empty()}</Command.Empty>
@@ -241,8 +244,9 @@
                 onSelect={() => insert(entry.token)}
                 class="items-start gap-2.5 py-2"
               >
+                {@const category = classifyToken?.(entry.token) ?? group.category}
                 <span
-                  class="{VARIABLE_CATEGORY_CLASSES[group.category]
+                  class="{VARIABLE_CATEGORY_CLASSES[category]
                     .scopeClass} bg-label-default mt-1.5 size-2 shrink-0 rounded-full"
                   aria-hidden="true"
                 ></span>
@@ -254,7 +258,7 @@
                   {#if isAdvancedMode}
                     <code
                       translate="no"
-                      class="{getChipClasses(group.category)} mt-0.5 max-w-full self-start truncate"
+                      class="{getChipClasses(category)} mt-0.5 max-w-full self-start truncate"
                       >{`{{${entry.token}}}`}</code
                     >
                   {/if}

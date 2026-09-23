@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import VariablePicker from "./VariablePicker.svelte";
+import { VARIABLE_CATEGORY_CLASSES } from "$lib/features/flows/flowVariableTokens";
 
 // The command list scrolls the active option into view, which jsdom lacks.
 beforeAll(() => {
@@ -16,6 +17,30 @@ afterEach(async () => {
 });
 
 describe("VariablePicker", () => {
+  it("offers the upload on an upload step, coloured as the editor colours it", async () => {
+    render(VariablePicker, {
+      steps: [],
+      currentStepOrder: 1,
+      formSchema: undefined,
+      isAdvancedMode: true,
+      uploadVariableAvailable: true,
+      classifyToken: (token: string) => (token === "step_input.text" ? "technical" : "field"),
+      onInsert: vi.fn()
+    });
+    await fireEvent.click(
+      screen.getByRole("button", { name: /^(Infoga variabel|Insert variable)$/ })
+    );
+    expect(screen.getByRole("combobox", { name: /Sök variabler|Search variables/ })).toBeTruthy();
+    const option = await screen.findByRole("option", {
+      name: /Det uppladdade underlaget|The uploaded material/
+    });
+    const chip = option.querySelector("code");
+    expect(chip?.className).toContain(VARIABLE_CATEGORY_CLASSES.technical.scopeClass);
+    // The run group alone would have made it purple; the classifier decides.
+    expect(chip?.className).not.toContain(VARIABLE_CATEGORY_CLASSES.system.scopeClass);
+    expect(chip?.textContent).toBe("{{step_input.text}}");
+  });
+
   it("inserts custom form fields through the canonical flow_input namespace", async () => {
     const onInsert = vi.fn();
 

@@ -3,6 +3,7 @@
   import type { FlowStep } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import {
+    classifyVariable,
     getChipClasses,
     parsePromptSegments,
     collectTemplateValidationIssues,
@@ -429,6 +430,7 @@
           {transcriptionEnabled}
           sectionVariablesAvailable={classificationContext.sectionVariablesAvailable}
           {uploadVariableAvailable}
+          classifyToken={(token) => classifyVariable(token, classificationContext)}
           onInsert={(variable) => {
             const match = variable.match(/^\{\{(.+)\}\}$/);
             if (match) void insertAtCursor(match[1]);

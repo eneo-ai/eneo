@@ -108,6 +108,9 @@ describe("FlowStepInputTemplateSection", () => {
     });
 
     await fireEvent.click(screen.getByRole("button", { name: /Välj resultat|Choose results/ }));
+    expect(
+      screen.getByRole("combobox", { name: m.flow_input_material_picker_search() })
+    ).toBeTruthy();
     await fireEvent.click(screen.getByText("summary"));
 
     expect(onInputSourcesChange).toHaveBeenCalledWith({
@@ -191,7 +194,15 @@ describe("FlowStepInputTemplateSection", () => {
   });
 
   it("keeps an upload step's own text editable and warns when it leaves the upload out", () => {
-    const upload = renderSection({ runtimeInputEnabled: true, showInputTemplate: true });
+    const uploadStep = makeStep(2, {
+      user_description: "Skriv rapport",
+      input_config: { runtime_input: { enabled: true, input_format: "document" } }
+    });
+    const upload = renderSection({
+      step: uploadStep,
+      runtimeInputEnabled: true,
+      showInputTemplate: true
+    });
     expect(upload.container.textContent).toContain(
       m.flow_material_reads({ what: m.flow_material_what_upload() })
     );
@@ -199,6 +210,7 @@ describe("FlowStepInputTemplateSection", () => {
     cleanup();
 
     const leftOut = renderSection({
+      step: { ...uploadStep, input_bindings: { question: "Namn: {{flow_input.namn}}" } as never },
       runtimeInputEnabled: true,
       hasInputTemplateOverride: true,
       inputTemplateText: "Namn: {{flow_input.namn}}"
@@ -207,6 +219,10 @@ describe("FlowStepInputTemplateSection", () => {
     cleanup();
 
     const kept = renderSection({
+      step: {
+        ...uploadStep,
+        input_bindings: { question: "Transkript: {{step_input.text}}" } as never
+      },
       runtimeInputEnabled: true,
       hasInputTemplateOverride: true,
       inputTemplateText: "Transkript: {{step_input.text}}"
@@ -215,6 +231,13 @@ describe("FlowStepInputTemplateSection", () => {
     expect(kept.container.textContent).toContain(
       m.flow_material_reads({ what: m.flow_material_what_own_text_with_upload() })
     );
+  });
+
+  it("says the step, not the AI, reads the material when the step does not call the AI", () => {
+    const compose = makeStep(2, { output_mode: "compose_text" });
+    const { container } = renderSection({ step: compose });
+    expect(container.textContent).toContain(m.flow_material_title_step());
+    expect(container.textContent).not.toContain(m.flow_material_title());
   });
 
   it("keeps custom text available for document input without a JSON input contract", () => {
