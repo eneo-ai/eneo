@@ -332,6 +332,9 @@ jobs:
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
+    # Both tasks finish in about 4-7 min; a hang should fail the check long
+    # before GitHub's 6 h default.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -403,6 +406,10 @@ jobs:
 
       - name: Run web unit & component tests
         if: matrix.task == 'checks'
+        # Usually ~2 min. Vitest browser mode has no per-file timeout: a test
+        # that unloads the tester iframe (e.g. a real navigation) stalls the
+        # run silently, so the step bounds it.
+        timeout-minutes: 10
         run: FORCE_COLOR=1 bun run --filter '@eneo/web' test
 
       # Builds the loader first (its size budget is enforced by the build) and
@@ -423,6 +430,8 @@ jobs:
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.frontend_e2e == 'true'
     runs-on: ubuntu-latest
+    # Usually 5-10 min including the stack build.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
