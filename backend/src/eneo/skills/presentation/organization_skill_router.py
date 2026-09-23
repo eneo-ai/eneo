@@ -15,6 +15,9 @@ from eneo.skills.domain.skill import (
     DEFAULT_SKILL_ADOPTION_PAGE_LIMIT,
     MAX_SKILL_ADOPTION_PAGE_LIMIT,
     PersonalChatPinAdvanceOutcome,
+    SkillAdoptionDrift,
+    SkillAdoptionFilter,
+    SkillAdoptionResourceKind,
 )
 from eneo.skills.presentation.skill_audit import (
     audit_skill_created,
@@ -36,8 +39,12 @@ from eneo.skills.presentation.skill_models import (
     PublishedSkillPublic,
     PublishedSkillSummaryPagePublic,
     SkillAdoptionProjectionPagePublic,
+    SkillBindingDetachRequest,
     SkillCreateRequest,
+    SkillDetachmentTotalsPublic,
     SkillPublishRequest,
+    SkillRemovalPublic,
+    SkillRemovalRequest,
     SkillRevisionCreateRequest,
     SkillRevisionPublic,
     SkillRevisionRestorePublic,
@@ -108,11 +115,13 @@ async def list_organization_skills(
     limit: Annotated[int, Query(ge=1, le=_MAX_PAGE_LIMIT)] = _DEFAULT_PAGE_LIMIT,
     cursor: str | None = None,
     search: Annotated[str | None, Query(max_length=200)] = None,
+    removed: bool = False,
 ) -> OrganizationSkillSummaryPagePublic:
     page = await container.organization_skill_service().list_organization_skills(
         limit=limit,
         cursor=cursor,
         search=search,
+        removed=removed,
     )
     assembler = container.skill_assembler()
     return OrganizationSkillSummaryPagePublic(
@@ -185,11 +194,18 @@ async def get_organization_skill_adoption(
         Query(ge=1, le=MAX_SKILL_ADOPTION_PAGE_LIMIT),
     ] = DEFAULT_SKILL_ADOPTION_PAGE_LIMIT,
     cursor: Annotated[str | None, Query(max_length=256)] = None,
+    query: Annotated[
+        str | None,
+        Query(max_length=100, description="Matches resource, space or owner name."),
+    ] = None,
+    kind: SkillAdoptionResourceKind | None = None,
+    drift: SkillAdoptionDrift | None = None,
 ) -> SkillAdoptionProjectionPagePublic:
     projection = await container.organization_skill_service().get_adoption_projection(
         skill_id=skill_id,
         limit=limit,
         cursor=cursor,
+        filters=SkillAdoptionFilter(query=query or None, kind=kind, drift=drift),
     )
     return container.skill_assembler().adoption_projection_to_public(projection)
 
@@ -499,6 +515,7 @@ async def advance_assistant_bindings(
         skill_id=skill_id,
         expected_published_revision_id=payload.expected_published_revision_id,
         cursor=payload.cursor,
+        assistant_ids=payload.assistant_ids,
     )
     return AssistantFleetAdvancePublic(
         run_id=outcome.run_id,
@@ -537,6 +554,7 @@ async def advance_app_bindings(
         skill_id=skill_id,
         expected_published_revision_id=payload.expected_published_revision_id,
         cursor=payload.cursor,
+        app_ids=payload.app_ids,
     )
     return AppFleetAdvancePublic(
         run_id=outcome.run_id,
@@ -605,25 +623,76 @@ async def unpublish_organization_skill(
 @router.delete(
     "/organization/{skill_id}/",
     status_code=204,
-    description="Delete an eligible organisation Skill draft.",
+    description=(
+        "Remove an organisation Skill while retaining its history. "
+        "With detach_bindings, its Assistant, App and Personal Chat bindings "
+        "are deleted in the same transaction."
+    ),
     responses=responses.get_responses([403, 404, 409]),
 )
 async def delete_organization_skill(
     skill_id: UUID,
     container: _ContainerWithUser,
+    detach_bindings: bool = False,
 ) -> None:
-    skill = await container.organization_skill_service().delete(skill_id=skill_id)
-    user = container.user()
-    await container.audit_service().log_async(
-        tenant_id=user.tenant_id,
-        user=user,
-        action=ActionType.SKILL_DELETED,
-        entity_type=EntityType.SKILL,
-        entity_id=skill.id,
-        description=f"Deleted Skill '{skill.current_revision.display_name}'",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=skill,
-            extra=skill_audit_extra(skill),
+    await container.organization_skill_service().delete(
+        skill_id=skill_id, detach_bindings=detach_bindings
+    )
+
+
+@router.post(
+    "/organization/{skill_id}/detach/",
+    response_model=SkillDetachmentTotalsPublic,
+    description=(
+        "Detach an organisation Skill from up to 100 selected Assistants and "
+        "Apps in one transaction. Personal Chat keeps its binding."
+    ),
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+async def detach_organization_skill_bindings(
+    skill_id: UUID,
+    payload: SkillBindingDetachRequest,
+    container: _ContainerWithUser,
+) -> SkillDetachmentTotalsPublic:
+    detached = await container.organization_skill_service().detach_bindings(
+        skill_id=skill_id,
+        assistant_ids=payload.assistant_ids,
+        app_ids=payload.app_ids,
+    )
+    return SkillDetachmentTotalsPublic(
+        assistant_count=len(detached.assistant_ids),
+        app_count=len(detached.app_ids),
+        personal_chat_count=0,
+    )
+
+
+@router.post(
+    "/organization/remove/",
+    response_model=SkillRemovalPublic,
+    description=(
+        "Remove up to 100 organisation Skills atomically, retaining history. "
+        "With detach_bindings, their Assistant, App and Personal Chat bindings "
+        "are deleted in the same transaction; otherwise a bound Skill refuses "
+        "the whole batch."
+    ),
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+async def remove_organization_skills(
+    payload: SkillRemovalRequest,
+    container: _ContainerWithUser,
+) -> SkillRemovalPublic:
+    outcomes = await container.organization_skill_service().remove_many(
+        skill_ids=payload.skill_ids, detach_bindings=payload.detach_bindings
+    )
+    # One Assistant can hold several selected Skills; count resources, not rows.
+    assistants = {id for outcome in outcomes for id in outcome.detached.assistant_ids}
+    apps = {id for outcome in outcomes for id in outcome.detached.app_ids}
+    policies = {id for outcome in outcomes for id in outcome.detached.policy_ids}
+    return SkillRemovalPublic(
+        removed_ids=[outcome.skill.id for outcome in outcomes],
+        detached=SkillDetachmentTotalsPublic(
+            assistant_count=len(assistants),
+            app_count=len(apps),
+            personal_chat_count=len(policies),
         ),
     )

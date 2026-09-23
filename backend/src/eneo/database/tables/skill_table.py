@@ -26,15 +26,18 @@ class Skills(BasePublic):
     current_revision_number: Mapped[int] = mapped_column(server_default="1")
     published_revision_number: Mapped[int | None] = mapped_column(nullable=True)
     first_published_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    removed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_by_user_id: Mapped[UUID] = mapped_column(
         ForeignKey(Users.id, ondelete="RESTRICT")
     )
 
     __table_args__ = (
-        UniqueConstraint(
+        Index(
+            "uq_skills_space_id_slug",
             "space_id",
             "slug",
-            name="uq_skills_space_id_slug",
+            unique=True,
+            postgresql_where=text("removed_at IS NULL"),
         ),
         UniqueConstraint(
             "space_id",
@@ -52,6 +55,10 @@ class Skills(BasePublic):
         CheckConstraint(
             "published_revision_number IS NULL OR is_active",
             name="ck_skills_published_active",
+        ),
+        CheckConstraint(
+            "removed_at IS NULL OR NOT is_active",
+            name="ck_skills_removed_inactive",
         ),
         ForeignKeyConstraint(
             ["id", "current_revision_number"],
