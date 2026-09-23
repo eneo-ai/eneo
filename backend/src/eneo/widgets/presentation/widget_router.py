@@ -19,6 +19,7 @@ from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.widgets.application.widget_service import WidgetView
+from eneo.widgets.application.widget_target_lifecycle import audit_snapshot
 from eneo.widgets.domain.widget import WidgetStatus
 from eneo.widgets.domain.widget_template import WidgetTemplate
 from eneo.widgets.presentation.widget_models import (
@@ -63,15 +64,7 @@ _ContainerWithUser = Annotated[
 
 
 def _widget_snapshot(view: WidgetView) -> dict[str, Any]:
-    widget = view.widget
-    return {
-        "status": widget.status.value,
-        "token_generation": widget.token_generation,
-        "allowed_origins": list(widget.allowed_origins),
-        "limits": widget.limits.model_dump(mode="json"),
-        "privacy": widget.privacy.model_dump(mode="json"),
-        "bot_protection": widget.bot_protection.value,
-    }
+    return audit_snapshot(view.widget)
 
 
 async def _audit(

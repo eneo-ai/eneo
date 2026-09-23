@@ -2111,6 +2111,16 @@ class AssistantService:
         space.remove_assistant(assistant)
         await self.space_repo.update(space)
 
+        # After the delete: a widget created meanwhile holds the assistant row
+        # until it commits, so it is archived here too.
+        from eneo.widgets.application.widget_target_lifecycle import (
+            archive_widgets_of_deleted_assistant,
+        )
+
+        await archive_widgets_of_deleted_assistant(
+            self.space_repo.session, assistant_id=assistant_id, user=self.user
+        )
+
         if icon_id:
             await self.icon_repo.delete(icon_id)
 
