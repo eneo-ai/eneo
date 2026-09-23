@@ -35,8 +35,10 @@ type ToolReference = NonNullable<ConversationMessage["mcp_tool_references"]>[num
 
 const HTTP_URL = /^https?:\/\//i;
 
+// One entry per document: a page by its address, anything else by its id.
+// Titles are not unique; two uploads named "Riktlinjer.pdf" stay apart.
 function knowledgeKey(reference: KnowledgeReference): string {
-  return reference.metadata.url ?? reference.metadata.title ?? reference.id;
+  return reference.metadata.url ?? reference.id;
 }
 
 // A tool result from a web page folds into a knowledge source with the same
