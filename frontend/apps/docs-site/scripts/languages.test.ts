@@ -195,16 +195,24 @@ test("Pagefind separates languages and excludes English fallback even with a nes
 });
 
 test("app docs links use the reader locale and preserve English URLs and anchors", async () => {
-  const { docsUrl } = await import("../../web/src/lib/core/docs");
+  const { docsUrl, docsVersionPath } =
+    await import("../../web/src/lib/core/docs");
+  const { latestRelease } = await import("@eneo/whats-new");
+  // The app links the docs of its own release line, or /dev before it is dated.
+  const version = docsVersionPath(latestRelease());
+  assert.match(version, /^\/(dev|v\d+\.\d+)$/);
   for (const page of [
     "guides/object-content-storage",
     "guides/embed-widget",
   ] as const) {
-    assert.equal(docsUrl(page, "en"), `https://docs.eneo.ai/${page}`);
-    assert.equal(docsUrl(page, "sv"), `https://docs.eneo.ai/sv/${page}`);
+    assert.equal(docsUrl(page, "en"), `https://docs.eneo.ai${version}/${page}`);
+    assert.equal(
+      docsUrl(page, "sv"),
+      `https://docs.eneo.ai${version}/sv/${page}`,
+    );
     assert.equal(
       docsUrl(page, "sv", "installation"),
-      `https://docs.eneo.ai/sv/${page}#installation`,
+      `https://docs.eneo.ai${version}/sv/${page}#installation`,
     );
   }
 });
