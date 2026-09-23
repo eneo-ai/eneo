@@ -1,51 +1,50 @@
 # `src/lib/components/ui` — shadcn-svelte primitives
 
-This directory holds [shadcn-svelte](https://shadcn-svelte.com) components copied
-into the project via the shadcn CLI. They are an entry point for adopting
-shadcn-svelte in eneo and live alongside the existing `@eneo/ui` package.
+This directory holds the [shadcn-svelte](https://shadcn-svelte.com) components the web
+app is built on. They are copied into the project with the shadcn CLI and run on
+[bits-ui](https://bits-ui.com) and Svelte 5 runes.
 
-## Why two UI systems?
+It is the only component library in `apps/web`. `@eneo/ui` (`frontend/packages/ui`)
+no longer ships components: it holds the design tokens, themes and the icon plugin
+(`@eneo/icons/*`) that these components are styled with.
 
-`@eneo/ui` (in `frontend/packages/ui`) is the existing in-house design system
-(Svelte 4 syntax, melt-ui, brand tokens). It is **not** going away — it covers
-many components shadcn-svelte does not, and rewriting it has no business value.
+## Where things live
 
-shadcn-svelte is being introduced because:
+| What                                            | Where                                                                                                                               |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Primitives (Button, Dialog, Select, Tooltip, …) | `$lib/components/ui/*`                                                                                                              |
+| App compositions of those primitives            | `$lib/components/*` — for example `dialogLayout.ts`, `DateRangePicker.svelte`, `StatusBadge.svelte`, `resource-table/`, `markdown/` |
+| Feature UI                                      | `$lib/features/*` and the route folders                                                                                             |
+| Tokens, themes, icons                           | `frontend/packages/ui/src/styles`, `frontend/packages/ui/src/icons`                                                                 |
 
-- It uses Svelte 5 runes, matching the direction the codebase is moving.
-- "Copy the source into your project" lets us evolve components without
-  fighting upstream APIs.
-- Its bits-ui foundation gives us modern, well-maintained primitives where
-  `@eneo/ui` would otherwise need new investment.
-
-## When to use which
-
-| Use shadcn-svelte (`$lib/components/ui/*`) when… | Use `@eneo/ui` when… |
-| --- | --- |
-| Building a new primitive that does not yet exist in `@eneo/ui` | The component already exists in `@eneo/ui` and works |
-| You explicitly want Svelte 5 runes / bits-ui semantics | Touching code that already uses `@eneo/ui` — don't mix in the same file |
-| The component is web-app-only and unlikely to be shared across apps | The component should be available to other apps in the monorepo |
-
-**Avoid** importing both `@eneo/ui` and shadcn primitives in the same file.
-Pick one per surface and convert wholesale if needed.
+Reach for an existing primitive first. When several features need the same
+composition, add it once under `$lib/components` instead of repeating the markup.
 
 ## Adding a new shadcn component
 
-1. Run `npx shadcn-svelte@latest add <component>` from `frontend/apps/web`.
+1. Run `bun x shadcn-svelte@latest add <component>` from `frontend/apps/web`.
+   - If the CLI asks to overwrite an existing component, answer no: several vendored
+     files carry eneo-specific patches (see the NOTE comments in them).
+   - If it changes `package.json` or `bun.lock` (it sometimes bumps dependencies),
+     revert those changes and keep only what the new component needs.
 2. Check which Tailwind tokens the new component references
    (`text-muted-foreground`, `bg-muted`, `border-*`, `ring-*`, etc.).
 3. Make sure each referenced token is mapped in `src/app.css` under the
-   `@theme inline { … }` block. Map shadcn semantic tokens to existing
-   eneo tokens (`--background-*`, `--text-*`, `--border-*`).
-4. **Do not** add token mappings to `frontend/packages/ui/src/styles/main.css`
-   — that file is shared across apps and must stay shadcn-agnostic.
-5. Try to keep the generated component files verbatim so future CLI
-   updates merge cleanly. Customize via class overrides at the call site.
+   `@theme inline { … }` block, pointing shadcn's semantic tokens at eneo's tokens
+   (`--background-*`, `--text-*`, `--border-*`).
+4. Replace `bg-primary` / `text-primary-foreground` with `bg-accent-default` /
+   `text-on-fill` and add the file to the list in `src/app.css` (see the
+   `--color-primary` namespace conflict comment there).
+5. Otherwise keep the generated files verbatim so future CLI updates merge
+   cleanly. Customize via class overrides at the call site.
 
 ## Component file conventions
 
-- Files are kept as the shadcn-svelte CLI generates them.
+- Files are kept as the shadcn-svelte CLI generates them, apart from the patches
+  marked with `NOTE:` comments.
 - Each component folder has an `index.ts` that re-exports the parts as both
   named exports (`Card`, `CardHeader`) and a namespace (`Card.Root`,
   `Card.Header`).
 - Prefer the namespace import in consumers: `import * as Card from "$lib/components/ui/card/index.js"`.
+- Menu items take `onSelect`, not `onclick`: bits-ui skips its select-and-close
+  step when an `onclick` handler disables the item.
