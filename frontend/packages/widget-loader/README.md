@@ -9,9 +9,10 @@ the loader only owns placement, focus and a small `postMessage` bridge.
 Built with Vite library mode to a classic IIFE (`dist/eneo.js`, es2019, no
 dependencies) so it works with `async` in any CMS. The build writes
 `dist/manifest.json` (version, SRI hash, sizes) and fails when the bundle
-exceeds **5 kB gzipped**. The web app serves the bundle from
-`/widget/v1/eneo.js` (floating) and `/widget/<version>/eneo.js` (pinned,
-immutable, for hosts that require `integrity`).
+exceeds **5 kB gzipped** or when its bytes differ from what `release.json`
+records for the version (see [Releases](#releases)). The web app serves the
+bundle from `/widget/v1/eneo.js` (floating) and `/widget/<version>/eneo.js`
+(pinned, immutable, for hosts that require `integrity`).
 
 ## Host snippet
 
@@ -97,9 +98,22 @@ submitted) and popups for source links.
 ## Development
 
 ```bash
-bun run --filter @eneo/widget-loader build   # dist/eneo.js + manifest.json, size budget
-bun run --filter @eneo/widget-loader test    # builds, then Vitest in headless Chromium
+bun run --filter @eneo/widget-loader build   # dist/eneo.js + manifest.json, size budget, release check
+bun run --filter @eneo/widget-loader test    # builds, then Vitest in headless Chromium and the release check's tests
+bun run --filter @eneo/widget-loader lock    # records a new version's bytes in release.json
 ```
 
 The web app's `/widget/...` route reads `dist/` at build time and answers 503
 until the package has been built.
+
+## Releases
+
+Hosts that require `integrity` load `/widget/<version>/eneo.js`, which is
+served as immutable and printed with its SRI hash. A version's bytes must
+therefore never change once it can have shipped: browsers and proxies keep
+the old ones for a year and the new ones fail the host's `integrity`.
+`release.json` records the version and the SRI hash of its bytes, and every
+build (CI, the Docker image, `pretest`) stops when they differ. After any
+change that alters the bundle (source, the stylesheet, a Vite or esbuild
+upgrade), bump `version` in `package.json`, run `lock` and commit
+`release.json`; `lock` refuses to give a recorded version other bytes.

@@ -6,11 +6,12 @@
   "description": "Loader script that embeds an Eneo assistant as a chat widget on a host website.",
   "scripts": {
     "build": "vite build && node scripts/manifest.mjs",
+    "lock": "vite build && node scripts/manifest.mjs --lock",
     "check": "tsc --noEmit",
     "lint": "prettier --check . && eslint .",
     "format": "prettier --write .",
     "pretest": "bun run build",
-    "test": "vitest run"
+    "test": "vitest run && node --test scripts/release.test.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
