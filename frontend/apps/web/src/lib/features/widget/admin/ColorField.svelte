@@ -121,8 +121,26 @@
       : ""
   );
   const describedByIds = $derived(
-    [`${id}-description`, invalid ? `${id}-error` : "", describedBy].filter(Boolean).join(" ")
+    [
+      `${id}-description`,
+      invalid && `${id}-error`,
+      textOnWarning && `${id}-text-on`,
+      contrastLabel && `${id}-contrast`,
+      describedBy
+    ]
+      .filter(Boolean)
+      .join(" ")
   );
+  // The verdicts are read with the field; only a change is announced, through
+  // a region that exists before its content does.
+  const verdicts = $derived([textOnWarning, contrastLabel].filter(Boolean).join(" "));
+  let announcement = $state("");
+  let announced = untrack(() => verdicts);
+  $effect(() => {
+    if (verdicts === announced) return;
+    announced = verdicts;
+    announcement = verdicts;
+  });
 </script>
 
 <Field.Field data-invalid={invalid || undefined}>
@@ -178,17 +196,18 @@
     <Field.Error id={`${id}-error`}>{m.widget_admin_contrast_invalid()}</Field.Error>
   {/if}
   {#if textOnWarning}
-    <p class="text-warning-stronger text-sm" aria-live="polite">{textOnWarning}</p>
+    <p id={`${id}-text-on`} class="text-warning-stronger text-sm">{textOnWarning}</p>
   {/if}
   {#if contrastLabel}
     <p
+      id={`${id}-contrast`}
       class={[
         "text-sm",
         contrast?.verdict === "text" ? "text-positive-default" : "text-warning-stronger"
       ]}
-      aria-live="polite"
     >
       {contrastLabel}
     </p>
   {/if}
+  <p class="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
 </Field.Field>

@@ -59,6 +59,31 @@ describe("WidgetThemeFields colours", () => {
   });
 });
 
+describe("WidgetThemeFields contrast", () => {
+  test("the verdicts describe the hex field, and a change is announced", async () => {
+    renderFields();
+    await expect.element(primary()).toHaveAccessibleDescription(/widget_admin_contrast_ok/);
+    const live = primary()
+      .element()
+      .closest("[data-slot=field]")
+      ?.querySelector("[aria-live=polite]");
+    expect(live?.textContent).toBe("");
+
+    // A mid-tone: graphics-only against the page, and no text colour reads on it.
+    await userEvent.fill(primary(), "#777777");
+    await expect
+      .element(primary())
+      .toHaveAccessibleDescription(
+        /widget_admin_contrast_text_on_fail.*widget_admin_contrast_graphics_only/
+      );
+    await vi.waitFor(() =>
+      expect(live?.textContent).toBe(
+        "widget_admin_contrast_text_on_fail widget_admin_contrast_graphics_only"
+      )
+    );
+  });
+});
+
 describe("WidgetThemeFields locks", () => {
   test("a template-governed appearance freezes every control and says why", async () => {
     const onChange = vi.fn();
