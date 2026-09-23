@@ -4,10 +4,11 @@
 
 
 from datetime import date, datetime
-from typing import Any, Literal, Optional, cast
+from typing import Annotated, Any, Literal, Optional, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from eneo.widgets.domain.widget import (
     MAX_DAILY_TOKEN_BUDGET,
@@ -99,16 +100,30 @@ class WidgetUpdate(BaseModel):
 
     revision: int = Field(ge=0)
 
-    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    texts: Optional[WidgetTexts] = Field(default=None, description=_WHOLE_GROUP)
-    theme: Optional[WidgetTheme] = Field(default=None, description=_WHOLE_GROUP)
-    limits: Optional[WidgetLimits] = Field(default=None, description=_WHOLE_GROUP)
-    privacy: Optional[WidgetPrivacy] = Field(default=None, description=_WHOLE_GROUP)
-    language: Optional[WidgetLanguage] = None
-    allowed_origins: Optional[list[str]] = Field(default=None, max_length=20)
-    bot_protection: Optional[BotProtection] = None
-    show_sources: Optional[bool] = None
-    show_tool_activity: Optional[bool] = None
+    # None only marks a field left out; _no_nulls refuses a sent null, so the
+    # schema does not offer one.
+    name: Annotated[str, Field(min_length=1, max_length=100)] | SkipJsonSchema[None] = (
+        None
+    )
+    texts: WidgetTexts | SkipJsonSchema[None] = Field(
+        default=None, description=_WHOLE_GROUP
+    )
+    theme: WidgetTheme | SkipJsonSchema[None] = Field(
+        default=None, description=_WHOLE_GROUP
+    )
+    limits: WidgetLimits | SkipJsonSchema[None] = Field(
+        default=None, description=_WHOLE_GROUP
+    )
+    privacy: WidgetPrivacy | SkipJsonSchema[None] = Field(
+        default=None, description=_WHOLE_GROUP
+    )
+    language: WidgetLanguage | SkipJsonSchema[None] = None
+    allowed_origins: (
+        Annotated[list[str], Field(max_length=20)] | SkipJsonSchema[None]
+    ) = None
+    bot_protection: BotProtection | SkipJsonSchema[None] = None
+    show_sources: bool | SkipJsonSchema[None] = None
+    show_tool_activity: bool | SkipJsonSchema[None] = None
 
     @model_validator(mode="before")
     @classmethod

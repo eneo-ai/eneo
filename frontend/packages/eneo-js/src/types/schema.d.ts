@@ -23075,23 +23075,37 @@ export interface components {
       /** Revision */
       revision: number;
       /** Name */
-      name?: string | null;
-      /** @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones. */
-      texts?: components["schemas"]["WidgetTexts"] | null;
-      /** @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones. */
-      theme?: components["schemas"]["WidgetTheme"] | null;
-      /** @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones. */
-      limits?: components["schemas"]["WidgetLimits"] | null;
-      /** @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones. */
-      privacy?: components["schemas"]["WidgetPrivacy"] | null;
-      language?: components["schemas"]["WidgetLanguage"] | null;
+      name?: string;
+      /**
+       * Texts
+       * @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones.
+       */
+      texts?: components["schemas"]["WidgetTexts"];
+      /**
+       * Theme
+       * @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones.
+       */
+      theme?: components["schemas"]["WidgetTheme"];
+      /**
+       * Limits
+       * @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones.
+       */
+      limits?: components["schemas"]["WidgetLimits"];
+      /**
+       * Privacy
+       * @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones.
+       */
+      privacy?: components["schemas"]["WidgetPrivacy"];
+      /** Language */
+      language?: components["schemas"]["WidgetLanguage"];
       /** Allowed Origins */
-      allowed_origins?: string[] | null;
-      bot_protection?: components["schemas"]["BotProtection"] | null;
+      allowed_origins?: string[];
+      /** Bot Protection */
+      bot_protection?: components["schemas"]["BotProtection"];
       /** Show Sources */
-      show_sources?: boolean | null;
+      show_sources?: boolean;
       /** Show Tool Activity */
-      show_tool_activity?: boolean | null;
+      show_tool_activity?: boolean;
     };
     /** WidgetUsageDayPublic */
     WidgetUsageDayPublic: {
