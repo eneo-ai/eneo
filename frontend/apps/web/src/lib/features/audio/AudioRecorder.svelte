@@ -1,3 +1,9 @@
+<script lang="ts" module>
+  // How long a recording waits for a listener preparing on its audio graph
+  // (the live preview tapping it) before it starts anyway.
+  export const AUDIO_GRAPH_PREPARATION_MS = 2_000;
+</script>
+
 <script lang="ts">
   import { IconMicrophone } from "@eneo/icons/microphone";
   import { IconStop } from "@eneo/icons/stop";
@@ -46,7 +52,13 @@
   // The live transcript preview listens to this recorder's own audio graph: it
   // gets the graph once the microphone is open and `null` before the graph is
   // released. Rotation keeps the graph, so one preview spans every segment.
-  export let onAudioGraph: (graph: RecorderAudioGraph | null) => void = () => {};
+  // While it returns a pending promise the recording waits, at most
+  // AUDIO_GRAPH_PREPARATION_MS; `signal` aborts once the recording stops
+  // waiting, and a listener that fails never keeps the recording from starting.
+  export let onAudioGraph: (
+    graph: RecorderAudioGraph | null,
+    signal?: AbortSignal
+  ) => void | Promise<void> = () => {};
 
   type RecordingStartOrigin = "user" | "external";
   export let maxBytes: number | null = null;
@@ -460,9 +472,27 @@
       await audioContext.resume();
     }
     // Unless the recorder closed while the context resumed.
-    if (audioContext === graph.context) onAudioGraph(graph);
+    if (audioContext === graph.context) await prepareAudioGraphListener(graph);
 
     return mediaStream;
+  }
+
+  async function prepareAudioGraphListener(graph: RecorderAudioGraph) {
+    const waiting = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        onAudioGraph(graph, waiting.signal),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, AUDIO_GRAPH_PREPARATION_MS);
+        })
+      ]);
+    } catch (error) {
+      console.warn("Audio graph listener failed to prepare", error);
+    } finally {
+      clearTimeout(timer);
+      waiting.abort();
+    }
   }
 
   // The session controller can call startExternal in parallel with a user

@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 
 import type { FlowLiveTranscriptionSession } from "@eneo/eneo-js";
+import { PCM16_FLUSH, PCM16_FLUSHED } from "./pcm16-worklet.js";
 
 // Test doubles for the live transcript preview's browser APIs.
 
@@ -66,13 +67,20 @@ export class FakeLiveSocket {
   }
 }
 
-// The worklet node; `frame(tag)` is the processor posting 100 ms of audio whose
-// first byte is `tag`, so a test can tell frames apart.
+// The worklet node. `frame(tag)` is the processor posting 100 ms of audio whose
+// first byte is `tag`, so a test can tell frames apart; like a live processor it
+// answers a flush request, unless `answersFlush` is turned off.
 export class FakeWorkletNode {
   static instances: FakeWorkletNode[] = [];
 
+  answersFlush = true;
   port = {
-    onmessage: null as ((event: { data: ArrayBuffer }) => void) | null,
+    onmessage: null as ((event: { data: unknown }) => void) | null,
+    postMessage: vi.fn((message: unknown) => {
+      if (message === PCM16_FLUSH && this.answersFlush) {
+        queueMicrotask(() => this.post(PCM16_FLUSHED));
+      }
+    }),
     close: vi.fn()
   };
 
@@ -83,10 +91,14 @@ export class FakeWorkletNode {
     FakeWorkletNode.instances.push(this);
   }
 
-  frame(tag = 0) {
-    const frame = new ArrayBuffer(3200);
+  frame(tag = 0, bytes = 3200) {
+    const frame = new ArrayBuffer(bytes);
     new Uint8Array(frame)[0] = tag;
-    this.port.onmessage?.({ data: frame });
+    this.post(frame);
+  }
+
+  post(data: unknown) {
+    this.port.onmessage?.({ data });
   }
 }
 

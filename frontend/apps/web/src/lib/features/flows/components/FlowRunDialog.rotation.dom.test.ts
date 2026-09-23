@@ -17,8 +17,10 @@ import {
   readSessionRecords,
   scanRecoverableSessionsForSteps
 } from "$lib/features/audio/flowRunRecordingSession";
+import { AUDIO_GRAPH_PREPARATION_MS } from "$lib/features/audio/AudioRecorder.svelte";
 import {
   FakeLiveSocket,
+  FakeWorkletNode,
   installLiveTranscriptFakes,
   liveSession
 } from "$lib/features/audio/live/liveTranscriptTestFakes";
@@ -597,7 +599,68 @@ describe("FlowRunDialog recording rotation", () => {
     expect(socket.texts).toEqual([JSON.stringify({ type: "stop" })]);
     expect(createSession).toHaveBeenCalledOnce();
   });
+
+  it("starts the recording once the live text has tapped the audio, so it hears the first word", async () => {
+    installLiveTranscriptFakes();
+    const loadWorklet = holdWorklet();
+    await openDialog(
+      vi.fn(() => new Promise<UploadedFile>(() => undefined)),
+      liveText
+    );
+
+    await fireEvent.click(screen.getByLabelText(m.start_recording()));
+    await flush();
+    expect(media.addModule).toHaveBeenCalledOnce();
+    expect(media.recorders).toHaveLength(0);
+
+    loadWorklet();
+    await flush();
+    expect(FakeWorkletNode.instances).toHaveLength(1);
+    expect(media.recorders).toHaveLength(1);
+    expect(media.recorders[0]?.state).toBe("recording");
+  });
+
+  it("records on time, and says live text is unavailable, when the tap takes too long", async () => {
+    installLiveTranscriptFakes();
+    const loadWorklet = holdWorklet();
+    await openDialog(
+      vi.fn(() => new Promise<UploadedFile>(() => undefined)),
+      liveText
+    );
+
+    await fireEvent.click(screen.getByLabelText(m.start_recording()));
+    await flush();
+    vi.advanceTimersByTime(AUDIO_GRAPH_PREPARATION_MS - 1);
+    await flush();
+    expect(media.recorders).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    await flush();
+    expect(media.recorders).toHaveLength(1);
+    expect(media.recorders[0]?.state).toBe("recording");
+    expect(screen.getByText(m.live_transcription_unavailable())).toBeTruthy();
+
+    loadWorklet();
+    await flush();
+    expect(FakeWorkletNode.instances).toHaveLength(0);
+  });
 });
+
+const liveText: DialogOptions = {
+  createSession: vi.fn(async () => liveSession),
+  transcription: {
+    live: { available: true, reason: null },
+    speaker_labels: { selectable: true, required: false, default: true }
+  }
+};
+
+// Holds the worklet module's load until the test lets it finish.
+function holdWorklet(): () => void {
+  let finish: () => void = () => {};
+  media.addModule.mockImplementation(
+    () => new Promise<undefined>((resolve) => (finish = () => resolve(undefined)))
+  );
+  return () => finish();
+}
 
 type PendingUpload = {
   file: File;
@@ -648,10 +711,15 @@ function renderDialog(upload: Upload, options: DialogOptions = {}) {
   });
 }
 
-async function openDialogAndStartRecording(upload: Upload, options: DialogOptions = {}) {
+async function openDialog(upload: Upload, options: DialogOptions = {}) {
   const rendered = renderDialog(upload, options);
   await screen.findByText("Audio input");
   vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
+  return rendered;
+}
+
+async function openDialogAndStartRecording(upload: Upload, options: DialogOptions = {}) {
+  const rendered = await openDialog(upload, options);
   await fireEvent.click(screen.getByLabelText(m.start_recording()));
   await flush();
   expect(media.recorders).toHaveLength(1);
@@ -738,6 +806,7 @@ function installFakeMedia() {
   const recorders: FakeMediaRecorder[] = [];
   const contexts: FakeAudioContext[] = [];
   const getUserMedia = vi.fn(async (): Promise<unknown> => stream);
+  const addModule = vi.fn(async (_url: string): Promise<undefined> => undefined);
 
   class FakeMediaRecorder extends EventTarget {
     static isTypeSupported = () => true;
@@ -775,7 +844,7 @@ function installFakeMedia() {
 
   class FakeAudioContext {
     state = "running";
-    audioWorklet = { addModule: vi.fn(async () => undefined) };
+    audioWorklet = { addModule };
     close = vi.fn(async () => {
       this.state = "closed";
     });
@@ -816,6 +885,7 @@ function installFakeMedia() {
     recorders,
     contexts,
     getUserMedia,
+    addModule,
     uninstall() {
       vi.unstubAllGlobals();
       Reflect.deleteProperty(navigator, "mediaDevices");

@@ -785,6 +785,33 @@ describe("FlowRunDialog transcription options", () => {
     expect(checked(speakers)).toBe("true");
   });
 
+  it("starts the live text afresh after the last recording was discarded", async () => {
+    installLiveTranscriptFakes();
+    renderDialog(
+      buildEneo({
+        upload: vi.fn(async () => {
+          throw new Error("offline");
+        }),
+        transcription: offeredTranscription(true),
+        createSession: vi.fn(async () => liveSession)
+      })
+    );
+    await screen.findByText("Audio input");
+
+    const first = await recordWithLiveText();
+    first.receive({ type: "transcript.delta", text: "Anna talar" });
+    await screen.findByText("Anna talar");
+    await fireEvent.click(screen.getByRole("button", { name: "Finish test recording" }));
+    await fireEvent.click(await screen.findByRole("button", { name: m.discard() }));
+    expect(screen.queryByRole("log")).toBeNull();
+
+    const second = await recordWithLiveText();
+    first.receive({ type: "transcript.done", text: "Anna talar vidare." });
+    second.receive({ type: "transcript.delta", text: "Bo talar" });
+
+    await waitFor(() => expect(screen.getByRole("log").textContent).toBe("Bo talar"));
+  });
+
   it.each([
     {
       run: "the flow's default when it only uploads",
@@ -867,7 +894,7 @@ describe("FlowRunDialog recording layout", () => {
   });
 });
 
-// Starts a recording whose live text reaches "Lyssnar".
+// Starts a recording whose live text reaches "Lyssnar"; returns its socket.
 async function recordWithLiveText() {
   const opened = FakeLiveSocket.instances.length;
   await fireEvent.click(screen.getByRole("button", { name: "Start test recording" }));
@@ -876,6 +903,7 @@ async function recordWithLiveText() {
   socket.open();
   socket.receive({ type: "ready", sample_rate: 16000, max_seconds: 18000 });
   await screen.findByText(m.live_transcription_listening());
+  return socket;
 }
 
 function offeredTranscription(speakerDefault: boolean): FlowRunContractTranscription {

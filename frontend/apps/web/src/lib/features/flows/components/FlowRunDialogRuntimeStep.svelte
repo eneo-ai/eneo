@@ -207,21 +207,30 @@
   const livePreview = new LiveTranscriptPreview();
   let recorderAudioGraph = $state.raw<RecorderAudioGraph | null>(null);
 
-  function handleAudioGraph(graph: RecorderAudioGraph | null) {
+  // The recorder waits for the returned promise, within its bound, so the
+  // preview has tapped the audio before the recording starts.
+  function handleAudioGraph(graph: RecorderAudioGraph | null, signal?: AbortSignal) {
     recorderAudioGraph = graph;
     if (!graph) {
       livePreview.stop();
-    } else if (liveTextOn) {
-      void livePreview.start(graph, {
-        eneo,
-        flowId,
-        stepId: step.step_id,
-        onListening: () => launchInputState.markLiveSessionStarted()
-      });
+      return;
     }
+    if (!liveTextOn) return;
+    return livePreview.start(graph, {
+      eneo,
+      flowId,
+      stepId: step.step_id,
+      onListening: () => launchInputState.markLiveSessionStarted(),
+      signal
+    });
   }
 
-  onDestroy(() => livePreview.dispose());
+  function discardRecording() {
+    livePreview.discard();
+    onDiscardRecordedAudio();
+  }
+
+  onDestroy(() => livePreview.discard());
 </script>
 
 <div class="flex flex-col gap-5">
@@ -578,7 +587,7 @@
               <Button
                 variant="ghost"
                 size="sm"
-                onclick={onDiscardRecordedAudio}
+                onclick={discardRecording}
                 disabled={!canDiscardRecording}
                 title={canDiscardRecording ? undefined : labels.discardRecordingBusy}
                 aria-describedby={canDiscardRecording ? undefined : DISCARD_REASON_ID}

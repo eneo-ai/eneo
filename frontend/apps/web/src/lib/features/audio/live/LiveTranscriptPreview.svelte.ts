@@ -1,5 +1,5 @@
-import { EneoError, type Eneo } from "@eneo/eneo-js";
-import { PCM16_PROCESSOR } from "./pcm16-worklet.js";
+import { EneoError, type Eneo, type FlowLiveTranscriptionSession } from "@eneo/eneo-js";
+import { PCM16_FLUSH, PCM16_FLUSHED, PCM16_PROCESSOR } from "./pcm16-worklet.js";
 // A file of its own: Vite would inline a file this small as a data: URL, and
 // the app's `script-src 'self'` refuses worklet modules from data: URLs.
 import workletUrl from "./pcm16-worklet.js?url&no-inline";
@@ -31,6 +31,9 @@ export const MAX_QUEUED_FRAMES = 150;
 // Frames are 100 ms (3.2 kB), so a socket holding this much has fallen minutes
 // behind the microphone. The preview then ends visibly; it never drops audio.
 const MAX_BUFFERED_BYTES = 1024 * 1024;
+// The worklet answers a flush within a render quantum; the bound only covers a
+// worklet that cannot answer any more because the recorder closed its context.
+export const FLUSH_TIMEOUT_MS = 200;
 // A backstop just past the server's own wait for the final text (60 s).
 const FINAL_TEXT_TIMEOUT_MS = 65_000;
 
@@ -50,10 +53,10 @@ export class LiveTranscriptPreview {
   #node: AudioWorkletNode | null = null;
   #source: MediaStreamAudioSourceNode | null = null;
   #queue: ArrayBuffer[] = [];
-  #finalTextTimer: ReturnType<typeof setTimeout> | undefined;
+  // The wait for the worklet's last frame, then for the final text.
+  #stopTimer: ReturnType<typeof setTimeout> | undefined;
   #onListening: (() => void) | undefined;
-  // Bumped whenever a session ends, so a start still awaiting its ticket or
-  // worklet knows it was overtaken.
+  // Bumped whenever a session ends, so its late promises and messages are ignored.
   #generation = 0;
   #sessionText = "";
   #nextPieceId = 0;
@@ -75,38 +78,98 @@ export class LiveTranscriptPreview {
     return this.#stepId;
   }
 
-  async start(
+  /**
+   * Starts the preview of a fresh recording: taps the recorder's audio and
+   * connects in the background. The promise settles once the audio is tapped
+   * or tapping failed; the recorder waits for it, within its own bound, before
+   * it records, so the preview hears the first word. When the recorder stops
+   * waiting (`signal`), an untapped preview is unavailable and never taps late.
+   */
+  start(
     graph: RecorderAudioGraph,
     {
       eneo,
       flowId,
       stepId,
-      onListening
-    }: { eneo: Eneo; flowId: string; stepId: string; onListening?: () => void }
+      onListening,
+      signal
+    }: {
+      eneo: Eneo;
+      flowId: string;
+      stepId: string;
+      onListening?: () => void;
+      signal?: AbortSignal;
+    }
   ): Promise<void> {
     this.#teardown();
     const generation = this.#generation;
-    if (this.#stepId !== stepId) this.#pieces = [];
+    this.#pieces = [];
     this.#stepId = stepId;
     this.#status = "connecting";
     this.#errorCode = null;
     this.#sessionText = "";
     this.#onListening = onListening;
 
+    signal?.addEventListener(
+      "abort",
+      () => {
+        if (generation === this.#generation && !this.#node) this.#end("audio_timeout");
+      },
+      { once: true }
+    );
+    const session = eneo.flows.liveTranscription.createSession({ id: flowId, stepId });
+    const tapped = graph.context.audioWorklet.addModule(workletUrl).then(() => {
+      if (generation === this.#generation) this.#tap(graph);
+    });
+    void this.#connect(generation, eneo, session, tapped);
+    return tapped.catch(() => undefined);
+  }
+
+  // The recording ended: send what is left of its audio, then ask for the
+  // rest of the text and keep the socket until it arrives. The recorder calls
+  // this while releasing its graph, so it neither waits nor throws.
+  stop(): void {
+    if (this.#status === "idle" || this.#status === "finished") return;
+    const socket = this.#socket;
+    const awaitsFinalText = this.#status === "listening" && socket?.readyState === WebSocket.OPEN;
+    // A notice about the recording going on is no longer true.
+    this.#status = "finished";
+    if (!socket || !awaitsFinalText) {
+      this.#teardown();
+      return;
+    }
+    const node = this.#node;
+    if (!node) {
+      this.#sendStop(socket);
+      return;
+    }
+    // The worklet posts its frame in progress, then PCM16_FLUSHED.
+    this.#stopTimer = setTimeout(() => this.#sendStop(socket), FLUSH_TIMEOUT_MS);
+    node.port.postMessage(PCM16_FLUSH);
+  }
+
+  // The recording was thrown away, or the preview goes: nothing of this
+  // session shows again, not even a late message.
+  discard(): void {
+    this.#teardown();
+    this.#pieces = [];
+    this.#status = "idle";
+    this.#errorCode = null;
+  }
+
+  async #connect(
+    generation: number,
+    eneo: Eneo,
+    session: Promise<FlowLiveTranscriptionSession>,
+    tapped: Promise<void>
+  ) {
     try {
-      // The worklet loads while the ticket is issued and taps the recording as
-      // soon as it can, so the preview hears it from the first word.
-      const [session] = await Promise.all([
-        eneo.flows.liveTranscription.createSession({ id: flowId, stepId }),
-        graph.context.audioWorklet.addModule(workletUrl).then(() => {
-          if (generation === this.#generation) this.#tap(graph);
-        })
-      ]);
+      const [ticket] = await Promise.all([session, tapped]);
       if (generation !== this.#generation) return;
 
-      const socket = new WebSocket(liveSocketUrl(eneo.client.baseUrl, session.websocket_path), [
+      const socket = new WebSocket(liveSocketUrl(eneo.client.baseUrl, ticket.websocket_path), [
         LIVE_PROTOCOL,
-        `ticket.${session.ticket}`
+        `ticket.${ticket.ticket}`
       ]);
       this.#socket = socket;
       socket.onopen = () => {
@@ -125,28 +188,6 @@ export class LiveTranscriptPreview {
     }
   }
 
-  // The recording ended: ask for the rest of the text and keep the socket
-  // until it arrives. The recorder calls this while releasing its graph, so it
-  // must not throw.
-  stop(): void {
-    if (this.#status === "idle" || this.#status === "finished") return;
-    const socket = this.#socket;
-    const awaitsFinalText = this.#status === "listening" && socket?.readyState === WebSocket.OPEN;
-    // A notice about the recording going on is no longer true.
-    this.#status = "finished";
-    if (!socket || !awaitsFinalText) {
-      this.#teardown();
-      return;
-    }
-    this.#detachAudio();
-    socket.send(JSON.stringify({ type: "stop" }));
-    this.#finalTextTimer = setTimeout(() => this.#teardown(), FINAL_TEXT_TIMEOUT_MS);
-  }
-
-  dispose(): void {
-    this.#teardown();
-  }
-
   // Mono in, no output: nothing of the microphone reaches the speakers.
   #tap(graph: RecorderAudioGraph) {
     const node = new AudioWorkletNode(graph.context, PCM16_PROCESSOR, {
@@ -156,7 +197,13 @@ export class LiveTranscriptPreview {
       channelCountMode: "explicit",
       channelInterpretation: "speakers"
     });
-    node.port.onmessage = (event: MessageEvent<ArrayBuffer>) => this.#takeFrame(event.data);
+    node.port.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
+      if (event.data !== PCM16_FLUSHED) {
+        this.#takeFrame(event.data as ArrayBuffer);
+      } else if (this.#socket) {
+        this.#sendStop(this.#socket);
+      }
+    };
     graph.source.connect(node);
     this.#node = node;
     this.#source = graph.source;
@@ -189,6 +236,14 @@ export class LiveTranscriptPreview {
     }
     socket.send(frame);
     return true;
+  }
+
+  #sendStop(socket: WebSocket) {
+    clearTimeout(this.#stopTimer);
+    this.#detachAudio();
+    if (socket !== this.#socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ type: "stop" }));
+    this.#stopTimer = setTimeout(() => this.#teardown(), FINAL_TEXT_TIMEOUT_MS);
   }
 
   #receive(message: LiveServerMessage) {
@@ -234,8 +289,8 @@ export class LiveTranscriptPreview {
     this.#generation += 1;
     this.#detachAudio();
     this.#queue = [];
-    clearTimeout(this.#finalTextTimer);
-    this.#finalTextTimer = undefined;
+    clearTimeout(this.#stopTimer);
+    this.#stopTimer = undefined;
     const socket = this.#socket;
     this.#socket = null;
     socket?.close();
