@@ -13,15 +13,14 @@
   import { dialogLayout } from "$lib/components/dialogLayout.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
-  import SelectEmbeddingModels from "./SelectEmbeddingModels.svelte";
+  import SelectSpaceModels from "./SelectSpaceModels.svelte";
+  import Hint from "$lib/components/Hint.svelte";
   import EditNameAndDescription from "./EditNameAndDescription.svelte";
-  import SelectCompletionModels from "./SelectCompletionModels.svelte";
   import SelectMCPServers from "./SelectMCPServers.svelte";
   import CapabilityRow from "./CapabilityRow.svelte";
   import { CAPABILITIES } from "$lib/features/mcp/capabilities";
   import { Page, Settings } from "$lib/components/layout";
   import SpaceStorageOverview from "./SpaceStorageOverview.svelte";
-  import SelectTranscriptionModels from "./SelectTranscriptionModels.svelte";
   import { getEneo } from "$lib/core/Eneo.js";
   import ChangeSecurityClassification from "./ChangeSecurityClassification.svelte";
   import EditRetentionPolicy from "./EditRetentionPolicy.svelte";
@@ -77,8 +76,7 @@
   // Navigation guard for unsaved changes
   beforeNavigate((navigate) => {
     if ($currentChanges.hasUnsavedChanges) {
-      const confirmMessage =
-        m.unsaved_changes_warning?.() ?? "Du har osparade ändringar. Vill du lämna sidan?";
+      const confirmMessage = m.unsaved_changes_warning();
       if (!confirm(confirmMessage)) {
         navigate.cancel();
         return;
@@ -233,12 +231,39 @@
       {/if}
 
       <Settings.Group title={m.advanced_settings()}>
-        <SelectCompletionModels selectableModels={completionModels}></SelectCompletionModels>
+        <SelectSpaceModels
+          field="completion_models"
+          selectableModels={completionModels}
+          title={m.completion_models()}
+          description={m.completion_models_description()}
+          hint={m.enable_completion_model_for_assistants()}
+        />
 
-        <SelectEmbeddingModels selectableModels={embeddingModels}></SelectEmbeddingModels>
+        <SelectSpaceModels
+          field="embedding_models"
+          selectableModels={embeddingModels}
+          title={m.embedding_models()}
+          description={m.embedding_models_description()}
+          hint={m.embedding_models_hint()}
+        >
+          {#snippet extra()}
+            {#if $currentSpace.embedding_models.length > 1}
+              <Hint class="mt-2.5">
+                {isOrgSpace
+                  ? m.embedding_models_multiple_warning_organization()
+                  : m.embedding_models_multiple_warning()}
+              </Hint>
+            {/if}
+          {/snippet}
+        </SelectSpaceModels>
 
-        <SelectTranscriptionModels selectableModels={transcriptionModels}
-        ></SelectTranscriptionModels>
+        <SelectSpaceModels
+          field="transcription_models"
+          selectableModels={transcriptionModels}
+          title={m.transcription_models()}
+          description={m.transcription_models_description()}
+          hint={m.transcription_models_hint()}
+        />
 
         <SelectMCPServers selectableServers={data.mcpServers}></SelectMCPServers>
 

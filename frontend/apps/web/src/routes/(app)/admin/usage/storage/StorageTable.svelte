@@ -9,7 +9,7 @@
   import * as Table from "$lib/components/resource-table/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
-  import SpaceMembersChips from "$lib/features/spaces/components/SpaceMembersChips.svelte";
+  import MemberChipStack from "$lib/features/spaces/components/MemberChipStack.svelte";
   import StorageSpaceName from "./StorageSpaceName.svelte";
   import { m } from "$lib/paraglide/messages";
 
@@ -33,7 +33,7 @@
       header: m.members(),
       accessor: "members",
       cell: (item) => {
-        return Table.renderComponent(SpaceMembersChips, {
+        return Table.renderComponent(MemberChipStack, {
           members: item.value
         });
       },

@@ -25,7 +25,7 @@
   import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext";
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
 
-  import HelpTooltip from "../../components/HelpTooltip.svelte";
+  import HelpTooltip from "$lib/components/HelpTooltip.svelte";
   import {
     IMAGE_QUALITIES,
     IMAGE_SIZES,

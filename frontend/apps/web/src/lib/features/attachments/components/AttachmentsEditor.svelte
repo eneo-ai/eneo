@@ -1,71 +1,84 @@
+<!--
+    Attachment list of an assistant or app in its editor: shows the attached
+    files and running uploads, and uploads new files through its own
+    AttachmentManager.
+-->
 <script lang="ts">
+  import { untrack } from "svelte";
   import { IconCancel } from "@eneo/icons/cancel";
   import { IconTrash } from "@eneo/icons/trash";
+  import type { UploadedFile, components } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Progress } from "$lib/components/ui/progress/index.js";
   import { m } from "$lib/paraglide/messages";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatFileType } from "$lib/core/formatting/formatFileType";
   import { getEneo } from "$lib/core/Eneo";
-  import { getAppEditor } from "$lib/features/apps/AppEditor";
-  import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
-  import AttachmentDropzone from "$lib/features/attachments/components/AttachmentDropzone.svelte";
-  import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
-  import type { UploadedFile } from "@eneo/eneo-js";
-  import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
-  import AttachmentPreview from "$lib/features/attachments/components/AttachmentPreview.svelte";
+  import { initAttachmentManager } from "../AttachmentManager";
+  import { getExplicitAttachmentRules } from "../getAttachmentRules";
+  import AttachmentDropzone from "./AttachmentDropzone.svelte";
+  import AttachmentPreview from "./AttachmentPreview.svelte";
+  import UploadedFileIcon from "./UploadedFileIcon.svelte";
 
-  // This is only the new uploads, it is bound to the attachment upload
+  type Props = {
+    /** The editor's attachments; bind it so uploads and removals reach the editor. */
+    attachments: UploadedFile[];
+    /** Read once on mount to build the upload rules. */
+    allowedAttachments: components["schemas"]["FileRestrictions"];
+    /** Set by this component; bind it and call it after saving or discarding to drop the upload queue. */
+    cancelUploadsAndClearQueue?: () => void;
+  };
+
+  let {
+    attachments = $bindable(),
+    allowedAttachments,
+    cancelUploadsAndClearQueue = $bindable()
+  }: Props = $props();
+
   const eneo = getEneo();
-  const {
-    state: { update }
-  } = getAppEditor();
-
-  const attachmentRules = getExplicitAttachmentRules($update.allowed_attachments);
 
   const {
     state: { attachments: newAttachments },
     clearUploads
-  } = initAttachmentManager({ eneo, options: { onFileUploaded, rules: attachmentRules } });
+  } = initAttachmentManager({
+    eneo,
+    options: {
+      onFileUploaded,
+      rules: getExplicitAttachmentRules(untrack(() => allowedAttachments))
+    }
+  });
 
   function onFileUploaded(newFile: UploadedFile) {
-    // After successful upload add the uploaded file ref to attachments
-    if (!$update.attachments.find((file) => file.id === newFile.id)) {
-      $update.attachments = [...$update.attachments, newFile];
+    if (!attachments.find((file) => file.id === newFile.id)) {
+      attachments = [...attachments, newFile];
     }
   }
 
   async function removeFile(file: { id: string }) {
-    // If this file is still in the attachments it means it has not yet been saved in the service
-    // This means we will delete it right away on the server as there is no later action to defer to
-    if (
-      $newAttachments.find((attachment) => attachment.fileRef && attachment.fileRef.id === file.id)
-    ) {
+    // A file still in the upload queue has not been saved to the resource yet, so no later
+    // save would delete it: delete it on the server right away.
+    if ($newAttachments.find((attachment) => attachment.fileRef?.id === file.id)) {
       await eneo.files.delete({ fileId: file.id });
     }
 
-    $update.attachments = $update.attachments.toSpliced(
-      $update.attachments.findIndex(({ id }) => id === file.id),
-      1
-    );
+    attachments = attachments.filter(({ id }) => id !== file.id);
   }
 
-  /**
-   * Reset the upload queue. Use after saving the app.
-   * */
-  export function cancelUploadsAndClearQueue() {
+  cancelUploadsAndClearQueue = () => {
     $newAttachments.forEach((upload) => {
       if (upload.status !== "completed") {
         upload.remove();
       }
-      clearUploads();
     });
-  }
+    clearUploads();
+  };
 
-  $: runningUploads = $newAttachments.filter((attachment) => attachment.status !== "completed");
+  const runningUploads = $derived(
+    $newAttachments.filter((attachment) => attachment.status !== "completed")
+  );
 </script>
 
-{#each $update.attachments as file (file.id)}
+{#each attachments as file (file.id)}
   <div
     class="border-default bg-primary hover:bg-hover-dimmer flex h-16 items-center gap-3 border-b px-4"
   >
@@ -74,7 +87,7 @@
     <div class="flex flex-grow items-center justify-between gap-1">
       <AttachmentPreview {file} isTableView={true}>
         {#snippet children({ showFile }: { showFile: () => void })}
-          <button on:click={showFile} class="line-clamp-1 cursor-pointer text-left hover:underline">
+          <button onclick={showFile} class="line-clamp-1 cursor-pointer text-left hover:underline">
             {file.name}
           </button>
         {/snippet}

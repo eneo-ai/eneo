@@ -6,39 +6,23 @@
 
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { derived } from "svelte/store";
-  import MemberChip from "$lib/features/spaces/components/MemberChip.svelte";
+  import MemberChipStack from "$lib/features/spaces/components/MemberChipStack.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   const {
     state: { currentSpace }
   } = getSpacesManager();
-
-  const members = derived(currentSpace, ($currentSpace) => {
-    if ($currentSpace.members.length > 4) {
-      const members = $currentSpace.members.slice(0, 3);
-      return [
-        ...members,
-        {
-          label: "+" + ($currentSpace.members.length - 3)
-        }
-      ];
-    }
-    return $currentSpace.members;
-  });
 </script>
 
-{#if $members.length > 0}
+{#if $currentSpace.members.length > 0}
   <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
   <a
     class="hover:bg-hover-default -mr-2 flex cursor-pointer rounded-lg p-2 pl-4"
     href={localizeHref(`/spaces/${$currentSpace.routeId}/members`)}
     aria-label={m.go_to_members_page_for_this_space()}
   >
-    {#each $members as member (member)}
-      <MemberChip {member}></MemberChip>
-    {/each}
+    <MemberChipStack members={$currentSpace.members}></MemberChipStack>
   </a>
   <!-- eslint-enable svelte/no-navigation-without-resolve -->
 {/if}
