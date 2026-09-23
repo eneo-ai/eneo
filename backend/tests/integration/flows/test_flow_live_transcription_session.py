@@ -331,6 +331,20 @@ async def test_a_page_on_an_unlisted_origin_cannot_open_the_socket(
     assert refused.value.response.status_code == 403
 
 
+async def test_a_page_on_the_apis_own_host_opens_the_socket_behind_a_proxy(
+    live_stack: LiveStack,
+):
+    session = await live_stack.open_session()
+
+    async with connect(
+        live_stack.socket_url(session),
+        subprotocols=_subprotocols(session["ticket"]),
+        origin=Origin("https://eneo.example.se"),
+        additional_headers={"X-Forwarded-Host": "eneo.example.se"},
+    ) as socket:
+        assert json.loads(await socket.recv())["type"] == "ready"
+
+
 async def test_realtime_switched_off_after_admission_ends_the_session(
     live_stack: LiveStack,
 ):

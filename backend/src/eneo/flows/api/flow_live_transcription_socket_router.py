@@ -11,6 +11,7 @@ off in the meantime is honoured.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import sqlalchemy as sa
 from dependency_injector import providers
@@ -129,10 +130,28 @@ async def _origin_allowed(websocket: WebSocket) -> bool:
     origin = websocket.headers.get("origin")
     if origin is None:
         return True  # server-side clients (a module backend) send no Origin
+    if _is_own_host(origin, websocket):
+        return True
     scheme = "https" if websocket.url.scheme == "wss" else "http"
     return await get_origin(
         origin, websocket.headers, False, websocket.url.replace(scheme=scheme)
     )
+
+
+def _is_own_host(origin: str, websocket: WebSocket) -> bool:
+    """Whether the page is on the host the browser addressed this socket to.
+
+    Compared by host, not scheme: behind a TLS-terminating proxy the socket
+    sees ws:// while the page is https://. A page cannot set Host or
+    X-Forwarded-Host on a WebSocket handshake, so neither can be forged by
+    the cross-site page this check keeps out.
+    """
+    origin_host = urlsplit(origin).netloc.lower()
+    addressed = (
+        websocket.headers.get("host", ""),
+        websocket.headers.get("x-forwarded-host", "").split(",")[0].strip(),
+    )
+    return bool(origin_host) and origin_host in {host.lower() for host in addressed}
 
 
 async def _load_upstream_target(grant: LiveTranscriptionGrant) -> _UpstreamTarget:
