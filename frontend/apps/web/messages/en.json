@@ -5057,7 +5057,7 @@
   "widget_admin_snippet_inactive": "The widget is not active yet. The snippet can be installed now but shows nothing until a tenant admin activates the widget.",
   "widget_admin_snippet_not_built": "The loader script is not available in this installation.",
   "widget_admin_snippet_pinned": "Pinned version with integrity hash",
-  "widget_admin_snippet_pinned_help": "For websites that require Subresource Integrity. The pinned snippet must be replaced after each Eneo release, otherwise the widget stops loading.",
+  "widget_admin_snippet_pinned_help": "For websites that require Subresource Integrity. The pinned snippet keeps working through Eneo releases and only needs replacing when the loader script gets a new version (the version is part of its address); the old version then stops loading.",
   "widget_admin_copy": "Copy",
   "widget_admin_copied": "{what} copied",
   "widget_admin_copy_failed": "Could not copy to the clipboard",

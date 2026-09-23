@@ -11,7 +11,13 @@
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { docsUrl } from "$lib/core/docs";
-  import { floatingSnippet, pinnedSnippet, standaloneUrl, type LoaderRelease } from "./snippet";
+  import {
+    floatingSnippet,
+    pinnedSnippet,
+    standaloneUrl,
+    type LoaderRelease,
+    type SnippetOptions
+  } from "./snippet";
 
   type Props = {
     widget: Widget;
@@ -28,9 +34,8 @@
     origin,
     publicId: widget.public_id,
     language: widget.language,
-    position: widget.theme.position ?? undefined,
     release
-  });
+  } satisfies SnippetOptions);
   const snippet = $derived(pinned ? pinnedSnippet(options) : floatingSnippet(options));
   const standalone = $derived(standaloneUrl(options));
 

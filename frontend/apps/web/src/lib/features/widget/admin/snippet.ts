@@ -43,7 +43,7 @@ export function floatingSnippet(options: SnippetOptions): string {
   ]);
 }
 
-/** Pinned snippet with Subresource Integrity; must be updated by the host on each release. */
+/** Pinned snippet with Subresource Integrity; the host replaces it when the loader version changes. */
 export function pinnedSnippet(options: SnippetOptions): string | null {
   if (!options.release) return null;
   return scriptTag([

@@ -5057,7 +5057,7 @@
   "widget_admin_snippet_inactive": "Widgeten är inte aktiv än. Koden kan installeras redan nu men visar inget förrän en organisationsadministratör aktiverar widgeten.",
   "widget_admin_snippet_not_built": "Laddarskriptet är inte tillgängligt i den här installationen.",
   "widget_admin_snippet_pinned": "Låst version med integritetshash",
-  "widget_admin_snippet_pinned_help": "För webbplatser som kräver Subresource Integrity. Den låsta koden måste bytas ut efter varje Eneo-release, annars slutar widgeten laddas.",
+  "widget_admin_snippet_pinned_help": "För webbplatser som kräver Subresource Integrity. Den låsta koden fortsätter att fungera när Eneo uppdateras och behöver bara bytas ut när laddarskriptet får en ny version (versionen står i adressen). Den gamla versionen slutar då att laddas.",
   "widget_admin_copy": "Kopiera",
   "widget_admin_copied": "{what} kopierad",
   "widget_admin_copy_failed": "Det gick inte att kopiera till urklipp",
