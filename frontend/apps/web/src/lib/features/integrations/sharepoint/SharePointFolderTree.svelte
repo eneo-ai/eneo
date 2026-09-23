@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getEneo } from "$lib/core/Eneo";
-  import { Cloud, Globe2, Info, LoaderCircle, RefreshCw } from "lucide-svelte";
+  import { Cloud, Globe2, Info, LoaderCircle, RefreshCw } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import type { components } from "@eneo/eneo-js";

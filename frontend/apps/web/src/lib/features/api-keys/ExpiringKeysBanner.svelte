@@ -1,6 +1,6 @@
 <script lang="ts">
   import { slide } from "svelte/transition";
-  import { Clock, AlertTriangle, X, BellOff, Bell } from "lucide-svelte";
+  import { Clock, AlertTriangle, X, BellOff, Bell } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import type { ExpiringKeyDisplayItem, ExpiryLevel } from "./expirationUtils";
   import { isDismissed, dismiss, isMutedNonCritical, setMutedNonCritical } from "./expirationPrefs";

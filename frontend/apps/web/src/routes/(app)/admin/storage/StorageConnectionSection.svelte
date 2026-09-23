@@ -17,7 +17,7 @@
     KeyRound,
     Loader2,
     Settings2
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";

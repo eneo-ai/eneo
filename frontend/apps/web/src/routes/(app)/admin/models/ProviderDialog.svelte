@@ -14,7 +14,7 @@
   import type { ModelProviderPublic } from "@eneo/eneo-js";
   import type { Writable } from "svelte/store";
   import { onMount } from "svelte";
-  import { Loader2 } from "lucide-svelte";
+  import { Loader2 } from "@lucide/svelte";
 
   import { invalidate } from "$app/navigation";
   import { getEneo } from "$lib/core/Eneo";

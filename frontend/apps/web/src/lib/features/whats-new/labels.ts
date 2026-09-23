@@ -10,7 +10,7 @@ import {
   Settings,
   Sparkles,
   User
-} from "lucide-svelte";
+} from "@lucide/svelte";
 
 // Both maps are typed exhaustively against the package's unions, and
 // labels.test.ts asserts they cover the schema's runtime vocabularies, so a

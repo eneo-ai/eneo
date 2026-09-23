@@ -1,6 +1,6 @@
 <script lang="ts">
   import { writable } from "svelte/store";
-  import { Info, MoreVertical, RefreshCw, Trash2, Webhook } from "lucide-svelte";
+  import { Info, MoreVertical, RefreshCw, Trash2, Webhook } from "@lucide/svelte";
   import { Page, Settings } from "$lib/components/layout";
   import type { PageProps } from "./$types";
   import IntegrationCard from "$lib/features/integrations/components/IntegrationCard.svelte";

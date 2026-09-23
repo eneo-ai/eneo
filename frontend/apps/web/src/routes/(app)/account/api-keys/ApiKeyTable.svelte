@@ -28,7 +28,7 @@
     Activity,
     Bell,
     AlertTriangle
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { slide } from "svelte/transition";
   import ApiKeyActions from "./ApiKeyActions.svelte";
   import {

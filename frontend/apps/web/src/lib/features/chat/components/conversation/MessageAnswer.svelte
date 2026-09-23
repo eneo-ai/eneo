@@ -22,7 +22,7 @@
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { ChevronRight, Check, X, Wrench } from "lucide-svelte";
+  import { ChevronRight, Check, X, Wrench } from "@lucide/svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
   const chat = getChatService();

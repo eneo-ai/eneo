@@ -9,7 +9,7 @@
     FolderOpen,
     LoaderCircle,
     RefreshCw
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { m } from "$lib/paraglide/messages";

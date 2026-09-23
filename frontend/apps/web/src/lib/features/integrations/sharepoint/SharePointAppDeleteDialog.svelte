@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { Writable } from "svelte/store";
-  import { AlertTriangle, LoaderCircle } from "lucide-svelte";
+  import { AlertTriangle, LoaderCircle } from "@lucide/svelte";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";

@@ -3,7 +3,7 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { Plus, Cpu, Sparkles } from "lucide-svelte";
+  import { Plus, Cpu, Sparkles } from "@lucide/svelte";
   import { fly, fade } from "svelte/transition";
 
   let {

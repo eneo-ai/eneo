@@ -53,7 +53,7 @@
 
 <script lang="ts">
   import type { SkillAdoptionProjectionPagePublic, SkillDetachmentTotals } from "@eneo/eneo-js";
-  import { AlertCircle, LoaderCircle, RefreshCw, Search, Unlink } from "lucide-svelte";
+  import { AlertCircle, LoaderCircle, RefreshCw, Search, Unlink } from "@lucide/svelte";
   import { resolve } from "$app/paths";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";

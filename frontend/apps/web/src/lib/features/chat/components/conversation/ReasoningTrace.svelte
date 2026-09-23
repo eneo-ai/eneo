@@ -12,7 +12,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { slide } from "svelte/transition";
-  import { Wrench, Brain, ChevronDown, Loader2 } from "lucide-svelte";
+  import { Wrench, Brain, ChevronDown, Loader2 } from "@lucide/svelte";
   import ReasoningToolStep from "./ReasoningToolStep.svelte";
 
   type Step = {

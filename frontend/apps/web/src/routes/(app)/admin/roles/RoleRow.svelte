@@ -12,7 +12,7 @@
     Star,
     Trash2,
     Users
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { Badge, badgeVariants } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";

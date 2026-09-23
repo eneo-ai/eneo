@@ -30,7 +30,7 @@
     Image,
     MoreHorizontal,
     Check
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
 
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";

@@ -26,7 +26,7 @@
     User,
     Link,
     AlertTriangle
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { slide } from "svelte/transition";
   import { SvelteSet, SvelteURLSearchParams } from "svelte/reactivity";
   import {

@@ -8,7 +8,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import { RefreshCw, AlertTriangle, Trash2, Check, Pencil, X, ShieldAlert } from "lucide-svelte";
+  import { RefreshCw, AlertTriangle, Trash2, Check, Pencil, X, ShieldAlert } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { invalidate } from "$app/navigation";

@@ -11,7 +11,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
   import { writable, type Writable } from "svelte/store";
-  import { Pencil, Trash2, RefreshCw } from "lucide-svelte";
+  import { Pencil, Trash2, RefreshCw } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import MCPServerDialog from "./MCPServerDialog.svelte";
   import DeleteMCPDialog from "./DeleteMCPDialog.svelte";

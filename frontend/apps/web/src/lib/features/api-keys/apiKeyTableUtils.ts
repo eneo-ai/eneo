@@ -10,7 +10,7 @@ import {
   Globe,
   Lock,
   ShieldCheck
-} from "lucide-svelte";
+} from "@lucide/svelte";
 
 type LucideIcon = typeof Building2;
 

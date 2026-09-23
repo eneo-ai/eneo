@@ -20,7 +20,7 @@
     AlertCircle,
     Check,
     RotateCcw
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { fly } from "svelte/transition";
 
   const eneo = getEneo();

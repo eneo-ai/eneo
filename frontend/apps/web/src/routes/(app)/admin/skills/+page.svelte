@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { SkillRuntimePolicyUpdate } from "@eneo/eneo-js";
-  import { ArrowRight, BookOpenCheck, SlidersHorizontal } from "lucide-svelte";
+  import { ArrowRight, BookOpenCheck, SlidersHorizontal } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { getEneo } from "$lib/core/Eneo.js";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";

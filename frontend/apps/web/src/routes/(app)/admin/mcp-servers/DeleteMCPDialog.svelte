@@ -9,7 +9,7 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { m } from "$lib/paraglide/messages";
-  import { AlertTriangle } from "lucide-svelte";
+  import { AlertTriangle } from "@lucide/svelte";
   import type { Writable } from "svelte/store";
   import type { components } from "@eneo/eneo-js";
 

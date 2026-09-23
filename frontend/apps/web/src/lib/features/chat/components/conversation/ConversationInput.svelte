@@ -26,7 +26,7 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { SvelteSet } from "svelte/reactivity";
-  import { AlertTriangle, X } from "lucide-svelte";
+  import { AlertTriangle, X } from "@lucide/svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { chatCapabilities } from "../../chatCapabilities";

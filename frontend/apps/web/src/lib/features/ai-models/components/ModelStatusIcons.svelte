@@ -74,7 +74,7 @@
 
 <script lang="ts">
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import { TriangleAlert, Brain, Eye, Wrench, Clock } from "lucide-svelte";
+  import { TriangleAlert, Brain, Eye, Wrench, Clock } from "@lucide/svelte";
   import ModelCostBadge from "./ModelCostBadge.svelte";
 
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;

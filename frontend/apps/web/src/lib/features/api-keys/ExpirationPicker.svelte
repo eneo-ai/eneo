@@ -4,7 +4,7 @@
     AlertTriangle,
     Infinity as InfinityIcon,
     ChevronDown
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { fly } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";

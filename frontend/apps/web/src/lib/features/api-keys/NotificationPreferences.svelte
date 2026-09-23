@@ -16,7 +16,7 @@
   } from "$lib/features/api-keys/notificationPreferences";
   import { summaryToDisplayItems } from "$lib/features/api-keys/expirationUtils";
   import type { ExpiringKeyDisplayItem } from "$lib/features/api-keys/expirationUtils";
-  import { Bell, BellOff, ShieldAlert } from "lucide-svelte";
+  import { Bell, BellOff, ShieldAlert } from "@lucide/svelte";
   import { slide } from "svelte/transition";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
 

@@ -23,7 +23,7 @@
     ExternalLink,
     Users,
     Activity
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
 
   import InteractiveGraph from "./InteractiveGraph.svelte";

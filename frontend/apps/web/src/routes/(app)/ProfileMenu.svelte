@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { User, KeyRound, Building2, LogOut, Sparkles } from "lucide-svelte";
+  import { User, KeyRound, Building2, LogOut, Sparkles } from "@lucide/svelte";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
   import { m } from "$lib/paraglide/messages";

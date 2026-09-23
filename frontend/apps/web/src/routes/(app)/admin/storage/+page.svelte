@@ -30,7 +30,7 @@
     Info,
     Loader2,
     RefreshCw
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { Page, Settings } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";

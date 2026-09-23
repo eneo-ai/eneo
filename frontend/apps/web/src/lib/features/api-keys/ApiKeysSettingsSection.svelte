@@ -13,7 +13,7 @@
     Bell,
     BellOff,
     ShieldAlert
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { slide } from "svelte/transition";
   import ApiKeyTable from "../../../routes/(app)/account/api-keys/ApiKeyTable.svelte";
   import CreateApiKeyDialog from "$lib/features/api-keys/CreateApiKeyDialog.svelte";

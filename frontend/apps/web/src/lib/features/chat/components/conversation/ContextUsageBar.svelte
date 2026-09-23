@@ -3,7 +3,7 @@
   import { browser } from "$app/environment";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import ContextMeterFill from "$lib/components/ContextMeterFill.svelte";
-  import { Info, AlertTriangle, Eye, EyeOff } from "lucide-svelte";
+  import { Info, AlertTriangle, Eye, EyeOff } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { getChatService } from "../../ChatService.svelte";
 

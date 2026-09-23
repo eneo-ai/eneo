@@ -8,7 +8,7 @@
   import type { components } from "@eneo/eneo-js";
   import { getActionLabel, getActionDescription } from "./audit-action-labels";
   import { getCategoryLabel, getCategoryDescription } from "./audit-category-labels";
-  import { ChevronRight, Search, Check, X } from "lucide-svelte";
+  import { ChevronRight, Search, Check, X } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { slide, fly } from "svelte/transition";
   import { SvelteSet } from "svelte/reactivity";

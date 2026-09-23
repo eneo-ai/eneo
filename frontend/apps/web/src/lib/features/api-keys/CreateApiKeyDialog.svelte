@@ -44,7 +44,7 @@
     CheckCircle2,
     Ban,
     Link2
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import ScopeResourceSelector from "$lib/features/api-keys/ScopeResourceSelector.svelte";

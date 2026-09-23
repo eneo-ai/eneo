@@ -18,7 +18,7 @@
     Loader2,
     ArrowRight,
     MoreHorizontal
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors";
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { CompletionModel } from "@eneo/eneo-js";
-  import { Brain, Eye, Wrench } from "lucide-svelte";
+  import { Brain, Eye, Wrench } from "@lucide/svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { formatCostPerMillionTokens } from "$lib/features/ai-models/formatModelStats";
   import { m } from "$lib/paraglide/messages";

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { Check, Copy } from "lucide-svelte";
+  import { Check, Copy } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { m } from "$lib/paraglide/messages";
 

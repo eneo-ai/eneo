@@ -9,7 +9,7 @@
 <script lang="ts" generics="T extends CompletionModel | EmbeddingModel | TranscriptionModel">
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
 
-  import { ChevronRight, Loader2, ShieldAlert } from "lucide-svelte";
+  import { ChevronRight, Loader2, ShieldAlert } from "@lucide/svelte";
   import { SvelteSet } from "svelte/reactivity";
 
   import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";

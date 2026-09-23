@@ -2,13 +2,8 @@
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
-  import {
-    loadLucideIcons,
-    toKebabCase,
-    toPascalCase,
-    type LucideIconRegistry
-  } from "../lucideIcons";
-  import { Search, X, Sparkles, Check } from "lucide-svelte";
+  import { loadLucideIcons, toKebabCase, type LucideIconRegistry } from "../lucideIcons";
+  import { Search, X, Sparkles, Check } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
 
   let {
@@ -37,7 +32,7 @@
     "User",
     "Users",
     "Building",
-    "Home",
+    "House",
     "Briefcase",
     "ShoppingCart",
     "CreditCard",
@@ -74,14 +69,7 @@
     loadIcons();
   });
 
-  // All available Lucide icon names
-  const allIcons = $derived(
-    icons
-      ? Object.keys(icons)
-          .filter((name) => name !== "Icon" && name !== "icons" && !name.startsWith("Lucide"))
-          .sort()
-      : []
-  );
+  const allIcons = $derived(icons?.names ?? []);
 
   // Filter icons based on search query
   const filteredIcons = $derived(
@@ -91,12 +79,12 @@
   );
 
   function getIconComponent(name: string) {
-    return icons?.[name] ?? null;
+    return icons?.get(name) ?? null;
   }
 
   const selectedIconComponent = $derived.by(() => {
     if (!value) return null;
-    return getIconComponent(toPascalCase(value));
+    return getIconComponent(value);
   });
 
   function handleIconClick(iconName: string) {
@@ -208,7 +196,7 @@
                 {#each popularIcons as iconName (iconName)}
                   {@const IconComp = getIconComponent(iconName)}
                   {@const kebabName = toKebabCase(iconName)}
-                  {@const isSelected = value === kebabName}
+                  {@const isSelected = IconComp !== null && IconComp === selectedIconComponent}
                   <button
                     type="button"
                     onclick={() => handleIconClick(iconName)}
@@ -218,6 +206,7 @@
                       : 'border-2 border-transparent'}"
                     title={kebabName}
                     aria-label={m.select_icon({ iconName: kebabName })}
+                    aria-pressed={isSelected}
                   >
                     {#if IconComp}
                       <IconComp
@@ -246,7 +235,7 @@
                 {#each filteredIcons.slice(0, 200) as iconName (iconName)}
                   {@const IconComp = getIconComponent(iconName)}
                   {@const kebabName = toKebabCase(iconName)}
-                  {@const isSelected = value === kebabName}
+                  {@const isSelected = IconComp !== null && IconComp === selectedIconComponent}
                   <button
                     type="button"
                     onclick={() => handleIconClick(iconName)}
@@ -256,6 +245,7 @@
                       : 'border-2 border-transparent'}"
                     title={kebabName}
                     aria-label={m.select_icon({ iconName: kebabName })}
+                    aria-pressed={isSelected}
                   >
                     {#if IconComp}
                       <IconComp

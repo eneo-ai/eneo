@@ -2,7 +2,7 @@
 
 <script lang="ts">
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import { HelpCircle } from "lucide-svelte";
+  import { HelpCircle } from "@lucide/svelte";
 
   let { text }: { text: string } = $props();
 </script>

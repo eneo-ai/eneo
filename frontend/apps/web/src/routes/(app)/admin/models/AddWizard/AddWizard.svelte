@@ -29,7 +29,7 @@
   import { getErrorMessage, toastError } from "$lib/core/errors";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { Loader2, AlertTriangle } from "lucide-svelte";
+  import { Loader2, AlertTriangle } from "@lucide/svelte";
 
   import StepProvider from "./StepProvider.svelte";
   import StepCredentials from "./StepCredentials.svelte";

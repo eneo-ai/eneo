@@ -6,7 +6,7 @@
     SkillPublic
   } from "@eneo/eneo-js";
   import { useId } from "bits-ui";
-  import { ArrowDown, ArrowUp, Info, Plus, RefreshCw, ShieldAlert, Trash2 } from "lucide-svelte";
+  import { ArrowDown, ArrowUp, Info, Plus, RefreshCw, ShieldAlert, Trash2 } from "@lucide/svelte";
   import { onDestroy, tick, untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
