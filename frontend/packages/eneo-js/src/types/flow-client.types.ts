@@ -30,6 +30,7 @@ flows.runs.create({
   step_inputs: { "step-1": { file_ids: ["file-1"] } }
 });
 flows.runs.list({ flowId: "flow-1", status: ["completed", "running"] });
+flows.runs.list({ flowId: "flow-1", mine: true });
 flows.runs.redispatch({
   id: "run-1",
   flowId: "flow-1",
@@ -146,6 +147,8 @@ flows.list({ publishedOnly: "yes" });
 flows.runContract.get({});
 // @ts-expect-error generated run statuses reject unknown values.
 flows.runs.list({ flowId: "flow-1", status: ["not-a-flow-run-status"] });
+// @ts-expect-error the own-runs filter is a boolean.
+flows.runs.list({ flowId: "flow-1", mine: "yes" });
 // @ts-expect-error top-level file ids are not part of the public run request.
 flows.runs.create({ flow: { id: "flow-1" }, file_ids: ["file-1"] });
 

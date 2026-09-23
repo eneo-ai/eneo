@@ -782,14 +782,15 @@ export function initFlows(client) {
       },
 
       /**
-       * List runs for a flow
-       * @param {{flowId: string, limit?: FlowRunListQuery["limit"], offset?: FlowRunListQuery["offset"], status?: FlowRunListQuery["status"]}} params
+       * List runs for a flow. `mine` keeps only the runs the caller started,
+       * within the runs the caller may see.
+       * @param {{flowId: string, limit?: FlowRunListQuery["limit"], offset?: FlowRunListQuery["offset"], status?: FlowRunListQuery["status"], mine?: FlowRunListQuery["mine"]}} params
        * @throws {EneoError}
        */
-      list: async ({ flowId, limit = 50, offset = 0, status }) => {
+      list: async ({ flowId, limit = 50, offset = 0, status, mine }) => {
         return _fetch("/api/v1/flows/{id}/runs/", {
           method: "get",
-          params: { path: { id: flowId }, query: { limit, offset, status } }
+          params: { path: { id: flowId }, query: { limit, offset, status, mine } }
         });
       },
 

@@ -121,6 +121,21 @@ describe("flows templates endpoint", () => {
     expect(status).toEqual(["completed", "queued", "completed"]);
   });
 
+  it("lists only the caller's own runs when mine is set", async () => {
+    const fetch = vi.fn(
+      async () => new Response(JSON.stringify({ items: [], count: 0, has_more: false }))
+    );
+    const flows = initFlows(createClient({ baseUrl: "https://api.example.test", fetch }));
+
+    await flows.runs.list({ flowId: "flow-1", mine: true });
+    await flows.runs.list({ flowId: "flow-1" });
+
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.example.test/api/v1/flows/flow-1/runs/?limit=50&offset=0&mine=true",
+      "https://api.example.test/api/v1/flows/flow-1/runs/?limit=50&offset=0"
+    ]);
+  });
+
   it("lists every space's flows unless a space is named, published ones on request", async () => {
     const fetch = vi.fn(
       async () => new Response(JSON.stringify({ items: [], count: 0, has_more: false }))
