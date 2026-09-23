@@ -31,7 +31,7 @@ const step = {
   }
 } as unknown as FlowStep;
 
-function renderPreview(isAdvancedMode = false) {
+function renderPreview(isAdvancedMode = false, overrides: Record<string, unknown> = {}) {
   render(FlowStepRequestPreview, {
     props: {
       open: true,
@@ -41,8 +41,11 @@ function renderPreview(isAdvancedMode = false) {
       instructionText: "Läs {{step_input.text}} för {{flow_input.namn}}.",
       ownText: "",
       materialSentence: "AI:n läser det som laddas upp när flödet körs.",
+      hasAttachments: false,
+      hasKnowledge: false,
       isAdvancedMode,
-      transcriptionEnabled: false
+      transcriptionEnabled: false,
+      ...overrides
     }
   });
   return screen.getByRole("dialog", { name: m.flow_request_preview_title() });
@@ -69,6 +72,27 @@ describe("FlowStepRequestPreview", () => {
       .map((item) => item.textContent?.replace(/\s+/g, " ").trim());
     expect(items).toEqual(["Grunduppgifter", "Stod i vardagen Vilket stöd som behövs"]);
     expect(within(dialog).queryByText("stod_i_vardagen")).toBeNull();
+  });
+
+  it("keeps the material sentence above the own text and names added files and knowledge", () => {
+    const dialog = renderPreview(false, {
+      ownText: "Underlag: {{flow_input.namn}}",
+      materialSentence: "AI:n läser din egen text nedan och resultaten du har valt.",
+      hasAttachments: true,
+      hasKnowledge: true
+    });
+    const heading = within(dialog).getByRole("heading", {
+      name: m.flow_request_preview_material()
+    });
+    const lines = [...(heading.parentElement?.children ?? [])]
+      .slice(1)
+      .map((element) => element.textContent?.trim());
+    expect(lines).toEqual([
+      "AI:n läser din egen text nedan och resultaten du har valt.",
+      "Underlag: Brukarens namn",
+      m.flow_request_preview_material_files(),
+      m.flow_request_preview_material_knowledge()
+    ]);
   });
 
   it("shows the raw field names in advanced mode", () => {

@@ -704,9 +704,15 @@
       !isTranscribeOnly &&
       outputModeUsesCompletionModel(activeStep.output_mode)
   );
+  // The material block's sentence: an own text is shown right under it, and
+  // the results chosen with it are named, as the runtime appends them.
   const previewMaterialSentence = $derived.by(() => {
     const material = activeStep ? getStepMaterial(activeStep, previousStep) : null;
-    return material ? m.flow_material_reads({ what: describeStepMaterial(material) }) : null;
+    return material
+      ? m.flow_material_reads({
+          what: describeStepMaterial(material, { below: material.kind === "own_text" })
+        })
+      : null;
   });
   const instructionText = $derived(
     assistantState.assistant &&
@@ -1025,6 +1031,8 @@
             {instructionText}
             ownText={inputTemplateText}
             materialSentence={previewMaterialSentence}
+            hasAttachments={hasAttachmentSelections}
+            hasKnowledge={hasKnowledgeSelections}
             {isAdvancedMode}
             transcriptionEnabled={transcriptionEnabled && hasAudioInputSteps}
           />

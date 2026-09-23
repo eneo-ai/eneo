@@ -5240,6 +5240,8 @@
   "flow_request_preview_instruction_empty": "Ingen instruktion ännu.",
   "flow_request_preview_material": "Underlag",
   "flow_request_preview_material_empty": "Stegets underlag är inte valt ännu.",
+  "flow_request_preview_material_files": "AI:n får också filerna som är tillagda i steget.",
+  "flow_request_preview_material_knowledge": "AI:n söker också i kunskapen som är kopplad till steget.",
   "flow_request_preview_answer": "Svaret ska innehålla",
   "flow_request_preview_answer_free_text": "Fri text.",
   "flow_request_preview_answer_document": "Ett {document}.",

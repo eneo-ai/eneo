@@ -21,6 +21,8 @@
     instructionText,
     ownText,
     materialSentence,
+    hasAttachments,
+    hasKnowledge,
     isAdvancedMode,
     transcriptionEnabled
   }: {
@@ -30,8 +32,10 @@
     formSchema: FlowFormSchemaMetadata | undefined;
     instructionText: string;
     ownText: string;
-    /** A full sentence saying what the step reads when it has no text of its own. */
+    /** The material block's sentence; with an own text it points at the text shown below it. */
     materialSentence: string | null;
+    hasAttachments: boolean;
+    hasKnowledge: boolean;
     isAdvancedMode: boolean;
     transcriptionEnabled: boolean;
   } = $props();
@@ -120,12 +124,19 @@
 
       <section class="flex flex-col gap-2">
         <h3 class="text-primary text-sm font-semibold">{m.flow_request_preview_material()}</h3>
+        {#if materialSentence}
+          <p class="text-primary text-sm">{materialSentence}</p>
+        {:else if !material}
+          <p class="text-secondary text-sm">{m.flow_request_preview_material_empty()}</p>
+        {/if}
         {#if material}
           {@render template(material)}
-        {:else if materialSentence}
-          <p class="text-primary text-sm">{materialSentence}</p>
-        {:else}
-          <p class="text-secondary text-sm">{m.flow_request_preview_material_empty()}</p>
+        {/if}
+        {#if hasAttachments}
+          <p class="text-primary text-sm">{m.flow_request_preview_material_files()}</p>
+        {/if}
+        {#if hasKnowledge}
+          <p class="text-primary text-sm">{m.flow_request_preview_material_knowledge()}</p>
         {/if}
       </section>
 

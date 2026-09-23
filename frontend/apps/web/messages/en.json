@@ -5240,6 +5240,8 @@
   "flow_request_preview_instruction_empty": "No instruction yet.",
   "flow_request_preview_material": "Material",
   "flow_request_preview_material_empty": "The step's material has not been chosen yet.",
+  "flow_request_preview_material_files": "The AI also gets the files added to this step.",
+  "flow_request_preview_material_knowledge": "The AI also searches the knowledge connected to this step.",
   "flow_request_preview_answer": "The answer must contain",
   "flow_request_preview_answer_free_text": "Free text.",
   "flow_request_preview_answer_document": "A {document}.",

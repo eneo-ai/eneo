@@ -473,10 +473,12 @@
     <!-- Textarea layer (on top, transparent text, visible caret). Block, not
          the default inline-block: the inline baseline gap made the box 5px
          taller than the textarea, so the mirror could scroll 5px less than
-         the textarea and the caret sat above the text near the end. -->
+         the textarea and the caret sat above the text near the end. No drag
+         handle: autoResize owns the height, so a drag was undone by the next
+         keystroke, and the frame's rounded corner cut the grip in half. -->
     <textarea
       bind:this={textareaEl}
-      class="selection:bg-accent-dimmer selection:text-primary caret-foreground relative z-10 block w-full overflow-hidden bg-transparent px-4 py-3 font-sans text-base leading-relaxed text-transparent focus:outline-none sm:text-sm"
+      class="selection:bg-accent-dimmer selection:text-primary caret-foreground relative z-10 block w-full resize-none overflow-hidden bg-transparent px-4 py-3 font-sans text-base leading-relaxed text-transparent focus:outline-none sm:text-sm"
       style={`min-height: ${minHeight}px`}
       oninput={handleInput}
       onkeydown={handleKeydown}

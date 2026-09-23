@@ -20,6 +20,7 @@
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import { supportsBehaviorPresets } from "$lib/features/ai-models/ModelKwargCapabilities.js";
   import { buildNextFlowPrompt } from "$lib/features/flows/flowPromptDraft";
+  import { innerHeight } from "svelte/reactivity/window";
 
   let {
     step,
@@ -68,6 +69,10 @@
     onInstructionFocused?: () => void;
   } = $props();
   const hasInstruction = $derived(instructionText.trim().length > 0);
+  // A long instruction gets most of a tall screen before the editor scrolls.
+  const instructionMaxHeight = $derived(
+    Math.max(360, Math.round((innerHeight.current ?? 0) * 0.6))
+  );
 
   // Collapsed label for the advanced model group — the chosen model's name.
   const modelStatus = $derived(
@@ -168,7 +173,7 @@
           ariaDescribedby={instructionMissing ? "flow-step-instruction-missing" : undefined}
           placeholder={stepUxCopy.instructionsPlaceholder}
           minHeight={isAdvancedMode ? 160 : 144}
-          maxHeight={360}
+          maxHeight={instructionMaxHeight}
           allowSectionVariables
           {steps}
           currentStepOrder={step.step_order}
