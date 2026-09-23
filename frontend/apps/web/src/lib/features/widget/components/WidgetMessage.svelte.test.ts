@@ -3,6 +3,7 @@ import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { ConversationMessage } from "@eneo/eneo-js";
 import "../../../../app.css";
+import axe from "axe-core";
 import WidgetMessage from "./WidgetMessage.svelte";
 
 vi.mock("$lib/paraglide/messages", () => ({
@@ -171,6 +172,57 @@ describe("WidgetMessage sources", () => {
     expect(page.getByRole("button", { name: /internal_tool_steps_count/ }).elements()).toHaveLength(
       0
     );
+  });
+
+  test("citations, the open source list and tool activity pass axe", async () => {
+    render(WidgetMessage, {
+      message: {
+        ...message(`Bygglov kostar pengar <inref id="${FILE_ID.slice(0, 8)}"/>.`),
+        tool_calls: [
+          {
+            server_name: "TimeMCP",
+            tool_name: "get_current_time",
+            arguments: { timezone: "Europe/Stockholm" },
+            tool_call_id: "c1",
+            result_status: "completed"
+          },
+          {
+            server_name: "TimeMCP",
+            tool_name: "get_current_time",
+            arguments: { timezone: "Asia/Tokyo" },
+            tool_call_id: "c2",
+            result_status: "completed"
+          }
+        ]
+      } as unknown as ConversationMessage,
+      index: 0,
+      isLast: true,
+      isLoading: false
+    });
+    await page.getByRole("button", { name: /widget_sources_count_other/ }).click();
+    await page.getByRole("button", { name: /Get current time/ }).click();
+    await expect.element(page.getByText("Asia/Tokyo")).toBeVisible();
+
+    // A lone list item outside a page: the page-level rules (landmarks, h1,
+    // list parent) are covered by the chat's axe test; this checks the
+    // message's own markup.
+    const result = await axe.run(document, {
+      rules: {
+        "color-contrast": { enabled: false },
+        "landmark-one-main": { enabled: false },
+        "page-has-heading-one": { enabled: false },
+        region: { enabled: false },
+        listitem: { enabled: false }
+      }
+    });
+    expect(
+      JSON.stringify(
+        result.violations.map((v) => ({
+          id: v.id,
+          targets: v.nodes.map((n) => n.target.join(" "))
+        }))
+      )
+    ).toBe("[]");
   });
 
   test("an inline citation opens the list and focuses its source", async () => {

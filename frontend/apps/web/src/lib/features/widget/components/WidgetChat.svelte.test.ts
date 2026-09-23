@@ -4,6 +4,20 @@ import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { WidgetPublicConfig } from "@eneo/eneo-js";
 import "../../../../app.css";
+import axe from "axe-core";
+
+/** Rule ids and targets of every axe violation on the page, for a readable diff. */
+async function violations() {
+  const result = await axe.run(document, {
+    // Contrast needs the widget colours the page computes at runtime.
+    rules: { "color-contrast": { enabled: false } }
+  });
+  return result.violations.map((v) => ({
+    id: v.id,
+    impact: v.impact,
+    targets: v.nodes.map((n) => n.target.join(" "))
+  }));
+}
 
 vi.mock("$lib/paraglide/messages", () => ({
   m: new Proxy<Record<string, () => string>>({}, { get: (_target, key) => () => String(key) })
@@ -17,7 +31,9 @@ const fake = vi.hoisted(() => ({
   asks: [] as AskCall[],
   feedback: [] as unknown[],
   release: null as null | (() => void),
-  sessions: 0
+  sessions: 0,
+  // A stored conversation the fake returns on restore, when set.
+  restored: null as null | Record<string, unknown>
 }));
 
 vi.mock("@eneo/eneo-js", async (importOriginal) => {
@@ -68,7 +84,10 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
           callbacks?.onText?.({ answer: "Svaret från assistenten.", session_id, references: [] });
           return {};
         },
-        get: unsupported,
+        get: async () => {
+          if (!fake.restored) return unsupported();
+          return fake.restored;
+        },
         leaveFeedback: async (args: unknown) => {
           fake.feedback.push(args);
           return {};
@@ -143,6 +162,7 @@ beforeEach(() => {
   fake.feedback.length = 0;
   fake.release = null;
   fake.sessions = 0;
+  fake.restored = null;
   localStorage.clear();
 });
 
@@ -204,6 +224,58 @@ describe("WidgetChat", () => {
     });
     await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
     expect(page.getByRole("button", { name: "widget_feedback_more" }).elements()).toHaveLength(0);
+  });
+
+  test("a restored conversation shows the vote the server remembers", async () => {
+    localStorage.setItem(
+      "eneo-widget:wgt_test",
+      JSON.stringify({
+        visitor_id: "11111111-1111-4111-8111-111111111111",
+        visitor_key: "key",
+        token: "visitor-token",
+        expires_at: Date.now() + 600_000,
+        session_id: "session-9"
+      })
+    );
+    fake.restored = {
+      id: "session-9",
+      name: "Tidigare",
+      messages: [
+        {
+          id: "message-9",
+          question: "Hej?",
+          answer: "Hej där.",
+          references: [],
+          files: [],
+          tools: { assistants: [] }
+        }
+      ],
+      feedback: { value: -1, text: null }
+    };
+    renderApp();
+
+    await expect
+      .element(page.getByRole("button", { name: "widget_feedback_unhelpful" }))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_thanks");
+    await expect
+      .element(page.getByRole("button", { name: "widget_feedback_more_negative" }))
+      .toBeVisible();
+    expect(fake.feedback).toHaveLength(0);
+  });
+
+  test("the chat, its acknowledgement and the comment dialog pass axe", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await vi.waitFor(() => expect(fake.release).not.toBeNull());
+    await releaseAnswer();
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_unhelpful" }));
+    await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_thanks");
+    expect(JSON.stringify(await violations())).toBe("[]");
+
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_more_negative" }));
+    await expect.element(page.getByRole("dialog")).toBeVisible();
+    expect(JSON.stringify(await violations())).toBe("[]");
   });
 
   test("a single-turn widget offers a new question instead of follow-up or feedback", async () => {

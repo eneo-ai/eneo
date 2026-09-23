@@ -98,7 +98,6 @@
   <WidgetQuestionBubble text={message.question} />
 
   <div class="flex flex-col gap-2">
-    <span class="sr-only">{m.widget_assistant()}: </span>
     {#if steps.length > 0}
       <div aria-label={m.widget_activity()} role="group">
         <WidgetToolActivity {steps} working={stepsWorking} />
@@ -107,6 +106,7 @@
     {#if waiting && steps.length === 0}
       <TypingIndicator />
     {:else if !waiting}
+      <span class="sr-only">{m.widget_assistant()}: </span>
       <div class="widget-answer">
         <Markdown
           class="text-primary max-w-none"
