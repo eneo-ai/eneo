@@ -5464,8 +5464,6 @@
   "flow_error_typed_io_transcription_model_unavailable": "Transkriberingsmodellen är inte tillgänglig. Välj en annan modell eller försök igen senare.",
   "flow_error_typed_io_transcription_not_enabled": "Transkribering är inte aktiverad för organisationen eller steget. Slå på transkribering eller ändra stegets typ av underlag.",
   "flow_error_typed_io_unsupported_type": "Stegets typ av underlag stöds inte. Ändra typen och publicera flödet igen.",
-  "flow_review_input_label": "Underlag",
-  "flow_review_output_label": "Resultat",
   "flow_review_step_count": "{count} steg",
   "flow_review_pipeline_title": "Flödesöversikt",
   "flow_run_attempts": "Försök",

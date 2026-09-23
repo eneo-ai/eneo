@@ -5464,8 +5464,6 @@
   "flow_error_typed_io_transcription_model_unavailable": "The transcription model is unavailable. Choose another model or try again later.",
   "flow_error_typed_io_transcription_not_enabled": "Transcription is not enabled for your organisation or this step. Turn on transcription or change the step's material type.",
   "flow_error_typed_io_unsupported_type": "The step's material type is not supported. Change the type and publish the flow again.",
-  "flow_review_input_label": "Material",
-  "flow_review_output_label": "Result",
   "flow_review_step_count": "{count} steps",
   "flow_review_pipeline_title": "Flow overview",
   "flow_run_attempts": "Attempts",

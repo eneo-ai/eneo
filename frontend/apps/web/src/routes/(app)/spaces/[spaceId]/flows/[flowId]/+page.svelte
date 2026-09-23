@@ -1306,11 +1306,7 @@
                     {m.flow_review_step_count({ count: String(($update.steps ?? []).length) })}
                   </span>
                 </div>
-                <!-- Read top to bottom: what comes in, each step in order, what comes out. -->
-                <p class="text-secondary mt-3 text-[0.8125rem]">
-                  <span class="text-primary font-medium">{m.flow_review_input_label()}</span>
-                </p>
-                <ol class="mt-2 gap-x-8 sm:columns-2 2xl:columns-3">
+                <ol class="mt-3 gap-x-8 sm:columns-2 2xl:columns-3">
                   {#each $update.steps ?? [] as pipeStep, stepIdx (pipeStep.id ?? pipeStep.step_order)}
                     {@const completionModel =
                       "completion_model" in pipeStep
@@ -1340,9 +1336,6 @@
                     </li>
                   {/each}
                 </ol>
-                <p class="text-secondary mt-3 text-[0.8125rem]">
-                  <span class="text-primary font-medium">{m.flow_review_output_label()}</span>
-                </p>
               </section>
 
               <!-- Test section -->
