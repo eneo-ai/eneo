@@ -5,6 +5,7 @@ import json
 import pytest
 
 from eneo.flows.runtime.speaker_mapping_runtime import (
+    MAX_SPEAKER_NAME_CHARS,
     SPEAKER_MAPPING_INFER_INSTRUCTIONS,
     SPEAKER_MAPPING_INSTRUCTIONS,
     SpeakerMappingValidationError,
@@ -171,6 +172,49 @@ def test_free_text_names_are_allowed_when_permitted() -> None:
         allow_free_text=True,
     )
     assert mapping_to_names(mapping) == {"SPEAKER_00": "Okänd Person"}
+
+
+INVENTORY_NAMES = [
+    {"label": "SPEAKER_00", "name": "Anna Svensson"},
+    {"label": "SPEAKER_01", "name": None},
+]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Anna\nSvensson",
+        "Anna\rSvensson",
+        "Anna\tSvensson",
+        "Anna\u2028Svensson",
+        "Anna\u200bSvensson",
+        "x" * (MAX_SPEAKER_NAME_CHARS + 1),
+    ],
+)
+def test_a_speaker_name_is_one_short_line(name: str) -> None:
+    with pytest.raises(SpeakerMappingValidationError, match="SPEAKER_00"):
+        validate_speaker_mapping(
+            {"speakers": [{**INVENTORY_NAMES[0], "name": name}, INVENTORY_NAMES[1]]},
+            inventory=INVENTORY,
+            participants=PARTICIPANTS,
+            allow_free_text=True,
+        )
+
+
+def test_a_speaker_name_at_the_bound_is_kept() -> None:
+    name = "x" * MAX_SPEAKER_NAME_CHARS
+    mapping = validate_speaker_mapping(
+        {
+            "speakers": [
+                {**INVENTORY_NAMES[0], "name": f" {name}\n"},
+                INVENTORY_NAMES[1],
+            ]
+        },
+        inventory=INVENTORY,
+        participants=PARTICIPANTS,
+        allow_free_text=True,
+    )
+    assert mapping_to_names(mapping) == {"SPEAKER_00": name}
 
 
 def test_question_carries_the_opening_only_when_given() -> None:

@@ -120,6 +120,11 @@ def resolve_participants(
     return parse_participants(semantic.get(participants_field))
 
 
+MAX_SPEAKER_NAME_CHARS = 120
+"""The run label's bound: a speaker name is one short line."""
+_NON_LINE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+
+
 class SpeakerMappingValidationError(ValueError):
     pass
 
@@ -132,7 +137,8 @@ def validate_speaker_mapping(
     allow_free_text: bool,
 ) -> dict[str, Any]:
     """Normalize a mapping to the inventory: every known label exactly once,
-    names restricted to participants unless free text is allowed."""
+    each name one short line, restricted to participants unless free text is
+    allowed."""
     if not isinstance(structured, Mapping):
         raise SpeakerMappingValidationError("Speaker mapping must be an object.")
     raw_speakers = cast(Mapping[str, object], structured).get("speakers")
@@ -160,6 +166,14 @@ def validate_speaker_mapping(
                     "Speaker name must be text or null."
                 )
             name = name.strip() or None
+        if name is not None and (
+            len(name) > MAX_SPEAKER_NAME_CHARS
+            or any(unicodedata.category(char) in _NON_LINE_CATEGORIES for char in name)
+        ):
+            raise SpeakerMappingValidationError(
+                f"The name for '{label}' must be one line of at most "
+                f"{MAX_SPEAKER_NAME_CHARS} characters."
+            )
         if name is not None and not allow_free_text and name not in participants:
             raise SpeakerMappingValidationError(
                 f"'{name}' is not one of the participants."
