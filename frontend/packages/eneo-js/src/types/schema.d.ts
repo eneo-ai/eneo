@@ -3221,7 +3221,7 @@ export interface paths {
     put?: never;
     /**
      * Link Widget Template
-     * @description Make the widget follow a published template. Its texts, appearance and language are copied now; the release's locked groups are then written onto the widget with every publication and cannot be edited on the widget.
+     * @description Make the widget follow a published template. Its texts, appearance and language are copied now; the release's locked groups are then written onto the widget with every publication and cannot be edited on the widget. Refused with `widget_serving_blocked` when the release would leave an active widget unable to serve.
      */
     post: operations["link_widget_template_api_v1_widgets__id__link_template__post"];
     delete?: never;
@@ -3269,7 +3269,7 @@ export interface paths {
     head?: never;
     /**
      * Update Widget
-     * @description Update a widget's configuration. Changes to allowed origins, limits, privacy or bot protection invalidate outstanding visitor tokens.
+     * @description Update a widget's configuration. Changes to allowed origins, limits, privacy or bot protection invalidate outstanding visitor tokens. A value outside the tenant's widget policy is refused with `widget_policy_violation` (listing `violations`); an edit that would leave an active widget unable to serve is refused with `widget_serving_blocked` (listing `blockers`).
      */
     patch: operations["update_widget_api_v1_widgets__id___patch"];
     trace?: never;
@@ -3325,7 +3325,7 @@ export interface paths {
     put?: never;
     /**
      * Activate Widget
-     * @description Activate a widget so it serves visitors. Tenant admins only; fails with the list of blockers when the configuration is incomplete.
+     * @description Activate a widget so it serves visitors. Tenant admins only. Fails with `widget_policy_violation` (listing `violations`) when settings are outside the tenant's widget policy and with `widget_serving_blocked` (listing `blockers`) when the configuration is incomplete.
      */
     post: operations["activate_widget_api_v1_widgets__id__activate__post"];
     delete?: never;
@@ -3503,7 +3503,7 @@ export interface paths {
     };
     /**
      * Get Widget Policy
-     * @description Get the tenant's widget policy (defaults apply when unset).
+     * @description Get the tenant's widget policy (defaults apply when unset). Readable by everyone with the widgets permission, so editors can check their settings against it; only tenant admins change it.
      */
     get: operations["get_widget_policy_api_v1_admin_widget_policy__get"];
     put?: never;
@@ -22626,7 +22626,10 @@ export interface components {
       unhelpful_30d: number;
       /** Last Activity */
       last_activity?: string | null;
-      /** Daily Token Budget */
+      /**
+       * Daily Token Budget
+       * @description The budget in force: the widget's, capped by the tenant policy.
+       */
       daily_token_budget: number;
       /**
        * Budget Used Today
@@ -22635,7 +22638,7 @@ export interface components {
       budget_used_today: number;
       /**
        * Activation Blockers
-       * @description Why the widget cannot be activated (or, for an active widget, why it is not serving): empty when it can.
+       * @description Why the widget could not be activated as configured: empty when it can. A policy violation does not stop an active widget: it is served within the policy.
        */
       activation_blockers?: string[];
     };
@@ -23087,7 +23090,10 @@ export interface components {
        * @description Tokens charged against today's budget, including reservations in flight.
        */
       budget_used_today: number;
-      /** Daily Token Budget */
+      /**
+       * Daily Token Budget
+       * @description The budget in force: the widget's, capped by the tenant policy.
+       */
       daily_token_budget: number;
     };
     /**

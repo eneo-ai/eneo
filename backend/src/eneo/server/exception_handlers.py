@@ -440,7 +440,13 @@ def add_exception_handlers(app: FastAPI):
         error = cast(WidgetPublicError, exc)
         return JSONResponse(
             status_code=error.status_code,
-            content={"detail": {"code": error.code, "message": error.message}},
+            content={
+                "detail": {
+                    **error.details(),
+                    "code": error.code,
+                    "message": error.message,
+                }
+            },
             headers=error.headers,
         )
 

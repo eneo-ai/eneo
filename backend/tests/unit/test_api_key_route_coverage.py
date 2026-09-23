@@ -566,6 +566,21 @@ class TestHighRiskExactRouteGuards:
             "authenticated by widget visitor tokens"
         )
 
+    @pytest.mark.parametrize("method", ["GET", "PATCH"])
+    def test_widget_policy_keeps_the_admin_api_key_guards(self, method: str):
+        """Widget editors read the policy with their session (WidgetService
+        checks Permission.WIDGETS); an API key still needs admin scope and
+        the admin key permission, for the read as for the change."""
+        route = _find_route_by_method_and_paths(
+            method, "/admin/widget-policy/", "/admin/widget-policy"
+        )
+        assert _route_has_dep_name(route, "_scope_check_dep"), (
+            f"{method} /admin/widget-policy/ missing _scope_check_dep"
+        )
+        assert _route_has_dep_name(route, "_api_key_permission_dep"), (
+            f"{method} /admin/widget-policy/ missing _api_key_permission_dep"
+        )
+
     def test_chat_turn_diagnostics_is_session_only_and_permission_gated(self):
         route = _find_route_by_method_and_paths(
             "GET",

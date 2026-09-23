@@ -11,13 +11,18 @@ from eneo.main.exceptions import (
 )
 from eneo.roles.permissions import Permission
 from eneo.widgets.application.widget_service import WidgetService
-from eneo.widgets.domain.widget import Widget, WidgetStatus
+from eneo.widgets.domain.exceptions import (
+    WidgetPolicyViolationError,
+    WidgetServingBlockedError,
+)
+from eneo.widgets.domain.widget import BotProtection, Widget, WidgetStatus
 
 
 class _InMemoryRepo:
     def __init__(self) -> None:
         self.rows: dict = {}
         self.locked_reads: list = []
+        self.revoked: list = []
 
     async def add(self, widget: Widget) -> Widget:
         widget = widget.model_copy(update={"id": uuid4()})
@@ -52,6 +57,10 @@ class _InMemoryRepo:
 
     async def is_target_published(self, widget):
         return True
+
+    async def revoke_tokens(self, tenant_id, *, bot_protection):
+        self.revoked.append((tenant_id, bot_protection))
+        return 0
 
     async def update(self, widget: Widget, *, check_revision=True, only=None) -> Widget:
         self.last_update = {"check_revision": check_revision, "only": only}
@@ -189,9 +198,10 @@ async def test_activation_requires_admin_and_reports_blockers(assistant):
     admin_user = _user(Permission.WIDGETS, Permission.ADMIN)
     admin_user.tenant_id = editor.user.tenant_id
     admin = _service(admin_user, space, repo=repo)
-    with pytest.raises(BadRequestException) as exc:
+    with pytest.raises(WidgetServingBlockedError) as exc:
         await admin.activate_widget(view.widget.id)
-    assert "allowed_origins_empty" in str(exc.value)
+    assert exc.value.blockers == ["allowed_origins_empty"]
+    assert exc.value.details() == {"blockers": ["allowed_origins_empty"]}
 
     await admin.update_widget(
         view.widget.id,
@@ -228,7 +238,7 @@ async def test_update_enforces_tenant_policy(assistant):
     view = await service.create_widget(
         space_id=space.id, target_id=assistant.id, name="w"
     )
-    with pytest.raises(BadRequestException) as exc:
+    with pytest.raises(WidgetPolicyViolationError) as exc:
         await service.update_widget(
             view.widget.id,
             {
@@ -236,7 +246,8 @@ async def test_update_enforces_tenant_policy(assistant):
                 "limits": {"daily_token_budget": 100_000},
             },
         )
-    assert "daily_token_budget_exceeds_policy" in str(exc.value)
+    assert exc.value.code == "widget_policy_violation"
+    assert exc.value.details() == {"violations": ["daily_token_budget_exceeds_policy"]}
 
 
 async def test_admin_runs_the_lifecycle_outside_their_own_spaces(assistant):
@@ -345,8 +356,13 @@ async def test_policy_update_merges_and_validates(assistant):
     with pytest.raises(BadRequestException):
         await service.update_policy({"min_retention_days": 400})
 
+    # Editors read the policy so they can hold their fields to it.
+    editor = _service(
+        _user(Permission.WIDGETS, widget_policy={"max_retention_days": 90}), space
+    )
+    assert editor.read_policy().max_retention_days == 90
     with pytest.raises(UnauthorizedException):
-        _service(_user(Permission.WIDGETS), space).read_policy()
+        _service(_user(), space).read_policy()
 
     with pytest.raises(UnauthorizedException):
         await _service(_user(Permission.WIDGETS), space).update_policy({})
@@ -497,3 +513,142 @@ async def test_widgets_follow_only_published_templates(assistant):
         await service.create_widget(
             space_id=space.id, target_id=assistant.id, name="w", template_id=foreign.id
         )
+
+
+async def _serving_widget(assistant, *, widget_policy=None):
+    space, _ = _space(uuid4(), assistant)
+    user = _user(Permission.WIDGETS, Permission.ADMIN, widget_policy=widget_policy)
+    service = _service(user, space)
+    view = await service.create_widget(
+        space_id=space.id, target_id=assistant.id, name="w"
+    )
+    await service.update_widget(
+        view.widget.id,
+        {"revision": view.widget.revision, "allowed_origins": ["https://a.se"]},
+    )
+    return service, (await service.activate_widget(view.widget.id)).widget
+
+
+@pytest.mark.parametrize(
+    ("change", "blocker"),
+    [
+        (
+            lambda w: {"texts": {**w.texts.model_dump(), "subtitle": ""}},
+            "subtitle_empty",
+        ),
+        (lambda w: {"allowed_origins": []}, "allowed_origins_empty"),
+    ],
+)
+async def test_an_active_widget_cannot_be_edited_out_of_serving(
+    assistant, change, blocker
+):
+    service, widget = await _serving_widget(assistant)
+    with pytest.raises(WidgetServingBlockedError) as exc:
+        await service.update_widget(
+            widget.id, {"revision": widget.revision, **change(widget)}
+        )
+    assert exc.value.code == "widget_serving_blocked"
+    assert exc.value.blockers == [blocker]
+
+    # A draft may pass through the same state on its way to activation.
+    space, _ = _space(uuid4(), assistant)
+    draft_service = _service(_user(Permission.WIDGETS), space)
+    draft = (
+        await draft_service.create_widget(
+            space_id=space.id, target_id=assistant.id, name="d"
+        )
+    ).widget
+    view = await draft_service.update_widget(
+        draft.id, {"revision": draft.revision, **change(draft)}
+    )
+    assert blocker in view.activation_blockers
+
+
+async def test_linking_an_active_widget_to_a_release_without_disclosure_is_refused(
+    assistant,
+):
+    from eneo.widgets.domain.widget_template import TemplateLockGroup, WidgetTemplate
+
+    service, widget = await _serving_widget(assistant)
+    template = WidgetTemplate.create(tenant_id=service.user.tenant_id, name="Tyst")
+    template.texts = template.texts.model_copy(update={"subtitle": ""})
+    template.locked_groups = [TemplateLockGroup.APPEARANCE]
+    template.publish(by=service.user.id)
+    template = await service.template_repo.add(template)
+
+    with pytest.raises(WidgetServingBlockedError) as exc:
+        await service.link_template(widget.id, template.id, revision=widget.revision)
+    assert exc.value.blockers == ["subtitle_empty"]
+
+
+async def test_a_tightened_policy_holds_edits_to_the_settings_they_change(assistant):
+    service, widget = await _serving_widget(assistant)
+    assert widget.limits.daily_token_budget == 500_000
+    service.user.tenant.widget_policy = {"max_daily_token_budget": 100_000}
+
+    renamed = await service.update_widget(
+        widget.id, {"revision": widget.revision, "name": "Nytt namn"}
+    )
+    assert renamed.widget.name == "Nytt namn"
+    assert renamed.activation_blockers == ["daily_token_budget_exceeds_policy"]
+
+    limits = widget.limits.model_dump()
+    with pytest.raises(WidgetPolicyViolationError) as exc:
+        await service.update_widget(
+            widget.id,
+            {
+                "revision": widget.revision,
+                "limits": {**limits, "daily_token_budget": 400_000},
+            },
+        )
+    assert exc.value.violations == ["daily_token_budget_exceeds_policy"]
+
+    compliant = await service.update_widget(
+        widget.id,
+        {
+            "revision": widget.revision,
+            "limits": {**limits, "daily_token_budget": 100_000},
+        },
+    )
+    assert compliant.activation_blockers == []
+
+
+async def test_activation_reports_policy_violations_as_structured_codes(assistant):
+    space, _ = _space(uuid4(), assistant)
+    user = _user(
+        Permission.WIDGETS,
+        Permission.ADMIN,
+        widget_policy={"allow_bot_protection_none": True},
+    )
+    service = _service(user, space)
+    view = await service.create_widget(
+        space_id=space.id, target_id=assistant.id, name="w"
+    )
+    await service.update_widget(
+        view.widget.id,
+        {
+            "revision": view.widget.revision,
+            "allowed_origins": ["https://a.se"],
+            "bot_protection": "none",
+        },
+    )
+    user.tenant.widget_policy = {"allow_bot_protection_none": False}
+    with pytest.raises(WidgetPolicyViolationError) as exc:
+        await service.activate_widget(view.widget.id)
+    assert exc.value.details() == {"violations": ["bot_protection_none_not_allowed"]}
+
+
+async def test_forbidding_bot_protection_none_revokes_tokens_minted_without_it(
+    assistant,
+):
+    space, _ = _space(uuid4(), assistant)
+    repo = _InMemoryRepo()
+    user = _user(Permission.ADMIN, widget_policy={"allow_bot_protection_none": True})
+    service = _service(user, space, repo=repo)
+
+    await service.update_policy({"max_daily_token_budget": 10_000})
+    await service.update_policy({"allow_bot_protection_none": True})
+    assert repo.revoked == []
+
+    await service.update_policy({"allow_bot_protection_none": False})
+    assert repo.revoked == [(user.tenant_id, BotProtection.NONE)]

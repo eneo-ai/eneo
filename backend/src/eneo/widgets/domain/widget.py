@@ -5,6 +5,7 @@
 
 import re
 import secrets
+from collections.abc import Callable
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
@@ -55,6 +56,14 @@ TOKEN_GENERATION_FIELDS = frozenset(
 # The columns pause and archive write. They never touch configuration, so
 # they bypass the revision check: a kill switch must not lose to an autosave.
 LIFECYCLE_FIELDS = frozenset({"status", "paused_at", "token_generation"})
+
+
+# What each configuration blocker is about: the widget cannot serve while the
+# setting is empty.
+_SERVING_REQUIREMENTS: dict[str, Callable[["Widget"], Any]] = {
+    "allowed_origins_empty": lambda widget: widget.allowed_origins,
+    "subtitle_empty": lambda widget: widget.texts.subtitle,
+}
 
 
 def generate_public_id() -> str:
@@ -374,13 +383,29 @@ class Widget(BaseModel):
         blockers: list[str] = []
         if self.status == WidgetStatus.ARCHIVED:
             blockers.append("archived")
-        if not self.allowed_origins:
-            blockers.append("allowed_origins_empty")
-        if not self.texts.subtitle:
-            blockers.append("subtitle_empty")
+        blockers.extend(self.configuration_blockers())
         if not target_published:
             blockers.append("target_not_published")
         return blockers
+
+    def configuration_blockers(self) -> list[str]:
+        """The activation blockers that are the widget's own settings."""
+        return [
+            code for code, setting in _SERVING_REQUIREMENTS.items() if not setting(self)
+        ]
+
+    def blockers_introduced_since(self, before: "Widget") -> list[str]:
+        """Configuration blockers on settings that changed since ``before``.
+
+        A serving widget must never be edited into a state it could not be
+        activated in. One left standing on a setting the edit did not touch
+        does not block the edit.
+        """
+        return [
+            code
+            for code in self.configuration_blockers()
+            if _SERVING_REQUIREMENTS[code](self) != _SERVING_REQUIREMENTS[code](before)
+        ]
 
     def activate(self, *, by: UUID, now: Optional[datetime] = None) -> None:
         if self.status not in (WidgetStatus.DRAFT, WidgetStatus.PAUSED):

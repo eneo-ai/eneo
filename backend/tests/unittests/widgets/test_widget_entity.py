@@ -125,6 +125,26 @@ def test_activation_blockers_cover_origins_disclosure_and_target():
     assert widget.activation_blockers(target_published=True) == []
 
 
+def test_blockers_introduced_count_only_settings_the_edit_changed():
+    widget = _widget()
+    widget.allowed_origins = ["https://www.kommun.se"]
+    before = widget.model_copy(deep=True)
+    widget.apply_update({"texts": {**widget.texts.model_dump(), "subtitle": ""}})
+    assert widget.blockers_introduced_since(before) == ["subtitle_empty"]
+
+    # Left standing, the empty subtitle does not hold up an unrelated edit,
+    # even one that sends the texts group whole.
+    before = widget.model_copy(deep=True)
+    widget.apply_update(
+        {"name": "Ny", "texts": {**widget.texts.model_dump(), "title": "Hej"}}
+    )
+    assert widget.blockers_introduced_since(before) == []
+
+    before = widget.model_copy(deep=True)
+    widget.apply_update({"allowed_origins": []})
+    assert widget.blockers_introduced_since(before) == ["allowed_origins_empty"]
+
+
 def test_status_transitions_and_token_generation():
     widget = _widget()
     by = uuid4()

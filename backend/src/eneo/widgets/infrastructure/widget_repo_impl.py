@@ -11,6 +11,7 @@ import sqlalchemy as sa
 
 from eneo.database.database import AsyncSession
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.widgets_table import Widgets
 from eneo.main.exceptions import NotFoundException
 from eneo.widgets.domain.exceptions import WidgetRevisionConflictError
@@ -25,6 +26,7 @@ from eneo.widgets.domain.widget import (
     WidgetTexts,
     WidgetTheme,
 )
+from eneo.widgets.domain.widget_policy import WidgetPolicy
 
 
 def to_entity(row: Widgets) -> Widget:
@@ -106,10 +108,44 @@ class WidgetRepoImpl:
         return to_entity(row) if row is not None else None
 
     async def get_by_public_id(self, public_id: str) -> Widget | None:
-        row = await self.session.scalar(
-            sa.select(Widgets).where(Widgets.public_id == public_id)
+        result = await self.session.execute(
+            sa.select(Widgets, Tenants.widget_policy)
+            .join(Tenants, Tenants.id == Widgets.tenant_id)
+            .where(Widgets.public_id == public_id)
         )
-        return to_entity(row) if row is not None else None
+        found = result.first()
+        if found is None:
+            return None
+        row, policy = found
+        return WidgetPolicy.from_tenant(policy).serving(to_entity(row))
+
+    async def policy_for(self, tenant_id: UUID) -> WidgetPolicy:
+        return WidgetPolicy.from_tenant(
+            await self.session.scalar(
+                sa.select(Tenants.widget_policy).where(Tenants.id == tenant_id)
+            )
+        )
+
+    async def revoke_tokens(
+        self, tenant_id: UUID, *, bot_protection: BotProtection
+    ) -> int:
+        # The revision moves too: an editor holding the old one must reload
+        # before a save could write the old generation back.
+        result = await self.session.execute(
+            sa.update(Widgets)
+            .where(
+                Widgets.tenant_id == tenant_id,
+                Widgets.bot_protection == bot_protection.value,
+                Widgets.status != WidgetStatus.ARCHIVED.value,
+            )
+            .values(
+                token_generation=Widgets.token_generation + 1,
+                revision=Widgets.revision + 1,
+                updated_at=sa.func.now(),
+            )
+            .returning(Widgets.id)
+        )
+        return len(result.all())
 
     async def list_by_space(self, space_id: UUID) -> list[Widget]:
         rows = await self.session.scalars(

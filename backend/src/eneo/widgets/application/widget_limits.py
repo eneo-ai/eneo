@@ -25,6 +25,7 @@ from eneo.widgets.domain.exceptions import (
     WidgetRateLimitedError,
 )
 from eneo.widgets.domain.widget import Widget
+from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
 from eneo.widgets.infrastructure.widget_usage_repo_impl import WidgetUsageRepoImpl
 
 logger = get_logger(__name__)
@@ -149,12 +150,15 @@ class WidgetBudget:
         reservation = BudgetReservation(uuid4(), widget.id, now.date(), max(0, tokens))
         try:
             async with sessionmanager.session() as session, session.begin():
+                # Capped by the tenant policy as it stands now, whatever copy
+                # of the widget the caller holds.
+                policy = await WidgetRepoImpl(session).policy_for(widget.tenant_id)
                 admitted = await WidgetUsageRepoImpl(session).reserve(
                     reservation.id,
                     widget.id,
                     reservation.day,
                     tokens=reservation.reserved_tokens,
-                    limit=widget.limits.daily_token_budget,
+                    limit=policy.daily_token_budget_for(widget),
                 )
                 if not admitted:
                     raise WidgetBudgetExhaustedError(

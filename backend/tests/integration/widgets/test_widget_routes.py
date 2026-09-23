@@ -6,6 +6,9 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.main.models import ModelId
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleCreate
 from eneo.users.user import UserAdd, UserState
 
 
@@ -27,6 +30,30 @@ async def regular_user_token(db_container, patch_auth_service_jwt):
                 username=f"reg_widget_{uuid4().hex[:8]}",
                 state=UserState.ACTIVE,
                 tenant_id=admin.tenant_id,
+            )
+        )
+        return container.auth_service().create_access_token_for_user(user)
+
+
+@pytest.fixture
+async def widget_editor_token(db_container, patch_auth_service_jwt):
+    """A user who manages widgets but is not a tenant admin."""
+    async with db_container() as container:
+        admin = await container.user_repo().get_user_by_email("test@example.com")
+        role = await container.role_repo().create_role(
+            RoleCreate(
+                name=f"widget-editor-{uuid4().hex[:8]}",
+                permissions=[Permission.WIDGETS],
+                tenant_id=admin.tenant_id,
+            )
+        )
+        user = await container.user_repo().add(
+            UserAdd(
+                email=f"widget-editor-{uuid4().hex[:8]}@example.com",
+                username=f"widget_editor_{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=admin.tenant_id,
+                roles=[ModelId(id=role.id)],
             )
         )
         return container.auth_service().create_access_token_for_user(user)
@@ -283,6 +310,142 @@ async def test_widget_policy_endpoints(client, admin_token, regular_user_token):
         "/api/v1/admin/widget-policy/", headers=_auth(regular_user_token)
     )
     assert resp.status_code == 403, resp.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_widget_editors_read_the_policy_but_cannot_change_it(
+    client, admin_token, widget_editor_token
+):
+    resp = await client.patch(
+        "/api/v1/admin/widget-policy/",
+        json={"max_daily_token_budget": 300_000, "max_retention_days": 120},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.get(
+        "/api/v1/admin/widget-policy/", headers=_auth(widget_editor_token)
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "max_daily_token_budget": 300_000,
+        "allow_bot_protection_none": False,
+        "min_retention_days": 0,
+        "max_retention_days": 120,
+    }
+
+    resp = await client.patch(
+        "/api/v1/admin/widget-policy/",
+        json={"max_daily_token_budget": 5_000_000},
+        headers=_auth(widget_editor_token),
+    )
+    assert resp.status_code == 403, resp.text
+    resp = await client.get("/api/v1/admin/widget-policy/", headers=_auth(admin_token))
+    assert resp.json()["max_daily_token_budget"] == 300_000
+
+
+async def _revision(client, token, widget_id) -> int:
+    resp = await client.get(f"/api/v1/widgets/{widget_id}/", headers=_auth(token))
+    return resp.json()["revision"]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_rule_errors_carry_their_codes(client, admin_token, space_with_assistant):
+    space_id, assistant_id = space_with_assistant
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/widgets/",
+        json={"target_id": assistant_id, "name": "Webbchatt"},
+        headers=_auth(admin_token),
+    )
+    widget_id = resp.json()["id"]
+
+    resp = await client.patch(
+        f"/api/v1/widgets/{widget_id}/",
+        json={
+            "revision": await _revision(client, admin_token, widget_id),
+            "limits": {"daily_token_budget": 5_000_000},
+            "privacy": {"retention_days": 400},
+        },
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 400, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "widget_policy_violation"
+    assert detail["violations"] == [
+        "daily_token_budget_exceeds_policy",
+        "retention_above_policy_maximum",
+    ]
+    assert detail["message"]
+
+    resp = await client.post(
+        f"/api/v1/widgets/{widget_id}/activate/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 400, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "widget_serving_blocked"
+    assert detail["blockers"] == ["allowed_origins_empty", "target_not_published"]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_an_active_widget_keeps_its_disclosure_and_origins(
+    client, admin_token, active_widget
+):
+    widget_id = active_widget["id"]
+    texts = {**active_widget["texts"], "subtitle": ""}
+    for change, blocker in [
+        ({"texts": texts}, "subtitle_empty"),
+        ({"allowed_origins": []}, "allowed_origins_empty"),
+    ]:
+        resp = await client.patch(
+            f"/api/v1/widgets/{widget_id}/",
+            json={
+                "revision": await _revision(client, admin_token, widget_id),
+                **change,
+            },
+            headers=_auth(admin_token),
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["detail"]["code"] == "widget_serving_blocked"
+        assert resp.json()["detail"]["blockers"] == [blocker]
+
+    resp = await client.post(
+        "/api/v1/admin/widget-templates/",
+        json={"name": f"Utan upplysning {uuid4().hex[:6]}"},
+        headers=_auth(admin_token),
+    )
+    template_id = resp.json()["id"]
+    resp = await client.patch(
+        f"/api/v1/admin/widget-templates/{template_id}/",
+        json={"texts": {"subtitle": ""}, "locked_groups": ["appearance"]},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/admin/widget-templates/{template_id}/publish/",
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/widgets/{widget_id}/link-template/",
+        json={
+            "template_id": template_id,
+            "revision": await _revision(client, admin_token, widget_id),
+        },
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["blockers"] == ["subtitle_empty"]
+
+    stored = (
+        await client.get(f"/api/v1/widgets/{widget_id}/", headers=_auth(admin_token))
+    ).json()
+    assert stored["status"] == "active"
+    assert stored["texts"]["subtitle"] == active_widget["texts"]["subtitle"]
+    assert stored["allowed_origins"] == ["https://www.kommun.se"]
+    assert stored["template"] is None
 
 
 @pytest.mark.integration

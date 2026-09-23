@@ -3,15 +3,16 @@
 # Licensed under the MIT License.
 
 
-from typing import Optional
+from typing import Any, Optional
 
 
 class WidgetPublicError(Exception):
-    """Error on the anonymous widget surface.
+    """A widget error the client branches on by ``code``.
 
-    Rendered as ``{"detail": {"code", "message"}}`` with the given status and
-    headers so the embed page can branch on ``code`` (re-mint, re-solve,
-    show paused state, back off) without parsing prose.
+    Rendered as ``{"detail": {"code", "message", **details()}}`` with the
+    given status and headers so the embed page and the admin page can act on
+    it (re-mint, re-solve, show paused state, back off, mark a field) without
+    parsing prose.
     """
 
     status_code: int = 400
@@ -32,6 +33,10 @@ class WidgetPublicError(Exception):
         if status_code is not None:
             self.status_code = status_code
         self.headers = headers
+
+    def details(self) -> dict[str, Any]:
+        """Machine-readable fields rendered next to ``code`` and ``message``."""
+        return {}
 
 
 class WidgetNotActiveError(WidgetPublicError):
@@ -142,3 +147,38 @@ class WidgetTemplateNotPublishedError(WidgetPublicError):
             "The template has not been published yet; publish it before"
             " widgets can follow it."
         )
+
+
+class WidgetPolicyViolationError(WidgetPublicError):
+    """The widget's settings are outside the organisation's widget policy."""
+
+    status_code = 400
+    code = "widget_policy_violation"
+
+    def __init__(self, violations: list[str]) -> None:
+        super().__init__(
+            "The widget's settings are outside the organisation's widget policy: "
+            + ", ".join(violations)
+            + "."
+        )
+        self.violations = violations
+
+    def details(self) -> dict[str, Any]:
+        return {"violations": list(self.violations)}
+
+
+class WidgetServingBlockedError(WidgetPublicError):
+    """The widget cannot serve visitors as configured: activation was refused,
+    or an edit would leave an active widget unable to serve."""
+
+    status_code = 400
+    code = "widget_serving_blocked"
+
+    def __init__(self, blockers: list[str]) -> None:
+        super().__init__(
+            "The widget cannot serve visitors like this: " + ", ".join(blockers) + "."
+        )
+        self.blockers = blockers
+
+    def details(self) -> dict[str, Any]:
+        return {"blockers": list(self.blockers)}

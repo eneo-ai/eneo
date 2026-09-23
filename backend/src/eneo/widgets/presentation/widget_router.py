@@ -154,7 +154,8 @@ async def create_space_widget(
         "Make the widget follow a published template. Its texts, appearance"
         " and language are copied now; the release's locked groups are then"
         " written onto the widget with every publication and cannot be edited"
-        " on the widget."
+        " on the widget. Refused with `widget_serving_blocked` when the"
+        " release would leave an active widget unable to serve."
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
@@ -219,7 +220,11 @@ async def get_widget(id: UUID, container: _ContainerWithUser):
     response_model=WidgetPublic,
     description=(
         "Update a widget's configuration. Changes to allowed origins, limits,"
-        " privacy or bot protection invalidate outstanding visitor tokens."
+        " privacy or bot protection invalidate outstanding visitor tokens. A"
+        " value outside the tenant's widget policy is refused with"
+        " `widget_policy_violation` (listing `violations`); an edit that would"
+        " leave an active widget unable to serve is refused with"
+        " `widget_serving_blocked` (listing `blockers`)."
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
@@ -276,7 +281,7 @@ async def get_widget_usage(
             for row in rows
         ],
         budget_used_today=used_today,
-        daily_token_budget=view.widget.limits.daily_token_budget,
+        daily_token_budget=service.get_policy().daily_token_budget_for(view.widget),
     )
 
 
@@ -303,8 +308,11 @@ async def create_widget_preview_token(id: UUID, container: _ContainerWithUser):
     "/{id}/activate/",
     response_model=WidgetPublic,
     description=(
-        "Activate a widget so it serves visitors. Tenant admins only; fails"
-        " with the list of blockers when the configuration is incomplete."
+        "Activate a widget so it serves visitors. Tenant admins only. Fails"
+        " with `widget_policy_violation` (listing `violations`) when settings"
+        " are outside the tenant's widget policy and with"
+        " `widget_serving_blocked` (listing `blockers`) when the configuration"
+        " is incomplete."
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
@@ -368,7 +376,11 @@ async def archive_widget(id: UUID, container: _ContainerWithUser):
 @policy_router.get(
     "/",
     response_model=WidgetPolicyPublic,
-    description="Get the tenant's widget policy (defaults apply when unset).",
+    description=(
+        "Get the tenant's widget policy (defaults apply when unset). Readable"
+        " by everyone with the widgets permission, so editors can check their"
+        " settings against it; only tenant admins change it."
+    ),
     responses=responses.get_responses([403]),
 )
 async def get_widget_policy(container: _ContainerWithUser):
@@ -457,7 +469,7 @@ async def get_widget_overview(container: _ContainerWithUser):
                 helpful_30d=row.helpful_30d,
                 unhelpful_30d=row.unhelpful_30d,
                 last_activity=row.last_activity,
-                daily_token_budget=row.daily_token_budget,
+                daily_token_budget=policy.daily_token_budget_for(row.widget),
                 budget_used_today=row.budget_used_today,
                 activation_blockers=blockers,
             )

@@ -234,15 +234,18 @@ class WidgetOverviewItem(BaseModel):
         description="Net thumbs down registered in the last 30 days."
     )
     last_activity: Optional[date] = None
-    daily_token_budget: int
+    daily_token_budget: int = Field(
+        description="The budget in force: the widget's, capped by the tenant policy."
+    )
     budget_used_today: int = Field(
         description="Durable usage plus in-flight reservations for today's budget."
     )
     activation_blockers: list[str] = Field(
         default_factory=list,
         description=(
-            "Why the widget cannot be activated (or, for an active widget, why"
-            " it is not serving): empty when it can."
+            "Why the widget could not be activated as configured: empty when"
+            " it can. A policy violation does not stop an active widget: it is"
+            " served within the policy."
         ),
     )
 
@@ -287,7 +290,9 @@ class WidgetUsagePublic(BaseModel):
     budget_used_today: int = Field(
         description="Tokens charged against today's budget, including reservations in flight."
     )
-    daily_token_budget: int
+    daily_token_budget: int = Field(
+        description="The budget in force: the widget's, capped by the tenant policy."
+    )
 
 
 class WidgetPolicyPublic(BaseModel):

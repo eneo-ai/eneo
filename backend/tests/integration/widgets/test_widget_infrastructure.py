@@ -66,6 +66,32 @@ async def test_concurrent_budget_admission_and_exactly_once_completion(active_wi
     assert (days[0].input_tokens, days[0].output_tokens) == (2_000, 500)
 
 
+async def test_budget_admission_is_capped_by_the_tenant_policy_as_it_stands(
+    active_widget,
+):
+    widget = await _load_widget(active_widget["id"])
+    assert widget.limits.daily_token_budget == 500_000
+    # Tightened after the widget was saved; nobody re-saves the widget.
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.update(Tenants)
+            .where(Tenants.id == widget.tenant_id)
+            .values(widget_policy={"max_daily_token_budget": 10_000})
+        )
+
+    budget = WidgetBudget()
+    await budget.reserve(widget, 8_000)
+    with pytest.raises(WidgetBudgetExhaustedError):
+        await budget.reserve(widget, 8_000)
+
+    async with sessionmanager.session() as session, session.begin():
+        served = await WidgetRepoImpl(session).get_by_public_id(widget.public_id)
+        stored = await WidgetRepoImpl(session).get(widget.id)
+    assert served is not None and stored is not None
+    assert served.limits.daily_token_budget == 10_000
+    assert stored.limits.daily_token_budget == 500_000
+
+
 async def test_release_is_idempotent_and_old_days_do_not_charge_today(active_widget):
     widget = await _load_widget(active_widget["id"])
     budget = WidgetBudget()
