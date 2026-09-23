@@ -27,7 +27,9 @@ from eneo.server.dependencies.container import get_container
 router = APIRouter()
 
 # Mutations commit before the response is sent; see flow_authoring_router.
-_MUTATING_CONTAINER = get_container(with_user=True, transaction_scope="function")
+_MUTATING_CONTAINER = get_container(
+    with_user=True, with_module_user=True, transaction_scope="function"
+)
 
 _FLOW_ASSISTANT_PUBLIC_EXAMPLE: dict[str, object] = {
     "id": "00000000-0000-0000-0000-000000000201",
@@ -198,7 +200,9 @@ async def get_flow_assistant(
         UUID, Path(description="Identifier of the flow-managed assistant to return.")
     ],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_module_user=True)
+    ),
 ):
     await _require_flow_assistant_access(request, container, flow_id=id)
     flow_service = container.flow_service()

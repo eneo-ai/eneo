@@ -173,6 +173,7 @@ async def list_flow_run_steps(
     container: Container = Depends(
         get_container_for_explicit_transaction(
             with_user=True,
+            with_module_user=True,
             with_upload_admission=True,
         )
     ),
@@ -296,7 +297,7 @@ async def get_flow_graph(
         ),
     ),
     container: Container = Depends(
-        get_container(with_user=True, with_upload_admission=True)
+        get_container(with_user=True, with_module_user=True, with_upload_admission=True)
     ),
 ):
     if run_id is not None:
@@ -398,6 +399,7 @@ async def generate_flow_run_artifact_signed_url(
     container: Container = Depends(
         get_container_for_explicit_transaction(
             with_user=True,
+            with_module_user=True,
             with_upload_admission=True,
         )
     ),
@@ -525,6 +527,7 @@ async def generate_flow_run_input_file_signed_url(
     container: Container = Depends(
         get_container_for_explicit_transaction(
             with_user=True,
+            with_module_user=True,
             with_upload_admission=True,
         )
     ),

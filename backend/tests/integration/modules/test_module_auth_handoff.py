@@ -639,3 +639,148 @@ async def test_incomplete_module_installation_is_rejected(
     )
 
     assert response.status_code == 422, response.text
+
+
+FLOW_RUN_CAPACITY_URL = "/api/v1/flows/runs/capacity/"
+
+
+async def issue_module_session(
+    client,
+    *,
+    admin_token: str,
+    module_key: str,
+    resource_permissions: dict[str, str] | None = None,
+) -> tuple[str, str]:
+    """Install a module with a fresh service key and complete the SSO handoff.
+
+    Returns the service key secret and the module user token, the two
+    credentials a module backend sends on every Eneo call.
+    """
+    body: dict[str, object] = {
+        "name": f"module-key-{uuid4().hex[:8]}",
+        "key_type": ApiKeyType.SK.value,
+        "ownership": ApiKeyOwnership.SERVICE.value,
+        "permission": ApiKeyPermission.WRITE.value,
+        "scope_type": ApiKeyScopeType.TENANT.value,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+    }
+    if resource_permissions is not None:
+        body["resource_permissions"] = resource_permissions
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    created = await client.post("/api/v1/api-keys", json=body, headers=admin_headers)
+    assert created.status_code == 201, created.text
+    service_key = created.json()
+
+    installed = await client.put(
+        module_installation_path(module_key),
+        json={
+            "redirect_uris": [REDIRECT_URI],
+            "service_key_id": service_key["api_key"]["id"],
+        },
+        headers=admin_headers,
+    )
+    assert installed.status_code == 200, installed.text
+
+    ticket_response = await client.post(
+        "/api/v1/module-auth/tickets/",
+        json={"module_key": module_key, "redirect_uri": REDIRECT_URI, "state": "s"},
+        headers=admin_headers,
+    )
+    assert ticket_response.status_code == 201, ticket_response.text
+    redirect_target = ticket_response.json()["redirect_target"]
+    ticket = parse_qs(urlparse(redirect_target).query)["ticket"][0]
+
+    exchange = await client.post(
+        "/api/v1/module-auth/token/",
+        json={"ticket": ticket},
+        headers={"X-API-Key": service_key["secret"]},
+    )
+    assert exchange.status_code == 200, exchange.text
+    return service_key["secret"], exchange.json()["access_token"]
+
+
+@pytest.mark.asyncio
+async def test_module_credentials_authenticate_flows_routes_as_the_module_user(
+    client, admin_token, admin_user, enabled_module
+):
+    secret, access_token = await issue_module_session(
+        client, admin_token=admin_token, module_key=enabled_module.name
+    )
+
+    response = await client.get(
+        FLOW_RUN_CAPACITY_URL,
+        headers={"X-API-Key": secret, "Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["tenant_id"] == str(admin_user.tenant_id)
+
+
+@pytest.mark.asyncio
+async def test_module_credentials_stay_unauthenticated_outside_flows(
+    client, admin_token, enabled_module
+):
+    secret, access_token = await issue_module_session(
+        client, admin_token=admin_token, module_key=enabled_module.name
+    )
+
+    response = await client.get(
+        "/api/v1/users/me/",
+        headers={"X-API-Key": secret, "Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 401, response.text
+
+
+@pytest.mark.asyncio
+async def test_a_module_token_without_its_service_key_is_unauthenticated_on_flows(
+    client, admin_token, enabled_module
+):
+    _secret, access_token = await issue_module_session(
+        client, admin_token=admin_token, module_key=enabled_module.name
+    )
+
+    response = await client.get(
+        FLOW_RUN_CAPACITY_URL, headers={"Authorization": f"Bearer {access_token}"}
+    )
+
+    assert response.status_code == 401, response.text
+
+
+@pytest.mark.asyncio
+async def test_module_credentials_need_the_key_flows_permission(
+    client, admin_token, enabled_module
+):
+    secret, access_token = await issue_module_session(
+        client,
+        admin_token=admin_token,
+        module_key=enabled_module.name,
+        resource_permissions={"spaces": "write", "flows": "none"},
+    )
+
+    response = await client.get(
+        FLOW_RUN_CAPACITY_URL,
+        headers={"X-API-Key": secret, "Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 403, response.text
+
+
+@pytest.mark.asyncio
+async def test_a_token_for_an_unknown_module_is_unauthenticated_not_not_found(
+    client, admin_token, admin_user, db_container, enabled_module
+):
+    secret, _access_token = await issue_module_session(
+        client, admin_token=admin_token, module_key=enabled_module.name
+    )
+    async with db_container() as container:
+        foreign_token = container.auth_service().create_access_token_for_user(
+            admin_user, audience="eneo-module:no-such-module"
+        )
+
+    response = await client.get(
+        FLOW_RUN_CAPACITY_URL,
+        headers={"X-API-Key": secret, "Authorization": f"Bearer {foreign_token}"},
+    )
+
+    assert response.status_code == 401, response.text

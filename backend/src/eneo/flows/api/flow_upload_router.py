@@ -183,7 +183,7 @@ async def get_flow_run_contract(
     ],
     request: Request,
     container: Container = Depends(
-        get_container(with_user=True, with_upload_admission=True)
+        get_container(with_user=True, with_module_user=True, with_upload_admission=True)
     ),
 ):
     await flow_access_context.enforce_flow_scope(
@@ -271,6 +271,7 @@ async def upload_flow_runtime_file(
     container: Container = Depends(
         get_container_for_explicit_transaction(
             with_user=True,
+            with_module_user=True,
             with_upload_admission=True,
         )
     ),
@@ -353,6 +354,7 @@ async def delete_flow_runtime_file(
     container: Container = Depends(
         get_container_for_explicit_transaction(
             with_user=True,
+            with_module_user=True,
             with_upload_admission=True,
         )
     ),

@@ -138,7 +138,7 @@ async def list_flow_run_review_checkpoint_edits(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     after_revision: Annotated[int | None, Query(ge=1)] = None,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ) -> FlowRunReviewCheckpointEditPagePublic:
     committed_audit_context: tuple[UserInDB, FlowRun] | None = None
@@ -663,7 +663,7 @@ async def get_active_flow_run_review_checkpoint(
     run_id: Annotated[UUID, Path(description="Identifier of the run to inspect.")],
     request: Request,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ):
     committed_audit_context: tuple[UserInDB, FlowRun] | None = None
@@ -779,7 +779,7 @@ async def edit_flow_run_review_checkpoint(
     request: Request,
     review_in: FlowRunReviewCheckpointEditRequest,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ):
     async with commit_flow_runtime_write_before_response(container):
@@ -858,7 +858,7 @@ async def approve_flow_run_review_checkpoint(
     request: Request,
     review_in: FlowRunReviewCheckpointApproveRequest,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ):
     async with commit_flow_runtime_write_before_response(container):
@@ -942,7 +942,7 @@ async def reject_flow_run_review_checkpoint(
     request: Request,
     review_in: FlowRunReviewCheckpointRejectRequest,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ):
     async with commit_flow_runtime_write_before_response(container):
@@ -1033,7 +1033,7 @@ async def resume_flow_run_review_checkpoint(
         ),
     ] = None,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ):
     """Refuse an overdue approval under the review locks without terminal writes.
@@ -1132,7 +1132,7 @@ async def approve_and_continue_flow_run_review_checkpoint(
         ),
     ] = None,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ):
     async with commit_flow_runtime_write_before_response(container):

@@ -77,7 +77,7 @@ async def list_flow_template_files(
     ],
     request: Request,
     container: Container = Depends(
-        get_container(with_user=True, with_upload_admission=True)
+        get_container(with_user=True, with_module_user=True, with_upload_admission=True)
     ),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
@@ -130,7 +130,7 @@ async def inspect_flow_template(
         Query(description="Identifier of the stored template asset to inspect."),
     ],
     container: Container = Depends(
-        get_container(with_user=True, with_upload_admission=True)
+        get_container(with_user=True, with_module_user=True, with_upload_admission=True)
     ),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
@@ -197,7 +197,7 @@ async def upload_flow_template_file(
         description="DOCX template file to store for later template_fill steps.",
     ),
     container: Container = Depends(
-        get_container(with_user=True, with_upload_admission=True)
+        get_container(with_user=True, with_module_user=True, with_upload_admission=True)
     ),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
@@ -273,7 +273,7 @@ async def delete_flow_template_file(
     ],
     request: Request,
     container: Container = Depends(
-        get_container(with_user=True, with_upload_admission=True)
+        get_container(with_user=True, with_module_user=True, with_upload_admission=True)
     ),
 ) -> Response:
     await require_flow_edit_access(request, container, flow_id=id)
@@ -355,6 +355,7 @@ async def generate_flow_template_signed_url(
     container: Container = Depends(
         get_container_for_explicit_transaction(
             with_user=True,
+            with_module_user=True,
             with_upload_admission=True,
         )
     ),

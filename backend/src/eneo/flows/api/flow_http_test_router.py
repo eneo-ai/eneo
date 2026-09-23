@@ -69,7 +69,9 @@ async def test_flow_http(
     id: Annotated[UUID, Path(description="Flow ID")],
     request: Request,
     body: flow_http_test_models.HttpTestRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_module_user=True)
+    ),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
     settings = get_settings()

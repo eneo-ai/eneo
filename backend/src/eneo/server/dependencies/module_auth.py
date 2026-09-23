@@ -12,6 +12,7 @@ from eneo.main.container.container_overrides import override_user
 from eneo.main.exceptions import AuthenticationException
 from eneo.modules.module_auth import ModuleRequestPrincipal
 from eneo.server.dependencies.container import get_container
+from eneo.server.dependencies.module_credentials import authenticate_module_principal
 
 
 async def authenticate_module_request(
@@ -33,22 +34,16 @@ async def authenticate_module_request(
         )
 
     try:
-        service_user = await container.user_service().authenticate(
-            api_key=api_key_secret,
+        principal = await authenticate_module_principal(
+            module_key=module_key,
+            access_token=access_token,
+            api_key_secret=api_key_secret,
             request=request,
+            container=container,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc, request=request)
 
-    resolved_key = service_user.active_api_key
-    if resolved_key is None:
-        raise AuthenticationException("Module API key authentication failed.")
-
-    principal = await container.module_auth_broker().authenticate_resource_request(
-        module_key=module_key,
-        access_token=access_token,
-        api_key=resolved_key,
-    )
     override_user(container=container, user=principal.user)
     request.state.module_principal = principal
     return container

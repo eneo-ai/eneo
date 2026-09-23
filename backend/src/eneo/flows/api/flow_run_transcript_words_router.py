@@ -129,7 +129,7 @@ async def get_flow_run_transcript_words(
     step_id: Annotated[UUID, Path(description="Identifier of the transcription step.")],
     request: Request,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ):
     committed_audit_context: tuple[UserInDB, FlowRun] | None = None

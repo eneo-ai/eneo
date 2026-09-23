@@ -106,7 +106,7 @@ async def list_flow_run_transcript_correction_revisions(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     after_revision: Annotated[int | None, Query(ge=1)] = None,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ) -> FlowTranscriptCorrectionRevisionPagePublic:
     committed_audit_context: tuple[UserInDB, FlowRun] | None = None
@@ -350,7 +350,7 @@ async def list_flow_run_transcript_corrections(
     ],
     request: Request,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ):
     committed_audit_context: tuple[UserInDB, FlowRun] | None = None
@@ -451,7 +451,7 @@ async def edit_flow_run_transcript_corrections(
     request: Request,
     corrections_in: FlowTranscriptCorrectionsEditRequest,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ):
     async with commit_flow_runtime_write_before_response(container):

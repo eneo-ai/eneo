@@ -46,7 +46,9 @@ router = APIRouter()
 # the transaction closes after the body has gone out, so a client that creates
 # a flow and immediately addresses it (the editor, the AI Builder harness) can
 # be told the flow does not exist.
-_MUTATING_CONTAINER = get_container(with_user=True, transaction_scope="function")
+_MUTATING_CONTAINER = get_container(
+    with_user=True, with_module_user=True, transaction_scope="function"
+)
 
 _FLOW_AUTHORING_FORBIDDEN_DESCRIPTION = (
     "Forbidden. Machine-readable codes include `insufficient_scope` when the API key "
@@ -237,7 +239,9 @@ async def list_flows(
     offset: int = Query(
         default=0, ge=0, description="Number of flows to skip before returning results."
     ),
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_module_user=True)
+    ),
 ):
     access_context = await flow_access_context.resolve_space_access_context(
         request,
@@ -341,7 +345,9 @@ async def get_flow(
         UUID, Path(description="Identifier of the draft flow definition to return.")
     ],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_module_user=True)
+    ),
 ):
     access_context = await require_flow_current_definition_access(
         request,
@@ -393,7 +399,9 @@ async def get_published_flow_runtime(
         ),
     ],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_module_user=True)
+    ),
 ):
     published_access = await require_flow_published_runtime_access(
         request,

@@ -155,6 +155,7 @@ async def regenerate_flow_run_transcript(
     container: Container = Depends(
         get_container_for_explicit_transaction(
             with_user=True,
+            with_module_user=True,
             with_upload_admission=True,
         )
     ),

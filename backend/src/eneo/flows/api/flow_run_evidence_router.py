@@ -146,7 +146,7 @@ async def get_flow_run_evidence(
     ],
     request: Request,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ):
     committed_audit_context: tuple[UserInDB, FlowRun] | None = None
@@ -290,7 +290,7 @@ async def list_flow_run_provider_calls(
         Query(description="Optionally restrict events to one step attempt."),
     ] = None,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ) -> ProviderCallEvidencePage:
     committed_audit_context: tuple[UserInDB, FlowRun] | None = None
@@ -455,7 +455,7 @@ async def export_flow_run_evidence(
         ),
     ] = _DEFAULT_EVIDENCE_EXPORT_REASON,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ):
     committed_audit_context: tuple[UserInDB, FlowRun] | None = None

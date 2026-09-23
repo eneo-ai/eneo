@@ -148,7 +148,7 @@ async def get_flow_run_transcript_source(
     request: Request,
     start_segment_index: Annotated[int, Query(ge=0)] = 0,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
     ),
 ) -> JSONResponse:
     committed_audit_context: tuple[UserInDB, FlowRun] | None = None

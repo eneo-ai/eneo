@@ -15,6 +15,7 @@ from eneo.database.database import (
 )
 from eneo.main.container.container import Container
 from eneo.main.container.container_overrides import override_user
+from eneo.main.exceptions import AuthenticationException, NotFoundException
 from eneo.object_content.deployment_policy import (
     UploadAdmissionSnapshot,
     load_upload_admission_snapshot,
@@ -24,6 +25,10 @@ from eneo.server.dependencies.auth_definitions import (
     API_KEY_HEADER,
     OAUTH2_SCHEME,
     get_token_from_websocket_header,
+)
+from eneo.server.dependencies.module_credentials import (
+    authenticate_module_principal,
+    claimed_module_key,
 )
 from eneo.users.setup import setup_user
 from eneo.users.user import UserInDB
@@ -43,6 +48,7 @@ def get_container(
     with_transaction: bool = True,
     with_upload_admission: bool = False,
     transaction_scope: Literal["function", "request"] = "request",
+    with_module_user: bool = False,
 ) -> Callable[..., Awaitable[Container]]:
     """Build a request container around one database session.
 
@@ -50,6 +56,10 @@ def get_container(
     for mutations whose result must be immediately observable. Request scope remains
     the default because streaming responses may keep using their session while the
     body is produced.
+
+    ``with_module_user`` opts a route into module dual credentials: a request that
+    carries an API key and a module user token authenticates as that user through
+    the module broker. Routes without the opt-in keep refusing module tokens.
     """
     if sum([with_user, with_user_from_assistant_api_key]) > 1:
         raise ValueError(
@@ -57,6 +67,8 @@ def get_container(
         )
     if with_upload_admission and not with_user:
         raise ValueError("Upload admission requires an authenticated user container")
+    if with_module_user and not with_user:
+        raise ValueError("Module credentials require an authenticated user container")
     if not with_transaction and transaction_scope != "request":
         raise ValueError("transaction_scope requires with_transaction=True")
 
@@ -85,14 +97,40 @@ def get_container(
             await object_content_runtime.refresh_object_store_configuration()
 
         async def authenticate_and_prepare_container() -> UserInDB:
-            user = await container.user_service().authenticate(
-                token=token, api_key=api_key, request=request
+            module_key = (
+                claimed_module_key(token)
+                if with_module_user and token and api_key
+                else None
             )
+            if module_key is not None:
+                user = await authenticate_module_user(module_key)
+            else:
+                user = await container.user_service().authenticate(
+                    token=token, api_key=api_key, request=request
+                )
             if not user.is_active:
                 await setup_user(container=container, user=user)
             if with_upload_admission:
                 await load_container_upload_admission(container)
             return user
+
+        async def authenticate_module_user(module_key: str) -> UserInDB:
+            try:
+                principal = await authenticate_module_principal(
+                    module_key=module_key,
+                    access_token=token,
+                    api_key_secret=api_key,
+                    request=request,
+                    container=container,
+                )
+            except NotFoundException as exc:
+                # An unknown module in an unverified claim is a credential failure;
+                # answering 404 would reveal which module keys exist.
+                raise AuthenticationException(
+                    "Could not validate credentials."
+                ) from exc
+            request.state.module_principal = principal
+            return principal.user
 
         try:
             session = cast(AsyncSession, container.session())
@@ -150,6 +188,7 @@ def get_container_for_explicit_transaction(
     with_user: bool = False,
     with_user_from_assistant_api_key: bool = False,
     with_upload_admission: bool = False,
+    with_module_user: bool = False,
 ) -> Callable[..., Awaitable[Container]]:
     """Return a container whose endpoint owns the database transaction.
 
@@ -161,6 +200,7 @@ def get_container_for_explicit_transaction(
         with_user_from_assistant_api_key=with_user_from_assistant_api_key,
         with_transaction=False,
         with_upload_admission=with_upload_admission,
+        with_module_user=with_module_user,
     )
 
 
