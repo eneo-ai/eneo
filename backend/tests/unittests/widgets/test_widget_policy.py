@@ -1,3 +1,4 @@
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -9,6 +10,7 @@ from eneo.widgets.domain.widget import (
     WidgetPrivacy,
 )
 from eneo.widgets.domain.widget_policy import WidgetPolicy
+from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
 
 
 def _widget() -> Widget:
@@ -106,3 +108,17 @@ def test_serving_holds_a_widget_saved_before_the_policy_to_it():
     permissive = WidgetPolicy(allow_bot_protection_none=True)
     assert permissive.serving(widget).bot_protection == BotProtection.NONE
     assert permissive.serving(widget).limits.daily_token_budget == 500_000
+
+
+async def test_the_serving_view_is_never_written_back():
+    widget = _widget()
+    widget.id = uuid4()
+    served = WidgetPolicy(max_daily_token_budget=1_000).serving(widget)
+    assert served.is_serving_view
+    assert served.model_copy().is_serving_view
+    assert not widget.is_serving_view
+
+    session = AsyncMock()
+    with pytest.raises(ValueError, match="never written back"):
+        await WidgetRepoImpl(session).update(served)
+    session.scalar.assert_not_called()

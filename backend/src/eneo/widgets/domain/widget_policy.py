@@ -101,8 +101,8 @@ class WidgetPolicy(BaseModel):
         minimum is left to the retention job: the policy can make a widget
         keep less, never start storing conversations it was set not to store.
         """
-        return widget.model_copy(
-            update={
+        return widget.serving_copy(
+            {
                 "limits": widget.limits.model_copy(
                     update={"daily_token_budget": self.daily_token_budget_for(widget)}
                 ),
@@ -114,6 +114,5 @@ class WidgetPolicy(BaseModel):
                     }
                 ),
                 "bot_protection": self.bot_protection_for(widget),
-            },
-            deep=True,
+            }
         )

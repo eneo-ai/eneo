@@ -16,6 +16,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     ValidationError,
     ValidationInfo,
     field_validator,
@@ -322,6 +323,18 @@ class Widget(BaseModel):
     paused_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    _serving_view: bool = PrivateAttr(default=False)
+
+    @property
+    def is_serving_view(self) -> bool:
+        return self._serving_view
+
+    def serving_copy(self, update: dict[str, Any]) -> "Widget":
+        """A copy for the visitor surface (WidgetPolicy.serving); the
+        repository refuses to write it back."""
+        served = self.model_copy(update=update, deep=True)
+        served._serving_view = True
+        return served
 
     @field_validator("public_id")
     @classmethod

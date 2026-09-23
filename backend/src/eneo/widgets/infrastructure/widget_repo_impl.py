@@ -245,6 +245,9 @@ class WidgetRepoImpl:
         """
         if widget.id is None:
             raise NotFoundException("Widget has not been persisted.")
+        if widget.is_serving_view:
+            # Its values are the policy's caps, not the widget's settings.
+            raise ValueError("The serving view of a widget is never written back.")
         values = _to_values(widget)
         if only is not None:
             wanted = set(only)
