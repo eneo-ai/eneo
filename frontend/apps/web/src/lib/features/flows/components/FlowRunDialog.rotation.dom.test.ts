@@ -717,6 +717,51 @@ describe("FlowRunDialog live text across a rotation", () => {
     expect(socket.sent.at(-1)).toBe(JSON.stringify({ type: "stop" }));
     expect(flushRequests()).toHaveLength(1);
   });
+
+  it("keeps a rotated recording's draft until Kasta actually runs, then drops it for good", async () => {
+    installLiveTranscriptFakes();
+    const pendingUploads: PendingUpload[] = [];
+    const upload = vi.fn(({ file }: { file: File }) => pendingUpload(pendingUploads, file));
+    await openDialogAndStartRecording(upload, liveText);
+    const socket = FakeLiveSocket.instances[0];
+    socket.open();
+    socket.receive({ type: "ready", sample_rate: 16000, max_seconds: 18000 });
+    socket.receive({ type: "transcript.delta", text: "Anna talar" });
+    const discard = () => queryInFailedRecordingAlert(m.discard()) as HTMLButtonElement;
+
+    await rotate();
+    await endOverlap();
+    media.recorders[0]?.finish();
+    await flush();
+    pendingUploads[0]?.reject(new Error("Network down"));
+    await flush();
+    // Capture is still in flight, so Kasta is refused and the draft stays.
+    expect(discard().disabled).toBe(true);
+    await fireEvent.click(discard());
+    await flush();
+    expect(screen.getByRole("log").textContent).toBe("Anna talar");
+
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[1]?.finish();
+    await flush();
+    // The last segment's upload is in flight: still refused.
+    expect(discard().disabled).toBe(true);
+    await fireEvent.click(discard());
+    await flush();
+    expect(screen.getByRole("log").textContent).toBe("Anna talar");
+
+    pendingUploads[1]?.resolve(uploadedFile("segment-1", pendingUploads[1].file.name));
+    await flush();
+    expect(discard().disabled).toBe(false);
+    await fireEvent.click(discard());
+    await flush();
+    socket.receive({ type: "transcript.delta", text: " vidare" });
+    socket.receive({ type: "transcript.done", text: "Anna talar vidare." });
+    await flush();
+
+    expect(screen.queryByRole("log")).toBeNull();
+    expect(screen.queryByText(/Anna talar/)).toBeNull();
+  });
 });
 
 const liveText: DialogOptions = {

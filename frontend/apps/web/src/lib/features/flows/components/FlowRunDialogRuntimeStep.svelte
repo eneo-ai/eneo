@@ -229,7 +229,10 @@
     });
   }
 
+  // The draft goes only when the recording does: discard is refused while the
+  // step still has work in flight.
   function discardRecording() {
+    if (!canDiscardRecording) return;
     livePreview.discard();
     onDiscardRecordedAudio();
   }
