@@ -244,6 +244,49 @@ def test_number_field_rejects_non_finite_values(raw_value: object) -> None:
     }
 
 
+_OPTIONAL_FIELDS: list[dict[str, object]] = [
+    {"name": "note", "type": "text"},
+    {"name": "attempts", "type": "number"},
+    {"name": "visit_date", "type": "date"},
+    {"name": "priority", "type": "select", "options": ["low", "high"]},
+    {"name": "tags", "type": "multiselect", "options": ["care", "legal"]},
+    {"name": "names", "type": "list"},
+]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {str(field["name"]): None for field in _OPTIONAL_FIELDS},
+        {
+            "note": "",
+            "attempts": "",
+            "visit_date": "",
+            "priority": "",
+            "tags": [],
+            "names": [],
+        },
+    ],
+    ids=["omitted", "null", "sent_empty"],
+)
+def test_optional_fields_left_out_or_null_read_as_their_empty_input(
+    payload: dict[str, object],
+) -> None:
+    normalized = normalize_and_validate_flow_run_payload(
+        metadata=_metadata(_OPTIONAL_FIELDS), payload=payload
+    )
+
+    assert normalized == {
+        "note": "",
+        "attempts": None,
+        "visit_date": None,
+        "priority": None,
+        "tags": [],
+        "names": [],
+    }
+
+
 def test_optional_select_empty_string_normalizes_to_none() -> None:
     metadata = _metadata(
         [

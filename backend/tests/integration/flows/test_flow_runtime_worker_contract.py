@@ -42,6 +42,7 @@ from eneo.flows.domain.flow_step_attempt_input import parse_flow_step_attempt_in
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
@@ -283,11 +284,17 @@ class _RuntimeWorkerContext:
 
 class _RuntimeAssistant:
     def __init__(
-        self, *, assistant_id: UUID, model_id: UUID, provider_id: UUID, model_name: str
+        self,
+        *,
+        assistant_id: UUID,
+        model_id: UUID,
+        provider_id: UUID,
+        model_name: str,
+        prompt_text: str = "Answer the submitted question.",
     ):
         self.id = assistant_id
         self.origin = AssistantOrigin.FLOW_MANAGED
-        self.prompt = SimpleNamespace(text="Answer the submitted question.")
+        self.prompt = SimpleNamespace(text=prompt_text)
         self.completion_model = SimpleNamespace(
             id=model_id,
             name=model_name,
@@ -325,6 +332,7 @@ def _build_flow(
     output_mode: str = "pass_through",
     output_type: str = "text",
     output_contract: FlowPersistedJsonObject | None = None,
+    form_fields: list[FlowPersistedJsonObject] | None = None,
 ) -> Flow:
     return Flow(
         id=None,
@@ -336,7 +344,13 @@ def _build_flow(
         owner_user_id=user_id,
         published_version=None,
         metadata_json={
-            "form_schema": {"fields": [{"name": "question", "type": "text"}]}
+            "form_schema": {
+                "fields": (
+                    [{"name": "question", "type": "text"}]
+                    if form_fields is None
+                    else form_fields
+                )
+            }
         },
         data_retention_days=30,
         created_at=None,
@@ -377,6 +391,8 @@ async def _create_runtime_worker_context(
     output_type: str = "text",
     output_contract: FlowPersistedJsonObject | None = None,
     input_payload_json: FlowPersistedJsonObject | None = None,
+    form_fields: list[FlowPersistedJsonObject] | None = None,
+    prompt_text: str = "Answer the submitted question.",
 ) -> _RuntimeWorkerContext:
     enable_autobegin_for_flow_task_session(session)
     setup_container = Container(
@@ -403,6 +419,7 @@ async def _create_runtime_worker_context(
             output_mode=output_mode,
             output_type=output_type,
             output_contract=output_contract,
+            form_fields=form_fields,
         ),
         tenant_id=admin_user.tenant_id,
     )
@@ -411,6 +428,7 @@ async def _create_runtime_worker_context(
         model_id=model.id,
         provider_id=model.provider_id,
         model_name="gpt-4o-mini",
+        prompt_text=prompt_text,
     )
     assistant_snapshot = build_assistant_execution_snapshot(
         assistant=runtime_assistant,
@@ -1068,6 +1086,78 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_omitted_optional_form_fields_resolve_as_empty_prompt_text(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    # A client that trusts `required: false` leaves optional fields out; the
+    # prompt must read them as empty instead of failing on a missing key.
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(completion="Klart.", total_token_count=1)
+        )
+    )
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            form_fields=[
+                {"name": "question", "type": "text", "required": True},
+                {"name": "vad_heter_talarna", "type": "list"},
+                {"name": "antal", "type": "number"},
+                {"name": "motesdatum", "type": "date"},
+                {"name": "prioritet", "type": "select", "options": ["hog"]},
+                {"name": "amnen", "type": "multiselect", "options": ["vard"]},
+                {"name": "anteckning", "type": "text"},
+            ],
+            prompt_text=(
+                "Talare: [{{flow_input.vad_heter_talarna}}] "
+                "Antal: [{{flow_input.antal}}] Datum: [{{flow_input.motesdatum}}] "
+                "Prioritet: [{{flow_input.prioritet}}] Ämnen: [{{flow_input.amnen}}] "
+                "Anteckning: [{{flow_input.anteckning}}]"
+            ),
+            input_payload_json={"question": "What happened?"},
+        )
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"runtime-optional-fields-{uuid4()}",
+            retry_count=0,
+        )
+
+    assert result == {"status": "completed"}
+    run_row, step_result_row, _, _ = await _failure_state_from_fresh_session(
+        run_id=context.run_id, tenant_id=context.tenant_id
+    )
+    assert step_result_row is not None
+    assert step_result_row.effective_prompt == (
+        "Talare: [] Antal: [] Datum: [] Prioritet: [] Ämnen: [] Anteckning: []"
+    )
+    assert run_row is not None
+    assert read_semantic_flow_input_payload(run_row.input_payload_json) == {
+        "question": "What happened?",
+        "vad_heter_talarna": [],
+        "antal": None,
+        "motesdatum": None,
+        "prioritet": None,
+        "amnen": [],
+        "anteckning": "",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_generic_step_failure_persists_failed_state_for_fresh_sessions(
     setup_database,
     admin_user,
@@ -1462,6 +1552,8 @@ async def test_question_binding_variable_miss_persists_precise_typed_failure_wit
     completion_service = SimpleNamespace(get_response=AsyncMock())
 
     async with sessionmanager.session() as session:
+        # The binding reads a field the form does not declare; a declared
+        # optional field left out reads as empty instead of missing.
         context = await _create_runtime_worker_context(
             session=session,
             admin_user=admin_user,
@@ -1471,6 +1563,7 @@ async def test_question_binding_variable_miss_persists_precise_typed_failure_wit
             assistant_factory=assistant_factory,
             completion_service=completion_service,
             input_payload_json={},
+            form_fields=[],
         )
         result = await context.executor.execute(
             run_id=context.run_id,

@@ -46,16 +46,6 @@ def normalize_and_validate_flow_run_payload(
         field_type = field.type.value
         options = field.options or []
 
-        if key not in normalized_payload:
-            if required:
-                raise _flow_payload_error(
-                    message=f"Missing required input field '{key}'.",
-                    code=FlowApiErrorCode.INPUT_REQUIRED_FIELD_MISSING,
-                    field_name=key,
-                    field_type=field_type,
-                )
-            continue
-
         value = normalized_payload.get(key)
         if value is None:
             if required:
@@ -65,7 +55,9 @@ def normalize_and_validate_flow_run_payload(
                     field_name=key,
                     field_type=field_type,
                 )
-            continue
+            # Left out or null reads as an empty input, so every declared field
+            # reaches templates and "omitted" fingerprints like "sent empty".
+            value = ""
 
         if field_type == "number":
             normalized_payload[key] = coerce_number_field(
