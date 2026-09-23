@@ -109,7 +109,7 @@ async def get_widget_challenge(
 ):
     await container.widget_limiter().check_challenge(widget, client_ip(request))
     response.headers["Cache-Control"] = "no-store"
-    challenge = container.widget_altcha_service().create_challenge()
+    challenge = container.widget_altcha_service().create_challenge(widget)
     return WidgetChallenge.model_validate(challenge)
 
 
@@ -147,7 +147,7 @@ async def create_visitor_session(
             raise VisitorTokenInvalidError("Preview tokens cannot be rotated.")
         visitor_id = claims.visitor_id
     elif body.altcha is not None:
-        await container.widget_altcha_service().verify(body.altcha)
+        await container.widget_altcha_service().verify(body.altcha, widget)
         visitor_id = identity.resolve(widget, body.visitor_id, body.visitor_key)
     elif widget.bot_protection == BotProtection.NONE:
         visitor_id = identity.resolve(widget, body.visitor_id, body.visitor_key)
