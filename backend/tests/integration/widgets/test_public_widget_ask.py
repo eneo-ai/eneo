@@ -158,7 +158,16 @@ async def test_visitor_ask_streams_and_owns_its_session(
     assert events[0][0] == "first_chunk"
     assert "".join(d["answer"] for e, d in events if e == "text") == "Hej där!"
     session_id = events[0][1]["session_id"]
-    assert fake_assistant_ask[-1]["allow_tools"] is False
+    # The assistant as configured: nothing narrows its MCP servers or
+    # capabilities and no approval is requested (tools-off was dropped).
+    assert set(fake_assistant_ask[-1]) == {
+        "question",
+        "session_id",
+        "stream",
+        "version",
+        "num_chunks_override",
+        "prompt_addendum",
+    }
     assert fake_assistant_ask[-1]["stream"] is True
 
     # The visitor can restore and continue its own session.

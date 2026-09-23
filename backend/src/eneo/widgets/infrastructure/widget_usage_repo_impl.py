@@ -199,8 +199,9 @@ class WidgetUsageRepoImpl:
         ]
 
     async def delete_sessions_before(self, widget_id: UUID, cutoff: datetime) -> int:
-        """Widget sessions never own generated files (tools are off), so a
-        plain delete cascades questions and references."""
+        """Widget sessions never own generated files (AssistantService drops
+        tool-generated images for visitors), so a plain delete cascades
+        questions and references."""
         result = await self.session.execute(
             sa.delete(Sessions).where(
                 Sessions.widget_id == widget_id, Sessions.created_at < cutoff

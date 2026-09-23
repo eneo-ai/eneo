@@ -129,6 +129,18 @@ from eneo.workflows.step_repo import StepRepository
 
 logger = get_logger(__name__)
 
+# What a widget visitor can run. A visitor is a synthetic principal with no
+# users row, and two things need one: Eneo's loopback MCP servers (knowledge,
+# files, built-in capability providers) authenticate their scoped token
+# against users, and a generated image is a file owned by a user. A visitor
+# therefore gets injected knowledge instead of the knowledge tool, no files
+# tool, no built-in provider and no image generation, and images other MCP
+# tools return are dropped. The assistant's own MCP servers and an external
+# web search provider serve visitors as configured.
+VISITOR_CAPABILITY_PURPOSES: frozenset[str] = frozenset(CAPABILITY_PURPOSES) - {
+    "image_generation"
+}
+
 _IMAGE_EXTENSIONS = {
     "image/jpeg": "jpeg",
     "image/png": "png",
@@ -402,8 +414,28 @@ class AssistantService:
         authenticated.tools = await with_live_builtin_tools(server)
         return authenticated
 
-    async def _save_generated_image(self, image: "GeneratedImage") -> "File":
-        """Persist a tool-produced image as a generated file."""
+    def _allowed_capability_purposes(self) -> set[str]:
+        # A widget visitor holds no permissions: the assistant's own
+        # configuration decides, less what a visitor cannot run.
+        if self.user.active_widget is not None:
+            return set(VISITOR_CAPABILITY_PURPOSES)
+        return allowed_capability_purposes(self.user.permissions)
+
+    async def _save_generated_image(self, image: "GeneratedImage") -> "File | None":
+        """Persist a tool-produced image as a generated file.
+
+        None for a widget visitor, who owns no files: the image is dropped
+        (the model only ever saw its placeholder).
+        """
+        if self.user.active_widget is not None:
+            logger.info(
+                "Dropped a tool-generated image for a widget visitor",
+                extra={
+                    "widget_id": str(self.user.active_widget.widget_id),
+                    "mcp_tool_name": image.mcp_tool_name,
+                },
+            )
+            return None
         extension = _extension_for_mime(image.mime_type)
         return await self.file_service.save_image_from_bytes(
             image.data,
@@ -937,13 +969,7 @@ class AssistantService:
                 requested_capabilities=sorted(requested_capabilities),
                 supports_tool_calling=model.supports_tool_calling,
                 user_group_ids=self.user.user_groups_ids,
-                # A widget visitor holds no permissions; the assistant's own
-                # configuration decides what the widget exposes.
-                allowed_purposes=(
-                    set(CAPABILITY_PURPOSES)
-                    if self.user.active_widget is not None
-                    else allowed_capability_purposes(self.user.permissions)
-                ),
+                allowed_purposes=self._allowed_capability_purposes(),
                 space_security_classification=space.security_classification,
             )
             effective_mcp_servers = [
@@ -2244,6 +2270,8 @@ class AssistantService:
                             and chunk.image is not None
                         ):
                             image_file = await self._save_generated_image(chunk.image)
+                            if image_file is None:
+                                continue
                             generated_files.append(image_file)
                             # The image chunk precedes the tool-call chunk that
                             # references it; the ids are attached to the tool
@@ -2608,6 +2636,8 @@ class AssistantService:
                         getattr(answer, "generated_images", None) or [],
                     ):
                         image_file = await self._save_generated_image(image)
+                        if image_file is None:
+                            continue
                         generated_files.append(image_file)
                         if image.tool_call_id:
                             generated_file_ids_by_call.setdefault(
@@ -2846,7 +2876,6 @@ class AssistantService:
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: list["UUID"] | None = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
-        allow_tools: bool = True,
     ):
         # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
         # Assistant via the normal ask path. Both ``POST /assistants/{id}/sessions/``
@@ -2858,8 +2887,6 @@ class AssistantService:
             role_repo=self.org_space_assistant_role_repo,
             history_repo=self.help_assistant_assignment_history_repo,
         )
-        if not allow_tools and tool_assistant_id is not None:
-            raise BadRequestException("Tool assistants are not available here.")
         if tool_assistant_id is not None:
             await assert_not_helper_assistant(
                 assistant_id=tool_assistant_id,
@@ -3069,13 +3096,7 @@ class AssistantService:
                 requested_capabilities=sorted(requested_capabilities),
                 supports_tool_calling=effective_completion_model.supports_tool_calling,
                 user_group_ids=self.user.user_groups_ids,
-                # A widget visitor holds no permissions; the assistant's own
-                # configuration decides what the widget exposes.
-                allowed_purposes=(
-                    set(CAPABILITY_PURPOSES)
-                    if self.user.active_widget is not None
-                    else allowed_capability_purposes(self.user.permissions)
-                ),
+                allowed_purposes=self._allowed_capability_purposes(),
                 space_security_classification=space.security_classification,
             )
             mcp_servers_override = resolution.general_servers
@@ -3084,14 +3105,9 @@ class AssistantService:
                     server, assistant_id=assistant_to_ask.id
                 )
                 for server in resolution.capability_servers
+                if self.user.active_widget is None
+                or not is_builtin_provider(server.http_auth_type)
             ]
-
-        if not allow_tools:
-            # Anonymous widget visitors: no MCP servers or capabilities, whatever
-            # the assistant or a policy grants. Knowledge retrieval is not a tool
-            # and stays on.
-            mcp_servers_override = []
-            capability_mcp_servers = []
 
         # This message's own uploads have no save-time fit gate and are inlined
         # whole, so reject an upload that can't fit before any session/question
@@ -3220,9 +3236,11 @@ class AssistantService:
         # calling never get a server and fall back to legacy
         # retrieve-and-inject inside Assistant.ask.
         knowledge_mcp_server = None
-        # No tools means no loopback server either: a widget visitor has no
-        # users row behind the scoped token, so its knowledge is injected.
-        if internal_mcp.knowledge and allow_tools:
+        # Loopback servers authenticate the scoped token against a users row.
+        # A widget visitor has none, so its knowledge is injected and it gets
+        # no files tool (see VISITOR_CAPABILITY_PURPOSES).
+        loopback_allowed = self.user.active_widget is None
+        if internal_mcp.knowledge and loopback_allowed:
             knowledge_mcp_server = await build_knowledge_mcp_server(
                 token=mint_scoped_token(),
                 tenant_id=self.user.tenant_id,
@@ -3235,7 +3253,7 @@ class AssistantService:
         # inlined files it still pages into text the window truncated).
         # External servers coexist; tool descriptions steer the choice.
         files_mcp_server = None
-        if internal_mcp.files:
+        if internal_mcp.files and loopback_allowed:
             seen_labels: set[str] = set()
             attachment_labels: list[str] = []
             for file in [*files, *history_files]:

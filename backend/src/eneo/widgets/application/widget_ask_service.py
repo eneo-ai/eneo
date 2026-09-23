@@ -197,6 +197,9 @@ class WidgetAskService:
             raise
 
         try:
+            # The assistant as configured, MCP servers and capabilities
+            # included, less what a visitor cannot run (AssistantService,
+            # VISITOR_CAPABILITY_PURPOSES). Approval is never requested.
             response = await self.assistant_service.ask(
                 question=cleaned,
                 assistant_id=widget.target_id,
@@ -207,9 +210,6 @@ class WidgetAskService:
                 version=2,
                 num_chunks_override=self.settings.widget_retrieval_chunks,
                 prompt_addendum=WIDGET_STYLE_PROMPT,
-                # The assistant as configured: its MCP servers and capabilities
-                # serve visitors too. Approval is never requested for visitors.
-                allow_tools=True,
             )
         except BaseException:
             # No stream owns the reservation yet. Cleanup must also run on a

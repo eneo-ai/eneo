@@ -166,12 +166,21 @@ async def test_ask_streams_then_settles_budget_and_records_usage():
     kwargs = deps.assistant_service.ask.await_args.kwargs
     assert kwargs["question"] == "Hej?"
     assert kwargs["assistant_id"] == widget.target_id
-    assert kwargs["allow_tools"] is True
-    assert "disabled_capabilities" not in kwargs
     assert kwargs["stream"] is True
     assert kwargs["version"] == 2
     assert kwargs["num_chunks_override"] == 30
     assert kwargs["prompt_addendum"] == module.WIDGET_STYLE_PROMPT
+    # The assistant as configured: nothing narrows its servers or
+    # capabilities, and no approval is requested.
+    assert set(kwargs) == {
+        "question",
+        "assistant_id",
+        "session_id",
+        "stream",
+        "version",
+        "num_chunks_override",
+        "prompt_addendum",
+    }
     assert response.completion_model is None
 
     deps.budget.reserve.assert_awaited_once_with(widget, 8_000)
