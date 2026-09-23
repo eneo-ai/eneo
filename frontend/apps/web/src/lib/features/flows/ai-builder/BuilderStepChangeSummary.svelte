@@ -1,9 +1,12 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import * as ToggleGroup from "$lib/components/ui/toggle-group/index.js";
   import IconArrowRight from "@lucide/svelte/icons/arrow-right";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
+  import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
+  import { wordDiff } from "./builderTextDiff";
   import type { StepFieldChange, StepSpec } from "./protocol";
   import type { StepFieldChangeDisplay } from "./BuilderStepDetails.svelte";
   import {
@@ -51,14 +54,14 @@
     output_config: "answers"
   };
   // Shown by the strip, the sentence and the sections below; everything else
-  // is listed as a plain row so no change goes unmentioned.
+  // is listed as a plain row so no change goes unmentioned. Chosen results
+  // and a contract are structures a short reading cannot carry, so they keep
+  // a row with their complete before and after behind a fold.
   const TOLD_ELSEWHERE = new Set<StepFieldChange["field"]>([
     "input_source",
-    "input_bindings",
     "instructions",
     "model_ref",
-    "output_type",
-    "output_contract"
+    "output_type"
   ]);
 
   const byField = $derived(new Map(changes.map((change) => [change.field, change])));
@@ -195,11 +198,46 @@
     }
   ]);
 
-  const otherRows = $derived(changes.filter((change) => !TOLD_ELSEWHERE.has(change.field)));
   const instructionChange = $derived(byField.get("instructions") ?? null);
+  const contractChange = $derived(byField.get("output_contract") ?? null);
   const showFields = $derived(changed("answers") && currentFields.length > 0);
+  // The field list carries the contract's fold when it is shown.
+  const otherRows = $derived(
+    changes.filter(
+      (change) =>
+        !TOLD_ELSEWHERE.has(change.field) && !(change.field === "output_contract" && showFields)
+    )
+  );
 
   let instructionOpen = $state(false);
+  // The instruction's change as a review tool shows it: one text, removed words
+  // struck through, added words marked. Very long texts get the two columns.
+  const instructionDiff = $derived(
+    instructionChange ? wordDiff(instructionChange.previous, instructionChange.current) : null
+  );
+  // A light edit reads best marked in one text; a rewrite reads best side by
+  // side, as a review tool splits it. The reader can switch either way.
+  const rewrittenShare = $derived.by(() => {
+    if (!instructionDiff) return 0;
+    const total = instructionDiff.reduce((sum, part) => sum + part.text.length, 0);
+    const changed = instructionDiff
+      .filter((part) => part.kind !== "same")
+      .reduce((sum, part) => sum + part.text.length, 0);
+    return total > 0 ? changed / total : 0;
+  });
+  let chosenDiffView = $state<"marked" | "split" | null>(null);
+  const diffView = $derived(chosenDiffView ?? (rewrittenShare > 0.5 ? "split" : "marked"));
+  // Ink on a soft tint: removed text keeps a hairline strike, added text a
+  // thin underline, so neither leans on colour alone.
+  const REMOVED =
+    "bg-negative-dimmer text-primary decoration-negative-default rounded-[3px] px-0.5 line-through decoration-1 box-decoration-clone";
+  const ADDED =
+    "bg-positive-dimmer text-primary decoration-positive-default rounded-[3px] px-0.5 underline decoration-1 underline-offset-[3px] box-decoration-clone";
+  // Raw before-and-after values are technical detail: Avancerad shows them,
+  // Enkel keeps to the readable summary. Outside the flows layout there is no
+  // mode and they show, as before.
+  const flowUserMode = getFlowUserMode();
+  const showTechnical = $derived(flowUserMode === undefined || $flowUserMode === "power_user");
   let technicalOpen = $state<Record<string, boolean>>({});
 
   function prettyDetail(detail: string): string {
@@ -212,7 +250,7 @@
 </script>
 
 {#snippet technical(change: StepFieldChangeDisplay)}
-  {#if change.previousDetail || change.currentDetail}
+  {#if showTechnical && (change.previousDetail || change.currentDetail)}
     <Collapsible.Root
       open={technicalOpen[change.field] ?? false}
       onOpenChange={(open) => (technicalOpen[change.field] = open)}
@@ -297,7 +335,105 @@
       {/each}
     </ol>
 
-    {#if instructionChange}
+    {#if instructionChange && instructionDiff}
+      <Collapsible.Content class="collapsible-animate">
+        <div
+          class="border-default overflow-hidden rounded-lg border"
+          data-testid="instruction-diff"
+        >
+          <div
+            class="border-default bg-secondary/60 flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2"
+          >
+            <span class="text-primary text-xs font-semibold"
+              >{m.ai_builder_step_instructions()}</span
+            >
+            <!-- The key is for the eye; each change names itself to a screen reader. -->
+            <span class="flex items-center gap-2 text-xs" aria-hidden="true">
+              <del class={REMOVED}>{m.ai_builder_change_diff_removed()}</del>
+              <ins class={ADDED}>{m.ai_builder_change_diff_added()}</ins>
+            </span>
+            <ToggleGroup.Root
+              type="single"
+              variant="outline"
+              size="sm"
+              spacing={0}
+              class="ml-auto"
+              bind:value={
+                () => diffView,
+                (value) => {
+                  // Clicking the chosen view again would clear it; one is always shown.
+                  if (value) chosenDiffView = value as "marked" | "split";
+                }
+              }
+              aria-label={m.ai_builder_change_diff_view_label()}
+            >
+              <ToggleGroup.Item value="marked" class="px-2.5 text-xs">
+                {m.ai_builder_change_diff_marked()}
+              </ToggleGroup.Item>
+              <ToggleGroup.Item value="split" class="px-2.5 text-xs">
+                {m.ai_builder_change_diff_split()}
+              </ToggleGroup.Item>
+            </ToggleGroup.Root>
+          </div>
+          {#if diffView === "marked"}
+            <p
+              class="bg-primary text-primary m-0 px-4 py-3.5 text-[0.8125rem] leading-[1.8] break-words whitespace-pre-wrap"
+            >
+              {#each instructionDiff as part, index (index)}
+                {#if part.kind === "same" || part.plain}
+                  {@render readable(part.text)}
+                {:else if part.kind === "removed"}
+                  <del class={REMOVED}
+                    ><span class="sr-only"
+                      >{m.ai_builder_change_diff_removed()}:
+                    </span>{@render readable(part.text)}</del
+                  >
+                {:else}
+                  <ins class="{ADDED} [del+&]:ms-1"
+                    ><span class="sr-only"
+                      >{m.ai_builder_change_diff_added()}:
+                    </span>{@render readable(part.text)}</ins
+                  >
+                {/if}
+              {/each}
+            </p>
+          {:else}
+            <div
+              class="bg-primary divide-default grid divide-y lg:grid-cols-2 lg:divide-x lg:divide-y-0"
+            >
+              {#each [{ kind: "removed", label: m.ai_builder_change_before() }, { kind: "added", label: m.ai_builder_change_after() }] as column (column.kind)}
+                <div class="min-w-0 px-4 py-3.5">
+                  <div class="text-secondary mb-1.5 text-xs font-semibold">{column.label}</div>
+                  <p
+                    class="text-primary m-0 max-w-[72ch] text-[0.8125rem] leading-[1.8] break-words whitespace-pre-wrap"
+                  >
+                    {#each instructionDiff as part, index (index)}
+                      {#if part.kind === "same" || (part.plain && part.kind === column.kind)}
+                        {@render readable(part.text)}
+                      {:else if part.kind === column.kind}
+                        {#if part.kind === "removed"}
+                          <del class={REMOVED}
+                            ><span class="sr-only"
+                              >{m.ai_builder_change_diff_removed()}:
+                            </span>{@render readable(part.text)}</del
+                          >
+                        {:else}
+                          <ins class={ADDED}
+                            ><span class="sr-only"
+                              >{m.ai_builder_change_diff_added()}:
+                            </span>{@render readable(part.text)}</ins
+                          >
+                        {/if}
+                      {/if}
+                    {/each}
+                  </p>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      </Collapsible.Content>
+    {:else if instructionChange}
       <Collapsible.Content class="collapsible-animate">
         <div class="bg-secondary grid gap-x-8 gap-y-4 rounded-lg px-4 py-3.5 lg:grid-cols-2">
           <div>
@@ -347,6 +483,9 @@
         <p class="text-secondary mt-1 text-[0.8125rem]">
           {m.ai_builder_change_fields_removed({ fields: removedFields.join(", ") })}
         </p>
+      {/if}
+      {#if contractChange}
+        {@render technical(contractChange)}
       {/if}
     </div>
   {/if}

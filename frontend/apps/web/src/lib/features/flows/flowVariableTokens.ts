@@ -20,7 +20,7 @@ export function isValidStepInputPath(path: string): boolean {
   return shape === "sequence" && rest.length === 1 && /^[0-9]+$/.test(rest[0] ?? "");
 }
 
-const TEMPLATE_TOKEN_PATTERN_SOURCE = String.raw`\{\{\s*([^{}]+)\s*\}\}`;
+export const TEMPLATE_TOKEN_PATTERN_SOURCE = String.raw`\{\{\s*([^{}]+)\s*\}\}`;
 const TEMPLATE_TOKEN_PATTERN = new RegExp(TEMPLATE_TOKEN_PATTERN_SOURCE, "g");
 const STEP_ORDER_TOKEN_PATTERN = /^step_(\d+)(\..+)?$/;
 const STEP_REFERENCE_TOKEN_PATTERN = /^step_(\d+)(\.|$)/;

@@ -1,5 +1,10 @@
 import { m } from "$lib/paraglide/messages";
+import { getLocale } from "$lib/paraglide/runtime";
 import { parseFlowInputBindings } from "$lib/features/flows/flowInputBindings";
+import {
+  extractTemplateTokens,
+  TEMPLATE_TOKEN_PATTERN_SOURCE
+} from "$lib/features/flows/flowVariableTokens";
 import type { StepSpec } from "./protocol";
 
 /**
@@ -71,6 +76,10 @@ function stepsLabel(orders: number[]): string {
  * What a planned step reads, as a label ("Föregående steg", "Steg 1 och 2").
  * `stepNumber` is the step's 1-based position; `stepNumberOf` resolves a plan
  * step reference named in the step's material to its position.
+ *
+ * Explicit underlag (chosen results or its own text) replaces the step's input
+ * source at run time, so it is read first: the steps and the flow input its
+ * references name, or "Egen text" when it names neither.
  */
 export function readsLabel(
   step: Pick<StepSpec, "input_source" | "input_bindings">,
@@ -78,11 +87,27 @@ export function readsLabel(
   stepNumberOf: (planStepRef: string) => number | null
 ): string {
   const bindings = parseFlowInputBindings(step.input_bindings);
-  if (bindings.status === "valid" && bindings.sourceRefs.length > 0) {
-    const orders = bindings.sourceRefs
-      .map((source) => stepNumberOf(source.stepRef))
+  const question = bindings.status === "valid" ? (bindings.question?.trim() ?? "") : "";
+  if (bindings.status === "valid" && (bindings.sourceRefs.length > 0 || question)) {
+    const tokenRefs = extractTemplateTokens(question).map((token) => token.split(".")[0].trim());
+    const orders = [...bindings.sourceRefs.map((source) => source.stepRef), ...tokenRefs]
+      .map((ref) => stepNumberOf(ref))
       .filter((order): order is number => order !== null && order < stepNumber);
-    if (orders.length > 0) return stepsLabel(orders);
+    const parts = [
+      ...(tokenRefs.includes("flow_input") ? [m.ai_builder_reads_flow_input()] : []),
+      ...(orders.length > 0 ? [stepsLabel(orders)] : [])
+    ];
+    if (parts.length > 0) {
+      const locale = getLocale();
+      return new Intl.ListFormat(locale, { type: "conjunction" }).format(
+        parts.map((part, index) => (index === 0 ? part : inSentence(part, locale)))
+      );
+    }
+    // Text of its own is what the step reads; a reference that names no
+    // earlier step says nothing, so the input source stands.
+    if (question.replace(new RegExp(TEMPLATE_TOKEN_PATTERN_SOURCE, "g"), "").trim()) {
+      return m.ai_builder_reads_own_text();
+    }
   }
   if (step.input_source === "previous_step" && stepNumber > 1) return m.ai_builder_reads_previous();
   if (step.input_source === "all_previous_steps" && stepNumber > 1) {

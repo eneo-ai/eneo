@@ -10,6 +10,7 @@ import type {
   AIBuilderTelemetrySummary,
   ApplyResult,
   ProposedPlan,
+  StepFieldChange,
   StepSpec
 } from "./protocol";
 import type { AIBuilderClientTransport, PendingPlanOperation } from "./FlowAIBuilderDriver";
@@ -23,7 +24,16 @@ afterEach(() => {
 });
 
 // A one-step edit: step 2 of two is the scoped target and the only change.
-function scopedStepEditState(targetStep: Partial<StepSpec> = {}) {
+function scopedStepEditState(
+  targetStep: Partial<StepSpec> = {},
+  fieldChanges: StepFieldChange[] = [
+    {
+      field: "instructions",
+      previous: "Sammanfatta texten.",
+      current: "Skriv en kort sammanfattning."
+    }
+  ]
+) {
   return {
     session: makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }),
     currentPlan: makePlan({
@@ -59,13 +69,7 @@ function scopedStepEditState(targetStep: Partial<StepSpec> = {}) {
                 kind: "modified",
                 step_name: "Sammanfatta",
                 step_ref: "existing_step_2",
-                field_changes: [
-                  {
-                    field: "instructions",
-                    previous: "Sammanfatta texten.",
-                    current: "Skriv en kort sammanfattning."
-                  }
-                ]
+                field_changes: fieldChanges
               }
             ],
             net_steps_added: 0,
@@ -797,10 +801,155 @@ describe("BuilderReviewScreen plan document", () => {
     });
     expect(within(context).getByText("Gör sammanfattningen kortare.")).toBeTruthy();
     expect(within(context).queryByText("Det stämmer.")).toBeNull();
+    expect(within(context).queryByRole("button", { name: m.ai_builder_show_more() })).toBeNull();
     // A one-step change leaves out how the whole flow runs.
     expect(
       within(context).queryByRole("button", { name: m.ai_builder_execution_profile() })
     ).toBeNull();
+  });
+
+  it("keeps a follow-up in a one-step review on its step until the reader widens it", async () => {
+    const sendMessage = vi.fn().mockResolvedValue("delivered");
+    // A loaded model listing, as a real session has once the composer can send.
+    const { availableModels, defaultModelId, modelLoadStatus } = makeCreateState();
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: { ...scopedStepEditState(), availableModels, defaultModelId, modelLoadStatus },
+      onservice: (service) => {
+        service.sendMessage = sendMessage;
+      }
+    });
+    const scoped = {
+      kind: "proposed_plan",
+      scope: "step",
+      plan_id: "plan-1",
+      target_plan_step_ref: "step_b",
+      target_existing_step_ref: "existing_step_2",
+      target_step_name: "Sammanfatta",
+      target_step_number: 2
+    };
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: new RegExp(m.ai_builder_change_request_title()) })
+    );
+    expect(
+      await screen.findByText(m.ai_builder_change_request_scope({ step: 2, name: "Sammanfatta" }))
+    ).toBeTruthy();
+    const textarea = () => screen.getByLabelText(m.ai_builder_change_request_textarea_label());
+    await fireEvent.input(textarea(), { target: { value: "Kortare, tack." } });
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_send() }));
+    expect(sendMessage).toHaveBeenLastCalledWith("Kortare, tack.", undefined, undefined, scoped);
+
+    // Clearing the chip is the one way to widen the request to the flow.
+    await fireEvent.click(
+      screen.getByRole("button", { name: new RegExp(m.ai_builder_change_request_title()) })
+    );
+    await fireEvent.click(
+      await screen.findByRole("button", { name: m.ai_builder_change_request_clear_scope() })
+    );
+    await fireEvent.input(textarea(), { target: { value: "Byt ordning på stegen." } });
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_send() }));
+    expect(sendMessage).toHaveBeenLastCalledWith("Byt ordning på stegen.", undefined, undefined, {
+      kind: "proposed_plan",
+      scope: "whole_plan",
+      plan_id: "plan-1"
+    });
+  });
+
+  it("keeps a change of chosen results inspectable when the reading stays the same", async () => {
+    const chosen = (field: string) => ({
+      source_refs: [{ step_ref: "step_a", output: "structured", field_path: field }]
+    });
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: scopedStepEditState({ input_bindings: chosen("beslut") }, [
+        {
+          field: "input_bindings",
+          previous: "Steg 1",
+          current: "Steg 1",
+          previous_detail: JSON.stringify(chosen("titel")),
+          current_detail: JSON.stringify(chosen("beslut"))
+        }
+      ])
+    });
+
+    const changes = screen.getByTestId("step-field-changes");
+    expect(within(changes).getByText(m.ai_builder_step_change_field_input_bindings())).toBeTruthy();
+    await fireEvent.click(
+      within(changes).getByRole("button", { name: m.ai_builder_change_show_technical() })
+    );
+    const detail = await within(changes).findByTestId("step-field-change-detail");
+    expect(detail.textContent).toContain('"field_path": "titel"');
+    expect(detail.textContent).toContain('"field_path": "beslut"');
+  });
+
+  it("offers the whole request when it runs over six lines, however short", () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        ...scopedStepEditState(),
+        messages: [
+          {
+            role: "user",
+            content: [
+              "Kort",
+              "sammanfattning",
+              "risknivå",
+              "låg",
+              "medel",
+              "hög",
+              "nästa",
+              "steg"
+            ].join("\n"),
+            timestamp: 1
+          }
+        ]
+      }
+    });
+
+    const context = screen.getByRole("complementary", {
+      name: m.ai_builder_review_context_label()
+    });
+    expect(within(context).getByRole("button", { name: m.ai_builder_show_more() })).toBeTruthy();
+  });
+
+  it("folds a long run of unchanged steps in the diagram and opens it on request", async () => {
+    const state = scopedStepEditState();
+    const extra = Array.from({ length: 6 }, (_, index) =>
+      makeRenderStep({
+        plan_step_ref: `step_x${index}`,
+        existing_step_ref: `existing_x${index}`,
+        name: `Kontroll ${index + 3}`,
+        output_mode: "pass_through",
+        output_type: "text"
+      })
+    );
+    state.currentPlan.proposal.spec.steps.push(...extra);
+    state.currentPlan.proposal.edit!.diff!.step_changes.push(
+      ...extra.map((step) => ({
+        kind: "unchanged" as const,
+        step_name: step.name,
+        step_ref: step.existing_step_ref!
+      }))
+    );
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state
+    });
+
+    // Step 2 changes: step 1 feeds it and step 3 reads it; 4 to 8 fold.
+    const gap = m.ai_builder_diagram_gap({ first: "4", last: "8" });
+    expect(screen.getByText(gap)).toBeTruthy();
+    expect(screen.getByText("Kontroll 3")).toBeTruthy();
+    expect(screen.queryByText("Kontroll 4")).toBeNull();
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_review_unchanged_show() })
+    );
+    await waitFor(() => expect(screen.queryByText(gap)).toBeNull());
+    expect(screen.getByText("Kontroll 8")).toBeTruthy();
+    // The button left with its row; the reader lands on the first step it showed.
+    expect(document.activeElement?.getAttribute("data-diagram-step")).toBe("4");
   });
 
   it("reads a reference to a planned step as that step, not as the plan's key", async () => {
@@ -977,6 +1126,13 @@ describe("BuilderReviewScreen plan document", () => {
       `${m.ai_builder_step_change_previous_label()}: Strukturera ${m.ai_builder_step_change_current_label()}: Strukturera transkriberingen`,
       `${m.ai_builder_step_change_previous_label()}: ${m.flow_step_review_policy_none()} ${m.ai_builder_step_change_current_label()}: ${m.flow_step_review_policy_view()}`
     ]);
+    // The contract keeps its complete before and after behind the fields.
+    await fireEvent.click(
+      within(changes).getByRole("button", { name: m.ai_builder_change_show_technical() })
+    );
+    const detail = await within(changes).findByTestId("step-field-change-detail");
+    expect(detail.textContent).toContain('"type": "string"');
+    expect(detail.textContent).toContain('"type": "array"');
     // Both wordings of the instruction wait behind one fold in the "does" part.
     const fold = within(changes).getByRole("button", {
       name: m.ai_builder_change_show_before_after()
@@ -990,7 +1146,14 @@ describe("BuilderReviewScreen plan document", () => {
           .getAttribute("aria-expanded")
       ).toBe("true")
     );
-    expect(await within(changes).findByText("Skriv om texten fritt.")).toBeTruthy();
+    // One text: the old words struck through, the new ones marked.
+    const diff = await within(changes).findByTestId("instruction-diff");
+    expect(
+      [...diff.querySelectorAll("del")].some((del) => del.textContent?.includes("fritt"))
+    ).toBe(true);
+    expect(
+      [...diff.querySelectorAll("ins")].some((ins) => ins.textContent?.includes("källnära"))
+    ).toBe(true);
   });
 
   it("reads one list of what an edit changes, removed steps included", async () => {

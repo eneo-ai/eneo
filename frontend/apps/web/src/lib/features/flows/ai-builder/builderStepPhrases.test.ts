@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
 
-import { contractFields, fieldDescription, fieldLabel, readsLabel } from "./builderStepPhrases";
+import { getLocale } from "$lib/paraglide/runtime";
+
+import {
+  contractFields,
+  fieldDescription,
+  fieldLabel,
+  inSentence,
+  readsLabel
+} from "./builderStepPhrases";
 
 const ORDER: Record<string, number> = { step_a: 1, step_b: 2, step_c: 3, step_d: 4 };
 const numberOf = (ref: string) => ORDER[ref] ?? null;
@@ -21,6 +29,33 @@ describe("readsLabel", () => {
     );
     expect(readsLabel(readingFrom("step_a", "step_c"), 4, numberOf)).toBe(
       m.ai_builder_reads_steps_two({ first: "1", second: "3" })
+    );
+  });
+
+  it("reads the step's own underlag before its input source", () => {
+    const withQuestion = (question: string, refs: string[] = []) => ({
+      input_source: "previous_step" as const,
+      input_bindings: {
+        question,
+        ...(refs.length > 0
+          ? { source_refs: refs.map((step_ref) => ({ step_ref, output: "text" })) }
+          : {})
+      }
+    });
+    // Its own text names step 1, so it does not read step 2, the previous step.
+    expect(readsLabel(withQuestion("Sammanfatta {{ step_a.output.text }}."), 3, numberOf)).toBe(
+      m.ai_builder_reads_step({ step: "1" })
+    );
+    // Chosen results and the flow input together, in one sentence.
+    expect(readsLabel(withQuestion("Namn: {{ flow_input.namn }}", ["step_b"]), 3, numberOf)).toBe(
+      new Intl.ListFormat(getLocale(), { type: "conjunction" }).format([
+        m.ai_builder_reads_flow_input(),
+        inSentence(m.ai_builder_reads_step({ step: "2" }), getLocale())
+      ])
+    );
+    // Fixed text only.
+    expect(readsLabel(withQuestion("Läs policyn noga."), 3, numberOf)).toBe(
+      m.ai_builder_reads_own_text()
     );
   });
 

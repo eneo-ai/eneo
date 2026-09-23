@@ -266,7 +266,52 @@
   // scoped review's target is the featured card, so the list leaves it out.
   let showUnchanged = $state(false);
   let requestExpanded = $state(false);
-  const diagramSteps = $derived(indexedSteps);
+  // A long flow reads like a long diff: the changed steps with one step of
+  // context on each side (what feeds them, what reads them), and every other
+  // run of unchanged steps folded into one row the reader can open.
+  type DiagramRow =
+    | { kind: "step"; step: StepSpec; index: number }
+    | { kind: "gap"; key: string; first: number; last: number };
+  const openGaps = new SvelteSet<string>();
+  let diagramListEl = $state<HTMLOListElement | null>(null);
+  // The button goes away with its row, so focus moves to the first step it showed.
+  async function openGap(key: string, first: number) {
+    openGaps.add(key);
+    await tick();
+    diagramListEl?.querySelector<HTMLElement>(`[data-diagram-step="${first}"]`)?.focus();
+  }
+  const diagramRows = $derived.by((): DiagramRow[] => {
+    const all = indexedSteps.map(({ step, index }) => ({ kind: "step" as const, step, index }));
+    const changed = all.filter(({ step }) => changeBadge(step) !== null).map(({ index }) => index);
+    if (isCreateMode || changed.length === 0) return all;
+    const context = new Set(changed.flatMap((index) => [index - 1, index, index + 1]));
+    const rows: DiagramRow[] = [];
+    let run: typeof all = [];
+    const endRun = () => {
+      const key = run[0]?.step.plan_step_ref;
+      if (run.length >= 2 && !openGaps.has(key)) {
+        rows.push({
+          kind: "gap",
+          key,
+          first: run[0].index + 1,
+          last: run[run.length - 1].index + 1
+        });
+      } else {
+        rows.push(...run);
+      }
+      run = [];
+    };
+    for (const row of all) {
+      if (context.has(row.index)) {
+        endRun();
+        rows.push(row);
+      } else {
+        run.push(row);
+      }
+    }
+    endRun();
+    return rows;
+  });
   const listableSteps = $derived(
     isScopedStepReview ? indexedSteps.filter(({ step }) => !isScopedTargetStep(step)) : indexedSteps
   );
@@ -522,6 +567,12 @@
   // ---- Disclosures ---------------------------------------------------------
 
   let whyOpen = $state(false);
+  // Only a request long enough to be cut is clamped, and then always with the
+  // control that opens it: nothing of what the reader asked for hides silently.
+  const requestIsLong = $derived.by(() => {
+    const request = service.latestUserRequest ?? "";
+    return request.length > 240 || request.split("\n").length > 6;
+  });
   let limitsOpen = $state(false);
   let basisOpen = $state(false);
 
@@ -833,7 +884,16 @@
 
   let approveDialogOpen = $state(false);
   let changeOpen = $state(false);
-  let changeScope = $state<{ step: StepSpec; stepNumber: number } | null>(null);
+  let chosenChangeScope = $state<{ step: StepSpec; stepNumber: number } | null>(null);
+  // A one-step review keeps its follow-ups on that step: the box starts
+  // scoped to it, and clearing the chip is how the reader widens it.
+  let scopeWidened = $state(false);
+  const changeScope = $derived(
+    chosenChangeScope ??
+      (scopedTargetStep && !scopeWidened
+        ? { step: scopedTargetStep, stepNumber: scopedTargetIndex + 1 }
+        : null)
+  );
   let changeRequestRef = $state<BuilderChangeRequest | undefined>();
 
   const changeScopeLabel = $derived(
@@ -844,13 +904,17 @@
         })
       : null
   );
+  function clearChangeScope() {
+    chosenChangeScope = null;
+    scopeWidened = true;
+  }
 
   const isLocked = $derived(
     service.isBusy || service.isRevisingPlan || createOutcomeUnknown || service.conflict !== null
   );
 
   function scopeChangeToStep(step: StepSpec, stepNumber: number) {
-    changeScope = { step, stepNumber };
+    chosenChangeScope = { step, stepNumber };
     changeOpen = true;
     void changeRequestRef?.focusInput();
   }
@@ -875,7 +939,8 @@
     const editContext = editContextForChange();
     if (!editContext) return;
     changeOpen = false;
-    changeScope = null;
+    chosenChangeScope = null;
+    scopeWidened = false;
     void service.sendMessage(text, undefined, undefined, editContext);
   }
 
@@ -1366,191 +1431,255 @@
                     </ul>
                   </section>
                 {/if}
-                <article aria-labelledby="builder-flow-heading">
-                  <!-- How the flow works: the diagram, or a card per step -->
-                  <Tabs.Root value={stepsView} onValueChange={handleStepsViewChange}>
-                    <div class="flex flex-wrap items-center gap-2.5 px-6 pt-5 pb-1.5 max-sm:px-4">
-                      <h3 id="builder-flow-heading" class="text-primary text-[0.9375rem] font-bold">
-                        {isCreateMode
-                          ? m.ai_builder_how_flow_works()
-                          : m.ai_builder_flow_card_title_edit()}
-                      </h3>
-                      {#if stepChangeCounts && !isScopedStepReview}
-                        <ul class="flex list-none flex-wrap items-center gap-1.5 p-0">
-                          {#each diffCounters as counter (counter.key)}
-                            <li
-                              class="border-default bg-primary text-secondary inline-flex h-[1.625rem] items-center gap-1.5 rounded-full border px-2.5 text-xs"
-                            >
-                              <span
-                                class="size-[0.4375rem] rounded-full {counter.tone}"
-                                aria-hidden="true"
-                              ></span>
-                              {(counter.count === 1 ? counter.one : counter.other)({
-                                count: String(counter.count)
-                              })}
-                            </li>
-                          {/each}
-                        </ul>
-                      {/if}
-                      <Tabs.List class="ml-auto h-9">
-                        <Tabs.Trigger value="diagram" class="px-3 py-1 text-xs">
-                          {m.ai_builder_canvas_tab_diagram()}
-                        </Tabs.Trigger>
-                        <Tabs.Trigger value="details" class="px-3 py-1 text-xs">
-                          {m.ai_builder_canvas_tab_details()}
-                        </Tabs.Trigger>
-                      </Tabs.List>
-                    </div>
-
-                    <Tabs.Content value="diagram" class="px-6 pt-3 pb-6 max-sm:px-4">
-                      {#if reviewCheckpointSteps.length > 0}
-                        <div
-                          class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mx-auto mb-3 flex max-w-[47.5rem] flex-wrap items-baseline gap-1.5 rounded-lg border px-3 py-2 text-xs"
-                        >
-                          <span class="text-pretty">
-                            {m.ai_builder_review_checkpoint_note({
-                              count: reviewCheckpointSteps.length
-                            })}
-                          </span>
-                          {#each reviewCheckpointSteps as { step, index } (step.plan_step_ref)}
-                            <button
-                              type="button"
-                              class="bg-warning-default/20 text-warning-stronger focus-visible:ring-warning-stronger inline-flex min-h-7 items-center rounded-full px-2 text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none"
-                              onclick={() => void revealStep(step)}
-                            >
-                              {m.ai_builder_step_label({ step: index + 1 })}
-                            </button>
-                          {/each}
-                        </div>
-                      {/if}
-
-                      <ol class="mx-auto my-0 flex max-w-[43.75rem] list-none flex-col p-0">
-                        {#if flowInputLabel}
-                          <li
-                            class="border-dimmer bg-secondary flex items-center gap-2.5 rounded-[9px] border px-3 py-2.5"
+                {#snippet flowDiagram()}
+                  {#if reviewCheckpointSteps.length > 0}
+                    <div
+                      class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mx-auto mb-3 flex max-w-[47.5rem] flex-wrap items-baseline gap-1.5 rounded-lg border px-3 py-2 text-xs"
+                    >
+                      <span class="text-pretty">
+                        {m.ai_builder_review_checkpoint_note({
+                          count: reviewCheckpointSteps.length
+                        })}
+                      </span>
+                      {#each reviewCheckpointSteps as { step, index } (step.plan_step_ref)}
+                        {#if isScopedStepReview && !isScopedTargetStep(step)}
+                          <!-- A one-step review has no step list to open it in. -->
+                          <span
+                            class="bg-warning-default/20 text-warning-stronger inline-flex min-h-7 items-center rounded-full px-2 text-xs font-semibold"
                           >
-                            <span class="text-secondary text-xs font-bold tracking-[0.04em]">
-                              {m.ai_builder_flow_in()}
-                            </span>
-                            <span class="text-primary text-[0.8125rem] font-semibold">
-                              {m.ai_builder_flow_in_value({ type: flowInputLabel })}
-                            </span>
-                          </li>
+                            {m.ai_builder_step_label({ step: index + 1 })}
+                          </span>
+                        {:else}
+                          <button
+                            type="button"
+                            class="bg-warning-default/20 text-warning-stronger focus-visible:ring-warning-stronger inline-flex min-h-7 items-center rounded-full px-2 text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none"
+                            onclick={() => void revealStep(step)}
+                          >
+                            {m.ai_builder_step_label({ step: index + 1 })}
+                          </button>
                         {/if}
-                        {#each diagramSteps as { step, index } (step.plan_step_ref)}
-                          <li>
-                            <div
-                              class="border-stronger mx-auto h-3.5 w-px border-l"
-                              aria-hidden="true"
-                            ></div>
-                            <BuilderStepNode
-                              stepNumber={index + 1}
-                              name={step.name}
-                              detail={nodeDetail(step, index + 1)}
-                              modeLabel={nodeModeLabel(step)}
-                              pausesForReview={pausesForReview(step)}
-                              perFile={perFileStepRefs.has(step.plan_step_ref)}
-                              changeBadge={changeBadge(step)}
-                              quiet={!isCreateMode && changeBadge(step) === null}
-                            />
-                          </li>
-                        {/each}
-                        {#if flowOutputLabel}
-                          <li>
-                            <div
-                              class="border-stronger mx-auto h-3.5 w-px border-l"
-                              aria-hidden="true"
-                            ></div>
-                            <div
-                              class="border-dimmer bg-secondary flex items-center gap-2.5 rounded-[9px] border px-3 py-2.5"
-                            >
-                              <span class="text-secondary text-xs font-bold tracking-[0.04em]">
-                                {m.ai_builder_flow_out()}
-                              </span>
-                              <span class="text-primary text-[0.8125rem] font-semibold">
-                                {m.ai_builder_flow_out_value({ type: flowOutputLabel })}
-                              </span>
-                            </div>
-                          </li>
-                        {/if}
-                      </ol>
-                    </Tabs.Content>
+                      {/each}
+                    </div>
+                  {/if}
 
-                    <Tabs.Content value="details" class="px-6 pt-3 pb-6 max-sm:px-4">
-                      <ol bind:this={detailsListEl} class="my-0 flex list-none flex-col gap-2 p-0">
-                        {#each detailSteps as { step, index } (step.plan_step_ref)}
-                          <li data-plan-step-ref={step.plan_step_ref}>
-                            <BuilderStepDetails
-                              {step}
-                              stepNumber={index + 1}
-                              open={openStepRefs.has(step.plan_step_ref)}
-                              onopenchange={(open) => setStepOpen(step, open)}
-                              detail={nodeDetail(step, index + 1)}
-                              modelLabel={modelLabel(step)}
-                              changeBadge={changeBadge(step)}
-                              quiet={!isCreateMode && changeBadge(step) === null}
-                              fieldChanges={stepFieldChanges(step)}
-                              pausesForReview={pausesForReview(step)}
-                              perFile={perFileStepRefs.has(step.plan_step_ref)}
-                              canRequestChange={plan.status === "proposed"}
-                              resolveInputStepLabel={resolveExecutionStepLabel}
-                              resolveStepNumber={planStepNumber}
-                              onrequestchange={() => scopeChangeToStep(step, index + 1)}
-                              buildDiagnosticReport={() =>
-                                buildAIBuilderDiagnosticReport({
-                                  kind: "quality",
-                                  surface: "step_quality",
-                                  issue_kind: AIBuilderIssueKind.Other,
-                                  session: diagnosticSession,
-                                  plan: diagnosticPlan,
-                                  step: {
-                                    plan_step_ref: step.plan_step_ref,
-                                    step_name: step.name,
-                                    step_number: index + 1,
-                                    input_type: step.input_type,
-                                    output_type: step.output_type
-                                  },
-                                  details: { actual_output_type: step.output_type }
-                                })}
-                            />
-                          </li>
-                        {/each}
-                      </ol>
-                      {#if unchangedStepCountInList > 0}
-                        <!-- What the list leaves out, said where it is left out. -->
-                        <p
-                          class="text-secondary mt-3 flex flex-wrap items-baseline gap-x-2 text-[0.8125rem]"
-                        >
-                          {#if hiddenUnchangedSteps.length > 0}
+                  <ol
+                    bind:this={diagramListEl}
+                    class="mx-auto my-0 flex max-w-[43.75rem] list-none flex-col p-0"
+                  >
+                    {#if flowInputLabel}
+                      <li
+                        class="border-dimmer bg-secondary flex items-center gap-2.5 rounded-[9px] border px-3 py-2.5"
+                      >
+                        <span class="text-secondary text-xs font-bold tracking-[0.04em]">
+                          {m.ai_builder_flow_in()}
+                        </span>
+                        <span class="text-primary text-[0.8125rem] font-semibold">
+                          {m.ai_builder_flow_in_value({ type: flowInputLabel })}
+                        </span>
+                      </li>
+                    {/if}
+                    {#each diagramRows as row (row.kind === "gap" ? `gap-${row.key}` : row.step.plan_step_ref)}
+                      {#if row.kind === "gap"}
+                        <li>
+                          <div
+                            class="border-stronger mx-auto h-3.5 w-px border-l"
+                            aria-hidden="true"
+                          ></div>
+                          <div
+                            class="border-default text-secondary flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[10px] border border-dashed px-3.5 py-2.5 text-[0.8125rem]"
+                          >
                             <span>
-                              {hiddenUnchangedSteps.length === 1
-                                ? m.ai_builder_review_unchanged_hidden_one()
-                                : m.ai_builder_review_unchanged_hidden({
-                                    count: String(hiddenUnchangedSteps.length)
-                                  })}
+                              {m.ai_builder_diagram_gap({
+                                first: String(row.first),
+                                last: String(row.last)
+                              })}
                             </span>
                             <Button
                               variant="link"
                               size="xs"
-                              class="text-accent-stronger h-auto p-0 font-semibold underline underline-offset-2"
-                              onclick={() => (showUnchanged = true)}
+                              class="text-accent-stronger ml-auto h-auto p-0 font-semibold underline underline-offset-2"
+                              onclick={() => void openGap(row.key, row.first)}
                             >
                               {m.ai_builder_review_unchanged_show()}
                             </Button>
-                          {:else}
-                            <Button
-                              variant="link"
-                              size="xs"
-                              class="text-accent-stronger h-auto p-0 font-semibold underline underline-offset-2"
-                              onclick={() => (showUnchanged = false)}
-                            >
-                              {m.ai_builder_review_unchanged_hide()}
-                            </Button>
-                          {/if}
-                        </p>
+                          </div>
+                        </li>
+                      {:else}
+                        {@const { step, index } = row}
+                        <li
+                          data-diagram-step={index + 1}
+                          tabindex="-1"
+                          class="focus-visible:ring-accent-stronger rounded-[10px] outline-none focus-visible:ring-2"
+                        >
+                          <div
+                            class="border-stronger mx-auto h-3.5 w-px border-l"
+                            aria-hidden="true"
+                          ></div>
+                          <BuilderStepNode
+                            stepNumber={index + 1}
+                            name={step.name}
+                            detail={nodeDetail(step, index + 1)}
+                            modeLabel={nodeModeLabel(step)}
+                            pausesForReview={pausesForReview(step)}
+                            perFile={perFileStepRefs.has(step.plan_step_ref)}
+                            changeBadge={changeBadge(step)}
+                            quiet={!isCreateMode && changeBadge(step) === null}
+                          />
+                        </li>
                       {/if}
-                    </Tabs.Content>
-                  </Tabs.Root>
+                    {/each}
+                    {#if flowOutputLabel}
+                      <li>
+                        <div
+                          class="border-stronger mx-auto h-3.5 w-px border-l"
+                          aria-hidden="true"
+                        ></div>
+                        <div
+                          class="border-dimmer bg-secondary flex items-center gap-2.5 rounded-[9px] border px-3 py-2.5"
+                        >
+                          <span class="text-secondary text-xs font-bold tracking-[0.04em]">
+                            {m.ai_builder_flow_out()}
+                          </span>
+                          <span class="text-primary text-[0.8125rem] font-semibold">
+                            {m.ai_builder_flow_out_value({ type: flowOutputLabel })}
+                          </span>
+                        </div>
+                      </li>
+                    {/if}
+                  </ol>
+                {/snippet}
+                <article aria-labelledby="builder-flow-heading">
+                  <!-- How the flow works: the diagram, or a card per step. A one-step
+                       review shows the diagram alone: its step is shown above and
+                       every other step is unchanged, so a step list would be empty. -->
+                  {#if isScopedStepReview}
+                    <div class="px-6 pt-5 pb-1.5 max-sm:px-4">
+                      <h3 id="builder-flow-heading" class="text-primary text-[0.9375rem] font-bold">
+                        {m.ai_builder_flow_card_title_edit()}
+                      </h3>
+                    </div>
+                    <div class="px-6 pt-3 pb-6 max-sm:px-4">{@render flowDiagram()}</div>
+                  {:else}
+                    <Tabs.Root value={stepsView} onValueChange={handleStepsViewChange}>
+                      <div class="flex flex-wrap items-center gap-2.5 px-6 pt-5 pb-1.5 max-sm:px-4">
+                        <h3
+                          id="builder-flow-heading"
+                          class="text-primary text-[0.9375rem] font-bold"
+                        >
+                          {isCreateMode
+                            ? m.ai_builder_how_flow_works()
+                            : m.ai_builder_flow_card_title_edit()}
+                        </h3>
+                        {#if stepChangeCounts && !isScopedStepReview}
+                          <ul class="flex list-none flex-wrap items-center gap-1.5 p-0">
+                            {#each diffCounters as counter (counter.key)}
+                              <li
+                                class="border-default bg-primary text-secondary inline-flex h-[1.625rem] items-center gap-1.5 rounded-full border px-2.5 text-xs"
+                              >
+                                <span
+                                  class="size-[0.4375rem] rounded-full {counter.tone}"
+                                  aria-hidden="true"
+                                ></span>
+                                {(counter.count === 1 ? counter.one : counter.other)({
+                                  count: String(counter.count)
+                                })}
+                              </li>
+                            {/each}
+                          </ul>
+                        {/if}
+                        <Tabs.List class="ml-auto h-9">
+                          <Tabs.Trigger value="diagram" class="px-3 py-1 text-xs">
+                            {m.ai_builder_canvas_tab_diagram()}
+                          </Tabs.Trigger>
+                          <Tabs.Trigger value="details" class="px-3 py-1 text-xs">
+                            {m.ai_builder_canvas_tab_details()}
+                          </Tabs.Trigger>
+                        </Tabs.List>
+                      </div>
+
+                      <Tabs.Content value="diagram" class="px-6 pt-3 pb-6 max-sm:px-4">
+                        {@render flowDiagram()}
+                      </Tabs.Content>
+
+                      <Tabs.Content value="details" class="px-6 pt-3 pb-6 max-sm:px-4">
+                        <ol
+                          bind:this={detailsListEl}
+                          class="my-0 flex list-none flex-col gap-2 p-0"
+                        >
+                          {#each detailSteps as { step, index } (step.plan_step_ref)}
+                            <li data-plan-step-ref={step.plan_step_ref}>
+                              <BuilderStepDetails
+                                {step}
+                                stepNumber={index + 1}
+                                open={openStepRefs.has(step.plan_step_ref)}
+                                onopenchange={(open) => setStepOpen(step, open)}
+                                detail={nodeDetail(step, index + 1)}
+                                modelLabel={modelLabel(step)}
+                                changeBadge={changeBadge(step)}
+                                quiet={!isCreateMode && changeBadge(step) === null}
+                                fieldChanges={stepFieldChanges(step)}
+                                pausesForReview={pausesForReview(step)}
+                                perFile={perFileStepRefs.has(step.plan_step_ref)}
+                                canRequestChange={plan.status === "proposed"}
+                                resolveInputStepLabel={resolveExecutionStepLabel}
+                                resolveStepNumber={planStepNumber}
+                                onrequestchange={() => scopeChangeToStep(step, index + 1)}
+                                buildDiagnosticReport={() =>
+                                  buildAIBuilderDiagnosticReport({
+                                    kind: "quality",
+                                    surface: "step_quality",
+                                    issue_kind: AIBuilderIssueKind.Other,
+                                    session: diagnosticSession,
+                                    plan: diagnosticPlan,
+                                    step: {
+                                      plan_step_ref: step.plan_step_ref,
+                                      step_name: step.name,
+                                      step_number: index + 1,
+                                      input_type: step.input_type,
+                                      output_type: step.output_type
+                                    },
+                                    details: { actual_output_type: step.output_type }
+                                  })}
+                              />
+                            </li>
+                          {/each}
+                        </ol>
+                        {#if unchangedStepCountInList > 0}
+                          <!-- What the list leaves out, said where it is left out. -->
+                          <p
+                            class="text-secondary mt-3 flex flex-wrap items-baseline gap-x-2 text-[0.8125rem]"
+                          >
+                            {#if hiddenUnchangedSteps.length > 0}
+                              <span>
+                                {hiddenUnchangedSteps.length === 1
+                                  ? m.ai_builder_review_unchanged_hidden_one()
+                                  : m.ai_builder_review_unchanged_hidden({
+                                      count: String(hiddenUnchangedSteps.length)
+                                    })}
+                              </span>
+                              <Button
+                                variant="link"
+                                size="xs"
+                                class="text-accent-stronger h-auto p-0 font-semibold underline underline-offset-2"
+                                onclick={() => (showUnchanged = true)}
+                              >
+                                {m.ai_builder_review_unchanged_show()}
+                              </Button>
+                            {:else}
+                              <Button
+                                variant="link"
+                                size="xs"
+                                class="text-accent-stronger h-auto p-0 font-semibold underline underline-offset-2"
+                                onclick={() => (showUnchanged = false)}
+                              >
+                                {m.ai_builder_review_unchanged_hide()}
+                              </Button>
+                            {/if}
+                          </p>
+                        {/if}
+                      </Tabs.Content>
+                    </Tabs.Root>
+                  {/if}
                 </article>
                 {#if spec.form_fields && spec.form_fields.length > 0}
                   <section class="px-6 py-5 max-sm:px-4">
@@ -1590,7 +1719,7 @@
                     scopeLabel={changeScopeLabel}
                     disabled={isLocked || !service.canSendMessage}
                     sendBlockedReason={service.modelSendBlockMessage}
-                    onclearscope={() => (changeScope = null)}
+                    onclearscope={clearChangeScope}
                     onsend={handleChangeSend}
                   />
                 </div>
@@ -1791,11 +1920,11 @@
                   </h3>
                   <p
                     class="text-primary text-[0.8125rem] leading-relaxed break-words whitespace-pre-wrap"
-                    class:line-clamp-6={!requestExpanded}
+                    class:line-clamp-6={requestIsLong && !requestExpanded}
                   >
                     <q>{service.latestUserRequest}</q>
                   </p>
-                  {#if service.latestUserRequest.length > 280}
+                  {#if requestIsLong}
                     <Button
                       variant="link"
                       size="xs"
