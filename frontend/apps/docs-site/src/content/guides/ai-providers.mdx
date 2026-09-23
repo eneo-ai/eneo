@@ -149,7 +149,11 @@ Before you start, make sure the model server is reachable from the Eneo backend 
 
 1. **Add the server as a provider.** In **Admin → Models**, add a provider of type **vLLM**. Set **Endpoint** to the server's root URL, for example `http://vadsa:8000`, and **API Key** to one of the server's keys. For vadsa, use one of the keys in `VADSA_API_KEYS`.
 2. **Add the transcription model.** Add a transcription model on that provider, with the name the server serves as its identifier. For vadsa, the identifier is `KlangAI/pianissimo-sv` unless `VADSA_SERVED_MODEL_NAME` sets another name.
-3. **Mark the model for live transcription.** Look up the model's `id` with `GET /api/v1/transcription-models/`, then set `supports_realtime`:
+3. **Mark the model for live transcription.** In **Admin → Models → Transcription models**, open the model's actions menu (the **⋯** button) and choose **Edit model**. Select **Live transcription** and choose **Save**. You can also select it in the model step while you add the model. In the Swedish interface the path is **Administratör → Modeller → Transkription**, then **Redigera modell**, and the checkbox is **Livetranskribering**.
+
+   The checkbox is available only for a model on a provider of type vLLM. For any other provider it is disabled, with the note "Requires a provider of type vLLM." After you save, the model's **Details** column (**Detaljer**) in the table shows the live transcription icon, a sound wave with the tooltip "The model can write out speech while someone is talking".
+
+   To automate this step, set `supports_realtime` through the admin API instead. Look up the model's `id` with `GET /api/v1/transcription-models/`, then:
 
    ```bash
    curl -X PUT "https://eneo.example.com/api/v1/admin/tenant-models/transcription/$MODEL_ID/" \
@@ -158,7 +162,7 @@ Before you start, make sure the model server is reachable from the Eneo backend 
      -d '{"supports_realtime": true}'
    ```
 
-   Only a provider of type vLLM qualifies. For any other provider, Eneo answers `400`. You can also send `"supports_realtime": true` when you create the model with `POST /api/v1/admin/tenant-models/transcription/`.
+   The API applies the same rule: for a provider that is not of type vLLM, Eneo answers `400`. You can also send `"supports_realtime": true` when you create the model with `POST /api/v1/admin/tenant-models/transcription/`.
 
 4. **Use the model in a flow.** Enable the model in the space settings under **Transcription models**, choose it as the flow's transcription model, and publish the flow.
 5. **Check the flow.** Request `GET /api/v1/flows/{id}/run-contract/`. The response contains `"live": { "available": true, "reason": null }` inside `transcription`.
