@@ -549,7 +549,7 @@
           </Card.Root>
           <WidgetSnippet widget={current} {release} origin={page.url.origin} />
           <WidgetLiveTest widget={current} {eneo} />
-          <WidgetUsage widget={current} {eneo} />
+          <WidgetUsage widget={current} {eneo} visible={tab.value === "publish"} />
         </Tabs.Content>
       </div>
 

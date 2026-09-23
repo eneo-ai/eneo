@@ -1,7 +1,7 @@
 <!-- Daily usage of a widget and how much of today's token budget is spent. -->
 <script lang="ts">
   import type { Eneo, Widget, WidgetUsage } from "@eneo/eneo-js";
-  import { onMount } from "svelte";
+  import { untrack } from "svelte";
   import * as Table from "$lib/components/ui/table/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -9,9 +9,11 @@
   type Props = {
     widget: Widget;
     eneo: Eneo;
+    /** Whether the card is on screen; it is fetched afresh each time it comes into view. */
+    visible?: boolean;
   };
 
-  let { widget, eneo }: Props = $props();
+  let { widget, eneo, visible = true }: Props = $props();
 
   let usage = $state<WidgetUsage | null>(null);
   let failed = $state(false);
@@ -38,12 +40,31 @@
     )
   );
 
-  onMount(async () => {
+  let requests = 0;
+  async function load() {
+    const request = ++requests;
     try {
-      usage = await eneo.widgets.usage({ id: widget.id, days: 14 });
+      const answer = await eneo.widgets.usage({ id: widget.id, days: 14 });
+      if (request !== requests) return;
+      usage = answer;
+      failed = false;
     } catch {
-      failed = true;
+      if (request === requests) failed = true;
     }
+  }
+
+  // The budget in force is the server's (the policy may cap it), so a saved
+  // change is fetched again rather than shown from the widget.
+  let fetchedFor: string | null = null;
+  $effect(() => {
+    if (!visible) {
+      fetchedFor = null;
+      return;
+    }
+    const key = `${widget.id} ${widget.limits.daily_token_budget} ${widget.updated_at}`;
+    if (key === fetchedFor) return;
+    fetchedFor = key;
+    untrack(load);
   });
 </script>
 

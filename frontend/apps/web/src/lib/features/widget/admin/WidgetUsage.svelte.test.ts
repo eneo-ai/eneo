@@ -77,3 +77,41 @@ describe("WidgetUsage totals", () => {
     await expect.element(page.getByText(/widget_admin_usage_unhelpful_total\(0\)/)).toBeVisible();
   });
 });
+
+describe("WidgetUsage freshness", () => {
+  test("a hidden card is fetched when it comes into view, and again each time", async () => {
+    const fetchUsage = vi.fn(async () => usage());
+    const eneo = { widgets: { usage: fetchUsage } } as unknown as Eneo;
+    const screen = render(WidgetUsage, { widget, eneo, visible: false });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(fetchUsage).not.toHaveBeenCalled();
+
+    await screen.rerender({ visible: true });
+    await vi.waitFor(() => expect(fetchUsage).toHaveBeenCalledTimes(1));
+    await screen.rerender({ visible: false });
+    await screen.rerender({ visible: true });
+    await vi.waitFor(() => expect(fetchUsage).toHaveBeenCalledTimes(2));
+  });
+
+  test("a saved budget change shows the budget in force, not the old one", async () => {
+    const fetchUsage = vi
+      .fn()
+      .mockResolvedValueOnce(usage({ daily_token_budget: 4000 }))
+      .mockResolvedValueOnce(usage({ daily_token_budget: 8000 }));
+    const eneo = { widgets: { usage: fetchUsage } } as unknown as Eneo;
+    const screen = render(WidgetUsage, { widget, eneo });
+    await expect.element(page.getByText(/widget_admin_budget_used\(0\|4\s000\)/)).toBeVisible();
+
+    // A new copy of the same saved widget is not news.
+    await screen.rerender({ widget: { ...widget } });
+    await screen.rerender({
+      widget: {
+        ...widget,
+        limits: { daily_token_budget: 8000 },
+        updated_at: "2026-09-21T10:05:00Z"
+      } as unknown as Widget
+    });
+    await expect.element(page.getByText(/widget_admin_budget_used\(0\|8\s000\)/)).toBeVisible();
+    expect(fetchUsage).toHaveBeenCalledTimes(2);
+  });
+});

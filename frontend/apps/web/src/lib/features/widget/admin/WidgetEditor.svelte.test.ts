@@ -65,11 +65,12 @@ function renderEditor(current: Widget, assistant: Partial<Assistant> = {}) {
     ...current,
     ...patch
   }));
+  const usage = vi.fn(() => new Promise(() => {}));
   const eneo = {
     widgets: {
       update,
       previewToken: vi.fn(() => new Promise(() => {})),
-      usage: vi.fn(() => new Promise(() => {}))
+      usage
     }
   } as unknown as Eneo;
   render(WidgetEditor, {
@@ -85,7 +86,7 @@ function renderEditor(current: Widget, assistant: Partial<Assistant> = {}) {
     policy: null,
     release: null
   });
-  return { update };
+  return { update, usage };
 }
 
 describe("WidgetEditor", () => {
@@ -219,6 +220,14 @@ describe("WidgetEditor", () => {
           .getByText("widget_admin_visitor_access_hidden")
       )
       .toBeVisible();
+  });
+
+  test("usage is fetched when the Publish tab is opened, not while it is hidden", async () => {
+    const { usage } = renderEditor(widget());
+    await expect.element(page.getByRole("tab", { name: /widget_admin_tab_content/ })).toBeVisible();
+    expect(usage).not.toHaveBeenCalled();
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_publish/ }));
+    await vi.waitFor(() => expect(usage).toHaveBeenCalledTimes(1));
   });
 
   test("a linked template that locks nothing says so, not that nobody follows it", async () => {
