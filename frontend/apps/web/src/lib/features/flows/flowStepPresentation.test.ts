@@ -8,7 +8,6 @@ import {
   getRecommendedDisplayedInputType,
   getRuntimeFileOriginKind,
   getSourceHintKind,
-  getStepSummaryModel,
   sortSelectableInputTypeOptionsForDisplay,
   flowGraphLayoutKey
 } from "./flowStepPresentation";
@@ -163,43 +162,6 @@ describe("getRuntimeFileOriginKind", () => {
     expect(getRuntimeFileOriginKind({ needsFileUpload: false, hasFlowInputStep: false })).toBe(
       "no_runtime_upload"
     );
-  });
-});
-
-describe("getStepSummaryModel", () => {
-  it("summarizes source, output, downstream channel, and context badges", () => {
-    const summary = getStepSummaryModel({
-      step: {
-        step_order: 2,
-        input_source: "previous_step",
-        input_type: "json",
-        output_type: "pdf",
-        output_mode: "pass_through",
-        user_description: "Render"
-      },
-      previousStep: {
-        step_order: 1,
-        input_source: "flow_input",
-        input_type: "text",
-        output_type: "json",
-        output_mode: "pass_through",
-        user_description: "Extract"
-      },
-      hasInputTemplateOverride: true,
-      hasKnowledge: true,
-      hasAttachments: false
-    });
-
-    expect(summary).toMatchObject({
-      sourceKind: "previous_step_json",
-      sourceStepOrder: 1,
-      inputFormat: "json",
-      outputFormat: "pdf",
-      downstreamKind: "text",
-      usesInputTemplate: true,
-      hasKnowledge: true,
-      hasAttachments: false
-    });
   });
 });
 

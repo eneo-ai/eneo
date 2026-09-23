@@ -19,8 +19,8 @@
   import { IconChevronRight } from "@eneo/icons/chevron-right";
   import MousePointerClick from "lucide-svelte/icons/mouse-pointer-click";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import * as Empty from "$lib/components/ui/empty/index.js";
-  import { Separator } from "$lib/components/ui/separator/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
@@ -42,7 +42,6 @@
   import {
     getOutputHintKind,
     getSourceHintKind,
-    getStepSummaryModel,
     sortSelectableInputTypeOptionsForDisplay
   } from "$lib/features/flows/flowStepPresentation";
   import { buildNextFlowPrompt } from "$lib/features/flows/flowPromptDraft";
@@ -67,7 +66,6 @@
   } from "$lib/features/flows/flowVariableTokens";
   import {
     getInputBindingQuestion,
-    hasInputBindingSourceRefs,
     setInputBindingQuestion,
     setInputBindingSourceRefs,
     type FlowInputBindingSourceRef
@@ -121,7 +119,6 @@
   } from "./advancedJsonDrafts";
 
   // Sub-components
-  import FlowStepSummaryCard from "./FlowStepSummaryCard.svelte";
   import FlowStepInputSection from "./FlowStepInputSection.svelte";
   import FlowStepBehaviorSection from "./FlowStepBehaviorSection.svelte";
   import FlowStepContextSection from "./FlowStepContextSection.svelte";
@@ -249,6 +246,23 @@
     activeStepNavIndex >= 0 && activeStepNavIndex < orderedStepsForNav.length - 1
       ? orderedStepsForNav[activeStepNavIndex + 1]
       : null
+  );
+  function stepNavName(step: FlowStep | null | undefined): string {
+    if (!step) return "";
+    return (
+      step.user_description?.trim() ||
+      m.flow_step_fallback_label({ order: String(step.step_order) })
+    );
+  }
+  const previousNavLabel = $derived(
+    previousStepForNav
+      ? m.flow_step_go_previous_named({ name: stepNavName(previousStepForNav) })
+      : m.flow_step_go_previous()
+  );
+  const nextNavLabel = $derived(
+    nextStepForNav
+      ? m.flow_step_go_next_named({ name: stepNavName(nextStepForNav) })
+      : m.flow_step_go_next()
   );
 
   const httpVariableContext = $derived(
@@ -770,20 +784,7 @@
     activeStep ? getInputBindingQuestion(activeStep.input_bindings) : ""
   );
   const hasInputTemplateOverride = $derived(inputTemplateText.trim().length > 0);
-  const hasTypedInputSources = $derived(
-    activeStep ? hasInputBindingSourceRefs(activeStep.input_bindings) : false
-  );
-  const stepSummaryModel = $derived(
-    activeStep
-      ? getStepSummaryModel({
-          step: activeStep,
-          previousStep,
-          hasInputTemplateOverride: hasInputTemplateOverride || hasTypedInputSources,
-          hasKnowledge: hasKnowledgeSelections,
-          hasAttachments: hasAttachmentSelections
-        })
-      : null
-  );
+
   let revealInputTemplateInUserMode = $state(false);
   const canRevealInputTemplate = $derived(
     !isTranscribeOnly && activeStep !== null && !isAdvancedMode
@@ -944,27 +945,34 @@
                 })}
               </span>
               {#if steps.length > 1}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="size-7"
-                  disabled={!previousStepForNav}
-                  aria-label={m.flow_step_go_previous()}
-                  onclick={() =>
-                    previousStepForNav?.id && flowEditor.selectStep(previousStepForNav.id)}
-                >
-                  <IconChevronRight class="size-3.5 rotate-180" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="size-7"
-                  disabled={!nextStepForNav}
-                  aria-label={m.flow_step_go_next()}
-                  onclick={() => nextStepForNav?.id && flowEditor.selectStep(nextStepForNav.id)}
-                >
-                  <IconChevronRight class="size-3.5" />
-                </Button>
+                <!-- Quick jumps; each names where it goes. The same moves sit
+                     at the end of the step, where editing one usually ends. -->
+                <Tooltip.Provider delayDuration={300}>
+                  {#each [{ target: previousStepForNav, label: previousNavLabel, icon: "previous" }, { target: nextStepForNav, label: nextNavLabel, icon: "next" }] as nav (nav.icon)}
+                    <Tooltip.Root>
+                      <Tooltip.Trigger>
+                        {#snippet child({ props })}
+                          <Button
+                            {...props}
+                            variant="ghost"
+                            size="icon"
+                            class="size-8"
+                            disabled={!nav.target}
+                            aria-label={nav.label}
+                            onclick={() => nav.target?.id && flowEditor.selectStep(nav.target.id)}
+                          >
+                            <IconChevronRight
+                              class="size-4 {nav.icon === 'previous' ? 'rotate-180' : ''}"
+                            />
+                          </Button>
+                        {/snippet}
+                      </Tooltip.Trigger>
+                      {#if nav.target}
+                        <Tooltip.Content>{nav.label}</Tooltip.Content>
+                      {/if}
+                    </Tooltip.Root>
+                  {/each}
+                </Tooltip.Provider>
               {/if}
             </span>
             {#if activeStep.user_description}
@@ -986,90 +994,9 @@
             />
           {/if}
         </div>
-        {#if stepSummaryModel}
-          <FlowStepSummaryCard
-            step={activeStep}
-            summaryModel={stepSummaryModel}
-            {previousStep}
-            {isAdvancedMode}
-            {aiInstructionPresent}
-            onFixInstruction={() => {
-              taskRequestOpen++;
-              focusInstructionPending = true;
-            }}
-          />
-          <Separator class="my-2" />
-        {/if}
 
-        <FlowStepChapter
-          title={m.flow_chapter_what()}
-          status={chapterTaskStatus}
-          initialOpen={defaultOpenChapter === "task"}
-          resetKey={activeStepStateKey}
-          requestOpen={taskRequestOpen}
-        >
-          <FlowStepSection>
-            <Settings.Row
-              title={m.flow_step_name()}
-              description=""
-              help={m.flow_step_name_help()}
-              density="compact"
-              fullWidth
-              let:aria
-            >
-              <div class="flex max-w-xl flex-col gap-2">
-                <Input
-                  {...aria}
-                  bind:ref={nameInputEl}
-                  value={activeStep.user_description ?? ""}
-                  placeholder={m.flow_step_name_placeholder()}
-                  disabled={isPublished}
-                  onfocus={() => {
-                    stepNameBeforeEdit = activeStep.user_description ?? "";
-                  }}
-                  oninput={(e) => updateStep("user_description", e.currentTarget.value || null)}
-                  onchange={() => void handleCommittedStepRename()}
-                />
-                {#if shouldShowTemplateBodyTextHint( { steps, activeStep, isTemplateFill, isTranscribeOnly } )}
-                  <p
-                    class="bg-accent-dimmer/30 text-accent-stronger rounded-lg px-3 py-2 text-xs leading-relaxed"
-                  >
-                    {m.flow_template_fill_step_name_hint()}
-                  </p>
-                {/if}
-              </div>
-            </Settings.Row>
-          </FlowStepSection>
-
-          {#if !isTemplateFill && !isTranscribeOnly && outputModeUsesCompletionModel(activeStep.output_mode)}
-            <FlowStepBehaviorSection
-              step={activeStep}
-              {isPublished}
-              {isAdvancedMode}
-              {isTranscribeOnly}
-              instructionMissing={stepAiWork?.missing ?? false}
-              focusInstruction={focusInstructionPending}
-              onInstructionFocused={() => (focusInstructionPending = false)}
-              assistant={assistantState.assistant}
-              assistantLoading={assistantState.loading}
-              onImproveInstructionWithAI={onEditStepWithAI && activeStep.id
-                ? (request) => onEditStepWithAI?.(activeStep, request)
-                : undefined}
-              availableModels={$currentSpace.completion_models}
-              {steps}
-              {formSchema}
-              {transcriptionEnabled}
-              {hasAudioInputSteps}
-              {stepUxCopy}
-              {instructionText}
-              loadPromptVersions={(id) => flowEditor.listAssistantPrompts(id)}
-              onAssistantFieldChange={(detail) => updateAssistantField(detail.field, detail.value)}
-              onInstructionDraft={(detail) => queueInstructionDraft(detail.value)}
-              onInstructionCommit={(detail) => void updateInstruction(detail.value)}
-            />
-          {/if}
-        </FlowStepChapter>
-
+        <!-- In reading order: what the step reads, what the AI does with it,
+             what it gives the next step. -->
         <FlowStepChapter
           title={m.flow_chapter_input()}
           status={chapterInputStatus}
@@ -1176,6 +1103,76 @@
               onInputSourcesChange={(detail) => updateInputSources(detail.sourceRefs)}
               onInputSourceChange={(detail) =>
                 handleInputSourceChange(detail.value as FlowStep["input_source"])}
+            />
+          {/if}
+        </FlowStepChapter>
+
+        <FlowStepChapter
+          title={m.flow_chapter_what()}
+          status={chapterTaskStatus}
+          statusTone={stepAiWork?.missing ? "warning" : "default"}
+          initialOpen={defaultOpenChapter === "task"}
+          resetKey={activeStepStateKey}
+          requestOpen={taskRequestOpen}
+        >
+          <FlowStepSection>
+            <Settings.Row
+              title={m.flow_step_name()}
+              description=""
+              help={m.flow_step_name_help()}
+              density="compact"
+              fullWidth
+              let:aria
+            >
+              <div class="flex max-w-xl flex-col gap-2">
+                <Input
+                  {...aria}
+                  bind:ref={nameInputEl}
+                  value={activeStep.user_description ?? ""}
+                  placeholder={m.flow_step_name_placeholder()}
+                  disabled={isPublished}
+                  onfocus={() => {
+                    stepNameBeforeEdit = activeStep.user_description ?? "";
+                  }}
+                  oninput={(e) => updateStep("user_description", e.currentTarget.value || null)}
+                  onchange={() => void handleCommittedStepRename()}
+                />
+                {#if shouldShowTemplateBodyTextHint( { steps, activeStep, isTemplateFill, isTranscribeOnly } )}
+                  <p
+                    class="bg-accent-dimmer/30 text-accent-stronger rounded-lg px-3 py-2 text-xs leading-relaxed"
+                  >
+                    {m.flow_template_fill_step_name_hint()}
+                  </p>
+                {/if}
+              </div>
+            </Settings.Row>
+          </FlowStepSection>
+
+          {#if !isTemplateFill && !isTranscribeOnly && outputModeUsesCompletionModel(activeStep.output_mode)}
+            <FlowStepBehaviorSection
+              step={activeStep}
+              {isPublished}
+              {isAdvancedMode}
+              {isTranscribeOnly}
+              instructionMissing={stepAiWork?.missing ?? false}
+              focusInstruction={focusInstructionPending}
+              onInstructionFocused={() => (focusInstructionPending = false)}
+              assistant={assistantState.assistant}
+              assistantLoading={assistantState.loading}
+              onImproveInstructionWithAI={onEditStepWithAI && activeStep.id
+                ? (request) => onEditStepWithAI?.(activeStep, request)
+                : undefined}
+              availableModels={$currentSpace.completion_models}
+              {steps}
+              {formSchema}
+              {transcriptionEnabled}
+              {hasAudioInputSteps}
+              {stepUxCopy}
+              {instructionText}
+              loadPromptVersions={(id) => flowEditor.listAssistantPrompts(id)}
+              onAssistantFieldChange={(detail) => updateAssistantField(detail.field, detail.value)}
+              onInstructionDraft={(detail) => queueInstructionDraft(detail.value)}
+              onInstructionCommit={(detail) => void updateInstruction(detail.value)}
             />
           {/if}
         </FlowStepChapter>
@@ -1351,6 +1348,37 @@
               {m.flow_show_in_advanced()}
             </Button>
           </div>
+        {/if}
+
+        {#if steps.length > 1}
+          <nav
+            class="border-default mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-4"
+            aria-label={m.flow_step_nav_label()}
+          >
+            {#if previousStepForNav}
+              <Button
+                variant="outline"
+                class="max-w-[48%]"
+                onclick={() =>
+                  previousStepForNav?.id && flowEditor.selectStep(previousStepForNav.id)}
+              >
+                <IconChevronRight data-icon="inline-start" class="rotate-180" />
+                <span class="truncate">{previousNavLabel}</span>
+              </Button>
+            {:else}
+              <span></span>
+            {/if}
+            {#if nextStepForNav}
+              <Button
+                variant="outline"
+                class="max-w-[48%]"
+                onclick={() => nextStepForNav?.id && flowEditor.selectStep(nextStepForNav.id)}
+              >
+                <span class="truncate">{nextNavLabel}</span>
+                <IconChevronRight data-icon="inline-end" />
+              </Button>
+            {/if}
+          </nav>
         {/if}
       </div>
     </div>

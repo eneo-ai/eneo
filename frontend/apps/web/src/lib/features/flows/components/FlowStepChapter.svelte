@@ -8,6 +8,7 @@
   let {
     title,
     status,
+    statusTone = "default",
     initialOpen = false,
     resetKey,
     requestOpen,
@@ -16,6 +17,8 @@
   }: {
     title: string;
     status?: string;
+    /** "warning" when the summary reports something the step still needs. */
+    statusTone?: "default" | "warning";
     initialOpen?: boolean;
     resetKey?: string | number;
     requestOpen?: number;
@@ -54,7 +57,12 @@
         <span class="text-primary text-[0.9375rem] font-semibold tracking-[-0.005em]">{title}</span>
       </span>
       {#if status && !open}
-        <span class="text-secondary mt-0.5 block truncate text-xs font-normal">{status}</span>
+        <span
+          class={cn(
+            "mt-0.5 block truncate text-xs font-normal",
+            statusTone === "warning" ? "text-warning-stronger font-medium" : "text-secondary"
+          )}>{status}</span
+        >
       {/if}
     </span>
     <ChevronDown

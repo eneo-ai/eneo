@@ -1,5 +1,4 @@
 import type { FlowStep } from "@eneo/eneo-js";
-import { getTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
 import { getFlowStepUnderlag } from "./flowInputBindings";
 import type { SelectableInputTypeOption } from "./flowStepTypes";
 
@@ -29,19 +28,6 @@ export type FlowEdgePayloadKind = "flow_input" | "text" | "structured" | "none";
 
 export type FlowRuntimeFileOriginKind =
   "flow_input_runtime" | "no_runtime_upload" | "static_step_context";
-
-export type FlowStepSummaryModel = {
-  sourceKind: FlowSourceHintKind;
-  sourceStepOrder: number | null;
-  inputFormat: InputType;
-  outputFormat: OutputType;
-  downstreamKind: FlowDownstreamKind;
-  usesInputTemplate: boolean;
-  hasKnowledge: boolean;
-  hasAttachments: boolean;
-  /** The step reads its material section by section (input_config.text_processing). */
-  readsInSections: boolean;
-};
 
 const DISPLAY_PRIORITY_BY_SOURCE: Partial<Record<FlowSourceHintKind, InputType[]>> = {
   previous_step_json: ["json", "text", "any"]
@@ -171,31 +157,6 @@ export function getRuntimeFileOriginKind(params: {
   if (needsFileUpload) return "flow_input_runtime";
   if (!hasFlowInputStep) return "no_runtime_upload";
   return "static_step_context";
-}
-
-export function getStepSummaryModel(params: {
-  step: FlowPresentationStepLike;
-  previousStep?: FlowPresentationStepLike | null;
-  hasInputTemplateOverride: boolean;
-  hasKnowledge: boolean;
-  hasAttachments: boolean;
-}): FlowStepSummaryModel {
-  const { step, previousStep, hasInputTemplateOverride, hasKnowledge, hasAttachments } = params;
-  return {
-    sourceKind: getSourceHintKind({
-      inputSource: step.input_source,
-      previousOutputType: previousStep?.output_type
-    }),
-    sourceStepOrder: previousStep?.step_order ?? null,
-    inputFormat: step.input_type,
-    outputFormat: step.output_type,
-    downstreamKind: getDownstreamKindForOutput(step.output_type),
-    usesInputTemplate: hasInputTemplateOverride,
-    hasKnowledge,
-    hasAttachments,
-    readsInSections:
-      getTextProcessingMode({ input_config: step.input_config ?? null }) === "process_each_section"
-  };
 }
 
 export type FlowGraphTopologyStepLike = Pick<
