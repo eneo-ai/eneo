@@ -113,3 +113,51 @@ function regroup(raw: DiffPart[]): DiffPart[] {
   flush();
   return parts;
 }
+
+/** One item of the marked view; a marker stands for spacing that changed. */
+export type MarkedPart = DiffPart & { marker?: "break" | "space" };
+
+/**
+ * The marked view reads as the new text: added words marked, removed words
+ * struck where they stood, spacing as it is now. A change of spacing alone has
+ * no word to mark, so it shows as one marker (a line break or a space that
+ * came or went); the split view keeps both texts exactly.
+ */
+export function markedView(parts: DiffPart[]): MarkedPart[] {
+  const view: MarkedPart[] = [];
+  let change: DiffPart[] = [];
+  const endChange = () => {
+    if (change.length > 0 && change.every((part) => part.plain)) {
+      const width = (kind: DiffPart["kind"]) =>
+        change
+          .filter((part) => part.kind === kind)
+          .reduce((sum, part) => sum + part.text.length, 0);
+      const broken = (kind: DiffPart["kind"]) =>
+        change.some((part) => part.kind === kind && part.text.includes("\n"));
+      const isBreak = broken("removed") !== broken("added");
+      const kind = isBreak
+        ? broken("removed")
+          ? "removed"
+          : "added"
+        : width("removed") > width("added")
+          ? "removed"
+          : "added";
+      view.push({ kind, text: isBreak ? "¶" : "·", marker: isBreak ? "break" : "space" });
+    }
+    for (const part of change) {
+      if (!part.plain) view.push(part);
+      else if (part.kind === "added") view.push({ kind: "same", text: part.text });
+    }
+    change = [];
+  };
+  for (const part of parts) {
+    if (part.kind === "same") {
+      endChange();
+      view.push(part);
+    } else {
+      change.push(part);
+    }
+  }
+  endChange();
+  return view;
+}

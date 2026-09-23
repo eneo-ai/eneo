@@ -856,6 +856,74 @@ describe("BuilderReviewScreen plan document", () => {
     });
   });
 
+  it("keeps a failure repair on its step: its chip cannot be cleared", async () => {
+    const sendMessage = vi.fn().mockResolvedValue("delivered");
+    const { availableModels, defaultModelId, modelLoadStatus } = makeCreateState();
+    const state = scopedStepEditState();
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        ...state,
+        session: makeSession({
+          ...state.session,
+          edit_scope: {
+            context: { kind: "saved_flow_step" as const, flow_step_id: "existing_step_2" },
+            step_number: 2,
+            step_name: "Sammanfatta",
+            preserves_output_contract: true
+          }
+        }),
+        availableModels,
+        defaultModelId,
+        modelLoadStatus
+      },
+      onservice: (service) => {
+        service.sendMessage = sendMessage;
+      }
+    });
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: new RegExp(m.ai_builder_change_request_title()) })
+    );
+    expect(
+      await screen.findByText(m.ai_builder_change_request_scope({ step: 2, name: "Sammanfatta" }))
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: m.ai_builder_change_request_clear_scope() })
+    ).toBeNull();
+    await fireEvent.input(screen.getByLabelText(m.ai_builder_change_request_textarea_label()), {
+      target: { value: "Behåll fälten." }
+    });
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_send() }));
+    expect(sendMessage).toHaveBeenLastCalledWith(
+      "Behåll fälten.",
+      undefined,
+      undefined,
+      expect.objectContaining({ scope: "step", target_existing_step_ref: "existing_step_2" })
+    );
+  });
+
+  it("marks an instruction change of spacing alone", async () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: scopedStepEditState({}, [
+        {
+          field: "instructions",
+          previous: "Svara exakt:\n- beslut\n- skäl",
+          current: "Svara exakt:\n- beslut - skäl"
+        }
+      ])
+    });
+
+    const changes = screen.getByTestId("step-field-changes");
+    await fireEvent.click(
+      within(changes).getByRole("button", { name: m.ai_builder_change_show_before_after() })
+    );
+    const diff = await within(changes).findByTestId("instruction-diff");
+    const removed = [...diff.querySelectorAll("p del")].map((del) => del.textContent ?? "");
+    expect(removed.some((text) => text.includes(m.ai_builder_change_diff_break()))).toBe(true);
+  });
+
   it("keeps a change of chosen results inspectable when the reading stays the same", async () => {
     const chosen = (field: string) => ({
       source_refs: [{ step_ref: "step_a", output: "structured", field_path: field }]

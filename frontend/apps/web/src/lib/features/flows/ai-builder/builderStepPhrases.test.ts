@@ -53,14 +53,38 @@ describe("readsLabel", () => {
         inSentence(m.ai_builder_reads_step({ step: "2" }), getLocale())
       ])
     );
+    // The runtime's aliases: the previous step, the flow input and an upload.
+    expect(readsLabel(withQuestion("Jämför {{ föregående_steg }}."), 3, numberOf)).toBe(
+      m.ai_builder_reads_step({ step: "2" })
+    );
+    expect(readsLabel(withQuestion("Läs {{ indata_text }}."), 3, numberOf)).toBe(
+      m.ai_builder_reads_flow_input()
+    );
+    expect(readsLabel(withQuestion("Namn: {{ flow.input.namn }}"), 3, numberOf)).toBe(
+      m.ai_builder_reads_flow_input()
+    );
+    expect(readsLabel(withQuestion("Fil: {{ step_input.text }}"), 3, numberOf)).toBe(
+      m.ai_builder_reads_upload()
+    );
     // Fixed text only.
     expect(readsLabel(withQuestion("Läs policyn noga."), 3, numberOf)).toBe(
       m.ai_builder_reads_own_text()
     );
   });
 
-  it("falls back to the input source when the material names no earlier step", () => {
-    expect(readsLabel(readingFrom("step_d"), 2, numberOf)).toBe(m.ai_builder_reads_previous());
+  it("never falls back to the input source that explicit underlag replaces", () => {
+    // A chosen result this review cannot place is still chosen material.
+    expect(readsLabel(readingFrom("step_d"), 2, numberOf)).toBe(m.ai_builder_reads_chosen());
+    expect(
+      readsLabel(
+        { input_source: "all_previous_steps", input_bindings: { question: "{{ okänd }}" } },
+        3,
+        numberOf
+      )
+    ).toBe(m.ai_builder_reads_chosen());
+  });
+
+  it("reads the input source when the step has no underlag of its own", () => {
     expect(
       readsLabel({ input_source: "all_previous_steps", input_bindings: null }, 3, numberOf)
     ).toBe(m.ai_builder_reads_steps_two({ first: "1", second: "2" }));

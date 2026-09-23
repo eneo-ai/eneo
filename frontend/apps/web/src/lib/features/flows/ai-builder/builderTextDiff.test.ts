@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { wordDiff, type DiffPart } from "./builderTextDiff";
+import { markedView, wordDiff, type DiffPart } from "./builderTextDiff";
 
 const show = (parts: DiffPart[] | null) =>
   parts
@@ -36,6 +36,30 @@ describe("wordDiff", () => {
       parts.filter((part) => part.kind === "same" || part.kind === kind).map((part) => part.text);
     expect(side("removed").join("")).toBe("Punkt ett.\n\nSlut.");
     expect(side("added").join("")).toBe("Punkt ett. Slut.");
+  });
+
+  it("reads the marked view as the new text, removed words struck in place", () => {
+    const view = markedView(wordDiff("Skriv en kort rapport.", "Skapa ett utkast rapport.")!);
+    const kept = view.filter((part) => part.kind !== "removed");
+    expect(kept.map((part) => part.text).join("")).toBe("Skapa ett utkast rapport.");
+    expect(view.filter((part) => part.kind === "removed").map((part) => part.text)).toEqual([
+      "Skriv en kort"
+    ]);
+  });
+
+  it("marks a change of spacing alone instead of hiding it", () => {
+    const after = "Return exactly:\n- decision - reason";
+    const view = markedView(wordDiff("Return exactly:\n- decision\n- reason", after)!);
+    expect(view.filter((part) => part.marker)).toEqual([
+      { kind: "removed", text: "¶", marker: "break" }
+    ]);
+    // Apart from the marker, the view reads exactly as the new text.
+    expect(
+      view
+        .filter((part) => part.kind !== "removed")
+        .map((part) => part.text)
+        .join("")
+    ).toBe(after);
   });
 
   it("keeps a step reference whole", () => {

@@ -1,5 +1,6 @@
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
+import { FLOW_INPUT_ALIASES, PREVIOUS_STEP_ALIAS } from "$lib/features/flows/flowFormSchema";
 import { parseFlowInputBindings } from "$lib/features/flows/flowInputBindings";
 import {
   extractTemplateTokens,
@@ -89,12 +90,28 @@ export function readsLabel(
   const bindings = parseFlowInputBindings(step.input_bindings);
   const question = bindings.status === "valid" ? (bindings.question?.trim() ?? "") : "";
   if (bindings.status === "valid" && (bindings.sourceRefs.length > 0 || question)) {
-    const tokenRefs = extractTemplateTokens(question).map((token) => token.split(".")[0].trim());
-    const orders = [...bindings.sourceRefs.map((source) => source.stepRef), ...tokenRefs]
-      .map((ref) => stepNumberOf(ref))
-      .filter((order): order is number => order !== null && order < stepNumber);
+    // Every way the runtime lets text name its material: a planned step, the
+    // previous-step alias, the flow input (its aliases and namespaces) and the
+    // step's own upload.
+    const tokens = extractTemplateTokens(question).map((token) =>
+      token.split(".").map((segment) => segment.trim())
+    );
+    const readsFlowInput = tokens.some(
+      ([head, next]) =>
+        FLOW_INPUT_ALIASES.has(head) ||
+        head === "flow_input" ||
+        (head === "flow" && next === "input")
+    );
+    const readsUpload = tokens.some(([head]) => head === "step_input");
+    const orders = [
+      ...bindings.sourceRefs.map((source) => stepNumberOf(source.stepRef)),
+      ...tokens.map(([head]) =>
+        head === PREVIOUS_STEP_ALIAS ? stepNumber - 1 : stepNumberOf(head)
+      )
+    ].filter((order): order is number => order !== null && order >= 1 && order < stepNumber);
     const parts = [
-      ...(tokenRefs.includes("flow_input") ? [m.ai_builder_reads_flow_input()] : []),
+      ...(readsUpload ? [m.ai_builder_reads_upload()] : []),
+      ...(readsFlowInput ? [m.ai_builder_reads_flow_input()] : []),
       ...(orders.length > 0 ? [stepsLabel(orders)] : [])
     ];
     if (parts.length > 0) {
@@ -103,11 +120,11 @@ export function readsLabel(
         parts.map((part, index) => (index === 0 ? part : inSentence(part, locale)))
       );
     }
-    // Text of its own is what the step reads; a reference that names no
-    // earlier step says nothing, so the input source stands.
-    if (question.replace(new RegExp(TEMPLATE_TOKEN_PATTERN_SOURCE, "g"), "").trim()) {
-      return m.ai_builder_reads_own_text();
-    }
+    // Explicit underlag replaces the input source even when it names nothing
+    // this review can resolve: its own text, or else the chosen material.
+    return question.replace(new RegExp(TEMPLATE_TOKEN_PATTERN_SOURCE, "g"), "").trim()
+      ? m.ai_builder_reads_own_text()
+      : m.ai_builder_reads_chosen();
   }
   if (step.input_source === "previous_step" && stepNumber > 1) return m.ai_builder_reads_previous();
   if (step.input_source === "all_previous_steps" && stepNumber > 1) {

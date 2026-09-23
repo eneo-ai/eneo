@@ -6,7 +6,7 @@
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
-  import { wordDiff } from "./builderTextDiff";
+  import { markedView, wordDiff } from "./builderTextDiff";
   import type { StepFieldChange, StepSpec } from "./protocol";
   import type { StepFieldChangeDisplay } from "./BuilderStepDetails.svelte";
   import {
@@ -225,6 +225,7 @@
       .reduce((sum, part) => sum + part.text.length, 0);
     return total > 0 ? changed / total : 0;
   });
+  const markedParts = $derived(instructionDiff ? markedView(instructionDiff) : []);
   let chosenDiffView = $state<"marked" | "split" | null>(null);
   const diffView = $derived(chosenDiffView ?? (rewrittenShare > 0.5 ? "split" : "marked"));
   // Ink on a soft tint: removed text keeps a hairline strike, added text a
@@ -379,20 +380,30 @@
             <p
               class="bg-primary text-primary m-0 px-4 py-3.5 text-[0.8125rem] leading-[1.8] break-words whitespace-pre-wrap"
             >
-              {#each instructionDiff as part, index (index)}
-                {#if part.kind === "same" || part.plain}
+              {#each markedParts as part, index (index)}
+                {#if part.kind === "same"}
                   {@render readable(part.text)}
                 {:else if part.kind === "removed"}
                   <del class={REMOVED}
                     ><span class="sr-only"
                       >{m.ai_builder_change_diff_removed()}:
-                    </span>{@render readable(part.text)}</del
+                    </span>{#if part.marker}<span aria-hidden="true">{part.text}</span><span
+                        class="sr-only"
+                        >{part.marker === "break"
+                          ? m.ai_builder_change_diff_break()
+                          : m.ai_builder_change_diff_space()}</span
+                      >{:else}{@render readable(part.text)}{/if}</del
                   >
                 {:else}
                   <ins class="{ADDED} [del+&]:ms-1"
                     ><span class="sr-only"
                       >{m.ai_builder_change_diff_added()}:
-                    </span>{@render readable(part.text)}</ins
+                    </span>{#if part.marker}<span aria-hidden="true">{part.text}</span><span
+                        class="sr-only"
+                        >{part.marker === "break"
+                          ? m.ai_builder_change_diff_break()
+                          : m.ai_builder_change_diff_space()}</span
+                      >{:else}{@render readable(part.text)}{/if}</ins
                   >
                 {/if}
               {/each}

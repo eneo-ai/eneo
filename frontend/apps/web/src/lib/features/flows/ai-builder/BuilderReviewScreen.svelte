@@ -23,7 +23,7 @@
   import { describeFailure, type FailureAction } from "./aiBuilderFailurePresentation";
   import { fieldTypeLabel } from "./aiBuilderSummaryText";
   import type {
-    AIBuilderPlanEditContext,
+    AIBuilderEditContext,
     AIBuilderStatus,
     EditAdvisory,
     FlowDraftSpecCore,
@@ -904,7 +904,11 @@
         })
       : null
   );
+  // A failure repair keeps its step whatever the reader does: the backend
+  // refuses a wider request there, so its chip cannot be cleared.
+  const scopeLocked = $derived(service.activeStepScopeLocked);
   function clearChangeScope() {
+    if (scopeLocked) return;
     chosenChangeScope = null;
     scopeWidened = true;
   }
@@ -919,9 +923,11 @@
     void changeRequestRef?.focusInput();
   }
 
-  function editContextForChange(): AIBuilderPlanEditContext | null {
+  function editContextForChange(): AIBuilderEditContext | null {
     if (!plan) return null;
     if (!changeScope) {
+      // A locked repair never widens: it sends the scope it holds.
+      if (scopeLocked) return service.activeStepTransportContext;
       return { kind: "proposed_plan", scope: "whole_plan", plan_id: plan.plan_id };
     }
     return {
@@ -1719,7 +1725,7 @@
                     scopeLabel={changeScopeLabel}
                     disabled={isLocked || !service.canSendMessage}
                     sendBlockedReason={service.modelSendBlockMessage}
-                    onclearscope={clearChangeScope}
+                    onclearscope={scopeLocked ? undefined : clearChangeScope}
                     onsend={handleChangeSend}
                   />
                 </div>

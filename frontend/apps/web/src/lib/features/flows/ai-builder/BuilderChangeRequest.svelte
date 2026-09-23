@@ -87,15 +87,18 @@
             class="bg-accent-dimmer text-accent-stronger inline-flex h-[1.625rem] items-center gap-1.5 rounded-full pr-1 pl-2.5 text-xs font-semibold"
           >
             {scopeLabel}
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              class="hover:bg-accent-default/15 size-5 rounded-full"
-              aria-label={m.ai_builder_change_request_clear_scope()}
-              onclick={onclearscope}
-            >
-              <IconX class="size-3" />
-            </Button>
+            <!-- A scope the owner holds (a failure repair) cannot be cleared. -->
+            {#if onclearscope}
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                class="hover:bg-accent-default/15 size-5 rounded-full"
+                aria-label={m.ai_builder_change_request_clear_scope()}
+                onclick={onclearscope}
+              >
+                <IconX class="size-3" />
+              </Button>
+            {/if}
           </span>
         {/if}
         <Button
