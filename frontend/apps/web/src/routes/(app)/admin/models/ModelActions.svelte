@@ -36,9 +36,6 @@
   type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
   type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
 
-  // svelte-headless-table's `createRender` expects a class-based component,
-  // so we keep this file on the legacy `export let` API. Shadcn primitives
-  // below work just fine inside a non-runes parent.
   export let model: AnyModel;
   export let type: ModelTypeKey;
   export let completionModels: CompletionModel[] = [];

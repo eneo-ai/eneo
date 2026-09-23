@@ -2,9 +2,7 @@
 
 <!--
   One cell of the "Estimated cost" column. Splitting it out lets us wrap the
-  string in a tooltip (svelte-headless-table cells must be strings or single
-  components — there's no straightforward way to return a tooltip-wrapped
-  string from `cell: (item) => ...`).
+  string in a tooltip (a table cell renders a string or a single component).
 -->
 
 <script lang="ts">

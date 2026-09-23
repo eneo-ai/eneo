@@ -6,8 +6,7 @@
 
 <script lang="ts">
   import type { StorageSpaceList } from "@eneo/eneo-js";
-  import { createRender } from "svelte-headless-table";
-  import { Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import SpaceMembersChips from "$lib/features/spaces/components/SpaceMembersChips.svelte";
@@ -25,7 +24,7 @@
       header: m.name(),
       value: (item) => item.name,
       cell: (item) => {
-        return createRender(StorageSpaceName, {
+        return Table.renderComponent(StorageSpaceName, {
           space: item.value
         });
       }
@@ -34,7 +33,7 @@
       header: m.members(),
       accessor: "members",
       cell: (item) => {
-        return createRender(SpaceMembersChips, {
+        return Table.renderComponent(SpaceMembersChips, {
           members: item.value
         });
       },

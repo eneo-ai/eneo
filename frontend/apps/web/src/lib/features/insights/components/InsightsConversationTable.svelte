@@ -5,9 +5,8 @@
 -->
 
 <script lang="ts">
-  import { Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { createRender } from "svelte-headless-table";
   import { getInsightsService } from "../InsightsService.svelte";
   import { toStore } from "svelte/store";
   import InsightsConversationPrimaryCell from "./InsightsConversationPrimaryCell.svelte";
@@ -38,7 +37,7 @@
       header: m.question(),
       value: (item) => item.name,
       cell: (item) => {
-        return createRender(InsightsConversationPrimaryCell, {
+        return Table.renderComponent(InsightsConversationPrimaryCell, {
           conversation: item.value
         });
       }
@@ -48,7 +47,7 @@
       header: m.created(),
       accessor: (item) => item,
       cell: (item) => {
-        return createRender(Table.FormattedCell, {
+        return Table.renderComponent(Table.FormattedCell, {
           value: formatDate(item.value.created_at ?? ""),
           monospaced: true
         });
@@ -57,12 +56,12 @@
       plugins: {
         tableFilter: {
           getFilterValue(item) {
-            return formatDate(item.created_at);
+            return formatDate(item.created_at ?? "");
           }
         },
         sort: {
           getSortValue(item) {
-            return new Date(item.created_at).getTime();
+            return new Date(item.created_at ?? 0).getTime();
           }
         }
       }

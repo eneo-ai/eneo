@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { Table } from "@eneo/ui";
-  import { createRender } from "svelte-headless-table";
+  import * as Table from "$lib/components/resource-table/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
@@ -246,7 +245,7 @@
             di.itemCount === 1
               ? m.wrapper_items_count_one({ count: di.itemCount })
               : m.wrapper_items_count_other({ count: di.itemCount });
-          return createRender(Table.FormattedCell, { value: countLabel });
+          return Table.renderComponent(Table.FormattedCell, { value: countLabel });
         }
         return Table.renderComponent(IntegrationSyncStatusCell, {
           knowledge: di.item,
@@ -263,13 +262,13 @@
       cell: (displayItem) => {
         const di = displayItem.value;
         if (di.kind === "wrapper") {
-          return createRender(Table.FormattedCell, { value: "" });
+          return Table.renderComponent(Table.FormattedCell, { value: "" });
         }
         const labelKey = integrationData[di.item.integration_type].previewLinkLabel;
         const translatedLabel =
           (m as Record<string, ((...args: unknown[]) => string) | undefined>)[labelKey]?.() ??
           labelKey;
-        return createRender(Table.ButtonCell, {
+        return Table.renderComponent(Table.ButtonCell, {
           link: di.item.url ?? "",
           label: translatedLabel,
           linkIsExternal: true
@@ -289,7 +288,7 @@
             canDelete: di.canDelete
           });
         }
-        return createRender(IntegrationActions, {
+        return Table.renderComponent(IntegrationActions, {
           knowledgeItem: di.item
         });
       }

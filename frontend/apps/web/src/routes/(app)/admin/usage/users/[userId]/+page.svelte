@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { page } from "$app/stores";
-  import { Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
   import DateRangePicker from "$lib/components/DateRangePicker.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Page } from "$lib/components/layout";
@@ -17,7 +17,6 @@
   import { dynamicColour } from "$lib/core/colours";
   import { getChartColour } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { getEneo } from "$lib/core/Eneo";
-  import { createRender } from "svelte-headless-table";
   import { CalendarDate } from "@internationalized/date";
   import { m } from "$lib/paraglide/messages";
   import {
@@ -157,7 +156,7 @@
       accessor: (model) => model,
       id: "model_name",
       cell: (item) => {
-        return createRender(SimpleTextCell, {
+        return Table.renderComponent(SimpleTextCell, {
           primary: item.value.model_nickname || item.value.model_name,
           secondary: item.value.model_org || "Unknown"
         });
@@ -207,7 +206,7 @@
               rates
             )
           : null;
-        return createRender(EstimatedCostCell, { label: formatCostUSD(cost) });
+        return Table.renderComponent(EstimatedCostCell, { label: formatCostUSD(cost) });
       }
     })
   ]);

@@ -5,10 +5,9 @@
 -->
 
 <script lang="ts">
-  import { Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
   import UserActions from "./UserGroupActions.svelte";
   import UserGroupMembersChips from "./UserGroupMembersChips.svelte";
-  import { createRender } from "svelte-headless-table";
   import type { UserGroup } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
 
@@ -22,7 +21,7 @@
       header: m.members(),
       accessor: "users",
       cell: (item) => {
-        return createRender(UserGroupMembersChips, {
+        return Table.renderComponent(UserGroupMembersChips, {
           users: item.value ?? []
         });
       },
@@ -36,7 +35,7 @@
     }),
     table.columnActions({
       cell: (item) => {
-        return createRender(UserActions, { userGroup: item.value });
+        return Table.renderComponent(UserActions, { userGroup: item.value });
       }
     })
   ]);

@@ -19,8 +19,6 @@
   type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
   type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
 
-  // Rendered via svelte-headless-table's `createRender`, which requires the
-  // legacy `export let` API. Keep this file on Svelte 4 component syntax.
   export let model: AnyModel;
   export let type: ModelTypeKey;
   export let completionModels: CompletionModel[] = [];

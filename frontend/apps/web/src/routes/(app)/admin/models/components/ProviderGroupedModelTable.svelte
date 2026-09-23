@@ -24,9 +24,8 @@
     ModelProviderPublic,
     TranscriptionModel
   } from "@eneo/eneo-js";
-  import { Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { createRender } from "svelte-headless-table";
   import { writable } from "svelte/store";
   import { Plus, TriangleAlert, Clock } from "lucide-svelte";
 
@@ -108,7 +107,7 @@
       accessor: (model: M) => model,
       header: m.name(),
       cell: (item) =>
-        createRender(ModelNameCell, {
+        Table.renderComponent(ModelNameCell, {
           model: item.value,
           type: modelType,
           completionModels:
@@ -123,7 +122,8 @@
     table.column({
       accessor: (model: M) => model,
       header: m.enabled(),
-      cell: (item) => createRender(ModelEnableSwitch, { model: item.value, type: modelType }),
+      cell: (item) =>
+        Table.renderComponent(ModelEnableSwitch, { model: item.value, type: modelType }),
       plugins: { sort: { getSortValue: (value) => (value.is_org_enabled ? 1 : 0) } }
     }),
 
@@ -132,7 +132,7 @@
           table.column({
             accessor: (model: M) => model,
             header: m.security_classification(),
-            cell: (item) => createRender(ModelClassificationCell, { model: item.value }),
+            cell: (item) => Table.renderComponent(ModelClassificationCell, { model: item.value }),
             plugins: {
               sort: {
                 getSortValue: (value) => value.security_classification?.security_level ?? -1
@@ -148,7 +148,7 @@
     table.column({
       accessor: (model: M) => model,
       header: m.details(),
-      cell: (item) => createRender(ModelStatusIcons, { model: item.value }),
+      cell: (item) => Table.renderComponent(ModelStatusIcons, { model: item.value }),
       plugins: {
         sort: { disable: true },
         tableFilter: {
@@ -162,7 +162,7 @@
 
     table.columnActions({
       cell: (item) =>
-        createRender(ModelActions, {
+        Table.renderComponent(ModelActions, {
           model: item.value,
           type: modelType,
           completionModels:
@@ -285,11 +285,11 @@
           filterFn={groupFilterFor(group.key)}
           title=" "
           open={groupOpenState[group.key] ?? true}
-          on:openChange={(e) => {
-            groupOpenState[group.key] = e.detail.open;
+          onOpenChange={(open) => {
+            groupOpenState[group.key] = open;
           }}
         >
-          <svelte:fragment slot="title-prefix">
+          {#snippet titlePrefix()}
             {#if provider}
               <button
                 class="group focus:ring-accent-default mr-1 flex cursor-pointer items-center gap-3 rounded-lg transition-colors duration-150 focus:ring-2 focus:ring-offset-2 focus:outline-none"
@@ -314,9 +314,9 @@
                 <span class="text-primary font-medium">{group.name}</span>
               </div>
             {/if}
-          </svelte:fragment>
+          {/snippet}
 
-          <svelte:fragment slot="title-suffix">
+          {#snippet titleSuffix()}
             <div class="flex items-center gap-2">
               {#if provider}
                 {@const modelCount = getModelCountForProvider(provider.id)}
@@ -337,9 +337,9 @@
                 <ProviderActions {provider} onEditProvider={handleEditProvider} />
               {/if}
             </div>
-          </svelte:fragment>
+          {/snippet}
 
-          <svelte:fragment slot="empty">
+          {#snippet empty()}
             {#if provider}
               <ProviderEmptyState providerId={provider.id} onAddModel={handleAddModelToProvider} />
             {:else}
@@ -349,7 +349,7 @@
                 {m.no_models_in_provider()}
               </div>
             {/if}
-          </svelte:fragment>
+          {/snippet}
         </Table.Group>
       {/each}
     </Table.Root>
