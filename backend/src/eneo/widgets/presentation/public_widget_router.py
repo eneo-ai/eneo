@@ -3,6 +3,7 @@
 # Licensed under the MIT License.
 
 
+import hashlib
 from uuid import UUID
 
 from fastapi import APIRouter, Request, Response
@@ -42,8 +43,11 @@ from eneo.widgets.presentation.public_widget_models import (
 router = APIRouter()
 
 
-def _etag(widget_id: str, updated_at: str, generation: int) -> str:
-    return f'W/"{widget_id}:{updated_at}:{generation}"'
+def _etag(config: WidgetPublicConfig) -> str:
+    # Over what is served, not the row: the tenant policy changes the served
+    # widget (e.g. single_turn) without touching it.
+    digest = hashlib.sha256(config.model_dump_json().encode()).hexdigest()
+    return f'W/"{digest[:32]}"'
 
 
 @router.get(
@@ -59,19 +63,7 @@ def _etag(widget_id: str, updated_at: str, generation: int) -> str:
     },
 )
 async def get_widget_config(request: Request, response: Response, widget: ActiveWidget):
-    assert widget.id is not None and widget.updated_at is not None
-    etag = _etag(str(widget.id), widget.updated_at.isoformat(), widget.token_generation)
-    response.headers["ETag"] = etag
-    # A draft or paused widget is only ever admitted by a preview token; its
-    # configuration must not land in a shared cache for anonymous callers.
-    response.headers["Cache-Control"] = (
-        "public, max-age=60"
-        if widget.status == WidgetStatus.ACTIVE
-        else "private, no-store"
-    )
-    if request.headers.get("if-none-match") == etag:
-        return Response(status_code=304, headers=dict(response.headers))
-    return WidgetPublicConfig(
+    config = WidgetPublicConfig(
         public_id=widget.public_id,
         name=widget.name,
         texts=widget.texts,
@@ -86,6 +78,18 @@ async def get_widget_config(request: Request, response: Response, widget: Active
         single_turn=widget.privacy.never_persists,
         frame_ancestors=frame_ancestor_sources(widget.allowed_origins),
     )
+    etag = _etag(config)
+    response.headers["ETag"] = etag
+    # A draft or paused widget is only ever admitted by a preview token; its
+    # configuration must not land in a shared cache for anonymous callers.
+    response.headers["Cache-Control"] = (
+        "public, max-age=60"
+        if widget.status == WidgetStatus.ACTIVE
+        else "private, no-store"
+    )
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=dict(response.headers))
+    return config
 
 
 @router.get(

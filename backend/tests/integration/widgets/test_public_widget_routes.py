@@ -419,3 +419,29 @@ async def test_forbidding_bot_protection_none_holds_widgets_already_on_it(
         json={"altcha": _solve(challenge)},
     )
     assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_policy_change_reaches_a_cached_config(
+    client, admin_token, active_widget
+):
+    public_id = active_widget["public_id"]
+    resp = await client.get(f"/api/v1/widgets/{public_id}/config/")
+    assert resp.json()["single_turn"] is False
+    etag = resp.headers["etag"]
+
+    # Only the policy changes; the widget row keeps its 30 days.
+    resp = await client.patch(
+        "/api/v1/admin/widget-policy/",
+        json={"max_retention_days": 0},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.get(
+        f"/api/v1/widgets/{public_id}/config/", headers={"If-None-Match": etag}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["single_turn"] is True
+    assert resp.headers["etag"] != etag
