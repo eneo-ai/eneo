@@ -421,17 +421,20 @@ function addUnique(values: string[], value: string): string[] {
   return values.includes(value) ? values : [...values, value];
 }
 
-// A step's files go to the run in list order, so recorded segments take their
-// slots in session, then segment, order whatever order their uploads finished
-// in (a retried segment must not follow a later one); other files keep their
-// places.
+// A step's files go to the run in list order and the backend joins their
+// transcripts in that order, so recorded segments take their slots in capture
+// order whatever order their uploads finished in (a retried segment must not
+// follow a later one); within a session the segment index breaks a tie. Other
+// files keep their places.
 function inSegmentOrder(files: UploadedFile[]): UploadedFile[] {
   const segments = files.flatMap((file, slot) => {
     const segment = parseSegmentFilename(file.name ?? "");
     return segment ? [{ file, slot, ...segment }] : [];
   });
   const sorted = segments.toSorted(
-    (a, b) => a.sessionId.localeCompare(b.sessionId) || a.segmentIndex - b.segmentIndex
+    (a, b) =>
+      a.capturedAt - b.capturedAt ||
+      (a.sessionId === b.sessionId ? a.segmentIndex - b.segmentIndex : 0)
   );
   const ordered = [...files];
   segments.forEach(({ slot }, position) => {

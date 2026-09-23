@@ -89,16 +89,24 @@ export function buildSegmentFilenameBase(
   return `${RECORDING_FILENAME_PREFIX}${sessionId}-seg${seg}-${iso}`;
 }
 
-// The inverse of buildSegmentFilenameBase, for a file named by the recorder;
-// null for any other name.
+// The inverse of buildSegmentFilenameBase, as the backend reads it
+// (transcription.py::_parse_segment_filename): null for any other name, and
+// for a name whose capture time cannot be read.
 const SEGMENT_FILENAME_RE =
-  /^recording-([0-9a-fA-F-]+)-seg(\d{2,4})-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}(?:-\d+)?Z\.[A-Za-z0-9]+$/;
+  /^recording-([0-9a-fA-F-]+)-seg(\d{2,4})-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})(?:-(\d+))?Z\.[A-Za-z0-9]+$/;
 
 export function parseSegmentFilename(
   name: string
-): { sessionId: string; segmentIndex: number } | null {
+): { sessionId: string; segmentIndex: number; capturedAt: number } | null {
   const match = SEGMENT_FILENAME_RE.exec(name);
-  return match ? { sessionId: match[1] ?? "", segmentIndex: Number(match[2]) } : null;
+  if (!match) return null;
+  const [, sessionId = "", segmentIndex, date, hours, minutes, seconds, fraction] = match;
+  const capturedAt = Date.parse(
+    `${date}T${hours}:${minutes}:${seconds}${fraction ? `.${fraction}` : ""}Z`
+  );
+  return Number.isNaN(capturedAt)
+    ? null
+    : { sessionId, segmentIndex: Number(segmentIndex), capturedAt };
 }
 
 export function segmentExtensionFromMime(mimeType: string): string {

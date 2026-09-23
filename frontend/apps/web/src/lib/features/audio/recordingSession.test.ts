@@ -7,6 +7,7 @@ import {
   RecordingSession,
   SEGMENT_ROTATION_MS,
   buildSegmentFilenameBase,
+  parseSegmentFilename,
   diffContractSnapshot,
   generateSessionId,
   type RecordingSessionDeps,
@@ -63,6 +64,20 @@ describe("buildSegmentFilenameBase", () => {
     expect(buildSegmentFilenameBase("s", 0, captured)).toContain("seg00");
     expect(buildSegmentFilenameBase("s", 9, captured)).toContain("seg09");
     expect(buildSegmentFilenameBase("s", 99, captured)).toContain("seg99");
+  });
+
+  it("parses a recorder file name back into its session, segment and capture time", () => {
+    const captured = Date.UTC(2026, 3, 30, 12, 34, 56, 789);
+    const name = `${buildSegmentFilenameBase("0a1b-2c3d", 12, captured)}.webm`;
+
+    expect(parseSegmentFilename(name)).toEqual({
+      sessionId: "0a1b-2c3d",
+      segmentIndex: 12,
+      capturedAt: captured
+    });
+    expect(parseSegmentFilename("notes.webm")).toBeNull();
+    // Like the backend, a name whose time cannot be read is not a segment.
+    expect(parseSegmentFilename("recording-0a1b-seg01-2026-13-45T25-61-61-000Z.webm")).toBeNull();
   });
 });
 

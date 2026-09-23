@@ -24,8 +24,12 @@ function uploadedFile(id: string): UploadedFile {
 }
 
 // An uploaded recorded segment, named the way the recorder names its files.
-function uploadedSegment(id: string, sessionId: string, segmentIndex: number): UploadedFile {
-  const capturedAt = Date.UTC(2026, 4, 1, 8, segmentIndex);
+function uploadedSegment(
+  id: string,
+  sessionId: string,
+  segmentIndex: number,
+  capturedAt: number
+): UploadedFile {
   return {
     ...uploadedFile(id),
     name: `${buildSegmentFilenameBase(sessionId, segmentIndex, capturedAt)}.webm`
@@ -134,33 +138,30 @@ describe("FlowRunFileInputState", () => {
     expect(state.getSkippedMessage("step-a")).toBeNull();
   });
 
-  it("keeps a step's recorded segments in segment order whatever order they upload in", () => {
+  it("submits a step's recorded segments in capture order whatever order they upload in", () => {
     const state = new FlowRunFileInputState();
-    const sessionA = "0a1b2c3d-0000-4000-8000-000000000001";
-    const sessionB = "0b1b2c3d-0000-4000-8000-000000000002";
+    // Session ids that sort opposite to their capture times.
+    const later = "0a1b2c3d-0000-4000-8000-000000000001";
+    const earlier = "0f1b2c3d-0000-4000-8000-000000000002";
+    const at = (hour: number, minute: number) => Date.UTC(2026, 4, 1, hour, minute);
 
     state.recordUploadedFile("step-a", uploadedFile("notes"));
-    state.recordUploadedFile("step-a", uploadedSegment("b-0", sessionB, 0));
-    state.recordUploadedFile("step-a", uploadedSegment("a-1", sessionA, 1));
+    state.recordUploadedFile("step-a", uploadedSegment("later-1", later, 1, at(10, 20)));
+    state.recordUploadedFile("step-a", uploadedSegment("earlier-0", earlier, 0, at(9, 0)));
     state.recordUploadedFile("step-a", uploadedFile("slides"));
-    state.recordUploadedFile("step-a", uploadedSegment("a-0", sessionA, 0));
+    state.recordUploadedFile("step-a", uploadedSegment("later-0", later, 0, at(10, 0)));
 
-    // Segments take the segment slots in session, then segment, order; the
-    // other files keep their places.
-    expect(state.getUploadedFiles("step-a").map(({ id }) => id)).toEqual([
-      "notes",
-      "a-0",
-      "a-1",
-      "slides",
-      "b-0"
-    ]);
-    expect(state.runtimeFilesSnapshot["step-a"]?.map(({ id }) => id)).toEqual([
-      "notes",
-      "a-0",
-      "a-1",
-      "slides",
-      "b-0"
-    ]);
+    // Segments take the segment slots in capture order; the other files keep
+    // their places. The run is submitted in this order.
+    const inCaptureOrder = ["notes", "earlier-0", "later-0", "slides", "later-1"];
+    expect(state.getUploadedFiles("step-a").map(({ id }) => id)).toEqual(inCaptureOrder);
+    expect(state.runtimeFilesSnapshot["step-a"]?.map(({ id }) => id)).toEqual(inCaptureOrder);
+
+    // Within a session, the segment index breaks a tie in capture time.
+    const tied = new FlowRunFileInputState();
+    tied.recordUploadedFile("step-a", uploadedSegment("tie-1", later, 1, at(11, 0)));
+    tied.recordUploadedFile("step-a", uploadedSegment("tie-0", later, 0, at(11, 0)));
+    expect(tied.runtimeFilesSnapshot["step-a"]?.map(({ id }) => id)).toEqual(["tie-0", "tie-1"]);
   });
 
   it("keeps a step active until all of its uploads finish", () => {
