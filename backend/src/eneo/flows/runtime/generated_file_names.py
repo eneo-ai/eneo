@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import unicodedata
-from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -21,8 +20,15 @@ _FALLBACK_FLOW_NAME = "Dokument"
 # Refused by Windows in names; "/" also separates directories everywhere else.
 _RESERVED_CHARACTERS = frozenset('\\/:*?"<>|')
 # Controls, invisible format characters (bidirectional overrides, zero-width
-# spaces) and lone surrogates: a name shows what it holds, and encodes.
-_REFUSED_CATEGORIES = frozenset({"Cc", "Cf", "Cs"})
+# spaces), lone surrogates and unassigned code points (U+FFFE, which XML and
+# so a DOCX title refuses): a name shows what it holds, and encodes.
+_REFUSED_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Cn"})
+# Windows opens the device instead of the file when the part of a name before
+# its first dot is one of these, whatever case and trailing spaces it has.
+_WINDOWS_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"{port}{digit}" for port in ("COM", "LPT") for digit in "123456789¹²³"}
+)
 
 
 @dataclass(frozen=True)
@@ -31,14 +37,17 @@ class GeneratedFileNames:
 
     ``<flow name> <YYYY-MM-DD>.<ext>``. When the definition has more than one
     step producing a document type, each such document also carries its
-    step's name before the date; that is decided from the whole definition, so
-    a document's name does not depend on which steps have rendered so far.
+    step's name before the date, and when two of them would still share a name,
+    every document of that type carries ``Steg <n>`` too. Both are decided from
+    the whole definition, so a document's name does not depend on which steps
+    have rendered so far.
     """
 
     flow_name: str
     run_day: date
     step_names: Mapping[int, str]
-    shared_types: frozenset[str]
+    # The step orders producing each document type.
+    documents: Mapping[str, tuple[int, ...]]
 
     @classmethod
     def for_run(
@@ -48,9 +57,6 @@ class GeneratedFileNames:
         steps: Sequence[RuntimeStep],
         run_created_at: datetime,
     ) -> GeneratedFileNames:
-        documents = Counter(
-            step.output_type for step in steps if step.output_type in _DOCUMENT_TYPES
-        )
         if run_created_at.tzinfo is None:
             run_created_at = run_created_at.replace(tzinfo=timezone.utc)
         return cls(
@@ -58,9 +64,12 @@ class GeneratedFileNames:
             # Eneo has no user or tenant time zone: a run is dated by its UTC day.
             run_day=run_created_at.astimezone(timezone.utc).date(),
             step_names={step.step_order: step.user_description or "" for step in steps},
-            shared_types=frozenset(
-                output_type for output_type, count in documents.items() if count > 1
-            ),
+            documents={
+                output_type: tuple(
+                    step.step_order for step in steps if step.output_type == output_type
+                )
+                for output_type in _DOCUMENT_TYPES
+            },
         )
 
     def name(self, *, step_order: int, output_type: str) -> str:
@@ -69,20 +78,33 @@ class GeneratedFileNames:
 
     def stem(self, *, step_order: int, output_type: str) -> str:
         """The name without its extension, which is also the document's title."""
+        siblings = self.documents.get(output_type, ())
+        # Numbering only the clashing ones could meet a third name ("Beslut
+        # Steg 1"); numbered all, the names end in distinct numbers.
+        numbered = len(
+            {self._stem(order, output_type, numbered=False) for order in siblings}
+        ) < len(siblings)
+        return self._stem(step_order, output_type, numbered=numbered)
+
+    def _stem(self, step_order: int, output_type: str, *, numbered: bool) -> str:
         words = [_clean(self.flow_name) or _FALLBACK_FLOW_NAME]
-        if output_type in self.shared_types:
+        if len(self.documents.get(output_type, ())) > 1:
             words.append(
                 _clean(self.step_names.get(step_order, "")) or f"Steg {step_order}"
             )
-        day = f" {self.run_day.isoformat()}"
-        suffix = f"{day}.{output_type}"
-        # ponytail: two steps with one name, or a flow name long enough to cut
-        # the step name away, give two documents one name; add the step number
-        # if that happens.
+        number = f" Steg {step_order}" if numbered else ""
+        tail = f"{number} {self.run_day.isoformat()}"
         head = utf8_prefix(
-            " ".join(words), max_bytes=MAX_FILE_NAME_BYTES - len(suffix.encode("utf-8"))
+            " ".join(words),
+            max_bytes=MAX_FILE_NAME_BYTES
+            - len(f"{tail}.{output_type}".encode("utf-8")),
         )
-        return head.rstrip(" .") + day
+        stem = head.rstrip(" .") + tail
+        # The dot after a device name becomes a space: "CON.rapport" downloads
+        # as "CON rapport <day>".
+        while stem.partition(".")[0].rstrip(" ").upper() in _WINDOWS_DEVICE_NAMES:
+            stem = " ".join(stem.replace(".", " ", 1).split())
+        return stem
 
 
 def _clean(text: str) -> str:
