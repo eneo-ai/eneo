@@ -119,4 +119,25 @@ describe("WidgetTextsFields and the save's echo", () => {
     await expect.element(footer).toHaveAccessibleDescription(/För lång/);
     await expect.element(page.getByText("Frågorna godtogs inte")).toBeVisible();
   });
+
+  test("a required subtitle is kept in the field, not sent, when it is emptied", async () => {
+    const onChange = vi.fn();
+    render(WidgetTextsFields, {
+      texts,
+      onChange,
+      subtitleRequired: "Mallen låser upplysningen"
+    });
+    const subtitle = page.getByLabelText("widget_admin_text_subtitle", { exact: true });
+
+    await userEvent.clear(subtitle);
+    await userEvent.fill(subtitle, "   ");
+    expect(onChange).not.toHaveBeenCalled();
+    await expect.element(subtitle).toHaveValue("   ");
+    await expect.element(subtitle).toHaveAttribute("aria-invalid", "true");
+    await expect.element(subtitle).toHaveAccessibleDescription(/Mallen låser upplysningen/);
+
+    await userEvent.fill(subtitle, "Du chattar med AI.");
+    expect(onChange).toHaveBeenLastCalledWith({ subtitle: "Du chattar med AI." });
+    await expect.element(subtitle).not.toHaveAccessibleDescription(/Mallen låser/);
+  });
 });

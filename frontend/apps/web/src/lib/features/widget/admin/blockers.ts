@@ -7,6 +7,8 @@ export function blockerLabel(code: string): string {
       return m.widget_admin_blocker_allowed_origins_empty();
     case "subtitle_empty":
       return m.widget_admin_blocker_subtitle_empty();
+    case "subtitle_required_for_legal_texts_lock":
+      return m.widget_admin_blocker_legal_texts_lock_subtitle();
     case "target_not_published":
       return m.widget_admin_blocker_target_not_published();
     case "archived":

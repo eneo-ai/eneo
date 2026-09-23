@@ -22,6 +22,12 @@
     lockHint?: string;
     /** Why the server refused a text, by field name. */
     errors?: Partial<Record<keyof WidgetTexts, string>>;
+    /**
+     * Why the subtitle may not be emptied here (a live widget, a template
+     * that locks it). A blank subtitle then stays in the field with this
+     * message instead of being sent to a server that refuses it.
+     */
+    subtitleRequired?: string;
   };
 
   let {
@@ -31,13 +37,14 @@
     idPrefix = "widget",
     lockedFields = new Set<LockedTextField>(),
     lockHint = "",
-    errors = {}
+    errors = {},
+    subtitleRequired
   }: Props = $props();
 
   const id = (name: string) => `${idPrefix}-${name}`;
   const locked = (field: LockedTextField) => lockedFields.has(field);
   const describedBy = (field: LockedTextField, help: string) =>
-    [id(help), locked(field) && id("lock-hint"), errors[field] && id(`${field}-error`)]
+    [id(help), locked(field) && id("lock-hint"), problems[field] && id(`${field}-error`)]
       .filter(Boolean)
       .join(" ");
 
@@ -56,10 +63,17 @@
   ) as Record<Drafted, TextDraft>;
   const typed = (field: Drafted) => (event: Event & { currentTarget: { value: string } }) => {
     drafts[field].text = event.currentTarget.value;
+    if (field === "subtitle" && subtitleRequired && !event.currentTarget.value.trim()) return;
     const change: Partial<WidgetTexts> = { [field]: event.currentTarget.value };
     onChange(change);
   };
-  const subtitleInvalid = $derived(!drafts.subtitle.text.trim() || !!errors.subtitle);
+  const problems = $derived<Partial<Record<keyof WidgetTexts, string>>>({
+    ...errors,
+    subtitle:
+      errors.subtitle ??
+      (subtitleRequired && !drafts.subtitle.text.trim() ? subtitleRequired : undefined)
+  });
+  const subtitleInvalid = $derived(!drafts.subtitle.text.trim() || !!problems.subtitle);
 
   // The footer link is committed when the field is left, never per keystroke.
   let linkDraft = $state(untrack(() => texts.footer_link_url ?? ""));
@@ -86,8 +100,8 @@
 </script>
 
 {#snippet fieldError(field: keyof WidgetTexts)}
-  {#if errors[field]}
-    <Field.Error id={id(`${field}-error`)}>{errors[field]}</Field.Error>
+  {#if problems[field]}
+    <Field.Error id={id(`${field}-error`)}>{problems[field]}</Field.Error>
   {/if}
 {/snippet}
 

@@ -36,6 +36,8 @@ function refusalCodes(error: unknown): string[] {
       return codes(body.violations);
     case "widget_serving_blocked":
       return codes(body.blockers);
+    case "template_locks_unenforceable":
+      return codes(body.violations);
     default:
       return [];
   }
@@ -48,7 +50,8 @@ const CODE_FIELDS: Record<string, string> = {
   retention_above_policy_maximum: "privacy.retention_days",
   bot_protection_none_not_allowed: "bot_protection",
   allowed_origins_empty: "allowed_origins",
-  subtitle_empty: "texts.subtitle"
+  subtitle_empty: "texts.subtitle",
+  subtitle_required_for_legal_texts_lock: "texts.subtitle"
 };
 
 function refusedValueMessage(path: string): string {
@@ -107,6 +110,10 @@ export function widgetErrorMessage(error: unknown): string | null {
       });
     case "widget_serving_blocked":
       return m.widget_admin_error_serving_blocked({
+        reasons: refusalCodes(error).map(blockerLabel).join(" ")
+      });
+    case "template_locks_unenforceable":
+      return m.widget_admin_error_template_locks({
         reasons: refusalCodes(error).map(blockerLabel).join(" ")
       });
   }

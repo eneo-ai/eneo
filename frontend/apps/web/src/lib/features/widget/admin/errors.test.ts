@@ -98,6 +98,22 @@ describe("refused values", () => {
     expect(widgetFieldErrors(new Error("offline"))).toEqual({});
   });
 
+  it("pins a template lock that cannot be kept to the subtitle", () => {
+    const locks = new EneoError("raw", "RESPONSE", 400, 0, {
+      detail: {
+        code: "template_locks_unenforceable",
+        message: "raw",
+        violations: ["subtitle_required_for_legal_texts_lock"]
+      }
+    });
+    expect(widgetFieldErrors(locks)).toEqual({
+      "texts.subtitle": "widget_admin_blocker_legal_texts_lock_subtitle"
+    });
+    expect(widgetErrorMessage(locks)).toBe(
+      "widget_admin_error_template_locks(widget_admin_blocker_legal_texts_lock_subtitle)"
+    );
+  });
+
   it("explains a refusal in the editor's language instead of the raw English", () => {
     expect(widgetErrorMessage(policyViolation)).toBe(
       "widget_admin_error_policy_violation(widget_admin_blocker_budget_policy widget_admin_blocker_bot_protection)"

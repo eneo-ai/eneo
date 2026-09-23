@@ -10,7 +10,10 @@ from eneo.main.exceptions import (
 )
 from eneo.roles.permissions import Permission
 from eneo.widgets.application.widget_template_service import WidgetTemplateService
-from eneo.widgets.domain.exceptions import WidgetTemplateInUseError
+from eneo.widgets.domain.exceptions import (
+    WidgetTemplateInUseError,
+    WidgetTemplateLocksUnenforceableError,
+)
 from eneo.widgets.domain.widget import Widget, WidgetLanguage, WidgetStatus, WidgetTheme
 from eneo.widgets.domain.widget_template import (
     ALL_LOCK_GROUPS,
@@ -372,7 +375,7 @@ async def test_saving_edits_the_draft_and_publishing_updates_the_followers():
     assert [w.id for w in result.synced_widgets] == [linked.id]
     assert (await widgets.get(linked.id)).revision == before + 1
 
-    with pytest.raises(BadRequestException):
+    with pytest.raises(WidgetTemplateLocksUnenforceableError) as refused:
         await service.update_template(
             template.id,
             {
@@ -380,6 +383,11 @@ async def test_saving_edits_the_draft_and_publishing_updates_the_followers():
                 "texts": template.texts.model_copy(update={"subtitle": ""}),
             },
         )
+    # The editor pins the refusal to the subtitle field by this code.
+    assert refused.value.code == "template_locks_unenforceable"
+    assert refused.value.details() == {
+        "violations": ["subtitle_required_for_legal_texts_lock"]
+    }
 
     # The archived follower is history: it neither counts nor blocks.
     counts = await service.linked_widget_counts()

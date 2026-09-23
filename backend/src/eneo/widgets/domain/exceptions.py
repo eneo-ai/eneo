@@ -153,6 +153,22 @@ class WidgetTemplateNotPublishedError(WidgetPublicError):
         )
 
 
+class WidgetTemplateLocksUnenforceableError(WidgetPublicError):
+    """The template's locks could not be written onto its followers as saved."""
+
+    status_code = 400
+    code = "template_locks_unenforceable"
+
+    def __init__(self, violations: list[str]) -> None:
+        super().__init__(
+            "Template locks cannot be enforced: " + ", ".join(violations) + "."
+        )
+        self.violations = violations
+
+    def details(self) -> dict[str, Any]:
+        return {"violations": list(self.violations)}
+
+
 class WidgetPolicyViolationError(WidgetPublicError):
     """The widget's settings are outside the organisation's widget policy."""
 

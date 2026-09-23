@@ -387,6 +387,9 @@
                   showSuggestions={false}
                   idPrefix="template"
                   errors={textErrors}
+                  subtitleRequired={template.locked_groups.includes("legal_texts")
+                    ? m.widget_admin_blocker_legal_texts_lock_subtitle()
+                    : undefined}
                   onChange={(change) => autosave.patch({ texts: { ...template.texts, ...change } })}
                 />
               </Card.Content>

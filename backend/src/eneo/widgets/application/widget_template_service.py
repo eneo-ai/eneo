@@ -12,7 +12,10 @@ from pydantic import ValidationError
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.users.user import UserInDB
-from eneo.widgets.domain.exceptions import WidgetTemplateInUseError
+from eneo.widgets.domain.exceptions import (
+    WidgetTemplateInUseError,
+    WidgetTemplateLocksUnenforceableError,
+)
 from eneo.widgets.domain.widget import (
     Widget,
     WidgetLanguage,
@@ -134,9 +137,7 @@ class WidgetTemplateService:
     def _assert_locks_enforceable(template: WidgetTemplate) -> None:
         violations = template.lock_violations()
         if violations:
-            raise BadRequestException(
-                "Template locks cannot be enforced: " + ", ".join(violations)
-            )
+            raise WidgetTemplateLocksUnenforceableError(violations)
 
     async def _sync_followers(
         self, template: WidgetTemplate, *, force: bool = False
