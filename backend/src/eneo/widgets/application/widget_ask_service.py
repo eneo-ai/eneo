@@ -335,13 +335,12 @@ class WidgetAskService:
         if row is None:
             raise RuntimeError("Widget answer usage is missing; reservation retained.")
         question_tokens, answer_tokens, prompt_tokens, completion_tokens = row
+        # The num_tokens_* columns add up every provider request of the turn,
+        # tool rounds included, which is what the provider bills. The context
+        # columns keep only the final request and serve headroom, not cost.
         return (
-            int(prompt_tokens if prompt_tokens is not None else question_tokens or 0),
-            int(
-                completion_tokens
-                if completion_tokens is not None
-                else answer_tokens or 0
-            ),
+            int(question_tokens if question_tokens is not None else prompt_tokens or 0),
+            int(answer_tokens if answer_tokens is not None else completion_tokens or 0),
         )
 
     async def _record_blocked(

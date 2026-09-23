@@ -498,3 +498,22 @@ async def test_feedback_moves_the_daily_counters_with_the_vote():
     await service.leave_feedback(principal, uuid4(), SessionFeedback(value=-1))
     kwargs = deps.usage.record.await_args.kwargs
     assert (kwargs["helpful"], kwargs["unhelpful"]) == (-1, 1)
+
+
+async def test_settlement_reads_the_cumulative_tokens_of_every_provider_round():
+    async def row(*values):
+        result = MagicMock()
+        result.first.return_value = values
+        return result
+
+    session = MagicMock()
+    # Three tool rounds billed 4 800 prompt tokens; the last request alone
+    # had 1 800.
+    session.execute = AsyncMock(return_value=await row(4_800, 300, 1_800, 120))
+    assert await WidgetAskService._question_tokens(session, uuid4()) == (4_800, 300)
+
+    session.execute = AsyncMock(return_value=await row(None, None, 1_800, 120))
+    assert await WidgetAskService._question_tokens(session, uuid4()) == (1_800, 120)
+
+    session.execute = AsyncMock(return_value=await row(None, None, None, None))
+    assert await WidgetAskService._question_tokens(session, uuid4()) == (0, 0)

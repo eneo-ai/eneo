@@ -40,6 +40,12 @@ async def _mint(client, public_id: str) -> str:
     return resp.json()["token"]
 
 
+# Stored like a turn with tool rounds: the cumulative columns add up every
+# provider request, the context columns hold the final request only.
+PROMPT_TOKENS, ANSWER_TOKENS = 4_800, 300
+FINAL_PROMPT_TOKENS, FINAL_ANSWER_TOKENS = 1_800, 120
+
+
 @pytest.fixture
 def fake_assistant_ask(monkeypatch):
     """Replace the model call with a canned two-chunk stream.
@@ -68,8 +74,10 @@ def fake_assistant_ask(monkeypatch):
                 assistant_id=assistant_id,
                 question=question,
                 answer="Hej där!",
-                num_tokens_question=0,
-                num_tokens_answer=0,
+                num_tokens_question=PROMPT_TOKENS,
+                num_tokens_answer=ANSWER_TOKENS,
+                context_prompt_tokens=FINAL_PROMPT_TOKENS,
+                context_completion_tokens=FINAL_ANSWER_TOKENS,
             )
             .returning(Questions.id)
         )
@@ -232,18 +240,22 @@ async def test_visitor_ask_streams_and_owns_its_session(
     assert str(row.widget_id) == active_widget["id"]
     assert row.visitor_id is not None
 
-    # Usage was settled after the streams finished.
+    # Usage was settled after the streams finished, on what every provider
+    # round of the two answers cost, not on their final requests.
     resp = await client.get(
         f"/api/v1/widgets/{active_widget['id']}/usage/", headers=_auth(admin_token)
     )
     assert resp.status_code == 200, resp.text
     usage = resp.json()
     assert usage["daily_token_budget"] == 500_000
-    assert usage["days"] and usage["days"][0]["questions"] == 2
-    assert (usage["days"][0]["helpful"], usage["days"][0]["unhelpful"]) == (0, 1)
-    assert (
-        usage["budget_used_today"] == 0
-    )  # reservations settled to the real (zero) usage
+    day = usage["days"][0]
+    assert day["questions"] == 2
+    assert (day["helpful"], day["unhelpful"]) == (0, 1)
+    assert (day["input_tokens"], day["output_tokens"]) == (
+        2 * PROMPT_TOKENS,
+        2 * ANSWER_TOKENS,
+    )
+    assert usage["budget_used_today"] == 2 * (PROMPT_TOKENS + ANSWER_TOKENS)
 
 
 @pytest.mark.integration
