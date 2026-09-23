@@ -4,7 +4,7 @@
   "flow_capsule_ai_speakers": "Suggests speakers",
   "flow_output_mode_invalid_speaker_mapping": "Review transcript needs text from the previous step as material and structured data (JSON) as the response format.",
   "flow_output_mode_speaker_mapping": "Review transcript",
-  "flow_run_progress_running_body": "This step is running. Its result appears here when it is done.",
+  "flow_run_progress_running_body": "This step is running. When it is done, you can open its result here.",
   "flow_run_progress_transcribing_with_speakers_hint": "This step transcribes the audio and labels who says what.",
   "flow_run_review_speakers_confidence_high": "High confidence",
   "flow_run_review_speakers_confidence_low": "Low confidence",

@@ -4,7 +4,7 @@
   "flow_capsule_ai_speakers": "Föreslår talare",
   "flow_output_mode_invalid_speaker_mapping": "Granska transkript kräver text från föregående steg som underlag och strukturerade data (JSON) som svarsformat.",
   "flow_output_mode_speaker_mapping": "Granska transkript",
-  "flow_run_progress_running_body": "Steget körs. Resultatet visas här när det är klart.",
+  "flow_run_progress_running_body": "Steget körs. När det är klart kan du öppna resultatet här.",
   "flow_run_progress_transcribing_with_speakers_hint": "Steget transkriberar ljudet och märker upp vem som säger vad.",
   "flow_run_review_speakers_confidence_high": "Hög säkerhet",
   "flow_run_review_speakers_confidence_low": "Låg säkerhet",
