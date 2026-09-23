@@ -257,6 +257,8 @@ export type LocalResourceBinding = components["schemas"]["LocalResourceBinding"]
 export type LocalResourceKind = components["schemas"]["LocalResourceKind"];
 export type FlowRunContractStepInput = components["schemas"]["FlowRuntimeInputContractPublic"];
 export type FlowRunContractTemplateReadiness = components["schemas"]["FlowTemplateReadinessPublic"];
+export type FlowRunContractSecurityClassification =
+  components["schemas"]["FlowSecurityClassificationPublic"];
 export type FlowRunContract = components["schemas"]["FlowRunContractPublic"];
 export type FlowRuntimeUploadPolicy = components["schemas"]["FlowRuntimeUploadPolicyPublic"];
 export type FlowHttpTestRequest = components["schemas"]["HttpTestRequest"];

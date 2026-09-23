@@ -1,5 +1,9 @@
 import { createEneo } from "@eneo/eneo-js";
-import type { AIBuilderBudgetSettingsUpdate } from "./resources";
+import type {
+  AIBuilderBudgetSettingsUpdate,
+  FlowRunContract,
+  FlowRunContractSecurityClassification
+} from "./resources";
 import type { operations } from "./schema";
 
 type Assert<T extends true> = T;
@@ -155,6 +159,12 @@ flows.runs.create({ flow: { id: "flow-1" }, file_ids: ["file-1"] });
 type _ListFlowsReturn = Assert<Equal<Awaited<ReturnType<typeof flows.list>>, ListFlowsResponse>>;
 type _GetFlowRunContractReturn = Assert<
   Equal<Awaited<ReturnType<typeof flows.runContract.get>>, GetFlowRunContractResponse>
+>;
+type _RunContractSecurityClassification = Assert<
+  Equal<
+    FlowRunContract["security_classification"],
+    FlowRunContractSecurityClassification | null | undefined
+  >
 >;
 type _CreateFlowRunReturn = Assert<
   Equal<Awaited<ReturnType<typeof flows.runs.create>>, CreateFlowRunResponse>
