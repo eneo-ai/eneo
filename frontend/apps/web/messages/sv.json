@@ -3670,6 +3670,7 @@
   "eneo_error_9056": "Filen behöver ett namn med högst 255 tecken. Byt namn på filen och försök igen.",
   "eneo_error_9058": "Filen behöver ett namn med högst 255 tecken. Byt namn på filen och försök igen.",
   "eneo_error_9059": "Den uppladdade originalfilen är inte tillgänglig. Läs in sidan på nytt och försök igen. Be en redaktör att ladda upp filen igen om problemet kvarstår.",
+  "eneo_error_9060": "Det är inte angivet hur mycket text den valda AI-modellen klarar, så den kan inte användas här. Välj en annan modell eller be en administratör ange modellens kapacitet.",
   "organization_skills_execution_refresh_error": "Blockeringen ändrades efter att du granskade den, och det aktuella läget kunde inte läsas in. Ladda om sidan innan du försöker igen.",
   "skills_library_load_older": "Visa äldre versioner",
   "skills_library_loading_older": "Läser in versioner…",

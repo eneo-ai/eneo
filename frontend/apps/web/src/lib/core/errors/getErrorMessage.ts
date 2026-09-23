@@ -64,6 +64,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   // --- File uploads ---
   9058: () => m.eneo_error_9058(), // INVALID_FILENAME
   9059: () => m.eneo_error_9059(), // INFO_BLOB_ORIGINAL_UNAVAILABLE
+  9060: () => m.eneo_error_9060(), // UNKNOWN_MODEL_CAPACITY
 
   // --- Model lifecycle ---
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE

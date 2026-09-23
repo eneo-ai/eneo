@@ -3637,6 +3637,7 @@
   "eneo_error_9056": "The file needs a name of at most 255 characters. Rename it and try again.",
   "eneo_error_9058": "The file needs a name of at most 255 characters. Rename it and try again.",
   "eneo_error_9059": "The uploaded original is unavailable. Refresh the page and try again. If the problem continues, ask an editor to upload the file again.",
+  "eneo_error_9060": "It is not stated how much text the selected AI model can handle, so it cannot be used here. Choose another model or ask an administrator to set the model's capacity.",
   "organization_skills_execution_refresh_error": "The execution block changed after you reviewed it, and the current state could not be loaded. Reload the page before trying again.",
   "skills_library_load_older": "Load older versions",
   "skills_library_loading_older": "Loading versions…",
