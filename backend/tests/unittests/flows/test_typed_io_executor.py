@@ -4815,7 +4815,6 @@ async def test_render_verbatim_renders_input_text_without_llm_or_rag(user):
         render_document=lambda text, output_type, step_order: (
             f"{output_type}:{text}".encode("utf-8"),
             "application/pdf",
-            f"flow-step-{step_order}.pdf",
         ),
         render_structured_document=MagicMock(
             side_effect=AssertionError("structured rendering is not used here")
@@ -5022,7 +5021,6 @@ async def test_document_outputs_generate_downloadable_artifacts(
         render_document=lambda text, output_type, step_order: (
             f"{output_type}:{text}".encode("utf-8"),
             expected_mimetype,
-            f"flow-step-{step_order}{expected_ext}",
         ),
         render_structured_document=MagicMock(
             side_effect=AssertionError("structured rendering is not used here")
@@ -5049,7 +5047,7 @@ async def test_document_outputs_generate_downloadable_artifacts(
     assert artifact["size"] > 0
     executor.file_service.save_generated_file.assert_awaited_once_with(
         payload=f"{output_type}:Rapport".encode(),
-        name=f"flow-step-{step.step_order}{expected_ext}",
+        name=f"step_{step.step_order}_output{expected_ext}",
         mimetype=expected_mimetype,
         file_type=FileType.DOCUMENT,
     )

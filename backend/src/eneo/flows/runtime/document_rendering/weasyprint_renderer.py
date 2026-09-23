@@ -209,11 +209,7 @@ class WeasyPrintDocumentRenderer:
         )
         if pdf_bytes is None:
             raise RuntimeError("WeasyPrint did not return PDF bytes")
-        return RenderedDocument(
-            blob=bytes(pdf_bytes),
-            mimetype=_PDF_MIMETYPE,
-            filename=f"step_{step_order}_output.pdf",
-        )
+        return RenderedDocument(blob=bytes(pdf_bytes), mimetype=_PDF_MIMETYPE)
 
 
 def configure_weasyprint_dependency_logging() -> None:

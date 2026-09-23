@@ -41,7 +41,7 @@ class RenderDocumentFn(Protocol):
         output_type: str,
         *,
         step_order: int,
-    ) -> tuple[bytes, str, str]: ...
+    ) -> tuple[bytes, str]: ...
 
 
 class RenderStructuredDocumentFn(Protocol):
@@ -52,7 +52,7 @@ class RenderStructuredDocumentFn(Protocol):
         *,
         step_order: int,
         schema: FlowPersistedJsonObject | None = None,
-    ) -> tuple[bytes, str, str]: ...
+    ) -> tuple[bytes, str]: ...
 
 
 class EnsureSourceWithinLimitsFn(Protocol):
@@ -63,7 +63,6 @@ class EnsureSourceWithinLimitsFn(Protocol):
 class RenderedOutputArtifact:
     blob: bytes
     mimetype: str
-    filename: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,7 +189,7 @@ def process_structured_document_output(
         output_contract,
         label=f"Step {step_order} output",
     )
-    blob, mimetype, filename = context.render_structured_document(
+    blob, mimetype = context.render_structured_document(
         structured_output,
         output_type,
         step_order=step_order,
@@ -198,11 +197,7 @@ def process_structured_document_output(
     )
     return OutputFormatProcessingResult(
         structured_output=structured_output,
-        artifact=RenderedOutputArtifact(
-            blob=blob,
-            mimetype=mimetype,
-            filename=filename,
-        ),
+        artifact=RenderedOutputArtifact(blob=blob, mimetype=mimetype),
         diagnostics=diagnostics,
     )
 
@@ -214,17 +209,13 @@ def render_document_output(
     step_order: int,
     context: OutputFormatProcessingContext,
 ) -> OutputFormatProcessingResult:
-    blob, mimetype, filename = context.render_document(
+    blob, mimetype = context.render_document(
         full_text,
         output_type,
         step_order=step_order,
     )
     return OutputFormatProcessingResult(
-        artifact=RenderedOutputArtifact(
-            blob=blob,
-            mimetype=mimetype,
-            filename=filename,
-        )
+        artifact=RenderedOutputArtifact(blob=blob, mimetype=mimetype)
     )
 
 

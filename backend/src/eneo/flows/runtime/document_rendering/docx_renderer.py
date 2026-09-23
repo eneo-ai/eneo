@@ -70,8 +70,4 @@ class DocxDocumentRenderer:
             document.core_properties.title = title
         buf = io.BytesIO()
         document.save(buf)
-        return RenderedDocument(
-            blob=buf.getvalue(),
-            mimetype=_DOCX_MIMETYPE,
-            filename=f"step_{step_order}_output.docx",
-        )
+        return RenderedDocument(blob=buf.getvalue(), mimetype=_DOCX_MIMETYPE)

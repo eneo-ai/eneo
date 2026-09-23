@@ -743,8 +743,9 @@ async def test_materialized_template_attachment_publish_validates_controls_and_p
             asset_id=materialized.binding.local_id,
         )
         assert pinned_file.blob is not None
-        rendered, _mime, _name = render_docx_template(
+        rendered, _mime = render_docx_template(
             template_bytes=pinned_file.blob,
+            template_name=pinned_file.name,
             context={"case_id": "KS-2026-42", "body": "**Verifierad** bakgrund."},
             step_order=1,
         )

@@ -143,6 +143,7 @@ async def process_typed_output(
     if format_result.artifact is not None:
         artifacts = await _persist_rendered_artifact(
             artifact=format_result.artifact,
+            step=step,
             run=run,
             deps=deps,
         )
@@ -157,22 +158,24 @@ async def process_typed_output(
 async def _persist_rendered_artifact(
     *,
     artifact: RenderedOutputArtifact,
+    step: RuntimeOutputStep,
     run: RuntimeOutputRun,
     deps: OutputRuntimeDeps,
 ) -> list[dict[str, str | int]]:
     checksum = hashlib.sha256(artifact.blob).hexdigest()
+    name = f"step_{step.step_order}_output.{step.output_type}"
     file_record = await save_generated_flow_file(
         file_service=deps.file_service,
         run=run,
         payload=artifact.blob,
-        name=artifact.filename,
+        name=name,
         mimetype=artifact.mimetype,
         file_type=FileType.DOCUMENT,
     )
     return [
         {
             "file_id": str(file_record.id),
-            "name": artifact.filename,
+            "name": name,
             "mimetype": artifact.mimetype,
             "size": len(artifact.blob),
             "checksum": checksum,

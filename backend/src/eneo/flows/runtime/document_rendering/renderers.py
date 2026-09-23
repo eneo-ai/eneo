@@ -10,10 +10,9 @@ from eneo.flows.runtime.document_rendering.blocks import DocumentBlock
 class RenderedDocument:
     blob: bytes
     mimetype: str
-    filename: str
 
-    def as_tuple(self) -> tuple[bytes, str, str]:
-        return self.blob, self.mimetype, self.filename
+    def as_tuple(self) -> tuple[bytes, str]:
+        return self.blob, self.mimetype
 
 
 class DocumentRenderer(Protocol):

@@ -3843,7 +3843,7 @@ async def test_document_report_citation_survives_compose_render_and_public_artif
     # never prose scanning — so the visible marker and its reference entry
     # must already be present here.
     persisted_text = output.persisted_text
-    blob, _, _ = default_document_render_service().render_document(
+    blob, _ = default_document_render_service().render_document(
         persisted_text,
         "docx",
         step_order=5,

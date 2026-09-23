@@ -75,12 +75,19 @@ def test_empty_control_discovery_is_allowed_but_template_use_is_rejected(
         inspect_docx_template_bytes(blob, filename="template.docx")
     assert info.value.code == "flow_template_no_controls"
     with pytest.raises(TypedIOValidationException, match="at least one"):
-        render_docx_template(template_bytes=blob, context={}, step_order=1)
+        render_docx_template(
+            template_bytes=blob, template_name="mall.docx", context={}, step_order=1
+        )
 
 
 def test_corrupt_pinned_template_has_typed_runtime_failure() -> None:
     with pytest.raises(TypedIOValidationException) as info:
-        render_docx_template(template_bytes=b"not a docx", context={}, step_order=1)
+        render_docx_template(
+            template_bytes=b"not a docx",
+            template_name="mall.docx",
+            context={},
+            step_order=1,
+        )
     assert info.value.code == "typed_io_template_render_failed"
 
 
@@ -230,8 +237,9 @@ def test_inspect_normalizes_corrupt_archives() -> None:
 
 
 def test_render_writes_markdown_sections_with_the_template_styles() -> None:
-    blob, mimetype, filename = render_docx_template(
+    blob, mimetype = render_docx_template(
         template_bytes=_rapport(),
+        template_name="mall.docx",
         context={
             "titel": "Översyn 2026",
             "datum": "2026-09-08",
@@ -245,7 +253,6 @@ def test_render_writes_markdown_sections_with_the_template_styles() -> None:
     )
 
     assert mimetype.endswith("wordprocessingml.document")
-    assert filename == "step_4_output.docx"
     styled = docx_styled_paragraphs(blob)
     assert ("Normal", "Titel: Översyn 2026") in styled
     assert ("Heading 1", "Sammanfattning") in styled
@@ -281,8 +288,9 @@ def test_render_keeps_relative_heading_levels_under_the_section_heading() -> Non
         rich=[("avsnitt", "Avsnitt", "x")], heading_level=2
     )
 
-    blob, _, _ = render_docx_template(
+    blob, _ = render_docx_template(
         template_bytes=template,
+        template_name="mall.docx",
         context={"avsnitt": "# Delrubrik\n\nText\n\n## Underrubrik"},
         step_order=1,
     )
@@ -297,6 +305,7 @@ def test_render_rejects_skipped_heading_levels_by_section() -> None:
     with pytest.raises(DocumentStructureError, match="section 'Analys'"):
         render_docx_template(
             template_bytes=_rapport(),
+            template_name="mall.docx",
             context={
                 "titel": "T",
                 "datum": "D",
@@ -314,8 +323,9 @@ def test_render_text_controls_take_one_line_unless_multiline() -> None:
     multi = document.add_paragraph("Flera: ")
     append_text_control(multi, tag="flera", label="Flera", hint="f", multiline=True)
 
-    blob, _, _ = render_docx_template(
+    blob, _ = render_docx_template(
         template_bytes=_bytes(document),
+        template_name="mall.docx",
         context={"en": "första\nandra", "flera": "första\nandra"},
         step_order=1,
     )
@@ -327,8 +337,9 @@ def test_render_text_controls_take_one_line_unless_multiline() -> None:
 
 
 def test_render_removes_a_control_bound_to_empty_and_keeps_static_content() -> None:
-    blob, _, _ = render_docx_template(
+    blob, _ = render_docx_template(
         template_bytes=_rapport(),
+        template_name="mall.docx",
         context={"titel": "T", "datum": "", "sammanfattning": "S", "analys": ""},
         step_order=1,
     )
@@ -346,12 +357,14 @@ def test_render_rejects_missing_and_valueless_bindings_before_writing() -> None:
     ):
         render_docx_template(
             template_bytes=_rapport(),
+            template_name="mall.docx",
             context={"titel": "T", "datum": "D", "sammanfattning": "S"},
             step_order=1,
         )
     with pytest.raises(TypedIOValidationException, match="without a value: datum"):
         render_docx_template(
             template_bytes=_rapport(),
+            template_name="mall.docx",
             context={"titel": "T", "datum": None, "sammanfattning": "S", "analys": "A"},
             step_order=1,
         )
@@ -361,6 +374,7 @@ def test_render_holds_the_whole_document_to_the_render_limits() -> None:
     with pytest.raises(TypedIOValidationException):
         render_docx_template(
             template_bytes=_rapport(),
+            template_name="mall.docx",
             context={
                 "titel": "T",
                 "datum": "D",
@@ -391,6 +405,7 @@ def test_render_counts_inline_values_in_aggregate_limits(
     with pytest.raises(TypedIOValidationException) as info:
         render_docx_template(
             template_bytes=template,
+            template_name="mall.docx",
             context={"first": "abcd", "second": "efgh"},
             step_order=1,
             limits=limits,
@@ -406,7 +421,10 @@ def test_render_refuses_a_template_that_left_the_supported_profile() -> None:
 
     with pytest.raises(TypedIOValidationException, match="no longer fillable"):
         render_docx_template(
-            template_bytes=_bytes(document), context={"a": "x"}, step_order=1
+            template_bytes=_bytes(document),
+            template_name="mall.docx",
+            context={"a": "x"},
+            step_order=1,
         )
 
 
@@ -419,8 +437,9 @@ def test_extract_docx_text_reads_control_content_and_skips_page_furniture() -> N
     document.add_paragraph("Före")
     append_rich_control(document, tag="mitt", label="Mitt", hint="Placeholder")
     document.add_paragraph("Efter")
-    blob, _, _ = render_docx_template(
+    blob, _ = render_docx_template(
         template_bytes=_bytes(document),
+        template_name="mall.docx",
         context={"mitt": "Inuti kontrollen\n\n| A | B |\n|---|---|\n| 1 | 2 |"},
         step_order=1,
     )

@@ -50,7 +50,7 @@ class DocumentRenderService:
         output_type: str,
         *,
         step_order: int,
-    ) -> tuple[bytes, str, str]:
+    ) -> tuple[bytes, str]:
         ensure_source_within_limits(text, limits=self._limits)
         source_text = _unwrap_single_field_text_envelope(
             text,
@@ -69,7 +69,7 @@ class DocumentRenderService:
         *,
         step_order: int,
         schema: dict[str, Any] | None = None,
-    ) -> tuple[bytes, str, str]:
+    ) -> tuple[bytes, str]:
         ensure_structured_value_within_limits(data, limits=self._limits)
         try:
             blocks = structured_data_to_blocks(data, schema=schema)
@@ -91,7 +91,7 @@ class DocumentRenderService:
         output_type: str,
         *,
         step_order: int,
-    ) -> tuple[bytes, str, str]:
+    ) -> tuple[bytes, str]:
         ensure_blocks_within_limits(blocks, limits=self._limits)
         renderer = self._renderers.get(output_type)
         if renderer is None:

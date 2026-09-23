@@ -179,11 +179,13 @@ async def complete_template_fill_step(
 ) -> StepExecutionOutput:
     current_stage = "rendering the DOCX template"
     try:
-        blob, mimetype, filename = render_docx_template(
+        blob, mimetype = render_docx_template(
             template_bytes=prepared.template_blob,
+            template_name=prepared.template_file_name,
             context=prepared.resolved_bindings,
             step_order=step.step_order,
         )
+        filename = f"step_{step.step_order}_output.docx"
         deps.logger.debug(
             "flow_executor.template_fill.template_rendered run_id=%s step_order=%d template_file_id=%s filename=%s size=%d",
             run.id,

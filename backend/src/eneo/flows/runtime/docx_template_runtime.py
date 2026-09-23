@@ -129,10 +129,11 @@ def docx_template_placeholder_names(
 def render_docx_template(
     *,
     template_bytes: bytes,
+    template_name: str,
     context: Mapping[str, str | None],
     step_order: int,
     limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS,
-) -> tuple[bytes, str, str]:
+) -> tuple[bytes, str]:
     """Fill every control from ``context`` and return the finished document.
 
     Value semantics per target: a missing key or a ``None`` value is an error
@@ -143,9 +144,8 @@ def render_docx_template(
     render limits before anything is written.
     """
 
-    filename = f"step_{step_order}_output.docx"
     try:
-        validate_docx_template_archive(template_bytes, filename=filename)
+        validate_docx_template_archive(template_bytes, filename=template_name)
         document = Document(io.BytesIO(template_bytes))
         controls = inspect_content_controls(document)
         _require_fill_targets(controls)
@@ -187,7 +187,7 @@ def render_docx_template(
 
     output = io.BytesIO()
     document.save(output)
-    return output.getvalue(), _DOCX_MIMETYPE, filename
+    return output.getvalue(), _DOCX_MIMETYPE
 
 
 def extract_docx_text(document_bytes: bytes) -> str:

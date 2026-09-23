@@ -57,9 +57,7 @@ requires_weasyprint_native_stack = pytest.mark.skipif(
 
 @requires_weasyprint_native_stack
 def test_render_pdf_valid_blob():
-    blob, mimetype, filename = _render_service.render_document(
-        "Hello world", "pdf", step_order=1
-    )
+    blob, mimetype = _render_service.render_document("Hello world", "pdf", step_order=1)
     assert isinstance(blob, bytes)
     assert len(blob) > 0
     assert blob[:5] == b"%PDF-"
@@ -67,21 +65,15 @@ def test_render_pdf_valid_blob():
 
 @requires_weasyprint_native_stack
 def test_render_pdf_correct_mime():
-    _, mimetype, _ = _render_service.render_document("Test", "pdf", step_order=1)
+    _, mimetype = _render_service.render_document("Test", "pdf", step_order=1)
     assert mimetype == "application/pdf"
-
-
-@requires_weasyprint_native_stack
-def test_render_pdf_filename_pattern():
-    _, _, filename = _render_service.render_document("Test", "pdf", step_order=3)
-    assert filename == "step_3_output.pdf"
 
 
 @requires_weasyprint_native_stack
 def test_render_pdf_markdown_headings_and_lists_as_readable_document():
     text = "# Titel\n\n## Sammanfattning\n\n- punkt ett\n- punkt två\n\n1. nästa steg"
 
-    blob, _, _ = _render_service.render_document(text, "pdf", step_order=1)
+    blob, _ = _render_service.render_document(text, "pdf", step_order=1)
 
     with pdfplumber.open(io.BytesIO(blob)) as pdf:
         page_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
@@ -96,7 +88,7 @@ def test_render_pdf_markdown_headings_and_lists_as_readable_document():
 def test_render_pdf_markdown_table_outputs_cells_without_separator_row():
     text = "| Namn | Värde |\n| --- | --- |\n| Kommun | Sundsvall |"
 
-    blob, _, _ = _render_service.render_document(text, "pdf", step_order=1)
+    blob, _ = _render_service.render_document(text, "pdf", step_order=1)
 
     with pdfplumber.open(io.BytesIO(blob)) as pdf:
         page_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
@@ -137,7 +129,7 @@ def test_render_pdf_markdown_inline_syntax_as_readable_text():
         "Leona visar tydliga framsteg inom **svenska** och `matematik`."
     )
 
-    blob, _, _ = _render_service.render_document(text, "pdf", step_order=1)
+    blob, _ = _render_service.render_document(text, "pdf", step_order=1)
 
     with pdfplumber.open(io.BytesIO(blob)) as pdf:
         page_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
@@ -209,7 +201,7 @@ def test_markdown_blocks_preserve_inline_run_semantics():
 
 
 def test_render_docx_valid_blob():
-    blob, mimetype, filename = _render_service.render_document(
+    blob, mimetype = _render_service.render_document(
         "Hello world", "docx", step_order=1
     )
     assert isinstance(blob, bytes)
@@ -219,21 +211,16 @@ def test_render_docx_valid_blob():
 
 
 def test_render_docx_correct_mime():
-    _, mimetype, _ = _render_service.render_document("Test", "docx", step_order=1)
+    _, mimetype = _render_service.render_document("Test", "docx", step_order=1)
     assert (
         mimetype
         == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
 
-def test_render_docx_filename_pattern():
-    _, _, filename = _render_service.render_document("Test", "docx", step_order=5)
-    assert filename == "step_5_output.docx"
-
-
 def test_render_docx_empty_output_still_valid():
     """Empty markdown should still produce a readable DOCX file."""
-    blob, _, _ = _render_service.render_document("", "docx", step_order=1)
+    blob, _ = _render_service.render_document("", "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
     assert isinstance(blob, bytes)
     assert len(docx_paragraphs(doc)) >= 1
@@ -242,7 +229,7 @@ def test_render_docx_empty_output_still_valid():
 def test_render_docx_preserves_swedish_characters():
     """Swedish characters should survive DOCX rendering."""
     text = "Svenska tecken: å ä ö"
-    blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
+    blob, _ = _render_service.render_document(text, "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
     all_text = "\n".join(paragraph.text for paragraph in docx_paragraphs(doc))
     assert "å" in all_text
@@ -253,7 +240,7 @@ def test_render_docx_preserves_swedish_characters():
 def test_render_docx_markdown_table_creates_table():
     """Markdown table syntax should become a DOCX table."""
     text = "| Namn | Värde |\n| --- | --- |\n| Kommun | Sundsvall |"
-    blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
+    blob, _ = _render_service.render_document(text, "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
     assert len(docx_tables(doc)) == 1
     assert docx_tables(doc)[0].cell(0, 0).text == "Namn"
@@ -268,7 +255,7 @@ def test_render_docx_markdown_inline_syntax_as_readable_text():
         "Träna `skrivande` och ~~gamla mål~~."
     )
 
-    blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
+    blob, _ = _render_service.render_document(text, "docx", step_order=1)
 
     doc = Document(io.BytesIO(blob))
     all_text = "\n".join(paragraph.text for paragraph in docx_paragraphs(doc))
@@ -282,7 +269,7 @@ def test_render_docx_markdown_inline_syntax_as_readable_text():
 
 
 def test_render_docx_preserves_inline_bold_runs():
-    blob, _, _ = _render_service.render_document(
+    blob, _ = _render_service.render_document(
         "**Medarbetare:** Leona", "docx", step_order=1
     )
 
@@ -295,7 +282,7 @@ def test_render_docx_preserves_inline_bold_runs():
 
 def test_render_structured_docx_uses_schema_titles_and_tables():
     """Validated JSON contracts should render as semantic DOCX content."""
-    blob, _, _ = _render_service.render_structured_document(
+    blob, _ = _render_service.render_structured_document(
         {
             "summary": "Kort sammanfattning",
             "actions": [
@@ -338,7 +325,7 @@ def test_render_structured_docx_uses_schema_titles_and_tables():
 
 def test_render_structured_docx_pins_null_and_empty_array_values():
     """Missing structured values should stay visible instead of disappearing."""
-    blob, _, _ = _render_service.render_structured_document(
+    blob, _ = _render_service.render_structured_document(
         {"summary": None, "notes": []},
         "docx",
         step_order=1,
@@ -360,7 +347,7 @@ def test_render_structured_docx_pins_null_and_empty_array_values():
 
 def test_render_structured_docx_escapes_scalar_markdown_control_text():
     """JSON strings are data and must not become document structure."""
-    blob, _, _ = _render_service.render_structured_document(
+    blob, _ = _render_service.render_structured_document(
         {"summary": "Rad ett\n# Inte en rubrik\n```inte kod```"},
         "docx",
         step_order=1,
@@ -382,7 +369,7 @@ def test_render_structured_docx_escapes_scalar_markdown_control_text():
 
 def test_render_structured_docx_table_cells_preserve_pipe_characters():
     """Escaped Markdown table pipes should round-trip into DOCX table cells."""
-    blob, _, _ = _render_service.render_structured_document(
+    blob, _ = _render_service.render_structured_document(
         {"rows": [{"name": "A | B", "value": "C"}]},
         "docx",
         step_order=1,
@@ -402,7 +389,7 @@ def test_render_structured_pdf_table_does_not_truncate_long_cell_values():
         "radbrytas i PDF-tabellen och ändå behålla unique-tail-token."
     )
 
-    blob, _, _ = _render_service.render_structured_document(
+    blob, _ = _render_service.render_structured_document(
         {"actions": [{"owner": "Leona", "task": long_value}]},
         "pdf",
         step_order=1,
@@ -430,7 +417,7 @@ def test_render_structured_pdf_table_repeats_headers_after_page_break():
         for index in range(45)
     ]
 
-    blob, _, _ = _render_service.render_structured_document(
+    blob, _ = _render_service.render_structured_document(
         {"actions": rows},
         "pdf",
         step_order=1,
@@ -588,18 +575,13 @@ def test_document_render_service_can_use_injected_renderer():
             assert [(block.kind, block.text) for block in blocks] == [
                 ("paragraph", "Hello")
             ]
-            return RenderedDocument(
-                blob=b"custom",
-                mimetype="application/custom-pdf",
-                filename=f"custom-{step_order}.pdf",
-            )
+            return RenderedDocument(blob=b"custom", mimetype="application/custom-pdf")
 
     service = DocumentRenderService(renderers=(_FakeRenderer(),))
 
     assert service.render_document("Hello", "pdf", step_order=9) == (
         b"custom",
         "application/custom-pdf",
-        "custom-9.pdf",
     )
 
 
@@ -702,7 +684,7 @@ def test_document_render_service_rejects_deep_structured_values_before_conversio
 def test_render_docx_markdown_lists_and_code_blocks():
     """Lists and fenced code blocks should be represented in DOCX text."""
     text = "# Titel\n\n- punkt ett\n- punkt två\n\n```python\nprint('hej')\n```"
-    blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
+    blob, _ = _render_service.render_document(text, "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
     all_text = "\n".join(paragraph.text for paragraph in docx_paragraphs(doc))
     assert "Titel" in all_text
@@ -713,7 +695,7 @@ def test_render_docx_markdown_lists_and_code_blocks():
 def test_render_docx_very_long_output():
     """Very long markdown output should produce a valid DOCX without exceptions."""
     text = ("Rad med innehåll och åäö.\n" * 5000).strip()
-    blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
+    blob, _ = _render_service.render_document(text, "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
     assert len(blob) > 0
     assert any("åäö" in paragraph.text for paragraph in docx_paragraphs(doc))
@@ -734,9 +716,7 @@ def test_render_unsupported_type_raises():
 def test_render_pdf_unicode_characters():
     """Em-dash, Swedish chars, curly quotes must render without error."""
     text = "Em-dash \u2014 and Swedish: \u00e5\u00e4\u00f6 and curly \u201cquotes\u201d"
-    blob, mimetype, filename = _render_service.render_document(
-        text, "pdf", step_order=1
-    )
+    blob, mimetype = _render_service.render_document(text, "pdf", step_order=1)
     assert isinstance(blob, bytes)
     assert len(blob) > 0
     assert blob[:5] == b"%PDF-"
@@ -745,7 +725,7 @@ def test_render_pdf_unicode_characters():
 @requires_weasyprint_native_stack
 def test_render_pdf_font_fallback():
     """System font fallback should keep Unicode PDF rendering available."""
-    blob, _, _ = _render_service.render_document(
+    blob, _ = _render_service.render_document(
         "Em-dash \u2014 and curly \u201cquotes\u201d",
         "pdf",
         step_order=1,
@@ -764,7 +744,7 @@ def test_single_field_json_envelope_unwraps_to_formatted_document() -> None:
         '## Sammanfattning\\nKort text.\\n\\n- Beslut 1\\n- Beslut 2"\n}'
     )
 
-    blob, _, _ = _render_service.render_document(envelope, "docx", step_order=5)
+    blob, _ = _render_service.render_document(envelope, "docx", step_order=5)
 
     document = Document(io.BytesIO(blob))
     texts = [paragraph.text for paragraph in docx_paragraphs(document)]
@@ -778,7 +758,7 @@ def test_multi_field_json_text_renders_verbatim() -> None:
     # verbatim is honest and stays diagnosable.
     text = '{"first": "a", "second": "b"}'
 
-    blob, _, _ = _render_service.render_document(text, "docx", step_order=2)
+    blob, _ = _render_service.render_document(text, "docx", step_order=2)
 
     document = Document(io.BytesIO(blob))
     assert any("first" in paragraph.text for paragraph in docx_paragraphs(document))
@@ -794,7 +774,7 @@ def _docx_styled(blob: bytes) -> list[tuple[str, str]]:
 
 
 def test_generic_docx_contains_no_fixed_organisation_or_logo() -> None:
-    blob, _, _ = _render_service.render_document(
+    blob, _ = _render_service.render_document(
         "# Rapport\n\nText.", "docx", step_order=1
     )
     document = Document(io.BytesIO(blob))
@@ -816,7 +796,7 @@ def test_generic_docx_contains_no_fixed_organisation_or_logo() -> None:
 
 
 def test_render_docx_preserves_a_short_pre_title_paragraph() -> None:
-    blob, _, _ = _render_service.render_document(
+    blob, _ = _render_service.render_document(
         "Sekretessklass: Begränsad\n\n# Rapport\n\nBrödtext.",
         "docx",
         step_order=1,
@@ -829,7 +809,7 @@ def test_render_docx_preserves_a_short_pre_title_paragraph() -> None:
 
 
 def test_render_docx_keeps_a_real_opening_paragraph() -> None:
-    blob, _, _ = _render_service.render_document(
+    blob, _ = _render_service.render_document(
         "Inledning som är innehåll.\n\nAndra stycket.\n\n# Rubrik",
         "docx",
         step_order=1,
@@ -839,7 +819,7 @@ def test_render_docx_keeps_a_real_opening_paragraph() -> None:
 
 
 def test_render_docx_nested_lists_use_level_styles_and_numbering_restarts() -> None:
-    blob, _, _ = _render_service.render_document(
+    blob, _ = _render_service.render_document(
         "# T\n\n- A\n  - A1\n    - A2\n- B\n\n1. Ett\n2. Två\n\nText\n\n1. Ny",
         "docx",
         step_order=1,
@@ -875,7 +855,7 @@ def test_document_render_rejects_unsupported_list_nesting(text: str) -> None:
 
 def test_nested_numbered_lists_restart_under_each_parent() -> None:
     text = "1. A\n   1. A1\n   2. A2\n2. B\n   1. B1"
-    blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
+    blob, _ = _render_service.render_document(text, "docx", step_order=1)
     document = Document(io.BytesIO(blob))
     numbers = {
         paragraph.text: paragraph._p.pPr.numPr.numId.val
@@ -900,7 +880,7 @@ def test_nested_numbered_lists_restart_under_each_parent() -> None:
 
 
 def test_render_docx_writes_links_as_hyperlinks_and_inherits_style_emphasis() -> None:
-    blob, _, _ = _render_service.render_document(
+    blob, _ = _render_service.render_document(
         "# Titel\n\nLäs [riktlinjen](https://example.se/r) och **viktigt**.",
         "docx",
         step_order=1,
@@ -923,7 +903,7 @@ def test_render_docx_writes_links_as_hyperlinks_and_inherits_style_emphasis() ->
 
 
 def test_render_docx_tables_carry_a_repeating_header_row_and_table_style() -> None:
-    blob, _, _ = _render_service.render_document(
+    blob, _ = _render_service.render_document(
         "# T\n\n| A | B |\n|---|---|\n| 1 | 2 |",
         "docx",
         step_order=1,
@@ -938,7 +918,7 @@ def test_render_docx_tables_carry_a_repeating_header_row_and_table_style() -> No
 
 
 def test_render_docx_supports_six_heading_levels_and_rejects_skips() -> None:
-    blob, _, _ = _render_service.render_document(
+    blob, _ = _render_service.render_document(
         "# 1\n\n## 2\n\n### 3\n\n#### 4\n\n##### 5\n\n###### 6",
         "docx",
         step_order=1,

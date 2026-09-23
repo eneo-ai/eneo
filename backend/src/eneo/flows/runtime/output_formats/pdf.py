@@ -48,7 +48,6 @@ class PdfOutputFormatSpec:
                 artifact=RenderedOutputArtifact(
                     blob=_pdf_bytes_from_text(full_text),
                     mimetype="application/pdf",
-                    filename=f"step_{step_order}_output.pdf",
                 )
             )
         return render_document_output(

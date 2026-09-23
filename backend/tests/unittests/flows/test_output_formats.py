@@ -45,7 +45,7 @@ def _context(
         output_type: str,
         *,
         step_order: int,
-    ) -> tuple[bytes, str, str]:
+    ) -> tuple[bytes, str]:
         raise AssertionError(f"render_document was not expected: {output_type}")
 
     def _render_structured_not_expected(
@@ -54,7 +54,7 @@ def _context(
         *,
         step_order: int,
         schema: FlowPersistedJsonObject | None = None,
-    ) -> tuple[bytes, str, str]:
+    ) -> tuple[bytes, str]:
         raise AssertionError(
             f"render_structured_document was not expected: {output_type}"
         )
@@ -172,7 +172,6 @@ def test_pdf_output_format_preserves_raw_pdf_bytes() -> None:
     assert result.artifact is not None
     assert result.artifact.blob == raw_pdf.encode("latin-1")
     assert result.artifact.mimetype == "application/pdf"
-    assert result.artifact.filename == "step_4_output.pdf"
     assert limit_calls == [f"\n{raw_pdf}"]
 
 
@@ -210,9 +209,9 @@ def test_document_output_formats_share_structured_contract_pipeline(
         *,
         step_order: int,
         schema: FlowPersistedJsonObject | None = None,
-    ) -> tuple[bytes, str, str]:
+    ) -> tuple[bytes, str]:
         render_calls.append((data, rendered_output_type, step_order, schema))
-        return b"rendered", "application/test", f"step-{step_order}"
+        return b"rendered", "application/test"
 
     result = spec.process_model_output(
         '{"title": "Report", "extra": "dropped"}',
