@@ -298,7 +298,10 @@
         <p class="text-primary text-sm leading-relaxed" aria-live="polite">
           {materialReads({ what: currentMaterial })}
         </p>
-        <Settings.InfoTip title={materialTitle} text={m.flow_material_help()} />
+        <Settings.InfoTip
+          title={materialTitle}
+          text={usesAI ? m.flow_material_help() : m.flow_material_help_step()}
+        />
       </div>
     {/if}
 
@@ -443,7 +446,7 @@
             </h3>
             <Settings.InfoTip
               title={m.flow_material_own_text()}
-              text={m.flow_input_template_help()}
+              text={usesAI ? m.flow_input_template_help() : m.flow_input_template_help_step()}
             />
           </div>
           {#if hasInputTemplateOverride && !isPublished}

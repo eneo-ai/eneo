@@ -26,6 +26,8 @@ describe("flowStepMaterial", () => {
     expect(ownTextIncludesUpload("Transkript: {{step_input.typo}}")).toBe(false);
     expect(ownTextIncludesUpload("Första filen: {{step_input.file_ids.0}}")).toBe(true);
     expect(ownTextIncludesUpload("Rubrik: {{step_input.text.rubrik}}")).toBe(false);
+    expect(ownTextIncludesUpload("Transkript: {{step_input.text.}}")).toBe(false);
+    expect(ownTextIncludesUpload("Filer: {{step_input.file_ids..0}}")).toBe(false);
     expect(ownTextIncludesUpload("Namn: {{flow_input.namn}}")).toBe(false);
   });
 

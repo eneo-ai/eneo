@@ -163,6 +163,13 @@ describe("analyzeTemplateTokens invalid tokens", () => {
         context
       )
     ).toEqual(["step_input.text.rubrik", "step_input.file_ids.first", "step_input.file_ids.0.id"]);
+    // The resolver refuses an empty segment; a trailing dot is not a typo it forgives.
+    expect(
+      collectInvalidTokens(
+        "{{step_input.text.}} {{step_input..text}} {{step_input.file_ids..0}}",
+        context
+      )
+    ).toEqual(["step_input.text.", "step_input..text", "step_input.file_ids..0"]);
   });
 
   it("does not flag unknown single-segment flow_input references when no form fields are declared", () => {

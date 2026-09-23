@@ -252,8 +252,10 @@ def _validate_step_input_path(
 ) -> tuple[TemplateReferencePathErrorCode | None, dict[str, object] | None]:
     if not tail:
         return "step_input_key_required", None
-    segments = [part for part in tail.split(".") if part]
+    segments = _path_segments(tail)
     key = segments[0]
+    if not key:
+        return "step_input_key_required", None
     key_shape = step_input_key_shape(key)
     if key_shape is None:
         return (
@@ -270,11 +272,17 @@ def _validate_step_input_path(
     return None, None
 
 
+def _path_segments(tail: str) -> list[str]:
+    # The resolver strips each segment and refuses an empty one
+    # (variable_resolver._resolve_path_with_segments), so empty segments stay
+    # in and fail here instead of at run time.
+    return [part.strip() for part in tail.split(".")]
+
+
 def _validate_sequence_tail(
     tail: str,
 ) -> tuple[TemplateReferencePathErrorCode | None, dict[str, object] | None]:
-    segments = [part for part in tail.split(".") if part]
-    return _validate_sequence_segments(segments)
+    return _validate_sequence_segments(_path_segments(tail))
 
 
 def _validate_sequence_segments(
@@ -283,7 +291,9 @@ def _validate_sequence_segments(
     if not segments:
         return None, None
     first = segments[0]
-    if not first.isdigit():
+    # ASCII digits only: the resolver also takes other Unicode digits, which no
+    # author writes; the editor applies the same rule.
+    if not (first.isascii() and first.isdigit()):
         return "runtime_sequence_non_numeric_index", None
     if len(segments) > 1:
         return "runtime_scalar_nested_access", {"shape": VariableShape.SCALAR.value}

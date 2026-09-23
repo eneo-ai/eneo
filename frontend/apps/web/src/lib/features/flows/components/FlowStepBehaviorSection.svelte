@@ -38,12 +38,10 @@
     stepUxCopy,
     instructionText,
     instructionMissing = false,
-    focusInstruction = false,
     loadPromptVersions,
     onAssistantFieldChange,
     onInstructionDraft,
-    onInstructionCommit,
-    onInstructionFocused
+    onInstructionCommit
   }: {
     step: FlowStep;
     isPublished: boolean;
@@ -61,12 +59,10 @@
     stepUxCopy: FlowStepUxCopy;
     instructionText: string;
     instructionMissing?: boolean;
-    focusInstruction?: boolean;
     loadPromptVersions: (assistantId: string) => Promise<PromptSparse[]>;
     onAssistantFieldChange?: (detail: { field: string; value: unknown }) => void;
     onInstructionDraft?: (detail: { value: string }) => void;
     onInstructionCommit?: (detail: { value: string }) => void;
-    onInstructionFocused?: () => void;
   } = $props();
   const hasInstruction = $derived(instructionText.trim().length > 0);
   // A long instruction gets most of a tall screen before the editor scrolls.
@@ -168,7 +164,6 @@
           value={instructionText}
           disabled={isPublished || assistantLoading || !assistant}
           label={stepUxCopy.instructionsTitle}
-          focusOnMount={focusInstruction}
           invalid={instructionMissing}
           ariaDescribedby={instructionMissing ? "flow-step-instruction-missing" : undefined}
           placeholder={stepUxCopy.instructionsPlaceholder}
@@ -182,7 +177,6 @@
           {isAdvancedMode}
           onChange={(value) => onInstructionDraft?.({ value })}
           onCommit={(value) => onInstructionCommit?.({ value })}
-          onFocused={onInstructionFocused}
         >
           {#snippet toolbar()}
             {#if assistant?.id && !isPublished}

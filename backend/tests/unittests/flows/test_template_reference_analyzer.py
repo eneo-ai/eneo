@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from eneo.flows.flow_variable_definitions import PRIMARY_FLOW_INPUT_KEYS
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
@@ -7,6 +9,8 @@ from eneo.flows.template_reference_analyzer import (
     consumes_runtime_input,
     referenced_form_fields,
 )
+from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.main.exceptions import TypedIOValidationException
 
 
 def test_consumes_runtime_input_only_for_real_template_expression() -> None:
@@ -92,3 +96,53 @@ def test_validates_sequence_indexes_for_step_input_file_ids() -> None:
 
     assert refs[0].path_error_code == "runtime_sequence_non_numeric_index"
     assert refs[1].path_error_code is None
+
+
+_UPLOAD_CONTEXT = {
+    "step_input": {
+        "text": "Transkript",
+        "file_ids": ["file-1"],
+        "extracted_text_length": 10,
+        "input_format": "document",
+    }
+}
+
+
+@pytest.mark.parametrize(
+    ("path", "resolves"),
+    [
+        ("step_input.text", True),
+        ("step_input.file_ids.0", True),
+        ("step_input.text.", False),
+        ("step_input..text", False),
+        ("step_input.file_ids..0", False),
+        ("step_input.text.rubrik", False),
+        ("step_input.file_ids.first", False),
+        ("step_input.file_ids.0.id", False),
+    ],
+)
+def test_step_input_path_passes_validation_exactly_when_the_resolver_resolves_it(
+    path: str, resolves: bool
+) -> None:
+    (reference,) = analyze_template(
+        "{{ " + path + " }}", step_refs={}, form_field_names=set()
+    )
+    resolver = FlowVariableResolver()
+
+    if resolves:
+        resolver.resolve_path(_UPLOAD_CONTEXT, path)
+        assert reference.path_error_code is None
+    else:
+        with pytest.raises(TypedIOValidationException):
+            resolver.resolve_path(_UPLOAD_CONTEXT, path)
+        assert reference.path_error_code is not None
+
+
+def test_list_index_takes_ascii_digits_only() -> None:
+    # Deliberately stricter than the resolver, which also takes other Unicode
+    # digits: no author writes them, and the editor applies the same rule.
+    (reference,) = analyze_template(
+        "{{ step_input.file_ids.\u0660 }}", step_refs={}, form_field_names=set()
+    )
+
+    assert reference.path_error_code == "runtime_sequence_non_numeric_index"

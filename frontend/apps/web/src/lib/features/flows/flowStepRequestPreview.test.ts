@@ -66,6 +66,19 @@ describe("describeTemplateSegments", () => {
     ]);
   });
 
+  it("names only values it knows exactly and keeps other paths as tokens", () => {
+    expect(
+      labels(
+        "{{step_input.file_ids}} {{step_input.extracted_text_length}} {{step_1.input.text}} {{step_1}}"
+      )
+    ).toEqual([
+      "step_input.file_ids",
+      "step_input.extracted_text_length",
+      "step_1.input.text",
+      "step_1"
+    ]);
+  });
+
   it("leaves unknown and unavailable tokens raw", () => {
     expect(labels("{{okänd}} {{step_4.output.text}}")).toEqual(["okänd", "step_4.output.text"]);
   });

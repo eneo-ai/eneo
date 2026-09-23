@@ -19,7 +19,9 @@ export type TemplateSegment =
   | { kind: "variable"; token: string; label: string; category: VariableCategory };
 
 const STRUCTURED_FIELD_TOKEN = /^step_(\d+)\.output\.structured\.(.+)$/;
-const STEP_TOKEN = /^step_(\d+)(?:\.|$)/;
+// `step_N` is the whole step record (input, output, status); only its answer
+// text is "the answer". Other paths keep their token.
+const STEP_ANSWER_TOKEN = /^step_(\d+)\.output\.text$/;
 
 function variableLabel(
   token: string,
@@ -33,7 +35,9 @@ function variableLabel(
     const name = token.startsWith("flow_input.") ? token.slice("flow_input.".length) : token;
     return fieldLabels.get(name) ?? name;
   }
-  if (token.startsWith("step_input.")) return m.flow_variable_upload_label();
+  // Only the upload's text is "the uploaded material"; its file ids, length
+  // and format are other values and keep their token.
+  if (token === "step_input.text") return m.flow_variable_upload_label();
   if (token === "flow_input.text") return m.flow_variable_flow_input_text_label();
   if (token === "section_index") return m.flow_variable_section_index_label();
   if (token === "transkribering") return m.flow_variable_transcription();
@@ -42,8 +46,8 @@ function variableLabel(
   if (structured) {
     return m.flow_request_preview_step_field({ field: structured[2], step: structured[1] });
   }
-  const step = STEP_TOKEN.exec(token);
-  if (step) return m.flow_request_preview_step_answer({ step: step[1] });
+  const answer = STEP_ANSWER_TOKEN.exec(token);
+  if (answer) return m.flow_request_preview_step_answer({ step: answer[1] });
   for (const [order, name] of context.knownStepNames) {
     if (order < context.currentStepOrder && name === token) {
       return m.flow_request_preview_step_answer({ step: order });

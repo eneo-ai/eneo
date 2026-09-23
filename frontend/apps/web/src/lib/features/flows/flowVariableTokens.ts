@@ -8,14 +8,15 @@ import {
 
 /**
  * The runtime's rule for what follows `step_input.`
- * (template_reference_analyzer._validate_step_input_path): a known key, then
- * nothing after a single value, or one numeric index after a list.
+ * (template_reference_analyzer._validate_step_input_path, which the resolver
+ * agrees with): a known key, then nothing after a single value, or one ASCII
+ * index after a list. Segments are trimmed and none may be empty.
  */
 export function isValidStepInputPath(path: string): boolean {
-  const [key = "", ...rest] = path.split(".").filter(Boolean);
+  const [key = "", ...rest] = path.split(".").map((segment) => segment.trim());
   const shape = STEP_INPUT_KEY_SHAPES.get(key);
   if (rest.length === 0) return shape !== undefined;
-  return shape === "sequence" && rest.length === 1 && /^\d+$/.test(rest[0] ?? "");
+  return shape === "sequence" && rest.length === 1 && /^[0-9]+$/.test(rest[0] ?? "");
 }
 
 const TEMPLATE_TOKEN_PATTERN_SOURCE = String.raw`\{\{\s*([^{}]+)\s*\}\}`;

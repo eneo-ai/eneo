@@ -37,11 +37,9 @@
     uploadVariableAvailable = false,
     invalid = false,
     ariaDescribedby,
-    focusOnMount = false,
     toolbar,
     onChange,
-    onCommit,
-    onFocused
+    onCommit
   }: {
     value: string;
     disabled?: boolean;
@@ -49,7 +47,6 @@
     label?: string;
     invalid?: boolean;
     ariaDescribedby?: string;
-    focusOnMount?: boolean;
     minHeight?: number;
     maxHeight?: number;
     steps: FlowStep[];
@@ -74,7 +71,6 @@
     toolbar?: Snippet;
     onChange?: (value: string) => void;
     onCommit?: (value: string) => void;
-    onFocused?: () => void;
   } = $props();
 
   const MAX_VISIBLE_TEMPLATE_VALIDATION_ISSUES = 5;
@@ -118,20 +114,19 @@
   // DOM resize in sync when Enkel/Avancerad reuses the same editor instance.
   $effect(() => {
     const editor = textareaEl;
-    const valueToMeasure = currentEditorValue;
-    const nextMinHeight = minHeight;
-    const nextMaxHeight = maxHeight;
+    void currentEditorValue;
+    void minHeight;
+    void maxHeight;
     if (!editor) return;
+    // A newer run or unmounting cancels the pending measure, so it never reads
+    // the props of a destroyed editor (derived_inert) or a detached textarea.
+    let pending = true;
     tick().then(() => {
-      if (
-        textareaEl === editor &&
-        currentEditorValue === valueToMeasure &&
-        minHeight === nextMinHeight &&
-        maxHeight === nextMaxHeight
-      ) {
-        autoResize();
-      }
+      if (pending) autoResize();
     });
+    return () => {
+      pending = false;
+    };
   });
 
   // An editor mounted inside a closed section measures 0px and keeps its
@@ -148,20 +143,6 @@
     });
     observer.observe(editor);
     return () => observer.disconnect();
-  });
-
-  // Focus the textarea when the parent requests it (e.g. the step capsule's
-  // "add instruction" action, which opens this section and moves focus here).
-  // `focusOnMount` is a consume-once flag, not a counter: the section unmounts
-  // while collapsed, so on open this editor mounts fresh, reads the flag once,
-  // focuses, then calls `onFocused` so the parent clears it. Reading
-  // `textareaEl` keeps it correct when the flag is already set before mount.
-  $effect(() => {
-    if (!focusOnMount) return;
-    const el = textareaEl;
-    if (!el) return;
-    el.focus();
-    onFocused?.();
   });
 
   function resetAutocomplete() {

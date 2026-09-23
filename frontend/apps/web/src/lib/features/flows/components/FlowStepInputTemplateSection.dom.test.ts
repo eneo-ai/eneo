@@ -236,9 +236,20 @@ describe("FlowStepInputTemplateSection", () => {
   it.each(["compose_text", "render_verbatim"] as const)(
     "says the step, not the AI, reads the material when the step does not call the AI (%s)",
     (output_mode) => {
-      const { container } = renderSection({ step: makeStep(2, { output_mode }) });
+      const { container } = renderSection({
+        step: makeStep(2, { output_mode }),
+        showInputTemplate: true,
+        inputTemplateText: "Rapport: {{step_1.output.text}}"
+      });
       expect(container.textContent).toContain(m.flow_material_title_step());
-      expect(container.textContent).not.toContain(m.flow_material_title());
+      // Visible text and the info tips' labels alike: nothing mentions the AI.
+      const labels = [...container.querySelectorAll("[aria-label]")].map((element) =>
+        element.getAttribute("aria-label")
+      );
+      expect([container.textContent, ...labels].join(" ")).not.toMatch(/\bAI\b/);
+      expect(labels).toContain(
+        `${m.flow_settings_more_info({ title: m.flow_material_title_step() })}. ${m.flow_material_help_step()}`
+      );
     }
   );
 

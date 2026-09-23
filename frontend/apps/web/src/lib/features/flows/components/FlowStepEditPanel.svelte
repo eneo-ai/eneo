@@ -704,6 +704,19 @@
       !isTranscribeOnly &&
       outputModeUsesCompletionModel(activeStep.output_mode)
   );
+  // The preview describes the plain completion request. Speaker
+  // identification composes its own (a speaker inventory, fixed instructions,
+  // no knowledge search), so it has no preview.
+  const requestPreviewAvailable = $derived(
+    stepUsesAI && activeStep?.output_mode !== "speaker_mapping"
+  );
+  // The instruction, files and knowledge come with the step's AI settings;
+  // until they have loaded for this step the preview would show them empty.
+  const requestPreviewReady = $derived(
+    !assistantState.loading &&
+      assistantState.assistant !== null &&
+      assistantState.assistant.id === activeStep?.assistant_id
+  );
   // The material block's sentence: an own text is shown right under it, and
   // the results chosen with it are named, as the runtime appends them.
   const previewMaterialSentence = $derived.by(() => {
@@ -745,9 +758,7 @@
       hasOutputError: outputCompatibilityIssue !== null
     });
   });
-  let taskRequestOpen = $state(0);
   let technicalRequestOpen = $state(0);
-  let focusInstructionPending = $state(false);
   // A step the user just added lands with its name selected, so typing renames
   // it at once. The editor owns the "once": taking the focus marks the intent
   // handed over there, so neither the temp→real id reconciliation nor a later
@@ -1005,10 +1016,15 @@
                approving unpublishes the flow until it is published again. Hiding
                this hid the feature from the people whose flows are published. -->
           <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
-            {#if stepUsesAI}
+            {#if requestPreviewAvailable}
               <!-- What the AI will actually get: instruction, material and the
                    answer's fields, with variables named in words. -->
-              <Button variant="outline" size="sm" onclick={() => (requestPreviewOpen = true)}>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!requestPreviewReady}
+                onclick={() => (requestPreviewOpen = true)}
+              >
                 <Eye data-icon="inline-start" aria-hidden="true" />
                 {m.flow_request_preview_open()}
               </Button>
@@ -1022,7 +1038,7 @@
             {/if}
           </div>
         </div>
-        {#if stepUsesAI}
+        {#if requestPreviewAvailable && requestPreviewReady}
           <FlowStepRequestPreview
             bind:open={requestPreviewOpen}
             step={activeStep}
@@ -1046,7 +1062,6 @@
           statusTone={stepAiWork?.missing ? "warning" : "default"}
           initialOpen={defaultOpenChapter === "task"}
           resetKey={activeStepStateKey}
-          requestOpen={taskRequestOpen}
         >
           <FlowStepSection>
             <Settings.Row
@@ -1088,8 +1103,6 @@
               {isAdvancedMode}
               {isTranscribeOnly}
               instructionMissing={stepAiWork?.missing ?? false}
-              focusInstruction={focusInstructionPending}
-              onInstructionFocused={() => (focusInstructionPending = false)}
               assistant={assistantState.assistant}
               assistantLoading={assistantState.loading}
               onImproveInstructionWithAI={onEditStepWithAI && activeStep.id
@@ -1155,8 +1168,6 @@
               {isAdvancedMode}
               {isTranscribeOnly}
               instructionMissing={stepAiWork?.missing ?? false}
-              focusInstruction={focusInstructionPending}
-              onInstructionFocused={() => (focusInstructionPending = false)}
               assistant={assistantState.assistant}
               assistantLoading={assistantState.loading}
               onImproveInstructionWithAI={onEditStepWithAI && activeStep.id
