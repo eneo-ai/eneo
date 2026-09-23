@@ -2,6 +2,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
 
   interface Props {
     total: string;
@@ -27,6 +28,12 @@
     interactive = true
   }: Props = $props();
 
+  // Token counts are cost detail for Avancerad; in Enkel they are jargon with
+  // nothing to act on, so the badge is not shown. Outside the flows layout
+  // (tests, other pages) there is no mode and the badge shows as before.
+  const flowUserMode = getFlowUserMode();
+  const hiddenInEnkel = $derived(flowUserMode !== undefined && $flowUserMode === "user");
+
   const labelTitleId = $props.id();
   const badgeLabel = $derived(m.flow_run_tokens_badge({ count: total }));
 </script>
@@ -43,7 +50,9 @@
   </Badge>
 {/snippet}
 
-{#if interactive}
+{#if hiddenInEnkel}
+  <!-- Avancerad shows the usage. -->
+{:else if interactive}
   <Popover.Root>
     <Popover.Trigger>
       {#snippet child({ props })}

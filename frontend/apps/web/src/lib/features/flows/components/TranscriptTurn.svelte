@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Button } from "$lib/components/ui/button/index.js";
   import ChevronRight from "lucide-svelte/icons/chevron-right";
   import PencilLine from "lucide-svelte/icons/pencil-line";
   import Undo2 from "lucide-svelte/icons/undo-2";
@@ -298,25 +299,27 @@
         class="flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
       >
         {#if hasCorrections}
-          <button
-            type="button"
-            class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-ring rounded-md p-1 transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            class="text-secondary"
             aria-label={m.flow_run_transcript_revert_turn({ time })}
             disabled={busy}
             onclick={onRevertTurn}
           >
-            <Undo2 class="size-3.5" />
-          </button>
+            <Undo2 aria-hidden="true" />
+          </Button>
         {/if}
-        <button
-          type="button"
-          class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-ring rounded-md p-1 transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          class="text-secondary"
           aria-label={m.flow_run_transcript_edit_turn({ time })}
           disabled={busy}
           onclick={onStartEdit}
         >
-          <PencilLine class="size-3.5" />
-        </button>
+          <PencilLine aria-hidden="true" />
+        </Button>
       </div>
     {/if}
   </div>
@@ -339,24 +342,23 @@
       <div class="mt-1 flex items-center justify-between gap-2">
         <p class="text-muted text-xs">{m.flow_run_transcript_edit_reassign_hint()}</p>
         <div class="flex shrink-0 gap-2">
-          <button
-            type="button"
-            class="text-secondary hover:bg-hover-dimmer rounded-md px-2 py-1 text-xs disabled:opacity-50"
+          <Button
+            variant="ghost"
+            size="xs"
             disabled={busy}
-            onpointerdown={(event) => event.preventDefault()}
+            onpointerdown={(event: PointerEvent) => event.preventDefault()}
             onclick={cancelEditing}
           >
             {m.cancel()}
-          </button>
-          <button
-            type="button"
-            class="bg-accent-default text-on-fill hover:bg-accent-stronger rounded-md px-2 py-1 text-xs disabled:opacity-50"
+          </Button>
+          <Button
+            size="xs"
             disabled={busy}
-            onpointerdown={(event) => event.preventDefault()}
+            onpointerdown={(event: PointerEvent) => event.preventDefault()}
             onclick={() => onCommitEdit(editorText())}
           >
             {busy ? m.saving() : m.save()}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

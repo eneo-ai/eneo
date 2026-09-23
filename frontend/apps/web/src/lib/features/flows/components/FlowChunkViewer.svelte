@@ -222,13 +222,9 @@
                 </Tooltip.Provider>
               {/if}
               {#if sourceUrl}
-                <button
-                  type="button"
-                  class="text-accent-stronger text-xs font-medium hover:underline"
-                  onclick={openSourceUrl}
-                >
+                <Button variant="link" size="xs" class="h-auto px-0" onclick={openSourceUrl}>
                   {m.go_to_website()}
-                </button>
+                </Button>
               {/if}
             </div>
           </div>
@@ -246,13 +242,9 @@
                 {/if}
               </h4>
               {#if activeChunkIndex !== null}
-                <button
-                  type="button"
-                  class="text-accent-stronger hover:bg-hover-default rounded px-2 py-1 text-xs font-medium"
-                  onclick={resetChunkHighlight}
-                >
+                <Button variant="ghost" size="xs" onclick={resetChunkHighlight}>
                   {m.clear()}
-                </button>
+                </Button>
               {/if}
             </div>
             {#if hasHiddenMatchedChunks}
@@ -287,7 +279,7 @@
                 {#each chunkItems as passage, index (`${passage.chunk_no ?? 0}-${index}`)}
                   <button
                     type="button"
-                    class="hover:bg-hover-default w-full px-2.5 py-2 text-left text-xs transition-colors"
+                    class="hover:bg-hover-default focus-visible:inset-ring-ring w-full px-2.5 py-2 text-left text-xs focus-visible:inset-ring-2 focus-visible:outline-none motion-safe:transition-colors motion-safe:duration-(--duration-quick)"
                     class:bg-accent-dimmer={activeChunkIndex === index}
                     onclick={() => activateChunk(index)}
                   >

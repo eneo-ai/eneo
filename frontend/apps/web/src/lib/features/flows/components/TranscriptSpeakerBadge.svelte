@@ -57,7 +57,7 @@
           {disabled}
           aria-label={menuLabel}
           {title}
-          class="{badgeClass} {colorClass} {overriddenClass} cursor-pointer transition-shadow hover:ring-1 hover:ring-current/40 disabled:cursor-default"
+          class="{badgeClass} {colorClass} {overriddenClass} focus-visible:ring-ring cursor-pointer hover:ring-1 hover:ring-current/40 focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default motion-safe:transition-shadow motion-safe:duration-(--duration-quick)"
         >
           {display}
         </button>
