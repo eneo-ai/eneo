@@ -4,7 +4,7 @@ Use this sequence for a runtime-only application. Paths below are relative to th
 
 ## 1. Authenticate and discover
 
-Send exactly one credential:
+Send exactly one credential, unless the client is a module session:
 
 ```http
 Authorization: Bearer <user-access-token>
@@ -13,10 +13,17 @@ Authorization: Bearer <user-access-token>
 or:
 
 ```http
-X-API-Key: <service-key>
+X-API-Key: <api-key>
 ```
 
-Service keys are for trusted server-side clients. A service key must send `space_id` (otherwise `400 flow_service_key_space_id_required`), lists published Flows only within its scope, and later sees only its own runs. A user principal (a user token, a user-owned key, or a module session) may omit `space_id` to list the Flows of every space the user belongs to: personal, shared directly or through a group, and the organization space for its admins. A space-scoped key narrows that list to its space. Drafts appear where the caller may edit Flows, so send `published_only=true` before presenting runnable Flows. Items carry `space_name`; group them on `space_id`. Use the published projection rather than the draft/current-definition endpoint:
+A module session acts for its signed-in user and sends both headers on every request:
+
+```http
+Authorization: Bearer <module-user-token>
+X-API-Key: <module-service-key>
+```
+
+The module token alone gets `401`, and the key alone acts as the service key instead of the user. Service keys and module tokens are for trusted server-side clients. A service key must send `space_id` (otherwise `400 flow_service_key_space_id_required`), lists published Flows only within its scope, and later sees only its own runs. A user principal (a user token, a user-owned key, or a module session with both headers) may omit `space_id` to list the Flows of every space the user belongs to: personal, shared directly or through a group, and the organization space for its admins. A space-scoped key narrows that list to its space. Drafts appear where the caller may edit Flows, so send `published_only=true` before presenting runnable Flows. Items carry `space_name`; group them on `space_id`. Use the published projection rather than the draft/current-definition endpoint:
 
 ```http
 GET /flows/?space_id={space_id}&published_only=true&limit=50&offset=0

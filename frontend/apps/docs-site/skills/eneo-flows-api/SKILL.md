@@ -18,10 +18,11 @@ Do not use it to create or edit draft Flows, operate Flow AI Builder, administer
 1. Obtain the deployment origin and API prefix from the operator. `/api/v1` is common but configurable.
 2. If the deployment exposes `/openapi.json`, use it to generate types and confirm exact operations. Otherwise use this skill's bundled contract.
 3. In either case, treat `GET /flows/{flow_id}/published/`, its `runtime_paths`, and `GET /flows/{flow_id}/run-contract/` as runtime truth. They protect the client from published-version, path, input, and limit drift.
-4. Use exactly one credential per request:
-   - `Authorization: Bearer <user-access-token>`; or
-   - `X-API-Key: <service-key>`.
-5. Keep service keys on a trusted server. Never embed one in a browser or mobile binary.
+4. Use exactly one credential per request, unless the client is a module session:
+   - a user sends `Authorization: Bearer <user-access-token>`;
+   - an API key goes in `X-API-Key: <api-key>`;
+   - a module session sends both on every request, `Authorization: Bearer <module-user-token>` and `X-API-Key: <module-service-key>`. The token alone gets `401`; the key alone acts as the service key, not the user.
+5. Keep service keys and module tokens on a trusted server. Never embed one in a browser or mobile binary.
 
 ## Follow the runtime workflow
 
@@ -66,7 +67,7 @@ Do not recreate server-owned response objects as broad maps or `any`. Generate t
 Before presenting code or approving a consumer, verify:
 
 - the base URL does not hardcode a deployment-specific prefix without documenting it;
-- one credential is sent and service credentials remain server-side;
+- one credential is sent, or both the module token and its key for a module session, and service credentials remain server-side;
 - published projection and run contract are fetched before a run is created;
 - file controls and validation come from `steps_requiring_input`;
 - uploaded IDs are bound to their exact step IDs;

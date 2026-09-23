@@ -56,7 +56,7 @@ Always keep an unknown-code branch that shows a generic failure, records the raw
 
 | HTTP / code                                | Recovery                                                                       |
 | ------------------------------------------ | ------------------------------------------------------------------------------ |
-| `401 authentication_error`                 | Send one supported credential.                                                 |
+| `401 authentication_error`                 | Send one supported credential, or a module session's token and key together.   |
 | `401 invalid_api_key`                      | Replace or reissue the key; do not retry it.                                   |
 | `403 insufficient_scope`                   | Fix key scope. Do not infer whether the resource exists.                       |
 | `403 insufficient_resource_permission`     | Reissue with the required permission reported in context.                      |

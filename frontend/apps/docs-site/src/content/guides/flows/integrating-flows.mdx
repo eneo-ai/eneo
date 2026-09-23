@@ -20,7 +20,9 @@ Use your Eneo deployment origin as the base URL. Eneo does not publish a shared 
 
 Paths in this guide are written under `/api/v1/`, which is the prefix the reference configuration ships. It is an operator setting (`API_PREFIX`), not a constant, so read the prefix once from the paths in that deployment's `/openapi.json`, build your base URL from it, and treat every path below as relative to that base.
 
-Authenticate every request with exactly one credential:
+### Authenticate requests
+
+Authenticate every request with exactly one credential, unless you call as a module session:
 
 ```text
 Authorization: Bearer <user-access-token>
@@ -29,17 +31,24 @@ Authorization: Bearer <user-access-token>
 or:
 
 ```text
-X-API-Key: <service-key>
+X-API-Key: <api-key>
 ```
 
-Keep service keys in server-side code; a browser frontend should use a user access token or call through your own backend. Do not put a service key in the bearer-token header. See [Authentication & OIDC](/guides/oidc-federation) for token setup.
+A module session is the exception. A module acting for a signed-in user sends both headers on every request: the user's module token as the bearer token and the module's `sk_` service key as the API key. The module token alone gets `401`, and the key alone calls as the service key instead of the user. [Module authentication](/docs/module-authentication#call-flows-as-the-signed-in-user) describes how the module gets the token and which routes accept the pair.
+
+```text
+Authorization: Bearer <module-user-token>
+X-API-Key: <module-service-key>
+```
+
+Keep service keys and module tokens in server-side code, never in a browser; a browser frontend should use a user access token or call through your own backend. Do not put an API key in the bearer-token header. See [Authentication & OIDC](/guides/oidc-federation) for token setup.
 
 ### Rules that break clients when you miss them
 
 These are the parts of the contract that are easy to get subtly wrong. Read them before you write the client.
 
 1. **Trailing slashes are load-bearing.** Every Flow runtime path ends with `/`, with one exception: `GET .../runs/{run_id}/evidence/export` has none. Requesting `/api/v1/flows/{id}/runs` without the slash returns `307 Temporary Redirect` to the slashed path. Some HTTP clients drop the request body or the authentication header when they follow a redirect, so send the exact path.
-2. **One credential per request.** `Authorization: Bearer` for a user token, `X-API-Key` for an API key. Never put an API key in the bearer header.
+2. **One credential per request, except for a module session.** `Authorization: Bearer` for a user token, `X-API-Key` for an API key, and never an API key in the bearer header. A module session sends both, its module token and its service key; see [Authenticate requests](#authenticate-requests).
 3. **The active-checkpoint endpoint returns `200` with a body of literal `null`** when no checkpoint is open. It is not a `404` and not `{}`. Check for `null` before dereferencing.
 4. **Reject requires a `reason`.** `POST .../reject/` takes `expected_checkpoint_revision` and a non-empty `reason` of 1 to 1024 characters. Sending only the revision returns `400 flow_review_reject_reason_required`.
 5. **`Idempotency-Key` is required on both continuation endpoints and optional on run creation.** `POST .../review-checkpoints/{checkpoint_id}/resume/` and `POST .../review-checkpoints/{checkpoint_id}/approve-and-continue/` reject a request without it (`400 flow_review_idempotency_key_required`). `POST /runs/` accepts it and it is strongly recommended. Edit, approve, and reject do not accept it at all; they use `expected_checkpoint_revision` for concurrency instead. Every accepted key must be 1 to 255 characters after trimming, or the request returns `400 flow_run_invalid_idempotency_key`. That bound is enforced as a typed error rather than as a JSON Schema `maxLength`, so a validator generated from the OpenAPI document will not catch it for you.
@@ -105,7 +114,7 @@ Polling is the only mechanism a caller controls for observing run status, becaus
 
 The worked example starts with a known Flow id. If your app needs discovery, list flows with `GET /api/v1/flows/?published_only=true&limit=50&offset=0`, adding `space_id={space_id}` to cover one space.
 
-- **Without `space_id`**, a signed-in user, a user-owned API key, or a module session gets the flows of every space the user belongs to: their personal space, spaces shared with them directly or through a group, and the organization space if they are one of its admins. A space-scoped API key narrows the list to its space, so a module key scoped to a space the user does not belong to returns an empty list.
+- **Without `space_id`**, a signed-in user, a user-owned API key, or a module session (its module token and service key together, see [Authenticate requests](#authenticate-requests)) gets the flows of every space the user belongs to: their personal space, spaces shared with them directly or through a group, and the organization space if they are one of its admins. A space-scoped API key narrows the list to its space, so a module key scoped to a space the user does not belong to returns an empty list.
 - **A service key must send `space_id`**, because a key belongs to no spaces. Without it the request returns `400` with code `flow_service_key_space_id_required`. A service key sees only published Flows in its scoped space.
 
 Drafts appear only in spaces where the caller may edit flows, so an app that runs flows sends `published_only=true` to get published flows only. Each item carries `space_name` next to `space_id`: group the list on `space_id` and show `space_name` as the heading. Items come oldest first. `count` is the number of items in the current page, not the total; increase `offset` while `has_more` is true (`limit` is 1 to 200, default 50).
