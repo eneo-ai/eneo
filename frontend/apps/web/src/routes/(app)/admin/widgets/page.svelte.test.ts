@@ -98,6 +98,22 @@ describe("widget policy page", () => {
     await expect.element(page.getByText("widget_admin_saved")).toBeVisible();
   });
 
+  test("the maximum budget may reach the API's ceiling but not pass it", async () => {
+    const update = vi.fn(async (patch: Partial<WidgetPolicy>) => ({ ...policy, ...patch }));
+    renderPage(update);
+    const budget = page.getByLabelText("widget_admin_policy_max_budget");
+    await userEvent.fill(budget, "2000000001");
+    await userEvent.tab();
+    await expect.element(budget).toHaveAttribute("aria-invalid", "true");
+    expect(update).not.toHaveBeenCalled();
+
+    await userEvent.fill(budget, "2000000000");
+    await userEvent.tab();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update).toHaveBeenCalledWith({ max_daily_token_budget: 2_000_000_000 });
+    await expect.element(budget).toHaveAttribute("aria-invalid", "false");
+  });
+
   test("keeps an out-of-range number in the field with an error instead of saving it", async () => {
     const update = vi.fn<(patch: Partial<WidgetPolicy>) => Promise<WidgetPolicy>>();
     renderPage(update);

@@ -29,6 +29,7 @@
   import { toastWidgetError } from "$lib/features/widget/admin/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import WidgetOverviewList from "$lib/features/widget/admin/WidgetOverviewList.svelte";
+  import { MAX_DAILY_TOKEN_BUDGET } from "$lib/features/widget/admin/limits";
   import { urlTab } from "$lib/features/widget/admin/tabState.svelte";
   import { Autosave } from "$lib/features/widget/admin/widgetAutosave.svelte";
   import { DEFAULT_PRIMARY_COLOR, isHexColor } from "$lib/features/widget/contrast";
@@ -345,13 +346,14 @@
                     type="number"
                     min={1000}
                     step={1000}
+                    max={MAX_DAILY_TOKEN_BUDGET}
                     value={policy.max_daily_token_budget}
                     aria-invalid={!!rangeErrors.budget}
                     aria-describedby={rangeErrors.budget
                       ? "policy-max-budget-help policy-max-budget-error"
                       : "policy-max-budget-help"}
                     onchange={(event) =>
-                      commitNumber(event, "budget", 1000, 100_000_000, (value) =>
+                      commitNumber(event, "budget", 1000, MAX_DAILY_TOKEN_BUDGET, (value) =>
                         patch({ max_daily_token_budget: value })
                       )}
                   />

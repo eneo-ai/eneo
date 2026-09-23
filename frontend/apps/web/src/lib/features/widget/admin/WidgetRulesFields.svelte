@@ -10,6 +10,7 @@
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
   import { blockerLabel } from "./blockers";
+  import { MAX_DAILY_TOKEN_BUDGET } from "./limits";
   import { MAX_ALLOWED_ORIGINS, parseOrigins } from "./origins";
   import { TextDraft } from "./textDraft.svelte";
   import type { WidgetAutosave } from "./widgetAutosave.svelte";
@@ -80,7 +81,9 @@
   );
   const describedBy = (key: string, help: string, error?: string) =>
     rangeErrors[key] || error ? `${help} widget-${key}-error` : help;
-  const budgetMax = $derived(policy?.max_daily_token_budget ?? 100_000_000);
+  const budgetMax = $derived(
+    Math.min(policy?.max_daily_token_budget ?? MAX_DAILY_TOKEN_BUDGET, MAX_DAILY_TOKEN_BUDGET)
+  );
 
   // The list is committed when the field is left, and only when every line
   // is an origin the API accepts; the text stays as typed until then.

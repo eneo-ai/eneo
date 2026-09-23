@@ -52,10 +52,11 @@ type Save = (update: WidgetUpdate) => Promise<Widget>;
 
 function setup(
   start: Widget,
-  save: Save = vi.fn(async (update: WidgetUpdate) => widget(update as Partial<Widget>))
+  save: Save = vi.fn(async (update: WidgetUpdate) => widget(update as Partial<Widget>)),
+  rules: WidgetPolicy | null = policy
 ) {
   const autosave = new WidgetAutosave(start, save, { delay: 10 });
-  render(WidgetRulesFields, { autosave, policy });
+  render(WidgetRulesFields, { autosave, policy: rules });
   return { autosave, save };
 }
 
@@ -170,6 +171,27 @@ describe("WidgetRulesFields policy", () => {
     await expect
       .element(protection)
       .toHaveAccessibleDescription("widget_admin_blocker_bot_protection");
+  });
+
+  test.each([
+    ["an older, looser policy", { ...policy, max_daily_token_budget: 3_000_000_000 }],
+    ["no readable policy", null]
+  ])("a budget above the API's ceiling stays in the field under %s", async (_case, rules) => {
+    const save = vi.fn(async (update: WidgetUpdate) => widget(update as Partial<Widget>));
+    setup(widget(), save, rules);
+    await userEvent.fill(budget(), "2000000001");
+    await userEvent.tab();
+    await expect.element(budget()).toHaveAttribute("aria-invalid", "true");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(save).not.toHaveBeenCalled();
+
+    await userEvent.fill(budget(), "2000000000");
+    await userEvent.tab();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save).toHaveBeenCalledWith({
+      limits: expect.objectContaining({ daily_token_budget: 2_000_000_000 }),
+      revision: 0
+    });
   });
 
   test("a saved value outside a tightened policy is flagged at its field", async () => {
