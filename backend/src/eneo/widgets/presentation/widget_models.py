@@ -10,6 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from eneo.widgets.domain.widget import (
+    MAX_DAILY_TOKEN_BUDGET,
     BotProtection,
     WidgetLanguage,
     WidgetLimits,
@@ -328,7 +329,9 @@ class WidgetPolicyPublic(BaseModel):
 class WidgetPolicyUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    max_daily_token_budget: Optional[int] = Field(default=None, ge=1_000)
+    max_daily_token_budget: Optional[int] = Field(
+        default=None, ge=1_000, le=MAX_DAILY_TOKEN_BUDGET
+    )
     allow_bot_protection_none: Optional[bool] = None
     min_retention_days: Optional[int] = Field(default=None, ge=0, le=3650)
     max_retention_days: Optional[int] = Field(default=None, ge=0, le=3650)

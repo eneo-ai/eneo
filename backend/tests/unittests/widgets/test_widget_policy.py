@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from eneo.widgets.domain.widget import (
     BotProtection,
@@ -11,6 +12,7 @@ from eneo.widgets.domain.widget import (
 )
 from eneo.widgets.domain.widget_policy import WidgetPolicy
 from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
+from eneo.widgets.presentation.widget_models import WidgetPolicyUpdate
 
 
 def _widget() -> Widget:
@@ -122,3 +124,17 @@ async def test_the_serving_view_is_never_written_back():
     with pytest.raises(ValueError, match="never written back"):
         await WidgetRepoImpl(session).update(served)
     session.scalar.assert_not_called()
+
+
+def test_token_budgets_stay_within_the_usage_counters():
+    """The daily usage counters are int4: a larger budget would fail every
+    admission with a 503 instead of being refused when it is saved."""
+    WidgetLimits(daily_token_budget=2_000_000_000)
+    WidgetPolicy(max_daily_token_budget=2_000_000_000)
+    for build in (
+        lambda: WidgetLimits(daily_token_budget=2_000_000_001),
+        lambda: WidgetPolicy(max_daily_token_budget=2_000_000_001),
+        lambda: WidgetPolicyUpdate(max_daily_token_budget=2_000_000_001),
+    ):
+        with pytest.raises(ValidationError):
+            build()

@@ -280,15 +280,23 @@ async def test_budget_exhaustion_blocks_and_is_counted(
     assert resp.status_code == 200, resp.text
     token = await _mint(client, public_id)
 
+    # A budget below the reservation estimate still answers once; what the
+    # answer used then exhausts the day.
     resp = await client.post(
         f"/api/v1/widgets/{public_id}/ask/",
         json={"question": "Hej"},
         headers=_auth(token),
     )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Och?"},
+        headers=_auth(token),
+    )
     assert resp.status_code == 429, resp.text
     assert resp.json()["detail"]["code"] == "budget_exhausted"
     assert "retry-after" in resp.headers
-    assert fake_assistant_ask == []
+    assert [call["question"] for call in fake_assistant_ask] == ["Hej"]
 
     resp = await client.get(
         f"/api/v1/widgets/{active_widget['id']}/usage/", headers=_auth(admin_token)

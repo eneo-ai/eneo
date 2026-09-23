@@ -35,6 +35,8 @@ _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 MAX_ALLOWED_ORIGINS = 20
 MAX_SUGGESTED_QUESTIONS = 4
 MAX_SUGGESTED_QUESTION_LENGTH = 160
+# The daily usage counters are int4 columns.
+MAX_DAILY_TOKEN_BUDGET = 2_000_000_000
 
 # AI Act article 50: visitors must be told they are talking to an AI system.
 # The text is editable per widget but never empty on an active widget.
@@ -249,7 +251,9 @@ class WidgetLimits(BaseModel):
 
     messages_per_visitor_10min: int = Field(default=10, ge=1, le=100)
     messages_per_ip_hour: int = Field(default=60, ge=1, le=1000)
-    daily_token_budget: int = Field(default=500_000, ge=1_000)
+    daily_token_budget: int = Field(
+        default=500_000, ge=1_000, le=MAX_DAILY_TOKEN_BUDGET
+    )
     max_question_chars: int = Field(default=2_000, ge=100, le=8_000)
     max_session_turns: int = Field(default=30, ge=1, le=100)
 

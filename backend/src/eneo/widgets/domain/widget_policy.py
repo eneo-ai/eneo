@@ -8,7 +8,7 @@ from typing import Any, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from eneo.widgets.domain.widget import BotProtection, Widget
+from eneo.widgets.domain.widget import MAX_DAILY_TOKEN_BUDGET, BotProtection, Widget
 
 # The widget setting each violation is about.
 _VIOLATION_SETTINGS: dict[str, Callable[[Widget], Any]] = {
@@ -32,7 +32,9 @@ class WidgetPolicy(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    max_daily_token_budget: int = Field(default=2_000_000, ge=1_000)
+    max_daily_token_budget: int = Field(
+        default=2_000_000, ge=1_000, le=MAX_DAILY_TOKEN_BUDGET
+    )
     allow_bot_protection_none: bool = False
     min_retention_days: int = Field(default=0, ge=0, le=3650)
     max_retention_days: int = Field(default=365, ge=0, le=3650)

@@ -92,6 +92,22 @@ async def test_budget_admission_is_capped_by_the_tenant_policy_as_it_stands(
     assert stored.limits.daily_token_budget == 500_000
 
 
+async def test_a_budget_below_the_reservation_still_admits_one_answer(active_widget):
+    widget = await _load_widget(active_widget["id"])
+    widget.limits.daily_token_budget = 5_000
+    budget = WidgetBudget()
+
+    receipt = await budget.reserve(widget, 8_000)
+    assert receipt.reserved_tokens == 5_000
+    with pytest.raises(WidgetBudgetExhaustedError):
+        await budget.reserve(widget, 8_000)
+    await budget.settle(receipt, 2_000, 400)
+    # The settled answer closes the day for a budget this small.
+    with pytest.raises(WidgetBudgetExhaustedError):
+        await budget.reserve(widget, 8_000)
+    assert await budget.used_today(widget) == 2_400
+
+
 async def test_release_is_idempotent_and_old_days_do_not_charge_today(active_widget):
     widget = await _load_widget(active_widget["id"])
     budget = WidgetBudget()

@@ -167,18 +167,23 @@ class WidgetBudget:
         midnight = datetime.combine(
             now.date() + timedelta(days=1), time.min, tzinfo=zone
         )
-        reservation = BudgetReservation(uuid4(), widget.id, now.date(), max(0, tokens))
         try:
             async with sessionmanager.session() as session, session.begin():
                 # Capped by the tenant policy as it stands now, whatever copy
                 # of the widget the caller holds.
                 policy = await WidgetRepoImpl(session).policy_for(widget.tenant_id)
+                limit = policy.daily_token_budget_for(widget)
+                # A budget below the estimate still admits its first answer;
+                # the settled usage then closes the day.
+                reservation = BudgetReservation(
+                    uuid4(), widget.id, now.date(), min(max(0, tokens), limit)
+                )
                 admitted = await WidgetUsageRepoImpl(session).reserve(
                     reservation.id,
                     widget.id,
                     reservation.day,
                     tokens=reservation.reserved_tokens,
-                    limit=policy.daily_token_budget_for(widget),
+                    limit=limit,
                 )
                 if not admitted:
                     raise WidgetBudgetExhaustedError(
