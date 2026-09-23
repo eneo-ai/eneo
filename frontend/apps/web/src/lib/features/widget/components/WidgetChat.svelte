@@ -50,6 +50,7 @@
   let composer = $state<WidgetComposer | null>(null);
   let log = $state<HTMLElement | null>(null);
   let newQuestionButton = $state<HTMLButtonElement | null>(null);
+  let startOverButton = $state<HTMLButtonElement | null>(null);
 
   let status = $state<"idle" | "verifying" | "sending">("idle");
   // Keyed so every completion is announced: the same text set again would
@@ -62,6 +63,9 @@
   let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
   // Shown while the backend has not yet confirmed the question (first chunk).
   let pendingQuestion = $state<string | null>(null);
+  // How many messages there were when it was sent; the same text asked again
+  // must still show as pending, so the count tells when it has arrived.
+  let pendingFrom = $state(0);
   // The conversation whose first answer is in. Its feedback stays mounted
   // through follow-up questions, so a vote is not lost to the next one.
   let rateableSession = $state<string | null>(null);
@@ -95,9 +99,7 @@
   const messages = $derived(chat.currentConversation.messages ?? []);
   // The service appends the message once the backend confirms it; until then
   // show the question and a typing indicator so the visitor sees progress.
-  const showPending = $derived(
-    pendingQuestion !== null && !messages.some((message) => message.question === pendingQuestion)
-  );
+  const showPending = $derived(pendingQuestion !== null && messages.length <= pendingFrom);
   const busy = $derived(status !== "idle" || chat.askQuestion.isLoading);
   const subtitle = $derived(config.texts.subtitle);
   // Retention 0: the backend deletes the session when the answer ends, so
@@ -125,7 +127,7 @@
     if (answered) void tick().then(() => newQuestionButton?.focus());
   });
 
-  async function restore(sessionId: string) {
+  async function restore(sessionId: string, retried = false): Promise<void> {
     try {
       await session.ensureToken();
       // ChatService toasts and swallows load errors for the signed-in app;
@@ -133,6 +135,12 @@
       await chat.loadConversation({ id: sessionId }, { rethrow: true });
       rateableSession = chat.currentConversation.id;
     } catch (error) {
+      if (isTokenRejected(error) && !retried) {
+        // Stale after a pause or a settings change: a fresh token for the
+        // same visitor still owns the conversation.
+        session.invalidate();
+        return restore(sessionId, true);
+      }
       // A gone session (retention, a new visitor identity) is not worth showing.
       session.rememberSession(null);
       if (isWidgetUnavailable(error) && !isSessionError(error)) unavailable = true;
@@ -164,6 +172,7 @@
     status = "sending";
     errorMessage = null;
     pendingQuestion = question;
+    pendingFrom = messages.length;
     try {
       await ask(question, false);
     } finally {
@@ -209,11 +218,24 @@
         session.invalidate();
         return ask(question, true);
       }
-      if (widgetErrorCode(error) === "widget_not_active") unavailable = true;
+      // Nothing reached the server, so the question goes back into the field.
+      void composer?.restore(question);
+      const code = widgetErrorCode(error);
+      if (code === "widget_not_active") unavailable = true;
+      if (code === "session_not_owned") {
+        // Deleted by retention, or owned by an identity this browser lost:
+        // asking in it again can never succeed.
+        chat.newConversation();
+        session.rememberSession(null);
+        errorMessage = m.widget_error_session_gone();
+        return;
+      }
       const wait = retryAfterSeconds(error);
       if (wait !== null && wait <= MAX_COOLDOWN_SECONDS) coolDown(wait);
       // The alert below announces the error itself; no second live message.
       errorMessage = describeWidgetError(error);
+      // The conversation is full: the one way on is to start a new one.
+      if (code === "session_turns_exceeded") void tick().then(() => startOverButton?.focus());
     }
   }
 
@@ -289,6 +311,7 @@
         <button
           type="button"
           class="widget-header-button"
+          bind:this={startOverButton}
           onclick={() => (confirmStartOver = true)}
           aria-label={m.widget_new_conversation()}
           title={m.widget_new_conversation()}

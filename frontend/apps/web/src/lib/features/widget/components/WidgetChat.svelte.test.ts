@@ -2,7 +2,7 @@
 import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { WidgetPublicConfig } from "@eneo/eneo-js";
+import { EneoError, type WidgetPublicConfig } from "@eneo/eneo-js";
 import "../../../../app.css";
 import axe from "axe-core";
 import { backgroundOf, contrastAgainst } from "./contrastProbe";
@@ -40,7 +40,13 @@ const fake = vi.hoisted(() => ({
   // Answer texts for the next asks, in order; the default after that.
   answers: [] as string[],
   // The next answer breaks off after its first words, then clears itself.
-  breakOffNext: false
+  breakOffNext: false,
+  // Errors the next asks fail with before any chunk, in order.
+  askErrors: [] as unknown[],
+  // Errors the next restores fail with, in order.
+  getErrors: [] as unknown[],
+  // Visitor tokens minted so far.
+  mints: 0
 }));
 
 vi.mock("@eneo/eneo-js", async (importOriginal) => {
@@ -54,12 +60,15 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
       publicId: "wgt_test",
       challengeUrl: "http://localhost/api/v1/widgets/wgt_test/challenge/",
       config: unsupported,
-      createVisitorSession: async () => ({
-        token: "visitor-token",
-        expires_in: 3600,
-        visitor_id: "11111111-1111-4111-8111-111111111111",
-        visitor_key: "key"
-      }),
+      createVisitorSession: async () => {
+        fake.mints += 1;
+        return {
+          token: "visitor-token",
+          expires_in: 3600,
+          visitor_id: "11111111-1111-4111-8111-111111111111",
+          visitor_key: "key"
+        };
+      },
       conversations: {
         ask: async ({
           conversation,
@@ -74,6 +83,8 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
           };
         }) => {
           fake.asks.push({ question, conversationId: conversation?.id });
+          const failure = fake.askErrors.shift();
+          if (failure) throw failure;
           await new Promise<void>((resolve) => {
             fake.release = resolve;
           });
@@ -105,6 +116,8 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
           return {};
         },
         get: async () => {
+          const failure = fake.getErrors.shift();
+          if (failure) throw failure;
           if (!fake.restored) return unsupported();
           return fake.restored;
         },
@@ -196,6 +209,47 @@ async function askFollowUp(question: string, answer: string) {
 
 const liveRegion = () => document.querySelector("[data-widget-chat] > [aria-live='polite']")!;
 
+function widgetError(status: number, code: string, headers?: Record<string, string>) {
+  return new EneoError(
+    "failed",
+    "SERVER",
+    status,
+    0,
+    { detail: { code } },
+    { endpoint: "/x" },
+    headers ? new Headers(headers) : undefined
+  );
+}
+
+/** A visitor who was here before, with a live token and a remembered conversation. */
+function rememberVisitor() {
+  localStorage.setItem(
+    "eneo-widget:wgt_test",
+    JSON.stringify({
+      visitor_id: "11111111-1111-4111-8111-111111111111",
+      visitor_key: "key",
+      token: "visitor-token",
+      expires_at: Date.now() + 600_000,
+      session_id: "session-9"
+    })
+  );
+  fake.restored = {
+    id: "session-9",
+    name: "Tidigare",
+    messages: [
+      {
+        id: "message-9",
+        question: "Hej?",
+        answer: "Hej där.",
+        references: [],
+        files: [],
+        tools: { assistants: [] }
+      }
+    ],
+    feedback: null
+  };
+}
+
 beforeEach(() => {
   fake.asks.length = 0;
   fake.feedback.length = 0;
@@ -205,6 +259,9 @@ beforeEach(() => {
   fake.failNextFeedback = false;
   fake.answers.length = 0;
   fake.breakOffNext = false;
+  fake.askErrors.length = 0;
+  fake.getErrors.length = 0;
+  fake.mints = 0;
   localStorage.clear();
   delete document.documentElement.dataset.theme;
 });
@@ -460,6 +517,92 @@ describe("WidgetChat", () => {
     // The turn exists on the server: it is remembered and can be rated.
     expect(JSON.parse(localStorage.getItem("eneo-widget:wgt_test")!).session_id).toBe("session-1");
     await expect.element(page.getByText("widget_feedback_prompt")).toBeVisible();
+  });
+
+  test("a remembered conversation is restored with a fresh token when the old one went stale", async () => {
+    rememberVisitor();
+    // A pause or a settings change since the last visit makes the stored token stale.
+    fake.getErrors.push(widgetError(401, "visitor_token_stale"));
+    renderApp();
+
+    await expect.element(page.getByText("Hej där.")).toBeVisible();
+    expect(fake.mints).toBe(1);
+    expect(JSON.parse(localStorage.getItem("eneo-widget:wgt_test")!).session_id).toBe("session-9");
+  });
+
+  test("a question that fails before it reaches the server goes back into the field", async () => {
+    renderApp();
+    fake.askErrors.push(widgetError(400, "challenge_invalid"));
+    await userEvent.fill(composer(), "Vad kostar bygglov?");
+    await userEvent.keyboard("{Enter}");
+
+    await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_verification");
+    await expect.element(composer()).toHaveValue("Vad kostar bygglov?");
+
+    // The same text can simply be sent again.
+    await userEvent.click(composer());
+    await userEvent.keyboard("{Enter}");
+    await releaseAnswer();
+    expect(fake.asks.map((ask) => ask.question)).toEqual([
+      "Vad kostar bygglov?",
+      "Vad kostar bygglov?"
+    ]);
+  });
+
+  test("a full conversation says to start a new one and moves focus there", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+
+    fake.askErrors.push(widgetError(400, "session_turns_exceeded"));
+    await userEvent.fill(composer(), "En fråga för mycket");
+    await userEvent.keyboard("{Enter}");
+
+    await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_session_limit");
+    await expect
+      .element(page.getByRole("button", { name: "widget_new_conversation" }))
+      .toHaveFocus();
+    await expect.element(composer()).toHaveValue("En fråga för mycket");
+  });
+
+  test("a conversation the server no longer has is replaced by a new one", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+
+    fake.askErrors.push(widgetError(404, "session_not_owned"));
+    await userEvent.fill(composer(), "Och på lördagar?");
+    await userEvent.keyboard("{Enter}");
+
+    await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_session_gone");
+    expect(answers()).toHaveLength(0);
+    expect(JSON.parse(localStorage.getItem("eneo-widget:wgt_test")!).session_id).toBeNull();
+    await expect.element(composer()).toHaveValue("Och på lördagar?");
+
+    await userEvent.click(composer());
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() => expect(fake.asks).toHaveLength(3));
+    // The gone conversation is never asked in again.
+    expect(fake.asks[2].conversationId).toBeFalsy();
+    await releaseAnswer();
+  });
+
+  test("asking the same question again shows it as pending until the answer starts", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    await expect.element(composer()).toBeEnabled();
+    expect(answers()).toHaveLength(1);
+
+    await userEvent.fill(composer(), "Vad har biblioteket för öppettider?");
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() => expect(fake.release).not.toBeNull());
+
+    // The first answer plus the pending question with its typing indicator.
+    await vi.waitFor(() => expect(answers()).toHaveLength(2));
+    expect(answers()[1].textContent).toContain("Vad har biblioteket för öppettider?");
+    await releaseAnswer();
+    expect(answers()).toHaveLength(2);
   });
 
   test("the send arrow sends and hands focus back to the question field", async () => {

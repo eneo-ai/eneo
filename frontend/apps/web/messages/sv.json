@@ -4876,6 +4876,8 @@
   "widget_error_budget": "Chatten har nått sin dagliga gräns. Försök igen i morgon.",
   "widget_error_unavailable": "Chatten är inte tillgänglig just nu.",
   "widget_error_verification": "Vi kunde inte verifiera din webbläsare. Ladda om sidan och försök igen.",
+  "widget_error_session_limit": "Konversationen har nått sin maxlängd. Starta en ny konversation för att ställa fler frågor.",
+  "widget_error_session_gone": "Konversationen finns inte längre, så en ny har startats. Skicka din fråga igen.",
   "widget_verifying": "Kontrollerar din webbläsare…",
   "widget_references": "Källor",
   "widget_conversation_log": "Konversation",

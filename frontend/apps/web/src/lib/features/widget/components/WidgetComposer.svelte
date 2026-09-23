@@ -1,6 +1,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { IconSendArrow } from "@eneo/icons/send-arrow";
+  import { tick } from "svelte";
 
   type Props = {
     placeholder: string;
@@ -29,6 +30,14 @@
 
   export function focus() {
     textarea?.focus();
+  }
+
+  /** Put back a question that never reached the server, unless something new was typed. */
+  export async function restore(question: string) {
+    if (value.trim()) return;
+    value = question;
+    await tick();
+    resize();
   }
 
   const canSend = $derived(!disabled && !busy && value.trim().length > 0);

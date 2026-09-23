@@ -54,6 +54,10 @@ describe("widget errors", () => {
     expect(describeWidgetError(error(402, "budget_exhausted"))).toBe("widget_error_budget");
     expect(describeWidgetError(error(404, "widget_not_active"))).toBe("widget_error_unavailable");
     expect(describeWidgetError(error(400, "challenge_expired"))).toBe("widget_error_verification");
+    // Retrying the same conversation can never succeed; the visitor must start a new one.
+    expect(describeWidgetError(error(400, "session_turns_exceeded"))).toBe(
+      "widget_error_session_limit"
+    );
     expect(describeWidgetError(new Error("boom"))).toBe("widget_error_generic");
   });
 });

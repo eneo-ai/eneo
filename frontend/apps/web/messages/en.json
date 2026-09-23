@@ -4876,6 +4876,8 @@
   "widget_error_budget": "The chat has reached its daily limit. Please try again tomorrow.",
   "widget_error_unavailable": "The chat is not available right now.",
   "widget_error_verification": "We could not verify your browser. Please reload the page and try again.",
+  "widget_error_session_limit": "This conversation has reached its length limit. Start a new conversation to ask more.",
+  "widget_error_session_gone": "This conversation is no longer available, so a new one has been started. Send your question again.",
   "widget_verifying": "Checking your browser…",
   "widget_references": "Sources",
   "widget_conversation_log": "Conversation",
