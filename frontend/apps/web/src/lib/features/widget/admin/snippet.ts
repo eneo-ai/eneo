@@ -1,7 +1,9 @@
 /**
- * The install snippets the admin page shows. Floating `v1` follows Eneo
- * releases and is the default; the pinned variant carries the SRI hash of
- * the exact loader build for hosts that require `integrity`.
+ * The install snippets the admin page shows. The floating channel (`v1`)
+ * follows Eneo releases and is the default; the pinned variant carries the
+ * SRI hash of the exact loader build for hosts that require `integrity`.
+ * Neither exists without a loader build: it would point at an address this
+ * installation answers with 503.
  *
  * Neither carries a setting the editor can change later: the loader reads
  * the saved language, position and colours from Eneo on every page, so an
@@ -35,10 +37,10 @@ export function loaderUrl(origin: string, version: string): string {
 }
 
 /** Floating snippet; updates with every Eneo release. */
-export function floatingSnippet(options: SnippetOptions): string {
-  const channel = options.release?.channel ?? "v1";
+export function floatingSnippet(options: SnippetOptions): string | null {
+  if (!options.release) return null;
   return scriptTag([
-    ["src", loaderUrl(options.origin, channel)],
+    ["src", loaderUrl(options.origin, options.release.channel)],
     ["data-widget-id", options.publicId]
   ]);
 }

@@ -10,12 +10,10 @@ describe("install snippets", () => {
     );
   });
 
-  it("falls back to v1 when the loader is not built", () => {
+  it("offers no snippet to paste when the loader is not built", () => {
     expect(
       floatingSnippet({ origin: "https://eneo.kommun.se", publicId: "wgt_x", release: null })
-    ).toBe(
-      '<script async src="https://eneo.kommun.se/widget/v1/eneo.js" data-widget-id="wgt_x"></script>'
-    );
+    ).toBeNull();
   });
 
   it("pins the exact version with integrity and crossorigin", () => {
