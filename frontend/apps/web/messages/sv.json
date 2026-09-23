@@ -5187,6 +5187,7 @@
   "widget_admin_template_linked_title": "Följer mallen ”{name}”",
   "widget_admin_template_linked_description": "De låsta delarna nedan uppdateras när mallen publiceras och kan inte redigeras här. Övriga delar är dina; hämta mallens värden igen för att utgå från den publicerade versionen på nytt. Koppla loss widgeten för att ändra allt själv; den behåller sina nuvarande värden.",
   "widget_admin_template_locked_parts": "Låst av mallen: {parts}",
+  "widget_admin_template_locks_nothing": "Mallen låser inga delar; allt går att redigera här.",
   "widget_admin_template_open": "Öppna mallen",
   "widget_admin_template_detach": "Koppla loss från mallen",
   "widget_admin_template_detach_confirm_title": "Koppla loss från mallen?",

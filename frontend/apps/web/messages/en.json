@@ -5187,6 +5187,7 @@
   "widget_admin_template_linked_title": "Follows the template “{name}”",
   "widget_admin_template_linked_description": "The locked parts below are updated whenever the template is published and cannot be edited here. The other parts are yours; reapply the template to start from its published version again. Detach the widget to change everything yourself; it keeps its current values.",
   "widget_admin_template_locked_parts": "Locked by the template: {parts}",
+  "widget_admin_template_locks_nothing": "The template locks nothing; every part can be edited here.",
   "widget_admin_template_open": "Open the template",
   "widget_admin_template_detach": "Detach from template",
   "widget_admin_template_detach_confirm_title": "Detach from the template?",

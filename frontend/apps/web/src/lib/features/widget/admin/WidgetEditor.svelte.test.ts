@@ -201,6 +201,17 @@ describe("WidgetEditor", () => {
       .toBeVisible();
   });
 
+  test("a linked template that locks nothing says so, not that nobody follows it", async () => {
+    renderEditor(
+      widget({
+        template: { id: "t1", name: "Kommunblå", locked_groups: [] }
+      } as unknown as Partial<Widget>)
+    );
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_appearance/ }));
+    await expect.element(page.getByText("widget_admin_template_locks_nothing")).toBeVisible();
+    expect(document.body.textContent).not.toContain("widget_admin_template_linked_none");
+  });
+
   test("detaching a template keeps a refused edit held at its field", async () => {
     const linked = widget({
       template: { id: "t1", name: "Kommunblå", locked_groups: [] }

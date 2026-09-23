@@ -415,7 +415,7 @@
                 <p class="text-sm">
                   {lockedParts
                     ? m.widget_admin_template_locked_parts({ parts: lockedParts })
-                    : m.widget_admin_template_linked_none()}
+                    : m.widget_admin_template_locks_nothing()}
                 </p>
                 <div class="flex flex-wrap items-center gap-2">
                   {#if isAdmin}
