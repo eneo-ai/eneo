@@ -24,9 +24,18 @@
     error?: string;
     /** Told whether the rows hold edits that cannot be sent yet (a repeated question). */
     onHeld?: (held: boolean) => void;
+    /** Extra ids every row points to, e.g. an error about the whole texts group. */
+    describedBy?: string;
   };
 
-  let { questions, onChange, id = "widget-questions", error = "", onHeld }: Props = $props();
+  let {
+    questions,
+    onChange,
+    id = "widget-questions",
+    error = "",
+    onHeld,
+    describedBy = ""
+  }: Props = $props();
 
   // What the API stores for a list of rows: whitespace collapsed, blanks dropped.
   const clean = (texts: string[]) => texts.map(collapseWhitespace).filter(Boolean);
@@ -115,7 +124,13 @@
             maxlength={MAX_LENGTH}
             placeholder={m.widget_admin_questions_placeholder()}
             aria-invalid={duplicate}
-            aria-describedby={duplicate ? `${id}-${row.key}-error` : undefined}
+            aria-describedby={[
+              duplicate && `${id}-${row.key}-error`,
+              error && `${id}-error`,
+              describedBy
+            ]
+              .filter(Boolean)
+              .join(" ") || undefined}
             onblur={emit}
             onkeydown={(event) => {
               if (event.key === "Enter") {

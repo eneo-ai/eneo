@@ -127,6 +127,22 @@ describe("WidgetEditor", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  test("a refusal of the whole texts group is tied to every text field", async () => {
+    const { update } = renderEditor(widget());
+    update.mockRejectedValueOnce(
+      new EneoError("raw", "RESPONSE", 422, 0, {
+        detail: [{ loc: ["body", "texts"], type: "value_error", msg: "Invalid" }]
+      })
+    );
+    const title = page.getByLabelText("widget_admin_text_title", { exact: true });
+    await userEvent.fill(title, "Hej");
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    await expect.element(title).toHaveAccessibleDescription(/widget_admin_value_refused/);
+    await expect
+      .element(page.getByLabelText("widget_admin_text_footer", { exact: true }))
+      .toHaveAccessibleDescription(/widget_admin_value_refused/);
+  });
+
   test("the content cards are section headings", async () => {
     renderEditor(widget());
     await expect.element(page.getByRole("heading", { level: 2, name: "general" })).toBeVisible();

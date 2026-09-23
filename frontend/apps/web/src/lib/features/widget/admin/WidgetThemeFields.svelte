@@ -18,9 +18,18 @@
     /** The whole appearance is governed by a template; `lockHint` says so. */
     locked?: boolean;
     lockHint?: string;
+    /** Id of an error about the whole appearance, which every control points to. */
+    errorId?: string;
   };
 
-  let { theme, onChange, idPrefix = "widget", locked = false, lockHint = "" }: Props = $props();
+  let {
+    theme,
+    onChange,
+    idPrefix = "widget",
+    locked = false,
+    lockHint = "",
+    errorId
+  }: Props = $props();
 
   const id = (name: string) => `${idPrefix}-${name}`;
 
@@ -87,9 +96,9 @@
       onChange({ radius: Math.min(24, Math.max(0, value)) });
   }
 
-  // The lock hint must reach every control; a describedby on the group's
-  // div is not exposed to assistive technology.
-  const lockRef = $derived(locked ? id("lock-hint") : "");
+  // The lock hint and an appearance-wide error must reach every control; a
+  // describedby on the group's div is not exposed to assistive technology.
+  const lockRef = $derived([locked && id("lock-hint"), errorId].filter(Boolean).join(" "));
   const describedBy = (help: string) => (lockRef ? `${id(help)} ${lockRef}` : id(help));
 </script>
 
@@ -136,7 +145,7 @@
           <Switch
             id={id("dark-mode-custom")}
             checked={customDark}
-            aria-describedby={id("dark-mode-help")}
+            aria-describedby={[id("dark-mode-help"), errorId].filter(Boolean).join(" ")}
             onCheckedChange={toggleDark}
           />
         </Field.Field>

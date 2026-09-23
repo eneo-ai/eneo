@@ -30,6 +30,8 @@
     subtitleRequired?: string;
     /** Told whether the suggested questions hold edits that cannot be sent yet. */
     onQuestionsHeld?: (held: boolean) => void;
+    /** Id of an error about the whole texts group, which every field points to. */
+    groupErrorId?: string;
   };
 
   let {
@@ -41,13 +43,19 @@
     lockHint = "",
     errors = {},
     subtitleRequired,
-    onQuestionsHeld
+    onQuestionsHeld,
+    groupErrorId
   }: Props = $props();
 
   const id = (name: string) => `${idPrefix}-${name}`;
   const locked = (field: LockedTextField) => lockedFields.has(field);
   const describedBy = (field: LockedTextField, help: string) =>
-    [id(help), locked(field) && id("lock-hint"), problems[field] && id(`${field}-error`)]
+    [
+      id(help),
+      locked(field) && id("lock-hint"),
+      problems[field] && id(`${field}-error`),
+      groupErrorId
+    ]
       .filter(Boolean)
       .join(" ");
 
@@ -160,6 +168,7 @@
         questions={texts.suggested_questions ?? []}
         error={errors.suggested_questions}
         onHeld={onQuestionsHeld}
+        describedBy={groupErrorId}
         onChange={(questions) => onChange({ suggested_questions: questions })}
       />
     </Field.Field>

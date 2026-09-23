@@ -384,7 +384,7 @@
             </Card.Header>
             <Card.Content class="flex flex-col gap-4">
               {#if autosave.refusals["texts"]}
-                <Field.Error>{autosave.refusals["texts"]}</Field.Error>
+                <Field.Error id="widget-texts-error">{autosave.refusals["texts"]}</Field.Error>
               {/if}
               <WidgetTextsFields
                 texts={current.texts}
@@ -395,6 +395,7 @@
                   ? m.widget_admin_blocker_subtitle_empty()
                   : undefined}
                 onQuestionsHeld={(held) => autosave.markDraft("texts.suggested_questions", held)}
+                groupErrorId={autosave.refusals["texts"] ? "widget-texts-error" : undefined}
                 onChange={(change) => autosave.patch({ texts: { ...current.texts, ...change } })}
               />
             </Card.Content>
@@ -472,13 +473,18 @@
               <Card.Description>{m.widget_admin_appearance_description()}</Card.Description>
             </Card.Header>
             <Card.Content class="flex flex-col gap-4">
-              {#each appearanceErrors as message (message)}
-                <Field.Error>{message}</Field.Error>
-              {/each}
+              {#if appearanceErrors.length > 0}
+                <div id="widget-appearance-error" class="flex flex-col gap-1">
+                  {#each appearanceErrors as message (message)}
+                    <Field.Error>{message}</Field.Error>
+                  {/each}
+                </div>
+              {/if}
               <WidgetThemeFields
                 theme={current.theme}
                 locked={appearanceLocked}
                 {lockHint}
+                errorId={appearanceErrors.length > 0 ? "widget-appearance-error" : undefined}
                 onChange={(change) => autosave.patch({ theme: { ...current.theme, ...change } })}
               />
             </Card.Content>

@@ -90,3 +90,23 @@ describe("WidgetThemeFields radius", () => {
     await expect.element(radius).toHaveAttribute("aria-invalid", "false");
   });
 });
+
+describe("WidgetThemeFields errors", () => {
+  test("an error about the whole appearance is tied to every control", async () => {
+    const error = document.createElement("p");
+    error.id = "appearance-error";
+    error.textContent = "Utseendet sparades inte";
+    document.body.append(error);
+    render(WidgetThemeFields, {
+      theme: { primary_color: "#1F4E79", radius: 12 } as WidgetTheme,
+      onChange: vi.fn(),
+      errorId: "appearance-error"
+    });
+    await expect.element(primary()).toHaveAccessibleDescription(/Utseendet sparades inte/);
+    await expect.element(header()).toHaveAccessibleDescription(/Utseendet sparades inte/);
+    await expect
+      .element(page.getByLabelText("widget_admin_dark_mode_custom", { exact: true }))
+      .toHaveAccessibleDescription(/Utseendet sparades inte/);
+    error.remove();
+  });
+});

@@ -166,6 +166,20 @@ describe("WidgetRulesFields policy", () => {
       .toHaveAccessibleDescription(/widget_admin_blocker_budget_policy/);
   });
 
+  test("a forbidden 'none' is explained once, not as a hint and an error both", async () => {
+    setup(
+      widget({
+        bot_protection: "none",
+        activation_blockers: ["bot_protection_none_not_allowed"]
+      })
+    );
+    const protection = page.getByLabelText("widget_admin_bot_protection", { exact: true });
+    await expect.element(protection).toHaveAttribute("aria-invalid", "true");
+    await expect
+      .element(protection)
+      .toHaveAccessibleDescription("widget_admin_blocker_bot_protection");
+  });
+
   test("each card title is a section heading", async () => {
     setup(widget());
     for (const name of [

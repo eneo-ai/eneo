@@ -357,7 +357,7 @@
             class="w-full sm:max-w-md"
             aria-invalid={!!protectionProblem}
             aria-describedby={[
-              !noneAllowed && "widget-protection-help",
+              !noneAllowed && !protectionProblem && "widget-protection-help",
               protectionProblem && "widget-protection-error"
             ]
               .filter(Boolean)
@@ -376,7 +376,7 @@
             >
           </Select.Content>
         </Select.Root>
-        {#if !noneAllowed}
+        {#if !noneAllowed && !protectionProblem}
           <Field.Description id="widget-protection-help"
             >{m.widget_admin_blocker_bot_protection()}</Field.Description
           >

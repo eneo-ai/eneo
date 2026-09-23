@@ -133,6 +133,25 @@ describe("SuggestedQuestionsEditor and the save's echo", () => {
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 
+  test("a refused list and a group error are tied to every row", async () => {
+    const group = document.createElement("p");
+    group.id = "texts-group-error";
+    group.textContent = "Texterna sparades inte";
+    document.body.append(group);
+    render(SuggestedQuestionsEditor, {
+      questions: ["Öppettider?", "Parkering?"],
+      onChange: vi.fn(),
+      error: "Frågorna godtogs inte",
+      describedBy: "texts-group-error"
+    });
+    for (const row of page.getByRole("textbox").elements()) {
+      await expect
+        .element(row)
+        .toHaveAccessibleDescription("Frågorna godtogs inte Texterna sparades inte");
+    }
+    group.remove();
+  });
+
   test("a repeated question is flagged at the row and never sent", async () => {
     const onChange = vi.fn<(questions: string[]) => void>();
     const onHeld = vi.fn<(held: boolean) => void>();
