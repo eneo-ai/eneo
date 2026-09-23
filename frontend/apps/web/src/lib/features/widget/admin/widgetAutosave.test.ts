@@ -114,6 +114,9 @@ describe("WidgetAutosave", () => {
     autosave.patch({ name: "A" });
     await vi.advanceTimersByTimeAsync(10);
     expect(autosave.status).toBe("saving");
+    // Nothing is queued, but closing the tab now would still lose "A".
+    expect(autosave.hasPending).toBe(false);
+    expect(autosave.unsaved).toBe(true);
     autosave.patch({ name: "B" });
     resolveFirst(widget({ name: "A" }));
     await vi.advanceTimersByTimeAsync(0);
@@ -122,6 +125,7 @@ describe("WidgetAutosave", () => {
     expect(save).toHaveBeenCalledTimes(2);
     expect(save).toHaveBeenLastCalledWith({ revision: 0, name: "B" });
     expect(autosave.widget.name).toBe("B");
+    expect(autosave.unsaved).toBe(false);
   });
 
   it("keeps pending changes on failure so they can be retried", async () => {
