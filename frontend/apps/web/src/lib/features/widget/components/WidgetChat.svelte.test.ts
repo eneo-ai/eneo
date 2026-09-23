@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { WidgetPublicConfig } from "@eneo/eneo-js";
 import "../../../../app.css";
 import axe from "axe-core";
+import { backgroundOf, contrastAgainst } from "./contrastProbe";
 
 /** Rule ids and targets of every axe violation on the page, for a readable diff. */
 async function violations() {
@@ -142,13 +143,16 @@ function config(overrides: Partial<WidgetPublicConfig> = {}): WidgetPublicConfig
   } as WidgetPublicConfig;
 }
 
-function renderApp(overrides: Partial<WidgetPublicConfig> = {}) {
+function renderApp(
+  overrides: Partial<WidgetPublicConfig> = {},
+  hostScheme: "light" | "dark" | null = null
+) {
   return render(EmbedApp, {
     config: config(overrides),
     publicId: "wgt_test",
     baseUrl: "http://localhost",
     hostOrigin: null,
-    hostScheme: null
+    hostScheme
   });
 }
 
@@ -172,6 +176,7 @@ beforeEach(() => {
   fake.restored = null;
   fake.failNextFeedback = false;
   localStorage.clear();
+  delete document.documentElement.dataset.theme;
 });
 
 describe("WidgetChat", () => {
@@ -296,6 +301,81 @@ describe("WidgetChat", () => {
       .element(page.getByRole("button", { name: "widget_feedback_more_negative" }))
       .toBeVisible();
     expect(fake.feedback).toHaveLength(0);
+  });
+
+  test("the send arrow sends and hands focus back to the question field", async () => {
+    renderApp();
+    await userEvent.fill(composer(), "Vad kostar bygglov?");
+    await userEvent.click(page.getByRole("button", { name: "widget_send" }));
+
+    await vi.waitFor(() =>
+      expect(fake.asks.map((ask) => ask.question)).toEqual(["Vad kostar bygglov?"])
+    );
+    await expect.element(composer()).toHaveFocus();
+    await releaseAnswer();
+  });
+
+  describe.each(["light", "dark"] as const)("focus in the %s scheme", (scheme) => {
+    const FOCUSABLE =
+      "button:not([disabled]), a[href], textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
+    /** Focus every control from the keyboard and check the indicator it shows. */
+    async function checkEveryControl(scope: Element) {
+      const controls = Array.from(scope.querySelectorAll<HTMLElement>(FOCUSABLE));
+      for (const control of controls) {
+        // A key press first, so focus counts as keyboard focus.
+        await userEvent.keyboard("{Shift}");
+        control.focus();
+        const name = `${control.tagName} ${control.getAttribute("aria-label") ?? control.textContent?.trim()}`;
+        expect(control.matches(":focus-visible"), name).toBe(true);
+        // The question field's box carries its indicator.
+        const indicator = control.matches(".widget-composer textarea")
+          ? control.closest("form")!
+          : control;
+        // Buttons that transition every property reach their colour later.
+        await Promise.all(indicator.getAnimations().map((animation) => animation.finished));
+        const style = getComputedStyle(indicator);
+        expect(style.outlineStyle, name).not.toBe("none");
+        expect(parseFloat(style.outlineWidth), name).toBeGreaterThanOrEqual(2);
+        const ratio = contrastAgainst(style.outlineColor, indicator.parentElement);
+        expect(ratio, `${name}: ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
+      }
+      return controls.length;
+    }
+
+    test("every control shows an indicator of at least 3:1", async () => {
+      renderApp(
+        {
+          texts: {
+            title: "Fråga kommunen",
+            subtitle: "Du chattar med en AI-assistent.",
+            welcome: "Hej!",
+            suggested_questions: ["Vad har biblioteket för öppettider?"],
+            footer_text: "Läs mer",
+            footer_link_url: "https://www.kommun.se/integritet"
+          }
+        } as Partial<WidgetPublicConfig>,
+        scheme
+      );
+      const chat = document.querySelector("[data-widget-chat]")!;
+      expect(backgroundOf(chat)[0] < 128).toBe(scheme === "dark");
+      // Suggestion, question field and footer link.
+      expect(await checkEveryControl(chat)).toBeGreaterThanOrEqual(3);
+
+      await userEvent.click(suggestion());
+      await releaseAnswer();
+      await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
+      await userEvent.fill(composer(), "En till fråga");
+      // New conversation, thumbs, "tell us more", question field, send, footer link.
+      expect(await checkEveryControl(chat)).toBeGreaterThanOrEqual(7);
+
+      await userEvent.click(page.getByRole("button", { name: "widget_feedback_more" }));
+      const dialog = page.getByRole("dialog");
+      await expect.element(dialog).toBeVisible();
+      await userEvent.fill(dialog.getByRole("textbox"), "Bra.");
+      // Comment field, cancel, send and the close button.
+      expect(await checkEveryControl(dialog.element())).toBeGreaterThanOrEqual(4);
+    });
   });
 
   test("the chat, its acknowledgement and the comment dialog pass axe", async () => {

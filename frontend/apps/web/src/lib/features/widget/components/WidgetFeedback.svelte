@@ -83,7 +83,7 @@
   <button
     type="button"
     class={[
-      "focus-visible:ring-default flex h-8 w-8 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none",
+      "flex h-8 w-8 items-center justify-center rounded-full",
       given === 1 ? "bg-accent-dimmer text-accent-default" : "text-secondary hover:bg-secondary"
     ]}
     aria-label={m.widget_feedback_helpful()}
@@ -95,7 +95,7 @@
   <button
     type="button"
     class={[
-      "focus-visible:ring-default flex h-8 w-8 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none",
+      "flex h-8 w-8 items-center justify-center rounded-full",
       given === -1 ? "bg-accent-dimmer text-accent-default" : "text-secondary hover:bg-secondary"
     ]}
     aria-label={m.widget_feedback_unhelpful()}
@@ -114,7 +114,7 @@
   {#if collectsText && !sent}
     <button
       type="button"
-      class="text-accent-default focus-visible:ring-default mt-1 w-fit rounded-md text-xs underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+      class="text-accent-default mt-1 w-fit rounded-md text-xs underline-offset-2 hover:underline"
       onclick={openDialog}
     >
       {given === -1 ? m.widget_feedback_more_negative() : m.widget_feedback_more()}
@@ -144,7 +144,7 @@
         <Dialog.Description>{m.widget_feedback_more_body()}</Dialog.Description>
       </Dialog.Header>
       <textarea
-        class="border-default bg-primary text-primary focus-visible:ring-default w-full resize-y rounded-lg border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+        class="border-default bg-primary text-primary w-full resize-y rounded-lg border px-3 py-2 text-sm"
         rows="4"
         maxlength="2000"
         aria-label={m.widget_feedback_more_title()}

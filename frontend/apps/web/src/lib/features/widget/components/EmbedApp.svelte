@@ -101,3 +101,14 @@
     onTheme={applyScheme}
   />
 </div>
+
+<style>
+  /* One focus indicator for every control in the widget, the dialogs
+     included: the text colour reaches at least 3:1 against every surface
+     the chat uses, in both schemes (WCAG 1.4.11, 2.4.7). Unlayered, so it
+     wins over the utilities that switch outlines off. */
+  :global(:focus-visible) {
+    outline: 2px solid var(--text-primary);
+    outline-offset: 2px;
+  }
+</style>

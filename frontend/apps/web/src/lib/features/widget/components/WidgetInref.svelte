@@ -43,8 +43,7 @@
     text-decoration: none;
     vertical-align: 0.2em;
   }
-  .widget-citation:hover,
-  .widget-citation:focus-visible {
+  .widget-citation:hover {
     outline: 2px solid var(--widget-accent);
     outline-offset: 1px;
   }

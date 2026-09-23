@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { ConversationMessage } from "@eneo/eneo-js";
 import "../../../../app.css";
 import axe from "axe-core";
+import { contrastAgainst } from "./contrastProbe";
 import WidgetMessage from "./WidgetMessage.svelte";
 
 vi.mock("$lib/paraglide/messages", () => ({
@@ -140,6 +141,45 @@ describe("WidgetMessage sources", () => {
     await expect.element(page.getByText("Asia/Tokyo")).toBeVisible();
     await expect.element(page.getByText(/widget_activity_via/)).toHaveTextContent("TimeMCP");
   });
+
+  test.each(["light", "dark"] as const)(
+    "tells which service a step used in text that meets 4.5:1 (%s)",
+    async (scheme) => {
+      // The embed page always sets a scheme (the tokens only exist under
+      // one) and paints the panel with the primary background.
+      document.documentElement.dataset.theme = scheme;
+      document.body.classList.add("bg-primary");
+      const call = (id: string) => ({
+        server_name: "TimeMCP",
+        tool_name: "get_current_time",
+        arguments: { timezone: "UTC" },
+        tool_call_id: id,
+        result_status: "completed"
+      });
+      try {
+        // One step shows "via" beside it; several fold into a list that ends with it.
+        for (const calls of [[call("c1")], [call("c1"), call("c2")]]) {
+          const { unmount } = render(WidgetMessage, {
+            message: {
+              ...message("Klockan är 14:02."),
+              tool_calls: calls
+            } as unknown as ConversationMessage,
+            index: 0,
+            isLast: true,
+            isLoading: false
+          });
+          const summary = page.getByRole("button", { name: /Get current time/ });
+          if (summary.elements().length > 0) await summary.click();
+          const via = page.getByText(/widget_activity_via/).element();
+          expect(contrastAgainst(getComputedStyle(via).color, via)).toBeGreaterThanOrEqual(4.5);
+          unmount();
+        }
+      } finally {
+        delete document.documentElement.dataset.theme;
+        document.body.classList.remove("bg-primary");
+      }
+    }
+  );
 
   test("keeps tool activity out of view when the widget hides it", async () => {
     render(WidgetMessage, {

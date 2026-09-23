@@ -129,7 +129,7 @@
         <section aria-label={m.widget_references()} class="border-default mt-1 border-t pt-2">
           <button
             type="button"
-            class="text-secondary hover:text-primary focus-visible:ring-accent-default flex items-center gap-1.5 rounded-md text-sm focus-visible:ring-2 focus-visible:outline-none"
+            class="text-secondary hover:text-primary flex items-center gap-1.5 rounded-md text-sm"
             aria-expanded={expanded}
             aria-controls={listId}
             onclick={() => (expanded = !expanded)}
@@ -150,7 +150,7 @@
                 <li
                   id={anchorFor(sourceIndex)}
                   tabindex="-1"
-                  class="border-default focus-visible:ring-accent-default flex items-start gap-2.5 rounded-md border px-2.5 py-2 focus-visible:ring-2 focus-visible:outline-none"
+                  class="border-default flex items-start gap-2.5 rounded-md border px-2.5 py-2"
                 >
                   <span
                     class="border-default bg-secondary min-w-6 rounded-md border text-center font-mono text-xs leading-6 tabular-nums"
@@ -185,7 +185,7 @@
                         <span class="text-secondary text-xs">{m.widget_source_document()}</span>
                         <button
                           type="button"
-                          class="text-accent-default focus-visible:ring-accent-default mt-1 inline-flex w-fit items-center gap-1 rounded-md text-xs underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                          class="text-accent-default mt-1 inline-flex w-fit items-center gap-1 rounded-md text-xs underline-offset-2 hover:underline"
                           aria-label={m.widget_copy_reference_for({ title: source.title })}
                           onclick={() => copyReference(source)}
                         >

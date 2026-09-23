@@ -348,7 +348,7 @@
         <button
           type="button"
           bind:this={newQuestionButton}
-          class="widget-new-question bg-primary text-primary hover:bg-secondary focus-visible:ring-default flex items-center gap-1.5 border px-3 py-1.5 text-sm focus-visible:ring-2 focus-visible:outline-none"
+          class="widget-new-question bg-primary text-primary hover:bg-secondary flex items-center gap-1.5 border px-3 py-1.5 text-sm"
           onclick={startOver}
         >
           <MessageSquarePlus class="size-4" aria-hidden="true" />
