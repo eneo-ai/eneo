@@ -336,6 +336,102 @@ def test_field_reuse_requires_a_downstream_structured_reference() -> None:
     }
 
 
+def test_instruction_naming_an_unread_step_in_prose_is_an_issue() -> None:
+    # Reproduced live 2026-09-23: asked to make step 4 read step 1, the planner
+    # rewrote the instruction to "Läs underlaget från steg 1 ..." and left the
+    # step reading the previous one. The runtime hands the step its underlag and
+    # resolves its templates; it does not read the prose, so the model never
+    # sees step 1 while the plan reads as though it does.
+    def _spec_with_step_four(step_four: StepSpec) -> FlowDraftSpecCore:
+        return FlowDraftSpecCore(
+            flow_name="Steglista",
+            steps=[
+                _step("step_a", "Ta fram fakta", "Ta fram fakta ur underlaget."),
+                _step(
+                    "step_b",
+                    "Bedöm",
+                    "Bedöm fakta.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                ),
+                _step(
+                    "step_c",
+                    "Skriv sammanfattning",
+                    "Skriv en sammanfattning.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                ),
+                step_four,
+            ],
+        )
+
+    prose_only = _spec_with_step_four(
+        _step(
+            "step_d",
+            "Sammanfatta",
+            "Läs underlaget från steg 1 (Ta fram fakta) och skriv en kort sammanfattning.",
+            input_source=InputSource.PREVIOUS_STEP,
+        )
+    )
+    with_reference = _spec_with_step_four(
+        _step(
+            "step_d",
+            "Sammanfatta",
+            "Sammanfatta {{step_1.output.text}} kort.",
+            input_source=InputSource.PREVIOUS_STEP,
+        )
+    )
+    reading_every_earlier_step = _spec_with_step_four(
+        _step(
+            "step_d",
+            "Sammanfatta",
+            "Läs underlaget från steg 1 (Ta fram fakta) och skriv en kort sammanfattning.",
+            input_source=InputSource.ALL_PREVIOUS_STEPS,
+        )
+    )
+    bound_to_that_step = _spec_with_step_four(
+        _step(
+            "step_d",
+            "Sammanfatta",
+            "Läs underlaget från steg 1 (Ta fram fakta) och skriv en kort sammanfattning.",
+            input_source=InputSource.PREVIOUS_STEP,
+            input_bindings={"source_refs": [{"step_ref": "step_a", "output": "text"}]},
+        )
+    )
+    naming_the_previous_step = _spec_with_step_four(
+        _step(
+            "step_d",
+            "Sammanfatta",
+            "Bygg vidare på steg 3 och skriv en kort sammanfattning.",
+            input_source=InputSource.PREVIOUS_STEP,
+        )
+    )
+    naming_a_later_step = _spec_with_step_four(
+        _step(
+            "step_d",
+            "Sammanfatta",
+            "Resultatet går vidare till steg 9.",
+            input_source=InputSource.PREVIOUS_STEP,
+        )
+    )
+    conversation = [
+        {"role": "user", "content": "Ändra underlaget så att steget läser steg 1."}
+    ]
+
+    def _fires(spec: FlowDraftSpecCore) -> bool:
+        return "instruction_step_reference_requires_binding" in {
+            issue.id
+            for issue in evaluate_critic_invariants(
+                build_conversation_critic_context(conversation, spec)
+            )
+        }
+
+    assert _fires(prose_only)
+    assert not _fires(with_reference)
+    assert not _fires(reading_every_earlier_step)
+    assert not _fires(bound_to_that_step)
+    assert not _fires(naming_the_previous_step)
+    assert not _fires(naming_a_later_step)
+
+
 def test_field_reuse_with_only_a_terminal_producer_is_unsatisfiable() -> None:
     # The reviewer's probe: TEXT -> terminal JSON, reuse requested, terminal
     # step bound only to the earlier text. Nothing can consume the fields.
@@ -4671,6 +4767,7 @@ class TestCriticInvariantRegistry:
             "source_reader_required_fields_must_be_captured",
             "action_followup_requires_followup_fields",
             "field_reuse_requires_input_bindings",
+            "instruction_step_reference_requires_binding",
             "multi_document_compare_requires_all_previous_steps",
             "simple_text_transform_must_remain_single_step",
             "document_renderer_must_immediately_follow_body_writer",

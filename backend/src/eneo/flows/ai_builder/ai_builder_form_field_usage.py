@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
-
+from eneo.flows.ai_builder.ai_builder_validation_references import (
+    iter_step_templates,
+)
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     StepSpec,
@@ -12,15 +13,6 @@ from eneo.flows.template_reference_analyzer import (
     analyze_template,
     referenced_form_fields,
 )
-
-
-def _iter_step_templates(step: StepSpec) -> list[str]:
-    templates = [step.assistant_spec.instructions]
-    for payload in (step.input_bindings, step.output_config):
-        if payload is None:
-            continue
-        templates.append(json.dumps(payload, ensure_ascii=False))
-    return templates
 
 
 def step_references_form_field(spec: FlowDraftSpecCore, step: StepSpec) -> bool:
@@ -33,7 +25,7 @@ def step_references_form_field(spec: FlowDraftSpecCore, step: StepSpec) -> bool:
     step_refs = {
         candidate.plan_step_ref: index for index, candidate in enumerate(spec.steps)
     }
-    for template in _iter_step_templates(step):
+    for template in iter_step_templates(step):
         refs = analyze_template(
             template,
             step_refs=step_refs,
@@ -53,7 +45,7 @@ def find_unused_form_fields(spec: FlowDraftSpecCore) -> list[str]:
 
     used_fields: set[str] = set()
     for step in spec.steps:
-        for template in _iter_step_templates(step):
+        for template in iter_step_templates(step):
             refs = analyze_template(
                 template,
                 step_refs={},

@@ -173,18 +173,25 @@ def validate_variable_references(
                 )
 
 
+def iter_step_templates(step: StepSpec) -> list[str]:
+    """The step's three template carriers: instructions, input bindings, output config.
+
+    One owner, so a reader of a step's references never misses a carrier that
+    was added here.
+    """
+
+    templates = [step.assistant_spec.instructions]
+    for payload in (step.input_bindings, step.output_config):
+        if payload is not None:
+            templates.append(_stringify_template_payload(payload))
+    return templates
+
+
 def iter_step_template_expressions(step: StepSpec) -> list[str]:
     """Enumerate templates in instructions, input bindings and output configuration."""
     expressions: list[str] = []
-    expressions.extend(iter_template_expressions(step.assistant_spec.instructions))
-
-    for payload in (step.input_bindings, step.output_config):
-        if payload is None:
-            continue
-        expressions.extend(
-            iter_template_expressions(_stringify_template_payload(payload))
-        )
-
+    for template in iter_step_templates(step):
+        expressions.extend(iter_template_expressions(template))
     return expressions
 
 

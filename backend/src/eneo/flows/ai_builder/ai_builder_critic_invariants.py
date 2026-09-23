@@ -22,6 +22,7 @@ language.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
@@ -68,6 +69,9 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     source_capture_field_satisfied,
+)
+from eneo.flows.ai_builder.ai_builder_validation_references import (
+    iter_step_templates,
 )
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
@@ -864,6 +868,117 @@ def _field_reuse_requires_input_bindings_evidence(context: CriticContext) -> boo
     )
 
 
+# ── Prose references to another step ─────────────────────────────────────
+
+# "steg 4", "step 4": a step named in running text. The underscore in a
+# template head (`step_4.output.text`) is not a space, so a real reference
+# never matches this.
+_PROSE_STEP_NUMBER = re.compile(r"\b(?:steg|step)\s+(\d{1,2})\b", re.IGNORECASE)
+
+
+def _earlier_steps_named_in_prose(instructions: str, order: int) -> set[int]:
+    """Earlier steps the instruction names in running text.
+
+    A later step or the step itself is another invariant's business.
+    """
+
+    return {
+        named
+        for match in _PROSE_STEP_NUMBER.finditer(instructions)
+        if 1 <= (named := int(match.group(1))) < order
+    }
+
+
+def _step_orders_read(
+    step: StepSpec,
+    *,
+    step_refs: dict[str, int],
+    form_field_names: set[str],
+) -> set[int]:
+    """Steps this step actually reads, by 1-based order.
+
+    Both ways a step can name another one count: a template reference, which
+    the runtime resolves, and a `source_refs` binding, which the runtime
+    compiles into the underlag. `step_refs` maps a plan ref to its order, so a
+    plan ref and a runtime alias (`step_4`) come back as the same number.
+    """
+
+    orders = {
+        reference.step_order
+        for template in iter_step_templates(step)
+        for reference in analyze_template(
+            template,
+            step_refs=step_refs,
+            form_field_names=form_field_names,
+        )
+        if reference.kind is TemplateReferenceKind.STEP
+        and reference.step_order is not None
+    }
+    source_refs = cast(object, (step.input_bindings or {}).get("source_refs"))
+    if isinstance(source_refs, list):
+        for ref in cast(list[object], source_refs):
+            if not isinstance(ref, Mapping):
+                continue
+            bound = cast(Mapping[str, object], ref).get("step_ref")
+            if isinstance(bound, str) and bound in step_refs:
+                orders.add(step_refs[bound])
+    return orders
+
+
+def _instruction_step_reference_requires_binding_evidence(
+    context: CriticContext,
+) -> bool:
+    """An instruction asks for another step's material in running text only.
+
+    The runtime hands a step its underlag and resolves the templates it
+    contains; it does not read the prose. An instruction that says "läs
+    underlaget från steg 1" without a reference to step 1, and without an
+    underlag that carries step 1, describes material the model never sees -
+    and the plan reads as though it does.
+    """
+
+    spec = context.spec
+    step_refs = {step.plan_step_ref: index + 1 for index, step in enumerate(spec.steps)}
+    form_field_names = {field.name for field in (spec.form_fields or [])}
+    for index, step in enumerate(spec.steps):
+        order = index + 1
+        named = _earlier_steps_named_in_prose(step.assistant_spec.instructions, order)
+        if not named:
+            continue
+        if step.input_source == InputSource.ALL_PREVIOUS_STEPS:
+            continue
+        read = _step_orders_read(
+            step,
+            step_refs=step_refs,
+            form_field_names=form_field_names,
+        )
+        for named_order in named:
+            if named_order in read:
+                continue
+            if (
+                step.input_source == InputSource.PREVIOUS_STEP
+                and named_order == order - 1
+            ):
+                continue
+            return True
+    return False
+
+
+_INSTRUCTION_STEP_REFERENCE_REQUIRES_BINDING = CriticInvariant(
+    id="instruction_step_reference_requires_binding",
+    description=(
+        "A step that names an earlier step in its instruction must reference "
+        "that step, or read all previous steps: prose delivers nothing."
+    ),
+    evidence=_instruction_step_reference_requires_binding_evidence,
+    remediation=(
+        "Ett steg nämner ett tidigare steg i löpande text utan att läsa det. Körningen ger steget sitt "
+        "underlag och löser ut referenserna i instruktionen - den läser inte texten om steget. Referera "
+        "steget i instruktionen, till exempel {{step_1.output.text}}, eller låt steget läsa alla tidigare steg."
+    ),
+)
+
+
 _FIELD_REUSE_REQUIRES_INPUT_BINDINGS = CriticInvariant(
     id="field_reuse_requires_input_bindings",
     description=(
@@ -1614,6 +1729,7 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _SOURCE_READER_REQUIRED_FIELDS_MUST_BE_CAPTURED,
     _ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS,
     _FIELD_REUSE_REQUIRES_INPUT_BINDINGS,
+    _INSTRUCTION_STEP_REFERENCE_REQUIRES_BINDING,
     _MULTI_DOCUMENT_COMPARE_REQUIRES_EXPLICIT_FAN_IN,
     _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP,
     _DOCUMENT_RENDERER_MUST_IMMEDIATELY_FOLLOW_BODY_WRITER,
