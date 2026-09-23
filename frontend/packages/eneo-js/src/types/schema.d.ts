@@ -1295,6 +1295,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/assistants/{id}/widget-status/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Assistant Widget Status
+     * @description Whether an active web widget publishes the assistant, for anyone who can read it. Says nothing else about the widget. Requires a session token.
+     */
+    get: operations["get_assistant_widget_status_api_v1_assistants__id__widget_status__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/assistants/{id}/sessions/": {
     parameters: {
       query?: never;
@@ -10991,6 +11011,14 @@ export interface components {
      * @enum {string}
      */
     AssistantType: "assistant" | "default-assistant";
+    /** AssistantWidgetStatus */
+    AssistantWidgetStatus: {
+      /**
+       * Serves Active Widget
+       * @description Whether an active web widget publishes this assistant to visitors. Visitors get the assistant as configured, so changes to its MCP servers and capabilities reach them immediately.
+       */
+      serves_active_widget: boolean;
+    };
     /** AttachmentLimits */
     AttachmentLimits: {
       /** Formats */
@@ -27983,6 +28011,55 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_assistant_widget_status_api_v1_assistants__id__widget_status__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AssistantWidgetStatus"];
+        };
       };
       /** @description Forbidden */
       403: {

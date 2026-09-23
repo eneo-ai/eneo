@@ -19,4 +19,11 @@ describe("WidgetPublishedNotice", () => {
       .element(page.getByRole("link", { name: "widget_admin_open" }))
       .toHaveAttribute("href", "/spaces/s1/assistants/a1/widget");
   });
+
+  test("tells an editor who cannot manage widgets without offering a link", async () => {
+    render(WidgetPublishedNotice, {});
+    const note = page.getByRole("note", { name: "widget_admin_assistant_notice_title" });
+    await expect.element(note).toHaveTextContent("widget_admin_assistant_notice_body");
+    await expect.element(page.getByRole("link")).not.toBeInTheDocument();
+  });
 });

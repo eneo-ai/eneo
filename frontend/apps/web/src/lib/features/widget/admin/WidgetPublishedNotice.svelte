@@ -7,8 +7,9 @@
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
-    /** The widget settings, or the organisation's widget overview. */
-    href: string;
+    /** The widget settings or the organisation's widget overview; none when
+     * the viewer cannot manage widgets. */
+    href?: string;
   };
 
   let { href }: Props = $props();
@@ -23,6 +24,8 @@
     {m.widget_admin_assistant_notice_title()}
   </p>
   <p>{m.widget_admin_assistant_notice_body()}</p>
-  <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- localized href passed in by the page -->
-  <a class="w-fit font-medium underline underline-offset-2" {href}>{m.widget_admin_open()}</a>
+  {#if href}
+    <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- localized href passed in by the page -->
+    <a class="w-fit font-medium underline underline-offset-2" {href}>{m.widget_admin_open()}</a>
+  {/if}
 </div>

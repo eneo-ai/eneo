@@ -543,6 +543,15 @@ class TestHighRiskExactRouteGuards:
             "what the public internet can reach"
         )
 
+    def test_assistant_widget_status_is_session_only(self):
+        """Assistant readers learn whether a widget publishes the assistant;
+        an API key learns nothing about widgets."""
+        route = _find_route_by_method_and_paths(
+            "GET", "/assistants/{id}/widget-status/", "/assistants/{id}/widget-status"
+        )
+        assert _route_has_dep_name(route, "require_session_auth")
+        assert "assistants" in _route_resource_permission_types(route)
+
     @pytest.mark.parametrize(
         ("method", "path"),
         [

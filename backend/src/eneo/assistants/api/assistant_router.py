@@ -12,6 +12,7 @@ from eneo.assistants.api.assistant_models import (
     AssistantCreatePublic,
     AssistantPublic,
     AssistantUpdatePublic,
+    AssistantWidgetStatus,
 )
 
 # Audit logging - module level imports for consistency
@@ -24,6 +25,7 @@ from eneo.authentication.api_key_notification_auto_follow import (
 from eneo.authentication.auth_dependencies import (
     get_scope_filter,
     require_resource_permission_for_method,
+    require_session_auth,
     require_user_for_creation,
 )
 from eneo.authentication.auth_models import (
@@ -248,6 +250,28 @@ async def get_assistant(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     return await _assistant_response(container, id)
+
+
+@router.get(
+    "/{id}/widget-status/",
+    response_model=AssistantWidgetStatus,
+    description=(
+        "Whether an active web widget publishes the assistant, for anyone who "
+        "can read it. Says nothing else about the widget. Requires a session token."
+    ),
+    responses=responses.get_responses([403, 404]),
+    dependencies=[Depends(require_session_auth)],
+)
+async def get_assistant_widget_status(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    assistant, _ = await container.assistant_service().get_assistant(id)
+    return AssistantWidgetStatus(
+        serves_active_widget=await container.widget_repo().serves_target(
+            tenant_id=container.user().tenant_id, target_id=assistant.id
+        )
+    )
 
 
 def _build_assistant_update_changes(

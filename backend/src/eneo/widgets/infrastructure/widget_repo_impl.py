@@ -146,6 +146,20 @@ class WidgetRepoImpl:
         )
         return [to_entity(row) for row in rows]
 
+    async def serves_target(self, tenant_id: UUID, target_id: UUID) -> bool:
+        return bool(
+            await self.session.scalar(
+                sa.select(
+                    sa.exists().where(
+                        Widgets.tenant_id == tenant_id,
+                        Widgets.target_type == WidgetTargetType.ASSISTANT.value,
+                        Widgets.target_id == target_id,
+                        Widgets.status == WidgetStatus.ACTIVE.value,
+                    )
+                )
+            )
+        )
+
     async def revoke_tokens(
         self, tenant_id: UUID, *, bot_protection: BotProtection
     ) -> int:

@@ -625,11 +625,13 @@
       <Settings.Group title={m.tools()}>
         {#if data.servesActiveWidget}
           <WidgetPublishedNotice
-            href={localizeHref(
-              hasPermission(data.user)("widgets")
-                ? `/spaces/${$currentSpace.routeId}/assistants/${data.assistant.id}/widget`
-                : "/admin/widgets"
-            )}
+            href={hasPermission(data.user)("widgets")
+              ? localizeHref(
+                  `/spaces/${$currentSpace.routeId}/assistants/${data.assistant.id}/widget`
+                )
+              : hasPermission(data.user)("admin")
+                ? localizeHref("/admin/widgets")
+                : undefined}
           />
         {/if}
         <Settings.Row
