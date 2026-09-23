@@ -58,6 +58,8 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Swedish trans
 | `backend/src/eneo/skills/**`, skill permissions in `roles/**`, `frontend/apps/web/src/routes/(app)/admin/skills/**`                                                              | `guides/skills.mdx`                                              |
 | `backend/src/eneo/integration/**` (SharePoint) , `frontend/apps/web/src/routes/(app)/admin/integrations/**`                                                                      | `guides/sharepoint-integration.mdx`                              |
 | `backend/src/eneo/widgets/**`, `frontend/packages/widget-loader/**`, `frontend/apps/web/src/lib/features/widget/**`, `routes/(public)/embed/**`, `routes/(app)/admin/widgets/**` | `guides/embed-widget.mdx`                                        |
+| `routes/(public)/widget/**` (loader, saved settings), `routes/(app)/documents/**` (source references), `spaces/**/assistants/**/widget/**`, `WIDGET_*` in `main/config.py`       | `guides/embed-widget.mdx`                                        |
+| Visitor reach: `VISITOR_CAPABILITY_PURPOSES` in `assistants/assistant_service.py`, `mcp_servers/infrastructure/identity_headers.py`, `/{id}/widget-status/` route                | `guides/embed-widget.mdx`                                        |
 
 ## Storage, workers and operations
 

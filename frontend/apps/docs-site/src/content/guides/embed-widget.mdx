@@ -4,14 +4,37 @@ import { Callout } from "nextra/components";
 
 A web widget puts a published assistant on an external website, for example a municipality's public site, as a chat bubble in the corner of every page. Visitors are anonymous: no Eneo account, no cookies, and nothing is stored until they send their first message.
 
-This guide covers the editor's side (creating and publishing a widget), the operator's side (policy, templates, security and data protection) and what to publish in your accessibility statement.
+This guide covers what visitors can reach, the editor's side (creating and publishing a widget), the website team's side (installing it), the operator's side (policy, templates, server settings, security and data protection) and what to publish in your accessibility statement.
 
 ## How it works
 
-- Your site includes one small script (the _loader_, about 4 kB) from your Eneo installation. It renders a launcher button and, when opened, an `iframe` with Eneo's chat page.
+- Your site includes one small script (the _loader_, under 5 kB compressed) from your Eneo installation. Before it shows the launcher button, it reads the widget's saved language, position and colours from Eneo, so later edits reach the site without a new snippet. When opened, it shows an `iframe` with Eneo's chat page.
 - The chat runs entirely on the Eneo origin. The host site never sees the conversation, and the browser only allows the widget on the sites you have listed (`Content-Security-Policy: frame-ancestors`).
 - Before the first message the visitor's browser solves an invisible proof of work (ALTCHA, self-hosted, no third party) and receives a short-lived visitor token. Rate limits per visitor and per IP address, a maximum question length and a daily token budget per widget limit usage.
-- Tools, MCP servers and file uploads are always off for visitors. The assistant answers from its instructions and knowledge only.
+- Visitors talk to the assistant as it is configured, within fixed limits; see [What visitors can reach](#what-visitors-can-reach).
+
+## What visitors can reach
+
+A widget publishes the assistant as it is configured. There is no separate tool setting per widget. A visitor gets:
+
+- **Knowledge**: the assistant's collections and websites. Relevant passages are always retrieved and added to the question, also when the assistant's knowledge mode is _On demand (search tool)_.
+- **The assistant's own MCP servers**: those enabled on the assistant that the space's security classification allows, with their tools as configured. Visitors are anonymous: a server set to forward user identity receives no identity headers, and no tool call waits for anyone's approval.
+- **Web search**, when both the space and the assistant have it switched on and the model can call tools. Web search runs on the organisation's external search server (see [Web search and image generation](/guides/capabilities)).
+
+Never available to visitors, whatever the assistant's configuration: image generation, file uploads, Eneo's built-in tool servers (knowledge search as a tool, attachment reading and built-in function providers), and images that a tool returns, which are dropped.
+
+<Callout type="warning">
+  Changing the assistant's MCP servers or functions changes what an active
+  widget exposes, immediately and without a new activation. Anything a server's
+  tools can read or do, an anonymous visitor can ask the assistant to use. While
+  an active widget publishes the assistant, its edit page says so at the top of
+  the **Tools** section ("Published as a web widget") for everyone who can edit
+  the assistant, with a link to the widget for those who manage widgets.
+</Callout>
+
+The widget's **Publish** tab lists what visitors get from the assistant as it is configured right now.
+
+Everything a visitor receives passes one filter on the server. The visitor never receives the model's name, its reasoning, the assistant or Skills behind an answer, tool results or the contents of a tool's resources. The **Show sources** and **Show tool activity** switches decide the rest; see [Sources, tool activity and feedback](#sources-tool-activity-and-feedback).
 
 ## For editors: publish a widget
 
@@ -20,10 +43,10 @@ You need the **widgets** permission and edit rights on the assistant.
 1. Publish the assistant in its space (Assistant → **Publishing**).
 2. On the same page, open **Web widget**. Create the widget, optionally from one of the organisation's templates.
 3. Configure it. Every change is saved automatically. The page is organised in the order you work:
-   - **Content**: name and language, then the texts visitors read: title, welcome message, suggested questions (added one by one, at most four), the required description under the title (by default an AI disclosure) and a footer note with an optional link (a data-handling reminder, a "powered by" line, whatever fits).
-   - **Appearance**: link the widget to one of the organisation's templates if you like (the parts the template locks are then read-only here until you detach it), then the primary colour (a contrast check tells you when it is too light), an optional header colour and logo (Eneo's logo marks the spot until you set your own), colour scheme, position and corner radius. Text on your colours is chosen automatically for contrast. Colours chosen for a light page rarely work on a dark one, so **Dark mode** can have its own primary and header colour (checked against the dark panel); leave them empty and dark mode keeps the light-mode colours. The chat button on your site takes the widget's colour too. The live preview follows the theme you are using in Eneo unless the widget pins light or dark.
-   - **Rules**: the websites that may show the widget (one origin per line, for example `https://www.kommun.se` or `https://*.kommun.se`; at least one is required), limits, privacy (retention in days; `0` stores nothing after the answer, so the chat answers one question at a time without follow-ups or feedback) and protection.
-   - **Publish**: the activation checklist, the install snippet, "Test in Eneo" and usage.
+   - **Content**: name and language, the **Show sources** and **Show tool activity** switches, then the texts visitors read: title, welcome message, suggested questions (added one by one, at most four), the required description under the title (by default an AI disclosure) and a footer note with an optional link (a data-handling reminder, a "powered by" line, whatever fits).
+   - **Appearance**: link the widget to one of the organisation's templates if you like (the parts the template locks are then read-only here until you detach it), then the primary colour (a contrast check tells you when it is too light), an optional header colour and logo (Eneo's logo marks the spot until you set your own), colour scheme, position and corner radius. Text on your colours is chosen automatically for contrast. Colours chosen for a light page rarely work on a dark one, so **Dark mode** can have its own primary and header colour (checked against the dark panel); leave them empty and dark mode keeps the light-mode colours. The chat button on your site takes the widget's colour too, and its dark-mode colour on a dark page, from the moment it appears. The live preview follows the theme you are using in Eneo unless the widget pins light or dark.
+   - **Rules**: the websites that may show the widget (one origin per line, for example `https://www.kommun.se` or `https://*.kommun.se`; at least one is required, at most 20), limits, privacy (retention in days; `0` stores nothing after the answer, so the chat answers one question at a time without follow-ups or feedback; whether free-text feedback is stored) and protection. The organisation's policy bounds are shown at the fields they limit.
+   - **Publish**: the activation checklist, what visitors get access to, the install snippet, "Test in Eneo" and usage.
 4. Check the **Preview** (the real chat page) and, if you like, **Test in Eneo**, which mounts the real widget on the admin page so you can try the button, keyboard navigation and the chat before anything is installed on your site.
 5. When the status bar shows no blockers, a tenant admin activates the widget. Until then the widget is a draft and shows nothing on your site.
 6. Copy the **install snippet** and place it once on the website, preferably just before `</body>`:
@@ -36,21 +59,37 @@ You need the **widgets** permission and edit rights on the assistant.
 ></script>
 ```
 
-The floating `v1` address follows Eneo releases. Sites that require Subresource Integrity can copy the pinned variant instead; it must be replaced after each Eneo release.
+The snippet carries nothing you can change later: the widget's saved language, position and colours reach every installed site within about a minute. The floating `v1` address follows Eneo releases. Sites that require Subresource Integrity can copy the pinned variant instead; it only needs replacing when the loader itself gets a new version (see [For the website team](#for-the-website-team)).
+
+The editor checks each value against the rules the server applies before saving it: an allowed website must be an origin, not a page address; a name cannot be blank; values outside the organisation's policy are flagged at the field. A value the server still refuses stays on screen at its field with the reason and is held back while the rest of your changes keep saving; edit it to send it again. The status bar lists every change that was not saved.
+
+On an active widget, the description under the title and the list of allowed websites cannot be emptied: the change is refused so the live widget keeps serving. If an active widget stops serving as configured, for example because the assistant was unpublished, the status bar, the **Publish** tab and the organisation's overview say what needs fixing. Until then visitors see a short "not available" notice.
 
 If another editor changes the widget while you edit, autosave stops and keeps your unsaved values visible. Copy anything you want to keep, then choose **Reload and discard unsaved changes** before editing the latest version. A stale save cannot undo a pause or archive.
 
 **Pause** stops the widget immediately for every visitor; any editor can pause. **Archive** (admins) is permanent.
 
+### Sources, tool activity and feedback
+
+**Sources.** With **Show sources** on (the default), answers carry numbered citations and a collapsed source list ("3 sources") under the answer; a citation number opens the list at its source. Knowledge sources come first, then the tool results the answer cites, one entry per document. A web page links to the page, opening in a new tab. An uploaded document has no public link: the visitor can choose **Copy reference**, which copies the document's title and an Eneo address (`https://<eneo>/documents/<id>`), and is asked to send it to an administrator of the chat. Anyone signed in to Eneo who opens that address sees the document (its collection or website, its text and, when stored, the original file) if they may read it; everyone else is told it is not available to them, without learning whether it exists. A tool result without a web link is listed as coming from a service the assistant used. With **Show sources** off, answers show no citations or source list, and no source title, link or document reference leaves Eneo.
+
+**Tool activity.** With **Show tool activity** on (the default), visitors see which tools and MCP servers an answer uses while it is being written ("via TimeMCP"): the tool's catalog title, or its technical name when it has none, and one value the assistant passed to it. Tool results never reach the visitor. With it off, no tool call, tool name or server name leaves Eneo. The tools still run, and the sources they return are still listed when sources are shown.
+
+**Feedback.** When the widget keeps conversations (retention above `0`), visitors can give the conversation a thumbs up or down under the latest answer and change the vote later; follow-up questions keep it. Votes are counted in the widget's usage and the organisation overview. With **Store free-text feedback** on (off by default), a link follows the vote ("Want to tell us more?", or "Tell us what was missing" after a thumbs-down) and opens a dialog with a comment box (at most 2 000 characters), which the visitor can ignore. The comment is stored with the conversation only while that setting is on and is deleted with the conversation. Changing the vote afterwards keeps the comment.
+
 ### Optional attributes and API
 
-| Attribute                              | Effect                                                                              |
-| -------------------------------------- | ----------------------------------------------------------------------------------- |
-| `data-lang="sv"` / `"en"`              | Fixed interface language (default: the page's)                                      |
-| `data-position="bottom-left"`          | Launcher on the left (the copied snippet carries the position chosen in the editor) |
-| `data-color-scheme="light"` / `"dark"` | Fixed colour scheme (default: follows the site)                                     |
-| `data-launcher="none"`                 | No button; the site opens the chat itself                                           |
-| `data-auto-open="true"`                | Open the panel on page load                                                         |
+The copied snippet carries only `data-widget-id`. These optional attributes are for the website team:
+
+| Attribute                              | Effect                                                                                                                                                 |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `data-lang="sv"` / `"en"`              | The host page's language, used while the widget's language is **Automatic** (default: the page's `lang`). A widget set to Swedish or English keeps it. |
+| `data-position="bottom-left"`          | Fallback only, used when the saved settings cannot be read. Otherwise the widget's saved position applies.                                             |
+| `data-color-scheme="light"` / `"dark"` | The host page's colour scheme, used while the widget's colour scheme is automatic (default: the visitor's system setting)                              |
+| `data-launcher="none"`                 | No button; the site opens the chat itself                                                                                                              |
+| `data-auto-open="true"`                | Open the panel on page load                                                                                                                            |
+| `data-label="…"`                       | Accessible name of the button (default "Öppna chatt" / "Open chat")                                                                                    |
+| `data-frame-title="…"`                 | Accessible name of the chat frame (default "Chatt" / "Chat")                                                                                           |
 
 The loader also exposes `window.Eneo`, which queues calls made before the script has loaded:
 
@@ -78,9 +117,9 @@ The editor in Eneo hands you the install snippet; this is what you need to know 
 
 1. **Where to paste it.** Once per page template, ideally just before `</body>`. In SiteVision and Optimizely (Episerver) that is the site template's script slot; in WordPress a footer script block or a theme's `footer.php`; through Google Tag Manager a Custom HTML tag fired on all pages. The script is `async`, so it never blocks rendering.
 2. **The address must match exactly.** The editor lists the sites that may show the widget under _Rules → Allowed websites_. Each entry is a full origin: scheme and host, for example `https://www.kommun.se`. `https://kommun.se` and `https://www.kommun.se` are two different origins, and `http` is not `https`. A wildcard covers subdomains: `https://*.kommun.se`. If the origin is missing, the button appears but the panel stays empty, because the browser refuses to frame the chat.
-3. **Content Security Policy.** If the site sends a CSP, allow the Eneo origin in `script-src` (the loader) and `frame-src` (the chat panel), for example `script-src 'self' https://eneo.kommun.se; frame-src https://eneo.kommun.se`. Nothing else is needed: the chat itself runs inside the frame on Eneo's origin.
+3. **Content Security Policy.** If the site sends a CSP, allow the Eneo origin in `script-src` (the loader), `connect-src` (the loader reads the widget's saved settings from `/widget/settings/<widget id>`) and `frame-src` (the chat panel), for example `script-src 'self' https://eneo.kommun.se; connect-src 'self' https://eneo.kommun.se; frame-src https://eneo.kommun.se`. Without `connect-src` the button still appears, but with the snippet's attributes instead of the widget's saved position, language and colours, and the browser reports a CSP violation. Nothing else is needed: the chat itself runs inside the frame on Eneo's origin.
 4. **Cookies and consent.** The widget sets no cookies on your site. The chat panel keeps a pseudonymous visitor id and the current conversation in its own frame storage, which browsers keep separate per site. It does not need to be gated behind a cookie banner, but mention it in the site's privacy information; the _Personal data and cookies_ section below has the wording.
-5. **Locked version (SRI).** If your policy requires Subresource Integrity, copy the pinned snippet with the `integrity` attribute instead of the floating one. It stops loading after the next Eneo release until you paste the new snippet, so prefer the floating `v1` address unless SRI is mandatory.
+5. **Locked version (SRI).** If your policy requires Subresource Integrity, copy the pinned snippet with the `integrity` attribute instead of the floating one. Its address contains the loader's version, and the bytes of a version never change, so the `integrity` hash stays valid through Eneo upgrades. When an upgrade brings a new loader version, Eneo serves only the new one: the old pinned snippet stops loading until you paste the new one from the widget's **Publish** tab. Check that tab after each Eneo upgrade, or prefer the floating `v1` address unless SRI is mandatory.
 6. **Test before go-live.** Open a page with the snippet on a staging host that is on the allowed list, click the launcher, send a question, close with Escape and check that focus returns to the button. The editor can also use _Test in Eneo_ to try the real widget before your site has it.
 7. **No JavaScript on the page?** Link to the stand-alone chat instead: `https://<eneo>/embed/<widget id>?mode=full`. It is the same chat as a full page and works from intranets and content that cannot run scripts.
 
@@ -88,26 +127,61 @@ The editor in Eneo hands you the install snippet; this is what you need to know 
 
 ### Tenant policy
 
-Under **Admin → Web widgets** a tenant admin sees every widget in the organisation (where it lives, whether it is active, questions and tokens over the last 7 and 30 days, blocked requests, today's budget) and sets the ceilings every widget must stay within: the highest daily token budget, the allowed retention range and whether widgets may run without bot protection (off by default). Editors see policy violations as activation blockers. There is no cap on the number of widgets; each activation is still an admin decision and the overview keeps the public surface visible.
+Under **Admin → Web widgets** a tenant admin sees every widget in the organisation (where it lives, whether it is active, questions and tokens over the last 7 and 30 days, blocked requests, today's budget) and, on the **Policy** tab, sets the ceilings every widget must stay within: the highest daily token budget (default 2 000 000), the allowed retention range (default 0–365 days) and whether widgets may run without bot protection (off by default). Only admins change the policy. Everyone with the widgets permission can read it, so the widget editor shows its bounds on the **Rules** tab and flags values outside them before saving; editors see remaining violations as activation blockers. There is no cap on the number of widgets; each activation is still an admin decision and the overview keeps the public surface visible.
+
+The policy applies to existing widgets as it stands, not only to later edits:
+
+- A daily budget above the maximum is capped to it for visitors, and usage figures show the budget that applies.
+- The nightly retention job keeps each widget's conversations within the allowed range. A widget set to `0` still stores nothing, even when the minimum is higher.
+- When widgets are no longer allowed to run without bot protection, those widgets require the proof of work again at once and their outstanding visitor tokens stop working. Editors who have such a widget open must reload before their next save.
+
+The widget keeps its own saved values and shows them as policy violations to fix.
 
 ### Templates
 
-Templates hold the organisation's house style: texts, colours, logo, shape and language. Admins create them under **Admin → Web widgets → Templates** and preview them in light and dark mode; at most one template is the default that editors get preselected (switch it off and nothing is preselected).
+Templates hold the organisation's house style: texts, colours, logo, shape and language. Admins create them under **Admin → Web widgets → Widget templates** and preview them in light and dark mode; at most one template is the default that editors get preselected (switch it off and nothing is preselected).
 
-A template has a draft and a **published** version. Saving edits the draft (previewed on the template page, never pushed); **Publish** makes the draft the version widgets link to. A widget **follows** the template it was created from or linked to: linking copies the published texts, appearance and language onto the widget once. The template's **locked parts** then stay in step: every publication writes them onto all widgets that follow the template, in the same request, and those parts are read-only in the widget editor. Publishing to widgets that follow the template asks for confirmation first. Unlocked parts are starting values editors may change. The lockable parts are appearance, language, disclosure and footer, and wording (title, welcome message, placeholder); new templates lock appearance and language. Locking the disclosure requires the template to have one, so a live widget can never lose its AI disclosure through a template. Suggested questions are never part of a template: they depend on the assistant and are set per widget.
+A template has a draft and a **published** version. Saving edits the draft (previewed on the template page, never pushed); **Publish** makes the draft the version widgets link to. A widget **follows** the template it was created from or linked to: linking copies the published texts, appearance and language onto the widget once. The template's **locked parts** then stay in step: every publication writes them onto all widgets that follow the template, in the same request, and those parts are read-only in the widget editor. Publishing to widgets that follow the template asks for confirmation first. Unlocked parts are starting values editors may change. The lockable parts are appearance, language, disclosure and footer, and wording (title, welcome message, placeholder); new templates lock appearance and language. Locking the disclosure requires the template to have one, so a live widget can never lose its AI disclosure through a template. Suggested questions are never part of a template: they depend on the assistant and are set per widget. Locked language and appearance reach installed sites like any other edit, without a new snippet.
 
 The template page shows how many widgets follow it and whether the draft has unpublished changes; the template list marks templates that are not published yet. Only published templates are offered when a widget is created or linked, and the picker previews the published version, not a draft that may be ahead of it. Before a publication reaches followers, the confirmation lists which parts are replaced on the widgets, which locks are new or released, and which changed parts are unlocked and therefore stay as editors set them. A widget can **reapply** its template at any time, which copies the published version onto it again, unlocked parts included, or be **detached**; a detached widget keeps its current values and every part becomes editable again. A template that widgets still follow cannot be deleted. Editors with an open widget page are told to reload when the template changed their widget underneath them.
+
+### When the assistant changes
+
+- **Tools and functions.** A change to the assistant's MCP servers or functions reaches visitors at once; see [What visitors can reach](#what-visitors-can-reach).
+- **Unpublishing** the assistant takes an active widget offline. Visitors see the "not available" notice, and the widget shows what needs fixing.
+- **Moving** the assistant to another space is refused while it has a widget that is not archived (a draft, active or paused widget), because the widget belongs to the assistant's space. Archive the widget first.
+- **Deleting** the assistant archives its widgets in the same step and records each in the audit log. A template those widgets followed can then be deleted.
 
 ### Security properties
 
 - **Who may frame the chat** is enforced by the visitor's browser from the widget's allowed origins. A site that is not listed gets a blank frame. A paused widget shows a short "not available" notice instead, on every site, so the chat button never opens an empty panel.
 - **Answers cannot phone home.** The chat page's Content Security Policy only allows images from Eneo and your logo's address and connections to the Eneo API, so an image link that ends up in an answer cannot carry the visitor's question to a third party.
-- **Visitor tokens** are JWTs bound to one widget and one pseudonymous visitor id, valid for 15 minutes and rotated silently. Pausing the widget or changing its origins, limits or privacy settings invalidates every outstanding token.
+- **Visitor tokens** are JWTs bound to one widget and one pseudonymous visitor id, valid for 15 minutes and rotated silently. Pausing the widget, or changing its origins, limits, privacy or bot protection, invalidates every outstanding token, as does a policy change that forbids running without bot protection.
 - **ALTCHA** is a self-hosted proof of work; no CAPTCHA provider, no cookies, no fingerprinting. Widgets without it require the tenant policy to allow it.
 - **Limits fail closed by default.** Redis protects request rates and challenge replays. The daily token budget and in-flight reservations are stored in PostgreSQL, so losing Redis data does not reset that budget.
-- **Budget accounting** reserves tokens before a turn and replaces the reservation with that answer’s measured usage exactly once. A failure before streaming releases the reservation. If a stream or process stops with uncertain usage, its reservation remains charged for that day. The reservation size is an admission estimate, not a hard maximum for a model response; actual usage can exceed it.
-- **The loader** is served from your Eneo origin with `nosniff`, open CORS (required for `integrity`) and an ETag; the pinned variant is immutable.
+- **Budget accounting** reserves tokens before a turn and replaces the reservation with that answer's measured usage exactly once, counting every round of tool calls. A failure before streaming releases the reservation. If a stream or process stops with uncertain usage, its reservation remains charged for that day. The reservation size is an admission estimate, not a hard maximum for a model response; actual usage can exceed it.
+- **The loader** is served from your Eneo origin with `nosniff`, open CORS (required for `integrity`) and an ETag; the pinned variant is immutable. The saved settings it reads are the widget's public display settings and are cached for a minute.
 - The embed page sends `Referrer-Policy: strict-origin-when-cross-origin`, a restrictive `Permissions-Policy` and a CSP without `unsafe-inline` scripts.
+
+### Server settings
+
+Operators can tune the visitor surface with backend environment variables. The defaults suit most installations.
+
+| Variable                                 | Default            | Meaning                                                                                                                                                                                           |
+| ---------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WIDGET_VISITOR_TOKEN_TTL_SECONDS`       | `900`              | Lifetime of a visitor token. The chat renews it silently.                                                                                                                                         |
+| `WIDGET_VISITOR_TOKEN_GRACE_SECONDS`     | `3600`             | How long after expiry a token can still prove the visitor's identity for a renewal without a new proof of work.                                                                                   |
+| `WIDGET_PREVIEW_TOKEN_TTL_SECONDS`       | `3600`             | Lifetime of the token behind **Preview** and **Test in Eneo**. It is never renewed.                                                                                                               |
+| `WIDGET_ALTCHA_COST`                     | `1000`             | Hash iterations per proof-of-work attempt (at least 1000). Raise it for an abused widget.                                                                                                         |
+| `WIDGET_ALTCHA_KEY_PREFIX`               | `0`                | One to four hexadecimal characters each attempt must hit; every extra character makes a solve 16 times more expensive.                                                                            |
+| `WIDGET_ALTCHA_CHALLENGE_TTL_SECONDS`    | `300`              | How long a challenge stays valid.                                                                                                                                                                 |
+| `WIDGET_CHALLENGE_RATE_LIMIT_PER_MINUTE` | `60`               | Challenge requests, and separately visitor-token requests, per widget and IP address per minute.                                                                                                  |
+| `WIDGET_RATE_LIMIT_FAIL_OPEN`            | `false`            | What happens when Redis is unavailable: `false` refuses widget traffic (`503`); `true` skips the rate limits and the challenge replay check, so one solved proof of work can be reused meanwhile. |
+| `WIDGET_BUDGET_TIMEZONE`                 | `Europe/Stockholm` | Time zone whose midnight starts a new budget day.                                                                                                                                                 |
+| `WIDGET_BUDGET_RESERVATION_TOKENS`       | `8000`             | Tokens reserved against the daily budget before each answer and settled to the measured usage afterwards. An admission estimate, not a cap on an answer.                                          |
+| `WIDGET_RETRIEVAL_CHUNKS`                | `30`               | Knowledge passages retrieved for each visitor question.                                                                                                                                           |
+
+The per-widget limits (messages per visitor and per IP address, question length, conversation length, daily budget) are set on each widget's **Rules** tab within the tenant policy.
 
 ### Behind a reverse proxy
 
@@ -121,7 +195,7 @@ Suggested sentence for your cookie or privacy page: _"The chat assistant uses no
 
 ### Conversation retention
 
-The worker removes expired conversations daily at 03:30 UTC, including their questions, source references and question-owned model logs. Knowledge sources and audit records have their own lifecycles. With retention set to `0`, nothing is committed while the answer is produced and the conversation is deleted at the end of the turn, including when budget settlement fails; the visitor is offered a new question instead of a follow-up or feedback. Changing an existing widget to `0` also makes its earlier conversations eligible for the next scheduled purge.
+The worker removes expired widget conversations daily at 03:30 UTC, including their questions, source references, feedback and question-owned model logs. Each widget's own retention applies, held within the tenant policy's range; the conversation retention set for the assistant, the space or the organisation never deletes widget conversations. Knowledge sources and audit records have their own lifecycles. With retention set to `0`, nothing is committed while the answer is produced and the conversation is deleted at the end of the turn, including when budget settlement fails; the visitor is offered a new question instead of a follow-up or feedback. Changing an existing widget to `0` also makes its earlier conversations eligible for the next scheduled purge.
 
 Daily usage totals and budget receipts contain no conversation text or visitor identifier. Receipts expire after seven days; daily totals remain available for statistics.
 
@@ -131,16 +205,17 @@ Before activating a widget on a public site, confirm that:
 
 - the description under the title says that visitors are talking to an AI assistant, and the footer links to your privacy policy;
 - the retention period matches your records schedule (`0` if conversations must not be kept);
-- free-text feedback is only stored if you have a purpose for it (off by default). A visitor who votes on an answer sees a thank-you; with free-text feedback on, a link follows the vote ("Want to tell us more?", or "Tell us what was missing" after a thumbs-down) and opens a dialog with a comment box (at most 2 000 characters), which the visitor can ignore;
+- free-text feedback is only stored if you have a purpose for it (off by default);
 - the assistant's instructions tell visitors not to enter personal data and how to reach a human;
 - the assistant's knowledge contains no personal data or internal material;
+- every MCP server and function the assistant uses is acceptable for anonymous public use: what its tools can read or do, a visitor can ask for, and later changes to the assistant apply at once ([What visitors can reach](#what-visitors-can-reach));
 - the names of the assistant's MCP servers read well in public: visitors see them as the source of tool activity ("via TimeMCP"), and tools without a catalog title show their technical name. Turn off _Show tool activity_ to keep tool and server names internal; the tools still run;
 - the daily token budget reflects the cost you accept, and the usage view is reviewed regularly;
 - audit logging is enabled: widget creation, changes, activation, pausing, archiving and budget exhaustion are logged.
 
 ## Accessibility
 
-The widget is built for WCAG 2.1 AA: the launcher is a real button with an accessible name and a visible focus ring, the panel is a labelled `iframe`, opening moves focus into the chat, `Escape` closes it and returns focus, answers are announced to screen readers, everything works with the keyboard, colours meet contrast requirements and the panel becomes full-screen on small screens. Editors get a contrast check on the colour they choose.
+The widget is built for WCAG 2.1 AA: the launcher is a real button with an accessible name and a visible focus ring, the panel is a labelled `iframe`, opening moves focus into the chat, `Escape` closes it and returns focus, every control in the chat shows a visible focus indicator, completed answers and copied references are announced to screen readers, everything works with the keyboard, colours meet contrast requirements and the panel becomes full-screen on small screens. Editors get a contrast check on the colour they choose.
 
 ### Accessibility statement template
 
