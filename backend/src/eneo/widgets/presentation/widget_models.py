@@ -4,7 +4,7 @@
 
 
 from datetime import date, datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -113,14 +113,16 @@ class WidgetUpdate(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _no_nulls(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            nulls = sorted(str(key) for key, value in data.items() if value is None)
-            if nulls:
-                raise ValueError(
-                    f"{', '.join(nulls)} cannot be null; leave a field out to"
-                    " keep its value."
-                )
-        return data
+        if not isinstance(data, dict):
+            return data
+        fields = cast(dict[object, object], data)
+        nulls = sorted(str(key) for key, value in fields.items() if value is None)
+        if nulls:
+            raise ValueError(
+                f"{', '.join(nulls)} cannot be null; leave a field out to"
+                " keep its value."
+            )
+        return fields
 
     @field_validator("allowed_origins")
     @classmethod
