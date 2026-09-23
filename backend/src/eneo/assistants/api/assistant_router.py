@@ -1134,8 +1134,11 @@ async def leave_feedback(
 @router.post(
     "/{id}/transfer/",
     status_code=204,
-    description="Transfer an assistant to another space.",
-    responses=responses.get_responses([403, 404]),
+    description=(
+        "Transfer an assistant to another space. Refused with 400 while the "
+        "assistant has Skill bindings or a web widget that is not archived."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def transfer_assistant_to_space(
     id: UUID,

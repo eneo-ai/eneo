@@ -1392,7 +1392,7 @@ export interface paths {
     put?: never;
     /**
      * Transfer Assistant To Space
-     * @description Transfer an assistant to another space.
+     * @description Transfer an assistant to another space. Refused with 400 while the assistant has Skill bindings or a web widget that is not archived.
      */
     post: operations["transfer_assistant_to_space_api_v1_assistants__id__transfer__post"];
     delete?: never;
@@ -29067,6 +29067,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Forbidden */
       403: {
