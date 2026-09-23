@@ -8,6 +8,7 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
+from eneo.flows.domain.one_line_text import ONE_LINE_TEXT_MAX_CHARS, breaks_one_line
 from eneo.flows.domain.speaker_labels import SPEAKER_LABEL_RE, parse_participants
 from eneo.flows.domain.speaker_mapping_config import (
     speaker_mapping_speaker_count_field,
@@ -120,18 +121,8 @@ def resolve_participants(
     return parse_participants(semantic.get(participants_field))
 
 
-MAX_SPEAKER_NAME_CHARS = 120
-"""The run label's bound: a speaker name is one short line."""
-_NON_LINE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
-
-
 class SpeakerMappingValidationError(ValueError):
     pass
-
-
-def _breaks_line(char: str) -> bool:
-    """A control, format, surrogate or line or paragraph separator character."""
-    return unicodedata.category(char) in _NON_LINE_CATEGORIES
 
 
 def clean_proposed_speaker_name(name: str) -> str | None:
@@ -139,9 +130,11 @@ def clean_proposed_speaker_name(name: str) -> str | None:
     included, collapses to single spaces and other control or format
     characters go. A name left empty or over the bound is dropped, so the
     label stays for the reviewer to name."""
-    visible = "".join(char for char in name if char.isspace() or not _breaks_line(char))
+    visible = "".join(
+        char for char in name if char.isspace() or not breaks_one_line(char)
+    )
     cleaned = " ".join(visible.split())
-    return cleaned if 0 < len(cleaned) <= MAX_SPEAKER_NAME_CHARS else None
+    return cleaned if 0 < len(cleaned) <= ONE_LINE_TEXT_MAX_CHARS else None
 
 
 def validate_speaker_mapping(
@@ -190,12 +183,12 @@ def validate_speaker_mapping(
             else:
                 name = name.strip() or None
                 if name is not None and (
-                    len(name) > MAX_SPEAKER_NAME_CHARS
-                    or any(_breaks_line(char) for char in name)
+                    len(name) > ONE_LINE_TEXT_MAX_CHARS
+                    or any(breaks_one_line(char) for char in name)
                 ):
                     raise SpeakerMappingValidationError(
                         f"The name for '{label}' must be one line of at most "
-                        f"{MAX_SPEAKER_NAME_CHARS} characters."
+                        f"{ONE_LINE_TEXT_MAX_CHARS} characters."
                     )
         if name is not None and not allow_free_text and name not in participants:
             raise SpeakerMappingValidationError(

@@ -86,6 +86,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptInput,
     parse_flow_step_attempt_input,
 )
+from eneo.flows.domain.one_line_text import ONE_LINE_TEXT_MAX_CHARS
 from eneo.flows.domain.provider_call import (
     PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
     ProviderCallEvidencePage,
@@ -1198,7 +1199,7 @@ class FlowRunPublic(FlowRunSummaryPublic):
     run_label: str | None = Field(
         default=None,
         min_length=1,
-        max_length=120,
+        max_length=ONE_LINE_TEXT_MAX_CHARS,
         description="Caller-supplied run label, available only through audited reads.",
     )
     error: FlowRunError | None = Field(

@@ -4,8 +4,8 @@ import json
 
 import pytest
 
+from eneo.flows.domain.one_line_text import ONE_LINE_TEXT_MAX_CHARS
 from eneo.flows.runtime.speaker_mapping_runtime import (
-    MAX_SPEAKER_NAME_CHARS,
     SPEAKER_MAPPING_INFER_INSTRUCTIONS,
     SPEAKER_MAPPING_INSTRUCTIONS,
     SpeakerMappingValidationError,
@@ -241,7 +241,7 @@ def test_a_split_label_keeps_the_inventory_rules(speakers) -> None:
         "Anna\tSvensson",
         "Anna\u2028Svensson",
         "Anna\u200bSvensson",
-        "x" * (MAX_SPEAKER_NAME_CHARS + 1),
+        "x" * (ONE_LINE_TEXT_MAX_CHARS + 1),
     ],
 )
 def test_a_speaker_name_is_one_short_line(name: str) -> None:
@@ -260,8 +260,8 @@ def test_a_speaker_name_is_one_short_line(name: str) -> None:
         ("Anna\nSvensson", "Anna Svensson"),
         ("  Anna \t\u2028 Svensson\r\n", "Anna Svensson"),
         ("An\u200bna Svens\u0007son\ud800", "Anna Svensson"),
-        ("y" * MAX_SPEAKER_NAME_CHARS, "y" * MAX_SPEAKER_NAME_CHARS),
-        ("x" * (MAX_SPEAKER_NAME_CHARS + 1), None),
+        ("y" * ONE_LINE_TEXT_MAX_CHARS, "y" * ONE_LINE_TEXT_MAX_CHARS),
+        ("x" * (ONE_LINE_TEXT_MAX_CHARS + 1), None),
         ("\u200b\u0007 \n", None),
     ],
 )
@@ -279,7 +279,7 @@ def test_a_model_proposed_name_is_cleaned_not_refused(
 
 
 def test_a_speaker_name_at_the_bound_is_kept() -> None:
-    name = "x" * MAX_SPEAKER_NAME_CHARS
+    name = "x" * ONE_LINE_TEXT_MAX_CHARS
     mapping = validate_speaker_mapping(
         {
             "speakers": [

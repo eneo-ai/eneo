@@ -35,6 +35,7 @@ from eneo.flows.domain.flow_run_exceptions import (
 from eneo.flows.domain.mapped_execution_policy import (
     resolve_flow_mapped_execution_policy_from_source,
 )
+from eneo.flows.domain.one_line_text import ONE_LINE_TEXT_MAX_CHARS, breaks_one_line
 from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
 )
@@ -354,17 +355,15 @@ class FlowRunService:
         idempotency_key = self._validate_idempotency_key(idempotency_key)
         if run_label is not None:
             run_label = unicodedata.normalize("NFC", run_label)
-            if any(
-                unicodedata.category(char) in {"Cc", "Cf", "Cs", "Zl", "Zp"}
-                for char in run_label
-            ):
+            if any(breaks_one_line(char) for char in run_label):
                 raise ValidationException(
                     "run_label must be a single line without control characters."
                 )
             run_label = run_label.strip()
-            if not 1 <= len(run_label) <= 120:
+            if not 1 <= len(run_label) <= ONE_LINE_TEXT_MAX_CHARS:
                 raise ValidationException(
-                    "run_label must contain between 1 and 120 characters."
+                    "run_label must contain between 1 and "
+                    f"{ONE_LINE_TEXT_MAX_CHARS} characters."
                 )
         principal = self._principal()
         published = await self._load_published_run_definition(
