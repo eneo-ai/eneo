@@ -2,7 +2,7 @@
   import { type VariantProps, tv } from "tailwind-variants";
 
   export const toggleVariants = tv({
-    base: "hover:text-foreground aria-pressed:bg-foreground/15 focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 aria-invalid:border-destructive data-[state=on]:bg-foreground/15 data-[state=on]:text-foreground data-[state=off]:text-muted-foreground gap-1 rounded-lg text-sm font-medium transition-all [&_svg:not([class*='size-'])]:size-4 group/toggle inline-flex items-center justify-center whitespace-nowrap outline-none hover:bg-muted focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+    base: "hover:text-foreground aria-pressed:bg-foreground/15 aria-pressed:text-foreground aria-pressed:shadow-[inset_0_-2px_0_var(--color-foreground)] focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 aria-invalid:border-destructive text-muted-foreground data-[state=on]:bg-foreground/15 data-[state=on]:text-foreground data-[state=on]:shadow-[inset_0_-2px_0_var(--color-foreground)] gap-1 rounded-lg text-sm font-medium transition-all [&_svg:not([class*='size-'])]:size-4 group/toggle inline-flex items-center justify-center whitespace-nowrap outline-none hover:bg-muted focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
     variants: {
       variant: {
         default: "bg-transparent",

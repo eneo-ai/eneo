@@ -505,14 +505,14 @@
       >
         <ToggleGroup.Item value="all" class="gap-1.5 px-3">
           {m.all_categories()}
-          <span class="text-secondary font-normal tabular-nums">{displayRuns.length}</span>
+          <span class="font-normal tabular-nums">{displayRuns.length}</span>
         </ToggleGroup.Item>
         {#each FLOW_RUN_STATUS_FILTER_OPTIONS as status (status)}
           {@const count = statusCounts[status] ?? 0}
           {#if count > 0}
             <ToggleGroup.Item value={status} class="gap-1.5 px-3">
               {getRunStatusLabel(status)}
-              <span class="text-secondary font-normal tabular-nums">{count}</span>
+              <span class="font-normal tabular-nums">{count}</span>
             </ToggleGroup.Item>
           {/if}
         {/each}
