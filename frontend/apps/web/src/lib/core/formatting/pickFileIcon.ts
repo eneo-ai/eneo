@@ -1,4 +1,4 @@
-import { File as FileIcon, FileAudio, FileImage, FileText } from "@lucide/svelte";
+import { File as FileIcon, FileHeadphone, FileImage, FileText } from "@lucide/svelte";
 
 /**
  * Maps a MIME type to a representative Lucide file icon.
@@ -10,7 +10,7 @@ import { File as FileIcon, FileAudio, FileImage, FileText } from "@lucide/svelte
 export function pickFileIcon(mimetype: string) {
   const general = mimetype.split("/")[0];
   if (general === "image") return FileImage;
-  if (general === "audio" || general === "video") return FileAudio;
+  if (general === "audio" || general === "video") return FileHeadphone;
   if (
     general === "text" ||
     mimetype.includes("pdf") ||

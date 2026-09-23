@@ -9,8 +9,8 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import {
-    MoreVertical,
-    Edit,
+    EllipsisVertical,
+    SquarePen,
     Trash2,
     RotateCcw,
     ArrowUpToLine,
@@ -61,14 +61,14 @@
   <DropdownMenu.Trigger>
     {#snippet child({ props })}
       <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
-        <MoreVertical size={16} />
+        <EllipsisVertical size={16} />
       </Button>
     {/snippet}
   </DropdownMenu.Trigger>
 
   <DropdownMenu.Content align="end">
     <DropdownMenu.Item onSelect={handleEdit}>
-      <Edit size={16} />
+      <SquarePen size={16} />
       {m.edit()}
     </DropdownMenu.Item>
 

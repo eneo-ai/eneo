@@ -11,9 +11,9 @@
   import {
     Plus,
     Wrench,
-    CheckCircle2,
+    CircleCheck,
     CircleDashed,
-    AlertTriangle,
+    TriangleAlert,
     Power,
     Pause,
     Pencil,
@@ -205,9 +205,9 @@
                               : 'bg-secondary text-secondary'}"
                         >
                           {#if source.readiness_reason}
-                            <AlertTriangle class="h-3.5 w-3.5" aria-hidden="true" />
+                            <TriangleAlert class="h-3.5 w-3.5" aria-hidden="true" />
                           {:else if source.is_enabled}
-                            <CheckCircle2 class="h-3.5 w-3.5" aria-hidden="true" />
+                            <CircleCheck class="h-3.5 w-3.5" aria-hidden="true" />
                           {:else}
                             <CircleDashed class="h-3.5 w-3.5" aria-hidden="true" />
                           {/if}

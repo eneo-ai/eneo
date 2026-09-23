@@ -22,13 +22,13 @@
   import {
     Pencil,
     Trash2,
-    AlertTriangle,
-    Loader2,
+    TriangleAlert,
+    LoaderCircle,
     Box,
     Sparkles,
     AudioLines,
     Image,
-    MoreHorizontal,
+    Ellipsis,
     Check
   } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
@@ -135,7 +135,7 @@
   <DropdownMenu.Trigger>
     {#snippet child({ props })}
       <Button {...props} variant="ghost" size="icon-sm" aria-label={m.actions()}>
-        <MoreHorizontal />
+        <Ellipsis />
       </Button>
     {/snippet}
   </DropdownMenu.Trigger>
@@ -167,7 +167,7 @@
   <div class="flex flex-col gap-4">
     {#if isLoadingModels}
       <div class="text-muted flex items-center justify-center gap-3 py-6">
-        <Loader2 class="size-5 animate-spin" aria-hidden="true" />
+        <LoaderCircle class="size-5 animate-spin" aria-hidden="true" />
         <span class="text-sm">{m.loading()}</span>
       </div>
     {:else if modelsLoadError}
@@ -178,7 +178,7 @@
         <div class="bg-negative-default absolute inset-y-0 left-0 w-1" aria-hidden="true"></div>
         <div class="flex items-start gap-3 p-4 pl-5">
           <div class="bg-negative-default/10 flex-shrink-0 rounded-full p-1.5">
-            <AlertTriangle class="text-negative-default size-4" aria-hidden="true" />
+            <TriangleAlert class="text-negative-default size-4" aria-hidden="true" />
           </div>
           <p class="text-negative-default/90 text-sm">{modelsLoadError}</p>
         </div>
@@ -186,7 +186,7 @@
     {:else if providerModels.length > 0}
       <div class="border-negative-default/30 bg-negative-dimmer/30 rounded-lg border">
         <div class="border-negative-default/20 flex items-center gap-2 border-b px-4 py-3">
-          <AlertTriangle class="text-negative-default size-4" aria-hidden="true" />
+          <TriangleAlert class="text-negative-default size-4" aria-hidden="true" />
           <p class="text-negative-stronger text-sm font-medium">
             {providerModels.length === 1
               ? m.provider_model_count_one({ count: providerModels.length })

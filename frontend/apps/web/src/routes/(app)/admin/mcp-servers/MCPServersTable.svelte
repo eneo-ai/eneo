@@ -9,7 +9,7 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import type { Snippet } from "svelte";
-  import { AlertTriangle, ChevronRight } from "@lucide/svelte";
+  import { TriangleAlert, ChevronRight } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { getCapability, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import MCPServerPrimaryCell from "./MCPServerPrimaryCell.svelte";
@@ -94,7 +94,7 @@
       class="border-negative-default/30 bg-negative-dimmer text-negative-stronger mb-4 flex items-start gap-3 rounded-lg border px-4 py-3 text-sm"
       role="alert"
     >
-      <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      <TriangleAlert class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
       <p>{switchError}</p>
     </div>
   {/if}
@@ -153,7 +153,7 @@
               <MCPServerPrimaryCell mcpServer={server} />
               {#if capability && server.forward_identity}
                 <p class="text-warning-default mt-1.5 flex items-center gap-1.5 text-xs">
-                  <AlertTriangle class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <TriangleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   {m.capability_identity_forwarded_warning()}
                 </p>
               {/if}

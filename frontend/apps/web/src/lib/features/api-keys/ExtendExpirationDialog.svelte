@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ApiKeyV2 } from "@eneo/eneo-js";
-  import { AlertCircle, Calendar, Infinity as InfinityIcon } from "@lucide/svelte";
+  import { CircleAlert, Calendar, Infinity as InfinityIcon } from "@lucide/svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -100,7 +100,7 @@
 
     {#if errorMessage}
       <Alert.Root variant="destructive">
-        <AlertCircle />
+        <CircleAlert />
         <Alert.Description>{errorMessage}</Alert.Description>
       </Alert.Root>
     {/if}

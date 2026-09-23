@@ -1,6 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { AlertCircle, Check, Copy, Key } from "@lucide/svelte";
+  import { CircleAlert, Check, Copy, Key } from "@lucide/svelte";
   import { toast } from "svelte-sonner";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -44,7 +44,7 @@
     </Dialog.Header>
 
     <Alert.Root class="border-caution/35 bg-caution/8 dark:bg-caution/12 mt-1">
-      <AlertCircle class="text-caution" />
+      <CircleAlert class="text-caution" />
       <Alert.Title class="text-caution">{m.api_keys_important()}</Alert.Title>
       <Alert.Description class="text-secondary">
         {m.api_keys_copy_warning()}

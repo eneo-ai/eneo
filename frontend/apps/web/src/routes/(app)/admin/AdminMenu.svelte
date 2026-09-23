@@ -13,7 +13,7 @@
     ChartPie,
     Cloud,
     Cpu,
-    Fingerprint,
+    FingerprintPattern,
     HardDrive,
     History,
     KeyRound,
@@ -99,7 +99,7 @@
       items: [
         navItem("/admin/users", UserRound, m.users()),
         navItem("/admin/legacy/user-groups", UsersRound, m.user_groups()),
-        navItem("/admin/roles", Fingerprint, m.roles()),
+        navItem("/admin/roles", FingerprintPattern, m.roles()),
         navItem("/admin/api-keys", KeyRound, m.api_keys())
       ]
     }

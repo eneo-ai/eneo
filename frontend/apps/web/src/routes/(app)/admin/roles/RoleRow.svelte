@@ -6,7 +6,7 @@
     ChevronRight,
     LayoutTemplate,
     Minus,
-    MoreHorizontal,
+    Ellipsis,
     Pencil,
     RotateCcw,
     Star,
@@ -136,7 +136,7 @@
         <DropdownMenu.Trigger>
           {#snippet child({ props })}
             <Button {...props} variant="ghost" size="icon-sm">
-              <MoreHorizontal aria-hidden="true" />
+              <Ellipsis aria-hidden="true" />
               <span class="sr-only">{m.roles_more_actions({ name: role.name })}</span>
             </Button>
           {/snippet}

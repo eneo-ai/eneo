@@ -3,8 +3,8 @@
   import type { Writable } from "svelte/store";
   import type { components } from "@eneo/eneo-js";
   import {
-    AlertTriangle,
-    CheckCircle2,
+    TriangleAlert,
+    CircleCheck,
     FlaskConical,
     LoaderCircle,
     RefreshCw
@@ -401,7 +401,7 @@
             </Field.Field>
           {:else}
             <Alert.Root class="border-caution bg-caution">
-              <AlertTriangle class="text-caution!" aria-hidden="true" />
+              <TriangleAlert class="text-caution!" aria-hidden="true" />
               <Alert.Description>{m.sharepoint_change_auth_warning()}</Alert.Description>
             </Alert.Root>
           {/if}
@@ -502,7 +502,7 @@
           {#if testResult}
             {#if testResult.success}
               <Alert.Root class="border-positive-default/40 bg-positive-default/10" role="status">
-                <CheckCircle2 class="text-positive-stronger!" aria-hidden="true" />
+                <CircleCheck class="text-positive-stronger!" aria-hidden="true" />
                 <Alert.Title>{m.connection_successful()}</Alert.Title>
                 {#if testResult.details}
                   <Alert.Description>{testResult.details}</Alert.Description>
@@ -510,7 +510,7 @@
               </Alert.Root>
             {:else}
               <Alert.Root variant="destructive" role="alert">
-                <AlertTriangle aria-hidden="true" />
+                <TriangleAlert aria-hidden="true" />
                 <Alert.Title>{m.connection_failed()}</Alert.Title>
                 {#if testResult.error_message || testResult.details}
                   <Alert.Description>

@@ -8,7 +8,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import { RefreshCw, AlertTriangle, Trash2, Check, Pencil, X, ShieldAlert } from "@lucide/svelte";
+  import { RefreshCw, TriangleAlert, Trash2, Check, Pencil, X, ShieldAlert } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { invalidate } from "$app/navigation";
@@ -403,7 +403,7 @@
                           <span
                             class="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600"
                           >
-                            <AlertTriangle class="h-2.5 w-2.5" />
+                            <TriangleAlert class="h-2.5 w-2.5" />
                             {m.pending_description_change()}
                           </span>
                         {/if}

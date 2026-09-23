@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
-  import { AlertTriangle } from "@lucide/svelte";
+  import { TriangleAlert } from "@lucide/svelte";
   import { invalidate } from "$app/navigation";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { getEneo } from "$lib/core/Eneo.js";
@@ -49,7 +49,7 @@
 >
   <div class="border-warning-default bg-warning-default/15 rounded-lg border px-4 py-3">
     <div class="flex items-start gap-3">
-      <AlertTriangle class="text-warning-default shrink-0" size={20} aria-hidden="true" />
+      <TriangleAlert class="text-warning-default shrink-0" size={20} aria-hidden="true" />
       <div class="flex flex-col gap-1">
         <div class="text-default font-semibold">{template.name}</div>
         <div class="text-muted text-sm">{m.permanent_action()}</div>

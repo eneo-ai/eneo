@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { AlertCircle } from "@lucide/svelte";
+  import { CircleAlert } from "@lucide/svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -36,7 +36,7 @@
 <div class="flex flex-col gap-4">
   {#if errorMessage}
     <Alert.Root variant="destructive">
-      <AlertCircle />
+      <CircleAlert />
       <Alert.Description>{errorMessage}</Alert.Description>
     </Alert.Root>
   {/if}

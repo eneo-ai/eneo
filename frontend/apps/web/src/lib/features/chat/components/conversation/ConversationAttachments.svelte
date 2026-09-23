@@ -2,7 +2,7 @@
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { X, Loader2, Paperclip } from "@lucide/svelte";
+  import { X, LoaderCircle, Paperclip } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatFileType } from "$lib/core/formatting/formatFileType";
@@ -62,7 +62,7 @@
                   class="bg-accent-dimmer text-accent-stronger flex size-8 flex-shrink-0 items-center justify-center rounded-md"
                 >
                   {#if isUploading}
-                    <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+                    <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
                   {:else}
                     <Icon class="size-4" aria-hidden="true" />
                   {/if}

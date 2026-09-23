@@ -14,10 +14,10 @@
   import {
     Pencil,
     Trash2,
-    AlertTriangle,
-    Loader2,
+    TriangleAlert,
+    LoaderCircle,
     ArrowRight,
-    MoreHorizontal
+    Ellipsis
   } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors";
@@ -115,7 +115,7 @@
   <DropdownMenu.Trigger>
     {#snippet child({ props })}
       <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
-        <MoreHorizontal />
+        <Ellipsis />
       </Button>
     {/snippet}
   </DropdownMenu.Trigger>
@@ -169,7 +169,7 @@
           <div class="bg-negative-default absolute inset-y-0 left-0 w-1" aria-hidden="true"></div>
           <div class="flex items-start gap-3 p-4 pl-5">
             <div class="bg-negative-default/10 flex-shrink-0 rounded-full p-1.5">
-              <AlertTriangle class="text-negative-default size-4" aria-hidden="true" />
+              <TriangleAlert class="text-negative-default size-4" aria-hidden="true" />
             </div>
             <div class="min-w-0 flex-1">
               <p class="text-negative-stronger text-sm font-medium">
@@ -209,7 +209,7 @@
       <Button variant="outline" onclick={() => (deleteOpen = false)}>{m.cancel()}</Button>
       <Button variant="destructive" onclick={handleDelete} disabled={isDeleting}>
         {#if isDeleting}
-          <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+          <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
           {m.deleting()}
         {:else}
           {m.delete_model()}

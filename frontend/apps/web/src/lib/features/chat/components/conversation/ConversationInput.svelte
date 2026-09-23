@@ -26,7 +26,7 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { SvelteSet } from "svelte/reactivity";
-  import { AlertTriangle, X } from "@lucide/svelte";
+  import { TriangleAlert, X } from "@lucide/svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { chatCapabilities } from "../../chatCapabilities";
@@ -479,7 +479,7 @@
       class="bg-card/80 absolute inset-0 z-10 flex items-center justify-center rounded-2xl backdrop-blur-[1px]"
     >
       <div class="text-muted-foreground flex items-center gap-2 px-4 text-sm">
-        <AlertTriangle class="h-4 w-4 flex-shrink-0" />
+        <TriangleAlert class="h-4 w-4 flex-shrink-0" />
         <p>{m.no_completion_model_description()}</p>
       </div>
     </div>
@@ -495,7 +495,7 @@
       role="alert"
     >
       <div class="flex items-start gap-2">
-        <AlertTriangle class="mt-0.5 h-4 w-4 flex-shrink-0" />
+        <TriangleAlert class="mt-0.5 h-4 w-4 flex-shrink-0" />
         <p class="whitespace-pre-line">{$uploadError}</p>
       </div>
       <button
@@ -515,7 +515,7 @@
       role="alert"
     >
       <div class="flex items-start gap-2">
-        <AlertTriangle class="mt-0.5 h-4 w-4 flex-shrink-0" />
+        <TriangleAlert class="mt-0.5 h-4 w-4 flex-shrink-0" />
         <div>
           <p class="font-medium">{inputError.message}</p>
           {#if inputError.details}
