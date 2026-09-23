@@ -1887,7 +1887,9 @@ async def test_large_source_is_reviewed_and_regenerated_through_api(
     assert child.json()["segments"] == detail.json()["segments"]
 
 
+@pytest.mark.parametrize("split_undone", [False, True])
 async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
+    split_undone,
     client,
     db_container,
     patch_auth_service_jwt,
@@ -2067,6 +2069,19 @@ async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
         checkpoint_path, headers=headers, json=edit(anna, unnamed, split_name)
     )
     assert edited.status_code == 200, edited.text
+    if split_undone:
+        undone = await client.patch(
+            f"{run_path}/steps/{scenario.transcription_step_id}/transcript-corrections/",
+            headers=headers,
+            json={
+                "schema_version": 3,
+                "segments_hash": segments_content_hash(SEGMENTS),
+                "expected_revision": split.json()["revision"],
+                "occurrences": [],
+                "speaker_edits": [],
+            },
+        )
+        assert undone.status_code == 200, undone.text
 
     approved = await client.post(
         f"{checkpoint_path}approve/",
@@ -2076,9 +2091,15 @@ async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
 
     assert approved.status_code == 200, approved.text
     document = approved.json()["current_payload_json"]["text"]
-    assert "] Eva Ek: sugary svarade direkt." in document
     assert "] Anna: Vi frågade sugary om planen." in document
-    assert "SPEAKER_" not in document
+    if split_undone:
+        # The split's name has no passage left: nothing names it, nothing blocks.
+        assert "] SPEAKER_01: sugary svarade direkt." in document
+        assert "SPEAKER_05" not in approved.text
+        assert "Eva Ek" not in approved.text
+    else:
+        assert "] Eva Ek: sugary svarade direkt." in document
+        assert "SPEAKER_" not in document
     async with db_container() as container:
         session = container.session()
         output = await session.scalar(

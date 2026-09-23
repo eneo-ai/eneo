@@ -642,6 +642,80 @@ async def test_approval_renders_the_name_of_a_speaker_split_at_the_pause() -> No
     )
 
 
+@pytest.mark.parametrize(
+    ("occurrences", "second_line"),
+    [
+        ([], "SPEAKER_01: Hallå."),
+        (
+            [
+                {
+                    "segment_index": 1,
+                    "char_start": 0,
+                    "char_end": 6,
+                    "original": "Hallå.",
+                    "corrected": "Hallå där.",
+                }
+            ],
+            "SPEAKER_01: Hallå där.",
+        ),
+    ],
+)
+async def test_approval_drops_the_name_of_a_split_the_corrections_undid(
+    occurrences, second_line
+) -> None:
+    checkpoint = _checkpoint(_payload(SOURCE))
+    checkpoint = checkpoint.model_copy(
+        update={
+            "current_payload_json": {
+                **checkpoint.current_payload_json,
+                "structured": NAMED_SPLIT,
+            }
+        }
+    )
+    run = SimpleNamespace(
+        id=checkpoint.flow_run_id,
+        tenant_id=checkpoint.tenant_id,
+        flow_id=checkpoint.flow_id,
+        input_payload_json={},
+    )
+    flow_run_repo = AsyncMock()
+    flow_run_repo.get_step_result = AsyncMock(
+        return_value=_source_result(checkpoint, SOURCE).model_copy(
+            update={"input_payload_json": {}}
+        )
+    )
+    flow_run_repo.update_input_payload = AsyncMock(return_value={})
+    service = _service(checkpoint, run, flow_run_repo)
+    service.flow_run_review_checkpoint_repo.get_review_checkpoint_for_edit = AsyncMock(
+        return_value=checkpoint
+    )
+    undone = _correction_set(checkpoint).model_copy(
+        update={"occurrences_json": occurrences, "speaker_edits_json": []}
+    )
+    service.transcript_corrections_repo = AsyncMock(
+        get_for_step=AsyncMock(return_value=undone)
+    )
+    service.flow_run_review_checkpoint_repo.approve_review_checkpoint = AsyncMock(
+        side_effect=lambda **kwargs: checkpoint.model_copy(
+            update={"current_payload_json": kwargs["current_payload_json"]}
+        )
+    )
+
+    approval = await service.approve_review_checkpoint(
+        flow_id=checkpoint.flow_id,
+        run_id=run.id,
+        checkpoint_id=checkpoint.id,
+        expected_checkpoint_revision=1,
+    )
+
+    fold = approval.corrections_fold
+    assert fold is not None and fold.propagated, fold
+    assert fold.folded_payload["text"] == "\n".join(
+        ["[00:00:00 - 00:00:04] Anna: Hej.", f"[00:00:05 - 00:00:09] {second_line}"]
+    )
+    assert fold.folded_payload["structured"] == PROPOSAL
+
+
 async def test_approval_skips_a_stale_source_set_but_still_approves() -> None:
     checkpoint = _checkpoint(_payload("[00:00:00 - 00:00:04] Anna: Hej."))
     run = SimpleNamespace(

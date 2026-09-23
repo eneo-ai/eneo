@@ -389,6 +389,33 @@ def split_speaker_labels(
     )
 
 
+def drop_undone_split_names(
+    mapping: dict[str, Any], *, extension: dict[str, Any], split_labels: Sequence[str]
+) -> dict[str, Any]:
+    """The mapping without names for split labels the corrections no longer
+    make: such a label carries no passage left to name. Inventory labels stay."""
+    inventory = extension.get("inventory")
+    kept = set(split_labels)
+    if isinstance(inventory, list):
+        kept.update(
+            str(cast(dict[str, Any], entry).get("label"))
+            for entry in cast(list[object], inventory)
+            if isinstance(entry, dict)
+        )
+    speakers = mapping.get("speakers")
+    if not isinstance(speakers, list):
+        return mapping
+    return {
+        **mapping,
+        "speakers": [
+            entry
+            for entry in cast(list[object], speakers)
+            if not isinstance(entry, dict)
+            or cast(dict[str, Any], entry).get("label") in kept
+        ],
+    }
+
+
 def _speaker_mapping_text(
     *,
     checkpoint: FlowRunReviewCheckpoint,
@@ -1041,9 +1068,24 @@ class FlowRunReviewCheckpointService:
             step_id=source_step_id,
             tenant_id=run.tenant_id,
         )
-        if correction_set is None or (
+        if correction_set is None:
+            return None
+        split_labels = split_speaker_labels(correction_set)
+        structured = (checkpoint.current_payload_json or {}).get("structured")
+        mapping = (
+            drop_undone_split_names(
+                cast(dict[str, Any], structured),
+                extension=extension,
+                split_labels=split_labels,
+            )
+            if extension is not None and isinstance(structured, dict)
+            else structured
+        )
+        if (
             not correction_set.occurrences_json
             and not correction_set.speaker_edits_json
+            # A name for a split the corrections undid still has to go.
+            and mapping == structured
         ):
             return None
         if isinstance(
@@ -1087,18 +1129,17 @@ class FlowRunReviewCheckpointService:
             return skip_folded_transcript(
                 correction_set, "source_transcript_unavailable"
             )
-        structured = (checkpoint.current_payload_json or {}).get("structured")
-        if not isinstance(structured, dict):
+        if not isinstance(mapping, dict):
             return skip_folded_transcript(correction_set, "payload_invalid")
-        mapping = cast(StructuredOutputValue, structured)
+        edited_mapping = cast(StructuredOutputValue, mapping)
         expected_attempt = extension.get("source_attempt_no")
 
         def rebuild(folded_source: str) -> FlowPersistedJsonObject:
             return build_edited_review_payload(
                 checkpoint=checkpoint,
-                edited_value=mapping,
+                edited_value=edited_mapping,
                 source_text=folded_source,
-                split_labels=split_speaker_labels(correction_set),
+                split_labels=split_labels,
             )
 
         return build_folded_transcript(
