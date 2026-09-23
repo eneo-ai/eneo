@@ -186,15 +186,12 @@ class WeasyPrintDocumentRenderer:
         self,
         blocks: Sequence[DocumentBlock],
         *,
-        step_order: int,
+        title: str,
     ) -> RenderedDocument:
         configure_weasyprint_dependency_logging()
         html_class, css_class, font_config_class = _load_weasyprint_api()
         font_config = font_config_class()
-        html = blocks_to_html_document(
-            blocks,
-            title=f"Flow step {step_order} output",
-        )
+        html = blocks_to_html_document(blocks, title=title)
         pdf_bytes = html_class(
             string=html,
             media_type="print",

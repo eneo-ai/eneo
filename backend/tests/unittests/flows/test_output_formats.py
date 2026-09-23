@@ -45,6 +45,7 @@ def _context(
         output_type: str,
         *,
         step_order: int,
+        title: str,
     ) -> tuple[bytes, str]:
         raise AssertionError(f"render_document was not expected: {output_type}")
 
@@ -53,6 +54,7 @@ def _context(
         output_type: str,
         *,
         step_order: int,
+        title: str,
         schema: FlowPersistedJsonObject | None = None,
     ) -> tuple[bytes, str]:
         raise AssertionError(
@@ -73,6 +75,7 @@ def _context(
             ensure_source_within_limits or _ensure_limits_not_expected
         ),
         json_contract_validation_enabled=json_contract_validation_enabled,
+        document_title="Rapport 2026-09-23",
     )
 
 
@@ -189,7 +192,7 @@ def test_document_output_formats_share_structured_contract_pipeline(
     parsed: StructuredOutputValue = {"title": "Report", "extra": "dropped"}
     validate_payloads: list[object] = []
     render_calls: list[
-        tuple[StructuredOutputValue, str, int, FlowPersistedJsonObject | None]
+        tuple[StructuredOutputValue, str, int, str, FlowPersistedJsonObject | None]
     ] = []
     contract: FlowPersistedJsonObject = {
         "type": "object",
@@ -208,9 +211,10 @@ def test_document_output_formats_share_structured_contract_pipeline(
         rendered_output_type: str,
         *,
         step_order: int,
+        title: str,
         schema: FlowPersistedJsonObject | None = None,
     ) -> tuple[bytes, str]:
-        render_calls.append((data, rendered_output_type, step_order, schema))
+        render_calls.append((data, rendered_output_type, step_order, title, schema))
         return b"rendered", "application/test"
 
     result = spec.process_model_output(
@@ -230,7 +234,7 @@ def test_document_output_formats_share_structured_contract_pipeline(
     ]
     assert validate_payloads == [result.structured_output]
     assert render_calls == [
-        (result.structured_output, output_type, 5, contract),
+        (result.structured_output, output_type, 5, "Rapport 2026-09-23", contract),
     ]
     assert result.artifact is not None
     assert result.artifact.blob == b"rendered"

@@ -64,19 +64,25 @@ class GeneratedFileNames:
         )
 
     def name(self, *, step_order: int, output_type: str) -> str:
+        stem = self.stem(step_order=step_order, output_type=output_type)
+        return f"{stem}.{output_type}"
+
+    def stem(self, *, step_order: int, output_type: str) -> str:
+        """The name without its extension, which is also the document's title."""
         words = [_clean(self.flow_name) or _FALLBACK_FLOW_NAME]
         if output_type in self.shared_types:
             words.append(
                 _clean(self.step_names.get(step_order, "")) or f"Steg {step_order}"
             )
-        suffix = f" {self.run_day.isoformat()}.{output_type}"
+        day = f" {self.run_day.isoformat()}"
+        suffix = f"{day}.{output_type}"
         # ponytail: two steps with one name, or a flow name long enough to cut
         # the step name away, give two documents one name; add the step number
         # if that happens.
         head = utf8_prefix(
             " ".join(words), max_bytes=MAX_FILE_NAME_BYTES - len(suffix.encode("utf-8"))
         )
-        return head.rstrip(" .") + suffix
+        return head.rstrip(" .") + day
 
 
 def _clean(text: str) -> str:

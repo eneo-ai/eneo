@@ -134,6 +134,9 @@ async def process_typed_output(
             text,
             limits=deps.document_render_limits,
         ),
+        document_title=deps.file_names.stem(
+            step_order=step.step_order, output_type=step.output_type
+        ),
         json_contract_validation_enabled=("output", step.step_order) in compiled,
     )
     format_result = resolve_format_spec(step.output_type).process_model_output(

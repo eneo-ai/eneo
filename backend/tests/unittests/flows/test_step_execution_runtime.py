@@ -3847,6 +3847,7 @@ async def test_document_report_citation_survives_compose_render_and_public_artif
         persisted_text,
         "docx",
         step_order=5,
+        title="Rapport",
     )
     document_text = "\n".join(
         paragraph.text for paragraph in DocxDocument(io.BytesIO(blob)).paragraphs

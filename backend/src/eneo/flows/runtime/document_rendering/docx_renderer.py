@@ -37,7 +37,7 @@ class DocxDocumentRenderer:
         self,
         blocks: Sequence[DocumentBlock],
         *,
-        step_order: int,
+        title: str,
     ) -> RenderedDocument:
         import io
 
@@ -62,12 +62,7 @@ class DocxDocumentRenderer:
             body_control,
             writer.elements(blocks, heading_base=body_control.heading_level),
         )
-        title = next(
-            (block.text for block in blocks if block.kind == "heading" and block.text),
-            None,
-        )
-        if title:
-            document.core_properties.title = title
+        document.core_properties.title = title
         buf = io.BytesIO()
         document.save(buf)
         return RenderedDocument(blob=buf.getvalue(), mimetype=_DOCX_MIMETYPE)

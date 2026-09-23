@@ -55,8 +55,12 @@ async def test_process_typed_output_json_with_contract_validation() -> None:
         compile_validators=lambda steps: {("output", 1): object()},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=lambda data, schema, label: None,
-        render_document=lambda text, output_type, step_order: (b"", ""),
-        render_structured_document=lambda data, output_type, step_order, schema=None: (
+        render_document=lambda text, output_type, step_order, title: (b"", ""),
+        render_structured_document=lambda data,
+        output_type,
+        step_order,
+        title,
+        schema=None: (
             b"",
             "",
         ),
@@ -91,8 +95,12 @@ async def test_process_typed_output_json_without_compiled_validator_skips_contra
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=_unexpected_validate,
-        render_document=lambda text, output_type, step_order: (b"", ""),
-        render_structured_document=lambda data, output_type, step_order, schema=None: (
+        render_document=lambda text, output_type, step_order, title: (b"", ""),
+        render_structured_document=lambda data,
+        output_type,
+        step_order,
+        title,
+        schema=None: (
             b"",
             "",
         ),
@@ -129,17 +137,24 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
     )
     blob = b"docx-bytes"
     mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    render_titles: list[str] = []
+
+    def render_document(text, output_type, step_order, title):
+        render_titles.append(title)
+        return blob, mimetype
+
     deps = OutputRuntimeDeps(
         file_service=file_service,
         file_names=_FILE_NAMES,
         compile_validators=compile_validators,
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
-        render_document=lambda text, output_type, step_order: (
-            blob,
-            mimetype,
-        ),
-        render_structured_document=lambda data, output_type, step_order, schema=None: (
+        render_document=render_document,
+        render_structured_document=lambda data,
+        output_type,
+        step_order,
+        title,
+        schema=None: (
             blob,
             mimetype,
         ),
@@ -173,6 +188,7 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
         mimetype=mimetype,
         file_type=FileType.DOCUMENT,
     )
+    assert render_titles == ["Nämndmöte 2026-09-23"]
 
 
 @pytest.mark.asyncio
@@ -195,7 +211,11 @@ async def test_process_typed_output_pdf_preserves_pdf_bytes_from_model() -> None
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
         render_document=_render_not_expected,
-        render_structured_document=lambda data, output_type, step_order, schema=None: (
+        render_structured_document=lambda data,
+        output_type,
+        step_order,
+        title,
+        schema=None: (
             b"",
             "",
         ),
@@ -232,11 +252,15 @@ async def test_process_typed_output_pdf_bytes_obeys_document_render_limits() -> 
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
-        render_document=lambda text, output_type, step_order: (
+        render_document=lambda text, output_type, step_order, title: (
             b"",
             "",
         ),
-        render_structured_document=lambda data, output_type, step_order, schema=None: (
+        render_structured_document=lambda data,
+        output_type,
+        step_order,
+        title,
+        schema=None: (
             b"",
             "",
         ),
@@ -270,13 +294,13 @@ async def test_process_typed_output_docx_renders_validated_structured_contract()
         save_generated_file=AsyncMock(return_value=SimpleNamespace(id=file_id))
     )
     validate_calls: list[tuple[object, dict, str]] = []
-    render_calls: list[tuple[object, str, int, dict | None]] = []
+    render_calls: list[tuple[object, str, int, str, dict | None]] = []
 
     def _validate(data, schema, label):
         validate_calls.append((data, schema, label))
 
-    def _render_structured(data, output_type, step_order, schema=None):
-        render_calls.append((data, output_type, step_order, schema))
+    def _render_structured(data, output_type, step_order, title, schema=None):
+        render_calls.append((data, output_type, step_order, title, schema))
         return b"docx", "application/docx"
 
     deps = OutputRuntimeDeps(
@@ -285,7 +309,7 @@ async def test_process_typed_output_docx_renders_validated_structured_contract()
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"structured": 1},
         validate_against_contract=_validate,
-        render_document=lambda text, output_type, step_order: (
+        render_document=lambda text, output_type, step_order, title: (
             b"pdf",
             "application/pdf",
         ),
@@ -301,7 +325,9 @@ async def test_process_typed_output_docx_renders_validated_structured_contract()
 
     assert result.structured_output == {"structured": 1}
     assert validate_calls == [({"structured": 1}, {"type": "object"}, "Step 4 output")]
-    assert render_calls == [({"structured": 1}, "docx", 4, {"type": "object"})]
+    assert render_calls == [
+        ({"structured": 1}, "docx", 4, "Nämndmöte 2026-09-23", {"type": "object"})
+    ]
     assert result.artifacts is not None
     assert result.artifacts[0]["file_id"] == str(file_id)
 
@@ -351,8 +377,12 @@ async def test_process_typed_output_prunes_extra_item_properties_before_validati
         compile_validators=lambda steps: {("output", 4): object()},
         parse_json_output=lambda text: parsed,
         validate_against_contract=_validate,
-        render_document=lambda text, output_type, step_order: (b"", ""),
-        render_structured_document=lambda data, output_type, step_order, schema=None: (
+        render_document=lambda text, output_type, step_order, title: (b"", ""),
+        render_structured_document=lambda data,
+        output_type,
+        step_order,
+        title,
+        schema=None: (
             b"",
             "",
         ),
@@ -386,10 +416,10 @@ async def test_process_typed_output_docx_treats_empty_contract_as_structured() -
     file_service = SimpleNamespace(
         save_generated_file=AsyncMock(return_value=SimpleNamespace(id=uuid4()))
     )
-    render_calls: list[tuple[object, str, int, dict | None]] = []
+    render_calls: list[tuple[object, str, int, str, dict | None]] = []
 
-    def _render_structured(data, output_type, step_order, schema=None):
-        render_calls.append((data, output_type, step_order, schema))
+    def _render_structured(data, output_type, step_order, title, schema=None):
+        render_calls.append((data, output_type, step_order, title, schema))
         return b"docx", "application/docx"
 
     deps = OutputRuntimeDeps(
@@ -398,7 +428,7 @@ async def test_process_typed_output_docx_treats_empty_contract_as_structured() -
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: ["legacy", "data"],
         validate_against_contract=lambda data, schema, label: None,
-        render_document=lambda text, output_type, step_order: (
+        render_document=lambda text, output_type, step_order, title: (
             b"raw-json-doc",
             "application/docx",
         ),
@@ -413,7 +443,7 @@ async def test_process_typed_output_docx_treats_empty_contract_as_structured() -
     )
 
     assert result.structured_output == ["legacy", "data"]
-    assert render_calls == [(["legacy", "data"], "docx", 4, {})]
+    assert render_calls == [(["legacy", "data"], "docx", 4, "Nämndmöte 2026-09-23", {})]
     assert result.artifacts is not None
 
 
@@ -434,11 +464,15 @@ async def test_process_typed_output_docx_without_contract_does_not_parse_json() 
         compile_validators=lambda steps: {},
         parse_json_output=_parse_not_expected,
         validate_against_contract=lambda data, schema, label: None,
-        render_document=lambda text, output_type, step_order: (
+        render_document=lambda text, output_type, step_order, title: (
             b"docx",
             "application/docx",
         ),
-        render_structured_document=lambda data, output_type, step_order, schema=None: (
+        render_structured_document=lambda data,
+        output_type,
+        step_order,
+        title,
+        schema=None: (
             b"",
             "",
         ),
@@ -468,8 +502,12 @@ async def test_process_typed_output_unknown_type_returns_empty() -> None:
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=lambda data, schema, label: None,
-        render_document=lambda text, output_type, step_order: (b"", ""),
-        render_structured_document=lambda data, output_type, step_order, schema=None: (
+        render_document=lambda text, output_type, step_order, title: (b"", ""),
+        render_structured_document=lambda data,
+        output_type,
+        step_order,
+        title,
+        schema=None: (
             b"",
             "",
         ),
@@ -504,8 +542,12 @@ async def test_process_typed_output_json_contract_violation_propagates() -> None
         compile_validators=lambda steps: {("output", 7): object()},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=_raise_contract,
-        render_document=lambda text, output_type, step_order: (b"", ""),
-        render_structured_document=lambda data, output_type, step_order, schema=None: (
+        render_document=lambda text, output_type, step_order, title: (b"", ""),
+        render_structured_document=lambda data,
+        output_type,
+        step_order,
+        title,
+        schema=None: (
             b"",
             "",
         ),
@@ -538,7 +580,11 @@ async def test_process_typed_output_render_failure_propagates() -> None:
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
         render_document=_fail_render,
-        render_structured_document=lambda data, output_type, step_order, schema=None: (
+        render_structured_document=lambda data,
+        output_type,
+        step_order,
+        title,
+        schema=None: (
             b"",
             "",
         ),
@@ -569,11 +615,15 @@ async def test_process_typed_output_file_service_failure_propagates() -> None:
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
-        render_document=lambda text, output_type, step_order: (
+        render_document=lambda text, output_type, step_order, title: (
             b"pdf",
             "application/pdf",
         ),
-        render_structured_document=lambda data, output_type, step_order, schema=None: (
+        render_structured_document=lambda data,
+        output_type,
+        step_order,
+        title,
+        schema=None: (
             b"",
             "",
         ),

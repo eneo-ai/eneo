@@ -4819,7 +4819,7 @@ async def test_audio_transcribe_only_skips_llm_and_rag(user):
 async def test_render_verbatim_renders_input_text_without_llm_or_rag(user):
     executor, _, _, _ = _build_executor(user)
     executor.document_render_service = SimpleNamespace(
-        render_document=lambda text, output_type, step_order: (
+        render_document=lambda text, output_type, step_order, title: (
             f"{output_type}:{text}".encode("utf-8"),
             "application/pdf",
         ),
@@ -5025,7 +5025,7 @@ async def test_document_outputs_generate_downloadable_artifacts(
     """PDF/DOCX output types should persist artifact files with download metadata."""
     executor, _, _, _ = _build_executor(user)
     executor.document_render_service = SimpleNamespace(
-        render_document=lambda text, output_type, step_order: (
+        render_document=lambda text, output_type, step_order, title: (
             f"{output_type}:{text}".encode("utf-8"),
             expected_mimetype,
         ),

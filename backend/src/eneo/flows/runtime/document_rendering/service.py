@@ -50,6 +50,7 @@ class DocumentRenderService:
         output_type: str,
         *,
         step_order: int,
+        title: str,
     ) -> tuple[bytes, str]:
         ensure_source_within_limits(text, limits=self._limits)
         source_text = _unwrap_single_field_text_envelope(
@@ -60,6 +61,7 @@ class DocumentRenderService:
             parse_markdown_blocks(source_text.splitlines()),
             output_type,
             step_order=step_order,
+            title=title,
         )
 
     def render_structured_document(
@@ -68,6 +70,7 @@ class DocumentRenderService:
         output_type: str,
         *,
         step_order: int,
+        title: str,
         schema: dict[str, Any] | None = None,
     ) -> tuple[bytes, str]:
         ensure_structured_value_within_limits(data, limits=self._limits)
@@ -83,6 +86,7 @@ class DocumentRenderService:
             blocks,
             output_type,
             step_order=step_order,
+            title=title,
         )
 
     def render_blocks(
@@ -91,6 +95,7 @@ class DocumentRenderService:
         output_type: str,
         *,
         step_order: int,
+        title: str,
     ) -> tuple[bytes, str]:
         ensure_blocks_within_limits(blocks, limits=self._limits)
         renderer = self._renderers.get(output_type)
@@ -100,7 +105,7 @@ class DocumentRenderService:
                 code=FlowApiErrorCode.TYPED_IO_RENDER_FAILED.value,
             )
         try:
-            return renderer.render(blocks, step_order=step_order).as_tuple()
+            return renderer.render(blocks, title=title).as_tuple()
         except TypedIOValidationException:
             raise
         except Exception as exc:

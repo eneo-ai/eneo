@@ -22,5 +22,5 @@ class DocumentRenderer(Protocol):
         self,
         blocks: Sequence[DocumentBlock],
         *,
-        step_order: int,
+        title: str,
     ) -> RenderedDocument: ...

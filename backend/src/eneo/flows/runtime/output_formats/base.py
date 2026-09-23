@@ -41,6 +41,7 @@ class RenderDocumentFn(Protocol):
         output_type: str,
         *,
         step_order: int,
+        title: str,
     ) -> tuple[bytes, str]: ...
 
 
@@ -51,6 +52,7 @@ class RenderStructuredDocumentFn(Protocol):
         output_type: str,
         *,
         step_order: int,
+        title: str,
         schema: FlowPersistedJsonObject | None = None,
     ) -> tuple[bytes, str]: ...
 
@@ -79,6 +81,8 @@ class OutputFormatProcessingContext:
     render_document: RenderDocumentFn
     render_structured_document: RenderStructuredDocumentFn
     ensure_source_within_limits: EnsureSourceWithinLimitsFn
+    # The title a rendered document carries: its file name without the extension.
+    document_title: str
     # JSON preserves the existing compiled-validator gate; document contracts validate directly.
     json_contract_validation_enabled: bool
 
@@ -193,6 +197,7 @@ def process_structured_document_output(
         structured_output,
         output_type,
         step_order=step_order,
+        title=context.document_title,
         schema=output_contract,
     )
     return OutputFormatProcessingResult(
@@ -213,6 +218,7 @@ def render_document_output(
         full_text,
         output_type,
         step_order=step_order,
+        title=context.document_title,
     )
     return OutputFormatProcessingResult(
         artifact=RenderedOutputArtifact(blob=blob, mimetype=mimetype)
