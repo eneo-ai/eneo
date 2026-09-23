@@ -7,19 +7,25 @@
 Simulates many anonymous visitors hitting one active widget at once and
 reports how the limits behave: every visitor solves the ALTCHA challenge,
 mints a token and asks a few questions. Answers are read to the end so the
-budget is settled exactly as in production. The run is not a benchmark; it is
-a check that
+budget is settled exactly as in production. The run is not a benchmark; it
+exits non-zero unless
 
-* nothing gets through without a token or a solved challenge,
-* per-visitor and per-IP rate limits and the daily token budget produce 429s
-  with a Retry-After instead of letting traffic through, and
-* losing Redis fails closed (503) instead of open.
+* nothing gets through without a token or a solved challenge, and
+* every 429 and 503 carries a Retry-After.
+
+Which limits engaged (per visitor, per IP, the daily token budget) shows in
+the status and error-code counts.
 
 Run it against the isolated E2E stack (deterministic mock model, no real
 provider). From inside that stack's backend container:
 
     python tests/load/widget_load.py --base-url http://localhost:8000 \
         --public-id wgt_… --visitors 200 --messages 3
+
+Losing Redis must fail closed. Stop the stack's Redis (with
+``widget_rate_limit_fail_open`` off, the default) and run again with
+``--expect-redis-down``: the run then also fails unless every visitor is
+refused with 503 ``rate_limit_unavailable`` before a challenge is issued.
 
 Recorded results from the 2026-09-17 run are in the description of the
 widgets pull request (eneo-ai/eneo#867).
@@ -104,61 +110,65 @@ async def _visitor(
 async def _visit(
     client: httpx.AsyncClient, public_id: str, messages: int, report: Report
 ) -> None:
-    if True:
+    started = time.perf_counter()
+    # Nothing without a token: must be rejected.
+    bare = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/", json={"question": "hej"}
+    )
+    if bare.status_code == 401:
+        report.unauthenticated_asks_rejected += 1
+    else:
+        report.unauthenticated_asks_allowed += 1
+
+    try:
+        altcha = await _solve(client, public_id)
+    except httpx.HTTPStatusError as exc:
+        report.note(exc.response, started)
+        return
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/visitor-sessions/",
+        json={"altcha": altcha, "visitor_id": str(uuid4())},
+    )
+    report.note(resp, started)
+    if resp.status_code != 200:
+        return
+    token = resp.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    session_id: Optional[str] = None
+    for i in range(messages):
         started = time.perf_counter()
-        # Nothing without a token: must be rejected.
-        bare = await client.post(
-            f"/api/v1/widgets/{public_id}/ask/", json={"question": "hej"}
-        )
-        if bare.status_code == 401:
-            report.unauthenticated_asks_rejected += 1
-        else:
-            report.unauthenticated_asks_allowed += 1
-
-        try:
-            altcha = await _solve(client, public_id)
-        except httpx.HTTPStatusError as exc:
-            report.note(exc.response, started)
-            return
-        resp = await client.post(
-            f"/api/v1/widgets/{public_id}/visitor-sessions/",
-            json={"altcha": altcha, "visitor_id": str(uuid4())},
-        )
-        report.note(resp, started)
-        if resp.status_code != 200:
-            return
-        token = resp.json()["token"]
-        headers = {"Authorization": f"Bearer {token}"}
-
-        session_id: Optional[str] = None
-        for i in range(messages):
-            started = time.perf_counter()
-            async with client.stream(
-                "POST",
-                f"/api/v1/widgets/{public_id}/ask/",
-                json={"question": f"Fråga {i + 1}", "session_id": session_id},
-                headers=headers,
-            ) as stream:
-                if stream.status_code != 200:
-                    await stream.aread()
-                    report.note(stream, started)
-                    break
-                async for line in stream.aiter_lines():
-                    if line.startswith("data:") and session_id is None:
-                        try:
-                            payload: dict[str, Any] = json.loads(line[5:])
-                            session_id = payload.get("session_id") or session_id
-                        except json.JSONDecodeError:
-                            pass
+        async with client.stream(
+            "POST",
+            f"/api/v1/widgets/{public_id}/ask/",
+            json={"question": f"Fråga {i + 1}", "session_id": session_id},
+            headers=headers,
+        ) as stream:
+            if stream.status_code != 200:
+                await stream.aread()
                 report.note(stream, started)
+                break
+            async for line in stream.aiter_lines():
+                if line.startswith("data:") and session_id is None:
+                    try:
+                        payload: dict[str, Any] = json.loads(line[5:])
+                        session_id = payload.get("session_id") or session_id
+                    except json.JSONDecodeError:
+                        pass
+            report.note(stream, started)
 
 
-async def run(args: argparse.Namespace) -> Report:
+async def run(
+    args: argparse.Namespace, transport: Optional[httpx.AsyncBaseTransport] = None
+) -> Report:
     report = Report()
     gate = asyncio.Semaphore(args.concurrency)
     limits = httpx.Limits(max_connections=args.concurrency + 10)
     async with httpx.AsyncClient(
-        base_url=args.base_url, timeout=httpx.Timeout(60.0), limits=limits
+        base_url=args.base_url,
+        timeout=httpx.Timeout(60.0),
+        limits=limits,
+        transport=transport,
     ) as client:
         await asyncio.gather(
             *(
@@ -195,20 +205,52 @@ def print_report(report: Report, args: argparse.Namespace) -> None:
             f"latency ms: median={statistics.median(sorted_latencies):.0f} "
             f"p95={p95:.0f} max={sorted_latencies[-1]:.0f}"
         )
+
+
+def failures(report: Report, args: argparse.Namespace) -> list[str]:
+    """Why the run fails; empty when it passes."""
+    found: list[str] = []
     if report.unauthenticated_asks_allowed:
-        raise SystemExit("FAIL: an ask without a visitor token was answered")
+        found.append("an ask without a visitor token was answered")
+    if report.retry_after_missing:
+        found.append(
+            f"{report.retry_after_missing} 429/503 responses had no Retry-After"
+        )
+    if args.expect_redis_down:
+        # Each visitor must stop at its challenge: one refusal, nothing else.
+        refused = report.codes["rate_limit_unavailable"]
+        if refused != args.visitors or sum(report.statuses.values()) != refused:
+            found.append(
+                f"with Redis down, {args.visitors - refused} of {args.visitors}"
+                " visitors were not refused with 503 rate_limit_unavailable"
+            )
+    return found
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--public-id", required=True)
     parser.add_argument("--visitors", type=int, default=200)
     parser.add_argument("--messages", type=int, default=3)
     parser.add_argument("--concurrency", type=int, default=50)
-    args = parser.parse_args()
+    parser.add_argument(
+        "--expect-redis-down",
+        action="store_true",
+        help="Redis is stopped: every visitor must be refused with a 503.",
+    )
+    return parser.parse_args(argv)
+
+
+def main() -> None:
+    args = parse_args()
     report = asyncio.run(run(args))
     print_report(report, args)
+    found = failures(report, args)
+    if found:
+        raise SystemExit("FAIL: " + "; ".join(found))
 
 
 if __name__ == "__main__":
