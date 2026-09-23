@@ -36,4 +36,23 @@ describe("document reference page on the server", () => {
       `Taxa plan- och bygglov.pdf – https://eneo.kommun.se/documents/${DOCUMENT_ID}`
     );
   });
+
+  test("links a page by its host and shows the full address where it can wrap", () => {
+    const url =
+      "https://www.kommun.se/kommun-och-politik/styrdokument/riktlinjer-for-bygglov-och-anmalan-2024";
+    const blob = {
+      id: DOCUMENT_ID,
+      text: "Riktlinjerna gäller från 1 januari.",
+      metadata: { title: "Riktlinjer för bygglov", url },
+      original_available: false
+    };
+
+    const { body } = render(DocumentPage, { props: { data: { ...empty, blob } } as never });
+
+    // A nowrap button labelled with the whole address was clipped at the card edge.
+    const link = body.match(new RegExp(`<a[^>]*href="${url}"[^>]*>([\\s\\S]*?)</a>`));
+    expect(link?.[1]).toContain("www.kommun.se");
+    expect(link?.[1]).not.toContain("/kommun-och-politik");
+    expect(body).toMatch(new RegExp(`<dd class="break-all[^"]*">${url}</dd>`));
+  });
 });

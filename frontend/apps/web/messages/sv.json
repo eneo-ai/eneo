@@ -4909,6 +4909,8 @@
   "widget_reference_copied": "Referensen är kopierad",
   "widget_reference_copy_failed": "Kunde inte kopiera. Markera texten nedan för att kopiera den manuellt.",
   "widget_document_reference_copy_failed": "Kunde inte kopiera. Markera referensen ovan för att kopiera den manuellt.",
+  "widget_document_source": "Källa",
+  "widget_document_open_source": "Öppna på {host}",
   "widget_citation_label": "Källa {number}",
   "widget_admin_show_sources": "Visa källor",
   "widget_admin_show_sources_description": "På som standard: svaren får numrerade källhänvisningar och en källista. Stäng av för att visa svar utan källor.",

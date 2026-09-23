@@ -8,6 +8,7 @@
   import { toast } from "$lib/components/toast";
   import { getEneo } from "$lib/core/Eneo";
   import { assignLocation } from "$lib/core/navigation";
+  import { linkHost } from "$lib/features/widget/urls";
   import { sourceReferenceText } from "$lib/features/widget/widgetMessageContext";
   import { m } from "$lib/paraglide/messages";
 
@@ -57,6 +58,10 @@
   <dl class="grid gap-1 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-6">
     <dt class="text-secondary">{m.document_lookup_reference()}</dt>
     <dd class="break-all select-all">{reference}</dd>
+    {#if data.blob?.metadata.url}
+      <dt class="text-secondary">{m.widget_document_source()}</dt>
+      <dd class="break-all select-all">{data.blob.metadata.url}</dd>
+    {/if}
   </dl>
 {/snippet}
 
@@ -113,7 +118,8 @@
                   rel="noopener noreferrer"
                 >
                   <ExternalLink aria-hidden="true" />
-                  {data.blob.metadata.url}
+                  <!-- The full address is in the list above, where it can wrap. -->
+                  {m.widget_document_open_source({ host: linkHost(data.blob.metadata.url) })}
                 </Button>
               {/if}
               {#if data.space}
