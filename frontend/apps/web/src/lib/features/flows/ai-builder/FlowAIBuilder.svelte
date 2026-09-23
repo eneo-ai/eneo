@@ -995,7 +995,15 @@
           <div class="mx-auto flex w-full flex-wrap items-center gap-2 {columnClass}">
             <div class="-ml-2.5 flex min-w-0 flex-wrap items-center gap-2">
               <FlowAIBuilderModelSelect />
+              <!-- The effort belongs with the model it is chosen for: a screen
+                   that starts a turn without a composer offers both. -->
+              <FlowAIBuilderReasoningSelect />
             </div>
+            <!-- The one thing a reader needs to know before changing either:
+                 what they are choosing for. It was a hover title before. -->
+            <p class="text-secondary basis-full text-[0.8125rem] text-pretty">
+              {m.ai_builder_model_usage_hint()}
+            </p>
           </div>
         </div>
       {/if}

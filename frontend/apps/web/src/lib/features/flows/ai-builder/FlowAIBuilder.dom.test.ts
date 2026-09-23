@@ -2111,6 +2111,59 @@ describe("FlowAIBuilder confirm, build and review", () => {
     calls[0]!.finish();
   });
 
+  it("offers the effort where a turn starts without a composer, and sends it", async () => {
+    // The confirmation starts a turn from a button, not a composer: the model
+    // and the effort it is chosen for both belong on that screen.
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "", { requirements_summary: SUMMARY })
+          ]
+        })
+      ]
+    });
+    const listing = vi.fn(async (path: string, init?: Record<string, unknown>) =>
+      path.endsWith("/models")
+        ? {
+            models: [
+              {
+                id: DEFAULT_MODEL_ID,
+                name: "Test model",
+                provider: "openai",
+                reasoning_effort_options: ["low", "high"],
+                availability: { state: "ready" }
+              }
+            ],
+            default_model_id: DEFAULT_MODEL_ID
+          }
+        : fetch(path as string, init as never)
+    );
+    const { stream, calls } = makeStream(() => "hold");
+    const { service } = renderShell({ fetch: listing, stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    const notice = await screen.findByTestId("ai-builder-model-notice");
+    // The control is on this screen, next to the model it is chosen for, and
+    // the screen says what both are for.
+    expect(
+      await within(notice).findByRole("button", {
+        name: `${m.reasoning_effort()}: ${m.default_behavior()}`
+      })
+    ).toBeTruthy();
+    expect(within(notice).getByText(m.ai_builder_model_usage_hint())).toBeTruthy();
+
+    service().selectReasoningEffort("high");
+    await fireEvent.click(button(m.ai_builder_confirm_action()));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({
+      model_id: DEFAULT_MODEL_ID,
+      reasoning_effort: "high"
+    });
+    calls[0]!.finish();
+  });
+
   it("puts the model reason and picker on the confirmation and refuses its turn actions while no model can run", async () => {
     const { fetch } = makeFetch({
       sessions: [

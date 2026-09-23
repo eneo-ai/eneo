@@ -1,7 +1,8 @@
 <script lang="ts">
   /* Reasoning effort for the planning model. The options are named by the
      model itself; an empty list means this model takes no such setting and the
-     control does not exist. */
+     control does not exist. Like the model control it stays usable while a
+     turn runs or sending is blocked: the choice is for the next turn. */
   import * as Select from "$lib/components/ui/select/index.js";
   import { m } from "$lib/paraglide/messages";
   import Brain from "lucide-svelte/icons/brain";
@@ -44,7 +45,6 @@
   <Select.Root
     type="single"
     {value}
-    disabled={!service.canSendMessage}
     onValueChange={(next) => {
       service.selectReasoningEffort(
         next === DEFAULT_VALUE ? null : next.slice(EFFORT_PREFIX.length)
