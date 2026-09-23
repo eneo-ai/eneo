@@ -57,18 +57,19 @@
     {previewToken}
   />
 {:else if data.unavailable}
-  <div
+  <!-- Every state of the page is its main landmark, like the chat itself. -->
+  <main
     class="bg-primary text-primary fixed inset-0 flex flex-col items-center justify-center gap-2 p-6"
   >
     <h1 class="text-base font-semibold">{m.widget_not_available_title()}</h1>
     <p class="text-secondary text-center text-sm">{m.widget_not_available_body()}</p>
-  </div>
+  </main>
 {:else if previewFailed}
-  <div class="bg-primary text-secondary fixed inset-0 flex items-center justify-center p-6">
+  <main class="bg-primary text-secondary fixed inset-0 flex items-center justify-center p-6">
     <p class="text-center text-sm" role="alert">{m.widget_preview_unavailable()}</p>
-  </div>
+  </main>
 {:else}
-  <div class="bg-primary text-secondary fixed inset-0 flex items-center justify-center p-6">
+  <main class="bg-primary text-secondary fixed inset-0 flex items-center justify-center p-6">
     <p class="text-sm" aria-live="polite">{m.widget_preview_loading()}</p>
-  </div>
+  </main>
 {/if}
