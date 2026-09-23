@@ -3,16 +3,29 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("$lib/components/toast", () => ({ toast: { error: vi.fn() } }));
 vi.mock("$lib/core/errors", () => ({ toastError: vi.fn() }));
 vi.mock("$lib/paraglide/messages", () => ({
-  m: {
-    widget_admin_error_field_locked: () => "locked",
-    widget_admin_error_template_not_published: () => "unpublished",
-    widget_admin_template_in_use: () => "in use",
-    widget_admin_save_conflict: () => "conflict"
-  }
+  m: new Proxy<Record<string, (params?: Record<string, string>) => string>>(
+    {
+      widget_admin_error_field_locked: () => "locked",
+      widget_admin_error_template_not_published: () => "unpublished",
+      widget_admin_template_in_use: () => "in use",
+      widget_admin_save_conflict: () => "conflict"
+    },
+    {
+      get: (target, key: string) =>
+        target[key] ??
+        ((params?: Record<string, string>) =>
+          params ? `${key}(${Object.values(params).join("|")})` : key)
+    }
+  )
 }));
 
 import { EneoError } from "@eneo/eneo-js";
-import { isStaleEditorError, widgetErrorCode, widgetErrorMessage } from "./errors";
+import {
+  isStaleEditorError,
+  widgetErrorCode,
+  widgetErrorMessage,
+  widgetFieldErrors
+} from "./errors";
 
 function apiError(status: number, code: string) {
   return new EneoError("raw", "RESPONSE", status, 0, { detail: { code, message: "raw" } });
@@ -39,5 +52,59 @@ describe("widget admin errors", () => {
     expect(isStaleEditorError(apiError(409, "widget_revision_conflict"))).toBe(true);
     expect(isStaleEditorError(apiError(400, "field_locked_by_template"))).toBe(true);
     expect(isStaleEditorError(apiError(422, "validation"))).toBe(false);
+  });
+});
+
+describe("refused values", () => {
+  const policyViolation = new EneoError("raw", "RESPONSE", 400, 0, {
+    detail: {
+      code: "widget_policy_violation",
+      message: "raw",
+      violations: ["daily_token_budget_exceeds_policy", "bot_protection_none_not_allowed"]
+    }
+  });
+  const servingBlocked = new EneoError("raw", "RESPONSE", 400, 0, {
+    detail: {
+      code: "widget_serving_blocked",
+      message: "raw",
+      blockers: ["allowed_origins_empty", "target_not_published"]
+    }
+  });
+  const invalid = new EneoError("raw", "RESPONSE", 422, 0, {
+    detail: [
+      { loc: ["body", "texts", "suggested_questions"], type: "value_error", msg: "Invalid value" },
+      { loc: ["body", "allowed_origins", 0], type: "value_error", msg: "Invalid value" },
+      { loc: ["body", "revision"], type: "missing", msg: "Field required" }
+    ]
+  });
+
+  it("pins policy violations and blockers to the fields they are about", () => {
+    expect(widgetFieldErrors(policyViolation)).toEqual({
+      "limits.daily_token_budget": "widget_admin_blocker_budget_policy",
+      bot_protection: "widget_admin_blocker_bot_protection"
+    });
+    // An unpublished assistant is not something the widget form can fix.
+    expect(widgetFieldErrors(servingBlocked)).toEqual({
+      allowed_origins: "widget_admin_blocker_allowed_origins_empty"
+    });
+  });
+
+  it("pins request validation errors by their location", () => {
+    expect(widgetFieldErrors(invalid)).toEqual({
+      "texts.suggested_questions": "widget_admin_questions_refused",
+      allowed_origins: "widget_admin_origins_refused"
+    });
+    expect(widgetFieldErrors(new EneoError("x", "RESPONSE", 503, 0))).toEqual({});
+    expect(widgetFieldErrors(new Error("offline"))).toEqual({});
+  });
+
+  it("explains a refusal in the editor's language instead of the raw English", () => {
+    expect(widgetErrorMessage(policyViolation)).toBe(
+      "widget_admin_error_policy_violation(widget_admin_blocker_budget_policy widget_admin_blocker_bot_protection)"
+    );
+    expect(widgetErrorMessage(servingBlocked)).toBe(
+      "widget_admin_error_serving_blocked(widget_admin_blocker_allowed_origins_empty widget_admin_blocker_target_not_published)"
+    );
+    expect(widgetErrorMessage(invalid)).toBe("widget_admin_error_values_refused");
   });
 });
