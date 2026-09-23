@@ -135,13 +135,17 @@
             id={captionId(index)}
             aria-hidden="true"
             class={cn(
-              "flex items-center gap-1.5 px-3.5 pt-3 pb-1 text-xs leading-snug font-medium",
+              "flex items-center gap-2.5 px-3.5 pt-3 pb-1 text-xs leading-snug font-medium",
               caption.readsRunInput ? "text-primary" : "text-secondary"
             )}
           >
-            {#if caption.readsRunInput}
-              <FileInput class="size-3.5 shrink-0" aria-hidden="true" />
-            {/if}
+            <!-- Same columns as the rows: the icon over the number tiles, the
+                 words over the step names. -->
+            <span class="flex w-7 shrink-0 justify-center">
+              {#if caption.readsRunInput}
+                <FileInput class="size-3.5" aria-hidden="true" />
+              {/if}
+            </span>
             <span class="min-w-0">{caption.text}</span>
           </div>
         {/if}

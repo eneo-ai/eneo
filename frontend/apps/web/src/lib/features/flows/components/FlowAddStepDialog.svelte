@@ -139,7 +139,7 @@
 {/snippet}
 
 <Dialog.Root bind:open>
-  <Dialog.Content class="sm:max-w-xl">
+  <Dialog.Content class="sm:max-w-xl" closeLabel={m.close()}>
     <Dialog.Header>
       <Dialog.Title>{m.flow_step_add()}</Dialog.Title>
       <Dialog.Description>{m.flow_add_step_subtitle()}</Dialog.Description>

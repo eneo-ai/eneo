@@ -5213,6 +5213,8 @@
   "flow_step_reads_flow_input": "the flow input",
   "flow_step_reads_form": "the form",
   "flow_step_reads_own_text": "Reads your own text",
+  "flow_step_reads_previous": "the previous step",
+  "flow_step_reads_steps_numbered": "steps {steps}",
   "flow_step_reads_step": "step {step}",
   "flow_step_reads_steps": "{count} earlier steps",
   "flow_step_reads_upload": "the uploaded material",

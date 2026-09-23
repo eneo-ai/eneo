@@ -53,6 +53,8 @@ export const STEP_INPUT_KEY_SHAPES: ReadonlyMap<string, string> = new Map(
 );
 /** Runtime variables that read the flow's own input (its text, JSON or transcription). */
 export const FLOW_INPUT_ALIASES = new Set(flowVariableDefinitions.flowInputAliases);
+/** The runtime variable that reads the answer of the step right before. */
+export const PREVIOUS_STEP_ALIAS = flowVariableDefinitions.previousStepAlias;
 const FLOW_FORM_STEP_ALIAS_PATTERN = /^step_\d+($|[._])/i;
 
 export type FlowFormFieldNameIssue = "namespace_head" | "primary_input_key" | "step_alias" | "dot";

@@ -18,6 +18,7 @@ class FlowVariableDefinitionManifest(TypedDict):
     sectionRuntimeVariables: list[str]
     stepInputKeyShapes: dict[str, str]
     flowInputAliases: list[str]
+    previousStepAlias: str
     formFieldNamespaceHeads: list[str]
     primaryFlowInputKeys: list[str]
     reservedFormFieldInputKeys: list[str]
@@ -194,6 +195,7 @@ def flow_variable_definition_manifest(
         "flowInputAliases": sorted(
             {FLOW_INPUT_TEXT_ALIAS, FLOW_INPUT_JSON_ALIAS, FLOW_INPUT_TRANSCRIPTION_KEY}
         ),
+        "previousStepAlias": PREVIOUS_STEP_TEXT_ALIAS,
         "formFieldNamespaceHeads": sorted(FORM_FIELD_NAMESPACE_HEADS),
         "primaryFlowInputKeys": sorted(PRIMARY_FLOW_INPUT_KEYS),
         "reservedFormFieldInputKeys": sorted(RESERVED_FORM_FIELD_INPUT_KEYS),

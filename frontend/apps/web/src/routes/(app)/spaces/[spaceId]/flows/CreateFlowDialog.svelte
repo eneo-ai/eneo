@@ -78,7 +78,10 @@
     if (next) reset();
   }}
 >
-  <Dialog.Content class="w-[calc(100%-1.5rem)] !max-w-[33rem] gap-0 overflow-hidden !p-0">
+  <Dialog.Content
+    class="w-[calc(100%-1.5rem)] !max-w-[33rem] gap-0 overflow-hidden !p-0"
+    closeLabel={m.close()}
+  >
     <div class="px-6 pt-6">
       <Dialog.Title class="text-lg font-bold tracking-tight">
         {m.flow_create_dialog_title()}

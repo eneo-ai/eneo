@@ -242,7 +242,10 @@
   </Collapsible.Root>
 
   <Dialog.Root bind:open={showAllSources}>
-    <Dialog.Content class="!flex max-h-[86vh] !max-w-4xl flex-col !gap-0 overflow-hidden !p-0">
+    <Dialog.Content
+      class="!flex max-h-[86vh] !max-w-4xl flex-col !gap-0 overflow-hidden !p-0"
+      closeLabel={m.close()}
+    >
       <Dialog.Header class="px-5 pt-5 pb-3">
         <Dialog.Title>{m.flow_run_knowledge_all_sources_title()}</Dialog.Title>
         <Dialog.Description>

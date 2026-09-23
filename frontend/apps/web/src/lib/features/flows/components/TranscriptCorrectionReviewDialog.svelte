@@ -74,7 +74,7 @@
     if (!next && !busy) onSkip();
   }}
 >
-  <Dialog.Content class="max-w-2xl">
+  <Dialog.Content class="max-w-2xl" closeLabel={m.close()}>
     <Dialog.Header>
       <Dialog.Title>{m.flow_run_transcript_suggestions_title()}</Dialog.Title>
       <Dialog.Description>

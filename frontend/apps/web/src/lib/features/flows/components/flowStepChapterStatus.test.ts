@@ -109,7 +109,7 @@ describe("task and material chapter summaries", () => {
     ).toBe("Strukturera innehållet med beslut och uppgifter.");
   });
 
-  it("describes the concrete previous step and extra material", () => {
+  it("names the previous step as the source, and extra material", () => {
     const current = step({ input_source: "previous_step" });
     expect(
       getChapterInputStatus({
@@ -119,7 +119,7 @@ describe("task and material chapter summaries", () => {
         hasKnowledge: true,
         hasAttachments: false
       })
-    ).toBe("Läser steg 1 · Kunskap eller filer tillagda");
+    ).toBe("Läser föregående steg · Kunskap eller filer tillagda");
   });
 
   it("names the underlag instead of an inactive all-previous source", () => {
@@ -131,7 +131,12 @@ describe("task and material chapter summaries", () => {
           input_bindings: { question: "Samtal: {{ step_2.output.text }}" }
         }),
         previousStep: step({ step_order: 3 }),
-        context: buildContext([], undefined, false, 4),
+        context: buildContext(
+          [step({ step_order: 1 }), step({ step_order: 2 }), step({ step_order: 3 })],
+          undefined,
+          false,
+          4
+        ),
         hasKnowledge: false,
         hasAttachments: false
       })

@@ -17,6 +17,7 @@
     "text": "scalar"
   },
   "flowInputAliases": ["indata_json", "indata_text", "transkribering"],
+  "previousStepAlias": "föregående_steg",
   "formFieldNamespaceHeads": ["flow", "flow_input", "step_input"],
   "primaryFlowInputKeys": [
     "file_ids",

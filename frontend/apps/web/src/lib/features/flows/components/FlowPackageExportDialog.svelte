@@ -147,6 +147,7 @@
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
   <Dialog.Content
     class="grid max-h-[92vh] !max-w-2xl grid-rows-[auto_minmax(0,1fr)_auto] !gap-0 overflow-hidden !p-0"
+    closeLabel={m.close()}
   >
     <header class="border-default flex items-start gap-3 border-b px-5 py-4 sm:px-6 sm:py-5">
       <div

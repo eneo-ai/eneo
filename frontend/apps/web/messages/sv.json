@@ -5213,6 +5213,8 @@
   "flow_step_reads_flow_input": "flödets indata",
   "flow_step_reads_form": "formuläret",
   "flow_step_reads_own_text": "Läser din egen text",
+  "flow_step_reads_previous": "föregående steg",
+  "flow_step_reads_steps_numbered": "steg {steps}",
   "flow_step_reads_step": "steg {step}",
   "flow_step_reads_steps": "{count} tidigare steg",
   "flow_step_reads_upload": "det uppladdade underlaget",

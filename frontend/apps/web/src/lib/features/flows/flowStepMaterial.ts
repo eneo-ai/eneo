@@ -8,6 +8,7 @@ import {
   classifyVariable,
   extractTemplateTokens,
   isValidStepInputPath,
+  referencedStepOrder,
   type VariableClassificationContext
 } from "./flowVariableTokens";
 
@@ -15,8 +16,8 @@ import {
  * What the AI reads in a step, in the runtime's order
  * (step_input_resolution.resolve_step_input_binding): the step's own text,
  * then the results chosen from earlier steps, then the step's source. One
- * owner so the material block, the chapter summary and the request preview
- * say the same thing.
+ * owner so the material block, the step list, the chapter summary and the
+ * request preview say the same thing.
  */
 export type StepMaterial =
   | { kind: "own_text"; withUpload: boolean; withSources: boolean }
@@ -128,8 +129,6 @@ export type StepSourceLine = {
   text: string;
   /** Takes in what the flow is given when it runs (the upload, the form, its input). */
   readsRunInput: boolean;
-  /** Reads only the step right before it: the usual case the step list keeps quiet. */
-  readsOnlyPreviousStep: boolean;
 };
 
 /** A reference to the flow's own input: an alias, or a flow input path that is not a form field. */
@@ -141,13 +140,21 @@ function readsFlowInput(token: string, context: VariableClassificationContext): 
   );
 }
 
-function sourceLine(
-  parts: string[],
-  readsRunInput: boolean,
-  readsOnlyPreviousStep = false
-): StepSourceLine {
-  const what = new Intl.ListFormat(getLocale(), { type: "conjunction" }).format(parts);
-  return { text: m.flow_step_reads({ what }), readsRunInput, readsOnlyPreviousStep };
+function listed(parts: string[]): string {
+  return new Intl.ListFormat(getLocale(), { type: "conjunction" }).format(parts);
+}
+
+function sourceLine(parts: string[], readsRunInput = false): StepSourceLine {
+  return { text: m.flow_step_reads({ what: listed(parts) }), readsRunInput };
+}
+
+/** Earlier steps by number: up to three are named ("steg 1 och 2"), more are counted. */
+function stepParts(orders: number[], alone: boolean): string[] {
+  if (orders.length > 3) return [m.flow_step_reads_steps({ count: orders.length })];
+  if (alone && orders.length > 1) {
+    return [m.flow_step_reads_steps_numbered({ steps: listed(orders.map(String)) })];
+  }
+  return orders.map((order) => m.flow_step_reads_step({ step: order }));
 }
 
 export function getStepSourceLine(
@@ -167,65 +174,50 @@ export function getStepSourceLine(
       const upload = material.kind === "own_text" && material.withUpload;
       const form = tokens.some((token) => classifyVariable(token, context) === "field");
       const flowInput = tokens.some((token) => readsFlowInput(token, context));
-      const orders = getFlowStepUnderlag(step)?.stepOrders ?? [];
-      const parts = [
+      // Every way to read an earlier step: chosen results, step_N paths, a
+      // step's name and the previous-step alias. Later or missing steps read nothing.
+      const orders = [
+        ...new Set([
+          ...(getFlowStepUnderlag(step)?.stepOrders ?? []).filter(
+            (order) => order < step.step_order && context.stepOutputTypes.has(order)
+          ),
+          ...tokens.flatMap((token) => referencedStepOrder(token, context) ?? [])
+        ])
+      ].sort((a, b) => a - b);
+      const inputs = [
         ...(upload ? [m.flow_step_reads_upload()] : []),
         ...(form ? [m.flow_step_reads_form()] : []),
-        ...(flowInput ? [m.flow_step_reads_flow_input()] : []),
-        // Two steps read well by number; more become a count.
-        ...(orders.length > 2
-          ? [m.flow_step_reads_steps({ count: orders.length })]
-          : orders.map((order) => m.flow_step_reads_step({ step: order })))
+        ...(flowInput ? [m.flow_step_reads_flow_input()] : [])
       ];
-      if (parts.length === 0) {
-        return {
-          text: m.flow_step_reads_own_text(),
-          readsRunInput: false,
-          readsOnlyPreviousStep: false
-        };
-      }
-      const runInput = upload || form || flowInput;
-      return sourceLine(
-        parts,
-        runInput,
-        !runInput && orders.length === 1 && orders[0] === step.step_order - 1
-      );
+      const parts = [...inputs, ...stepParts(orders, inputs.length === 0)];
+      if (parts.length === 0) return { text: m.flow_step_reads_own_text(), readsRunInput: false };
+      return sourceLine(parts, inputs.length > 0);
     }
     case "upload":
       return sourceLine([m.flow_step_reads_upload()], true);
     case "flow_input":
       return sourceLine([m.flow_step_reads_flow_input()], true);
     case "previous_step":
-      return sourceLine([m.flow_step_reads_step({ step: material.stepOrder })], false, true);
+      // The usual source, said relatively: a chain of such steps shares one caption.
+      return sourceLine([m.flow_step_reads_previous()]);
     case "all_previous_steps":
-      return sourceLine([m.flow_step_reads_all_previous()], false);
+      return sourceLine([m.flow_step_reads_all_previous()]);
     case "web_address":
-      return sourceLine([m.flow_step_reads_web()], false);
+      return sourceLine([m.flow_step_reads_web()]);
   }
 }
 
 /**
  * Steps in a row that read the same thing share one caption, so the step list
- * says it once ("Läser steg 1" over twenty steps). A lone step that just reads
- * the one before gets none, as in a plain step-by-step flow. For each step:
- * the index of the step whose line captions it, or null.
+ * says it once ("Läser steg 1" over twenty steps) and every step sits under a
+ * caption that is true for it. For each step: the index of the step whose line
+ * captions it, or null when it has no line.
  */
 export function groupStepSources(lines: readonly (StepSourceLine | null)[]): (number | null)[] {
   const captionOf: (number | null)[] = [];
-  let runText: string | null = null;
-  let runStart: number | null = null;
   for (const [index, line] of lines.entries()) {
-    if (!line) {
-      runText = null;
-      captionOf.push(null);
-      continue;
-    }
-    if (line.text !== runText) {
-      const quiet = line.readsOnlyPreviousStep && lines[index + 1]?.text !== line.text;
-      runText = line.text;
-      runStart = quiet ? null : index;
-    }
-    captionOf.push(runStart);
+    const continues = index > 0 && line !== null && lines[index - 1]?.text === line.text;
+    captionOf.push(line === null ? null : continues ? (captionOf[index - 1] ?? index) : index);
   }
   return captionOf;
 }

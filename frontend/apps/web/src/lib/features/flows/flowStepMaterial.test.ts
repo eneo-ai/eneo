@@ -71,12 +71,27 @@ describe("flowStepMaterial", () => {
 describe("getStepSourceLine", () => {
   const upload = { runtime_input: { enabled: true, input_format: "document" } };
   const formSchema = { fields: [{ name: "namn", label: "Brukarens namn", type: "text" }] };
-  const contextFor = (current: FlowStep) =>
-    buildContext([current], formSchema, false, current.step_order);
-  const reads = (...parts: string[]) =>
-    m.flow_step_reads({
-      what: new Intl.ListFormat(getLocale(), { type: "conjunction" }).format(parts)
-    });
+  const flow = [
+    step({ id: "s1", step_order: 1, user_description: "Läs", input_source: "flow_input" }),
+    step({ id: "s2", step_order: 2, user_description: "Bedöm" }),
+    step({ id: "s3", step_order: 3, user_description: "Skriv" }),
+    step({ id: "s4", step_order: 4, user_description: "Granska" }),
+    step({ id: "s5", step_order: 5, user_description: "Sammanställ" })
+  ];
+  // The step under test takes its place in the flow, as in the editor.
+  const lineFor = (current: FlowStep) => {
+    const steps = flow.map((other) => (other.step_order === current.step_order ? current : other));
+    return getStepSourceLine(
+      current,
+      steps.find((other) => other.step_order === current.step_order - 1) ?? null,
+      buildContext(steps, formSchema, false, current.step_order)
+    );
+  };
+  const list = (parts: string[]) =>
+    new Intl.ListFormat(getLocale(), { type: "conjunction" }).format(parts);
+  const reads = (...parts: string[]) => m.flow_step_reads({ what: list(parts) });
+  const ownText = (order: number, question: string) =>
+    step({ step_order: order, input_bindings: { question } as never });
 
   it("marks the step that takes in the upload and the form", () => {
     const first = step({
@@ -85,95 +100,89 @@ describe("getStepSourceLine", () => {
       input_config: upload,
       input_bindings: { question: "Transkript: {{step_input.text}}\nNamn: {{flow_input.namn}}" }
     } as never);
-    expect(getStepSourceLine(first, null, contextFor(first))).toEqual({
+    expect(lineFor(first)).toEqual({
       text: reads(m.flow_step_reads_upload(), m.flow_step_reads_form()),
-      readsRunInput: true,
-      readsOnlyPreviousStep: false
+      readsRunInput: true
     });
   });
 
-  it("names up to two earlier steps and counts more", () => {
-    const third = step({
-      step_order: 3,
-      input_bindings: { question: "{{step_1.output.text}}" } as never
-    });
-    expect(getStepSourceLine(third, null, contextFor(third))).toEqual({
-      text: reads(m.flow_step_reads_step({ step: 1 })),
-      readsRunInput: false,
-      readsOnlyPreviousStep: false
-    });
-    const fifth = step({
-      step_order: 5,
-      input_bindings: {
-        question: "{{step_1.output.text}} {{step_2.output.text}} {{step_4.output.text}}"
-      } as never
-    });
-    expect(getStepSourceLine(fifth, null, contextFor(fifth))?.text).toBe(
-      reads(m.flow_step_reads_steps({ count: 3 }))
+  it("resolves every way to read an earlier step, and only earlier steps that exist", () => {
+    expect(lineFor(ownText(3, "{{step_2.output.text}} {{Läs}}"))?.text).toBe(
+      reads(m.flow_step_reads_steps_numbered({ steps: list(["1", "2"]) }))
+    );
+    expect(lineFor(ownText(3, "{{Läs}}"))?.text).toBe(reads(m.flow_step_reads_step({ step: 1 })));
+    expect(lineFor(ownText(3, "{{föregående_steg}}"))?.text).toBe(
+      reads(m.flow_step_reads_step({ step: 2 }))
+    );
+    expect(lineFor(ownText(2, "{{step_4.output.text}} {{step_9.output.text}}"))?.text).toBe(
+      m.flow_step_reads_own_text()
     );
   });
 
-  it("keeps the step before quiet and names what a default source reads", () => {
-    const second = step();
+  it("names up to three earlier steps and counts more", () => {
     expect(
-      getStepSourceLine(second, { step_order: 1, user_description: "Läs" }, contextFor(second))
-    ).toEqual({
-      text: reads(m.flow_step_reads_step({ step: 1 })),
-      readsRunInput: false,
-      readsOnlyPreviousStep: true
+      lineFor(
+        ownText(
+          5,
+          "{{step_1.output.text}} {{step_2.output.text}} {{step_3.output.text}} {{step_4.output.text}}"
+        )
+      )?.text
+    ).toBe(reads(m.flow_step_reads_steps({ count: 4 })));
+    expect(lineFor(ownText(3, "{{flow_input.namn}} {{step_1.output.text}} {{Bedöm}}"))).toEqual({
+      text: reads(
+        m.flow_step_reads_form(),
+        m.flow_step_reads_step({ step: 1 }),
+        m.flow_step_reads_step({ step: 2 })
+      ),
+      readsRunInput: true
     });
-    const start = step({ step_order: 1, input_source: "flow_input" });
-    expect(getStepSourceLine(start, null, contextFor(start))).toMatchObject({
+  });
+
+  it("says a default source in words", () => {
+    expect(lineFor(step({ step_order: 2 }))).toEqual({
+      text: reads(m.flow_step_reads_previous()),
+      readsRunInput: false
+    });
+    expect(lineFor(step({ step_order: 1, input_source: "flow_input" }))).toEqual({
       text: reads(m.flow_step_reads_flow_input()),
       readsRunInput: true
     });
-    const web = step({ input_source: "http_get" });
-    expect(getStepSourceLine(web, null, contextFor(web))?.text).toBe(
+    expect(lineFor(step({ step_order: 2, input_source: "http_get" }))?.text).toBe(
       reads(m.flow_step_reads_web())
     );
   });
 
   it("counts the flow's input aliases as its input, and fixed text as the step's own", () => {
-    const alias = step({ input_bindings: { question: "Text: {{indata_text}}" } as never });
-    expect(getStepSourceLine(alias, null, contextFor(alias))).toMatchObject({
+    expect(lineFor(ownText(2, "Text: {{indata_text}}"))).toEqual({
       text: reads(m.flow_step_reads_flow_input()),
       readsRunInput: true
     });
-    const fixed = step({ input_bindings: { question: "Skriv en hälsning." } as never });
-    expect(getStepSourceLine(fixed, null, contextFor(fixed))?.text).toBe(
-      m.flow_step_reads_own_text()
-    );
+    expect(lineFor(ownText(2, "Skriv en hälsning."))?.text).toBe(m.flow_step_reads_own_text());
   });
 });
 
 describe("groupStepSources", () => {
-  const line = (text: string, extra: Partial<StepSourceLine> = {}): StepSourceLine => ({
-    text,
-    readsRunInput: false,
-    readsOnlyPreviousStep: false,
-    ...extra
-  });
+  const line = (text: string, readsRunInput = false): StepSourceLine => ({ text, readsRunInput });
 
   it("captions a run once and every step in it points at that caption", () => {
     expect(
       groupStepSources([
-        line("Läser det uppladdade underlaget", { readsRunInput: true }),
-        line("Läser steg 1", { readsOnlyPreviousStep: true }),
+        line("Läser det uppladdade underlaget", true),
         line("Läser steg 1"),
         line("Läser steg 1"),
         line("Läser 3 tidigare steg")
       ])
-    ).toEqual([0, 1, 1, 1, 4]);
+    ).toEqual([0, 1, 1, 3]);
   });
 
-  it("keeps a plain step-by-step flow quiet", () => {
+  it("puts a step-by-step chain under one caption", () => {
     expect(
       groupStepSources([
-        line("Läser flödets indata", { readsRunInput: true }),
-        line("Läser steg 1", { readsOnlyPreviousStep: true }),
-        line("Läser steg 2", { readsOnlyPreviousStep: true })
+        line("Läser flödets indata", true),
+        line("Läser föregående steg"),
+        line("Läser föregående steg")
       ])
-    ).toEqual([0, null, null]);
+    ).toEqual([0, 1, 1]);
   });
 
   it("starts over after a step without a source line", () => {

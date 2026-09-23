@@ -1,6 +1,10 @@
 import type { FlowStep } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
-import { getFlowFormFieldLabel, type FlowFormSchemaMetadata } from "./flowFormSchema";
+import {
+  getFlowFormFieldLabel,
+  PREVIOUS_STEP_ALIAS,
+  type FlowFormSchemaMetadata
+} from "./flowFormSchema";
 import { getTextProcessingMode } from "./flowTextProcessingConfig";
 import {
   parsePromptSegments,
@@ -41,7 +45,7 @@ function variableLabel(
   if (token === "flow_input.text") return m.flow_variable_flow_input_text_label();
   if (token === "section_index") return m.flow_variable_section_index_label();
   if (token === "transkribering") return m.flow_variable_transcription();
-  if (token === "föregående_steg") return m.flow_variable_previous_step();
+  if (token === PREVIOUS_STEP_ALIAS) return m.flow_variable_previous_step();
   const structured = STRUCTURED_FIELD_TOKEN.exec(token);
   if (structured) {
     return m.flow_request_preview_step_field({ field: structured[2], step: structured[1] });

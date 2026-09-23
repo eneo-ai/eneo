@@ -2,6 +2,7 @@ import {
   isFlowFormFieldBareAliasSafe,
   PRIMARY_FLOW_INPUT_KEYS,
   RESERVED_RUNTIME_VARIABLES,
+  PREVIOUS_STEP_ALIAS,
   SECTION_RUNTIME_VARIABLES,
   STEP_INPUT_KEY_SHAPES
 } from "./flowFormSchema";
@@ -194,6 +195,28 @@ export function classifyVariable(
 ): VariableCategory {
   const analysis = analyzeTemplateToken(token, context);
   return analysis.kind === "valid" ? analysis.category : "unknown";
+}
+
+/**
+ * The earlier step a reference reads, or null: a `step_N` path, a step's name
+ * or the previous-step alias, as the runtime resolves them
+ * (variable_resolver.build_context). A later or missing step reads nothing.
+ */
+export function referencedStepOrder(
+  token: string,
+  context: VariableClassificationContext
+): number | null {
+  const numbered = STEP_REFERENCE_TOKEN_PATTERN.exec(token);
+  const order = numbered
+    ? Number(numbered[1])
+    : token === PREVIOUS_STEP_ALIAS
+      ? context.currentStepOrder - 1
+      : ([...context.knownStepNames].find(
+          ([stepOrder, name]) => name === token && stepOrder < context.currentStepOrder
+        )?.[0] ?? null);
+  return order !== null && order < context.currentStepOrder && context.stepOutputTypes.has(order)
+    ? order
+    : null;
 }
 
 function analyzeTemplateToken(
