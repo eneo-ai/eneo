@@ -70,6 +70,7 @@ class ActionType(str, Enum):
     SKILL_PUBLISHED = "skill_published"
     SKILL_UNPUBLISHED = "skill_unpublished"
     SKILL_BINDINGS_ADVANCED = "skill_bindings_advanced"
+    SKILL_BINDINGS_DETACHED = "skill_bindings_detached"
     SKILL_DELETED = "skill_deleted"
     SESSION_STARTED = "session_started"
     SESSION_ENDED = "session_ended"

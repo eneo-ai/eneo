@@ -13,7 +13,10 @@
         secondary: "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
         destructive:
           "bg-destructive/10 [a]:hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 text-destructive dark:bg-destructive/20",
-        outline: "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
+        // `border-strongest` (45% / 55% ink) is the only border token that clears
+        // the 3:1 non-text contrast bar for a status pill; `border-border` is 1.4:1.
+        outline:
+          "border-strongest text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
         ghost: "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
         link: "text-accent-default underline-offset-4 hover:underline"
       }

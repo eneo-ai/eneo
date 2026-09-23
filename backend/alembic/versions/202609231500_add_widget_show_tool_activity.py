@@ -1,6 +1,6 @@
 """Let a widget keep its tool activity out of the visitor's view.
 
-Revision ID: 202609231000
+Revision ID: 202609231500
 Revises: 202609221000
 """
 
@@ -8,7 +8,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "202609231000"
+revision = "202609231500"
 down_revision = "202609221000"
 branch_labels = None
 depends_on = None

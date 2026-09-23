@@ -1,7 +1,7 @@
 """Let widgets follow a published template that locks what it governs.
 
 Revision ID: 202609211000
-Revises: 202609181000
+Revises: 202609181500
 """
 
 import sqlalchemy as sa
@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from alembic import op
 
 revision = "202609211000"
-down_revision = "202609181000"
+down_revision = "202609181500"
 branch_labels = None
 depends_on = None
 

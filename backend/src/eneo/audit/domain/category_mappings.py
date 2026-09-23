@@ -84,6 +84,7 @@ CATEGORY_MAPPINGS = {
     ActionType.SKILL_PUBLISHED.value: "user_actions",
     ActionType.SKILL_UNPUBLISHED.value: "user_actions",
     ActionType.SKILL_BINDINGS_ADVANCED.value: "user_actions",
+    ActionType.SKILL_BINDINGS_DETACHED.value: "user_actions",
     ActionType.SKILL_DELETED.value: "user_actions",
     ActionType.COLLECTION_CREATED.value: "user_actions",
     ActionType.COLLECTION_UPDATED.value: "user_actions",

@@ -301,6 +301,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_skill_bindings_advanced,
     description: m.audit_action_skill_bindings_advanced_description
   },
+  skill_bindings_detached: {
+    name: m.audit_action_skill_bindings_detached,
+    description: m.audit_action_skill_bindings_detached_description
+  },
   skill_deleted: {
     name: m.audit_action_skill_deleted,
     description: m.audit_action_skill_deleted_description

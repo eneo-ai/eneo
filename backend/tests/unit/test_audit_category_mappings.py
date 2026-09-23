@@ -102,8 +102,9 @@ class TestCategoryMappings:
         user_actions = [
             action for action, cat in CATEGORY_MAPPINGS.items() if cat == "user_actions"
         ]
-        assert len(user_actions) == 48, (
-            f"Expected 48 user actions, got {len(user_actions)}"
+        expected = EXPECTED_CATEGORY_COUNTS["user_actions"]
+        assert len(user_actions) == expected, (
+            f"Expected {expected} user actions, got {len(user_actions)}"
         )
         assert ActionType.TOOL_APPROVAL_SUBMITTED.value in user_actions
 

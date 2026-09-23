@@ -6,7 +6,6 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from fastapi import HTTPException
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
@@ -20,14 +19,10 @@ from eneo.authentication.auth_models import (
 )
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.main.models import GeneralError
 from eneo.main.request_context import get_request_context
 
 logger = get_logger(__name__)
-
-
-class ApiKeyErrorResponse(BaseModel):
-    code: str
-    message: str
 
 
 _SAFE_CONTEXT_KEYS: frozenset[str] = frozenset(
@@ -149,7 +144,7 @@ def raise_api_key_http_error(
 def error_responses(codes: list[int]) -> dict[int | str, dict[str, Any]]:
     return cast(
         dict[int | str, dict[str, Any]],
-        {code: {"model": ApiKeyErrorResponse} for code in codes},
+        {code: {"model": GeneralError} for code in codes},
     )
 
 

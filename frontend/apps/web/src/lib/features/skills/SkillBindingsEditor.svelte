@@ -6,7 +6,7 @@
     SkillPublic
   } from "@eneo/eneo-js";
   import { useId } from "bits-ui";
-  import { ArrowDown, ArrowUp, Info, Plus, RefreshCw, Trash2 } from "lucide-svelte";
+  import { ArrowDown, ArrowUp, Info, Plus, RefreshCw, ShieldAlert, Trash2 } from "lucide-svelte";
   import { onDestroy, tick, untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -460,8 +460,11 @@
                   </span>
                 {/if}
                 {#if row.executionBlocked}
-                  <Badge variant="destructive">{m.skills_execution_blocked_status()}</Badge>
-                  <span class="text-destructive text-xs">
+                  <Badge variant="outline">
+                    <ShieldAlert aria-hidden="true" />
+                    {m.skills_execution_blocked_status()}
+                  </Badge>
+                  <span class="text-foreground text-xs">
                     {m.skills_execution_blocked_binding_explanation()}
                   </span>
                 {/if}
