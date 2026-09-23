@@ -36,6 +36,13 @@
   } from "./structuredQuestionAnswer";
   import { fieldTypeLabel } from "./aiBuilderSummaryText";
 
+  // An option key can be its label ("One PDF") when the planner gave no id; a
+  // space would split aria-labelledby into references that do not exist. The
+  // encoding is one-to-one, so two keys never share an id.
+  function optionIdPart(key: string): string {
+    return key.replace(/[^A-Za-z0-9-]/g, (char) => `_${char.codePointAt(0)?.toString(16)}_`);
+  }
+
   interface Props {
     question: StructuredQuestion;
     answered?: boolean;
@@ -785,12 +792,16 @@
         body: import("svelte").Snippet<[{ labelId: string; detailId: string }]>,
         onpointerdown?: () => void
       )}
-        {@const id = `${questionLabelId}-option-${key}`}
+        {@const id = `${questionLabelId}-option-${optionIdPart(key)}`}
         <Field.Label for={id} class={optionRowClass} data-option-key={key} {onpointerdown}>
           <!-- The name is the option's words plus its tag ("Eneo föreslår"). -->
           {@render control({
             id,
-            labelledby: `${id}-label ${id}-label-tag`,
+            // The tag ("Eneo föreslår", "Används i dag") exists only on those rows.
+            labelledby:
+              key === currentKey || key === recommendedKey
+                ? `${id}-label ${id}-label-tag`
+                : `${id}-label`,
             describedby: `${id}-detail`
           })}
           <span class="option-body">

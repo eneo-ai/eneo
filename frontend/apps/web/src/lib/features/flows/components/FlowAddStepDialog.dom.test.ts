@@ -58,3 +58,21 @@ describe("FlowAddStepDialog keyboard flow", () => {
     expect(status.textContent?.trim()).not.toBe("");
   });
 });
+
+describe("FlowAddStepDialog document format", () => {
+  it("keeps the chosen format when it is clicked again", async () => {
+    renderDialog();
+    await fireEvent.click(
+      screen.getByRole("radio", { name: new RegExp(m.flow_template_document_name()) })
+    );
+    const format = screen.getByRole("group", { name: m.flow_add_step_format() });
+    const pdf = within(format).getByRole("radio", { name: "PDF" });
+
+    await fireEvent.click(pdf);
+    expect(pdf.getAttribute("aria-checked")).toBe("true");
+    // A second click on the chosen option used to clear the control while the
+    // dialog kept creating a PDF step.
+    await fireEvent.click(pdf);
+    expect(pdf.getAttribute("aria-checked")).toBe("true");
+  });
+});

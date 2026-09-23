@@ -493,10 +493,13 @@
         variant="outline"
         spacing={0}
         class="flex-wrap"
-        value={statusFilter ?? "all"}
-        onValueChange={(value) => {
-          if (value) statusFilter = value === "all" ? null : (value as FlowRunStatusFilter);
-        }}
+        bind:value={
+          () => statusFilter ?? "all",
+          (value) => {
+            // Clicking the chosen status again would clear it; one is always chosen.
+            if (value) statusFilter = value === "all" ? null : (value as FlowRunStatusFilter);
+          }
+        }
         aria-label={m.filter()}
       >
         <ToggleGroup.Item value="all" class="gap-1.5 px-3">

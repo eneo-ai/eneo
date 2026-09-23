@@ -111,6 +111,28 @@ function singleChoiceQuestion(): StructuredQuestion {
   };
 }
 
+describe("FlowAIBuilderQuestion option names", () => {
+  it("points every option name at ids that exist when options have no id", () => {
+    const question = singleChoiceQuestion();
+    question.options = [
+      { value: "one_pdf", label: "One PDF" },
+      { value: "two_pdfs", label: "Two PDFs, one per unit" }
+    ];
+    render(FlowAIBuilderQuestion, { question });
+
+    const radios = screen.getAllByRole("radio");
+    expect(radios).toHaveLength(2);
+    for (const radio of radios) {
+      for (const attribute of ["aria-labelledby", "aria-describedby"]) {
+        for (const id of (radio.getAttribute(attribute) ?? "").split(/\s+/).filter(Boolean)) {
+          expect(document.getElementById(id), `${attribute} -> ${id}`).not.toBeNull();
+        }
+      }
+    }
+    expect(screen.getByRole("radio", { name: /One PDF/ })).toBeTruthy();
+  });
+});
+
 describe("FlowAIBuilderQuestion single choice keyboard", () => {
   it("is one tab stop whose arrow keys move the selection", async () => {
     render(FlowAIBuilderQuestion, { question: singleChoiceQuestion() });

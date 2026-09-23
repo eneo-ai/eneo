@@ -207,10 +207,13 @@
             variant="outline"
             size="sm"
             spacing={0}
-            value={documentFormat}
-            onValueChange={(value) => {
-              if (value === "docx" || value === "pdf") documentFormatOverride = value;
-            }}
+            bind:value={
+              () => documentFormat,
+              (value) => {
+                // Clicking the chosen format again would clear it; one is always chosen.
+                if (value === "docx" || value === "pdf") documentFormatOverride = value;
+              }
+            }
             aria-label={m.flow_add_step_format()}
           >
             {#each DOCUMENT_FORMATS as option (option.value)}

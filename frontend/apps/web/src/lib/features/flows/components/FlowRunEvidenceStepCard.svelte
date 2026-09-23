@@ -176,7 +176,14 @@
     if (!element) return;
     void result.effective_prompt;
     void promptExpanded;
-    promptClipped = element.scrollHeight > element.clientHeight + 1;
+    const measure = () => (promptClipped = element.scrollHeight > element.clientHeight + 1);
+    measure();
+    // The card can reflow after this runs (a panel opening, the window
+    // narrowing), which grows the text past the cap; measure again then.
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
   });
   const hasResultFiles = $derived(resultFiles.length > 0);
   // A step whose answer broke its format stores that answer as one escaped

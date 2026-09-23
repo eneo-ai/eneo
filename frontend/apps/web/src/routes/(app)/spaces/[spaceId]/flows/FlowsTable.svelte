@@ -209,11 +209,14 @@
       <ToggleGroup.Root
         type="single"
         variant="outline"
-        value={filter}
         spacing={0}
-        onValueChange={(value) => {
-          if (value) filter = value as FlowListFilter;
-        }}
+        bind:value={
+          () => filter,
+          (value) => {
+            // Clicking the chosen option again would clear it; the filter always has one.
+            if (value) filter = value as FlowListFilter;
+          }
+        }
         aria-label={m.flow_list_filter_aria()}
       >
         {#each filters as option (option.value)}
