@@ -7,7 +7,6 @@
 -->
 <script lang="ts" generics="T extends TranscriptionModel | CompletionModel">
   import type { CompletionModel, TranscriptionModel } from "@eneo/eneo-js";
-  import { uid } from "uid";
   import { Ban, ChevronsUpDown } from "@lucide/svelte";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";
@@ -37,7 +36,7 @@
   );
 
   let open = $state(false);
-  const valueId = uid(8);
+  const valueId = $props.id();
   // Compose the accessible name so screen readers announce the *selected* model,
   // not only the field label a surface supplies via aria-labelledby.
   const labelledBy = $derived([aria["aria-labelledby"], valueId].filter(Boolean).join(" "));

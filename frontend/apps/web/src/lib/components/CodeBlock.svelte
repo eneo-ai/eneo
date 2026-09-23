@@ -8,7 +8,9 @@
   import bash from "highlight.js/lib/languages/bash";
   import yaml from "highlight.js/lib/languages/yaml";
   import sql from "highlight.js/lib/languages/sql";
+  import plaintext from "highlight.js/lib/languages/plaintext";
   import { IconCopy } from "@eneo/icons/copy";
+  import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
   import { m } from "$lib/paraglide/messages";
 
   hljs.registerLanguage("javascript", js);
@@ -19,6 +21,7 @@
   hljs.registerLanguage("bash", bash);
   hljs.registerLanguage("yaml", yaml);
   hljs.registerLanguage("sql", sql);
+  hljs.registerLanguage("plaintext", plaintext);
 
   export let source: string;
   /** The fence info string (```python), when the markdown provided one. */
@@ -26,7 +29,7 @@
   let cls = "";
   export { cls as class };
 
-  let showCopiedMessage = false;
+  const clipboard = createCopyState(1000);
 
   // A fenced language we know is highlighted as that language; anything else
   // falls back to detection among the common ones. Detection is also what
@@ -51,15 +54,9 @@
     type="button"
     aria-label={m.copy_to_clipboard()}
     class="border-stronger bg-secondary hover:bg-tertiary absolute top-2 right-2 flex gap-1 rounded-md border p-1 opacity-0 shadow group-hover:opacity-100 focus-visible:opacity-100"
-    on:click={() => {
-      navigator.clipboard.writeText(source);
-      showCopiedMessage = true;
-      setTimeout(() => {
-        showCopiedMessage = false;
-      }, 1000);
-    }}
+    on:click={() => clipboard.copy(source)}
     ><IconCopy></IconCopy>
-    <span class="text-base" aria-live="polite">{showCopiedMessage ? m.copied() : ""}</span></button
+    <span class="text-base" aria-live="polite">{clipboard.copied ? m.copied() : ""}</span></button
   >
 </div>
 

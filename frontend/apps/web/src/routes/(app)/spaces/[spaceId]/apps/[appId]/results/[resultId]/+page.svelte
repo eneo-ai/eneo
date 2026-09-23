@@ -23,6 +23,7 @@
   import { browser } from "$app/environment";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
   import { localizeHref } from "$lib/paraglide/runtime";
   import { untrack } from "svelte";
   dayjs.extend(utc);
@@ -78,10 +79,10 @@
     document.body.removeChild(printNode);
   }
 
+  const clipboard = createCopyState();
   function copyText(text?: string | null) {
     if (text) {
-      navigator.clipboard.writeText(text);
-      setTimeout(() => {}, 2000);
+      clipboard.copy(text);
     } else {
       toast.warning(m.no_copyable_output());
     }

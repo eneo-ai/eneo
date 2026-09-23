@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { IconSession } from "@eneo/icons/session";
+  import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
   import * as Chart from "$lib/components/chart/index.js";
   import { Info, BarChart3 } from "@lucide/svelte";
@@ -64,7 +64,7 @@
           filter = "sessions";
         }}
       >
-        <IconSession
+        <IconSpeechBubble
           class="h-4 w-4 transition-opacity duration-200
                            {filter === 'sessions'
             ? 'opacity-100'

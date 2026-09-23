@@ -21,7 +21,6 @@ import Def from "./Def.svelte";
 import Table from "./Table.svelte";
 import Link from "./Link.svelte";
 import Image from "./Image.svelte";
-import Html from "./Html.svelte";
 
 type TokenMap = {
   [K in MarkedToken["type"]]: Extract<MarkedToken, { type: K }>;
@@ -64,7 +63,7 @@ export const renderers: Renderers = {
   table: Table,
   link: Link,
   image: Image,
-  html: Html // We're not rendering any html tags
+  html: CodeSpan
 };
 
 export function isSupportedToken(token: { type: string }): token is SupportedToken {

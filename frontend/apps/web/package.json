@@ -47,15 +47,16 @@
     "@vitest/browser": "3.2.7",
     "@vitest/coverage-v8": "3.2.7",
     "bits-ui": "^2.18.1",
-    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dayjs": "^1.11.21",
+    "dompurify": "^3.4.11",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.2",
     "eslint-plugin-svelte": "^3.20.0",
     "echarts": "^5.6.0",
     "globals": "^16.5.0",
     "highlight.js": "^11.11.1",
+    "marked": "^15.0.8",
     "playwright": "1.61.1",
     "prettier": "^3.9.4",
     "prettier-plugin-svelte": "^4.1.1",
@@ -68,7 +69,6 @@
     "tailwindcss": "^4.3.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.62.1",
-    "uid": "^2.0.2",
     "vite": "^6.4.3",
     "vitest": "3.2.7",
     "vitest-browser-svelte": "^1.1.0"
@@ -77,9 +77,7 @@
     "@eneo/ui": "workspace:*",
     "@eneo/whats-new": "workspace:*",
     "@inlang/paraglide-js": "^2.20.2",
-    "dompurify": "^3.4.11",
     "driver.js": "^1.8.0",
-    "marked": "^15.0.8",
     "paneforge": "^1.0.2"
   }
 }

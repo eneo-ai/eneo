@@ -34,6 +34,7 @@
   import { fade, slide, scale } from "svelte/transition";
   import { onDestroy, untrack } from "svelte";
   import { getEneo } from "$lib/core/Eneo";
+  import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
   import { getLocale } from "$lib/paraglide/runtime";
   import AuditConfigTab from "./AuditConfigTab.svelte";
   import AccessJustificationForm from "./AccessJustificationForm.svelte";
@@ -129,6 +130,7 @@
 
   // Expandable row state
   const expandedRows = new SvelteSet<string>();
+  const clipboard = createCopyState();
   let copiedRowId = $state<string | null>(null);
 
   // Filter states
@@ -394,15 +396,7 @@
   }
 
   async function copyJsonToClipboard(json: Record<string, unknown>, logId: string) {
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(json, null, 2));
-      copiedRowId = logId;
-      setTimeout(() => {
-        copiedRowId = null;
-      }, 2000);
-    } catch (err) {
-      console.error("Failed to copy:", err);
-    }
+    if (await clipboard.copy(JSON.stringify(json, null, 2))) copiedRowId = logId;
   }
 
   async function applyFilters() {
@@ -1900,7 +1894,7 @@
                                       class="text-muted hover:bg-hover-default hover:text-default flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-all duration-150 hover:scale-105 active:scale-95"
                                       aria-label={m.audit_copy_json()}
                                     >
-                                      {#if copiedRowId === (log.id || index.toString())}
+                                      {#if clipboard.copied && copiedRowId === (log.id || index.toString())}
                                         <IconCheck
                                           class="h-3.5 w-3.5 text-green-600 dark:text-green-400"
                                         />
