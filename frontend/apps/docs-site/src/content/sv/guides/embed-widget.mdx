@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@f9b3485241ef
+translationSource: guides/embed-widget.mdx@0793cab42dbc
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -247,8 +247,9 @@ in i webbplatsen:
    inställningar (som skriptet läser från `/widget/settings/<widget-id>`) och
    `frame-src` för panelen, till exempel
    `script-src 'self' https://eneo.kommun.se; connect-src 'self' https://eneo.kommun.se; frame-src https://eneo.kommun.se`.
-   Utan `connect-src` visas knappen ändå, men med installationskodens attribut
-   i stället för widgetens sparade placering, språk och färger, och webbläsaren
+   Utan `connect-src` visas knappen ändå, men nere till höger, på sidans språk
+   och i Eneos standardfärg (eller som de valfria `data-*`-attributen anger) i
+   stället för widgetens sparade placering, språk och färger, och webbläsaren
    rapporterar ett CSP-brott. Chattens egna nätverksanrop sker inne i ramen från
    Eneos origin.
 4. **Information till besökare.** Widgeten sätter inga kakor på värdwebbplatsen.

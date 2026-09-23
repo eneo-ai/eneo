@@ -37,6 +37,12 @@ The key ideas:
   the assistant must enable it, and the user's role must hold the matching
   permission. If any gate is closed the tool is silently not offered to the
   model for that turn.
+- **Web widget visitors have no role.** For an assistant published as a web
+  widget, anonymous visitors get web search whenever the space and the
+  assistant enable it, through the tenant's default source when that is an
+  external search server. Removing the permission from every role does not stop
+  it. Visitors never get image generation. See
+  [What visitors can reach](/guides/embed-widget#what-visitors-can-reach).
 
 ```mermaid
 flowchart LR
@@ -340,7 +346,10 @@ when all of these hold:
    source) meets the space's classification;
 6. the completion model supports tool calling.
 
-Otherwise the function is silently unavailable for that turn. The conversation
+Otherwise the function is silently unavailable for that turn. For a
+[web widget visitor](/guides/embed-widget#what-visitors-can-reach), step 1 does
+not apply, step 2 always resolves to the tenant default, only an external web
+search source qualifies, and image generation never does. The conversation
 request carries purpose-based opt-outs (`disabled_capabilities`); ordinary
 server opt-outs stay in `disabled_mcp_server_ids`.
 
