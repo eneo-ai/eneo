@@ -136,6 +136,42 @@ The last observed stage and queue position, when available, are retained in
 `error.details.transcription_stage` and `transcription_queue_position` on
 transcription failures and step timeouts. A missing queue position is unknown.
 
+## Live transcription socket codes
+
+The live transcription WebSocket reports a failure as an event, not as an HTTP
+response, and closes the socket after it:
+
+```json
+{
+  "type": "error",
+  "code": "upstream_unavailable",
+  "message": "The transcription server could not be reached.",
+  "retryable": true
+}
+```
+
+Branch on `code`. When `retryable` is `true`, request a new ticket to continue
+the preview. The failure affects only the preview: the run transcribes the
+uploaded recording. See [Show live text while recording](/guides/flows/integrating-flows#show-live-text-while-recording).
+
+| `code` | When | `retryable` |
+| --- | --- | --- |
+| `idle_timeout` | No audio arrived within the idle timeout (default 300 seconds) | `false` |
+| `invalid_audio_frame` | A binary frame was empty, larger than 64 KiB, or had an odd number of bytes | `false` |
+| `invalid_message` | A text frame other than `{"type": "stop"}` arrived | `false` |
+| `duration_exceeded` | The audio passed the session's `max_seconds` | `false` |
+| `model_unavailable` | When the socket opened, the model was no longer usable for live transcription: switched off for live use, disabled, or on an inactive or misconfigured provider | `false` |
+| `upstream_unavailable` | Eneo could not reach the model server | `true` |
+| `upstream_timeout` | The model server stopped reading audio, or did not send the final text in time after `stop` | `true` |
+| `upstream_closed` | The model server closed the session | `true` |
+| `capacity_exceeded`, `falling_behind`, `model_loading` | The model server is full, behind, or still loading its model | `true` |
+| `internal_error` | The session failed unexpectedly | `false` |
+| Any other code | The model server reported an error of its own, passed through; `upstream_error` when it sent no code | `false` |
+
+A handshake that Eneo refuses sends no event: the upgrade request gets HTTP
+`403`. The ticket request itself fails with the HTTP codes in the catalog
+below, such as `flow_live_transcription_unavailable`.
+
 ## Catalog
 
 Run admission measures file metadata across all steps before loading file content, including files retained by per-source previews. Extracted text and inline input share the inline text ceiling; binary documents and audio use their respective upload ceilings. A null file-count policy resolves to `FLOW_INPUT_MAX_FILES_COUNT` (1,000). The aggregate count cannot exceed that ceiling or the sum of the step limits.
@@ -158,6 +194,7 @@ Structured output uses the inline byte ceiling for both single calls and mapped 
 | Run input              | `flow_input_required_field_empty`                        | Request path                  | Send a non-empty value that matches the field contract.                                                                                          |
 | Run input              | `flow_input_required_field_missing`                      | Request path                  | Read the form schema and send every required field before retrying.                                                                              |
 | Run input              | `flow_input_type_mismatch`                               | Request path                  | Send the field value using the type declared in the form schema.                                                                                 |
+| Run input              | `flow_live_transcription_unavailable`                    | Request path                  | Record without live preview and upload the file; the run transcribes it.                                                                         |
 | Run input              | `flow_run_aggregate_max_files_exceeded`                  | Request path                  | Reduce the total attached files before creating or rerunning the run.                                                                            |
 | Run input              | `flow_run_concurrency_limit_reached`                     | Request path                  | Back off and retry after another run reaches a terminal status.                                                                                  |
 | Run input              | `flow_run_file_not_accessible`                           | Request path                  | Upload the file through the same caller context or choose an accessible file.                                                                    |
@@ -170,6 +207,7 @@ Structured output uses the inline byte ceiling for both single calls and mapped 
 | Run input              | `flow_run_required_step_input_missing`                   | Request path                  | Read the run contract and attach files to every required runtime-input step.                                                                     |
 | Run input              | `flow_run_reserved_input_payload_key`                    | Request path                  | Rename caller-owned payload fields that collide with reserved keys.                                                                              |
 | Run input              | `flow_run_runtime_input_disabled`                        | Request path                  | Refetch the run contract and only attach files to compatible steps.                                                                              |
+| Run input              | `flow_run_speaker_labels_not_selectable`                 | Request path                  | Send speaker_labels only when the run contract marks speaker labels as selectable.                                                               |
 | Run input              | `flow_run_stale_version`                                 | Request path                  | Refetch the runtime contract and submit against the current version.                                                                             |
 | Run input              | `flow_run_step_input_file_too_large`                     | Request path                  | Check max file size in the run contract before upload or binding.                                                                                |
 | Run input              | `flow_run_step_input_max_files_exceeded`                 | Request path                  | Limit attached files per step to the contract max_files value.                                                                                   |

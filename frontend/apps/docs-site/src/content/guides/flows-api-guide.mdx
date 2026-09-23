@@ -75,6 +75,7 @@ That distinction matters because service keys and ordinary human members are int
 | `GET /graph/`                                             | Allowed for published/runtime-safe topology and own-run snapshots                                                                                          |
 | Runtime uploads and orphan upload cleanup                 | Allowed for published flows                                                                                                                                |
 | Run creation                                              | Allowed for published flows                                                                                                                                |
+| Live transcription sessions                               | Allowed for published flows                                                                                                                                |
 | List / get / cancel / redispatch runs                     | Own runs only                                                                                                                                              |
 | Rerun a completed step                                    | Own runs only                                                                                                                                              |
 | Review checkpoints: active, edit, approve, reject, resume | Own runs only, and the key needs `resource_permissions.flows = write`                                                                                      |
@@ -425,6 +426,7 @@ This endpoint is the canonical published runtime contract. It includes:
 - `steps_requiring_review` for human-review UI preparation
 - `aggregate_max_files`, which is the combined runtime-step file limit when the published flow can calculate one
 - `template_readiness` for document-assembly readiness, such as whether a DOCX template is fully configured
+- `transcription` for a flow that transcribes recorded audio: whether the app can show live text (`live`) and whether a run may choose speaker labels (`speaker_labels`). It is `null` for any other flow; see [Live text and speaker labels](/guides/flows/integrating-flows#live-text-and-speaker-labels)
 
 Example:
 
@@ -505,7 +507,11 @@ Response shape:
       "can_download": false,
       "message_code": null
     }
-  ]
+  ],
+  "transcription": {
+    "live": { "available": true, "reason": null },
+    "speaker_labels": { "selectable": true, "required": false, "default": true }
+  }
 }
 ```
 
@@ -598,11 +604,15 @@ flow rather than relying on file attachment order alone.
 
 If the flow is still a draft, the API will return `flow_not_published`.
 
+#### Choose speaker labels
+
+When the run contract's `transcription.speaker_labels.selectable` is `true`, the request may add `speaker_labels`: `true` or `false` sets whether this run's transcript labels speakers, and `null` or omitting it keeps the flow's own setting (`transcription.speaker_labels.default`). A `true` or `false` value for a flow whose contract does not offer the choice returns `422` with code `flow_run_speaker_labels_not_selectable`. Labelling speakers makes the run take longer. See [Choose speaker labels for a run](/guides/flows/integrating-flows#choose-speaker-labels-for-a-run).
+
 #### How `input_payload_json` maps to form fields
 
 If the run contract exposes `form_fields`, send those values inside `input_payload_json` using the published field names as keys. The backend validates the values against the published field type and required/optional settings.
 
-Reserved `input_payload_json` keys: `expected_flow_version`, `file_ids`, `step_inputs`, `transkribering`. These keys are owned by Flow run orchestration, so use different form field names and keep runtime file bindings in top-level `step_inputs`.
+Reserved `input_payload_json` keys: `expected_flow_version`, `file_ids`, `speaker_labels`, `step_inputs`, `transcript_regeneration`, `transkribering`. These keys are owned by Flow run orchestration, so use different form field names and keep runtime file bindings in top-level `step_inputs`.
 
 #### Why `Idempotency-Key` matters
 
@@ -616,8 +626,9 @@ This is especially useful for browser retries, webhook retries, and unreliable n
 #### Receiving terminal Flow webhooks
 
 There is no callback parameter on run creation. `FlowRunCreateRequest` accepts
-exactly `expected_flow_version`, `input_payload_json`, and `step_inputs`, and
-rejects anything else, so a client cannot register a URL for Eneo to call back.
+exactly `run_label`, `expected_flow_version`, `input_payload_json`,
+`step_inputs`, and `speaker_labels`, and rejects anything else, so a client
+cannot register a URL for Eneo to call back.
 Completion is discovered by polling the run.
 
 A push notification is instead something the **flow author** builds: a terminal
@@ -703,7 +714,7 @@ For an audio workflow that generates structured output or a DOCX artifact, the r
 
 Important non-goals for this pattern:
 
-- no live transcription streaming while the browser is still recording
+- no streaming audio into the run: live text while the browser records is a separate preview (see [Show live text while recording](/guides/flows/integrating-flows#show-live-text-while-recording)), and the run transcribes the uploaded file
 - no frontend chunk orchestration for oversized files
 - no separate browser-only retry protocol outside the shared `Idempotency-Key` contract
 
@@ -1564,7 +1575,7 @@ Use this table as the canonical quick-reference for runtime access decisions.
 | `GET /api/v1/flows/{id}/`                                     | Only with an admin or owner space role                       | Yes                                 | Read-only if visible by human policy | Yes                         | Yes                       |
 | Run contract / runtime-safe graph                             | Yes                                                          | Yes                                 | Yes                                  | Yes                         | Yes                       |
 | Runtime uploads / orphan cleanup                              | Own uploads for published Flows                              | Yes                                 | No                                   | Yes                         | Yes                       |
-| Create run                                                    | Yes                                                          | Yes                                 | No                                   | Yes                         | Yes                       |
+| Create run / start a live transcription session               | Yes                                                          | Yes                                 | No                                   | Yes                         | Yes                       |
 | List / get / cancel / redispatch / rerun runs                 | Own runs only                                                | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
 | Review checkpoints: active / edit / approve / reject / resume | Own runs only, `resource_permissions.flows = write` required | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
 | Step outputs / artifacts                                      | Own runs only                                                | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
@@ -1661,17 +1672,17 @@ For short capability answers and operational choices, see [Flows FAQ](/guides/fl
 | Status | What it means on the Flow runtime surface                                                                                                                                                                                             | What to do                                                                                                      |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `200`  | Success. Also returned by `cancel` on an already-terminal run, and by the active-checkpoint endpoint with a body of literal `null` when no checkpoint is open                                                                         | Read the response body; do not infer state from the status alone                                                |
-| `201`  | A run or a runtime file was created                                                                                                                                                                                                   | Keep the returned id                                                                                            |
+| `201`  | A run, a runtime file, or a live transcription session was created                                                                                                                                                                    | Keep the returned id. A live transcription session returns a ticket to use within 30 seconds                    |
 | `202`  | Resume and step rerun were accepted for asynchronous execution                                                                                                                                                                        | Poll the run; the work has not finished                                                                         |
 | `204`  | A runtime file or template file was deleted                                                                                                                                                                                           | No body to read                                                                                                 |
 | `400`  | The request shape, a state precondition, or the Flow contract is invalid. This is also where stale revisions and idempotency conflicts land                                                                                           | Read the Flow error `code` and follow its recovery. Reuse an idempotency key only for the request it belongs to |
 | `401`  | No credential (`authentication_error`) or an unusable one (`invalid_api_key`)                                                                                                                                                         | Fix the credential; do not retry the same key                                                                   |
 | `403`  | Scope, space permission, run ownership, or evidence policy refused the request, before the resource was resolved                                                                                                                      | Fix the principal or policy. A `403` does not tell you whether the resource exists                              |
-| `409`  | Only four endpoints use it: deleting an attached runtime file (`flow_runtime_file_attached`), redispatch (`flow_run_redispatch_conflict`), deleting a template in use (`flow_template_in_use`), and the operator audit-outbox redrive | Reload the resource and retry. Stale runs and checkpoints use `400`, not `409`                                  |
+| `409`  | The request conflicts with current state, for example deleting an attached runtime file (`flow_runtime_file_attached`), redispatch (`flow_run_redispatch_conflict`), deleting a template in use (`flow_template_in_use`), the operator audit-outbox redrive, or starting live text for a flow that cannot offer it (`flow_live_transcription_unavailable`) | Reload the resource and retry. Stale runs and checkpoints use `400`, not `409`. For `flow_live_transcription_unavailable`, record without live text |
 | `410`  | The artifact's bytes were purged by retention; only its metadata remains                                                                                                                                                              | Show the file as unavailable. `availability` already said `content_purged`                                      |
 | `413`  | An upload exceeded the step's `max_file_size_bytes`, or an evidence export exceeded its bound                                                                                                                                         | Read the effective limit from the run contract; page `provider-calls/` instead of exporting                     |
 | `415`  | An upload's declared or sniffed `Content-Type` is not in the step's `accepted_mimetypes`                                                                                                                                              | Set the part's `Content-Type` from the run contract                                                             |
-| `422`  | FastAPI request validation rejected the payload shape before Flow logic ran                                                                                                                                                           | Fix the request body against the schema                                                                         |
+| `422`  | FastAPI request validation rejected the payload shape before Flow logic ran, or a run chose speaker labels that its run contract does not offer (`flow_run_speaker_labels_not_selectable`)                                            | Fix the request body against the schema. Send `speaker_labels` only when the run contract marks speaker labels as selectable |
 | `429`  | The tenant already has the maximum number of active runs                                                                                                                                                                              | Honor `Retry-After` (60 seconds), poll existing runs, then resubmit                                             |
 | `503`  | An evidence, provider-call, or redispatch dependency was unavailable                                                                                                                                                                  | Retry with backoff                                                                                              |
 

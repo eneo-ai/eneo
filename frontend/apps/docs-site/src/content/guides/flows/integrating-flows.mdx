@@ -94,7 +94,7 @@ The full state map, including review-checkpoint and rerun-operation states, is o
 
 ### How to wait for a run
 
-Polling is the only mechanism a caller controls for observing run status, because there is no client-registered subscription, server-sent events stream, or WebSocket. A flow author can design a terminal step that delivers its result over outbound HTTP, and that does signal successful completion to whatever receiver they configured, but it is not something the caller registers and it does not report failure or review states. A workable cadence:
+Polling is the only mechanism a caller controls for observing run status, because there is no client-registered subscription, server-sent events stream, or run-status WebSocket. A flow author can design a terminal step that delivers its result over outbound HTTP, and that does signal successful completion to whatever receiver they configured, but it is not something the caller registers and it does not report failure or review states. A workable cadence:
 
 - poll `GET /api/v1/flows/{id}/runs/{run_id}/status/` every **2 seconds** for the first 30 seconds, then every **5 seconds**, then every **15 seconds** after two minutes
 - stop as soon as `should_poll` is false for the current status, meaning the run is `completed`, `failed`, or `cancelled`
@@ -113,6 +113,7 @@ Use this table to choose the right runtime journey before you read the detailed 
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Quickstart                          | Discover the contract, create a run with idempotency, poll status, then read the final result.                            | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                 |
 | Files                               | Upload files before run creation and bind returned ids to the step that consumes them.                                    | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                 |
+| Live text and speaker labels        | Show text while someone records, and let a run choose speaker labels.                                                     | `POST /api/v1/flows/{id}/steps/{step_id}/live-transcription-sessions/` (`create_flow_live_transcription_session`) |
 | Evidence and provider usage         | Inspect run evidence, page every provider-call lifecycle row, and export a verified evidence bundle.                      | `GET /api/v1/flows/{id}/runs/{run_id}/evidence/` (`get_flow_run_evidence`)                                       |
 | Human-in-the-loop pause and resume  | Runs pause only at review-marked steps and resume through review checkpoint endpoints.                                    | `GET /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/` (`get_active_flow_run_review_checkpoint`)      |
 | Sending files mid-run               | Eneo Flows does not accept arbitrary file injection while a run is executing.                                             | `PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` (`edit_flow_run_review_checkpoint`) |
@@ -231,9 +232,15 @@ Response:
       "can_download": false,
       "message_code": null
     }
-  ]
+  ],
+  "transcription": {
+    "live": { "available": true, "reason": null },
+    "speaker_labels": { "selectable": true, "required": false, "default": true }
+  }
 }
 ```
+
+`transcription` describes the audio options for a flow that transcribes recorded audio, and is `null` for any other flow. See [Live text and speaker labels](#live-text-and-speaker-labels).
 
 ### 2. Upload runtime file
 
@@ -1159,6 +1166,111 @@ Common errors in this sequence: `flow_run_access_denied`, `flow_run_evidence_for
 
 Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
+## Live text and speaker labels
+
+A flow that transcribes recorded audio reports two options in the run contract's `transcription` object: whether your app can show live text while someone records, and whether a run may choose speaker labels. For any other flow, `transcription` is `null`.
+
+| Field                       | Meaning                                                                                                                                                                                                                                                                           |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live.available`            | The flow's audio step can show live text while someone records                                                                                                                                                                                                                    |
+| `live.reason`               | `null` when live text is available. Otherwise `transcription_disabled` (the flow does not transcribe audio), `transcription_service_mode` (an external transcription service transcribes with its own model), `model_unavailable` (the flow's transcription model is not available in its space), or `model_not_realtime` (the model does not support live transcription) |
+| `speaker_labels.selectable` | A run may choose speaker labels with `speaker_labels`. It is `false` when no transcription service labels speakers, or when the flow requires labels                                                                                                                             |
+| `speaker_labels.required`   | The flow needs speaker labels, because a step maps speakers to names                                                                                                                                                                                                              |
+| `speaker_labels.default`    | The flow's own setting, which applies when a run makes no choice                                                                                                                                                                                                                  |
+
+### Choose speaker labels for a run
+
+When `transcription.speaker_labels.selectable` is `true`, your app can let the user decide whether the run's transcript labels speakers.
+
+1. Show the choice, preset from `transcription.speaker_labels.default`.
+2. Send the choice as `speaker_labels` (`true` or `false`) in the create-run body, next to `expected_flow_version`, `input_payload_json`, and `step_inputs`:
+
+   ```json
+   {
+     "expected_flow_version": 3,
+     "step_inputs": {
+       "00000000-0000-0000-0000-000000000101": {
+         "file_ids": ["00000000-0000-0000-0000-000000000701"]
+       }
+     },
+     "speaker_labels": false
+   }
+   ```
+
+   To use the flow's own setting, omit `speaker_labels` or send `null`.
+
+3. Check the run: `GET /api/v1/flows/{id}/graph/?run_id={run_id}` marks the audio step's node with `"speaker_identification": true` only when the run labels speakers.
+
+When `selectable` is `false`, do not send `true` or `false`: Eneo refuses the request with `422` and code `flow_run_speaker_labels_not_selectable`. Labelling speakers makes the run take longer. A retry of a failed run and a transcript regeneration keep the run's choice. `speaker_labels` belongs at the top level of the request; inside `input_payload_json` it is a reserved key.
+
+### Show live text while recording
+
+Live text is a preview. It never becomes the run's transcript, and Eneo keeps no audio or text from the session. Record the audio in your app as usual. When the recording ends, upload it and create the run; the flow's transcription model then transcribes the uploaded file.
+
+Before you start, read `transcription.live.available` from the run contract. When it is `false`, record without live text. Requesting a ticket needs the same access as creating a run, and a service key can request one for a published flow.
+
+1. **Request a ticket** when the recording starts:
+
+   ```text
+   POST /api/v1/flows/{id}/steps/{step_id}/live-transcription-sessions/
+   ```
+
+   `{step_id}` is the audio step from `steps_requiring_input`. The request has no body. The response is `201 Created`:
+
+   ```json
+   {
+     "ticket": "Pq0cX5WnU1kz0dY8Gm7wQ2vJ4hR9sT3bA6eL1fN8xC0",
+     "websocket_path": "/api/v1/live-transcription",
+     "subprotocol": "eneo-live.v1",
+     "expires_at": "2026-09-23T10:15:30Z",
+     "sample_rate": 16000,
+     "max_seconds": 18000,
+     "model": {
+       "id": "7d0c7a8e-8b4c-4c1e-9d3e-2f4b6a1c9e10",
+       "name": "Pianissimo"
+     }
+   }
+   ```
+
+2. **Open the WebSocket within 30 seconds.** Connect to `websocket_path` on the API host, with `wss://` when the API uses HTTPS, and offer two subprotocols: `eneo-live.v1` and `ticket.<ticket>`. A ticket opens one socket only.
+3. **Wait for `ready`.** Then send the recording as binary frames of mono 16-bit little-endian PCM at 16 kHz. Each frame holds 2 bytes to 64 KiB, an even number of bytes. Keep sending for as long as the recording runs, silence included.
+4. **Show the text.** Append the `text` of each `transcript.delta` event to the preview.
+5. **Stop.** When the recording ends, send the text frame `{"type": "stop"}`. Eneo answers with `transcript.done`, which carries the full preview text, and closes the socket.
+6. **Upload and run.** Upload the recording to the audio step and create the run, as in the [worked example](#worked-end-to-end-example).
+
+The session works when the socket sends `ready` after it opens. If the socket sends `error` instead, its `code` says why.
+
+#### Socket messages
+
+| Direction   | Frame                                                                           | Meaning                                                                                                     |
+| ----------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| App to Eneo | Binary                                                                          | Audio: mono 16-bit little-endian PCM at 16 kHz, 2 bytes to 64 KiB per frame                                 |
+| App to Eneo | `{"type": "stop"}`                                                              | The recording has ended. Any other text frame ends the session with `invalid_message`                      |
+| Eneo to app | `{"type": "ready", "sample_rate": 16000, "max_seconds": 18000}`                 | Eneo has connected to the model server. Start sending audio                                                 |
+| Eneo to app | `{"type": "transcript.delta", "text": " världen"}`                              | Text to append to the preview                                                                               |
+| Eneo to app | `{"type": "transcript.done", "text": "Hej världen"}`                            | The full preview text after `stop`. The socket then closes                                                  |
+| Eneo to app | `{"type": "error", "code": "idle_timeout", "message": "...", "retryable": false}` | The session has ended. The socket then closes                                                               |
+
+`message` is for people; branch on `code`. When `retryable` is `true`, request a new ticket to continue the preview; the recording itself is unaffected. Every code is listed in [Live transcription socket codes](/guides/flows/reference/errors#live-transcription-socket-codes).
+
+#### Limits and refusals
+
+- A session accepts at most `max_seconds` of audio, the deployment's audio duration limit, and then ends with `duration_exceeded`.
+- With the default settings, a session that receives no audio for 300 seconds ends with `idle_timeout`, and after `stop` Eneo waits up to 60 seconds for the final text before it ends the session with `upstream_timeout`.
+- Eneo refuses the WebSocket handshake with HTTP `403` when a subprotocol is missing, when the ticket is unknown, used, or expired, or when the page's origin is not allowed. A refused handshake sends no event.
+
+The ticket request answers `400 flow_not_published` for an unpublished flow (`404` for a service key), `400 flow_run_unknown_step_input` when the step does not take audio, `403` when the caller may not run the flow, and `409 flow_live_transcription_unavailable` when live text is not available. The `409` response carries one of the `live.reason` values in `context.reason`.
+
+#### Relay the socket through your backend
+
+Service keys and module tokens must stay on your server, and the socket accepts a browser page only when the page is served from the API's own host or from an origin the operator allows. An app that calls Eneo with server-side credentials therefore relays the socket through its own backend:
+
+1. The browser streams the audio frames to your backend over a WebSocket of your own.
+2. Your backend requests the ticket and opens the Eneo socket. A server-side client that sends no `Origin` header is accepted.
+3. Your backend forwards audio frames to Eneo and events back to the browser.
+
+The relay works when the browser receives `ready` through your backend. A module requests the ticket with its `sk_` key and the user's module token; see [Call Flows as the signed-in user](/docs/module-authentication#call-flows-as-the-signed-in-user).
+
 ## A complete minimal client
 
 The two listings below are the same journey twice: once as copy-pasteable `curl`, once as a self-contained TypeScript module. Both cover discovery, upload, create, poll, review, resume, and download. Neither needs a library.
@@ -1714,7 +1826,7 @@ Conversation history, Flow AI Builder sessions, and audit logs have separate ret
 
 These are product limits, not documentation gaps. Design around them rather than looking for an endpoint that does not exist.
 
-- **No client-registered run-status subscription.** No webhook you can register, no server-sent events, no WebSocket. Polling is the contract for a client. A flow author can separately configure a terminal step to POST its result to a destination, but that is designed into the flow, not requested by the caller.
+- **No client-registered run-status subscription.** No webhook you can register, no server-sent events, no run-status WebSocket. Polling is the contract for a client. The live transcription WebSocket carries preview text only, never run status. A flow author can separately configure a terminal step to POST its result to a destination, but that is designed into the flow, not requested by the caller.
 - **No resumable or chunked upload.** A runtime file is one `multipart/form-data` request. A failed upload restarts from the beginning, which is why the run contract publishes an upload timeout budget scaled to file size.
 - **No global machine-readable catalogue of accepted media types.** The accepted list is per flow and per step, and `GET /api/v1/flows/{id}/run-contract/` is the only authoritative source. Do not hardcode one.
 - **No rate-limit introspection.** Nothing reports an API key's remaining hourly quota; you discover exhaustion from a `429`.
