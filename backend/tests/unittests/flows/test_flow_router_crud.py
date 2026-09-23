@@ -930,9 +930,8 @@ async def test_list_flows_allows_service_key_principals_for_published_discovery(
     assert result["has_more"] is False
     assert result["items"][0].id == visible_flow.id
     flow_service.list_flows.assert_awaited_once_with(
-        space_id=space_id,
-        sparse=True,
-        published_only=True,
+        space_ids=[space_id],
+        draft_space_ids=[],
         limit=51,
         offset=0,
     )
@@ -967,9 +966,8 @@ async def test_list_flows_requests_published_only_for_non_editors(monkeypatch):
     assert len(result["items"]) == 1
     assert result["items"][0].id == visible_flow.id
     flow_service.list_flows.assert_awaited_once_with(
-        space_id=space_id,
-        sparse=True,
-        published_only=True,
+        space_ids=[space_id],
+        draft_space_ids=[],
         limit=51,
         offset=0,
     )
@@ -1151,9 +1149,8 @@ async def test_list_flows_requests_all_flows_for_editors(monkeypatch):
     )
 
     flow_service.list_flows.assert_awaited_once_with(
-        space_id=space_id,
-        sparse=True,
-        published_only=False,
+        space_ids=[space_id],
+        draft_space_ids=[space_id],
         limit=51,
         offset=0,
     )

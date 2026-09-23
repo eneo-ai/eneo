@@ -1217,7 +1217,7 @@ async def test_flow_repository_sparse_list_derives_step_projection_in_one_batche
     assistant_factory,
     admin_user,
 ):
-    """`get_sparse_by_space` must derive step_count/input_type/output_type for
+    """`get_sparse_by_spaces` must derive step_count/input_type/output_type for
     every row from one batched steps query, not one query per flow, and each
     row's values must match its own `FlowSteps` configuration. (This test
     proves the repository's batching and per-flow wiring on real Postgres.
@@ -1322,9 +1322,10 @@ async def test_flow_repository_sparse_list_derives_step_projection_in_one_batche
         sync_bind = session.sync_session.get_bind()
         sa.event.listen(sync_bind, "before_cursor_execute", count_selects)
         try:
-            rows = await repo.get_sparse_by_space(
-                space_id=space.id,
+            rows = await repo.get_sparse_by_spaces(
                 tenant_id=admin_user.tenant_id,
+                space_ids=[space.id],
+                draft_space_ids=[space.id],
             )
         finally:
             sa.event.remove(sync_bind, "before_cursor_execute", count_selects)
@@ -1351,24 +1352,13 @@ async def test_flow_repository_sparse_list_derives_step_projection_in_one_batche
         assert by_id[single_json_step_flow.id].input_type is None
         assert by_id[single_json_step_flow.id].output_type == FlowOutputType.JSON
 
-        # All three repository read paths must agree on the same flow's
-        # projection, since only `get_sparse_by_space`'s steps query changed
-        # shape — `get` and `get_by_space` already loaded full step rows.
+        # Both repository read paths must agree on the same flow's projection,
+        # since the sparse steps query reads only the runtime-input subfield
+        # while `get` loads full step rows.
         full_flow = await repo.get(audio_to_pdf_flow.id, admin_user.tenant_id)
         assert full_flow.step_count == 2
         assert full_flow.input_type == FlowRuntimeInputFormat.AUDIO
         assert full_flow.output_type == FlowOutputType.PDF
-
-        paged_flows = await repo.get_by_space(space.id, admin_user.tenant_id)
-        paged_by_id = {flow.id: flow for flow in paged_flows}
-        assert paged_by_id[audio_to_pdf_flow.id].step_count == 2
-        assert (
-            paged_by_id[audio_to_pdf_flow.id].input_type == FlowRuntimeInputFormat.AUDIO
-        )
-        assert paged_by_id[audio_to_pdf_flow.id].output_type == FlowOutputType.PDF
-        assert paged_by_id[single_json_step_flow.id].step_count == 1
-        assert paged_by_id[single_json_step_flow.id].input_type is None
-        assert paged_by_id[single_json_step_flow.id].output_type == FlowOutputType.JSON
 
 
 @pytest.mark.asyncio

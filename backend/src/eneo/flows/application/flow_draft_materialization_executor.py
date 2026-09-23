@@ -578,7 +578,9 @@ async def _deduplicate_flow_name(
     desired_name: str,
 ) -> str:
     desired_name = normalize_flow_name(desired_name)
-    existing_flows = await flow_service.list_flows(space_id=space_id, sparse=True)
+    existing_flows = await flow_service.list_flows(
+        space_ids=[space_id], draft_space_ids=[space_id]
+    )
     existing_names = {flow.name for flow in existing_flows}
 
     if desired_name not in existing_names:

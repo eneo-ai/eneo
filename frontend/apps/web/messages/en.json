@@ -5425,6 +5425,7 @@
   "flow_error_flow_review_policy_invalid": "This flow pauses for review, but the review setting is invalid. Ask a flow editor to set up review on a step that runs and publish again.",
   "flow_error_flow_service_key_admin_required": "Service keys need an administrator role to read draft definitions. Use the published Flow runtime endpoint for published flows.",
   "flow_error_flow_service_key_principal_not_supported": "This Flow endpoint requires a user principal. Service keys cannot use this action.",
+  "flow_error_flow_service_key_space_id_required": "Service keys must name the space to list flows from with space_id.",
   "flow_error_flow_runtime_actor_invalid": "The run cannot continue because the account it runs as is not valid. Ask an administrator to check the service key or the owner's permissions.",
   "flow_error_flow_service_principal_disabled": "The account this run runs as is disabled. Enable it or choose another owner before retrying.",
   "flow_error_flow_step_attempt_start_failed": "The next step could not start. Retry the run; contact support with the run ID if it keeps failing.",

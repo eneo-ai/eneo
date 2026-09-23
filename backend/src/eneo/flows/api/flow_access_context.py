@@ -230,10 +230,36 @@ async def resolve_space_access_context(
     )
 
 
+async def resolve_member_flow_spaces(
+    request: Request,
+    container: Container,
+) -> dict[UUID, SpaceActor]:
+    """The spaces a user may list flows in without naming one.
+
+    Every space the user belongs to where they may read flows, narrowed to the
+    request's credential: a module key scoped to one space lists that space
+    only, although the human behind it belongs to more.
+    """
+    scope_filter = get_scope_filter(request)
+    _ensure_flow_scope_type_allowed(
+        scope_filter,
+        scope_mismatch_message="API key scope does not permit flow access.",
+    )
+    _ensure_required_flow_action(container.user(), required_access=FlowApiAction.VIEW)
+    return {
+        actor.space.id: actor
+        for actor in await container.space_service().get_member_space_actors()
+        if actor.space.id is not None
+        and (scope_filter.space_id is None or scope_filter.space_id == actor.space.id)
+        and actor.can_read_flows()
+    }
+
+
 __all__ = [
     "FlowAccessContext",
     "FlowSpaceAccessContext",
     "enforce_flow_scope",
     "resolve_flow_access_context",
+    "resolve_member_flow_spaces",
     "resolve_space_access_context",
 ]

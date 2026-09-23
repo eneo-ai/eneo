@@ -41,8 +41,10 @@ async def install_module(
     admin_token: str,
     module_key: str,
     resource_permissions: dict[str, str] | None = None,
+    space_id: UUID | None = None,
 ) -> str:
-    """Give the module a fresh tenant-wide service key; returns the key's secret."""
+    """Give the module a fresh service key, tenant-wide unless `space_id` scopes
+    it to one space; returns the key's secret."""
     body: dict[str, object] = {
         "name": f"module-key-{uuid4().hex[:8]}",
         "key_type": ApiKeyType.SK.value,
@@ -51,6 +53,8 @@ async def install_module(
         "scope_type": ApiKeyScopeType.TENANT.value,
         "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
     }
+    if space_id is not None:
+        body |= {"scope_type": ApiKeyScopeType.SPACE.value, "scope_id": str(space_id)}
     if resource_permissions is not None:
         body["resource_permissions"] = resource_permissions
     admin_headers = {"Authorization": f"Bearer {admin_token}"}

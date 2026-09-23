@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, TypeVar
@@ -183,6 +183,7 @@ class FlowRepository:
             int | None,
             str | None,
             int | None,
+            str,
         ]
     ]:
         return (
@@ -198,6 +199,7 @@ class FlowRepository:
                 Spaces.flow_run_history_retention_days.label("retention_space_days"),
                 Flows.flow_run_history_retention_mode.label("retention_flow_mode"),
                 Flows.flow_run_history_retention_days.label("retention_flow_days"),
+                Spaces.name.label("space_name"),
             )
             .join(
                 Spaces,
@@ -339,6 +341,7 @@ class FlowRepository:
             space_days,
             flow_mode,
             flow_days,
+            space_name,
         ) = row
         steps = await self._get_flow_steps(flow_id=flow_id, tenant_id=tenant_id)
         sparse_fields = {
@@ -347,6 +350,7 @@ class FlowRepository:
                 output_types=[step.output_type for step in steps],
                 input_configs=[step.input_config for step in steps],
             ),
+            "space_name": space_name,
         }
         return _attach_run_history_retention(
             Flow(
@@ -402,98 +406,33 @@ class FlowRepository:
             raise NotFoundException("Flow not found.")
         return row.published_version
 
-    async def get_by_space(
+    async def get_sparse_by_spaces(
         self,
-        space_id: UUID,
-        tenant_id: UUID,
         *,
-        published_only: bool = False,
-        limit: int | None = None,
-        offset: int | None = None,
-    ) -> list[Flow]:
-        stmt = (
-            self._select_flows_with_run_history_retention()
-            .where(Flows.space_id == space_id)
-            .where(Flows.tenant_id == tenant_id)
-            .where(Flows.deleted_at.is_(None))
-            .order_by(Flows.created_at.asc())
-        )
-        if published_only:
-            stmt = stmt.where(Flows.published_version.is_not(None))
-        if offset is not None:
-            stmt = stmt.offset(offset)
-        if limit is not None:
-            stmt = stmt.limit(limit)
-        flow_rows = (await self.session.execute(stmt)).all()
-        if not flow_rows:
-            return []
-
-        flow_ids = [row[0].id for row in flow_rows]
-        steps_rows = (
-            (
-                await self.session.execute(
-                    sa.select(FlowSteps)
-                    .where(FlowSteps.flow_id.in_(flow_ids))
-                    .where(FlowSteps.tenant_id == tenant_id)
-                    .order_by(FlowSteps.flow_id.asc(), FlowSteps.step_order.asc())
-                )
-            )
-            .scalars()
-            .all()
-        )
-        steps_by_flow: dict[UUID, list[FlowSteps]] = defaultdict(list)
-        for row in steps_rows:
-            steps_by_flow[row.flow_id].append(row)
-
-        return [
-            _attach_run_history_retention(
-                Flow(
-                    **{
-                        **FlowSparse.model_validate(row[0]).model_dump(),
-                        **_derived_step_projection(
-                            output_types=[
-                                step.output_type
-                                for step in steps_by_flow.get(row[0].id, [])
-                            ],
-                            input_configs=[
-                                step.input_config
-                                for step in steps_by_flow.get(row[0].id, [])
-                            ],
-                        ),
-                    },
-                    steps=[
-                        FlowStep.model_validate(step)
-                        for step in steps_by_flow.get(row[0].id, [])
-                    ],
-                ),
-                organization_mode=row[1],
-                organization_days=row[2],
-                space_mode=row[3],
-                space_days=row[4],
-                flow_mode=row[5],
-                flow_days=row[6],
-            )
-            for row in flow_rows
-        ]
-
-    async def get_sparse_by_space(
-        self,
-        space_id: UUID,
         tenant_id: UUID,
-        *,
-        published_only: bool = False,
+        space_ids: Collection[UUID],
+        draft_space_ids: Collection[UUID],
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[FlowSparse]:
+        """Published flows in `space_ids` and drafts in `draft_space_ids`.
+
+        Visibility is part of the query, so offset and limit page over visible
+        flows only, and the id breaks created_at ties so pages never overlap.
+        """
         stmt = (
             self._select_flows_with_run_history_retention()
-            .where(Flows.space_id == space_id)
+            .where(Flows.space_id.in_(space_ids))
+            .where(
+                sa.or_(
+                    Flows.published_version.is_not(None),
+                    Flows.space_id.in_(draft_space_ids),
+                )
+            )
             .where(Flows.tenant_id == tenant_id)
             .where(Flows.deleted_at.is_(None))
-            .order_by(Flows.created_at.asc())
+            .order_by(Flows.created_at.asc(), Flows.id.asc())
         )
-        if published_only:
-            stmt = stmt.where(Flows.published_version.is_not(None))
         if offset is not None:
             stmt = stmt.offset(offset)
         if limit is not None:
@@ -533,20 +472,23 @@ class FlowRepository:
         return [
             _attach_run_history_retention(
                 FlowSparse.model_validate(row[0]).model_copy(
-                    update=_derived_step_projection(
-                        output_types=[
-                            output_type
-                            for output_type, _ in step_columns_by_flow.get(
-                                row[0].id, []
-                            )
-                        ],
-                        input_configs=[
-                            input_config
-                            for _, input_config in step_columns_by_flow.get(
-                                row[0].id, []
-                            )
-                        ],
-                    )
+                    update={
+                        **_derived_step_projection(
+                            output_types=[
+                                output_type
+                                for output_type, _ in step_columns_by_flow.get(
+                                    row[0].id, []
+                                )
+                            ],
+                            input_configs=[
+                                input_config
+                                for _, input_config in step_columns_by_flow.get(
+                                    row[0].id, []
+                                )
+                            ],
+                        ),
+                        "space_name": row.space_name,
+                    }
                 ),
                 organization_mode=row[1],
                 organization_days=row[2],

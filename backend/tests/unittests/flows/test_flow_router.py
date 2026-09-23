@@ -61,6 +61,7 @@ def _flow(flow_id):
         id=flow_id,
         tenant_id=uuid4(),
         space_id=uuid4(),
+        space_name="Space",
         name="Flow",
         description=None,
         created_by_user_id=uuid4(),

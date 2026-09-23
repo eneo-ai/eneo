@@ -5425,6 +5425,7 @@
   "flow_error_flow_review_policy_invalid": "Flödet pausar för granskning, men granskningsinställningen är ogiltig. Be en flödesredigerare ställa in granskningen på ett steg som körs och publicera igen.",
   "flow_error_flow_service_key_admin_required": "Tjänstenycklar (service-key) kräver rollen administratör för att läsa utkastdefinitioner. Använd runtime-endpointen för publicerade flöden.",
   "flow_error_flow_service_key_principal_not_supported": "Den här flödesändpunkten kräver en användarprincipal. Tjänstenycklar (service-key) kan inte utföra denna åtgärd.",
+  "flow_error_flow_service_key_space_id_required": "Tjänstenycklar (service-key) måste ange vilken yta flödena ska listas från med space_id.",
   "flow_error_flow_runtime_actor_invalid": "Körningen kan inte fortsätta eftersom kontot den körs som inte är giltigt. Be en administratör kontrollera tjänstenyckeln eller ägarens behörighet.",
   "flow_error_flow_service_principal_disabled": "Kontot som körningen körs som är inaktiverat. Aktivera kontot eller välj en annan ägare innan du försöker igen.",
   "flow_error_flow_step_attempt_start_failed": "Nästa steg kunde inte starta. Försök köra igen, eller kontakta support med körnings-ID om felet återkommer.",

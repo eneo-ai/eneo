@@ -13,6 +13,7 @@ class FlowApiErrorCode(str, Enum):
     OWNER_REQUIRED = "flow_owner_required"
     SERVICE_KEY_ADMIN_REQUIRED = "flow_service_key_admin_required"
     SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED = "flow_service_key_principal_not_supported"
+    SERVICE_KEY_SPACE_ID_REQUIRED = "flow_service_key_space_id_required"
     RUN_INVALID_IDEMPOTENCY_KEY = "flow_run_invalid_idempotency_key"
     RUN_STALE_VERSION = "flow_run_stale_version"
     RUN_RETRY_SOURCE_NOT_FAILED = "flow_run_retry_source_not_failed"

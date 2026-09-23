@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -329,23 +330,23 @@ class _FlowRepositoryDouble:
         self._assert_tenant(tenant_id)
         return self.flows[flow_id].model_copy(deep=True)
 
-    async def get_sparse_by_space(
+    async def get_sparse_by_spaces(
         self,
         *,
-        space_id: UUID,
         tenant_id: UUID,
-        published_only: bool,
+        space_ids: Collection[UUID],
+        draft_space_ids: Collection[UUID],
         limit: int | None,
         offset: int | None,
     ) -> list[Flow]:
         self._assert_tenant(tenant_id)
-        assert published_only is False
+        assert set(draft_space_ids) == set(space_ids)
         assert limit is None
         assert offset is None
         return [
             flow.model_copy(deep=True)
             for flow in self.flows.values()
-            if flow.space_id == space_id
+            if flow.space_id in space_ids
         ]
 
     async def update(

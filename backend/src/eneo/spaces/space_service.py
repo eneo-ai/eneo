@@ -54,6 +54,7 @@ from eneo.users.user_repo import UsersRepository
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager
+    from eneo.actors.actors.space_actor import SpaceActor
     from eneo.apps import App
     from eneo.assistants.assistant import Assistant
     from eneo.completion_models.domain.completion_model import CompletionModel
@@ -287,6 +288,15 @@ class SpaceService:
                 },
             )
         return projection
+
+    async def get_member_space_actors(self) -> list["SpaceActor"]:
+        """Actors for the readable spaces among those the user belongs to,
+        built from membership facts instead of loading each space."""
+        actors = [
+            self.actor_manager.get_space_actor(access)
+            for access in await self.repo.get_member_access_facts()
+        ]
+        return [actor for actor in actors if actor.can_read_space()]
 
     async def _validate_capability_markers(
         self,

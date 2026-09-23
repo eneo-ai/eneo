@@ -240,52 +240,26 @@ async def test_template_file_reference_requires_persisted_flow_id(user) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_flows_passes_published_only_to_sparse_repo_path(user):
+async def test_list_flows_passes_space_visibility_to_the_tenant_repo_path(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
-    flow_repo.get_sparse_by_space.return_value = []
+    flow_repo.get_sparse_by_spaces.return_value = []
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
-    space_id = uuid4()
+    space_ids = [uuid4(), uuid4()]
 
     await service.list_flows(
-        space_id=space_id,
-        sparse=True,
-        published_only=True,
+        space_ids=space_ids,
+        draft_space_ids=space_ids[:1],
         limit=25,
         offset=10,
     )
 
-    flow_repo.get_sparse_by_space.assert_awaited_once_with(
-        space_id=space_id,
+    flow_repo.get_sparse_by_spaces.assert_awaited_once_with(
         tenant_id=user.tenant_id,
-        published_only=True,
+        space_ids=space_ids,
+        draft_space_ids=space_ids[:1],
         limit=25,
         offset=10,
-    )
-
-
-@pytest.mark.asyncio
-async def test_list_flows_passes_published_only_to_full_repo_path(user):
-    flow_repo = AsyncMock()
-    version_repo = AsyncMock()
-    flow_repo.get_by_space.return_value = []
-    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
-    space_id = uuid4()
-
-    await service.list_flows(
-        space_id=space_id,
-        sparse=False,
-        published_only=True,
-        limit=5,
-        offset=0,
-    )
-
-    flow_repo.get_by_space.assert_awaited_once_with(
-        space_id=space_id,
-        tenant_id=user.tenant_id,
-        published_only=True,
-        limit=5,
-        offset=0,
     )
 
 

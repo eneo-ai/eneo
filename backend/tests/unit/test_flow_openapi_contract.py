@@ -4145,6 +4145,21 @@ def test_openapi_flows_tag_guides_api_key_human_review(openapi_spec: dict) -> No
     assert "steps_requiring_review" in description
 
 
+def test_openapi_flow_list_discovers_flows_without_naming_a_space(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(openapi_spec, "/api/v1/flows/", "get")
+    parameters = {parameter["name"]: parameter for parameter in operation["parameters"]}
+    assert parameters["space_id"].get("required", False) is False
+    assert parameters["published_only"]["schema"]["default"] is False
+    refusal = operation["responses"]["400"]["content"]["application/json"]["example"]
+    assert refusal["code"] == FlowApiErrorCode.SERVICE_KEY_SPACE_ID_REQUIRED.value
+    for schema_name in ("FlowSparsePublic", "FlowPublic"):
+        schema = openapi_spec["components"]["schemas"][schema_name]
+        assert schema["properties"]["space_name"]["type"] == "string"
+        assert "space_name" in schema["required"]
+
+
 def test_openapi_flow_authoring_docs_separate_draft_and_service_key_runtime(
     openapi_spec: dict,
 ) -> None:

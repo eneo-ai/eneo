@@ -296,6 +296,7 @@ FLOW_SPARSE_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000001",
     "tenant_id": "00000000-0000-0000-0000-000000000010",
     "space_id": "00000000-0000-0000-0000-000000000020",
+    "space_name": "HR",
     "name": "Employee Review Summary",
     "description": "Transcribe a review conversation and return a PDF summary.",
     "created_by_user_id": "00000000-0000-0000-0000-000000000030",
@@ -802,6 +803,12 @@ class FlowSparsePublic(BaseModel):
     id: UUID
     tenant_id: UUID
     space_id: UUID
+    space_name: str = Field(
+        description=(
+            "Name of the space the flow belongs to, as stored, so clients can "
+            "group a list by space without reading spaces."
+        ),
+    )
     name: str
     description: str | None = None
     created_by_user_id: UUID | None = None

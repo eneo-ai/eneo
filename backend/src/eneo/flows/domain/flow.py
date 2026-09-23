@@ -186,6 +186,8 @@ class FlowSparse(BaseModel):
     id: UUID | None = None
     tenant_id: UUID
     space_id: UUID
+    # Read from the space row by the repository reads, like the retention.
+    space_name: str | None = None
     name: str
     description: Optional[str] = None
     created_by_user_id: Optional[UUID] = None

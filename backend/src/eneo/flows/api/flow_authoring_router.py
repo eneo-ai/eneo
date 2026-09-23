@@ -33,6 +33,7 @@ from eneo.flows.api.flow_runtime_paths import (
 )
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.principal import FlowPrincipal
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
@@ -75,7 +76,8 @@ _FLOW_DRAFT_OWNERSHIP_DESCRIPTION = (
 
 _FLOW_SERVICE_KEY_DISCOVERY_DESCRIPTION = (
     "Service-key principals may use this endpoint only for published-flow discovery in "
-    "their scoped space. Service-key webapps should use the returned ids with "
+    "their scoped space, and must send its `space_id`: a key has no space memberships "
+    "to list. Service-key webapps should use the returned ids with "
     "`GET /api/v1/flows/{id}/published/` and the runtime paths from that response; "
     "draft authoring and AI Builder still require a user principal."
 )
@@ -200,7 +202,15 @@ async def create_flow(
     operation_id="list_flows",
     summary="List Flows",
     description=(
-        "List flow definitions in a space with pagination-friendly sparse metadata. "
+        "List the flows the caller can see, with pagination-friendly sparse metadata. "
+        "With `space_id` the list covers that space. Without it the list covers every "
+        "space the signed-in user belongs to: their personal space, spaces shared with "
+        "them directly or through a group, and the organization space when their role "
+        "there shows flows. A space-scoped API key narrows the list to its space. "
+        "Drafts appear only in spaces where the caller may edit flows, and "
+        "`published_only=true` returns published flows only, which is what clients that "
+        "run flows need. Seeing a flow does not mean the caller may run it or that it is "
+        "ready to run. Items are ordered oldest first. "
         "The `count` field in the paginated response reports the number of items returned "
         "in the current page, not the total number of matching flows across all pages. "
         "`has_more` reports whether another page exists after this offset window. "
@@ -219,6 +229,15 @@ async def create_flow(
                 }
             },
         },
+        400: error_response(
+            description=(
+                "A service key listed flows without `space_id`. A key has no space "
+                "memberships, so it names the space it is scoped to."
+            ),
+            message="Service keys must name the space to list flows from with space_id.",
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FlowApiErrorCode.SERVICE_KEY_SPACE_ID_REQUIRED,
+        ),
         403: error_response(
             description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
@@ -230,9 +249,24 @@ async def create_flow(
 )
 async def list_flows(
     request: Request,
-    space_id: UUID = Query(
-        ..., description="Only return flows that belong to this space."
-    ),
+    space_id: Annotated[
+        UUID | None,
+        Query(
+            description=(
+                "Only return flows in this space. Omit it to list the flows of every "
+                "space the signed-in user belongs to; service keys must send it."
+            ),
+        ),
+    ] = None,
+    published_only: Annotated[
+        bool,
+        Query(
+            description=(
+                "Only return published flows, for clients that run flows rather "
+                "than edit them."
+            ),
+        ),
+    ] = False,
     limit: int = Query(
         default=50, ge=1, le=200, description="Maximum number of flows to return."
     ),
@@ -243,28 +277,42 @@ async def list_flows(
         get_container(with_user=True, with_module_user=True)
     ),
 ):
-    access_context = await flow_access_context.resolve_space_access_context(
-        request,
-        container,
-        space_id=space_id,
-        required_access=FlowApiAction.VIEW,
-        scope_mismatch_message="API key space scope does not match requested space.",
-        allow_service_key_principals=True,
-    )
-    if not access_context.actor.can_read_flows():
-        raise UnauthorizedException(
-            "You do not have permission to access flows in this space.",
-            code="insufficient_space_permission",
-            context={"auth_layer": "space_membership"},
+    service_key_principal = FlowPrincipal.from_user(container.user()).is_service_key
+    if space_id is not None:
+        access_context = await flow_access_context.resolve_space_access_context(
+            request,
+            container,
+            space_id=space_id,
+            required_access=FlowApiAction.VIEW,
+            scope_mismatch_message="API key space scope does not match requested space.",
+            allow_service_key_principals=True,
+        )
+        if not access_context.actor.can_read_flows():
+            raise UnauthorizedException(
+                "You do not have permission to access flows in this space.",
+                code="insufficient_space_permission",
+                context={"auth_layer": "space_membership"},
+            )
+        spaces = {space_id: access_context.actor}
+    elif service_key_principal:
+        raise FlowBadRequestException(
+            "Service keys must name the space to list flows from with space_id.",
+            code=FlowApiErrorCode.SERVICE_KEY_SPACE_ID_REQUIRED,
+        )
+    else:
+        spaces = await flow_access_context.resolve_member_flow_spaces(
+            request, container
         )
 
-    service_key_principal = FlowPrincipal.from_user(container.user()).is_service_key
+    drafts_visible = not (published_only or service_key_principal)
     assembler = FlowAssembler()
     flows = await container.flow_service().list_flows(
-        space_id=space_id,
-        sparse=True,
-        published_only=service_key_principal
-        or not access_context.actor.can_edit_flows(),
+        space_ids=list(spaces),
+        draft_space_ids=[
+            listed_space_id
+            for listed_space_id, actor in spaces.items()
+            if drafts_visible and actor.can_edit_flows()
+        ],
         limit=limit + 1,
         offset=offset,
     )

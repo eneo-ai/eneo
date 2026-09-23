@@ -2195,6 +2195,25 @@ class SpaceRepository:
             return []
         source, source_id = knowledge_source_for(info_blob)
         source_space_ids = source.spaces_seeing(source_id, user.tenant_id)
+        return await self._member_access_facts(
+            # Inverse of effective_space_ids_for: the space itself, or a
+            # child space whose organization space sees the source.
+            sa.or_(
+                Spaces.id.in_(source_space_ids),
+                Spaces.tenant_space_id.in_(source_space_ids),
+            )
+        )
+
+    async def get_member_access_facts(self) -> list[SpaceAccessFacts]:
+        """Access facts for every space the user belongs to: their personal
+        space and each space they are a member of directly or through a group.
+        Reads membership columns only; no space is hydrated."""
+        return await self._member_access_facts()
+
+    async def _member_access_facts(
+        self, *space_filters: sa.ColumnElement[bool]
+    ) -> list[SpaceAccessFacts]:
+        user = self._require_user()
         user_group_ids = sa.select(UserGroups.id).where(
             UserGroups.id.in_(user.user_groups_ids),
             UserGroups.tenant_id == user.tenant_id,
@@ -2220,12 +2239,7 @@ class SpaceRepository:
             )
             .where(
                 Spaces.tenant_id == user.tenant_id,
-                # Inverse of effective_space_ids_for: the space itself, or a
-                # child space whose organization space sees the source.
-                sa.or_(
-                    Spaces.id.in_(source_space_ids),
-                    Spaces.tenant_space_id.in_(source_space_ids),
-                ),
+                *space_filters,
                 sa.or_(
                     Spaces.user_id == user.id,
                     SpacesUsers.user_id.is_not(None),

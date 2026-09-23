@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
@@ -157,24 +158,16 @@ class FlowService:
     async def list_flows(
         self,
         *,
-        space_id: UUID,
-        sparse: bool = True,
-        published_only: bool = False,
+        space_ids: Collection[UUID],
+        draft_space_ids: Collection[UUID],
         limit: int | None = None,
         offset: int | None = None,
-    ) -> list[FlowSparse] | list[Flow]:
-        if sparse:
-            return await self.flow_repo.get_sparse_by_space(
-                space_id=space_id,
-                tenant_id=self.user.tenant_id,
-                published_only=published_only,
-                limit=limit,
-                offset=offset,
-            )
-        return await self.flow_repo.get_by_space(
-            space_id=space_id,
+    ) -> list[FlowSparse]:
+        """Published flows in `space_ids` and drafts in `draft_space_ids`."""
+        return await self.flow_repo.get_sparse_by_spaces(
             tenant_id=self.user.tenant_id,
-            published_only=published_only,
+            space_ids=space_ids,
+            draft_space_ids=draft_space_ids,
             limit=limit,
             offset=offset,
         )

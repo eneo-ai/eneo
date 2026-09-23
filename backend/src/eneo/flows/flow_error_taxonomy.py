@@ -110,6 +110,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Call with a user session or choose a service-key-supported runtime endpoint.",
         user_action="Sign in as a user with access.",
     ),
+    FlowApiErrorCode.SERVICE_KEY_SPACE_ID_REQUIRED: _entry(
+        category="Flow access",
+        surfaced_through="API error response",
+        cause="A service key listed flows without naming a space; it has no memberships to list.",
+        consumer_action="Send space_id for the space the key is scoped to.",
+        user_action="Choose the space to list flows from.",
+    ),
     FlowApiErrorCode.RUN_INVALID_IDEMPOTENCY_KEY: _entry(
         category="Run input",
         surfaced_through="API error response",
