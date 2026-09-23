@@ -1165,7 +1165,7 @@ Service keys can drive published runtime paths inside their scope and cannot ins
 
 1. Use a key scoped to the flow's space.
 2. Create runs through published runtime paths, not draft authoring paths.
-3. List runs with `runtime_paths.list_runs`; service keys see only their own runs.
+3. List runs with `runtime_paths.list_runs`; service keys see only their own runs. Tenant admins and same-space admins and owners also see other people's runs, and `mine=true` lists only the caller's own, which in a module session are the signed-in user's.
 4. Request evidence only when the key has the explicit evidence permission.
 
 Endpoint facts:

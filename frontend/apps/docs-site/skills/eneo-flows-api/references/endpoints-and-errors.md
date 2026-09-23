@@ -18,6 +18,7 @@ Paths are relative to the deployment API base. Prefer `runtime_paths` from `GET 
 | Live text ticket                    | `POST /flows/{flow_id}/steps/{step_id}/live-transcription-sessions/`       |
 | Live text socket                    | WebSocket at the ticket's `websocket_path`, resolved against the origin    |
 | Create or list runs                 | `POST` or `GET /flows/{flow_id}/runs/`                                     |
+| List the caller's own runs          | `GET /flows/{flow_id}/runs/?mine=true`                                     |
 | Poll content-free status            | `GET /flows/{flow_id}/runs/{run_id}/status/`                               |
 | Read audited run detail             | `GET /flows/{flow_id}/runs/{run_id}/`                                      |
 | Cancel                              | `POST /flows/{flow_id}/runs/{run_id}/cancel/`                              |
