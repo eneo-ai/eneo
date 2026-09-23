@@ -35257,7 +35257,7 @@ export interface components {
       segment_index: number;
       /**
        * Speaker
-       * @description The label the content is reassigned to. A label not present in the transcript is allowed (splitting a merged speaker); it becomes nameable once the speaker-mapping step sees it.
+       * @description The label the content is reassigned to. A label not present in the transcript is allowed (splitting a merged speaker). A speaker-mapping step that runs after the split names it like any other label; while its review is open, the reviewer can name it in that review.
        */
       speaker: string | null;
     };
