@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@2c5d94abecd9
+translationSource: guides/embed-widget.mdx@f9b3485241ef
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -349,9 +349,10 @@ att ladda om när mallen har ändrat deras widget.
 - **Avpublicering** av assistenten tar en aktiv widget offline. Besökare ser
   meddelandet om att chatten inte är tillgänglig, och widgeten visar vad som
   behöver åtgärdas.
-- **Flytt** av assistenten till en annan yta nekas så länge den har en widget
-  som inte är arkiverad (ett utkast eller en aktiv eller pausad widget),
-  eftersom widgeten hör till assistentens yta. Arkivera widgeten först.
+- **Flytt** av assistenten till en annan yta arkiverar dess widgetutkast och
+  loggar varje arkivering i granskningsloggen. Flytten nekas så länge en aktiv
+  eller pausad widget visar assistenten, eftersom widgeten hör till
+  assistentens yta; en administratör arkiverar då widgeten först.
 - **Borttagning** av assistenten arkiverar dess widgetar i samma steg och
   loggar varje arkivering i granskningsloggen. En mall som widgetarna följde
   kan därefter tas bort.

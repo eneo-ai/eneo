@@ -5,6 +5,8 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+from eneo.widgets.domain.exceptions import AssistantPublishedAsWidgetError
+from eneo.widgets.domain.widget import WidgetStatus
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -154,11 +156,11 @@ class ResourceMoverService:
                 "Remove the Assistant's Skill bindings before moving it to another Space"
             )
         # A widget serves its assistant from the widget's own space; moving
-        # the assistant away would take the widget offline without a word.
-        if await self.widget_repo.list_by_target(assistant_id):
-            raise BadRequestException(
-                "Archive the Assistant's web widget before moving it to another Space"
-            )
+        # the assistant away would take a live widget offline without a word.
+        # Drafts never served anyone and are archived with the move.
+        widgets = await self.widget_repo.list_by_target(assistant_id)
+        if any(widget.status is not WidgetStatus.DRAFT for widget in widgets):
+            raise AssistantPublishedAsWidgetError()
 
         target_space.add_assistant(assistant)
         source_space.remove_assistant(assistant)
@@ -197,3 +199,12 @@ class ResourceMoverService:
 
         await self.space_repo.update(space=target_space)
         await self.space_repo.update(space=source_space)
+
+        if widgets:
+            from eneo.widgets.application.widget_target_lifecycle import (
+                archive_drafts_of_moved_assistant,
+            )
+
+            await archive_drafts_of_moved_assistant(
+                self.space_repo.session, drafts=widgets, user=self.actor_manager.user
+            )

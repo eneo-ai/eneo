@@ -4859,6 +4859,7 @@
   "organization_skills_removed_empty": "Inga borttagna skills",
   "organization_skills_removed_at": "Borttagen {time}",
   "eneo_error_9062": "En skill uppdateras. Inget togs bort. Vänta en stund och försök igen.",
+  "eneo_error_9063": "Assistenten är publicerad som webbwidget. En administratör behöver arkivera widgeten innan assistenten kan flyttas.",
   "widget_send": "Skicka",
   "widget_input_label": "Din fråga",
   "widget_input_placeholder": "Skriv din fråga…",

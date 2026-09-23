@@ -6,6 +6,7 @@ import pytest
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
+from eneo.main.exceptions import ErrorCodes
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -42,7 +43,7 @@ async def test_an_assistant_with_a_live_widget_stays_in_its_space(
         headers=_auth(admin_token),
     )
     assert resp.status_code == 400, resp.text
-    assert "Archive the Assistant's web widget" in resp.text
+    assert resp.json()["eneo_error_code"] == ErrorCodes.ASSISTANT_PUBLISHED_AS_WIDGET
     resp = await client.get(
         f"/api/v1/assistants/{assistant_id}/", headers=_auth(admin_token)
     )
@@ -60,6 +61,55 @@ async def test_an_assistant_with_a_live_widget_stays_in_its_space(
         headers=_auth(admin_token),
     )
     assert resp.status_code == 204, resp.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_moving_an_assistant_archives_its_draft_widgets(
+    client, admin_token, monkeypatch
+):
+    audited: list[dict] = []
+    log_async = AuditService.log_async
+
+    async def record(self, **kwargs):
+        audited.append(kwargs)
+        return await log_async(self, **kwargs)
+
+    monkeypatch.setattr(AuditService, "log_async", record)
+    source_space = await _space(client, admin_token)
+    resp = await client.post(
+        f"/api/v1/spaces/{source_space}/applications/assistants/",
+        json={"name": "Utkastassistenten"},
+        headers=_auth(admin_token),
+    )
+    assistant_id = resp.json()["id"]
+    resp = await client.post(
+        f"/api/v1/spaces/{source_space}/widgets/",
+        json={"target_id": assistant_id, "name": "Provchatt"},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 201, resp.text
+    draft = resp.json()
+    target_space = await _space(client, admin_token)
+
+    audited.clear()
+    resp = await client.post(
+        f"/api/v1/assistants/{assistant_id}/transfer/",
+        json={"target_space_id": target_space},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 204, resp.text
+
+    resp = await client.get(
+        f"/api/v1/assistants/{assistant_id}/", headers=_auth(admin_token)
+    )
+    assert resp.json()["space_id"] == target_space
+    assert (await _widget(client, admin_token, draft["id"]))["status"] == "archived"
+    [entry] = [
+        entry for entry in audited if entry["action"] == ActionType.WIDGET_ARCHIVED
+    ]
+    assert str(entry["entity_id"]) == draft["id"]
+    assert entry["metadata"]["extra"]["reason"] == "assistant_moved"
 
 
 @pytest.mark.integration

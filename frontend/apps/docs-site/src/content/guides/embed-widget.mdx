@@ -149,7 +149,7 @@ The template page shows how many widgets follow it and whether the draft has unp
 
 - **Tools and functions.** A change to the assistant's MCP servers or functions reaches visitors at once; see [What visitors can reach](#what-visitors-can-reach).
 - **Unpublishing** the assistant takes an active widget offline. Visitors see the "not available" notice, and the widget shows what needs fixing.
-- **Moving** the assistant to another space is refused while it has a widget that is not archived (a draft, active or paused widget), because the widget belongs to the assistant's space. Archive the widget first.
+- **Moving** the assistant to another space archives its draft widgets and records each in the audit log. The move is refused while an active or paused widget serves the assistant, because the widget belongs to the assistant's space; an administrator archives that widget first.
 - **Deleting** the assistant archives its widgets in the same step and records each in the audit log. A template those widgets followed can then be deleted.
 
 ### Security properties

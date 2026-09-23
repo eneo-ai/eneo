@@ -39,6 +39,10 @@ class WidgetPublicError(Exception):
         return {}
 
 
+class AssistantPublishedAsWidgetError(Exception):
+    """An active or paused widget serves the assistant from its space."""
+
+
 class WidgetNotActiveError(WidgetPublicError):
     status_code = 404
     code = "widget_not_active"

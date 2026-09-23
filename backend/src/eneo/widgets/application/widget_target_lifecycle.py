@@ -53,8 +53,43 @@ async def archive_widgets_of_deleted_assistant(
     they stop serving and no longer hold their template.
     """
     repo = WidgetRepoImpl(session)
+    return await _archive(
+        session,
+        await repo.list_by_target(assistant_id),
+        user=user,
+        reason="assistant_deleted",
+        because="its assistant was deleted",
+    )
+
+
+async def archive_drafts_of_moved_assistant(
+    session: "AsyncSession", *, drafts: list[Widget], user: "UserInDB"
+) -> list[Widget]:
+    """Archive the draft widgets of an assistant moving to another space.
+
+    A draft never served anyone, and in its old space it could never serve
+    the moved assistant. Run in the move's transaction.
+    """
+    return await _archive(
+        session,
+        drafts,
+        user=user,
+        reason="assistant_moved",
+        because="its assistant moved to another space",
+    )
+
+
+async def _archive(
+    session: "AsyncSession",
+    widgets: list[Widget],
+    *,
+    user: "UserInDB",
+    reason: str,
+    because: str,
+) -> list[Widget]:
+    repo = WidgetRepoImpl(session)
     archived: list[Widget] = []
-    for widget in await repo.list_by_target(assistant_id):
+    for widget in widgets:
         widget.archive()
         archived.append(
             await repo.update(widget, check_revision=False, only=LIFECYCLE_FIELDS)
@@ -70,7 +105,7 @@ async def archive_widgets_of_deleted_assistant(
             action=ActionType.WIDGET_ARCHIVED,
             entity_type=EntityType.WIDGET,
             entity_id=widget.id,
-            description=f"Archived widget '{widget.name}': its assistant was deleted",
+            description=f"Archived widget '{widget.name}': {because}",
             metadata=AuditMetadata.standard(
                 actor=user,
                 target=widget,
@@ -78,7 +113,7 @@ async def archive_widgets_of_deleted_assistant(
                 extra={
                     "public_id": widget.public_id,
                     "space_id": str(widget.space_id),
-                    "reason": "assistant_deleted",
+                    "reason": reason,
                 },
             ),
         )
