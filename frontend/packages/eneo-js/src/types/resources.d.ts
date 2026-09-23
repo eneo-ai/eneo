@@ -434,6 +434,8 @@ export type SupportedModelKwargs = components["schemas"]["SupportedModelKwargs"]
 export type TenantCompletionModelCreate = components["schemas"]["TenantCompletionModelCreate"];
 export type TenantCompletionModelUpdate = components["schemas"]["TenantCompletionModelUpdate"];
 export type TenantEmbeddingModelUpdate = components["schemas"]["TenantEmbeddingModelUpdate"];
+export type TenantTranscriptionModelCreate =
+  components["schemas"]["TenantTranscriptionModelCreate"];
 export type TenantTranscriptionModelUpdate =
   components["schemas"]["TenantTranscriptionModelUpdate"];
 export type TenantImageModelCreate = components["schemas"]["TenantImageModelCreate"];

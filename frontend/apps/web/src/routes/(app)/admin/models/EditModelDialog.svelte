@@ -47,6 +47,7 @@
     rawCostToNumber,
     submittedModelName,
     tokenCostFromPerMillion,
+    transcriptionUpdateCapabilities,
     type ModelDraftState,
     type ModelType
   } from "./AddWizard/models/draft";
@@ -164,6 +165,7 @@
       hosting: draft.hosting,
       open_source: openSource,
       cost_per_minute: rawCostToNumber(draft.costPerMinuteStr),
+      ...transcriptionUpdateCapabilities(draft),
       ...(hasDefaultToggle ? { is_default: isDefault } : {}),
       ...securityClassificationPatch()
     };

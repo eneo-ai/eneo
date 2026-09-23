@@ -13,6 +13,8 @@ import type {
   SecurityClassification,
   TenantCompletionModelCreate,
   TenantCompletionModelUpdate,
+  TenantTranscriptionModelCreate,
+  TenantTranscriptionModelUpdate,
   TranscriptionModel
 } from "@eneo/eneo-js";
 import type { WizardModelDraft } from "../wizardState";
@@ -58,6 +60,9 @@ export interface ModelDraftState {
   outputCostPerTokenStr: string;
   /** USD per minute of audio (transcription only). */
   costPerMinuteStr: string;
+  /** Transcription only: the model is served over the realtime API that
+   *  live transcription uses. The server accepts it only for vLLM providers. */
+  supportsRealtime: boolean;
   /** USD per generated image (image only). */
   costPerImageStr: string;
   /** Request defaults the image tool uses when the assistant does not ask. */
@@ -87,6 +92,7 @@ export function createEmptyDraft(modelType: ModelType, providerType: string): Mo
     inputCostPerTokenStr: "",
     outputCostPerTokenStr: "",
     costPerMinuteStr: "",
+    supportsRealtime: false,
     costPerImageStr: "",
     defaultSize: "auto",
     defaultQuality: "auto",
@@ -276,6 +282,24 @@ export function completionUpdateCapabilities(
   };
 }
 
+type TranscriptionCapabilityField = "supports_realtime";
+
+/** The capability fields of a transcription create request, total like the
+ *  completion projection. */
+export function transcriptionCreateCapabilities(
+  model: WizardModelDraft
+): Required<Pick<TenantTranscriptionModelCreate, TranscriptionCapabilityField>> {
+  return { supports_realtime: model.supportsRealtime ?? false };
+}
+
+/** The capability fields of a transcription update request. The flag always
+ *  travels, so turning it off reaches the server as well as turning it on. */
+export function transcriptionUpdateCapabilities(
+  draft: ModelDraftState
+): Pick<TenantTranscriptionModelUpdate, TranscriptionCapabilityField> {
+  return { supports_realtime: draft.supportsRealtime };
+}
+
 /** Apply a catalogue answer's ceilings to a draft.
  *
  *  A dimension the catalogue does not state is not a declaration: that field
@@ -334,6 +358,7 @@ export function draftToWizardModel(draft: ModelDraftState): WizardModelDraft {
     inputCostPerToken: tokenCostFromPerMillion(draft.inputCostPerTokenStr),
     outputCostPerToken: tokenCostFromPerMillion(draft.outputCostPerTokenStr),
     costPerMinute: rawCostToNumber(draft.costPerMinuteStr),
+    supportsRealtime: draft.supportsRealtime,
     costPerImage: rawCostToNumber(draft.costPerImageStr),
     defaultSize: draft.defaultSize,
     defaultQuality: draft.defaultQuality,
@@ -393,6 +418,7 @@ export function modelToDraft(model: AnyCatalogModel, modelType: ModelType): Mode
     inputCostPerTokenStr: "",
     outputCostPerTokenStr: "",
     costPerMinuteStr: "",
+    supportsRealtime: false,
     costPerImageStr: "",
     defaultSize: "auto",
     defaultQuality: "auto",
@@ -418,6 +444,7 @@ export function modelToDraft(model: AnyCatalogModel, modelType: ModelType): Mode
     base.outputCostPerTokenStr = perMillionFromTokenCost(model.output_cost_per_token);
   } else if (modelType === "transcription" && "cost_per_minute" in model) {
     base.costPerMinuteStr = costToString(model.cost_per_minute);
+    base.supportsRealtime = model.supports_realtime ?? false;
   } else if (modelType === "image" && "cost_per_image" in model) {
     base.costPerImageStr = costToString(model.cost_per_image);
     base.defaultSize = isImageSize(model.default_size) ? model.default_size : "auto";

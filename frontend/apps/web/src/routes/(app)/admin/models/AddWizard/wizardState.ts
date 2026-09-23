@@ -29,6 +29,8 @@ export interface WizardModelDraft {
   outputCostPerToken?: number | null;
   /** USD per minute of audio. Used by transcription models. */
   costPerMinute?: number | null;
+  /** Transcription models only: served over the realtime API live transcription uses. */
+  supportsRealtime?: boolean;
   /** Image models only: USD per generated image and the request defaults. */
   costPerImage?: number | null;
   defaultSize?: ImageSize;

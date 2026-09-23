@@ -1,4 +1,4 @@
-import type { CompletionModel, ImageModel } from "@eneo/eneo-js";
+import type { CompletionModel, ImageModel, TranscriptionModel } from "@eneo/eneo-js";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/paraglide/messages", () => ({
@@ -19,7 +19,9 @@ import {
   setDraftModelName,
   completionUpdateCeilings,
   hasValidDeclaredCapacity,
-  applyCatalogueCeilings
+  applyCatalogueCeilings,
+  transcriptionCreateCapabilities,
+  transcriptionUpdateCapabilities
 } from "./draft";
 
 function completionModel(
@@ -210,6 +212,40 @@ describe("image model drafts", () => {
 
     expect(isDraftComplete(draft, "image")).toBe(true);
     expect(isDraftComplete({ ...draft, displayName: "" }, "image")).toBe(false);
+  });
+});
+
+function transcriptionModel(supportsRealtime: boolean): TranscriptionModel {
+  return {
+    id: "tm-1",
+    name: "pianissimo-sv",
+    nickname: "Pianissimo",
+    is_deprecated: false,
+    cost_per_minute: null,
+    provider_type: "hosted_vllm",
+    supports_realtime: supportsRealtime
+  };
+}
+
+describe("live transcription on transcription models", () => {
+  it("round-trips a saved model's flag into the create and update requests", () => {
+    const draft = modelToDraft(transcriptionModel(true), "transcription");
+
+    expect(transcriptionCreateCapabilities(draftToWizardModel(draft))).toEqual({
+      supports_realtime: true
+    });
+    expect(transcriptionUpdateCapabilities(draft)).toEqual({ supports_realtime: true });
+  });
+
+  it("starts off, and an update states it even when off", () => {
+    const created = createEmptyDraft("transcription", "hosted_vllm");
+    expect(transcriptionCreateCapabilities(draftToWizardModel(created))).toEqual({
+      supports_realtime: false
+    });
+
+    // The patch carries the flag either way, so turning it off reaches the server.
+    const saved = modelToDraft(transcriptionModel(false), "transcription");
+    expect(transcriptionUpdateCapabilities(saved)).toEqual({ supports_realtime: false });
   });
 });
 

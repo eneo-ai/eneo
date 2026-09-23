@@ -246,6 +246,22 @@
             </td>
           </tr>
         {/if}
+        {#if "supports_realtime" in model}
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.live_transcription_support()}</td
+            >
+            <td class="py-2.5">
+              {#if model.supports_realtime}
+                <span class="text-positive-default text-lg" aria-hidden="true">✓</span>
+                <span class="sr-only">{m.yes()}</span>
+              {:else}
+                <span class="text-muted/30" aria-hidden="true">–</span>
+                <span class="sr-only">{m.no()}</span>
+              {/if}
+            </td>
+          </tr>
+        {/if}
 
         <tr>
           <td colspan="2" class="py-2"><div class="border-dimmer border-t"></div></td>

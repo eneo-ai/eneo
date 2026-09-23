@@ -22,7 +22,11 @@
   import { cubicOut } from "svelte/easing";
   import { invalidate } from "$app/navigation";
   import type { Writable } from "svelte/store";
-  import type { ModelProviderPublic, TenantCompletionModelCreate } from "@eneo/eneo-js";
+  import type {
+    ModelProviderPublic,
+    TenantCompletionModelCreate,
+    TenantTranscriptionModelCreate
+  } from "@eneo/eneo-js";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -50,6 +54,7 @@
     MAX_COST_INPUT,
     completionCreateCapabilities,
     isCostValueOverflow,
+    transcriptionCreateCapabilities,
     type ModelType
   } from "./models/draft";
 
@@ -439,10 +444,11 @@
         is_active: true,
         description: model.description ?? null,
         cost_per_minute: model.costPerMinute ?? null,
+        ...transcriptionCreateCapabilities(model),
         security_classification: model.securityClassification
           ? { id: model.securityClassification.id }
           : null
-      });
+      } satisfies TenantTranscriptionModelCreate);
     }
     return eneo.tenantModels.createImage({
       provider_id: providerId,

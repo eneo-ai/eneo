@@ -5,7 +5,7 @@
   fields based on `modelType`:
     - completion   → token budgets + capability checkboxes
     - embedding    → family + dimensions + max input
-    - transcription → name + display name + hosting + classification
+    - transcription → name + display name + live transcription + hosting + classification
     - image        → cost per image + default size/quality
 -->
 
@@ -27,6 +27,7 @@
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
 
   import HelpTooltip from "../../components/HelpTooltip.svelte";
+  import { speaksRealtimeDialect } from "../../modelProviderCapabilities";
   import {
     IMAGE_QUALITIES,
     IMAGE_SIZES,
@@ -84,6 +85,10 @@
   ];
 
   let isLookingUpDefaults = $state(false);
+
+  // The server refuses live transcription for any provider but vLLM, so the
+  // form says why up front instead of failing on save.
+  const realtimeAvailable = $derived(speaksRealtimeDialect(providerType));
 
   onMount(async () => {
     await tick();
@@ -282,6 +287,28 @@
       </Field.Field>
     </div>
   </fieldset>
+{/if}
+
+{#if modelType === "transcription"}
+  <Field.Field orientation="horizontal">
+    <Checkbox
+      id="cap-realtime"
+      bind:checked={draft.supportsRealtime}
+      disabled={!realtimeAvailable}
+      aria-describedby={realtimeAvailable ? undefined : "cap-realtime-description"}
+    />
+    <Field.Content>
+      <Field.Label for="cap-realtime" class="flex items-center gap-1">
+        {m.live_transcription_support()}
+        <HelpTooltip text={m.live_transcription_help()} />
+      </Field.Label>
+      {#if !realtimeAvailable}
+        <Field.Description id="cap-realtime-description">
+          {m.live_transcription_needs_vllm()}
+        </Field.Description>
+      {/if}
+    </Field.Content>
+  </Field.Field>
 {/if}
 
 {#if modelType === "embedding"}
