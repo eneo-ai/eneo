@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.ai_models.completion_models.completion_model import ResponseType
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.widgets.application import widget_ask_service as module
 from eneo.widgets.application.widget_ask_service import (
@@ -207,8 +208,71 @@ async def test_ask_strips_references_when_sources_are_hidden():
     assert [chunk.reference_chunks for chunk in chunks] == [None]
 
 
+async def test_ask_hides_tool_activity_but_keeps_its_citations():
+    async def chunks():
+        yield SimpleNamespace(
+            text="",
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[object()],
+            mcp_tool_references=None,
+            reference_chunks=None,
+        )
+        yield SimpleNamespace(
+            text="",
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[object()],
+            mcp_tool_references=[object()],
+            reference_chunks=None,
+        )
+        yield SimpleNamespace(
+            text="Hej",
+            response_type=ResponseType.TEXT,
+            tool_calls_metadata=None,
+            mcp_tool_references=None,
+            reference_chunks=None,
+        )
+
+    service, _ = _service(
+        ask_result=SimpleNamespace(
+            session=SimpleNamespace(id=uuid4(), questions=[], feedback_value=None),
+            answer=chunks(),
+            question="q",
+            question_id=uuid4(),
+            completion_model=object(),
+        )
+    )
+    response = await service.ask(
+        _principal(_widget(show_tool_activity=False)),
+        question="Hej?",
+        session_id=None,
+        client_ip="203.0.113.1",
+    )
+    out = [chunk async for chunk in response.answer]
+    assert [chunk.response_type for chunk in out] == [
+        ResponseType.TOOL_CALL,
+        ResponseType.TEXT,
+    ]
+    assert out[0].tool_calls_metadata is None
+    assert out[0].mcp_tool_references
+
+
+async def test_get_session_strips_tool_calls_when_activity_is_hidden():
+    question = SimpleNamespace(info_blobs=[object()], tool_calls=[object()])
+    service, deps = _service()
+    deps.session_service.get_session_by_uuid = AsyncMock(
+        return_value=SimpleNamespace(id=uuid4(), questions=[question])
+    )
+
+    session = await service.get_session(
+        _principal(_widget(show_tool_activity=False)), uuid4()
+    )
+
+    assert session.questions[0].tool_calls is None
+    assert session.questions[0].info_blobs  # sources still shown
+
+
 async def test_get_session_strips_references_when_sources_are_hidden():
-    question = SimpleNamespace(info_blobs=[object()])
+    question = SimpleNamespace(info_blobs=[object()], tool_calls=[object()])
     service, deps = _service()
     deps.session_service.get_session_by_uuid = AsyncMock(
         return_value=SimpleNamespace(id=uuid4(), questions=[question])

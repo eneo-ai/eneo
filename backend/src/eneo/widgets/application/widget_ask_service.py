@@ -12,7 +12,10 @@ from zoneinfo import ZoneInfo
 import sqlalchemy as sa
 from anyio import CancelScope
 
-from eneo.ai_models.completion_models.completion_model import Completion
+from eneo.ai_models.completion_models.completion_model import (
+    Completion,
+    ResponseType,
+)
 from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
@@ -115,9 +118,11 @@ class WidgetAskService:
         self, principal: WidgetPrincipal, session_id: UUID
     ) -> SessionInDB:
         session = await self._owned_session(principal.widget, session_id)
-        if not principal.widget.show_sources:
-            for question in session.questions:
+        for question in session.questions:
+            if not principal.widget.show_sources:
                 question.info_blobs = []
+            if not principal.widget.show_tool_activity:
+                question.tool_calls = None
         return session
 
     async def leave_feedback(
@@ -245,6 +250,16 @@ class WidgetAskService:
                 # neither citation targets nor document titles.
                 if not widget.show_sources:
                     chunk.reference_chunks = None
+                # Hidden tool activity: the tools ran, but which ones stays
+                # internal. A tool event that only carried citations keeps
+                # them; one that carried nothing else is dropped.
+                if (
+                    not widget.show_tool_activity
+                    and chunk.response_type == ResponseType.TOOL_CALL
+                ):
+                    chunk.tool_calls_metadata = None
+                    if not chunk.mcp_tool_references:
+                        continue
                 yield chunk
             completed = True
         finally:

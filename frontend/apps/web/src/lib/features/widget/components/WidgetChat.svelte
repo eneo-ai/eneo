@@ -309,6 +309,7 @@
               isLast={index === messages.length - 1}
               isLoading={chat.askQuestion.isLoading}
               showSources={config.show_sources ?? true}
+              showActivity={config.show_tool_activity ?? true}
             />
           {/each}
           {#if showPending && pendingQuestion !== null}

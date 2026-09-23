@@ -31,6 +31,12 @@ class WidgetPublicConfig(BaseModel):
     show_sources: bool = Field(
         description="False when answers are shown without citations or a source list."
     )
+    show_tool_activity: bool = Field(
+        description=(
+            "False when the tools and MCP servers behind an answer stay out of"
+            " the visitor's view; the tools run either way."
+        )
+    )
     collects_feedback_text: bool = Field(
         description=(
             "True when the widget stores what a visitor writes with a vote; the"

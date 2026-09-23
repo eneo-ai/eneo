@@ -134,6 +134,7 @@ function config(overrides: Partial<WidgetPublicConfig> = {}): WidgetPublicConfig
     max_question_chars: 2000,
     token_generation: 0,
     show_sources: true,
+    show_tool_activity: true,
     collects_feedback_text: true,
     single_turn: false,
     frame_ancestors: [],

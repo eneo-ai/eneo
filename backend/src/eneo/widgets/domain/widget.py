@@ -301,6 +301,9 @@ class Widget(BaseModel):
     bot_protection: BotProtection = BotProtection.ALTCHA
     # Visitors see numbered citations and a source list unless turned off.
     show_sources: bool = True
+    # Tools always run; this only decides whether visitors see which tools
+    # and MCP servers the answer used.
+    show_tool_activity: bool = True
     # The template this widget follows; None for a stand-alone widget. Only
     # the link/detach commands change it, never a plain update.
     template_id: Optional[UUID] = None
@@ -419,6 +422,7 @@ class Widget(BaseModel):
             "allowed_origins",
             "bot_protection",
             "show_sources",
+            "show_tool_activity",
         }
         unknown = set(changes) - editable
         if unknown:

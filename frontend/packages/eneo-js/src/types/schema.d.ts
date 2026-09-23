@@ -22633,6 +22633,8 @@ export interface components {
       bot_protection: components["schemas"]["BotProtection"];
       /** Show Sources */
       show_sources: boolean;
+      /** Show Tool Activity */
+      show_tool_activity: boolean;
       /**
        * Activation Blockers
        * @description Empty when the widget can be activated as configured.
@@ -22682,6 +22684,11 @@ export interface components {
        * @description False when answers are shown without citations or a source list.
        */
       show_sources: boolean;
+      /**
+       * Show Tool Activity
+       * @description False when the tools and MCP servers behind an answer stay out of the visitor's view; the tools run either way.
+       */
+      show_tool_activity: boolean;
       /**
        * Collects Feedback Text
        * @description True when the widget stores what a visitor writes with a vote; the embed page only offers a comment box then.
@@ -22917,6 +22924,8 @@ export interface components {
       bot_protection?: components["schemas"]["BotProtection"] | null;
       /** Show Sources */
       show_sources?: boolean | null;
+      /** Show Tool Activity */
+      show_tool_activity?: boolean | null;
     };
     /** WidgetUsageDayPublic */
     WidgetUsageDayPublic: {

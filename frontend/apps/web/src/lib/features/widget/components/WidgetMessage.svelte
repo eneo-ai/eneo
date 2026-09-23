@@ -26,9 +26,18 @@
     isLoading: boolean;
     /** Off when the widget hides citations and the source list. */
     showSources?: boolean;
+    /** Off when the widget keeps the tools behind an answer out of view. */
+    showActivity?: boolean;
   };
 
-  let { message, index, isLast, isLoading, showSources = true }: Props = $props();
+  let {
+    message,
+    index,
+    isLast,
+    isLoading,
+    showSources = true,
+    showActivity = true
+  }: Props = $props();
 
   const anchorFor = (sourceIndex: number) => `widget-source-${index}-${sourceIndex}`;
   const listId = $derived(`widget-sources-${index}`);
@@ -88,7 +97,9 @@
   // each new call replaces it; once done, several steps fold into one line
   // that opens to the full list. A single step never folds.
   const streaming = $derived(isLast && isLoading);
-  const steps = $derived(widgetToolSteps(message, { streaming, working: waiting }));
+  const steps = $derived(
+    showActivity ? widgetToolSteps(message, { streaming, working: waiting }) : []
+  );
   const stepsWorking = $derived(
     waiting || steps.some((step) => step.status === "preparing" || step.status === "running")
   );

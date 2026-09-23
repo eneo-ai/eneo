@@ -305,6 +305,21 @@
                     onCheckedChange={(checked) => autosave.patch({ show_sources: checked })}
                   />
                 </Field.Field>
+                <Field.Field orientation="horizontal" class="sm:col-span-2">
+                  <Field.Content>
+                    <Field.Label for="widget-show-tool-activity"
+                      >{m.widget_admin_show_tool_activity()}</Field.Label
+                    >
+                    <Field.Description
+                      >{m.widget_admin_show_tool_activity_description()}</Field.Description
+                    >
+                  </Field.Content>
+                  <Switch
+                    id="widget-show-tool-activity"
+                    checked={current.show_tool_activity ?? true}
+                    onCheckedChange={(checked) => autosave.patch({ show_tool_activity: checked })}
+                  />
+                </Field.Field>
               </Field.Group>
             </Card.Content>
           </Card.Root>
@@ -442,6 +457,9 @@
                   {#each visitorTools as tool (tool)}
                     <li>{tool}</li>
                   {/each}
+                  {#if visitorTools.length > 0 && !(current.show_tool_activity ?? true)}
+                    <li class="text-secondary">{m.widget_admin_visitor_access_hidden()}</li>
+                  {/if}
                 </ul>
               </section>
             </Card.Content>

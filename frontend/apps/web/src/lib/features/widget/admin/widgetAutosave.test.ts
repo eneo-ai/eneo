@@ -14,6 +14,7 @@ function widget(overrides: Partial<Widget> = {}): Widget {
     status: "draft",
     token_generation: 0,
     show_sources: true,
+    show_tool_activity: true,
     revision: 0,
     allowed_origins: [],
     ...overrides

@@ -81,6 +81,7 @@ async def get_widget_config(request: Request, response: Response, widget: Active
         max_question_chars=widget.limits.max_question_chars,
         token_generation=widget.token_generation,
         show_sources=widget.show_sources,
+        show_tool_activity=widget.show_tool_activity,
         collects_feedback_text=widget.privacy.store_feedback_text,
         single_turn=widget.privacy.never_persists,
         frame_ancestors=frame_ancestor_sources(widget.allowed_origins),

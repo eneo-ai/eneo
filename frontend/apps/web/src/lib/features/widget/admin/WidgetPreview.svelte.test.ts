@@ -29,6 +29,7 @@ const widget = {
   status: "draft",
   token_generation: 1,
   show_sources: true,
+  show_tool_activity: true,
   revision: 3,
   language: "sv",
   theme: { primary_color: "#1F4E79", radius: 12, color_scheme: "auto" },

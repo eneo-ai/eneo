@@ -141,6 +141,30 @@ describe("WidgetMessage sources", () => {
     await expect.element(page.getByText(/widget_activity_via/)).toHaveTextContent("TimeMCP");
   });
 
+  test("keeps tool activity out of view when the widget hides it", async () => {
+    render(WidgetMessage, {
+      message: {
+        ...message("Klockan är 14:02."),
+        tool_calls: [
+          {
+            server_name: "TimeMCP",
+            tool_name: "get_current_time",
+            tool_call_id: "c1",
+            result_status: "completed"
+          }
+        ]
+      } as unknown as ConversationMessage,
+      index: 0,
+      isLast: true,
+      isLoading: false,
+      showActivity: false
+    });
+
+    await expect.element(page.getByText("Klockan är 14:02.")).toBeVisible();
+    expect(page.getByText(/Get current time/).elements()).toHaveLength(0);
+    expect(page.getByText(/TimeMCP/).elements()).toHaveLength(0);
+  });
+
   test("shows only the latest step while the assistant is still working", async () => {
     render(WidgetMessage, {
       message: {
