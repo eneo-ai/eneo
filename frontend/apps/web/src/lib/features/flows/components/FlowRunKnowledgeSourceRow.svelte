@@ -129,14 +129,10 @@
               </Tooltip.Content>
             </Tooltip.Root>
           </Tooltip.Provider>
-          <span
-            class="text-muted hidden text-xs opacity-60 transition-opacity group-hover:opacity-100 sm:inline"
-          >
+          <span class="text-secondary group-hover:text-primary hidden text-xs sm:inline">
             {m.flow_run_knowledge_open_viewer()}
           </span>
-          <IconChevronRight
-            class="text-muted size-4 opacity-60 transition-opacity group-hover:opacity-100"
-          />
+          <IconChevronRight class="text-secondary size-4" aria-hidden="true" />
         </div>
       </button>
     </li>

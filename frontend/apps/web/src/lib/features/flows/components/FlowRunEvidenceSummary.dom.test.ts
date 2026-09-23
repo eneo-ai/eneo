@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { FlowRunResultFile } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
 import FlowRunEvidenceSummary from "./FlowRunEvidenceSummary.svelte";
@@ -54,5 +55,29 @@ describe("FlowRunEvidenceSummary trace identifier", () => {
     await fireEvent.click(renderWithTrace());
 
     await waitFor(() => expect(screen.getByRole("status").textContent?.trim()).toBe(""));
+  });
+});
+
+describe("FlowRunEvidenceSummary result files", () => {
+  afterEach(() => cleanup());
+
+  it("offers every file the run created without opening a step", async () => {
+    const onDownloadResultFile = vi.fn();
+    const file = {
+      file_id: "file-1",
+      name: "Genomförandeplan.pdf",
+      availability: "available"
+    } as FlowRunResultFile;
+    render(FlowRunEvidenceSummary, {
+      props: { runStatus: "completed", resultFiles: [file], onDownloadResultFile }
+    });
+
+    expect(screen.getByText(m.flow_run_result_files_title())).toBeTruthy();
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.flow_run_download_artifact({ name: "Genomförandeplan.pdf" })
+      })
+    );
+    expect(onDownloadResultFile).toHaveBeenCalledWith("file-1");
   });
 });

@@ -13,15 +13,17 @@ type FlowRunStatusVisual = Omit<FlowRunStatusView, "label">;
 // The shared badge also renders step results, whose not-started state is `pending`.
 type FlowStatusVisualKey = FlowRunStatus | "pending";
 
+// `bg-secondary` is the linen page fill, so a grey dot drawn with it vanished
+// on a white row; the neutral states take the dot from their own text colour.
 const FLOW_STATUS_VISUALS = {
   queued: {
     textClass: "text-secondary",
-    dotClass: "bg-secondary",
+    dotClass: "bg-current",
     pulseDot: false
   },
   pending: {
     textClass: "text-secondary",
-    dotClass: "bg-secondary",
+    dotClass: "bg-current",
     pulseDot: false
   },
   running: {
@@ -53,7 +55,7 @@ const FLOW_STATUS_VISUALS = {
 
 const UNKNOWN_FLOW_STATUS_VISUAL = {
   textClass: "text-secondary",
-  dotClass: "bg-secondary",
+  dotClass: "bg-current",
   pulseDot: false
 } satisfies FlowRunStatusVisual;
 

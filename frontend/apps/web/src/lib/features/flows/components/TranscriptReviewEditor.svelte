@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Button } from "$lib/components/ui/button/index.js";
   import * as m from "$lib/paraglide/messages";
   const SPACE = " ";
   import { tick } from "svelte";
@@ -104,7 +105,7 @@
     "positive-stronger"
   ];
   const action =
-    "min-h-9 rounded-md px-2.5 py-1.5 text-xs font-medium hover:bg-hover-default focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-40";
+    "min-h-9 rounded-md px-2.5 py-1.5 text-xs font-medium hover:bg-hover-default focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-50";
   const name = (speaker: string | null) => {
     if (!speaker) return m.flow_transcript_editor_unknown();
     const display = displayName(speaker);
@@ -468,24 +469,34 @@
           count: pending.length + wordlessIntervals.length
         })}</span
       >
-      <button
-        class={action}
+      <Button
+        variant="ghost"
+        size="sm"
+        class="min-h-9 text-xs"
         disabled={!editable || !audioAvailable || !suggestions.length}
         onclick={() => confirm(true)}
-        >{m.flow_transcript_editor_confirm_all({ count: suggestions.length })}</button
+        >{m.flow_transcript_editor_confirm_all({ count: suggestions.length })}</Button
       >
-      <button
-        class={action}
+      <Button
+        variant="ghost"
+        size="sm"
+        class="min-h-9 text-xs"
         disabled={!pending.length && !wordlessIntervals.length}
-        onclick={() => navigate(-1)}>{m.flow_transcript_editor_previous()}</button
+        onclick={() => navigate(-1)}>{m.flow_transcript_editor_previous()}</Button
       >
-      <button
-        class={action}
+      <Button
+        variant="ghost"
+        size="sm"
+        class="min-h-9 text-xs"
         disabled={!pending.length && !wordlessIntervals.length}
-        onclick={() => navigate(1)}>{m.flow_transcript_editor_next()}</button
+        onclick={() => navigate(1)}>{m.flow_transcript_editor_next()}</Button
       >
-      <button class={action} aria-expanded={details} onclick={() => (details = !details)}
-        >{m.flow_transcript_editor_toggle_details()}</button
+      <Button
+        variant="ghost"
+        size="sm"
+        class="min-h-9 text-xs"
+        aria-expanded={details}
+        onclick={() => (details = !details)}>{m.flow_transcript_editor_toggle_details()}</Button
       >
     </div>
     {#if selection.length}
@@ -494,26 +505,34 @@
         role="group"
         aria-label={m.flow_transcript_editor_selected_words()}
       >
-        <button class={action} disabled={!audioAvailable} onclick={replay}
-          >{m.flow_transcript_editor_listen()}</button
+        <Button
+          variant="ghost"
+          size="sm"
+          class="min-h-9 text-xs"
+          disabled={!audioAvailable}
+          onclick={replay}>{m.flow_transcript_editor_listen()}</Button
         >
         {#if suggestion}
-          <button
-            class={action}
+          <Button
+            variant="ghost"
+            size="sm"
+            class="min-h-9 text-xs"
             disabled={!editable || !audioAvailable || !!confirmed}
             onclick={() => assign(suggestion)}
             >{confirmed
               ? m.flow_transcript_editor_confirmed_name({ name: name(suggestion) })
-              : m.flow_transcript_editor_confirm_name({ name: name(suggestion) })}</button
+              : m.flow_transcript_editor_confirm_name({ name: name(suggestion) })}</Button
           >
         {:else if selectedSuggestions.length}
-          <button
-            class={action}
+          <Button
+            variant="ghost"
+            size="sm"
+            class="min-h-9 text-xs"
             disabled={!editable || !audioAvailable}
             onclick={() => confirm(false)}
             >{m.flow_transcript_editor_confirm_selection({
               count: selectedSuggestions.length
-            })}</button
+            })}</Button
           >
         {/if}
         <DropdownMenu.Root>
@@ -531,25 +550,31 @@
             </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Root>
-        <button
-          class={action}
+        <Button
+          variant="ghost"
+          size="sm"
+          class="min-h-9 text-xs"
           disabled={!editable}
           onclick={() => {
             textDraft = selectedText;
             editing = !editing;
-          }}>{m.flow_transcript_editor_correct_text()}</button
+          }}>{m.flow_transcript_editor_correct_text()}</Button
         >
-        <button
-          class={action}
+        <Button
+          variant="ghost"
+          size="sm"
+          class="min-h-9 text-xs"
           disabled={!editable || !selected.some((f) => f.decision)}
-          onclick={() => assign(null, true)}>{m.flow_transcript_editor_reset()}</button
+          onclick={() => assign(null, true)}>{m.flow_transcript_editor_reset()}</Button
         >
-        <button
-          class={action}
+        <Button
+          variant="ghost"
+          size="sm"
+          class="min-h-9 text-xs"
           onclick={() => {
             selection = [];
             editing = false;
-          }}>{m.flow_transcript_editor_clear()}</button
+          }}>{m.flow_transcript_editor_clear()}</Button
         >
       </div>
     {/if}
@@ -560,14 +585,23 @@
           bind:value={textDraft}
         /></label
       >
-      <button class={action} disabled={!editable} onclick={saveText}
-        >{m.flow_transcript_editor_save_correction()}</button
+      <Button
+        variant="ghost"
+        size="sm"
+        class="min-h-9 text-xs"
+        disabled={!editable}
+        onclick={saveText}>{m.flow_transcript_editor_save_correction()}</Button
       >
     {/if}
     <div class="flex items-center gap-2">
       <span role="status" class="text-muted text-xs">{notice}</span>
-      {#if undo}<button class={action} disabled={!editable} data-undo onclick={undoLast}
-          >{m.flow_transcript_editor_undo()}</button
+      {#if undo}<Button
+          variant="ghost"
+          size="sm"
+          class="min-h-9 text-xs"
+          disabled={!editable}
+          data-undo
+          onclick={undoLast}>{m.flow_transcript_editor_undo()}</Button
         >{/if}
     </div>
     {#if error}<p role="alert" class="text-negative-stronger mt-2 text-sm">{error}</p>{/if}

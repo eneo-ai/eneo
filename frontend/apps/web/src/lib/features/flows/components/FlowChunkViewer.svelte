@@ -215,7 +215,7 @@
                 <Tooltip.Provider delayDuration={150}>
                   <Tooltip.Root>
                     <Tooltip.Trigger>
-                      <span class="text-muted font-mono text-xs opacity-60">{sourceIdShort}</span>
+                      <span class="text-secondary font-mono text-xs">{sourceIdShort}</span>
                     </Tooltip.Trigger>
                     <Tooltip.Content>{infoBlobId}</Tooltip.Content>
                   </Tooltip.Root>

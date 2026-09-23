@@ -209,23 +209,25 @@
     </Button>
   </Alert.Root>
 {:else}
-  <div class="flex flex-wrap items-center justify-between gap-2">
-    <p class="text-muted max-w-2xl text-xs leading-relaxed">
-      {m.flow_run_progress_manual_refresh()}
-    </p>
-    <Button
-      variant="outline"
-      size="sm"
-      disabled={refreshing}
-      onclick={() => void refreshStepStatuses()}
-    >
-      {m.flow_run_progress_refresh()}
-    </Button>
+  <div class="flex flex-col gap-4">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <p class="text-secondary max-w-2xl text-xs leading-relaxed text-pretty">
+        {m.flow_run_progress_manual_refresh()}
+      </p>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={refreshing}
+        onclick={() => void refreshStepStatuses()}
+      >
+        {m.flow_run_progress_refresh()}
+      </Button>
+    </div>
+    {#if refreshFailed}
+      <Alert.Root variant="destructive">
+        <Alert.Description>{m.flow_run_progress_refresh_failed()}</Alert.Description>
+      </Alert.Root>
+    {/if}
+    <FlowRunProgressView {snapshot} {runStartedAt} onDownloadArtifact={downloadArtifact} />
   </div>
-  {#if refreshFailed}
-    <Alert.Root variant="destructive" class="mt-3">
-      <Alert.Description>{m.flow_run_progress_refresh_failed()}</Alert.Description>
-    </Alert.Root>
-  {/if}
-  <FlowRunProgressView {snapshot} {runStartedAt} onDownloadArtifact={downloadArtifact} />
 {/if}

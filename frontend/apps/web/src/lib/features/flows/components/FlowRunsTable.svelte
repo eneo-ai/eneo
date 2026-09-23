@@ -11,6 +11,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
+  import * as ToggleGroup from "$lib/components/ui/toggle-group/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
@@ -25,7 +26,7 @@
   import { getFlowRunStatusLabel } from "./flowRunStatusLabel";
   import { getRedispatchToastKind } from "./flowRunRedispatchFeedback";
   import { m } from "$lib/paraglide/messages";
-  import type { FlowRunProgressSnapshot } from "./flowRunProgress";
+  import { formatFlowRunDuration, type FlowRunProgressSnapshot } from "./flowRunProgress";
   import { getConfirmedOptimisticFlowRunIds, mergeOptimisticFlowRuns } from "./flowRunsOptimistic";
   import {
     canRedispatchFlowRun,
@@ -254,24 +255,14 @@
     };
   });
 
-  function formatDurationMs(ms: number): string {
-    const value = Math.max(ms, 0);
-    if (value < 1000) return `${value}ms`;
-    if (value < 60_000) return `${(value / 1000).toFixed(1)}s`;
-    if (value < 3_600_000) return `${(value / 60_000).toFixed(1)}m`;
-    // A review can wait overnight; minutes stop being readable long before that.
-    if (value < 86_400_000) return `${(value / 3_600_000).toFixed(1)}h`;
-    return `${(value / 86_400_000).toFixed(1)}d`;
-  }
-
   function formatDuration(start: string, end: string): string {
-    return formatDurationMs(new Date(end).getTime() - new Date(start).getTime());
+    return formatFlowRunDuration(new Date(end).getTime() - new Date(start).getTime());
   }
 
   // A run still going has no end time, and with several going at once how long
   // each has been waiting is the fact the reviewer is after.
   function formatElapsed(start: string): string {
-    return formatDurationMs(nowMs - new Date(start).getTime());
+    return formatFlowRunDuration(nowMs - new Date(start).getTime());
   }
 
   function isRunInFlight(status: FlowRunSummary["status"]): boolean {
@@ -475,58 +466,53 @@
     {/if}
     <!-- The field sits on the linen page, where a transparent surface reads as
          inert and drops the placeholder below the contrast floor. -->
-    <div class="relative mb-2 max-w-md">
-      <Input
-        type="search"
-        bind:value={searchQuery}
-        placeholder={m.flow_history_search_placeholder()}
-        aria-label={m.flow_history_search_placeholder()}
-        aria-describedby={searchQuery ? searchScopeHintId : undefined}
-        class="bg-primary h-9"
-      />
-      {#if searchQuery}
-        <p id={searchScopeHintId} class="text-muted mt-1 text-xs leading-relaxed">
-          {windowFull
-            ? m.flow_history_search_scope_hint_window_full({
-                count: String(history.runs.length)
-              })
-            : m.flow_history_search_scope_hint({ count: String(history.runs.length) })}
-        </p>
-      {/if}
-    </div>
-    <div class="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label={m.filter()}>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        class="focus-visible:ring-ring h-8 rounded-full px-3.5 text-[0.8rem] {statusFilter === null
-          ? 'border-accent-default/40 bg-accent-default/10 text-accent-stronger hover:bg-accent-default/15 hover:text-accent-stronger'
-          : 'text-secondary'}"
-        aria-pressed={statusFilter === null}
-        onclick={() => (statusFilter = null)}
-      >
-        {m.all_categories()}
-        <span class="font-normal tabular-nums">{displayRuns.length}</span>
-      </Button>
-      {#each FLOW_RUN_STATUS_FILTER_OPTIONS as status (status)}
-        {@const count = statusCounts[status] ?? 0}
-        {#if count > 0}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            class="focus-visible:ring-ring h-8 rounded-full px-3.5 text-[0.8rem] {statusFilter ===
-            status
-              ? 'border-accent-default/40 bg-accent-default/10 text-accent-stronger hover:bg-accent-default/15 hover:text-accent-stronger'
-              : 'text-secondary'}"
-            aria-pressed={statusFilter === status}
-            onclick={() => (statusFilter = statusFilter === status ? null : status)}
-          >
-            {getRunStatusLabel(status)}
-            <span class="font-normal tabular-nums">{count}</span>
-          </Button>
+    <div class="mb-3 flex flex-wrap items-start gap-x-3 gap-y-2">
+      <div class="relative w-full max-w-md min-w-60 flex-1">
+        <Input
+          type="search"
+          bind:value={searchQuery}
+          placeholder={m.flow_history_search_placeholder()}
+          aria-label={m.flow_history_search_placeholder()}
+          aria-describedby={searchQuery ? searchScopeHintId : undefined}
+          class="bg-primary h-9"
+        />
+        {#if searchQuery}
+          <p id={searchScopeHintId} class="text-muted mt-1 text-xs leading-relaxed">
+            {windowFull
+              ? m.flow_history_search_scope_hint_window_full({
+                  count: String(history.runs.length)
+                })
+              : m.flow_history_search_scope_hint({ count: String(history.runs.length) })}
+          </p>
         {/if}
-      {/each}
+      </div>
+      <!-- One single-choice control with one keyboard model, as on the flows
+         list: arrow keys move between statuses, the chosen one stays set. -->
+      <ToggleGroup.Root
+        type="single"
+        variant="outline"
+        spacing={0}
+        class="flex-wrap"
+        value={statusFilter ?? "all"}
+        onValueChange={(value) => {
+          if (value) statusFilter = value === "all" ? null : (value as FlowRunStatusFilter);
+        }}
+        aria-label={m.filter()}
+      >
+        <ToggleGroup.Item value="all" class="gap-1.5 px-3">
+          {m.all_categories()}
+          <span class="text-secondary font-normal tabular-nums">{displayRuns.length}</span>
+        </ToggleGroup.Item>
+        {#each FLOW_RUN_STATUS_FILTER_OPTIONS as status (status)}
+          {@const count = statusCounts[status] ?? 0}
+          {#if count > 0}
+            <ToggleGroup.Item value={status} class="gap-1.5 px-3">
+              {getRunStatusLabel(status)}
+              <span class="text-secondary font-normal tabular-nums">{count}</span>
+            </ToggleGroup.Item>
+          {/if}
+        {/each}
+      </ToggleGroup.Root>
     </div>
 
     {#if visibleRuns.length === 0}
@@ -723,7 +709,7 @@
                       aria-controls={isExpanded ? getEvidenceRowId(run.id) : undefined}
                       onclick={() => toggleRunDetails(run.id)}
                     >
-                      {m.flow_run_evidence()}
+                      {isExpanded ? m.flow_run_hide_details() : m.flow_run_show_details()}
                       <IconChevronDown
                         data-icon="inline-end"
                         class="motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {isExpanded

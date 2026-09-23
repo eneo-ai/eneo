@@ -1160,7 +1160,7 @@
 
 <Dialog.Root bind:open onOpenChangeComplete={handleOpenChangeComplete}>
   <Dialog.Content
-    class="!flex max-h-[92vh] min-h-[24rem] !max-w-5xl flex-col !gap-0 overflow-hidden !rounded-2xl !p-0 sm:min-h-[30rem]"
+    class="!flex max-h-[92vh] min-h-[24rem] !max-w-5xl flex-col !gap-0 overflow-hidden !rounded-xl !p-0 sm:min-h-[30rem]"
     showCloseButton={false}
     interactOutsideBehavior={closeBehavior}
     escapeKeydownBehavior={closeBehavior}

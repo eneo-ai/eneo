@@ -1,3 +1,4 @@
+import { getLocale } from "$lib/paraglide/runtime";
 import type {
   FlowGraph,
   FlowGraphNode,
@@ -179,14 +180,27 @@ export function formatFlowRunStepDuration(step: FlowRunProgressStep): string | n
   return formatFlowRunDuration(ms);
 }
 
-export function formatFlowRunDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const totalSeconds = Math.round(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (seconds === 0) return `${minutes}m`;
-  return `${minutes}m ${seconds}s`;
+/**
+ * A duration in the reader's language with its two largest units, each
+ * rounded to the smaller one first: "4 min 59 s", "1 tim 5 min", "2 d 3 tim".
+ * One owner for the history table, the evidence view and the progress view.
+ */
+export function formatFlowRunDuration(ms: number, locale: string = getLocale()): string {
+  const unit = (name: string, value: number) =>
+    new Intl.NumberFormat(locale, { style: "unit", unit: name, unitDisplay: "short" }).format(
+      value
+    );
+  const pair = (big: string, bigValue: number, small: string, smallValue: number) =>
+    smallValue === 0 ? unit(big, bigValue) : `${unit(big, bigValue)} ${unit(small, smallValue)}`;
+  const value = Math.max(0, ms);
+  if (value < 1000) return unit("millisecond", Math.round(value));
+  const seconds = Math.round(value / 1000);
+  if (seconds < 60) return unit("second", seconds);
+  if (seconds < 3600) return pair("minute", Math.floor(seconds / 60), "second", seconds % 60);
+  const minutes = Math.round(value / 60_000);
+  if (minutes < 1440) return pair("hour", Math.floor(minutes / 60), "minute", minutes % 60);
+  const hours = Math.round(value / 3_600_000);
+  return pair("day", Math.floor(hours / 24), "hour", hours % 24);
 }
 
 export function formatFlowRunElapsed(startedAtIso: string | null, nowMs: number): string | null {

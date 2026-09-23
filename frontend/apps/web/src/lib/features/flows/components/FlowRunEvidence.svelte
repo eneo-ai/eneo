@@ -8,7 +8,7 @@
     Eneo
   } from "@eneo/eneo-js";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { toast } from "$lib/components/toast";
   import {
     classifyExportFailure,
@@ -25,6 +25,7 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import FlowRunEvidenceToolbar from "./FlowRunEvidenceToolbar.svelte";
+  import { formatFlowRunDuration } from "./flowRunProgress";
   import FlowRunEvidenceSummary from "./FlowRunEvidenceSummary.svelte";
   import FlowRunEvidenceStepCard, {
     type FlowRunTranscriptContext
@@ -166,7 +167,9 @@
   $effect(() => {
     if (evidence && evidence.step_results.length > 0 && !hasAutoExpanded) {
       hasAutoExpanded = true;
-      expandedSteps = [evidence.step_results[0].step_order];
+      // A failed run opens on the step that failed, so the reason is on screen
+      // without paging through every earlier step.
+      expandedSteps = [(failedStep ?? evidence.step_results[0]).step_order];
     }
   });
 
@@ -175,6 +178,41 @@
       if (copiedTimer) clearTimeout(copiedTimer);
     };
   });
+
+  // The step that stopped the run: the first failed step that actually started.
+  // The step that stopped the run: the one the run error names, else the
+  // first failed step that started.
+  const failedStep = $derived.by(() => {
+    const results = evidence?.step_results ?? [];
+    const named = evidence?.run.error?.step_order;
+    return (
+      (typeof named === "number"
+        ? results.find((result) => result.step_order === named && result.status === "failed")
+        : undefined) ??
+      results.find((result) => result.status === "failed" && result.started_at) ??
+      null
+    );
+  });
+  const failedStepName = $derived.by(() => {
+    if (!failedStep) return "";
+    const steps = (evidence?.definition_snapshot?.steps ?? []) as Record<string, unknown>[];
+    const name = steps.find((step) => step.step_order === failedStep.step_order)?.user_description;
+    return typeof name === "string" && name.trim()
+      ? name.trim()
+      : m.flow_step_fallback_label({ order: String(failedStep.step_order) });
+  });
+
+  async function showFailedStep() {
+    if (!failedStep) return;
+    const order = failedStep.step_order;
+    if (!expandedSteps.includes(order)) expandedSteps = [...expandedSteps, order];
+    await tick();
+    const panel = document.getElementById(getStepPanelId(order));
+    const card = panel?.closest("[data-slot='card']") ?? panel;
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    card?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+    card?.querySelector<HTMLButtonElement>("button[aria-expanded]")?.focus({ preventScroll: true });
+  }
 
   function toggleStep(order: number) {
     expandedSteps = expandedSteps.includes(order)
@@ -285,10 +323,9 @@
     const first = attempts[0] as { started_at?: string; finished_at?: string };
     const last = attempts[attempts.length - 1] as { started_at?: string; finished_at?: string };
     if (!first.started_at || !last.finished_at) return null;
-    const ms = new Date(last.finished_at).getTime() - new Date(first.started_at).getTime();
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-    return `${(ms / 60000).toFixed(1)}m`;
+    return formatFlowRunDuration(
+      new Date(last.finished_at).getTime() - new Date(first.started_at).getTime()
+    );
   }
 
   async function downloadArtifact(fileId: string) {
@@ -394,9 +431,7 @@
   }
 
   function formatElapsedMs(value: number | undefined): string {
-    if (value === undefined) return "\u2014";
-    if (value < 1000) return `${value}ms`;
-    return `${(value / 1000).toFixed(1)}s`;
+    return value === undefined ? "\u2014" : formatFlowRunDuration(value);
   }
 
   function formatBytes(value: number | undefined): string {
@@ -467,9 +502,12 @@
     <FlowRunEvidenceSummary
       {runStatus}
       traceId={evidence.debug_export?.run?.trace_id ?? null}
-      redactionApplied={evidence.debug_export?.security?.redaction_applied === true}
+      redactionApplied={$mode === "power_user" &&
+        evidence.debug_export?.security?.redaction_applied === true}
       tokenUsage={evidence.debug_export?.run?.summary?.token_usage ?? null}
       transcriptionUsage={evidence.debug_export?.run?.summary?.transcription_usage ?? null}
+      resultFiles={evidence.result_files ?? []}
+      onDownloadResultFile={downloadArtifact}
     />
     {#if $mode === "power_user"}
       <FlowRunEvidenceToolbar
@@ -557,6 +595,22 @@
           </p>
         {/each}
       </div>
+    {/if}
+
+    {#if failedStep}
+      <!-- A failed run says where it stopped before listing every step, so the
+           reason is one click away however long the flow is. -->
+      <Alert.Root variant="destructive" class="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Alert.Description class="min-w-0 flex-1 text-sm">
+          {m.flow_run_stopped_at_step({
+            order: String(failedStep.step_order),
+            name: failedStepName
+          })}
+        </Alert.Description>
+        <Button variant="outline" size="sm" onclick={showFailedStep}>
+          {m.flow_run_show_failed_step()}
+        </Button>
+      </Alert.Root>
     {/if}
 
     {#each evidence.step_results as result (result.id ?? result.step_order)}

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { SvelteSet } from "svelte/reactivity";
   import ChevronRight from "lucide-svelte/icons/chevron-right";
+  import IconHeadphones from "@lucide/svelte/icons/headphones";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as m from "$lib/paraglide/messages";
   import type { SpeakerMappingRow } from "../speakerMappingReview";
@@ -86,7 +88,7 @@
               )
             )}
         />
-        <p class="text-muted mt-1 text-xs">
+        <p class="text-secondary mt-1 text-xs">
           {m.flow_transcript_editor_lines({ count: row.lineCount })} · {row.name
             ? m.flow_transcript_editor_confidence({
                 confidence:
@@ -106,12 +108,14 @@
           open={whyOpen.has(row.label)}
           ontoggle={(event) =>
             event.currentTarget.open ? whyOpen.add(row.label) : whyOpen.delete(row.label)}
-          class="text-muted mt-1 text-xs"
+          class="text-secondary mt-1 text-xs"
         >
           <summary
             class="focus-visible:ring-ring flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
             ><ChevronRight
-              class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {whyOpen
+              class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {whyOpen.has(
+                row.label
+              )
                 ? 'rotate-90'
                 : ''}"
               aria-hidden="true"
@@ -130,24 +134,17 @@
             </p>{/if}
         </details>
       </div>
-      <button
-        type="button"
-        class="border-default focus-visible:ring-ring mt-0.5 flex size-9 items-center justify-center rounded-full border focus-visible:ring-2 disabled:opacity-40"
+      <Button
+        variant="outline"
+        size="icon-lg"
+        class="mt-0.5 rounded-full"
         aria-label={m.flow_transcript_editor_listen_speaker({ number: index + 1 })}
         disabled={!onListen || !sampleAvailable(row.label)}
         onclick={() => onListen?.(row.label)}
       >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          aria-hidden="true"><path d="M3 14v-3a9 9 0 0 1 18 0v3M3 13h4v8H3zM17 13h4v8h-4z" /></svg
-        >
-      </button>
+        <IconHeadphones class="size-4" aria-hidden="true" />
+      </Button>
     </div>
   {/each}
-  <p class="text-muted text-xs">{m.flow_transcript_editor_unnamed_hint()}</p>
+  <p class="text-secondary text-xs">{m.flow_transcript_editor_unnamed_hint()}</p>
 </details>

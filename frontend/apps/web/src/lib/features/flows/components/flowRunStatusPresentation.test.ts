@@ -34,7 +34,7 @@ describe("getFlowRunStatusView", () => {
     expect(getFlowRunStatusView("pending", translations)).toEqual({
       label: "Queued",
       textClass: "text-secondary",
-      dotClass: "bg-secondary",
+      dotClass: "bg-current",
       pulseDot: false
     });
   });
@@ -52,7 +52,7 @@ describe("getFlowRunStatusView", () => {
     expect(getFlowRunStatusView("mystery-status", translations)).toEqual({
       label: "mystery-status",
       textClass: "text-secondary",
-      dotClass: "bg-secondary",
+      dotClass: "bg-current",
       pulseDot: false
     });
   });

@@ -59,13 +59,11 @@
 </script>
 
 <Field.Group>
-  <div class="px-1">
-    <p class="text-primary text-sm font-semibold">{labels.formIntroTitle}</p>
-    <p class="text-secondary mt-1 text-sm leading-relaxed">{labels.formIntroDescription}</p>
-    {#if hasRequiredFormFields}
-      <p class="text-muted mt-1.5 text-xs">{m.flow_run_required_hint()}</p>
-    {/if}
-  </div>
+  <!-- The wizard header above already says what this page is for; only the
+       required-field key is added here. -->
+  {#if hasRequiredFormFields}
+    <p class="text-secondary text-xs">{m.flow_run_required_hint()}</p>
+  {/if}
 
   {#each formFields as field, fieldIndex (field.name)}
     {@const inputId = `flow-input-${fieldIndex}`}

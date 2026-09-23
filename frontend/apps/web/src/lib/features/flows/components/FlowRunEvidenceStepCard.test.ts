@@ -24,11 +24,13 @@ function renderCard(
   currentEvidenceNotLoaded: boolean,
   stepResult: FlowRunStep = result,
   transcriptContext: FlowRunTranscriptContext | null = null,
-  onRepairFailure: ((stepOrder: number) => void) | null = null
+  onRepairFailure: ((stepOrder: number) => void) | null = null,
+  runError: { step_order?: number | null } | null = null
 ): string {
   return render(FlowRunEvidenceStepCard, {
     props: {
       result: stepResult,
+      runError: runError as never,
       transcriptContext,
       currentEvidenceNotLoaded,
       onRepairFailure,
@@ -78,6 +80,53 @@ describe("FlowRunEvidenceStepCard", () => {
     expect(
       renderCard(false, failed("typed_io_input_exceeds_model_window"), null, repair)
     ).not.toContain(m.flow_run_error_repair_action());
+  });
+
+  it("leads a failed step with what went wrong, before its result and prompt", () => {
+    const html = renderCard(false, {
+      ...result,
+      status: "failed",
+      error_code: "typed_io_output_parse_failed",
+      error_message: "Step 1: typed_io_output_parse_failed.",
+      effective_prompt: "Sammanfatta underlaget.",
+      output_payload_json: { text: "Utkast" },
+      input_payload_json: { text: "Underlag" }
+    });
+    const errorAt = html.indexOf(m.flow_run_error());
+    expect(errorAt).toBeGreaterThan(-1);
+    expect(errorAt).toBeLessThan(html.indexOf(m.flow_run_output()));
+    expect(html.indexOf(m.flow_run_output())).toBeLessThan(
+      html.indexOf(m.flow_run_effective_prompt())
+    );
+    // The raw input payload is JSON, which Enkel does not show.
+    expect(html).not.toContain(m.flow_run_show_input());
+  });
+
+  it("says a step after the one that stopped the run did not run, without repeating the error", () => {
+    const skipped: FlowRunStep = {
+      ...result,
+      step_order: 3,
+      status: "failed",
+      started_at: null,
+      error_code: "typed_io_contract_violation",
+      error_message: "Step 2: contract violation."
+    };
+    const html = renderCard(false, skipped, null, null, { step_order: 2 });
+    expect(html).toContain(m.flow_run_step_not_run());
+    expect(html).not.toContain("Step 2: contract violation.");
+  });
+
+  it("keeps a step that failed before recording its start as the failing step", () => {
+    const failedToStart: FlowRunStep = {
+      ...result,
+      step_order: 2,
+      status: "failed",
+      started_at: null,
+      error_code: "flow_step_attempt_start_failed",
+      error_message: "Step 2: attempt could not start."
+    };
+    const html = renderCard(false, failedToStart, null, null, { step_order: 2 });
+    expect(html).not.toContain(m.flow_run_step_not_run());
   });
 
   it("shows when the current attempt's evidence was not loaded", () => {

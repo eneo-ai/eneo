@@ -13,6 +13,7 @@
     type FlowRunProgressSnapshot
   } from "./flowRunProgress";
 
+  const progressId = $props.id();
   const prefersReducedMotion =
     browser && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -136,7 +137,10 @@
   const headerSummary = $derived.by(() => {
     if (stats.total === 0) return m.flow_run_progress_waiting_for_run();
     if (stats.running > 0) return m.flow_run_progress_running_summary();
-    if (stats.terminal === stats.total) return m.flow_run_status_completed();
+    // Every step finished, but a failed one means the run did not succeed.
+    if (stats.terminal === stats.total) {
+      return stats.failed > 0 ? m.flow_run_status_failed() : m.flow_run_status_completed();
+    }
     return m.flow_run_progress_pending_summary();
   });
 </script>
@@ -146,17 +150,17 @@
     <div class="flex flex-col gap-2.5">
       <div class="flex items-baseline justify-between gap-3">
         <div class="flex items-baseline gap-2">
-          <span class="text-primary text-sm font-semibold tabular-nums">
+          <span id="{progressId}-counter" class="text-primary text-sm font-semibold tabular-nums">
             {m.flow_run_progress_counter({
               current: String(stats.terminal + stats.running),
               total: String(stats.total)
             })}
           </span>
-          <span class="text-muted text-xs">&middot;</span>
+          <span class="text-secondary text-xs" aria-hidden="true">&middot;</span>
           <span class="text-secondary text-xs">{headerSummary}</span>
         </div>
         {#if elapsedLabel}
-          <span class="text-muted shrink-0 text-xs tabular-nums">
+          <span class="text-secondary shrink-0 text-xs tabular-nums">
             {m.flow_run_progress_elapsed({ elapsed: elapsedLabel })}
           </span>
         {/if}
@@ -164,6 +168,7 @@
       <div
         class="bg-hover-dimmer h-1.5 w-full overflow-hidden rounded-full"
         role="progressbar"
+        aria-labelledby="{progressId}-counter"
         aria-valuenow={progressPercent}
         aria-valuemin="0"
         aria-valuemax="100"
@@ -185,7 +190,9 @@
         in:fly={{
           y: prefersReducedMotion ? 0 : 6,
           duration: prefersReducedMotion ? 0 : 200,
-          delay: prefersReducedMotion ? 0 : step.stepOrder * 50,
+          // A long flow must not take a second to settle: the cascade stops
+          // after the first few cards.
+          delay: prefersReducedMotion ? 0 : Math.min(step.stepOrder - 1, 5) * 40,
           easing: cubicOut
         }}
       >

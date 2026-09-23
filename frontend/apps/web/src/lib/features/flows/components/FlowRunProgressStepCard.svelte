@@ -8,6 +8,9 @@
   import { cubicOut } from "svelte/easing";
   import { browser } from "$app/environment";
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { getLocale } from "$lib/paraglide/runtime";
+  import { formatFlowRunTokenCount } from "./flowRunTokenUsage";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -72,15 +75,15 @@
 </script>
 
 <Card.Root
-  class="overflow-hidden transition-[box-shadow,background-color,border-color] duration-300 {focused
-    ? 'border-accent-default/40 bg-accent-dimmer/15 shadow-sm'
+  class="overflow-hidden motion-safe:transition-[background-color,border-color] motion-safe:duration-(--duration-fast) {focused
+    ? 'border-accent-default/40 bg-accent-dimmer/15'
     : ''} {isRunning ? 'ring-accent-default/35 ring-2' : ''} {isFailed
     ? 'ring-negative-default/30 ring-1'
     : ''}"
 >
   <button
     type="button"
-    class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors active:scale-[0.995] disabled:cursor-default"
+    class="focus-visible:inset-ring-ring flex w-full items-center justify-between gap-3 px-4 py-3 text-left focus-visible:inset-ring-2 focus-visible:outline-none disabled:cursor-default"
     aria-expanded={expanded}
     aria-controls={panelId}
     aria-current={focused ? "step" : undefined}
@@ -91,7 +94,7 @@
   >
     <div class="flex min-w-0 items-center gap-3">
       <span
-        class="{circleClass} flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold tabular-nums transition-colors duration-300"
+        class="{circleClass} flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold tabular-nums motion-safe:transition-colors motion-safe:duration-(--duration-fast)"
       >
         {step.stepOrder}
       </span>
@@ -109,13 +112,13 @@
           {/if}
         </div>
         {#if focused && isRunning}
-          <p class="text-muted mt-1 text-xs">
+          <p class="text-secondary mt-1 text-xs">
             {step.speakerIdentification
               ? m.flow_run_progress_transcribing_with_speakers_hint()
               : m.flow_run_progress_active_step_hint()}
           </p>
         {:else if focused && step.status === "queued"}
-          <p class="text-muted mt-1 text-xs">
+          <p class="text-secondary mt-1 text-xs">
             {m.flow_run_progress_next_step_hint()}
           </p>
         {/if}
@@ -135,7 +138,10 @@
   </button>
 
   {#if expanded && canExpand}
-    <div id={panelId} transition:slide={{ duration: 180, easing: cubicOut }}>
+    <div
+      id={panelId}
+      transition:slide={{ duration: prefersReducedMotion ? 0 : 150, easing: cubicOut }}
+    >
       <Card.Content class="border-default flex min-w-0 flex-col gap-3 border-t px-4 py-3">
         {#if step.errorMessage}
           <FlowRunErrorAlert errorCode={step.errorCode} message={step.errorMessage} />
@@ -144,10 +150,11 @@
         {#if hasOutput}
           <div>
             <div class="flex items-center justify-between">
-              <h4 class="text-muted text-xs font-semibold">{m.flow_run_output()}</h4>
-              <button
-                type="button"
-                class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-ring rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              <h4 class="text-secondary text-xs font-semibold">{m.flow_run_output()}</h4>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="text-secondary hover:text-primary size-8"
                 aria-label={m.copy()}
                 onclick={() =>
                   void onCopyPayload(`progress-step-${step.stepOrder}-output`, step.outputPayload)}
@@ -159,7 +166,7 @@
                 {:else}
                   <IconCopy class="size-3.5" />
                 {/if}
-              </button>
+              </Button>
             </div>
 
             {#if hasStructuredOutput && step.outputPayload?.structured !== undefined}
@@ -178,7 +185,7 @@
 
             {#if hasResultFiles}
               <div class="mt-2">
-                <h4 class="text-muted text-xs font-semibold">{m.flow_run_files()}</h4>
+                <h4 class="text-secondary text-xs font-semibold">{m.flow_run_files()}</h4>
                 <div class="mt-1.5 flex flex-wrap gap-2">
                   {#each step.resultFiles as artifact (artifact.file_id)}
                     <FlowRunResultFileButton file={artifact} onDownload={onDownloadArtifact} />
@@ -211,11 +218,11 @@
             </div>
           </div>
         {:else if isCompleted && step.detailsStale}
-          <div class="text-muted text-xs italic">
+          <div class="text-secondary text-xs italic">
             {m.flow_run_progress_details_stale()}
           </div>
         {:else if isCompleted}
-          <div class="text-muted text-xs italic">
+          <div class="text-secondary text-xs italic">
             {m.flow_run_progress_empty_output()}
           </div>
         {/if}
@@ -224,7 +231,7 @@
           <Collapsible.Root open={inputExpanded} onOpenChange={() => onToggleInput(step.stepOrder)}>
             <div class="flex items-center justify-between">
               <Collapsible.Trigger
-                class="text-muted hover:text-secondary focus-visible:ring-ring -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                class="text-secondary hover:text-primary focus-visible:ring-ring -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
               >
                 <IconChevronDown
                   class="size-3 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {inputExpanded
@@ -233,9 +240,10 @@
                 />
                 {m.flow_run_input()}
               </Collapsible.Trigger>
-              <button
-                type="button"
-                class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-ring rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              <Button
+                variant="ghost"
+                size="icon"
+                class="text-secondary hover:text-primary size-8"
                 aria-label={m.copy()}
                 onclick={() =>
                   void onCopyPayload(`progress-step-${step.stepOrder}-input`, step.inputPayload)}
@@ -247,7 +255,7 @@
                 {:else}
                   <IconCopy class="size-3.5" />
                 {/if}
-              </button>
+              </Button>
             </div>
             <Collapsible.Content>
               <pre
@@ -262,15 +270,19 @@
         {/if}
 
         {#if hasTokens}
-          <div class="border-default text-muted flex items-center gap-2 border-t pt-3 text-xs">
-            <span class="tabular-nums">{m.flow_run_tokens()}</span>
-            <span class="text-dimmer">&middot;</span>
+          <div class="border-default text-secondary flex items-center gap-2 border-t pt-3 text-xs">
+            <span>{m.flow_run_tokens()}</span>
+            <span aria-hidden="true">&middot;</span>
             <span class="tabular-nums"
-              >{m.flow_run_tokens_in({ count: String(step.numTokensInput ?? 0) })}</span
+              >{m.flow_run_tokens_in({
+                count: formatFlowRunTokenCount(step.numTokensInput ?? 0, getLocale())
+              })}</span
             >
-            <span class="text-dimmer">&middot;</span>
+            <span aria-hidden="true">&middot;</span>
             <span class="tabular-nums"
-              >{m.flow_run_tokens_out({ count: String(step.numTokensOutput ?? 0) })}</span
+              >{m.flow_run_tokens_out({
+                count: formatFlowRunTokenCount(step.numTokensOutput ?? 0, getLocale())
+              })}</span
             >
           </div>
         {/if}

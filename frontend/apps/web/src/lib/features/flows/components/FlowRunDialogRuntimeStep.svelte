@@ -329,7 +329,7 @@
         class="mt-2 inline-flex text-sm"
         class:text-accent-stronger={fileCount > 0 && remainingSlots > 0}
         class:text-warning-stronger={remainingSlots <= 0}
-        class:text-muted={fileCount === 0}
+        class:text-secondary={fileCount === 0}
       >
         {m.flow_run_files_count({
           current: String(fileCount),
@@ -352,7 +352,7 @@
       <div class="border-default bg-secondary/5 mt-4 rounded-xl border p-4">
         <div class="mb-3 space-y-1">
           <p class="text-sm font-medium">{m.record_microphone_audio()}</p>
-          <p class="text-muted text-sm">
+          <p class="text-secondary text-sm">
             {m.record_audio_device()}
           </p>
         </div>
@@ -449,17 +449,19 @@
         <p>
           {uploadError}{getUploadErrorHint(classifyUploadError(uploadError ?? ""))}
         </p>
-        <button
-          class="text-negative-stronger mt-1.5 text-xs font-medium underline underline-offset-2 hover:no-underline"
+        <Button
+          variant="link"
+          size="sm"
+          class="text-negative-stronger mt-1 h-auto min-h-6 px-0"
           onclick={onRetryUpload}
         >
           {labels.retryUpload}
-        </button>
+        </Button>
       </div>
     {/if}
 
     {#if supportsAudioRecording && fileCount > 0 && remainingSlots > 0}
-      <p class="text-muted mt-3 text-sm leading-relaxed">
+      <p class="text-secondary mt-3 text-sm leading-relaxed">
         {m.recording_record_another_hint()}
       </p>
     {/if}
@@ -473,24 +475,30 @@
             <div class="flex min-w-0 flex-col">
               <span class="min-w-0 truncate">{file.name ?? file.id}</span>
               {#if file.size}
-                <span class="text-muted text-xs">{formatBytes(file.size)}</span>
+                <span class="text-secondary text-xs tabular-nums">{formatBytes(file.size)}</span>
               {/if}
             </div>
             <div class="flex shrink-0 items-center gap-1">
-              <button
-                class="text-muted/70 hover:text-accent-stronger group-hover:text-muted flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md transition-colors duration-(--duration-quick)"
+              <!-- Faded icons (60 to 70% of the muted grey) sat under the 3:1
+                   floor for controls and had no focus ring. -->
+              <Button
+                variant="ghost"
+                size="icon"
+                class="text-secondary hover:text-primary size-10"
                 onclick={() => onDownloadUploadedFile(file)}
                 aria-label="{m.download_file()} {file.name ?? file.id}"
               >
                 <IconDownload class="size-4" />
-              </button>
-              <button
-                class="text-muted/60 hover:text-negative-stronger group-hover:text-muted flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md transition-colors duration-(--duration-quick)"
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="text-secondary hover:text-negative-stronger size-10"
                 onclick={() => onRemoveFile(file.id)}
                 aria-label="{m.delete()} {file.name ?? file.id}"
               >
                 <IconXMark class="size-4" />
-              </button>
+              </Button>
             </div>
           </div>
         {/each}

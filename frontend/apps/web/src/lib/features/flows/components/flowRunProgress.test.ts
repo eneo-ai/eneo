@@ -8,9 +8,17 @@ import {
 
 describe("flowRunProgress helpers", () => {
   test("rounds a duration to whole seconds before splitting minutes", () => {
-    expect(formatFlowRunDuration(4 * 60_000 + 59_600)).toBe("5m");
-    expect(formatFlowRunDuration(4 * 60_000 + 59_400)).toBe("4m 59s");
-    expect(formatFlowRunDuration(61_000)).toBe("1m 1s");
+    expect(formatFlowRunDuration(4 * 60_000 + 59_600, "en")).toBe("5 min");
+    expect(formatFlowRunDuration(4 * 60_000 + 59_400, "en")).toBe("4 min 59 sec");
+    expect(formatFlowRunDuration(61_000, "sv")).toBe("1 min 1 s");
+  });
+
+  test("names durations in the reader's language and carries the round-up into the larger unit", () => {
+    expect(formatFlowRunDuration(350, "sv")).toBe("350 ms");
+    expect(formatFlowRunDuration(59_600, "sv")).toBe("1 min");
+    expect(formatFlowRunDuration(3_599_700, "sv")).toBe("1 tim");
+    expect(formatFlowRunDuration(3_900_000, "sv")).toBe("1 tim 5 min");
+    expect(formatFlowRunDuration(2 * 86_400_000 + 3 * 3_600_000, "sv")).toBe("2 d 3 tim");
   });
 
   test("trusts the step list over an older graph when both come from one detail read", () => {

@@ -102,13 +102,15 @@
   {#if completedFormFieldSummaries.length > 0}
     <section class="flex flex-col gap-3 px-1">
       <h4 class="text-primary text-sm font-semibold">{labels.reviewFieldsTitle}</h4>
-      <dl class="grid gap-2 sm:grid-cols-2">
+      <!-- One sheet with hairline rows, label beside value: field labels are
+           whole Swedish phrases, so they stay in sentence case. -->
+      <dl class="border-default divide-default divide-y rounded-lg border">
         {#each completedFormFieldSummaries as item (item.field.name)}
-          <div class="border-default bg-secondary/25 rounded-lg border px-3 py-2.5">
-            <dt class="text-muted text-xs font-medium tracking-[0.08em] uppercase">
+          <div class="grid gap-x-4 gap-y-0.5 px-3 py-2.5 sm:grid-cols-[12.5rem_minmax(0,1fr)]">
+            <dt class="text-secondary text-sm">
               {getFlowFormFieldLabel(item.field)}
             </dt>
-            <dd class="text-primary mt-1 text-sm leading-relaxed break-words">{item.value}</dd>
+            <dd class="text-primary text-sm leading-relaxed break-words">{item.value}</dd>
           </div>
         {/each}
       </dl>
@@ -119,7 +121,7 @@
     <section class="flex flex-col gap-2 px-1">
       <h4 class="text-primary text-sm font-semibold">{labels.reviewTextTitle}</h4>
       <pre
-        class="border-default bg-secondary/25 overflow-x-auto rounded-lg border px-3 py-3 font-mono text-[0.8125rem] leading-relaxed whitespace-pre-wrap">{inputText.trim()}</pre>
+        class="border-default max-h-60 overflow-auto rounded-lg border px-3 py-3 font-sans text-sm leading-relaxed break-words whitespace-pre-wrap">{inputText.trim()}</pre>
     </section>
   {/if}
 
@@ -129,7 +131,7 @@
       <div class="mt-3 flex flex-col gap-4">
         {#each reviewFileGroups as group (group.step.step_id)}
           <div class="flex flex-col gap-2">
-            <p class="text-muted text-xs font-medium tracking-[0.08em] uppercase">
+            <p class="text-secondary text-xs font-medium">
               {labels.runtimeReviewStep(group.step.step_order, getStepLabel(group.step))}
             </p>
             <ul class="flex flex-col gap-1.5">
@@ -139,7 +141,7 @@
                 >
                   <span class="min-w-0 truncate">{file.name ?? file.id}</span>
                   {#if file.size}
-                    <span class="text-muted shrink-0 text-xs tabular-nums">
+                    <span class="text-secondary shrink-0 text-xs tabular-nums">
                       {formatBytes(file.size)}
                     </span>
                   {/if}

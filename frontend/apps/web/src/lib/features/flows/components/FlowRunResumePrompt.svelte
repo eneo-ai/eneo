@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formatFlowRunDuration } from "./flowRunProgress";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconTrash } from "@eneo/icons/trash";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -23,12 +24,7 @@
   } = $props();
 
   function formatDuration(totalMs: number): string {
-    if (!Number.isFinite(totalMs) || totalMs <= 0) return "0 min";
-    const totalMinutes = Math.max(1, Math.round(totalMs / 60000));
-    if (totalMinutes < 60) return `${totalMinutes} min`;
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-    return minutes > 0 ? `${hours} h ${minutes} min` : `${hours} h`;
+    return formatFlowRunDuration(Number.isFinite(totalMs) ? totalMs : 0, locale);
   }
 
   function formatWhen(epochMs: number): string {

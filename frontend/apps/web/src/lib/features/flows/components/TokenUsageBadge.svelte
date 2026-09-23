@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { useId } from "bits-ui";
-
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -29,14 +27,14 @@
     interactive = true
   }: Props = $props();
 
-  const labelTitleId = useId();
+  const labelTitleId = $props.id();
   const badgeLabel = $derived(m.flow_run_tokens_badge({ count: total }));
 </script>
 
 {#snippet badge()}
   <Badge
     variant="outline"
-    class="bg-secondary/60 text-muted hover:bg-secondary hover:text-primary cursor-help px-2 py-0.5 text-xs font-medium tabular-nums motion-safe:transition-colors motion-safe:duration-(--duration-quick)"
+    class="bg-secondary/60 text-secondary hover:bg-secondary hover:text-primary cursor-help px-2 py-0.5 text-xs font-medium tabular-nums motion-safe:transition-colors motion-safe:duration-(--duration-quick)"
   >
     {estimated ? "≈ " : ""}{badgeLabel}
     {#if incomplete}
@@ -61,6 +59,11 @@
     <Popover.Content align="end" class="w-72 gap-3">
       <Popover.Header>
         <Popover.Title id={labelTitleId}>{m.flow_run_token_usage_title()}</Popover.Title>
+        <!-- "Token" is the one technical word the badge cannot avoid, so the
+             popover says what it is before any number. -->
+        <Popover.Description class="text-secondary text-xs leading-relaxed text-pretty">
+          {m.flow_run_token_usage_explainer()}
+        </Popover.Description>
       </Popover.Header>
 
       <dl
@@ -70,7 +73,7 @@
         <dt class="text-secondary">{m.flow_run_tokens_total()}</dt>
         <dd class="text-primary font-semibold tabular-nums">{estimated ? "≈ " : ""}{total}</dd>
 
-        <dt class="text-muted text-xs">{m.flow_run_tokens_input()}</dt>
+        <dt class="text-secondary text-xs">{m.flow_run_tokens_input()}</dt>
         <dd class="text-secondary text-xs tabular-nums">
           {estimated ? "≈ " : ""}{input}
           {#if inputIncomplete}
@@ -78,7 +81,7 @@
           {/if}
         </dd>
 
-        <dt class="text-muted text-xs">{m.flow_run_tokens_output()}</dt>
+        <dt class="text-secondary text-xs">{m.flow_run_tokens_output()}</dt>
         <dd class="text-secondary text-xs tabular-nums">
           {estimated ? "≈ " : ""}{output}
           {#if outputIncomplete}
@@ -87,7 +90,9 @@
         </dd>
       </dl>
 
-      <p class="border-default text-muted border-t pt-3 text-xs leading-relaxed">{note}</p>
+      <p class="border-default text-secondary border-t pt-3 text-xs leading-relaxed text-pretty">
+        {note}
+      </p>
     </Popover.Content>
   </Popover.Root>
 {:else}

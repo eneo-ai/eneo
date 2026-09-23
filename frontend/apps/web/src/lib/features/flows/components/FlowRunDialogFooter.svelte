@@ -86,7 +86,7 @@
       <div class="order-1 flex-grow sm:order-2">
         {#if !isReviewPage && !canGoNext && nextDisabledReason}
           <p
-            class="text-muted text-sm leading-relaxed sm:text-right"
+            class="text-secondary text-sm leading-relaxed sm:text-right"
             role="status"
             aria-live="polite"
           >
@@ -98,11 +98,42 @@
       <div
         class="order-2 flex w-full flex-col gap-2 sm:order-3 sm:w-auto sm:flex-row sm:items-center"
       >
+        <!-- DOM order is the desktop reading order (Avbryt, Föregående, then the
+             forward action), so Tab moves the way the eye does; the order
+             classes only restack the column on narrow screens. -->
+        {#if isDirty && !isSubmitting}
+          <Button
+            variant="outline"
+            onclick={onRequestClose}
+            class="order-3 w-full sm:order-none sm:w-auto"
+          >
+            {m.cancel()}
+          </Button>
+        {:else}
+          <Dialog.Close>
+            {#snippet child({ props })}
+              <Button variant="outline" class="order-3 w-full sm:order-none sm:w-auto" {...props}>
+                {m.cancel()}
+              </Button>
+            {/snippet}
+          </Dialog.Close>
+        {/if}
+
+        {#if showPrevious}
+          <Button
+            variant="outline"
+            onclick={onGoPrevious}
+            class="order-2 w-full sm:order-none sm:w-auto"
+          >
+            {labels.previous}
+          </Button>
+        {/if}
+
         {#if isReviewPage}
           <Button
             onclick={onTriggerRun}
             disabled={!canSubmitRun}
-            class="order-1 w-full min-w-[8rem] sm:order-3 sm:w-auto"
+            class="order-1 w-full min-w-[8rem] sm:order-none sm:w-auto"
           >
             {#if isSubmitting}
               <IconLoadingSpinner data-icon="inline-start" class="animate-spin" />
@@ -114,37 +145,9 @@
             onclick={onGoNext}
             disabled={!canGoNext}
             title={nextDisabledReason}
-            class="order-1 w-full min-w-[7rem] sm:order-3 sm:w-auto"
+            class="order-1 w-full min-w-[7rem] sm:order-none sm:w-auto"
           >
             {labels.next}
-          </Button>
-        {/if}
-
-        {#if isDirty && !isSubmitting}
-          <Button
-            variant="outline"
-            onclick={onRequestClose}
-            class="order-3 w-full sm:order-2 sm:w-auto"
-          >
-            {m.cancel()}
-          </Button>
-        {:else}
-          <Dialog.Close>
-            {#snippet child({ props })}
-              <Button variant="outline" class="order-3 w-full sm:order-2 sm:w-auto" {...props}>
-                {m.cancel()}
-              </Button>
-            {/snippet}
-          </Dialog.Close>
-        {/if}
-
-        {#if showPrevious}
-          <Button
-            variant="outline"
-            onclick={onGoPrevious}
-            class="order-2 w-full sm:order-1 sm:w-auto"
-          >
-            {labels.previous}
           </Button>
         {/if}
       </div>

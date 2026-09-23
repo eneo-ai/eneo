@@ -24,7 +24,7 @@
 <div class="border-default/60 shrink-0 border-b px-4 py-4 sm:px-6 lg:px-8">
   <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_17rem] md:items-center">
     <div class="min-w-0">
-      <p class="text-muted mb-1 text-xs font-medium">
+      <p class="text-secondary mb-1 text-xs font-medium">
         {#if currentPage.kind === "runtime-step"}
           {m.flow_run_input_progress({
             n: String(currentInputPosition),
@@ -63,11 +63,10 @@
         <button
           type="button"
           title={page.title}
-          class="focus-visible:ring-ring relative h-1.5 flex-1 rounded-full transition-colors duration-(--duration-quick) before:absolute before:-inset-x-0 before:-inset-y-5 before:content-[''] focus-visible:ring-2 focus-visible:ring-offset-2 {isCompleted
+          class="focus-visible:ring-ring relative h-1.5 flex-1 rounded-full transition-colors duration-(--duration-quick) before:absolute before:-inset-x-0 before:-inset-y-5 before:content-[''] focus-visible:ring-2 focus-visible:ring-offset-2 {isCompleted ||
+          isCurrent
             ? 'bg-accent-default'
-            : isCurrent
-              ? 'bg-accent-default/55'
-              : 'bg-hover-dimmer'}"
+            : 'bg-hover-default'}"
           aria-label={page.title}
           aria-current={isCurrent ? "step" : undefined}
           disabled={!isClickable}

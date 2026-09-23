@@ -2,7 +2,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import IconSparkles from "@lucide/svelte/icons/sparkles";
+  import IconWrench from "@lucide/svelte/icons/wrench";
   import { m } from "$lib/paraglide/messages";
   import {
     FLOW_API_ERROR_CODE,
@@ -137,7 +137,7 @@
            border, and a `dark:` override is the thing the token lint exists
            to prevent. The red text it sits inside carries the association. -->
       <Button variant="outline" size="sm" class="text-foreground w-fit gap-1.5" onclick={onrepair}>
-        <IconSparkles class="size-3.5" aria-hidden="true" />
+        <IconWrench class="size-3.5" aria-hidden="true" />
         {m.flow_run_error_repair_action()}
       </Button>
     {/if}

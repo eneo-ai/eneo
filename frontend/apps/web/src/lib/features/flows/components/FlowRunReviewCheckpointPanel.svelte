@@ -566,7 +566,7 @@
 </script>
 
 {#if loading}
-  <div class="text-muted flex items-center justify-center gap-2 py-8 text-sm">
+  <div class="text-secondary flex items-center justify-center gap-2 py-8 text-sm">
     <IconLoadingSpinner class="size-4 animate-spin" />
     {m.flow_loading()}
   </div>
@@ -590,7 +590,7 @@
         <h3 class="text-primary text-sm font-semibold">
           {checkpoint.step_label || m.flow_run_review_checkpoint_title()}
         </h3>
-        <p class="text-muted mt-1 text-xs">
+        <p class="text-secondary mt-1 text-xs">
           {m.flow_run_review_checkpoint_step({ step: checkpoint.step_order })}
         </p>
       </div>
@@ -673,7 +673,7 @@
             onChange={(rows) => (speakerRows = rows)}
           />
         {:else}
-          <p class="text-muted text-sm">
+          <p class="text-secondary text-sm">
             {m.flow_transcript_review_help()}
           </p>
         {/if}
@@ -702,20 +702,26 @@
                 <p>
                   {m.flow_transcript_editor_draft_preserved()}
                 </p>
-                <button
-                  class="mt-2 mr-4 underline"
-                  onclick={() => void correctionsController?.retry()}
-                  >{m.flow_transcript_editor_retry()}</button
-                >
-                <button
-                  class="mt-2 underline"
-                  onclick={() => correctionsController?.downloadDraft()}
-                  >{m.flow_transcript_editor_download_draft()}</button
-                >
+                <span class="mt-2 flex flex-wrap gap-4">
+                  <Button
+                    variant="link"
+                    size="sm"
+                    class="h-auto min-h-6 px-0 text-current"
+                    onclick={() => void correctionsController?.retry()}
+                    >{m.flow_transcript_editor_retry()}</Button
+                  >
+                  <Button
+                    variant="link"
+                    size="sm"
+                    class="h-auto min-h-6 px-0 text-current"
+                    onclick={() => correctionsController?.downloadDraft()}
+                    >{m.flow_transcript_editor_download_draft()}</Button
+                  >
+                </span>
               </Alert.Description>
             </Alert.Root>
           {/if}
-          {#if correctionsController?.saving}<p class="text-muted text-xs" role="status">
+          {#if correctionsController?.saving}<p class="text-secondary text-xs" role="status">
               {m.flow_transcript_editor_saving()}
             </p>{/if}
           {#if correctionsController && correctionsController.staleCount > 0}
@@ -728,7 +734,7 @@
             </Alert.Root>
           {/if}
           {#if !storedSegments}
-            <p class="text-muted text-sm">
+            <p class="text-secondary text-sm">
               {m.flow_transcript_review_details_unavailable()}
             </p>
           {/if}
@@ -785,7 +791,7 @@
             bind:value={draftValueText}
             disabled={!canEdit || activeAction !== null}
             aria-invalid={reviewDecisionExpired || checkpointExpired}
-            class="min-h-72 resize-y font-mono text-xs leading-relaxed lg:min-h-80"
+            class="min-h-72 resize-y text-sm leading-relaxed lg:min-h-80"
             spellcheck={false}
           />
         </Field.Field>
@@ -794,7 +800,7 @@
             {m.flow_run_review_original_payload()}
           </Field.Label>
           <pre
-            class="border-default bg-hover-dimmer min-h-72 overflow-auto rounded-lg border p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap lg:min-h-80">{renderEditableValue(
+            class="border-default bg-hover-dimmer min-h-72 overflow-auto rounded-lg border p-3 font-sans text-sm leading-relaxed break-words whitespace-pre-wrap lg:min-h-80">{renderEditableValue(
               checkpoint.original_payload_json,
               checkpoint.output_type
             )}</pre>
@@ -845,7 +851,7 @@
             <li>
               <button
                 type="button"
-                class="border-default hover:bg-hover-dimmer flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 rounded-md border px-3 py-2 text-left text-xs"
+                class="border-default hover:bg-hover-dimmer focus-visible:ring-ring flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 rounded-md border px-3 py-2 text-left text-xs focus-visible:ring-2 focus-visible:outline-none"
                 aria-expanded={selected}
                 onclick={() => (selectedHistoryRevision = selected ? null : item.revision)}
               >
@@ -925,7 +931,7 @@
 
     <details bind:open={rejectExpanded} class="text-secondary border-default border-t text-sm">
       <summary
-        class="focus-visible:ring-ring flex min-h-10 cursor-pointer list-none items-center py-3 focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+        class="hover:text-primary focus-visible:ring-ring flex min-h-10 cursor-pointer list-none items-center py-3 focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
       >
         <ChevronRight
           class="mr-2 size-4 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {rejectExpanded
