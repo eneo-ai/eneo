@@ -22,6 +22,12 @@
     getFlowFormFieldVariableExpression,
     isFlowFormFieldNameUsableAsVariable
   } from "$lib/features/flows/flowFormSchema";
+  import {
+    getChipClasses,
+    VARIABLE_CATEGORY_CLASSES,
+    type VariableCategory
+  } from "$lib/features/flows/flowVariableTokens";
+  import { fieldTypeLabel } from "$lib/features/flows/ai-builder/aiBuilderSummaryText";
 
   let {
     steps,
@@ -30,6 +36,7 @@
     isAdvancedMode = false,
     transcriptionEnabled = false,
     sectionVariablesAvailable = false,
+    uploadVariableAvailable = false,
     onInsert
   }: {
     steps: VariablePickerContext["steps"];
@@ -39,11 +46,16 @@
     transcriptionEnabled?: boolean;
     /** The editor holds the AI instruction of a step that reads section by section. */
     sectionVariablesAvailable?: boolean;
+    /** Offer the text of the file uploaded when the flow runs (custom text of an upload step). */
+    uploadVariableAvailable?: boolean;
     onInsert?: (variable: string) => void;
   } = $props();
 
   type Entry = { token: string; label: string; description?: string };
-  type Group = { key: string; heading: string; entries: Entry[] };
+  // Each group carries the colour its variables get in the editor, so a
+  // form field, a result from the run and an earlier step's answer read the
+  // same in the list as in the text.
+  type Group = { key: string; heading: string; category: VariableCategory; entries: Entry[] };
 
   let open = $state(false);
 
@@ -88,7 +100,7 @@
     const fieldEntries: Entry[] = fields.map((field) => ({
       token: getFlowFormFieldVariableExpression(field.name),
       label: field.label?.trim() || field.name,
-      description: isAdvancedMode ? field.type : undefined
+      description: isAdvancedMode ? fieldTypeLabel(field.type) : undefined
     }));
     if (fieldEntries.length === 0 && isAdvancedMode) {
       fieldEntries.push({
@@ -98,10 +110,22 @@
       });
     }
     if (fieldEntries.length > 0) {
-      result.push({ key: "fields", heading: m.flow_variable_form_field(), entries: fieldEntries });
+      result.push({
+        key: "fields",
+        heading: m.flow_variable_form_field(),
+        category: "field",
+        entries: fieldEntries
+      });
     }
 
     const runEntries: Entry[] = [];
+    if (uploadVariableAvailable) {
+      runEntries.push({
+        token: "step_input.text",
+        label: m.flow_variable_upload_label(),
+        description: m.flow_variable_upload_desc()
+      });
+    }
     if (sectionVariablesAvailable) {
       runEntries.push({
         token: "section_index",
@@ -124,7 +148,12 @@
       });
     }
     if (runEntries.length > 0) {
-      result.push({ key: "run", heading: m.flow_variable_run_section(), entries: runEntries });
+      result.push({
+        key: "run",
+        heading: m.flow_variable_run_section(),
+        category: "system",
+        entries: runEntries
+      });
     }
 
     for (const step of steps.filter((s) => s.step_order < currentStepOrder)) {
@@ -171,6 +200,7 @@
       if (entries.length > 0) {
         result.push({
           key: `step-${step.step_order}`,
+          category: "step",
           heading: m.flow_variable_step_output({
             order: String(step.step_order),
             name: stepName(step)
@@ -197,7 +227,7 @@
       </Button>
     {/snippet}
   </Popover.Trigger>
-  <Popover.Content align="start" class="w-[min(26rem,calc(100vw-2rem))] p-0">
+  <Popover.Content align="start" class="w-[min(30rem,calc(100vw-2rem))] p-0">
     <Command.Root>
       <Command.Input placeholder={m.flow_variable_search_placeholder()} />
       <Command.List class="max-h-[min(24rem,60vh)]">
@@ -209,21 +239,26 @@
                 value={`${group.key}:${entry.token}`}
                 keywords={[entry.label, entry.token, group.heading, entry.description ?? ""]}
                 onSelect={() => insert(entry.token)}
-                class="items-start gap-3 py-2"
+                class="items-start gap-2.5 py-2"
               >
+                <span
+                  class="{VARIABLE_CATEGORY_CLASSES[group.category]
+                    .scopeClass} bg-label-default mt-1.5 size-2 shrink-0 rounded-full"
+                  aria-hidden="true"
+                ></span>
                 <span class="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span class="text-primary text-sm font-medium">{entry.label}</span>
                   {#if entry.description}
                     <span class="text-secondary text-xs leading-relaxed">{entry.description}</span>
                   {/if}
+                  {#if isAdvancedMode}
+                    <code
+                      translate="no"
+                      class="{getChipClasses(group.category)} mt-0.5 max-w-full self-start truncate"
+                      >{`{{${entry.token}}}`}</code
+                    >
+                  {/if}
                 </span>
-                {#if isAdvancedMode}
-                  <code
-                    translate="no"
-                    class="text-secondary max-w-[45%] truncate pt-0.5 font-mono text-xs"
-                    >{entry.token}</code
-                  >
-                {/if}
               </Command.Item>
             {/each}
           </Command.Group>

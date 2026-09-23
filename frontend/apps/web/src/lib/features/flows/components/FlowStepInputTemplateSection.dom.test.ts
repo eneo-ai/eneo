@@ -49,9 +49,7 @@ function renderSection(props: Partial<ComponentProps<typeof FlowStepInputTemplat
       formSchema: undefined,
       transcriptionEnabled: false,
       hasAudioInputSteps: false,
-      stepUxCopy: getFlowStepUxCopy({ locale: "sv", inputSource: "previous_step" }),
-      inputTemplateSectionTitle: "Underlag till steget",
-      inputTemplateSectionDescription: "Beskrivning",
+      stepUxCopy: getFlowStepUxCopy({ locale: "sv" }),
       ...props
     }
   });
@@ -71,7 +69,7 @@ describe("FlowStepInputTemplateSection", () => {
     });
 
     expect(container.textContent).toContain(
-      String(m.flow_input_template_effective_sources_title())
+      m.flow_material_reads({ what: m.flow_material_what_sources() })
     );
     expect(container.textContent).toContain("Steg 1: Läs dokument");
     expect(container.textContent).toContain(String(m.flow_input_template_source_output_text()));
@@ -82,10 +80,11 @@ describe("FlowStepInputTemplateSection", () => {
     const { container } = renderSection();
 
     expect(container.textContent).toContain(
-      String(m.flow_input_template_effective_sources_title())
-    );
-    expect(container.textContent).toContain(
-      String(m.flow_input_template_effective_previous_step())
+      m.flow_material_reads({
+        what: m.flow_material_what_previous({
+          step: `${m.flow_input_template_effective_step({ step: 1 })}: Läs dokument`
+        })
+      })
     );
   });
 
@@ -108,7 +107,7 @@ describe("FlowStepInputTemplateSection", () => {
       onInputSourcesChange
     });
 
-    await fireEvent.click(screen.getByRole("button", { name: /Ändra underlag|Change material/ }));
+    await fireEvent.click(screen.getByRole("button", { name: /Välj resultat|Choose results/ }));
     await fireEvent.click(screen.getByText("summary"));
 
     expect(onInputSourcesChange).toHaveBeenCalledWith({
@@ -122,7 +121,6 @@ describe("FlowStepInputTemplateSection", () => {
         }
       ]
     });
-    await fireEvent.click(screen.getByRole("button", { name: /Klar|Done/ }));
   });
 
   it("renders deleted typed source refs without leaking the internal sentinel", () => {
@@ -141,24 +139,22 @@ describe("FlowStepInputTemplateSection", () => {
   });
 
   it("explains material and custom text through keyboard-focusable help controls", () => {
-    renderSection();
+    renderSection({ showInputTemplate: true });
 
     const materialHelp = screen.getByRole("button", {
-      name: `${m.flow_settings_more_info({
-        title: m.flow_input_template_effective_sources_title()
-      })}. ${m.flow_input_material_help()}`
+      name: `${m.flow_settings_more_info({ title: m.flow_material_title() })}. ${m.flow_material_help()}`
     });
     expect(materialHelp.getAttribute("aria-describedby")).toBeNull();
 
     const customTextHelp = screen.getByRole("button", {
-      name: `${m.flow_settings_more_info({ title: "Underlag till steget" })}. ${m.flow_input_template_help()}`
+      name: `${m.flow_settings_more_info({ title: m.flow_material_own_text() })}. ${m.flow_input_template_help()}`
     });
     expect(customTextHelp.getAttribute("aria-describedby")).toBeNull();
   });
 
   it("uses distinct accessible relationships for each rendered step", () => {
-    const first = renderSection();
-    const second = renderSection();
+    const first = renderSection({ showInputTemplate: true });
+    const second = renderSection({ showInputTemplate: true });
 
     const labelledSections = [first.container, second.container].map((container) =>
       container.querySelector("section[aria-labelledby]")
@@ -194,11 +190,31 @@ describe("FlowStepInputTemplateSection", () => {
     ).toBeNull();
   });
 
-  it("shows runtime material as locked instead of exposing an empty custom-text editor", () => {
-    renderSection({ runtimeInputEnabled: true, showInputTemplate: true });
+  it("keeps an upload step's own text editable and warns when it leaves the upload out", () => {
+    const upload = renderSection({ runtimeInputEnabled: true, showInputTemplate: true });
+    expect(upload.container.textContent).toContain(
+      m.flow_material_reads({ what: m.flow_material_what_upload() })
+    );
+    expect(screen.getByRole("textbox")).toBeTruthy();
+    cleanup();
 
-    expect(screen.getByText(String(m.flow_input_material_runtime_locked_notice()))).toBeTruthy();
-    expect(screen.queryByRole("textbox")).toBeNull();
+    const leftOut = renderSection({
+      runtimeInputEnabled: true,
+      hasInputTemplateOverride: true,
+      inputTemplateText: "Namn: {{flow_input.namn}}"
+    });
+    expect(leftOut.container.textContent).toContain(m.flow_input_template_upload_left_out());
+    cleanup();
+
+    const kept = renderSection({
+      runtimeInputEnabled: true,
+      hasInputTemplateOverride: true,
+      inputTemplateText: "Transkript: {{step_input.text}}"
+    });
+    expect(kept.container.textContent).not.toContain(m.flow_input_template_upload_left_out());
+    expect(kept.container.textContent).toContain(
+      m.flow_material_reads({ what: m.flow_material_what_own_text_with_upload() })
+    );
   });
 
   it("keeps custom text available for document input without a JSON input contract", () => {

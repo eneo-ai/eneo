@@ -793,9 +793,7 @@
       hasInputTemplateOverride ||
       (canRevealInputTemplate && revealInputTemplateInUserMode)
   );
-  const stepUxCopy = $derived(getFlowStepUxCopy({ locale, inputSource: activeStep?.input_source }));
-  const inputTemplateSectionTitle = $derived(stepUxCopy.inputTemplateTitle);
-  const inputTemplateSectionDescription = $derived(stepUxCopy.inputTemplateDescription);
+  const stepUxCopy = $derived(getFlowStepUxCopy({ locale }));
 
   async function showTechnicalSettings() {
     mode.set("power_user");
@@ -1172,8 +1170,6 @@
               {hasAudioInputSteps}
               runtimeInputEnabled={runtimeInputConfig.enabled}
               {stepUxCopy}
-              {inputTemplateSectionTitle}
-              {inputTemplateSectionDescription}
               onRevealInputTemplate={() => (revealInputTemplateInUserMode = true)}
               onClearInputTemplate={() => updateInputTemplate("")}
               onInputTemplateChange={(detail) => updateInputTemplate(detail.value)}

@@ -4,7 +4,7 @@
   import { m } from "$lib/paraglide/messages";
   import type { FlowStep } from "@eneo/eneo-js";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
-  import { Input } from "$lib/components/ui/input/index.js";
+  import * as Command from "$lib/components/ui/command/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { IconPlus } from "@eneo/icons/plus";
@@ -38,8 +38,6 @@
     hasAudioInputSteps,
     runtimeInputEnabled = false,
     stepUxCopy,
-    inputTemplateSectionTitle,
-    inputTemplateSectionDescription,
     onRevealInputTemplate,
     onClearInputTemplate,
     onInputTemplateChange,
@@ -65,8 +63,6 @@
     hasAudioInputSteps: boolean;
     runtimeInputEnabled?: boolean;
     stepUxCopy: FlowStepUxCopy;
-    inputTemplateSectionTitle: string;
-    inputTemplateSectionDescription: string;
     onRevealInputTemplate?: () => void;
     onClearInputTemplate?: () => void;
     onInputTemplateChange?: (detail: { value: string }) => void;
@@ -75,8 +71,7 @@
   } = $props();
 
   const componentId = $props.id();
-  const effectiveSourcesTitleId = `${componentId}-effective-sources-title`;
-  const materialSearchId = `${componentId}-material-search`;
+  const ownTextLabelId = `${componentId}-own-text-label`;
 
   const inputBindingsState = $derived(parseFlowInputBindings(step.input_bindings));
   const hasTypedInputSources = $derived(
@@ -104,9 +99,11 @@
       inputBindingsState.status === "valid" &&
       !inputBindingsState.hasAdvancedSourceRefs
   );
+  // A step that receives an upload keeps its custom text editable: the
+  // runtime only requires that the text still includes the upload
+  // (flow_validators._validate_runtime_input_publish_rules).
   const inputTemplateEditingAllowed = $derived(
     !isPublished &&
-      !runtimeInputEnabled &&
       step.input_type !== "json" &&
       step.input_contract == null &&
       inputBindingsState.status === "valid"
@@ -128,16 +125,18 @@
     }
     return null;
   });
-  const shouldShowEffectiveInputSources = $derived(
-    effectiveInputSources.length > 0 || sourceEditingNotice !== null
+  const uploadLeftOut = $derived(
+    runtimeInputEnabled &&
+      inputTemplateText.trim().length > 0 &&
+      !/\{\{\s*step_input\./.test(inputTemplateText)
   );
   const shouldShowInputTemplateEditor = $derived(
     hasInputTemplateOverride || (showInputTemplate && inputTemplateEditingAllowed)
   );
   let materialPickerOpen = $state(false);
-  let materialSearch = $state("");
+  // Results from earlier steps not chosen yet, grouped by step; Command
+  // filters them as the person types.
   const availableMaterialGroups = $derived.by(() => {
-    const query = materialSearch.trim().toLocaleLowerCase();
     const groups: Array<{
       stepOrder: number;
       stepName: string | null;
@@ -145,19 +144,6 @@
     }> = [];
     for (const option of materialOptions) {
       if (selectedSourceRefs.some((ref) => sourceRefMatchesOption(ref, option))) continue;
-      const searchText = [
-        option.sourceStepName,
-        option.fieldPath,
-        option.description,
-        option.fieldPath === null ? m.flow_input_material_whole_result() : null,
-        option.output === "structured"
-          ? m.flow_input_template_source_output_structured()
-          : m.flow_input_template_source_output_text()
-      ]
-        .filter((value): value is string => value !== null)
-        .join(" ")
-        .toLocaleLowerCase();
-      if (query && !searchText.includes(query)) continue;
       const existing = groups.find((group) => group.stepOrder === option.sourceStepOrder);
       if (existing) {
         existing.options.push(option);
@@ -171,6 +157,45 @@
     }
     return groups;
   });
+
+  // What the step reads when it has no text of its own: the one sentence
+  // that answers "what does the AI get here" (runtime order:
+  // input_bindings.question, then chosen results, then the step's source).
+  const defaultMaterial = $derived.by((): string | null => {
+    if (selectedSourceRefs.length > 0) return m.flow_material_what_sources();
+    if (runtimeInputEnabled) return m.flow_material_what_upload();
+    if (step.input_source === "previous_step" && step.step_order > 1) {
+      const previous = steps.find((candidate) => candidate.step_order === step.step_order - 1);
+      if (previous) {
+        return m.flow_material_what_previous({
+          step: stepLabel(previous.step_order, previous.user_description ?? null)
+        });
+      }
+    }
+    if (step.input_source === "all_previous_steps" && step.step_order > 1) {
+      return m.flow_material_what_all_previous();
+    }
+    if (step.input_source === "http_get") return m.flow_material_what_http();
+    if (step.input_source === "flow_input") return m.flow_material_what_flow_input();
+    return null;
+  });
+  const ownTextIncludesUpload = $derived(/\{\{\s*step_input\./.test(inputTemplateText));
+  const currentMaterial = $derived.by((): string | null => {
+    if (!hasInputTemplateOverride) return defaultMaterial;
+    if (selectedSourceRefs.length > 0) return m.flow_material_what_own_text_and_sources();
+    if (runtimeInputEnabled && ownTextIncludesUpload) {
+      return m.flow_material_what_own_text_with_upload();
+    }
+    return m.flow_material_what_own_text();
+  });
+  const chosenSources = $derived(
+    effectiveInputSources.filter(
+      (source) => source.kind === "source_ref" || source.kind === "deleted_source"
+    )
+  );
+  // Locks worth explaining. An upload step needs no note: the sentence above
+  // already says the step reads the upload.
+  const materialNotice = $derived(runtimeInputEnabled ? null : sourceEditingNotice);
 
   function stepLabel(stepOrder: number, stepName: string | null): string {
     const base = m.flow_input_template_effective_step({ step: stepOrder });
@@ -253,11 +278,6 @@
     });
   }
 
-  function setMaterialPickerOpen(open: boolean) {
-    materialPickerOpen = open;
-    if (!open) materialSearch = "";
-  }
-
   function removeMaterial(source: FlowStepEffectiveInputSource) {
     if (source.kind !== "source_ref" && source.kind !== "deleted_source") return;
     const index = selectedSourceRefs.findIndex(
@@ -275,105 +295,80 @@
   }
 </script>
 
-{#if !isPowerUser && hasInputTemplateOverride}
-  <Alert.Root class="border-accent-default/20 bg-accent-dimmer mb-3 rounded-[9px]" role="status">
-    <Alert.Description class="text-accent-stronger flex items-center gap-3 text-xs">
-      <span class="flex-1">{m.flow_input_template_active_notice()}</span>
-      <div class="flex shrink-0 gap-1.5">
-        {#if !showInputTemplate}
-          <Button variant="outline" size="sm" onclick={() => onRevealInputTemplate?.()}>
-            {m.show()}
-          </Button>
-        {/if}
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={isPublished}
-          onclick={() => onClearInputTemplate?.()}
-        >
-          {m.clear()}
-        </Button>
+<FlowStepSection title={m.flow_material_title()} {collapsible} {resetKey} status={templateStatus}>
+  <div class="flex max-w-3xl flex-col gap-4 px-2">
+    {#if currentMaterial}
+      <!-- The one answer this block owes: what the AI gets in this step. -->
+      <div class="flex items-start gap-1">
+        <p class="text-primary text-sm leading-relaxed" aria-live="polite">
+          {m.flow_material_reads({ what: currentMaterial })}
+        </p>
+        <Settings.InfoTip title={m.flow_material_title()} text={m.flow_material_help()} />
       </div>
-    </Alert.Description>
-  </Alert.Root>
-{/if}
+    {/if}
 
-{#if templateSourceConflict && isPowerUser}
-  <Alert.Root class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mb-3">
-    <Alert.Description class="text-warning-stronger flex items-start gap-3 text-xs">
-      <span class="flex-1">
-        {m.flow_template_source_conflict_warning({
-          steps: templateSourceConflict
-            .map((n) => m.flow_step_fallback_label({ order: n }))
-            .join(", "),
-          source: INPUT_SOURCE_LABELS[step.input_source]?.() ?? step.input_source
-        })}
-      </span>
-      <div class="flex shrink-0 gap-1.5">
-        {#if step.input_source === "flow_input" && templateStepRefs.length === 1 && templateStepRefs[0] === step.step_order - 1}
-          <Button
-            variant="outline"
-            size="sm"
-            onclick={() => onInputSourceChange?.({ value: "previous_step" })}
-            >{m.flow_template_source_conflict_fix_source()}</Button
-          >
+    {#if templateSourceConflict && isPowerUser}
+      <Alert.Root class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mb-3">
+        <Alert.Description class="text-warning-stronger flex items-start gap-3 text-xs">
+          <span class="flex-1">
+            {m.flow_template_source_conflict_warning({
+              steps: templateSourceConflict
+                .map((n) => m.flow_step_fallback_label({ order: n }))
+                .join(", "),
+              source: INPUT_SOURCE_LABELS[step.input_source]?.() ?? step.input_source
+            })}
+          </span>
+          <div class="flex shrink-0 gap-1.5">
+            {#if step.input_source === "flow_input" && templateStepRefs.length === 1 && templateStepRefs[0] === step.step_order - 1}
+              <Button
+                variant="outline"
+                size="sm"
+                onclick={() => onInputSourceChange?.({ value: "previous_step" })}
+                >{m.flow_template_source_conflict_fix_source()}</Button
+              >
+            {/if}
+            <Button variant="outline" size="sm" onclick={() => onClearInputTemplate?.()}
+              >{m.flow_template_source_conflict_fix_clear()}</Button
+            >
+          </div>
+        </Alert.Description>
+      </Alert.Root>
+    {/if}
+
+    {#if chosenSources.length > 0 || sourceEditingAllowed}
+      <div class="flex flex-col gap-2">
+        {#if chosenSources.length > 0}
+          <ul class="border-default divide-default flex flex-col divide-y rounded-lg border">
+            {#each chosenSources as source, index (`${source.kind}-${index}`)}
+              {@const title = sourceTitle(source)}
+              <li class="flex min-w-0 items-center gap-3 px-3 py-2">
+                <div class="min-w-0 flex-1">
+                  <p class="text-primary truncate text-sm font-medium">{title}</p>
+                  <p class="text-secondary text-xs leading-snug">{sourceMeta(source)}</p>
+                </div>
+                {#if sourceEditingAllowed}
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={m.flow_input_material_remove({ source: title })}
+                    onclick={() => removeMaterial(source)}
+                  >
+                    <IconXMark aria-hidden="true" />
+                  </Button>
+                {/if}
+              </li>
+            {/each}
+          </ul>
         {/if}
-        <Button variant="outline" size="sm" onclick={() => onClearInputTemplate?.()}
-          >{m.flow_template_source_conflict_fix_clear()}</Button
-        >
-      </div>
-    </Alert.Description>
-  </Alert.Root>
-{/if}
-
-{#if shouldShowEffectiveInputSources}
-  <section class="mb-4 flex flex-col gap-3 px-2" aria-labelledby={effectiveSourcesTitleId}>
-    <div class="flex items-center">
-      <h3 id={effectiveSourcesTitleId} class="text-primary text-sm font-medium">
-        {m.flow_input_template_effective_sources_title()}
-      </h3>
-      <Settings.InfoTip
-        title={m.flow_input_template_effective_sources_title()}
-        text={m.flow_input_material_help()}
-      />
-    </div>
-
-    <div class="text-secondary flex flex-col gap-3 text-[0.8125rem] leading-relaxed">
-      {#if effectiveInputSources.length > 0}
-        <ul class="border-default divide-default flex flex-col divide-y rounded-lg border">
-          {#each effectiveInputSources as source, index (`${source.kind}-${index}`)}
-            {@const title = sourceTitle(source)}
-            <li class="flex min-w-0 items-center gap-3 px-3 py-2.5">
-              <div class="min-w-0 flex-1">
-                <p class="text-primary truncate font-medium">{title}</p>
-                <p class="text-muted mt-0.5 leading-snug">{sourceMeta(source)}</p>
-              </div>
-              {#if sourceEditingAllowed && (source.kind === "source_ref" || source.kind === "deleted_source")}
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={m.flow_input_material_remove({ source: title })}
-                  onclick={() => removeMaterial(source)}
-                >
-                  <IconXMark aria-hidden="true" />
-                </Button>
-              {/if}
-            </li>
-          {/each}
-        </ul>
-      {/if}
-
-      {#if sourceEditingAllowed}
-        <div class="flex flex-wrap items-center gap-2">
-          {#if materialOptions.length > 0}
-            <Popover.Root bind:open={materialPickerOpen} onOpenChange={setMaterialPickerOpen}>
+        {#if sourceEditingAllowed && materialOptions.length > 0}
+          <div class="flex flex-wrap items-center gap-2">
+            <Popover.Root bind:open={materialPickerOpen}>
               <Popover.Trigger>
                 {#snippet child({ props })}
                   <button
                     {...props}
                     type="button"
                     class={buttonVariants({ variant: "outline", size: "sm" })}
-                    aria-label={m.flow_input_material_change()}
                   >
                     <IconPlus data-icon="inline-start" aria-hidden="true" />
                     {m.flow_input_material_change()}
@@ -383,130 +378,113 @@
               <Popover.Content
                 align="start"
                 collisionPadding={16}
-                class="max-h-(--bits-popover-content-available-height) w-(--bits-popover-anchor-width) min-w-80 overflow-hidden p-0"
+                class="w-[min(28rem,calc(100vw-2rem))] p-0"
               >
-                <Popover.Header class="px-3 pt-3 pb-2">
-                  <Popover.Title>{m.flow_input_material_change()}</Popover.Title>
-                  <Popover.Description
-                    >{m.flow_input_material_picker_description()}</Popover.Description
-                  >
-                </Popover.Header>
-                <div class="border-default border-y px-3 py-2">
-                  <label for={materialSearchId} class="sr-only">
-                    {m.flow_input_material_picker_search()}
-                  </label>
-                  <Input
-                    id={materialSearchId}
-                    value={materialSearch}
-                    placeholder={m.flow_input_material_picker_search()}
-                    oninput={(event) => (materialSearch = event.currentTarget.value)}
-                  />
-                </div>
-                <div class="min-h-0 flex-1 overflow-y-auto p-1.5">
-                  {#if availableMaterialGroups.length === 0}
-                    <p class="text-muted px-3 py-6 text-center text-sm">
-                      {m.flow_input_material_no_options()}
-                    </p>
-                  {:else}
+                <Command.Root>
+                  <Command.Input placeholder={m.flow_input_material_picker_search()} />
+                  <Command.List class="max-h-[min(22rem,60vh)]">
+                    <Command.Empty>{m.flow_input_material_no_options()}</Command.Empty>
                     {#each availableMaterialGroups as group (group.stepOrder)}
-                      <section aria-labelledby={`${componentId}-material-step-${group.stepOrder}`}>
-                        <h4
-                          id={`${componentId}-material-step-${group.stepOrder}`}
-                          class="text-muted px-2 py-1.5 text-xs font-medium"
-                        >
-                          {stepLabel(group.stepOrder, group.stepName)}
-                        </h4>
-                        <ul>
-                          {#each group.options as option (option.key)}
-                            <li>
-                              <button
-                                type="button"
-                                class="hover:bg-hover-dimmer focus-visible:ring-ring flex w-full min-w-0 items-start rounded-md px-2 py-2 text-left focus-visible:ring-2 focus-visible:outline-none"
-                                onclick={() => selectMaterial(option)}
-                              >
-                                <span class="min-w-0 flex-1">
-                                  <span class="text-primary block truncate text-sm font-medium">
-                                    {option.fieldPath ?? m.flow_input_material_whole_result()}
-                                  </span>
-                                  <span class="text-muted block truncate text-xs">
-                                    {option.description ??
-                                      (option.output === "structured"
-                                        ? m.flow_input_template_source_output_structured()
-                                        : m.flow_input_template_source_output_text())}
-                                  </span>
-                                </span>
-                              </button>
-                            </li>
-                          {/each}
-                        </ul>
-                      </section>
+                      <Command.Group heading={stepLabel(group.stepOrder, group.stepName)}>
+                        {#each group.options as option (option.key)}
+                          <Command.Item
+                            value={option.key}
+                            keywords={[
+                              stepLabel(group.stepOrder, group.stepName),
+                              option.fieldPath ?? m.flow_input_material_whole_result(),
+                              option.description ?? ""
+                            ]}
+                            onSelect={() => {
+                              selectMaterial(option);
+                              materialPickerOpen = false;
+                            }}
+                            class="items-start py-2"
+                          >
+                            <span class="flex min-w-0 flex-col gap-0.5">
+                              <span class="text-primary truncate text-sm font-medium">
+                                {option.fieldPath ?? m.flow_input_material_whole_result()}
+                              </span>
+                              <span class="text-secondary truncate text-xs">
+                                {option.description ??
+                                  (option.output === "structured"
+                                    ? m.flow_input_template_source_output_structured()
+                                    : m.flow_input_template_source_output_text())}
+                              </span>
+                            </span>
+                          </Command.Item>
+                        {/each}
+                      </Command.Group>
                     {/each}
-                  {/if}
-                </div>
-                <div class="border-default flex justify-end border-t px-3 py-2">
-                  <Popover.Close>
-                    {#snippet child({ props })}
-                      <Button {...props} variant="ghost" size="sm">{m.done()}</Button>
-                    {/snippet}
-                  </Popover.Close>
-                </div>
+                  </Command.List>
+                </Command.Root>
               </Popover.Content>
             </Popover.Root>
-          {/if}
+            {#if selectedSourceRefs.length > 0}
+              <Button
+                variant="ghost"
+                size="sm"
+                onclick={() => onInputSourcesChange?.({ sourceRefs: [] })}
+              >
+                {inputBindingsState.status === "valid" && inputBindingsState.question
+                  ? m.flow_input_material_clear_sources()
+                  : m.flow_input_material_default()}
+              </Button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
 
-          {#if selectedSourceRefs.length > 0}
-            <Button
-              variant="ghost"
-              size="sm"
-              title={inputBindingsState.status === "valid" && inputBindingsState.question
-                ? m.flow_input_material_clear_sources_description()
-                : m.flow_input_material_default_description()}
-              onclick={() => onInputSourcesChange?.({ sourceRefs: [] })}
-            >
-              {inputBindingsState.status === "valid" && inputBindingsState.question
-                ? m.flow_input_material_clear_sources()
-                : m.flow_input_material_default()}
+    {#if materialNotice && !isPublished}
+      <p class="text-secondary text-xs leading-relaxed">{materialNotice}</p>
+    {/if}
+
+    {#if shouldShowInputTemplateEditor}
+      <section class="flex flex-col gap-2" aria-labelledby={ownTextLabelId}>
+        <div class="flex min-h-8 items-center justify-between gap-2">
+          <div class="flex items-center gap-1">
+            <h3 id={ownTextLabelId} class="text-primary text-sm font-medium">
+              {m.flow_material_own_text()}
+            </h3>
+            <Settings.InfoTip
+              title={m.flow_material_own_text()}
+              text={m.flow_input_template_help()}
+            />
+          </div>
+          {#if hasInputTemplateOverride && !isPublished}
+            <Button variant="ghost" size="sm" onclick={() => onClearInputTemplate?.()}>
+              {m.flow_material_own_text_remove()}
             </Button>
           {/if}
         </div>
-      {:else if sourceEditingNotice && !isPublished}
-        <Alert.Root>
-          <Alert.Description class="text-secondary text-xs leading-relaxed">
-            {sourceEditingNotice}
-          </Alert.Description>
-        </Alert.Root>
-      {/if}
-    </div>
-  </section>
-{/if}
-
-<FlowStepSection title={inputTemplateSectionTitle} {collapsible} {resetKey} status={templateStatus}>
-  <div class="flex flex-col gap-3 px-2">
-    <div class="flex max-w-3xl items-start gap-1">
-      <p class="text-secondary text-[0.8125rem] leading-relaxed">
-        {inputTemplateSectionDescription}
-      </p>
-      <Settings.InfoTip title={inputTemplateSectionTitle} text={m.flow_input_template_help()} />
-    </div>
-    {#if shouldShowInputTemplateEditor}
-      <div class="flex flex-col gap-2">
-        <p class="text-secondary text-[0.8125rem] leading-relaxed">
-          {stepUxCopy.inputTemplateDefaultHint}
-        </p>
         <FlowPromptEditor
           value={inputTemplateText}
           disabled={!inputTemplateEditingAllowed}
-          label={stepUxCopy.inputTemplateEditorLabel}
+          label={m.flow_material_own_text()}
           placeholder={stepUxCopy.inputTemplatePlaceholder}
           minHeight={isAdvancedMode ? 160 : 132}
           {steps}
           currentStepOrder={step.step_order}
           {formSchema}
           transcriptionEnabled={transcriptionEnabled && hasAudioInputSteps}
+          uploadVariableAvailable={runtimeInputEnabled}
           {isAdvancedMode}
           onChange={(value) => onInputTemplateChange?.({ value })}
         />
-      </div>
+        {#if uploadLeftOut}
+          <Alert.Root class="border-warning-default/30 bg-warning-dimmer rounded-[9px]" role="note">
+            <Alert.Description class="text-warning-stronger text-xs leading-relaxed">
+              {m.flow_input_template_upload_left_out()}
+            </Alert.Description>
+          </Alert.Root>
+        {:else if inputTemplateEditingAllowed && defaultMaterial}
+          <p class="text-secondary text-xs leading-relaxed">
+            {runtimeInputEnabled
+              ? m.flow_material_own_text_help_upload({ fallback: defaultMaterial })
+              : m.flow_material_own_text_help({ fallback: defaultMaterial })}
+          </p>
+        {/if}
+      </section>
     {:else if inputTemplateEditingAllowed}
       <Button
         variant="outline"
@@ -514,7 +492,7 @@
         class="self-start"
         onclick={() => onRevealInputTemplate?.()}
       >
-        {stepUxCopy.inputTemplateCtaAction}
+        {m.flow_material_own_text_add()}
       </Button>
     {/if}
   </div>

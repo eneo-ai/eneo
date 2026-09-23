@@ -42,9 +42,11 @@
     {m.flow_step_json_format()}
   </Button>
 </div>
+<!-- The textarea grows with its content; a long schema stops at a fixed
+     height and scrolls inside, so the page and the Format button stay put. -->
 <Textarea
   rows={4}
-  class="bg-primary hover:border-stronger font-mono text-base shadow-xs sm:text-sm"
+  class="bg-primary hover:border-stronger max-h-[min(28rem,60vh)] overflow-y-auto font-mono text-base shadow-xs sm:text-sm"
   {value}
   disabled={isPublished}
   aria-invalid={Boolean(error)}

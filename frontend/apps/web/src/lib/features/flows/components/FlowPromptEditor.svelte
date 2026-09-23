@@ -33,6 +33,7 @@
     transcriptionEnabled,
     isAdvancedMode = false,
     allowSectionVariables = false,
+    uploadVariableAvailable = false,
     invalid = false,
     ariaDescribedby,
     focusOnMount = false,
@@ -67,6 +68,8 @@
     isAdvancedMode?: boolean;
     /** The editor holds the step's AI instruction, which is rendered once per section. */
     allowSectionVariables?: boolean;
+    /** The editor holds the custom text of a step that receives an upload when the flow runs. */
+    uploadVariableAvailable?: boolean;
     toolbar?: Snippet;
     onChange?: (value: string) => void;
     onCommit?: (value: string) => void;
@@ -128,6 +131,22 @@
         autoResize();
       }
     });
+  });
+
+  // An editor mounted inside a closed section measures 0px and keeps its
+  // minimum height once opened; a new width (0 on reveal, or a resized
+  // window that rewraps the lines) measures it again.
+  $effect(() => {
+    const editor = textareaEl;
+    if (!editor || typeof ResizeObserver === "undefined") return;
+    let lastWidth = editor.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (editor.clientWidth === lastWidth) return;
+      lastWidth = editor.clientWidth;
+      autoResize();
+    });
+    observer.observe(editor);
+    return () => observer.disconnect();
   });
 
   // Focus the textarea when the parent requests it (e.g. the step capsule's
@@ -396,30 +415,35 @@
   <!-- Toolbar. The row that hosts the editor already titles it, so the label
        is kept for assistive technology only; repeating it here read as two
        different fields. -->
-  <div class="border-default flex items-center justify-between gap-2 border-b px-2 py-1.5">
-    <span class="sr-only">{label}</span>
-    {#if !disabled}
-      <VariablePicker
-        {steps}
-        {currentStepOrder}
-        {formSchema}
-        {isAdvancedMode}
-        {transcriptionEnabled}
-        sectionVariablesAvailable={classificationContext.sectionVariablesAvailable}
-        onInsert={(variable) => {
-          const match = variable.match(/^\{\{(.+)\}\}$/);
-          if (match) void insertAtCursor(match[1]);
-        }}
-      />
-    {:else}
-      <span></span>
-    {/if}
-    {#if toolbar}
-      <div class="flex items-center gap-1">
-        {@render toolbar()}
-      </div>
-    {/if}
-  </div>
+  <!-- A read-only editor has nothing to insert; without a toolbar of its
+       own it shows no empty bar either. -->
+  {#if !disabled || toolbar}
+    <div class="border-default flex items-center justify-between gap-2 border-b px-2 py-1.5">
+      <span class="sr-only">{label}</span>
+      {#if !disabled}
+        <VariablePicker
+          {steps}
+          {currentStepOrder}
+          {formSchema}
+          {isAdvancedMode}
+          {transcriptionEnabled}
+          sectionVariablesAvailable={classificationContext.sectionVariablesAvailable}
+          {uploadVariableAvailable}
+          onInsert={(variable) => {
+            const match = variable.match(/^\{\{(.+)\}\}$/);
+            if (match) void insertAtCursor(match[1]);
+          }}
+        />
+      {:else}
+        <span></span>
+      {/if}
+      {#if toolbar}
+        <div class="flex items-center gap-1">
+          {@render toolbar()}
+        </div>
+      {/if}
+    </div>
+  {/if}
 
   <!-- Editor area (overlay pattern) -->
   <div class="relative" style={`min-height: ${minHeight}px`}>
@@ -438,17 +462,19 @@
           >{:else if seg.type === "text"}<span class="text-primary">{seg.value}</span>{:else}<span
             class="{getChipClasses(
               seg.category ?? 'unknown'
-            )} inline !px-0 !py-0 !font-sans !text-base !font-normal sm:!text-sm"
-            >{seg.value}</span
+            )} inline !px-0 !py-0 !font-sans !text-base !font-normal sm:!text-sm">{seg.value}</span
           >{/if}
       {/each}
       <span>&nbsp;</span>
     </div>
 
-    <!-- Textarea layer (on top, transparent text, visible caret) -->
+    <!-- Textarea layer (on top, transparent text, visible caret). Block, not
+         the default inline-block: the inline baseline gap made the box 5px
+         taller than the textarea, so the mirror could scroll 5px less than
+         the textarea and the caret sat above the text near the end. -->
     <textarea
       bind:this={textareaEl}
-      class="selection:bg-accent-dimmer selection:text-primary caret-foreground relative z-10 w-full overflow-hidden bg-transparent px-4 py-3 font-sans text-base leading-relaxed text-transparent focus:outline-none sm:text-sm"
+      class="selection:bg-accent-dimmer selection:text-primary caret-foreground relative z-10 block w-full overflow-hidden bg-transparent px-4 py-3 font-sans text-base leading-relaxed text-transparent focus:outline-none sm:text-sm"
       style={`min-height: ${minHeight}px`}
       oninput={handleInput}
       onkeydown={handleKeydown}
