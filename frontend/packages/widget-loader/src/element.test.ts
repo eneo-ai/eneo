@@ -201,6 +201,21 @@ describe("saved settings", () => {
     expect(element.open).toBe(false);
   });
 
+  it("forgets an early open when the host removes it before the settings are in", async () => {
+    const held = heldSettings();
+    const element = attach();
+    element.openPanel();
+    element.prefetch();
+    const listen = vi.spyOn(window, "addEventListener");
+    element.remove();
+
+    held.answer({ position: "bottom-left", colors });
+    await flushSettings();
+    expect(element.open).toBe(false);
+    expect(frameOf(element)).toBeNull();
+    expect(listen.mock.calls.map(([type]) => type)).not.toContain("resize");
+  });
+
   it("never asks for settings in a preview, which shows what the editor passes in", async () => {
     const request = stubSettings({ position: "bottom-right" });
     const element = attach({ preview: "tok", position: "bottom-left" });

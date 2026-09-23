@@ -222,6 +222,10 @@ export class EneoWidgetElement extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    // An open or prefetch waiting for the settings belongs to this page
+    // visit; run on a detached element it would leak viewport listeners.
+    this.openWhenSettled = false;
+    this.prefetchWhenSettled = false;
     window.removeEventListener("message", this.onMessage);
     this.schemeQuery?.removeEventListener("change", this.onSchemeChange);
     this.unwatchViewport();
