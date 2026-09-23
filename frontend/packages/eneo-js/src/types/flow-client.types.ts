@@ -20,6 +20,8 @@ const flows = createEneo({
 }).flows;
 
 flows.list({ spaceId: "space-1", limit: 25 });
+flows.list({ publishedOnly: true, limit: 25 });
+flows.list();
 flows.runContract.get({ id: "flow-1" });
 flows.runs.create({
   flow: { id: "flow-1" },
@@ -138,8 +140,8 @@ async function compilePublishedFlowWebAppJourney(runtimeFile: File) {
 
 void compilePublishedFlowWebAppJourney;
 
-// @ts-expect-error list requires a space id.
-flows.list({ limit: 25 });
+// @ts-expect-error the publication filter is a boolean.
+flows.list({ publishedOnly: "yes" });
 // @ts-expect-error run-contract lookup requires a flow id.
 flows.runContract.get({});
 // @ts-expect-error generated run statuses reject unknown values.

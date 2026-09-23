@@ -290,14 +290,19 @@ export function initFlows(client) {
     },
 
     /**
-     * List flows in a space
-     * @param {{spaceId: string, limit?: number, offset?: number}} params
+     * List the flows the caller can see: those in `spaceId`, or without it the
+     * flows of every space the signed-in user belongs to. Service keys must
+     * send `spaceId`. `publishedOnly` returns published flows only, for
+     * clients that run flows rather than edit them.
+     * @param {{spaceId?: string, publishedOnly?: boolean, limit?: number, offset?: number}} [params]
      * @throws {EneoError}
      */
-    list: async ({ spaceId, limit = 50, offset = 0 }) => {
+    list: async ({ spaceId, publishedOnly, limit = 50, offset = 0 } = {}) => {
       return _fetch("/api/v1/flows/", {
         method: "get",
-        params: { query: { space_id: spaceId, limit, offset } }
+        params: {
+          query: { space_id: spaceId, published_only: publishedOnly, limit, offset }
+        }
       });
     },
 

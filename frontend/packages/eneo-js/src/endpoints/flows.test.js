@@ -121,6 +121,23 @@ describe("flows templates endpoint", () => {
     expect(status).toEqual(["completed", "queued", "completed"]);
   });
 
+  it("lists every space's flows unless a space is named, published ones on request", async () => {
+    const fetch = vi.fn(
+      async () => new Response(JSON.stringify({ items: [], count: 0, has_more: false }))
+    );
+    const flows = initFlows(createClient({ baseUrl: "https://api.example.test", fetch }));
+
+    await flows.list();
+    await flows.list({ publishedOnly: true, limit: 25, offset: 25 });
+    await flows.list({ spaceId: "space-1" });
+
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.example.test/api/v1/flows/?limit=50&offset=0",
+      "https://api.example.test/api/v1/flows/?published_only=true&limit=25&offset=25",
+      "https://api.example.test/api/v1/flows/?space_id=space-1&limit=50&offset=0"
+    ]);
+  });
+
   it("validates portable flow packages through multipart upload", async () => {
     const fetch = vi.fn(async () => ({ package_id: "se.demo.report" }));
     const flows = initFlows({ fetch });
