@@ -268,6 +268,34 @@ describe("FlowRunFileInputState", () => {
     expect(state.getRecordingNotice("step-a")).toBe("upload pending");
   });
 
+  it("keeps a step's recording in flight until capture, local save and uploads have settled", () => {
+    const state = new FlowRunFileInputState();
+    expect(state.hasWorkInFlight("step-a")).toBe(false);
+
+    // Capture, until the recorder has handed over its last segment.
+    state.recordingStarted("step-a");
+    expect(state.hasWorkInFlight("step-a")).toBe(true);
+    state.recordingStopped("step-a");
+
+    // A segment being saved locally, then uploading.
+    const segment = state.prepareRecordedSegment("step-a");
+    state.recordedSegmentArrived("step-a", segment, recordingFile());
+    expect(state.hasWorkInFlight("step-a")).toBe(true);
+    state.recordSegmentPersistence({ stepId: "step-a", segment, notice: null, degraded: false });
+    expect(state.hasWorkInFlight("step-a")).toBe(true);
+
+    // A failed segment waits for the user, not for the dialog.
+    state.recordedSegmentFailed("step-a", segment);
+    expect(state.hasWorkInFlight("step-a")).toBe(false);
+
+    // Any upload for the step, a picked file's as well.
+    state.beginStepUpload("step-a");
+    expect(state.hasWorkInFlight("step-a")).toBe(true);
+    expect(state.hasWorkInFlight("step-b")).toBe(false);
+    state.finishStepUpload("step-a");
+    expect(state.hasWorkInFlight("step-a")).toBe(false);
+  });
+
   it("tracks recovered segments that still need an upload and numbers new ones after them", () => {
     const state = new FlowRunFileInputState();
 

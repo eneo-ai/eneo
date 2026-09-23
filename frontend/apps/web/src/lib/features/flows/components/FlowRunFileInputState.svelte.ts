@@ -33,6 +33,7 @@ export class FlowRunFileInputState {
   #recordingNoticesByStepId = $state<Record<string, string | null>>({});
   #skippedMessagesByStepId = $state<Record<string, string | null>>({});
   #activeUploadCountByStepId = $state<Record<string, number>>({});
+  // Steps whose recorder captures or has yet to hand over its last segment.
   #recordingStepIds = $state<string[]>([]);
   #draggingStepId = $state<string | null>(null);
   #recordingSessionState = $state<RecordingSessionState>(emptyRecordingSessionState());
@@ -104,6 +105,17 @@ export class FlowRunFileInputState {
 
   isStepRecording(stepId: string): boolean {
     return this.#recordingStepIds.includes(stepId);
+  }
+
+  // The step still has work on its way: capture until its last segment is
+  // handed over, a local save, an upload or a retry. Each would bring files
+  // back after a discard.
+  hasWorkInFlight(stepId: string): boolean {
+    return (
+      this.isStepRecording(stepId) ||
+      this.isStepUploading(stepId) ||
+      (this.#pendingSegmentsByStepId[stepId] ?? []).some((segment) => segment.state !== "failed")
+    );
   }
 
   isDraggingStep(stepId: string): boolean {

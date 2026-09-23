@@ -66,6 +66,8 @@ vi.mock("$lib/components/toast", () => ({
 const FAKED_CLOCK = ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] as const;
 const LOCAL_RECORDING_BLOCKER =
   "Slutför uppladdningen eller kassera inspelningen för steg 1: Audio input.";
+const DISCARD_BUSY_REASON =
+  "Du kan kassera inspelningen när den har stoppats och uppladdningen är klar.";
 
 let media: ReturnType<typeof installFakeMedia>;
 
@@ -328,7 +330,7 @@ describe("FlowRunDialog recording rotation", () => {
     );
   });
 
-  it("offers save for later and discard only once capture stops and every segment is persisted", async () => {
+  it("offers save for later once every segment is handed over and persisted, and discard once none is in flight", async () => {
     const pendingUploads: PendingUpload[] = [];
     const upload = vi.fn(({ file }: { file: File }) => pendingUpload(pendingUploads, file));
     await openDialogAndStartRecording(upload);
@@ -343,7 +345,7 @@ describe("FlowRunDialog recording rotation", () => {
     // Capture continues: Retry is offered, the actions that end the recording are not.
     expect(queryInFailedRecordingAlert("Försök igen")).toBeTruthy();
     expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeNull();
-    expect(queryInFailedRecordingAlert(m.discard())).toBeNull();
+    await expectDiscardRefused();
 
     let finishPersisting = () => {};
     vi.mocked(persistRecordingSegment).mockImplementationOnce(
@@ -353,6 +355,10 @@ describe("FlowRunDialog recording rotation", () => {
         })
     );
     await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    await flush();
+    // Stopped, but the browser has not handed over the last segment yet.
+    expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeNull();
+    await expectDiscardRefused();
     media.recorders[1]?.finish();
     await flush();
     expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeNull();
@@ -360,7 +366,18 @@ describe("FlowRunDialog recording rotation", () => {
     finishPersisting();
     await flush();
     expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeTruthy();
-    expect(queryInFailedRecordingAlert(m.discard())).toBeTruthy();
+    // The last segment still uploads.
+    await expectDiscardRefused();
+
+    pendingUploads[1]?.resolve(uploadedFile("segment-1", pendingUploads[1].file.name));
+    await flush();
+    expect(screen.getByText(/-seg01-/)).toBeTruthy();
+    await fireEvent.click(discardButton());
+    await flush();
+
+    expect(purgeSession).toHaveBeenCalledOnce();
+    expect(failedRecordingAlert()).toBeNull();
+    expect(screen.queryByText(/-seg0\d-/)).toBeNull();
   });
 
   it("retries when the replacement recorder fails before it captures any audio", async () => {
@@ -452,6 +469,57 @@ describe("FlowRunDialog recording rotation", () => {
     expect(back.disabled).toBe(false);
     await fireEvent.click(back);
     expect(await screen.findByText("First audio")).toBeTruthy();
+  });
+
+  it("holds a stopped step until its last segment is handed over, and a close waits for it", async () => {
+    const pendingUploads: PendingUpload[] = [];
+    const upload = vi.fn(({ file }: { file: File }) => pendingUpload(pendingUploads, file));
+    renderDialog(upload, { steps: [firstAudioStep, { ...audioStep, step_order: 2 }] });
+    await screen.findByText("First audio");
+    await fireEvent.click(nextButton());
+    await screen.findByText("Audio input");
+    vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
+    await fireEvent.click(screen.getByLabelText(m.start_recording()));
+    await flush();
+    // The first segment is uploaded, so nothing but the recording holds the step.
+    await rotate();
+    await endOverlap();
+    media.recorders[0]?.finish();
+    await flush();
+    pendingUploads[0]?.resolve(uploadedFile("segment-0", pendingUploads[0].file.name));
+    await flush();
+
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    await flush();
+    // Stopped, but the browser has not handed over the last segment yet.
+    const back = screen.getByRole("button", { name: "Tillbaka" }) as HTMLButtonElement;
+    const firstPageDot = screen.getByRole("button", {
+      name: "Steg 1 i flödet"
+    }) as HTMLButtonElement;
+    expect(back.disabled).toBe(true);
+    expect(firstPageDot.disabled).toBe(true);
+    expect(nextButton().disabled).toBe(true);
+    await fireEvent.click(back);
+    await fireEvent.click(firstPageDot);
+    await fireEvent.click(nextButton());
+    await flush();
+    expect(screen.getByText("Audio input")).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_run_trigger_close() }));
+    await fireEvent.click(screen.getByRole("button", { name: "Stäng ändå" }));
+    await flush();
+    media.recorders[1]?.finish();
+    await flush();
+
+    // The last segment reached the local store, under the step that recorded it.
+    expect(
+      vi
+        .mocked(persistRecordingSegment)
+        .mock.calls.map(([args]) => [args.stepId, args.segmentIndex, args.reason])
+    ).toEqual([
+      ["step-audio", 0, "rotation"],
+      ["step-audio", 1, "manual"]
+    ]);
   });
 
   it("counts recovered segments whose upload fails and retries them in segment order", async () => {
@@ -591,6 +659,24 @@ function retryInFailedRecordingAlert() {
 
 function queryInFailedRecordingAlert(name: string) {
   return within(requireFailedRecordingAlert()).queryByRole("button", { name });
+}
+
+function discardButton() {
+  return within(requireFailedRecordingAlert()).getByRole("button", {
+    name: m.discard()
+  }) as HTMLButtonElement;
+}
+
+// Discard shows why it is disabled, and a click on it changes nothing.
+async function expectDiscardRefused() {
+  const discard = discardButton();
+  expect(discard.disabled).toBe(true);
+  const reasonId = discard.getAttribute("aria-describedby") ?? "";
+  expect(document.getElementById(reasonId)?.textContent?.trim()).toBe(DISCARD_BUSY_REASON);
+  await fireEvent.click(discard);
+  await flush();
+  expect(purgeSession).not.toHaveBeenCalled();
+  expect(failedRecordingAlert()).toBeTruthy();
 }
 
 function installFakeMedia() {

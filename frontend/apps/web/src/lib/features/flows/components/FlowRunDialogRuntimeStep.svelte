@@ -43,6 +43,7 @@
     resumeBusy = false,
     storageDegraded = false,
     canStartRecording = true,
+    canDiscardRecording = true,
     sessionPhase = "idle",
     onOpenFilePicker,
     onRemoveFile,
@@ -83,6 +84,8 @@
     resumeBusy?: boolean;
     storageDegraded?: boolean;
     canStartRecording?: boolean;
+    // False while the step's recording or an upload is still on its way.
+    canDiscardRecording?: boolean;
     // The session-level state surfaces a "trying to reconnect" hint and a
     // paused-failed CTA right next to the recorder so the user knows the
     // system is still working without scrolling.
@@ -93,7 +96,7 @@
     onRetryUpload: () => void;
     onDownloadRecordedAudio: () => void;
     onRetryRecordedAudio: () => void;
-    onDiscardRecordedAudio?: () => void;
+    onDiscardRecordedAudio: () => void;
     onSaveForLater?: () => void;
     onContinueResume?: (hint: SessionRecoveryHint) => void;
     onDiscardResume?: (hint: SessionRecoveryHint) => void;
@@ -136,6 +139,7 @@
     }
   }
 
+  const DISCARD_REASON_ID = "flow-run-discard-reason";
   const supportsAudioRecording = $derived(step.input_format === "audio");
   const acceptedMimetypes = $derived(step.accepted_mimetypes ?? []);
 
@@ -427,13 +431,23 @@
                   {m.recording_save_for_later()}
                 </Button>
               {/if}
-              {#if onDiscardRecordedAudio}
-                <Button variant="ghost" size="sm" onclick={onDiscardRecordedAudio}>
-                  <IconTrash data-icon="inline-start" />
-                  {m.discard()}
-                </Button>
-              {/if}
+              <Button
+                variant="ghost"
+                size="sm"
+                onclick={onDiscardRecordedAudio}
+                disabled={!canDiscardRecording}
+                title={canDiscardRecording ? undefined : labels.discardRecordingBusy}
+                aria-describedby={canDiscardRecording ? undefined : DISCARD_REASON_ID}
+              >
+                <IconTrash data-icon="inline-start" />
+                {m.discard()}
+              </Button>
             </div>
+            {#if !canDiscardRecording}
+              <p id={DISCARD_REASON_ID} class="mt-2 leading-relaxed">
+                {labels.discardRecordingBusy}
+              </p>
+            {/if}
           </Alert.Root>
         {/if}
 

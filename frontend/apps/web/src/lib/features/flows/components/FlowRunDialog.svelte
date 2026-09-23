@@ -126,6 +126,9 @@
   // Promise tails coordinate side effects and must not trigger rendering.
   // eslint-disable-next-line svelte/prefer-svelte-reactivity
   const uploadTailsByStepId = new Map<string, Promise<void>>();
+  // Counts each step's discards: an upload begun before one must not bring
+  // the discarded files back.
+  const discardsByStepId: Record<string, number> = {};
 
   const AUDIO_ACCEPT_FILTER = "audio/*,video/webm,video/mp4";
   const NAVIGATION_REASON_ID = "flow-run-navigation-reason";
@@ -269,9 +272,10 @@
       ? canStartRecording(fileInputState.segmentsAwaitingUpload(currentRuntimeStep.step_id))
       : true
   );
-  // Capture has stopped and every segment is in the local store. Until then
-  // no page change (leaving the step unmounts its recorder, which drops the
-  // segment in progress) and no save for later or discard.
+  // No recorder captures or has yet to hand over its last segment, and every
+  // segment is in the local store. Until then no page change (leaving the
+  // step unmounts its recorder, which drops the segment in progress) and no
+  // save for later.
   const recordingSettled = $derived(
     !fileInputState.hasActiveRecording && !fileInputState.hasPersistingRecordedSegments
   );
@@ -361,8 +365,9 @@
   });
 
   // Closing unmounts the recorder, which drops a recording still running. So
-  // the recording stops as the dialog starts to close, and the reset waits
-  // until its segments have been handed over and their local save started.
+  // the recording stops as the dialog starts to close (one already stopping is
+  // waited for), and the reset waits until its segments have been handed over
+  // and their local save started.
   let closingRecordings: Promise<unknown> | null = null;
   function handleOpenChange(isOpen: boolean) {
     if (isOpen) return;
@@ -602,6 +607,12 @@
     if (isStale(operationGeneration, operationFlowId)) {
       return staleResult;
     }
+    // A discard of the step meanwhile outdates the upload; the step's upload
+    // count still drops when it ends.
+    const discards = discardsByStepId[step.step_id] ?? 0;
+    const isOutdated = () =>
+      isStale(operationGeneration, operationFlowId) ||
+      (discardsByStepId[step.step_id] ?? 0) !== discards;
     fileInputState.beginStepUpload(step.step_id, options);
     const previousTail = uploadTailsByStepId.get(step.step_id) ?? Promise.resolve();
     let releaseTail = () => {};
@@ -615,7 +626,7 @@
 
     try {
       await previousTail.catch(() => undefined);
-      if (isStale(operationGeneration, operationFlowId)) {
+      if (isOutdated()) {
         return staleResult;
       }
       const currentFileCount = fileInputState.getUploadedFiles(step.step_id).length;
@@ -653,14 +664,14 @@
 
         try {
           const uploaded = await uploadRuntimeFileWithTimeout(operationFlowId, step, file);
-          if (isStale(operationGeneration, operationFlowId)) {
+          if (isOutdated()) {
             return staleResult;
           }
           uploadedCount += 1;
           uploadedFiles.push(uploaded);
           fileInputState.recordUploadedFile(step.step_id, uploaded);
         } catch (error) {
-          if (isStale(operationGeneration, operationFlowId)) {
+          if (isOutdated()) {
             return staleResult;
           }
           failed = true;
@@ -804,6 +815,19 @@
     recorderRefsByStepId[stepId] = ref;
   }
 
+  // A recorder reports to the callbacks its recording started with, so these
+  // are bound to their step: a segment handed over after the page changed
+  // still goes to the step that recorded it.
+  function recordedAudioHandler(step: DialogRuntimeStepInput) {
+    return (params: Parameters<typeof handleRecordedAudio>[1]) =>
+      void handleRecordedAudio(step, params);
+  }
+
+  function recordingStateHandler(stepId: string) {
+    return (active: boolean, meta?: { origin: "user" | "external" }) =>
+      setStepRecordingState(stepId, active, meta);
+  }
+
   function retryRecordingSession(stepId: string) {
     const operationGeneration = dialogGeneration;
     const operationFlowId = flow.id;
@@ -842,9 +866,13 @@
   }
 
   async function discardRecordedFile(stepId: string) {
+    // Refused, as its disabled control says, while the step still has work on
+    // its way: it would arrive after the discard.
+    if (fileInputState.hasWorkInFlight(stepId)) return;
     const operationGeneration = dialogGeneration;
     const operationFlowId = flow.id;
     const sessionId = fileInputState.sessionIdsByStepIdSnapshot[stepId];
+    discardsByStepId[stepId] = (discardsByStepId[stepId] ?? 0) + 1;
     fileInputState.discardStepRecording(stepId);
     if (sessionId) {
       await purgeSession({ eneo, flowId: operationFlowId, stepId, sessionId });
@@ -1315,18 +1343,16 @@
             onRetryUpload={() => retryUpload(currentRuntimeStep)}
             onDownloadRecordedAudio={() => void downloadRecordedFile(currentRuntimeStep)}
             onRetryRecordedAudio={() => void retryRecordedFileUpload(currentRuntimeStep)}
-            onDiscardRecordedAudio={recordingSettled
-              ? () => void discardRecordedFile(currentRuntimeStep.step_id)
-              : undefined}
+            onDiscardRecordedAudio={() => void discardRecordedFile(currentRuntimeStep.step_id)}
+            canDiscardRecording={!fileInputState.hasWorkInFlight(currentRuntimeStep.step_id)}
             onSaveForLater={recordingSettled ? saveForLater : undefined}
             onContinueResume={(hint) =>
               void continueResumedSession(currentRuntimeStep.step_id, hint)}
             onDiscardResume={(hint) => void discardResumedSession(currentRuntimeStep.step_id, hint)}
             onDismissResumePrompt={dismissResumePrompt}
             sessionPhase={fileInputState.getSessionPhase(currentRuntimeStep.step_id)}
-            onRecordingDone={(params) => void handleRecordedAudio(currentRuntimeStep, params)}
-            onRecordingStateChange={(active, meta) =>
-              setStepRecordingState(currentRuntimeStep.step_id, active, meta)}
+            onRecordingDone={recordedAudioHandler(currentRuntimeStep)}
+            onRecordingStateChange={recordingStateHandler(currentRuntimeStep.step_id)}
             onRecorderRef={handleRecorderRefChange}
             onSessionRetry={() => retryRecordingSession(currentRuntimeStep.step_id)}
             onSessionDismissFailure={() => dismissSessionFailure(currentRuntimeStep.step_id)}

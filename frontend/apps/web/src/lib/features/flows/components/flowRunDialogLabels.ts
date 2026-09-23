@@ -27,6 +27,8 @@ export function getFlowRunDialogLabels(locale: FlowLocale) {
       runtimeGroupEyebrow: "Filer för denna körning",
       runtimeUploadHint: "Ladda upp fil eller dra den hit.",
       runtimeUploadingHint: "Uppladdning pågår. Vänta tills filen är klar innan du går vidare.",
+      discardRecordingBusy:
+        "Du kan kassera inspelningen när den har stoppats och uppladdningen är klar.",
       allowedTypesToggle: "Visa tillåtna filtyper",
       maxFiles: (count: number) => (count === 1 ? "Högst 1 fil" : `Högst ${count} filer`),
       maxFileSize: (size: string) => `Högst ${size} per fil`,
@@ -73,6 +75,8 @@ export function getFlowRunDialogLabels(locale: FlowLocale) {
     runtimeGroupEyebrow: "Files for this run",
     runtimeUploadHint: "Upload a file or drag it here.",
     runtimeUploadingHint: "Upload in progress. Wait until the file is finished before continuing.",
+    discardRecordingBusy:
+      "You can discard the recording once it has stopped and the upload has finished.",
     allowedTypesToggle: "Show allowed file types",
     maxFiles: (count: number) => (count === 1 ? "Up to 1 file" : `Up to ${count} files`),
     maxFileSize: (size: string) => `Up to ${size} per file`,

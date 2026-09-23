@@ -31,6 +31,8 @@
     // can label resumed segments by length without having to read the blob.
     durationMs: number;
   }) => void;
+  // `false` comes once every segment of the recording has been reported
+  // through onRecordingDone; the last one arrives a moment after the stop.
   // The session needs to know whether `true` came from a user click or from
   // its own retry path. Without this, the dialog had to infer intent by
   // peeking at session phase + a side-channel flag, which raced with the
@@ -45,6 +47,10 @@
   export let resetToken: unknown = 0;
   // False while the caller cannot take another recording; stopping stays possible.
   export let canStart = true;
+
+  // A recording reports to the callbacks it started with: its last segment
+  // arrives after the stop, when the caller may have moved on.
+  let reportTo = { onRecordingDone, onRecordingStateChange };
 
   let isRecording: boolean = false;
   let startedRecordingAt = dayjs();
@@ -469,6 +475,7 @@
   }
 
   async function doStartRecording(origin: RecordingStartOrigin): Promise<void> {
+    reportTo = { onRecordingDone, onRecordingStateChange };
     try {
       recordedBlob = null;
       recordedMimeType = "";
@@ -521,7 +528,7 @@
         elapsedTime = "00:00";
         recordingState = "recording";
         isRecording = true;
-        onRecordingStateChange(true, { origin });
+        reportTo.onRecordingStateChange(true, { origin });
         startMonitoringLoop();
         startStallChecker();
         attachVisibilityHandler();
@@ -530,7 +537,7 @@
         setRecordingErrorState(errorMsg);
         recordingStats.errors.push(errorMsg);
         isRecording = false;
-        onRecordingStateChange(false);
+        reportTo.onRecordingStateChange(false);
         recordingState = "error";
       }
     } catch (error) {
@@ -544,7 +551,7 @@
       setRecordingErrorState(errorMsg, error);
       recordingStats.errors.push(errorMsg);
       isRecording = false;
-      onRecordingStateChange(false);
+      reportTo.onRecordingStateChange(false);
       recordingState = "error";
     }
   }
@@ -559,6 +566,7 @@
     const initialMimeType = recorder.mimeType || recordingOptions.mimeType || "";
     const chunks: Blob[] = [];
     const segmentStartedAt = dayjs();
+    const handOver = reportTo.onRecordingDone;
     const isReplaced = () => replacedRecorders.has(recorder);
     let stopHandled = () => {};
     recorderStops.set(
@@ -648,7 +656,7 @@
         // stream, the meter and the live recorder alone. The segment is
         // complete, so not even an unmount drops it.
         if (chunks.length > 0) {
-          onRecordingDone({ ...finishedSegment(), reason: "rotation" });
+          handOver({ ...finishedSegment(), reason: "rotation" });
         }
         return;
       }
@@ -689,7 +697,7 @@
       // captured nothing still has to reach the caller's retry loop.
       const reason = stopReason;
       resetStopReason();
-      onRecordingDone({
+      handOver({
         blob: segment?.blob ?? null,
         mimeType: segment?.mimeType ?? "",
         reason,
@@ -754,14 +762,15 @@
 
   // Stops the recording, the replaced recorder of an overlap first, so its
   // file comes before the final one and the stream outlives both. Settles
-  // once every stopped recorder has handed over its file.
+  // once every stopped recorder has handed over its file; only then is the
+  // recording reported as ended.
   function stopRecording(): Promise<void> {
     const overlapStopped = stopOverlappingRecorder();
     stopStallChecker();
     detachVisibilityHandler();
+    const endsRecording = isRecording;
     if (isRecording) {
       isRecording = false;
-      onRecordingStateChange(false);
       recordingState = "processing";
     }
 
@@ -778,9 +787,15 @@
       recordingStats.errors.push(errorMsg);
       recordingState = "error";
     }
-    return Promise.all([overlapStopped, live ? recorderStops.get(live) : undefined]).then(
-      () => undefined
-    );
+    const handedOver = Promise.all([
+      overlapStopped,
+      live ? recorderStops.get(live) : undefined
+    ]).then(() => undefined);
+    if (endsRecording) {
+      const report = reportTo.onRecordingStateChange;
+      void handedOver.then(() => report(false));
+    }
+    return handedOver;
   }
 
   function toggleRecording(e: Event) {
@@ -1067,7 +1082,7 @@
     }
     if (isRecording) {
       isRecording = false;
-      onRecordingStateChange(false);
+      reportTo.onRecordingStateChange(false);
     }
     releaseMediaCapture();
   }

@@ -58,14 +58,15 @@ vi.mock("$lib/features/audio/AudioRecorder.svelte", () => ({
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = "Finish test recording";
+    // Like the recorder, the recording ends once its last segment is reported.
     button.addEventListener("click", () => {
-      props.onRecordingStateChange?.(false, { origin: "user" });
       props.onRecordingDone({
         blob: new Blob(["recording"], { type: "audio/webm" }),
         mimeType: "audio/webm",
         reason: "manual",
         durationMs: 1_000
       });
+      props.onRecordingStateChange?.(false, { origin: "user" });
     });
     anchor.parentNode?.insertBefore(button, anchor);
 
@@ -73,13 +74,13 @@ vi.mock("$lib/features/audio/AudioRecorder.svelte", () => ({
     stalledButton.type = "button";
     stalledButton.textContent = "Finish stalled test recording";
     stalledButton.addEventListener("click", () => {
-      props.onRecordingStateChange?.(false, { origin: "user" });
       props.onRecordingDone({
         blob: new Blob(["recording"], { type: "audio/webm" }),
         mimeType: "audio/webm",
         reason: "stall",
         durationMs: 1_000
       });
+      props.onRecordingStateChange?.(false, { origin: "user" });
     });
     anchor.parentNode?.insertBefore(stalledButton, anchor);
   }
