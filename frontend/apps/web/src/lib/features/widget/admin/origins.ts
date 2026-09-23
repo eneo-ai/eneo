@@ -7,7 +7,17 @@ export const MAX_ALLOWED_ORIGINS = 20;
 
 const HOST = /^(\*\.)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/i;
 const IPV6_HOST = /^[0-9a-f:.]+$/i;
-const PORT = /^\d{1,5}$/;
+const PORT = /^\d+$/;
+
+/** Whether a bracketed host is an IPv6 address, as the API's URL parser checks it. */
+function isIpv6(host: string): boolean {
+  if (!IPV6_HOST.test(host)) return false;
+  try {
+    return new URL(`http://[${host}]/`).hostname !== "";
+  } catch {
+    return false;
+  }
+}
 
 /** `scheme://host[:port]` in the API's canonical form, or null when the API would refuse it. */
 export function normalizeOrigin(raw: string): string | null {
@@ -28,7 +38,7 @@ export function normalizeOrigin(raw: string): string | null {
     // The API reads the colons of a bare IPv6 literal as a malformed port.
     if (!rest.startsWith(":")) return null;
     port = rest.slice(1);
-    if (!IPV6_HOST.test(host)) return null;
+    if (!isIpv6(host)) return null;
   } else {
     const colon = authority.lastIndexOf(":");
     if (colon >= 0) {

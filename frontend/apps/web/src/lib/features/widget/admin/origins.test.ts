@@ -3,6 +3,7 @@ import { MAX_ALLOWED_ORIGINS, normalizeOrigin, parseOrigins } from "./origins";
 
 // Expected values are what the backend's normalize_origin_pattern returns
 // (null where it raises), so the field refuses exactly what a save would.
+// backend/tests/unit/test_origin_matching.py holds the same table.
 const BACKEND: [string, string | null][] = [
   ["https://www.kommun.se", "https://www.kommun.se"],
   ["https://www.kommun.se/", "https://www.kommun.se"],
@@ -33,7 +34,15 @@ const BACKEND: [string, string | null][] = [
   ["https://1.2.3.4:443", "https://1.2.3.4:443"],
   ["http://localhost:08", "http://localhost:08"],
   ["https://kommun.se:abc", null],
-  ["https://[zz]", null]
+  ["https://[zz]", null],
+  ["https://example.com?", null],
+  ["https://example.com#", null],
+  ["https://@example.com", null],
+  ["https://example.com:000080", "https://example.com:000080"],
+  ["https://[abc.def]:80", null],
+  ["https://[1.2.3.4]:80", null],
+  ["https://[:::]:80", null],
+  ["https://[::ffff:1.2.3.4]:80", "https://[::ffff:1.2.3.4]:80"]
 ];
 
 describe("allowed origins", () => {
