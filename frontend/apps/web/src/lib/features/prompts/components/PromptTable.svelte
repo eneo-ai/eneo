@@ -5,8 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Table } from "@eneo/ui";
-  import { createRender } from "svelte-headless-table";
+  import * as Table from "$lib/components/resource-table/index.js";
   import PromptActions from "./PromptActions.svelte";
   import { getPromptManager } from "../PromptManager";
   import dayjs from "dayjs";
@@ -36,7 +35,7 @@
       header: m.created(),
       accessor: (item) => item,
       cell: (item) => {
-        return createRender(PromptTimestamp, {
+        return Table.renderComponent(PromptTimestamp, {
           prompt: item.value
         });
       },
@@ -59,7 +58,7 @@
       header: m.author(),
       value: (item) => item.user.email,
       cell: (item) => {
-        return createRender(PromptCreator, {
+        return Table.renderComponent(PromptCreator, {
           user: item.value.user
         });
       }
@@ -67,7 +66,7 @@
 
     table.columnActions({
       cell: (item) => {
-        return createRender(PromptActions, {
+        return Table.renderComponent(PromptActions, {
           prompt: item.value
         });
       }

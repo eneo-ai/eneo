@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
   import type { App, AppRunSparse } from "@eneo/eneo-js";
-  import { createRender } from "svelte-headless-table";
   import dayjs from "dayjs";
   import relativeTime from "dayjs/plugin/relativeTime";
   import utc from "dayjs/plugin/utc";
@@ -28,7 +27,7 @@
       header: m.name(),
       value: (item) => getResultTitle(item),
       cell: (item) => {
-        return createRender(ResultPrimaryCell, {
+        return Table.renderComponent(ResultPrimaryCell, {
           run: item.value,
           app
         });
@@ -38,7 +37,7 @@
       header: m.status(),
       accessor: (item) => item,
       cell: (item) => {
-        return createRender(AppResultStatus, {
+        return Table.renderComponent(AppResultStatus, {
           run: item.value
         });
       }
@@ -47,7 +46,7 @@
       header: m.created(),
       accessor: "created_at",
       cell: (item) => {
-        return createRender(Table.FormattedCell, {
+        return Table.renderComponent(Table.FormattedCell, {
           value: dayjs(item.value).format("YYYY-MM-DD HH:mm"),
           monospaced: true
         });
@@ -56,7 +55,7 @@
 
     table.columnActions({
       cell: (item) => {
-        return createRender(ResultAction, {
+        return Table.renderComponent(ResultAction, {
           result: item.value,
           onResultDeleted
         });

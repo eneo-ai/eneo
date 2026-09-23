@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { CrawlRun } from "@eneo/eneo-js";
-  import { Table } from "@eneo/ui";
-  import { createRender } from "svelte-headless-table";
+  import * as Table from "$lib/components/resource-table/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
 
@@ -65,7 +64,7 @@
       accessor: "created_at",
       header: m.started(),
       cell: (item) => {
-        return createRender(Table.FormattedCell, {
+        return Table.renderComponent(Table.FormattedCell, {
           value: dayjs(item.value).format("YYYY-MM-DD HH:mm"),
           monospaced: true
         });
@@ -76,7 +75,7 @@
       accessor: (item) => item,
       header: m.status(),
       cell: (item) => {
-        return createRender(Table.FormattedCell, {
+        return Table.renderComponent(Table.FormattedCell, {
           value: translateStatus(item.value),
           class: ""
         });
@@ -94,7 +93,7 @@
       accessor: (item) => item,
       header: m.results(),
       cell: (item) => {
-        return createRender(CrawlResultCell, {
+        return Table.renderComponent(CrawlResultCell, {
           crawl: item.value
         });
       },
@@ -121,7 +120,7 @@
           value = started.to(finished, true);
         }
 
-        return createRender(Table.FormattedCell, {
+        return Table.renderComponent(Table.FormattedCell, {
           value
         });
       }

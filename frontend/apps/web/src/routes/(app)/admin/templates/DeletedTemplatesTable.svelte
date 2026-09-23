@@ -7,7 +7,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import type { components } from "@eneo/eneo-js";
-  import { Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
   import { m } from "$lib/paraglide/messages";
   import TemplateDeletedActions from "./TemplateDeletedActions.svelte";
   import TemplateNameCell from "./TemplateNameCell.svelte";
@@ -31,7 +31,7 @@
       accessor: "name",
       header: m.template_name(),
       cell: (item) => {
-        const row = item.row as import("svelte-headless-table").DataBodyRow<Template>;
+        const row = item.row;
         return Table.renderComponent(TemplateNameCell, {
           name: item.value,
           description: row.original.description,
@@ -73,7 +73,7 @@
       accessor: "category",
       header: m.category(),
       cell: (item) => {
-        const row = item.row as import("svelte-headless-table").DataBodyRow<Template>;
+        const row = item.row;
         const type = isAppTemplate(row.original) ? "app" : "assistant";
         return Table.renderComponent(TemplateCategoryBadge, {
           category: item.value,

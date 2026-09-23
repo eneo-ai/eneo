@@ -6,8 +6,7 @@
 
 <script lang="ts">
   import type { TokenUsageSummary } from "@eneo/eneo-js";
-  import { createRender } from "svelte-headless-table";
-  import { Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import ModelNameAndVendor from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
@@ -39,7 +38,7 @@
       header: "Name",
       value: (item) => item.model_nickname,
       cell: (item) => {
-        return createRender(ModelNameAndVendor, {
+        return Table.renderComponent(ModelNameAndVendor, {
           model: {
             name: item.value.model_name,
             nickname: item.value.model_nickname,
@@ -72,7 +71,7 @@
       header: m.estimated_cost(),
       accessor: (item) => item,
       cell: (item) =>
-        createRender(EstimatedCostCell, {
+        Table.renderComponent(EstimatedCostCell, {
           label: estimateCostText(
             item.value.model_id,
             item.value.input_token_usage,

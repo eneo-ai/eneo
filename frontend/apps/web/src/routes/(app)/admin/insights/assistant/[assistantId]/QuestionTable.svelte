@@ -5,12 +5,11 @@
 -->
 
 <script lang="ts">
-  import { Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import dayjs from "dayjs";
   import { m } from "$lib/paraglide/messages";
   import QuestionDetails from "./QuestionDetails.svelte";
-  import { createRender } from "svelte-headless-table";
   import type { CalendarDate } from "@internationalized/date";
   import { getEneo } from "$lib/core/Eneo";
   import { onMount } from "svelte";
@@ -55,7 +54,7 @@
       header: m.question(),
       accessor: (item) => item,
       cell(item) {
-        return createRender(QuestionDetails, {
+        return Table.renderComponent(QuestionDetails, {
           message: item.value
         });
       },
@@ -71,7 +70,7 @@
       header: m.created(),
       accessor: (item) => item.created_at,
       cell: (item) => {
-        return createRender(Table.FormattedCell, {
+        return Table.renderComponent(Table.FormattedCell, {
           value: dayjs(item.value).format("YYYY-MM-DD HH:mm"),
           monospaced: true
         });

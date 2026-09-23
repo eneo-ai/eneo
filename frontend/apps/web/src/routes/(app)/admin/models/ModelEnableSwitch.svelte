@@ -21,8 +21,6 @@
     lock_reason?: string | null | undefined;
   };
 
-  // Rendered via svelte-headless-table's `createRender`, which requires the
-  // legacy `export let` API. Keep this file on Svelte 4 component syntax.
   export let model: LockableModel;
   export let type: ModelTypeKey;
 

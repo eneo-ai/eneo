@@ -18,8 +18,6 @@
 
   type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
 
-  // Rendered via svelte-headless-table's `createRender`, which requires the
-  // legacy `export let` API. Keep this file on Svelte 4 component syntax.
   export let model: AnyModel;
 
   $: classification = model.security_classification ?? null;
