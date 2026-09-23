@@ -69,6 +69,16 @@
       "count": 8
     }
   },
+  "src/lib/components/ui/range-calendar/range-calendar-cell.svelte": {
+    "eneo/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/lib/components/ui/range-calendar/range-calendar-day.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
+    }
+  },
   "src/lib/components/ui/select/select-trigger.svelte": {
     "eneo/no-raw-color": {
       "count": 4
