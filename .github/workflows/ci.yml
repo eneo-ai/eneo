@@ -258,7 +258,7 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
-      - name: Verify File/Icon upgrade and optional cleanup on PostgreSQL 13
+      - name: Verify File/Icon upgrade, optional cleanup and widget migrations on PostgreSQL 13
         if: matrix.suite == 'migrations'
         # Migration tests are opt-in and run outside the parallel suite. The
         # restore rehearsal needs its own application/database session.
@@ -266,7 +266,8 @@ jobs:
         run: |
           uv run pytest -v --durations=25 -m migration_isolation \
             tests/integration/migrations/test_file_icon_preflight.py \
-            tests/integration/migrations/test_file_icon_legacy_cleanup.py
+            tests/integration/migrations/test_file_icon_legacy_cleanup.py \
+            tests/integration/migrations/test_widget_migrations.py
           uv run pytest -v --durations=25 -o faulthandler_timeout=180 -m migration_isolation \
             tests/integration/migrations/test_file_icon_bridge_rehearsal.py
         env:
