@@ -3,7 +3,7 @@
   import { resolve } from "$app/paths";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import TemplateCreateAssistant from "$lib/features/templates/components/assistants/TemplateCreateAssistant.svelte";
+  import TemplateCreateDialog from "$lib/features/templates/components/TemplateCreateDialog.svelte";
   import { getTemplateController } from "$lib/features/templates/TemplateController";
   import { IconAssistant } from "@eneo/icons/assistant";
   import { IconChevronDown } from "@eneo/icons/chevron-down";
@@ -64,7 +64,7 @@
   {#snippet triggerSnippet(props: any)}
     <Button {...props} class="!rounded-r-none">{m.create_assistant()}</Button>
   {/snippet}
-  <TemplateCreateAssistant settings={data.settings} {triggerSnippet} />
+  <TemplateCreateDialog kind="assistant" settings={data.settings} {triggerSnippet} />
   <DropdownMenu.Root>
     <DropdownMenu.Trigger>
       {#snippet child({ props })}

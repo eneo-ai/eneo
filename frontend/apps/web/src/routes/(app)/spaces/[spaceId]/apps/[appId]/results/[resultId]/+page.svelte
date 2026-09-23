@@ -1,31 +1,23 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout";
-  import { IconCopy } from "@eneo/icons/copy";
   import { IconDownload } from "@eneo/icons/download";
-  import { IconPrint } from "@eneo/icons/print";
   import { Markdown } from "$lib/components/markdown/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import dayjs from "dayjs";
   import utc from "dayjs/plugin/utc";
-  import { getResultTitle } from "$lib/features/apps/getResultTitle.js";
   import AppResultStatus from "$lib/features/apps/components/AppResultStatus.svelte";
-  import { onMount } from "svelte";
-  import { getEneoSocket } from "$lib/core/EneoSocket.js";
+  import AppResultToolbar from "$lib/features/apps/components/AppResultToolbar.svelte";
+  import { createAppRunResult } from "$lib/features/apps/createAppRunResult.svelte";
   import Tabbar from "$lib/components/layout/Page/Tabbar.svelte";
   import TabTrigger from "$lib/components/layout/Page/TabTrigger.svelte";
   import Tab from "$lib/components/layout/Page/Tab.svelte";
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
-  import type { UploadedFile } from "@eneo/eneo-js";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
   import { getEneo } from "$lib/core/Eneo.js";
   import { browser } from "$app/environment";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
-  import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import { untrack } from "svelte";
   dayjs.extend(utc);
 
   const { data } = $props();
@@ -34,91 +26,12 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  const { subscribe } = getEneoSocket();
   const eneo = getEneo();
-
   const attachmentUrlService = getAttachmentUrlService();
 
-  let result = $state(untrack(() => data.result));
-  const resultTitle = $derived(getResultTitle(result));
-
-  async function downloadAsText(text?: string | null) {
-    if (!text) {
-      toast.warning(m.not_output_to_save());
-      return;
-    }
-    const file = new Blob([text], { type: "application/octet-stream;charset=utf-8" });
-    const suggestedName =
-      data.app.name + dayjs(result.created_at).format(" YYYY-MM-DD HH:mm") + ".txt";
-    if (window.showSaveFilePicker) {
-      const handle = await window.showSaveFilePicker({ suggestedName });
-      const writable = await handle.createWritable();
-      await writable.write(file);
-      writable.close();
-    } else {
-      const a = document.createElement("a");
-      a.download = suggestedName;
-      a.href = URL.createObjectURL(file);
-      a.click();
-      setTimeout(function () {
-        URL.revokeObjectURL(a.href);
-      }, 1500);
-    }
-  }
-
-  // We should subscribe to this specific app here somewhere
+  const run = createAppRunResult(() => data);
 
   let printElement = $state<HTMLDivElement>();
-  function print() {
-    if (!printElement) return;
-    const printNode = printElement.cloneNode(true);
-    document.body.appendChild(printNode);
-    document.body.classList.add("print-mode");
-    window.print();
-    document.body.classList.remove("print-mode");
-    document.body.removeChild(printNode);
-  }
-
-  const clipboard = createCopyState();
-  function copyText(text?: string | null) {
-    if (text) {
-      clipboard.copy(text);
-    } else {
-      toast.warning(m.no_copyable_output());
-    }
-  }
-
-  const isRunComplete = $derived(!(result.status === "in progress" || result.status === "queued"));
-
-  function isTranscribedFile(file: UploadedFile): file is UploadedFile & { transcription: string } {
-    return file.transcription !== null && file.transcription !== undefined;
-  }
-
-  let transcribedFiles = $derived.by(() => {
-    if (!result.output) return [];
-    return result.input.files.filter((file) => isTranscribedFile(file));
-  });
-
-  onMount(() => {
-    if (isRunComplete) return;
-
-    const unsubscriber = subscribe("app_run_updates", async (update) => {
-      if (update.id === data.result.id) {
-        result = await data.eneo.apps.runs.get(result);
-      }
-    });
-
-    // There is a bit of an edge case where the run is still "queued" when the load function runs
-    // and switches to "in progress" just before the websocket handler is registered. This makes us
-    // miss a crucial update; as a work around we always poll once more in case we missed sth.
-    if (result.status === "queued") {
-      data.eneo.apps.runs.get(result).then((updatedResult) => {
-        result = updatedResult;
-      });
-    }
-
-    return unsubscriber;
-  });
 </script>
 
 <svelte:head>
@@ -129,63 +42,21 @@
 </svelte:head>
 
 {#snippet formattedResult()}
-  {#if result.output}
-    {@render downloadButtons("output", result.output)}
-    <Markdown source={result.output}></Markdown>
+  {#if run.result.output}
+    <AppResultToolbar
+      type="output"
+      text={run.result.output}
+      fileName={run.textFileName}
+      {printElement}
+      floating
+      class="hidden-in-print absolute -right-[5.5rem] z-10"
+    />
+    <Markdown source={run.result.output}></Markdown>
   {:else}
     <div class="flex items-center justify-center gap-2">
       <span class="text-secondary">{m.no_output_generated()}</span>
     </div>
   {/if}
-{/snippet}
-
-{#snippet downloadButtons(type: "output" | "transcription", text?: string)}
-  <div
-    class="hidden-in-print border-default bg-primary absolute -right-[5.5rem] z-10 flex flex-col gap-1 rounded-lg border p-1 shadow"
-  >
-    <Tooltip.Root>
-      <Tooltip.Trigger onclick={print}>
-        {#snippet child({ props })}
-          <Button
-            {...props}
-            variant="ghost"
-            size="icon"
-            aria-label={m.print_save_type_pdf({ type })}
-          >
-            <IconPrint size="md" />
-          </Button>
-        {/snippet}
-      </Tooltip.Trigger>
-      <Tooltip.Content side="left">{m.print_save_type_pdf({ type })}</Tooltip.Content>
-    </Tooltip.Root>
-
-    <Tooltip.Root>
-      <Tooltip.Trigger onclick={() => downloadAsText(text)}>
-        {#snippet child({ props })}
-          <Button
-            {...props}
-            variant="ghost"
-            size="icon"
-            aria-label={m.download_type_raw_text({ type })}
-          >
-            <IconDownload />
-          </Button>
-        {/snippet}
-      </Tooltip.Trigger>
-      <Tooltip.Content side="left">{m.download_type_raw_text({ type })}</Tooltip.Content>
-    </Tooltip.Root>
-
-    <Tooltip.Root>
-      <Tooltip.Trigger onclick={() => copyText(text)}>
-        {#snippet child({ props })}
-          <Button {...props} variant="ghost" size="icon" aria-label={m.copy_type({ type })}>
-            <IconCopy />
-          </Button>
-        {/snippet}
-      </Tooltip.Trigger>
-      <Tooltip.Content side="left">{m.copy_type({ type })}</Tooltip.Content>
-    </Tooltip.Root>
-  </div>
 {/snippet}
 
 <Page.Root>
@@ -195,7 +66,7 @@
         title: m.back(),
         href: `/spaces/${$currentSpace.routeId}/apps/${data.app.id}`
       }}
-      title={resultTitle}
+      title={run.title}
     ></Page.Title>
 
     <Page.Flex>
@@ -216,8 +87,8 @@
         class=" prose border-default bg-primary relative min-h-72 w-full max-w-[90ch] rounded-sm border px-16 py-8 text-lg shadow-lg"
       >
         <div class="printable-document relative flex flex-col py-4" bind:this={printElement}>
-          {#if isRunComplete}
-            {#if transcribedFiles.length > 0}
+          {#if run.isComplete}
+            {#if run.transcribedFiles.length > 0}
               <div class="hidden-in-print -mt-2 h-20">
                 <Tabbar>
                   <TabTrigger tab="results">{m.results()}</TabTrigger>
@@ -229,9 +100,16 @@
               </Tab>
               <Tab id="transcription">
                 <div class="flex flex-col gap-8">
-                  {#each transcribedFiles as file (file.id)}
+                  {#each run.transcribedFiles as file (file.id)}
                     {@const url = attachmentUrlService.getUrl(file)}
-                    {@render downloadButtons("transcription", file.transcription)}
+                    <AppResultToolbar
+                      type="transcription"
+                      text={file.transcription}
+                      fileName={run.textFileName}
+                      {printElement}
+                      floating
+                      class="hidden-in-print absolute -right-[5.5rem] z-10"
+                    />
 
                     <div class="border-stronger bg-secondary rounded-xl border print:border-none">
                       {#if url}
@@ -262,16 +140,16 @@
                   {/each}
                 </div>
               </Tab>
-            {:else if result.output}
+            {:else if run.result.output}
               {@render formattedResult()}
               <!-- Need to check for browser as we make a fetch request in the await -->
-            {:else if browser && result.status === "failed" && result.input.files.length > 0}
+            {:else if browser && run.result.status === "failed" && run.result.input.files.length > 0}
               <div class="flex flex-grow flex-col items-center justify-center gap-2">
                 <span class="py-2">
                   {m.app_run_failed_files_list()}
                 </span>
 
-                {#each result.input.files as file (file.id)}
+                {#each run.result.input.files as file (file.id)}
                   {#await eneo.files.generateSignedUrl( { fileId: file.id, contentDisposition: "attachment" } ) then { url }}
                     <Button variant="ghost" href={url} class="no-underline"
                       ><IconDownload></IconDownload>{m.download()} "{file.name}"</Button
@@ -302,19 +180,19 @@
         <div class="flex flex-col gap-3 pt-2">
           <div class="border-dimmer flex items-center justify-between border-b">
             <span>{m.started()}</span><span class="font-mono text-sm"
-              >{dayjs(result.created_at).format("YYYY-MM-DD HH:mm")}</span
+              >{dayjs(run.result.created_at).format("YYYY-MM-DD HH:mm")}</span
             >
           </div>
-          {#if isRunComplete}
+          {#if run.isComplete}
             <div class="border-dimmer flex items-center justify-between border-b">
               <span>{m.finished()}</span><span class="font-mono text-sm"
-                >{dayjs(result.finished_at).format("YYYY-MM-DD HH:mm")}</span
+                >{dayjs(run.result.finished_at).format("YYYY-MM-DD HH:mm")}</span
               >
             </div>
           {/if}
-          <AppResultStatus run={result} variant="full"></AppResultStatus>
+          <AppResultStatus run={run.result} variant="full"></AppResultStatus>
 
-          {#each result.input.files as file (file.id)}
+          {#each run.result.input.files as file (file.id)}
             <div
               class="border-default bg-primary flex items-center gap-2 rounded-lg border px-4 py-3 shadow"
             >

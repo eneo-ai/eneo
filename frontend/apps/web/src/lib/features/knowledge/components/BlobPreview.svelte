@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { toastError } from "$lib/core/errors";
   import { browser } from "$app/environment";
   import type { InfoBlob } from "@eneo/eneo-js";
   import { IconDocument } from "@eneo/icons/document";
@@ -9,6 +10,7 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { getEneo } from "$lib/core/Eneo";
+  import { downloadTextFile } from "$lib/core/helpers/download";
   import * as m from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   type BlobPreviewReference = {
@@ -44,7 +46,7 @@
       } catch (e) {
         loadError = true;
         console.error("Error retrieving blob content:", e);
-        toast.error("Error retrieving reference, see console for details.");
+        toastError(e, m.could_not_load_file_content());
       }
       loadingBlob = false;
     }
@@ -56,24 +58,10 @@
   async function downloadText() {
     await loadBlob();
     if (loadedBlobText && browser) {
-      const file = new Blob([loadedBlobText], { type: "application/octet-stream;charset=utf-8" });
       const filename = blob.metadata.title
         ? `${blob.metadata.title}${blob.metadata.title.endsWith(".txt") ? "" : ".txt"}`
         : "Download.txt";
-      if (window.showSaveFilePicker) {
-        const handle = await window.showSaveFilePicker({ suggestedName: filename });
-        const writable = await handle.createWritable();
-        await writable.write(file);
-        writable.close();
-      } else {
-        const a = document.createElement("a");
-        a.download = filename;
-        a.href = URL.createObjectURL(file);
-        a.click();
-        setTimeout(function () {
-          URL.revokeObjectURL(a.href);
-        }, 1500);
-      }
+      await downloadTextFile(loadedBlobText, filename);
     }
   }
 

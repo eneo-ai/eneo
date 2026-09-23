@@ -2,107 +2,48 @@
   import { IconPlay } from "@eneo/icons/play";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
-  import { getEneo } from "$lib/core/Eneo";
-  import { type App, type AppRunInput } from "@eneo/eneo-js";
-  import AppIcon from "$lib/features/apps/components/AppIcon.svelte";
-  import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
-  import { getAppAttachmentRulesStore } from "$lib/features/attachments/getAttachmentRules";
-  import { derived, type Readable } from "svelte/store";
-  import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
-  import DashboardAppInput from "./DashboardAppInput.svelte";
+  import AppIcon from "$lib/features/apps/components/AppIcon.svelte";
+  import AppInput from "$lib/features/apps/components/AppInput.svelte";
+  import { createAppRun } from "$lib/features/apps/createAppRun.svelte";
+  import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
-  import { toastError } from "$lib/core/errors";
 
-  const eneo = getEneo();
-
-  const app = derived(page, ($page) => $page.data.app) as Readable<App>;
-
-  const { clearUploads } = initAttachmentManager({
-    eneo,
-    options: { rules: getAppAttachmentRulesStore(app) }
-  });
-
-  const createEmptyInputs = () => {
-    return { files: [], text: null };
-  };
-
-  let inputs: AppRunInput = createEmptyInputs();
-  $: hasData = inputs.files.length > 0 || inputs.text;
-
-  let isDragging = false;
-  const dragDropEnabled = derived(app, ($app) => {
-    return $app.input_fields.map((field) => field.type).some((type) => type.includes("upload"));
-  });
-
-  let isSubmitting = false;
-  async function createRun() {
-    if (inputs.files.length === 0 && !inputs.text) {
-      toast.warning(m.input_required_to_run_app());
-      return;
-    }
-
-    try {
-      isSubmitting = true;
-      const result = await eneo.apps.runs.create({
-        app: $app,
-        inputs: {
-          files: inputs.files.map(({ id }) => {
-            return { id };
-          }),
-          text: inputs.text
-        }
-      });
-      inputs = createEmptyInputs();
-      clearUploads();
-      isSubmitting = false;
-      goto(resolve(`/dashboard/app/${$app.id}/results/${result.id}`));
-    } catch (err) {
-      console.error(err);
-      toastError(err);
-      isSubmitting = false;
-    }
-  }
+  const run = createAppRun((result, app) =>
+    goto(resolve(`/dashboard/app/${app.id}/results/${result.id}`))
+  );
 </script>
 
-<!-- svelte-ignore a11y-no-static-element-interactions -->
-<div
-  class="flex h-full w-full flex-col overflow-y-auto"
-  on:dragenter={(event) => {
-    if ($dragDropEnabled) {
-      event.preventDefault();
-      isDragging = true;
-    }
-  }}
->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="flex h-full w-full flex-col overflow-y-auto" ondragenter={run.onDragEnter}>
   <div class="flex flex-col items-center gap-2 px-4 py-6">
-    <AppIcon app={$app} size="medium"></AppIcon>
-    <h2 class="text-center text-xl font-bold">{formatEmojiTitle($app.name)}</h2>
-    {#if $app.description}
+    <AppIcon app={run.app} size="medium"></AppIcon>
+    <h2 class="text-center text-xl font-bold">{formatEmojiTitle(run.app.name)}</h2>
+    {#if run.app.description}
       <p class="text-secondary max-w-[50ch] text-center text-sm">
-        {$app.description}
+        {run.app.description}
       </p>
     {/if}
   </div>
 
   <div class="flex flex-grow flex-col gap-4 px-4 pb-4">
-    <DashboardAppInput app={$app} bind:inputData={inputs}></DashboardAppInput>
+    <div class="flex w-full flex-col gap-4">
+      <AppInput app={run.app} bind:text={run.text} compact />
+    </div>
 
     {#snippet runButton()}
       <Button
-        disabled={!hasData || isSubmitting}
-        onclick={createRun}
+        disabled={!run.hasData || run.isSubmitting}
+        onclick={run.submit}
         class="h-auto w-full gap-2 py-3 text-lg"
       >
         <IconPlay />
-        {isSubmitting ? m.submitting() : m.submit()}
+        {run.isSubmitting ? m.submitting() : m.submit()}
       </Button>
     {/snippet}
-    {#if hasData}
+    {#if run.hasData}
       {@render runButton()}
     {:else}
       <Tooltip.Root>
@@ -117,6 +58,9 @@
   </div>
 </div>
 
-{#if isDragging}
-  <AttachmentDropArea bind:isDragging label={m.drop_files_here_upload({ appName: $app.name })} />
+{#if run.isDragging}
+  <AttachmentDropArea
+    bind:isDragging={run.isDragging}
+    label={m.drop_files_here_upload({ appName: run.app.name })}
+  />
 {/if}

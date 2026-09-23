@@ -5,6 +5,7 @@
   import ServiceActions from "./ServiceActions.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { IconService } from "@eneo/icons/service";
+  import { m } from "$lib/paraglide/messages";
 
   export let services: ServiceSparse[];
   const table = Table.createWithResource(services);
@@ -15,7 +16,7 @@
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
-      header: "Name",
+      header: m.name(),
       value: (item) => item.name,
       cell: (item) => {
         return Table.renderComponent(Table.PrimaryCell, {
@@ -47,5 +48,11 @@
   $: table.update(services);
 </script>
 
-<Table.Root {viewModel} resourceName="service" displayAs="cards" gapX={1.5} gapY={1.5} layout="grid"
+<Table.Root
+  {viewModel}
+  resourceName={m.resource_services()}
+  displayAs="cards"
+  gapX={1.5}
+  gapY={1.5}
+  layout="grid"
 ></Table.Root>
