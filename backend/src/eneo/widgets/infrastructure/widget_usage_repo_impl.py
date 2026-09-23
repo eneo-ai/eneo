@@ -226,14 +226,17 @@ class WidgetUsageRepoImpl:
         )
 
     async def retention_targets(self) -> list[RetentionTarget]:
-        """Every widget with its configured retention and its tenant's widget
-        policy; archived widgets are included so their history still expires."""
+        """Every widget that has conversations, with its configured retention
+        and its tenant's widget policy; archived widgets are included so
+        their history still expires."""
         rows = await self.session.execute(
             sa.select(
                 Widgets.id,
                 Widgets.privacy["retention_days"].as_integer(),
                 Tenants.widget_policy,
-            ).join(Tenants, Tenants.id == Widgets.tenant_id)
+            )
+            .join(Tenants, Tenants.id == Widgets.tenant_id)
+            .where(sa.exists().where(Sessions.widget_id == Widgets.id))
         )
         return [
             RetentionTarget(

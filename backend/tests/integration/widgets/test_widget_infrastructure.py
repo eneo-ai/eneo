@@ -425,6 +425,28 @@ async def test_retention_deletes_owned_logs_and_preserves_other_content(
         )
 
 
+async def test_retention_visits_only_widgets_that_have_conversations(active_widget):
+    widget = await _load_widget(active_widget["id"])
+    async with sessionmanager.session() as session, session.begin():
+        talked = widget.model_copy(deep=True)
+        talked.public_id = generate_public_id()
+        talked = await WidgetRepoImpl(session).add(talked)
+        await session.execute(
+            sa.insert(Sessions).values(
+                widget_id=talked.id,
+                visitor_id=uuid4(),
+                name="Conversation",
+                assistant_id=widget.target_id,
+            )
+        )
+
+    async with sessionmanager.session() as session, session.begin():
+        targets = await WidgetUsageRepoImpl(session).retention_targets()
+    assert [target.widget_id for target in targets] == [talked.id]
+    result = await purge_expired_widget_sessions()
+    assert result == {"widgets_processed": 1, "sessions_deleted": 0, "errors": 0}
+
+
 async def test_overview_includes_durable_inflight_budget_without_per_widget_reads(
     active_widget,
 ):
