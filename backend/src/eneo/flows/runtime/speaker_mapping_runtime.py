@@ -8,7 +8,11 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
-from eneo.flows.domain.one_line_text import ONE_LINE_TEXT_MAX_CHARS, breaks_one_line
+from eneo.flows.domain.one_line_text import (
+    ONE_LINE_TEXT_MAX_CHARS,
+    breaks_one_line,
+    one_line,
+)
 from eneo.flows.domain.speaker_labels import SPEAKER_LABEL_RE, parse_participants
 from eneo.flows.domain.speaker_mapping_config import (
     speaker_mapping_speaker_count_field,
@@ -118,23 +122,15 @@ def resolve_participants(
     if participants_field is None:
         return []
     semantic = read_semantic_flow_input_payload(dict(run_input_payload or {}))
-    return parse_participants(semantic.get(participants_field))
+    # Cleaned like a model's proposal, so the model's copy of a name matches.
+    cleaned = (
+        one_line(name) for name in parse_participants(semantic.get(participants_field))
+    )
+    return list(dict.fromkeys(name for name in cleaned if name))
 
 
 class SpeakerMappingValidationError(ValueError):
     pass
-
-
-def clean_proposed_speaker_name(name: str) -> str | None:
-    """A model's proposed name made one short line: whitespace, line breaks
-    included, collapses to single spaces and other control or format
-    characters go. A name left empty or over the bound is dropped, so the
-    label stays for the reviewer to name."""
-    visible = "".join(
-        char for char in name if char.isspace() or not breaks_one_line(char)
-    )
-    cleaned = " ".join(visible.split())
-    return cleaned if 0 < len(cleaned) <= ONE_LINE_TEXT_MAX_CHARS else None
 
 
 def validate_speaker_mapping(
@@ -179,7 +175,9 @@ def validate_speaker_mapping(
                     "Speaker name must be text or null."
                 )
             if model_proposal:
-                name = clean_proposed_speaker_name(name)
+                # Cleaned, not refused; a name left empty or too long stays
+                # for the reviewer.
+                name = one_line(name)
             else:
                 name = name.strip() or None
                 if name is not None and (

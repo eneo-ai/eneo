@@ -249,6 +249,34 @@ async def test_a_stray_character_in_a_proposed_name_does_not_fail_the_step(
     ]
 
 
+async def test_a_listed_name_matches_whatever_its_whitespace(harness) -> None:
+    calls, activate = harness
+    calls["structured"] = {
+        "speakers": [
+            {"label": "SPEAKER_00", "name": "Eva\u00a0Ek", "confidence": "high"},
+            {"label": "SPEAKER_01", "name": "Bo  Berg", "confidence": "high"},
+        ]
+    }
+    handler, _ = _handler(activate)
+    state, _ = _state()
+    run = SimpleNamespace(
+        id=uuid4(), input_payload_json={"deltagare": "Eva\u00a0Ek, Bo  Berg"}
+    )
+
+    result = await handler.execute(
+        step=_step(), run=run, state=state, version_metadata=None, attempt_no=1
+    )
+
+    output = result.output
+    assert [entry["name"] for entry in output.structured_output["speakers"]] == [
+        "Eva Ek",
+        "Bo Berg",
+    ]
+    assert output.full_text.splitlines()[0].startswith("[00:00:00 - 00:00:04] Eva Ek:")
+    extension = output.output_payload_extensions["speaker_mapping"]
+    assert extension["participants"] == ["Eva Ek", "Bo Berg"]
+
+
 async def test_run_transcript_keeps_distinct_source_with_identical_text(
     harness,
 ) -> None:
