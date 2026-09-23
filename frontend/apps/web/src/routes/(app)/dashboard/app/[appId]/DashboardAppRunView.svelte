@@ -1,6 +1,6 @@
 <script lang="ts">
   import { IconPlay } from "@eneo/icons/play";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { getEneo } from "$lib/core/Eneo";
@@ -95,9 +95,8 @@
     {#snippet runButton()}
       <Button
         disabled={!hasData || isSubmitting}
-        variant="primary"
-        on:click={createRun}
-        class="flex w-full items-center justify-center gap-2 py-3 text-lg"
+        onclick={createRun}
+        class="h-auto w-full gap-2 py-3 text-lg"
       >
         <IconPlay />
         {isSubmitting ? m.submitting() : m.submit()}

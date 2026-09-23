@@ -9,7 +9,9 @@
   import { makeEditable } from "$lib/core/editable";
   import { getEneo } from "$lib/core/Eneo";
   import type { UserGroup } from "@eneo/eneo-js";
-  import { Dialog, Button } from "@eneo/ui";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -28,7 +30,7 @@
   export let mode: "update" | "create" = "create";
   export let userGroup: UserGroup = emptyUserGroup;
 
-  let showDialog: Dialog.OpenState;
+  let showDialog = false;
   let isProcessing = false;
 
   const editableUserGroup = makeEditable(userGroup ?? emptyUserGroup);
@@ -52,7 +54,7 @@
       });
       editableUserGroup.updateWithValue(updated);
       invalidate("admin:user-groups:load");
-      $showDialog = false;
+      showDialog = false;
     } catch (error) {
       toastError(error);
       console.error(error);
@@ -65,7 +67,7 @@
     try {
       await eneo.userGroups.create(editableUserGroup);
       invalidate("admin:user-groups:load");
-      $showDialog = false;
+      showDialog = false;
       editableUserGroup.updateWithValue(emptyUserGroup);
     } catch (error) {
       toastError(error);
@@ -75,55 +77,65 @@
   }
 </script>
 
-<Dialog.Root bind:isOpen={showDialog}>
+<Dialog.Root bind:open={showDialog}>
   {#if mode === "create"}
-    <Dialog.Trigger asFragment let:trigger>
-      <Button variant="primary" is={trigger}>{m.create_user_group()}</Button>
+    <Dialog.Trigger>
+      {#snippet child({ props })}
+        <Button {...props}>{m.create_user_group()}</Button>
+      {/snippet}
     </Dialog.Trigger>
   {:else}
-    <Dialog.Trigger asFragment let:trigger>
-      <Button variant="outlined" is={trigger}>{m.rename()}</Button>
+    <Dialog.Trigger>
+      {#snippet child({ props })}
+        <Button {...props} variant="outline">{m.rename()}</Button>
+      {/snippet}
     </Dialog.Trigger>
   {/if}
 
-  <Dialog.Content width="medium" form>
-    {#if mode === "create"}
-      <Dialog.Title>{m.create_new_user_group()}</Dialog.Title>
-    {:else}
-      <Dialog.Title>{m.rename_user_group()}</Dialog.Title>
-    {/if}
+  <Dialog.Content class={dialogLayout.content("medium")} closeLabel={m.close()}>
+    <form class="contents" on:submit|preventDefault={() => (mode === "create" ? create() : edit())}>
+      <Dialog.Header class={dialogLayout.header}>
+        {#if mode === "create"}
+          <Dialog.Title>{m.create_new_user_group()}</Dialog.Title>
+        {:else}
+          <Dialog.Title>{m.rename_user_group()}</Dialog.Title>
+        {/if}
+      </Dialog.Header>
 
-    <Dialog.Section>
-      <div class="hover:bg-hover-dimmer">
-        <Field.Field class="border-default px-4 py-4 {mode === 'create' ? 'border-b' : ''}">
-          <Field.Label for={nameId}>
-            {m.group_name()}
-            <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
-          </Field.Label>
-          <Input
-            id={nameId}
-            bind:value={editableUserGroup.name}
-            required
-            aria-describedby={`${nameId}-description`}
-          />
-          <Field.Description id={`${nameId}-description`}>
-            {m.descriptive_name_for_group()}
-          </Field.Description>
-        </Field.Field>
+      <div class={dialogLayout.body}>
+        <div class={dialogLayout.section}>
+          <div class="hover:bg-hover-dimmer">
+            <Field.Field class="border-default px-4 py-4 {mode === 'create' ? 'border-b' : ''}">
+              <Field.Label for={nameId}>
+                {m.group_name()}
+                <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+              </Field.Label>
+              <Input
+                id={nameId}
+                bind:value={editableUserGroup.name}
+                required
+                aria-describedby={`${nameId}-description`}
+              />
+              <Field.Description id={`${nameId}-description`}>
+                {m.descriptive_name_for_group()}
+              </Field.Description>
+            </Field.Field>
+          </div>
+        </div>
       </div>
-    </Dialog.Section>
 
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      {#if mode === "create"}
-        <Button variant="primary" on:click={create} type="submit" disabled={isProcessing}
-          >{isProcessing ? m.creating() : m.create_user_group()}</Button
-        >
-      {:else}
-        <Button variant="primary" on:click={edit} disabled={isProcessing}
-          >{isProcessing ? m.saving() : m.save_changes()}</Button
-        >
-      {/if}
-    </Dialog.Controls>
+      <Dialog.Footer class={dialogLayout.footer}>
+        <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
+        {#if mode === "create"}
+          <Button type="submit" disabled={isProcessing}
+            >{isProcessing ? m.creating() : m.create_user_group()}</Button
+          >
+        {:else}
+          <Button type="submit" disabled={isProcessing}
+            >{isProcessing ? m.saving() : m.save_changes()}</Button
+          >
+        {/if}
+      </Dialog.Footer>
+    </form>
   </Dialog.Content>
 </Dialog.Root>

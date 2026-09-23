@@ -7,7 +7,8 @@
 <script lang="ts">
   import type { TokenUsageSummary } from "@eneo/eneo-js";
   import { createRender } from "svelte-headless-table";
-  import { Button, Table } from "@eneo/ui";
+  import { Table } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import ModelNameAndVendor from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
   import { m } from "$lib/paraglide/messages";
@@ -99,9 +100,9 @@
 <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list"></Table.Root>
 {#if models.length > 10}
   <Button
-    variant="outlined"
+    variant="outline"
     class="h-12"
-    on:click={() => {
+    onclick={() => {
       showAllItems = !showAllItems;
     }}
     >{showAllItems ? m.show_only_10_models() : m.show_all_models({ count: models.length })}</Button

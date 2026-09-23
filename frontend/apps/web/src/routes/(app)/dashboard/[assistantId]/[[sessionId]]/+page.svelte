@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { pushState } from "$app/navigation";
   import ConversationView from "$lib/features/chat/components/conversation/ConversationView.svelte";
   import { fade, fly, slide } from "svelte/transition";
@@ -76,12 +76,7 @@
         {chat.partner.name}
       </h1>
     </a>
-    <Button
-      variant="primary"
-      on:click={startNewConversation}
-      class="!rounded-lg !border-b-2 !border-[var(--color-ui-blue-700)] !px-5 !py-1"
-      >{m.new_chat()}
-    </Button>
+    <Button onclick={startNewConversation} class="px-5">{m.new_chat()}</Button>
   </div>
 
   {#if chat.loadedConversations.length > 0}

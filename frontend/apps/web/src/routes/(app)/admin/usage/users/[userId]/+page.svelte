@@ -6,7 +6,8 @@
 
 <script lang="ts">
   import { page } from "$app/stores";
-  import { Table, Input, Button } from "@eneo/ui";
+  import { Table, Input } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { Page } from "$lib/components/layout";
   import SimpleTextCell from "$lib/components/layout/SimpleTextCell.svelte";
   import { Settings } from "$lib/components/layout";
@@ -266,7 +267,7 @@
     <Page.Title>
       <div class="flex items-center gap-2">
         <Button
-          variant="simple"
+          variant="ghost"
           onclick={() => history.back()}
           class="text-muted hover:text-primary"
         >

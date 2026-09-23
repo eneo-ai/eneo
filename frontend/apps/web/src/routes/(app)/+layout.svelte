@@ -1,6 +1,5 @@
 <script lang="ts">
   import { IconArrowUpToLine } from "@eneo/icons/arrow-up-to-line";
-  import { Button } from "@eneo/ui";
   import { page } from "$app/stores";
   import { getAppContext, initAppContext } from "$lib/core/AppContext";
   import JobManagerDropdown from "$lib/features/jobs/components/JobManagerDropdownButton.svelte";
@@ -109,15 +108,16 @@
         ></IconEneo>
       </a>
       <!-- eslint-enable svelte/no-navigation-without-resolve -->
-      <Button
-        unstyled
-        class="text-accent-stronger hover:bg-hover-default hidden h-9 w-9 items-center justify-center rounded-lg text-lg md:group-hover:flex"
+      <button
+        type="button"
+        class="text-accent-stronger hover:bg-hover-default hidden h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-lg md:group-hover:flex"
+        aria-label={m.hide_header()}
         on:click={() => {
           $showHeader = false;
         }}
       >
         <IconArrowUpToLine />
-      </Button>
+      </button>
     </div>
     <nav class="flex h-[3.25rem] w-full items-center gap-1 overflow-x-auto px-3">
       <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->

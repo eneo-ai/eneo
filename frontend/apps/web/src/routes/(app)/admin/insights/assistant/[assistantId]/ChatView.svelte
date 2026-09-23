@@ -8,7 +8,8 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconSparkles } from "@eneo/icons/sparkles";
   import { IconSendArrow } from "@eneo/icons/send-arrow";
-  import { Button, Markdown } from "@eneo/ui";
+  import { Markdown } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import { getEneo } from "$lib/core/Eneo";
@@ -173,16 +174,16 @@
           <span class="truncate">{message.question}</span>
         </div>
         <div class="flex shrink-0 items-center gap-2">
-          <Button variant="outlined" on:click={copyAnswer}>
+          <Button variant="outline" onclick={copyAnswer}>
             {copiedAnswer ? m.copied() : m.copy()}
           </Button>
           <div class="border-dimmer h-5 w-px border-l" aria-hidden="true"></div>
-          <Button variant="outlined" on:click={openQuestionHistory}>
+          <Button variant="outline" onclick={openQuestionHistory}>
             {m.question_history()}
           </Button>
           <Button
-            variant="outlined"
-            on:click={() => {
+            variant="outline"
+            onclick={() => {
               message.answer = NOT_ANSWERED;
               copiedAnswer = false;
             }}>{m.new_questions()}</Button

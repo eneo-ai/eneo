@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { Page } from "$lib/components/layout/index.js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -44,7 +44,7 @@
   <Page.Header>
     <Page.Title title={m.templates()}></Page.Title>
 
-    <Button variant="primary" padding="icon-leading" onclick={handleCreateTemplate}>
+    <Button onclick={handleCreateTemplate}>
       <LayoutTemplate size={16} />
       {m.create_template()}
     </Button>
@@ -72,11 +72,7 @@
             </p>
           </div>
 
-          <Button
-            variant="primary"
-            padding="icon-leading"
-            href={localizeHref("/admin/templates/new/assistant")}
-          >
+          <Button href={localizeHref("/admin/templates/new/assistant")}>
             <LayoutTemplate size={16} />
             {m.create_first_template()}
           </Button>
@@ -101,11 +97,7 @@
             </p>
           </div>
 
-          <Button
-            variant="primary"
-            padding="icon-leading"
-            href={localizeHref("/admin/templates/new/app")}
-          >
+          <Button href={localizeHref("/admin/templates/new/app")}>
             <LayoutTemplate size={16} />
             {m.create_first_template()}
           </Button>

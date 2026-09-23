@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
@@ -286,20 +286,10 @@
         />
       </div>
       <div class="flex gap-2">
-        <Button
-          variant="simple"
-          onclick={expandAll}
-          size="sm"
-          class="h-11 px-4 text-sm font-medium"
-        >
+        <Button variant="ghost" onclick={expandAll} class="h-11 px-4 text-sm font-medium">
           {m.audit_config_expand_all()}
         </Button>
-        <Button
-          variant="simple"
-          onclick={collapseAll}
-          size="sm"
-          class="h-11 px-4 text-sm font-medium"
-        >
+        <Button variant="ghost" onclick={collapseAll} class="h-11 px-4 text-sm font-medium">
           {m.audit_config_collapse_all()}
         </Button>
       </div>
@@ -429,19 +419,12 @@
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <Button
-              variant="simple"
-              onclick={resetChanges}
-              size="sm"
-              class="h-10 px-4 text-sm font-medium"
-            >
+            <Button variant="ghost" onclick={resetChanges} class="h-10 px-4 text-sm font-medium">
               {m.audit_config_reset()}
             </Button>
             <Button
-              variant="primary"
               onclick={saveConfig}
               disabled={isSaving}
-              size="sm"
               class="h-10 px-5 text-sm font-semibold"
             >
               {#if isSaving}

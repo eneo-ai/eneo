@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout";
-  import { Button, Dropdown } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
@@ -143,8 +144,8 @@
                       </p>{/if}
                   </div>
                 </div>
-                <Button size="sm" variant="primary" onclick={() => configure(capability.purpose)}>
-                  <Plus class="mr-2 h-4 w-4" />{sources.length
+                <Button size="sm" onclick={() => configure(capability.purpose)}>
+                  <Plus class="size-4" />{sources.length
                     ? m.tools_add_source()
                     : m.capability_configure({
                         capability: capability.label().toLocaleLowerCase()
@@ -158,8 +159,8 @@
                     class="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
                   >
                     <Button
-                      variant="simple"
-                      padding="icon"
+                      variant="ghost"
+                      size="icon"
                       aria-label={`${expanded ? m.governance_mcp_hide_tools() : m.governance_mcp_show_tools()}: ${source.name}`}
                       aria-expanded={expanded}
                       aria-controls={"source-tools-" + source.mcp_server_id}
@@ -231,24 +232,25 @@
                     <div
                       class="col-start-2 flex flex-wrap items-center gap-2 sm:col-start-3 sm:row-start-1"
                     >
-                      <Dropdown.Root>
-                        <Dropdown.Trigger let:trigger asFragment>
-                          <Button
-                            is={trigger}
-                            variant="on-fill"
-                            padding="icon"
-                            aria-label={`${m.actions()}: ${source.name}`}
-                          >
-                            <IconEllipsis />
-                          </Button>
-                        </Dropdown.Trigger>
-                        <Dropdown.Menu let:item>
-                          <Button
-                            is={item}
-                            padding="icon-leading"
+                      <DropdownMenu.Root>
+                        <DropdownMenu.Trigger>
+                          {#snippet child({ props })}
+                            <Button
+                              {...props}
+                              variant="ghost"
+                              size="icon"
+                              class="hover:bg-hover-on-fill hover:text-primary"
+                              aria-label={`${m.actions()}: ${source.name}`}
+                            >
+                              <IconEllipsis />
+                            </Button>
+                          {/snippet}
+                        </DropdownMenu.Trigger>
+                        <DropdownMenu.Content align="end">
+                          <DropdownMenu.Item
                             disabled={busy !== null ||
                               (!source.is_enabled && !!source.readiness_reason)}
-                            onclick={() => toggle(source)}
+                            onSelect={() => toggle(source)}
                           >
                             {#if source.is_enabled}
                               <Pause class="h-4 w-4" aria-hidden="true" />
@@ -256,27 +258,21 @@
                               <Power class="h-4 w-4" aria-hidden="true" />
                             {/if}
                             {source.is_enabled ? m.deactivate() : m.activate()}
-                          </Button>
-                          <Button
-                            is={item}
-                            padding="icon-leading"
-                            onclick={() => configure(capability.purpose, source)}
-                          >
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item onSelect={() => configure(capability.purpose, source)}>
                             <Pencil class="h-4 w-4" aria-hidden="true" />{m.tools_change()}
-                          </Button>
-                          <Button
-                            is={item}
-                            padding="icon-leading"
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item
                             variant="destructive"
-                            onclick={() => {
+                            onSelect={() => {
                               deleting = source;
                               deleteOpen.set(true);
                             }}
                           >
                             <Trash2 class="h-4 w-4" aria-hidden="true" />{m.delete()}
-                          </Button>
-                        </Dropdown.Menu>
-                      </Dropdown.Root>
+                          </DropdownMenu.Item>
+                        </DropdownMenu.Content>
+                      </DropdownMenu.Root>
                     </div>
                   </div>
                   {#if expanded}
@@ -313,8 +309,8 @@
             </Field.Field>
           {/snippet}
           {#snippet actions()}
-            <Button size="sm" variant="primary" onclick={() => configure("general")}
-              ><Wrench class="mr-2 h-4 w-4" />{m.add_mcp_server()}</Button
+            <Button size="sm" onclick={() => configure("general")}
+              ><Wrench class="size-4" />{m.add_mcp_server()}</Button
             >
           {/snippet}
         </MCPServersTable>

@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { Button, Select } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import * as m from "$lib/paraglide/messages";
   import { Shield, ArrowRight } from "lucide-svelte";
   import { slide, fade, fly } from "svelte/transition";
-  import { writable } from "svelte/store";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
@@ -24,7 +24,7 @@
   let { onSubmit }: Props = $props();
 
   // State
-  const categoryStore = writable<{ value: string; label: string }>({ value: "", label: "" });
+  let category = $state("");
   let description = $state("");
   let isSubmitting = $state(false);
   let categoryError = $state<string | null>(null);
@@ -43,9 +43,11 @@
     { value: "other", label: m.audit_reason_other() }
   ];
 
+  const categoryLabel = $derived(accessReasonOptions.find((o) => o.value === category)?.label);
+
   // Form validation
   const isFormValid = $derived(
-    $categoryStore?.value && description.trim().length >= 10 && description.length <= 500
+    category && description.trim().length >= 10 && description.length <= 500
   );
 
   // Character counter
@@ -55,7 +57,7 @@
 
   // Validate category
   function validateCategory() {
-    if (!$categoryStore?.value) {
+    if (!category) {
       categoryError = "Please select an access reason";
       return false;
     }
@@ -92,12 +94,12 @@
       return;
     }
 
-    if (!$categoryStore?.value) return;
+    if (!category) return;
 
     isSubmitting = true;
     try {
       await onSubmit({
-        category: $categoryStore.value,
+        category,
         description: description.trim()
       });
     } catch (error) {
@@ -171,29 +173,28 @@
         >
           <!-- Category Select -->
           <div in:fly={{ y: 10, duration: 400, delay: 200 }}>
-            <!-- svelte-ignore a11y_label_has_associated_control -->
-            <label class="text-default mb-2 block text-sm font-semibold">
+            <label for="access-reason-field" class="text-default mb-2 block text-sm font-semibold">
               {m.audit_access_reason_label()} <span class="text-red-600 dark:text-red-400">*</span>
             </label>
-            <!-- @ts-ignore customStore type mismatch -->
             <Select.Root
-              customStore={categoryStore}
+              type="single"
+              name="access_reason"
               required
-              {...{ onSelectedChange: validateCategory }}
+              value={category}
+              onValueChange={(value) => {
+                category = value;
+                validateCategory();
+              }}
             >
-              <Select.Trigger
-                {...{
-                  class: "w-full",
-                  "aria-label": m.audit_access_reason_label(),
-                  "aria-required": "true"
-                }}
-                placeholder={m.audit_access_reason_placeholder()}
-              />
-              <Select.Options>
+              <Select.Trigger id="access-reason-field" class="w-full" aria-required="true">
+                {categoryLabel ?? m.audit_access_reason_placeholder()}
+              </Select.Trigger>
+              <Select.Content>
                 {#each accessReasonOptions as option (option.value)}
-                  <Select.Item value={option.value} label={option.label} />
+                  <Select.Item value={option.value} label={option.label}>{option.label}</Select.Item
+                  >
                 {/each}
-              </Select.Options>
+              </Select.Content>
             </Select.Root>
             {#if categoryError}
               <div
@@ -271,8 +272,7 @@
             </span>
             <div class="flex items-center gap-3">
               <Button
-                type="button"
-                variant="simple"
+                variant="ghost"
                 onclick={handleCancel}
                 class="w-full transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] sm:w-auto"
               >
@@ -280,7 +280,6 @@
               </Button>
               <Button
                 type="submit"
-                variant="primary"
                 disabled={!isFormValid || isSubmitting}
                 class="w-full min-w-[160px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98] sm:w-auto"
               >
