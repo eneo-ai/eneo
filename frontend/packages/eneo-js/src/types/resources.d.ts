@@ -261,6 +261,9 @@ export type FlowRunContractSecurityClassification =
   components["schemas"]["FlowSecurityClassificationPublic"];
 export type FlowRunContract = components["schemas"]["FlowRunContractPublic"];
 export type FlowRuntimeUploadPolicy = components["schemas"]["FlowRuntimeUploadPolicyPublic"];
+export type FlowRunContractTranscription = components["schemas"]["FlowTranscriptionContractPublic"];
+export type FlowLiveTranscriptionSession =
+  components["schemas"]["FlowLiveTranscriptionSessionPublic"];
 export type FlowHttpTestRequest = components["schemas"]["HttpTestRequest"];
 export type FlowHttpTestResponse = components["schemas"]["HttpTestResponse"];
 export type FlowHttpRequestPreview = components["schemas"]["HttpRequestPreview"];

@@ -58,6 +58,20 @@ describe("flows templates endpoint", () => {
     expect(fetch.mock.calls[0][1].params).toEqual({ path: { id: "flow-1" } });
   });
 
+  it("admits a live transcription session for an audio step", async () => {
+    const fetch = vi.fn(async () => ({ ticket: "ticket-1" }));
+    const flows = initFlows({ fetch });
+
+    await flows.liveTranscription.createSession({ id: "flow-1", stepId: "step-1" });
+
+    expect(fetch.mock.calls).toEqual([
+      [
+        "/api/v1/flows/{id}/steps/{step_id}/live-transcription-sessions/",
+        { method: "post", params: { path: { id: "flow-1", step_id: "step-1" } } }
+      ]
+    ]);
+  });
+
   it("loads the published runtime projection from the canonical route", async () => {
     const fetch = vi.fn(async () => ({
       id: "flow-1",
@@ -738,6 +752,43 @@ describe("flows templates endpoint", () => {
         "step-b": { file_ids: ["file-5", "file-4", "file-5"] }
       }
     });
+  });
+
+  it("sends the run's speaker-label choice only when one is made", async () => {
+    const fetch = vi.fn(async () => ({ id: "run-1" }));
+    const flows = initFlows({ fetch });
+
+    await flows.runs.create({ flow: { id: "flow-1" }, speaker_labels: false });
+    await flows.runs.create({ flow: { id: "flow-1" }, speaker_labels: null });
+
+    expect(fetch.mock.calls[0][1].requestBody["application/json"]).toEqual({
+      speaker_labels: false
+    });
+    expect(fetch.mock.calls[1][1].requestBody["application/json"]).toEqual({});
+  });
+
+  it("derives a different upload-intent key for a different speaker-label choice", async () => {
+    const flows = initFlows({ fetch: vi.fn() });
+    const intent = {
+      flowId: "flow-1",
+      expectedFlowVersion: 7,
+      step_inputs: { "step-a": { file_ids: ["file-1"] } }
+    };
+
+    const noChoice = await flows.runs.deriveUploadIntentIdempotencyKey(intent);
+    const labelled = await flows.runs.deriveUploadIntentIdempotencyKey({
+      ...intent,
+      speaker_labels: true
+    });
+    const unlabelled = await flows.runs.deriveUploadIntentIdempotencyKey({
+      ...intent,
+      speaker_labels: false
+    });
+
+    expect(new Set([noChoice, labelled, unlabelled]).size).toBe(3);
+    expect(
+      await flows.runs.deriveUploadIntentIdempotencyKey({ ...intent, speaker_labels: null })
+    ).toBe(noChoice);
   });
 
   it("forwards flow run idempotency header when provided", async () => {

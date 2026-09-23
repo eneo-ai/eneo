@@ -138,20 +138,23 @@ export function initFlows(client) {
    *   flowId: string,
    *   expectedFlowVersion?: number,
    *   input_payload_json?: any,
-   *   step_inputs?: Record<string, {file_ids?: string[]}>
+   *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   speaker_labels?: boolean | null
    * }} params
    * @returns {{
    *   flow_id: string,
    *   expected_flow_version?: number,
    *   input_payload_json?: any,
-   *   step_inputs?: Record<string, {file_ids?: string[]}>
+   *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   speaker_labels?: boolean
    * }}
    */
   const _normalizeRunIntent = ({
     flowId,
     expectedFlowVersion,
     input_payload_json,
-    step_inputs
+    step_inputs,
+    speaker_labels
   }) => {
     const normalizedStepInputs = _normalizeStepInputs(step_inputs);
     return {
@@ -160,7 +163,10 @@ export function initFlows(client) {
       ...(input_payload_json !== undefined
         ? { input_payload_json: _stableSortObjectKeys(input_payload_json) }
         : {}),
-      ...(normalizedStepInputs ? { step_inputs: normalizedStepInputs } : {})
+      ...(normalizedStepInputs ? { step_inputs: normalizedStepInputs } : {}),
+      // The API fingerprints the choice with the run request, so a different
+      // choice is a different intent.
+      ...(speaker_labels != null ? { speaker_labels } : {})
     };
   };
 
@@ -168,22 +174,30 @@ export function initFlows(client) {
    * @param {{
    *   expected_flow_version?: number,
    *   input_payload_json?: any,
-   *   step_inputs?: Record<string, {file_ids?: string[]}>
+   *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   speaker_labels?: boolean | null
    * }} params
    * @returns {{
    *   expected_flow_version?: number,
    *   input_payload_json?: any,
-   *   step_inputs?: Record<string, {file_ids?: string[]}>
+   *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   speaker_labels?: boolean
    * }}
    */
-  const _buildRunRequestBody = ({ expected_flow_version, input_payload_json, step_inputs }) => {
+  const _buildRunRequestBody = ({
+    expected_flow_version,
+    input_payload_json,
+    step_inputs,
+    speaker_labels
+  }) => {
     const normalizedStepInputs = _normalizeStepInputs(step_inputs);
     return {
       ...(expected_flow_version != null ? { expected_flow_version } : {}),
       ...(input_payload_json !== undefined
         ? { input_payload_json: _stableSortObjectKeys(input_payload_json) }
         : {}),
-      ...(normalizedStepInputs ? { step_inputs: normalizedStepInputs } : {})
+      ...(normalizedStepInputs ? { step_inputs: normalizedStepInputs } : {}),
+      ...(speaker_labels != null ? { speaker_labels } : {})
     };
   };
 
@@ -193,6 +207,7 @@ export function initFlows(client) {
    *   expectedFlowVersion?: number,
    *   input_payload_json?: any,
    *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   speaker_labels?: boolean | null,
    *   file_ids?: never
    * }} params
    * @returns {Promise<string>}
@@ -493,6 +508,22 @@ export function initFlows(client) {
       }
     },
 
+    liveTranscription: {
+      /**
+       * Admit a live transcript preview for an audio step of the published flow and
+       * get a single-use ticket for the WebSocket at `websocket_path`. The preview
+       * is not the run's transcript: upload the recording and create the run as usual.
+       * @param {{id: string, stepId: string}} params
+       * @throws {EneoError} 409 `flow_live_transcription_unavailable` with `context.reason`
+       */
+      createSession: async ({ id, stepId }) => {
+        return _fetch("/api/v1/flows/{id}/steps/{step_id}/live-transcription-sessions/", {
+          method: "post",
+          params: { path: { id, step_id: stepId } }
+        });
+      }
+    },
+
     /**
      * Inspect placeholders in an uploaded DOCX template for a flow.
      * @param {{id: string, fileId: string}} params
@@ -715,10 +746,14 @@ export function initFlows(client) {
        *  idempotencyKey?: string,
        *  input_payload_json?: any,
        *  step_inputs?: Record<string, {file_ids: string[]}>,
+       *  speaker_labels?: boolean | null,
        *  file_ids?: never
        * }} params
        * `step_inputs[stepId].file_ids` is ordered run input. The SDK preserves
-       * caller order and leaves duplicate collapse to the API.
+       * caller order and leaves duplicate collapse to the API. Send
+       * `speaker_labels` only when the run contract's
+       * `transcription.speaker_labels.selectable` is true; null or omitted keeps
+       * the flow's default.
        * @throws {EneoError}
        */
       create: async ({
@@ -727,6 +762,7 @@ export function initFlows(client) {
         idempotencyKey,
         input_payload_json,
         step_inputs,
+        speaker_labels,
         file_ids
       }) => {
         _rejectTopLevelFileIds(file_ids);
@@ -734,7 +770,8 @@ export function initFlows(client) {
         const requestBody = _buildRunRequestBody({
           expected_flow_version,
           input_payload_json,
-          step_inputs
+          step_inputs,
+          speaker_labels
         });
         return _fetch("/api/v1/flows/{id}/runs/", {
           method: "post",
@@ -771,6 +808,7 @@ export function initFlows(client) {
        *  expectedFlowVersion?: number,
        *  input_payload_json?: any,
        *  step_inputs?: Record<string, {file_ids?: string[]}>,
+       *  speaker_labels?: boolean | null,
        *  file_ids?: never
        * }} params
        * `step_inputs[stepId].file_ids` order contributes to the derived key.
