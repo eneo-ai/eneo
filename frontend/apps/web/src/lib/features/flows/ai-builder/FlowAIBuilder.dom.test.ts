@@ -3951,6 +3951,59 @@ describe("FlowAIBuilder edit host contract", () => {
     });
   });
 
+  it("asks about the part of the step the menu chose, with quick picks for what it reads", async () => {
+    const { fetch } = makeFetch({ created: editSession() });
+    const { stream } = makeStream();
+    const { service, builder } = renderShell({
+      fetch,
+      stream,
+      targetKind: "edit",
+      flowId: "flow-1",
+      stepChoices: [
+        { id: "step-one", name: "Ta fram fakta", order: 1 },
+        {
+          id: SAVED_STEP_SCOPE.editContext.flow_step_id,
+          name: SAVED_STEP_SCOPE.stepName,
+          order: 2
+        },
+        { id: "step-three", name: "Sammanfatta", order: 3 }
+      ]
+    });
+
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    await waitFor(() => expect(builder()).toBeDefined());
+    await builder().focusSavedFlowStep({
+      ...SAVED_STEP_SCOPE,
+      request: m.flow_step_ai_request_underlag(),
+      intent: "underlag",
+      current: "Läser föregående steg"
+    });
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_title_step_reads({ step: "2" }) });
+    expect(screen.getByText(m.ai_builder_task_now({ what: "läser föregående steg" }))).toBeTruthy();
+    // What step 2 can read: the flow input and step 1; step 3 comes after it.
+    const earlier = screen.getByRole("button", {
+      name: m.ai_builder_step_choice_item({ step: 1, name: "Ta fram fakta" })
+    });
+    expect(screen.getByRole("button", { name: m.ai_builder_reads_flow_input() })).toBeTruthy();
+    expect(
+      screen.queryByRole("button", {
+        name: m.ai_builder_step_choice_item({ step: 3, name: "Sammanfatta" })
+      })
+    ).toBeNull();
+
+    // A pick finishes the open request the menu wrote.
+    await fireEvent.click(earlier);
+    const textbox = screen.getByRole("textbox", {
+      name: m.ai_builder_saved_step_prompt_placeholder()
+    }) as HTMLTextAreaElement;
+    await waitFor(() =>
+      expect(textbox.value).toBe(
+        `${m.flow_step_ai_request_underlag()}${m.ai_builder_task_pick_step({ step: "1", name: "Ta fram fakta" })}`
+      )
+    );
+  });
+
   it("drops the saved-step placeholder with the context when the chip is dismissed", async () => {
     const { fetch } = makeFetch({ created: editSession() });
     const { stream } = makeStream();

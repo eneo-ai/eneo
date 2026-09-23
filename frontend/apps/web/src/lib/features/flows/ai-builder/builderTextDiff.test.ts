@@ -62,6 +62,13 @@ describe("wordDiff", () => {
     ).toBe(after);
   });
 
+  it("marks a removed paragraph line by line, never an empty line", () => {
+    const parts = wordDiff("Inledning.\n\nGammal rad.\n\nSlut.", "Inledning.\n\nSlut.")!;
+    const marked = parts.filter((part) => !part.plain && part.kind !== "same");
+    expect(marked.every((part) => !part.text.includes("\n"))).toBe(true);
+    expect(marked.map((part) => part.text)).toEqual(["Gammal rad."]);
+  });
+
   it("keeps a step reference whole", () => {
     expect(
       show(

@@ -82,13 +82,17 @@ function regroup(raw: DiffPart[]): DiffPart[] {
   const parts: DiffPart[] = [];
   let removed = "";
   let added = "";
-  // A change is marked from its first to its last visible character; the
-  // spaces and line breaks around it stay on their side, unmarked.
+  // A change is marked from its first to its last visible character, line by
+  // line: the spaces and line breaks around and inside it stay on their side,
+  // unmarked, so no empty line carries a mark.
   const pushChange = (kind: "removed" | "added", text: string) => {
-    const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(text) ?? ["", "", text, ""];
-    if (lead) parts.push({ kind, text: lead, plain: true });
-    if (core) parts.push({ kind, text: core });
-    if (trail) parts.push({ kind, text: trail, plain: true });
+    for (const piece of text.split(/(\s*\n\s*)/)) {
+      if (!piece) continue;
+      const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(piece) ?? ["", "", piece, ""];
+      if (lead) parts.push({ kind, text: lead, plain: true });
+      if (core) parts.push({ kind, text: core });
+      if (trail) parts.push({ kind, text: trail, plain: true });
+    }
   };
   const flush = () => {
     if (removed) pushChange("removed", removed);
