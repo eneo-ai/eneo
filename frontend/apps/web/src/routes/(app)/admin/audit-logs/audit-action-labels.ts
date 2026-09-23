@@ -533,6 +533,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_run_audio_transcribed,
     description: m.audit_action_flow_run_audio_transcribed_description
   },
+  flow_live_transcription_started: {
+    name: m.audit_action_flow_live_transcription_started,
+    description: m.audit_action_flow_live_transcription_started_description
+  },
   flow_http_outbound_call: {
     name: m.audit_action_flow_http_outbound_call,
     description: m.audit_action_flow_http_outbound_call_description
