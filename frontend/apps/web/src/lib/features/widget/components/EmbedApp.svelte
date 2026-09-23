@@ -40,11 +40,14 @@
 
   // The widget client mirrors the `conversations` namespace the ChatService
   // drives; nothing else on the Eneo client is reachable from here.
+  // A broken-off answer keeps what arrived and is reported by the chat's own
+  // localized alert instead of an error block written into the answer.
   initChatService({
     eneo: client as unknown as Eneo,
     chatPartner: widgetChatPartner(initial.config),
     initialConversation: null,
-    initialHistory: { items: [], count: 0, total_count: 0, next_cursor: null }
+    initialHistory: { items: [], count: 0, total_count: 0, next_cursor: null },
+    inlineStreamErrors: false
   });
 
   // A widget pinned to light or dark stays that way; "auto" follows the host

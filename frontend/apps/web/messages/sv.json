@@ -4870,6 +4870,7 @@
   "widget_close": "Stäng chatten",
   "widget_answer_complete": "Svaret är klart",
   "widget_error_generic": "Något gick fel. Försök igen.",
+  "widget_error_incomplete": "Svaret kunde inte slutföras. Försök igen.",
   "widget_error_rate_limited": "Du skickar meddelanden för snabbt. Vänta en stund och försök igen.",
   "widget_error_budget": "Chatten har nått sin dagliga gräns. Försök igen i morgon.",
   "widget_error_unavailable": "Chatten är inte tillgänglig just nu.",

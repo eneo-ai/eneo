@@ -4870,6 +4870,7 @@
   "widget_close": "Close chat",
   "widget_answer_complete": "Answer complete",
   "widget_error_generic": "Something went wrong. Please try again.",
+  "widget_error_incomplete": "The answer could not be completed. Please try again.",
   "widget_error_rate_limited": "You are sending messages too quickly. Please wait a moment and try again.",
   "widget_error_budget": "The chat has reached its daily limit. Please try again tomorrow.",
   "widget_error_unavailable": "The chat is not available right now.",

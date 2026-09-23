@@ -190,12 +190,20 @@
 
   async function ask(question: string, retried: boolean): Promise<void> {
     const wasNew = !chat.currentConversation.id;
+    const turns = chat.currentConversation.messages?.length ?? 0;
     try {
       await session.ensureToken();
       await chat.askQuestion(question);
       keepConversation(wasNew);
       announce(m.widget_answer_complete());
     } catch (error) {
+      if ((chat.currentConversation.messages?.length ?? 0) > turns) {
+        // The answer broke off after it began: what arrived stays, the alert
+        // says it is incomplete and nothing announces it as done.
+        keepConversation(wasNew);
+        errorMessage = m.widget_error_incomplete();
+        return;
+      }
       if (isTokenRejected(error) && !retried) {
         // Stale after a pause/config change or simply expired: re-mint once.
         session.invalidate();

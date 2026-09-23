@@ -38,7 +38,9 @@ const fake = vi.hoisted(() => ({
   // A stored conversation the fake returns on restore, when set.
   restored: null as null | Record<string, unknown>,
   // Answer texts for the next asks, in order; the default after that.
-  answers: [] as string[]
+  answers: [] as string[],
+  // The next answer breaks off after its first words, then clears itself.
+  breakOffNext: false
 }));
 
 vi.mock("@eneo/eneo-js", async (importOriginal) => {
@@ -89,6 +91,17 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
           });
           const answer = fake.answers.shift() ?? "Svaret från assistenten.";
           callbacks?.onText?.({ answer, session_id, references: [] });
+          if (fake.breakOffNext) {
+            fake.breakOffNext = false;
+            // Long enough for the streamed words to reach the page first.
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            throw new actual.EneoError(
+              "The AI response stream ended unexpectedly.",
+              "SERVER",
+              200,
+              0
+            );
+          }
           return {};
         },
         get: async () => {
@@ -191,6 +204,7 @@ beforeEach(() => {
   fake.restored = null;
   fake.failNextFeedback = false;
   fake.answers.length = 0;
+  fake.breakOffNext = false;
   localStorage.clear();
   delete document.documentElement.dataset.theme;
 });
@@ -428,6 +442,24 @@ describe("WidgetChat", () => {
     await vi.waitFor(() => expect(changes.length).toBeGreaterThan(0));
     observer.disconnect();
     expect(liveRegion().textContent).toContain("widget_answer_complete");
+  });
+
+  test("an answer that breaks off keeps what arrived and says it is incomplete", async () => {
+    renderApp();
+    fake.breakOffNext = true;
+    fake.answers.push("Biblioteket har öppet ");
+    await userEvent.click(suggestion());
+    await releaseAnswer("Biblioteket har öppet");
+
+    await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_incomplete");
+    await expect.element(page.getByText("Biblioteket har öppet")).toBeVisible();
+    expect(document.querySelector("[data-widget-chat] [role='log']")!.textContent).not.toContain(
+      "chat_stream_error_inline"
+    );
+    expect(liveRegion().textContent).not.toContain("widget_answer_complete");
+    // The turn exists on the server: it is remembered and can be rated.
+    expect(JSON.parse(localStorage.getItem("eneo-widget:wgt_test")!).session_id).toBe("session-1");
+    await expect.element(page.getByText("widget_feedback_prompt")).toBeVisible();
   });
 
   test("the send arrow sends and hands focus back to the question field", async () => {
