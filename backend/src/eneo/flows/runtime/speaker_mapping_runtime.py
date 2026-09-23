@@ -129,6 +129,21 @@ class SpeakerMappingValidationError(ValueError):
     pass
 
 
+def _breaks_line(char: str) -> bool:
+    """A control, format, surrogate or line or paragraph separator character."""
+    return unicodedata.category(char) in _NON_LINE_CATEGORIES
+
+
+def clean_proposed_speaker_name(name: str) -> str | None:
+    """A model's proposed name made one short line: whitespace, line breaks
+    included, collapses to single spaces and other control or format
+    characters go. A name left empty or over the bound is dropped, so the
+    label stays for the reviewer to name."""
+    visible = "".join(char for char in name if char.isspace() or not _breaks_line(char))
+    cleaned = " ".join(visible.split())
+    return cleaned if 0 < len(cleaned) <= MAX_SPEAKER_NAME_CHARS else None
+
+
 def validate_speaker_mapping(
     structured: object,
     *,
@@ -136,11 +151,13 @@ def validate_speaker_mapping(
     participants: Sequence[str],
     allow_free_text: bool,
     split_labels: Sequence[str] = (),
+    model_proposal: bool = False,
 ) -> dict[str, Any]:
     """Normalize a mapping to the inventory: every known label exactly once,
     and at most once a label the transcript's own speaker edits split off
-    after the inventory was taken. A name is one short line, restricted to
-    participants unless free text is allowed."""
+    after the inventory was taken. Names are restricted to participants
+    unless free text is allowed. A reviewer's name that is not one short line
+    is refused; a model's proposed name is cleaned to one instead."""
     if not isinstance(structured, Mapping):
         raise SpeakerMappingValidationError("Speaker mapping must be an object.")
     raw_speakers = cast(Mapping[str, object], structured).get("speakers")
@@ -168,15 +185,18 @@ def validate_speaker_mapping(
                 raise SpeakerMappingValidationError(
                     "Speaker name must be text or null."
                 )
-            name = name.strip() or None
-        if name is not None and (
-            len(name) > MAX_SPEAKER_NAME_CHARS
-            or any(unicodedata.category(char) in _NON_LINE_CATEGORIES for char in name)
-        ):
-            raise SpeakerMappingValidationError(
-                f"The name for '{label}' must be one line of at most "
-                f"{MAX_SPEAKER_NAME_CHARS} characters."
-            )
+            if model_proposal:
+                name = clean_proposed_speaker_name(name)
+            else:
+                name = name.strip() or None
+                if name is not None and (
+                    len(name) > MAX_SPEAKER_NAME_CHARS
+                    or any(_breaks_line(char) for char in name)
+                ):
+                    raise SpeakerMappingValidationError(
+                        f"The name for '{label}' must be one line of at most "
+                        f"{MAX_SPEAKER_NAME_CHARS} characters."
+                    )
         if name is not None and not allow_free_text and name not in participants:
             raise SpeakerMappingValidationError(
                 f"'{name}' is not one of the participants."

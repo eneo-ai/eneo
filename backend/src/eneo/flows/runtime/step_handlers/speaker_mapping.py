@@ -227,6 +227,7 @@ class SpeakerMappingStepHandler:
                 inventory=inventory,
                 participants=participants,
                 allow_free_text=infer_names or not participants,
+                model_proposal=True,
             )
         except SpeakerMappingValidationError as exc:
             raise attach_typed_failure_context(

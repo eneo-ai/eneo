@@ -254,6 +254,30 @@ def test_a_speaker_name_is_one_short_line(name: str) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("proposed", "kept"),
+    [
+        ("Anna\nSvensson", "Anna Svensson"),
+        ("  Anna \t\u2028 Svensson\r\n", "Anna Svensson"),
+        ("An\u200bna Svens\u0007son\ud800", "Anna Svensson"),
+        ("y" * MAX_SPEAKER_NAME_CHARS, "y" * MAX_SPEAKER_NAME_CHARS),
+        ("x" * (MAX_SPEAKER_NAME_CHARS + 1), None),
+        ("\u200b\u0007 \n", None),
+    ],
+)
+def test_a_model_proposed_name_is_cleaned_not_refused(
+    proposed: str, kept: str | None
+) -> None:
+    mapping = validate_speaker_mapping(
+        {"speakers": [{**INVENTORY_NAMES[0], "name": proposed}, INVENTORY_NAMES[1]]},
+        inventory=INVENTORY,
+        participants=PARTICIPANTS,
+        allow_free_text=True,
+        model_proposal=True,
+    )
+    assert mapping["speakers"][0]["name"] == kept
+
+
 def test_a_speaker_name_at_the_bound_is_kept() -> None:
     name = "x" * MAX_SPEAKER_NAME_CHARS
     mapping = validate_speaker_mapping(

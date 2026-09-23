@@ -222,6 +222,33 @@ async def test_proposal_renames_transcript_and_records_provenance(harness) -> No
     assert stored.reference.selector.path == ("output", "text")
 
 
+async def test_a_stray_character_in_a_proposed_name_does_not_fail_the_step(
+    harness,
+) -> None:
+    calls, activate = harness
+    calls["structured"] = {
+        "speakers": [
+            {"label": "SPEAKER_00", "name": "An\u200bna\n", "confidence": "high"},
+            {"label": "SPEAKER_01", "name": "B" * 121, "confidence": "low"},
+        ]
+    }
+    handler, _ = _handler(activate)
+    state, _ = _state()
+    run = SimpleNamespace(id=uuid4(), input_payload_json={"deltagare": "Anna, Bo"})
+
+    result = await handler.execute(
+        step=_step(), run=run, state=state, version_metadata=None, attempt_no=1
+    )
+
+    output = result.output
+    assert output.full_text.splitlines()[0].startswith("[00:00:00 - 00:00:04] Anna:")
+    assert "SPEAKER_01: Hej Anna, Bo här." in output.full_text
+    assert [entry["name"] for entry in output.structured_output["speakers"]] == [
+        "Anna",
+        None,
+    ]
+
+
 async def test_run_transcript_keeps_distinct_source_with_identical_text(
     harness,
 ) -> None:
