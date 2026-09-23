@@ -10,7 +10,7 @@
 </script>
 
 <div class="flex justify-end">
-  <p class="widget-bubble max-w-[85%] px-3.5 py-2 text-sm whitespace-pre-wrap">
+  <p class="widget-bubble max-w-[85%] px-3.5 py-2 text-sm wrap-anywhere whitespace-pre-wrap">
     <span class="sr-only">{m.widget_you()}: </span>{text}
   </p>
 </div>
