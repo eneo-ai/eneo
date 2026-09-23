@@ -8,7 +8,7 @@ the loader only owns placement, focus and a small `postMessage` bridge.
 
 Built with Vite library mode to a classic IIFE (`dist/eneo.js`, es2019, no
 dependencies) so it works with `async` in any CMS. The build writes
-`dist/manifest.json` (version, SRI hash, sizes) and fails when the bundle
+`dist/manifest.json` (version, channel, SRI hash, sizes) and fails when the bundle
 exceeds **5 kB gzipped** or when its bytes differ from what `release.json`
 records for the version (see [Releases](#releases)). The web app serves the
 bundle from `/widget/v1/eneo.js` (floating) and `/widget/<version>/eneo.js`
@@ -117,3 +117,8 @@ build (CI, the Docker image, `pretest`) stops when they differ. After any
 change that alters the bundle (source, the stylesheet, a Vite or esbuild
 upgrade), bump `version` in `package.json`, run `lock` and commit
 `release.json`; `lock` refuses to give a recorded version other bytes.
+
+The floating channel (`v1` in `/widget/v1/eneo.js`) is `eneoWidgetChannel`
+in `package.json`, not the major version. Every floating snippet already
+pasted into a site keeps loading its channel's address, so it changes only
+with a bridge protocol an installed page could misread.

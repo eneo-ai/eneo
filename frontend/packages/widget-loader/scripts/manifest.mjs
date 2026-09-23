@@ -1,12 +1,13 @@
 // Writes dist/manifest.json next to the built loader: the version the web app
-// serves under /widget/<version>/eneo.js, the SRI hash the admin snippet
-// prints for pinned installs, and the sizes the budget below is enforced on.
+// serves under /widget/<version>/eneo.js, the floating channel it serves under
+// /widget/<channel>/eneo.js, the SRI hash the admin snippet prints for pinned
+// installs, and the sizes the budget below is enforced on.
 // Then stops the build when the bytes differ from what release.json records
 // for this version (see release.mjs); `--lock` records a new version instead.
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
-import { lockRelease, releaseProblem } from "./release.mjs";
+import { loaderChannel, lockRelease, releaseProblem } from "./release.mjs";
 
 const GZIP_BUDGET_BYTES = 5 * 1024;
 
@@ -16,8 +17,17 @@ const source = readFileSync(bundlePath);
 const gzipBytes = gzipSync(source, { level: 9 }).length;
 const integrity = `sha384-${createHash("sha384").update(source).digest("base64")}`;
 
+let channel;
+try {
+  channel = loaderChannel(pkg);
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+
 const manifest = {
   version: pkg.version,
+  channel,
   file: "eneo.js",
   integrity,
   bytes: source.length,

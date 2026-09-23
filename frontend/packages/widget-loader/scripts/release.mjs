@@ -40,6 +40,26 @@ export function releaseProblem(built, locked) {
 }
 
 /**
+ * The floating channel, `/widget/<channel>/eneo.js`, that every default
+ * snippet loads. It is not the semver major: it changes only with a bridge
+ * protocol an installed page could misread, and changing it strands every
+ * floating snippet already pasted into a site on the old address.
+ *
+ * @param {{ eneoWidgetChannel?: unknown }} pkg
+ * @returns {string}
+ */
+export function loaderChannel(pkg) {
+  const channel = pkg.eneoWidgetChannel;
+  if (typeof channel !== "string" || !/^v\d+$/.test(channel)) {
+    throw new Error(
+      `packages/widget-loader/package.json needs "eneoWidgetChannel", the floating ` +
+        `channel snippets load (for example "v1").`
+    );
+  }
+  return channel;
+}
+
+/**
  * What `lock` writes for a new version. A version already recorded keeps its
  * bytes: changing them takes a new version, never a new lock.
  *

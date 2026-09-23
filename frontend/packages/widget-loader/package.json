@@ -1,6 +1,7 @@
 {
   "name": "@eneo/widget-loader",
   "version": "1.0.1",
+  "eneoWidgetChannel": "v1",
   "private": true,
   "type": "module",
   "description": "Loader script that embeds an Eneo assistant as a chat widget on a host website.",
