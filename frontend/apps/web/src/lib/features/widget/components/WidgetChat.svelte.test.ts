@@ -46,7 +46,10 @@ const fake = vi.hoisted(() => ({
   // Errors the next restores fail with, in order.
   getErrors: [] as unknown[],
   // Visitor tokens minted so far.
-  mints: 0
+  mints: 0,
+  // Merged into every first chunk, and the references every answer cites.
+  chunkExtras: {} as Record<string, unknown>,
+  references: [] as unknown[]
 }));
 
 vi.mock("@eneo/eneo-js", async (importOriginal) => {
@@ -98,10 +101,11 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
             references: [],
             files: [],
             generated_files: [],
-            tools: { assistants: [] }
+            tools: { assistants: [] },
+            ...fake.chunkExtras
           });
           const answer = fake.answers.shift() ?? "Svaret från assistenten.";
-          callbacks?.onText?.({ answer, session_id, references: [] });
+          callbacks?.onText?.({ answer, session_id, references: fake.references });
           if (fake.breakOffNext) {
             fake.breakOffNext = false;
             // Long enough for the streamed words to reach the page first.
@@ -262,6 +266,8 @@ beforeEach(() => {
   fake.askErrors.length = 0;
   fake.getErrors.length = 0;
   fake.mints = 0;
+  fake.chunkExtras = {};
+  fake.references = [];
   localStorage.clear();
   delete document.documentElement.dataset.theme;
 });
@@ -604,6 +610,41 @@ describe("WidgetChat", () => {
     await releaseAnswer();
     expect(answers()).toHaveLength(2);
   });
+
+  test.each([true, false])(
+    "shows the sources and the tool activity only when the widget does (%s)",
+    async (shown) => {
+      fake.chunkExtras = {
+        mcp_tool_calls: [
+          {
+            server_name: "TimeMCP",
+            tool_name: "get_current_time",
+            arguments: { timezone: "Europe/Stockholm" },
+            tool_call_id: "c1",
+            result_status: "completed"
+          }
+        ]
+      };
+      fake.references = [
+        {
+          id: "bbbbbbbb-0000-4000-8000-000000000002",
+          metadata: { title: "Öppettider.pdf", url: null, embedding_model_id: "em", size: 10 },
+          group_id: null,
+          website_id: null,
+          original_available: true
+        }
+      ];
+      renderApp({ show_sources: shown, show_tool_activity: shown });
+      await userEvent.click(suggestion());
+      await releaseAnswer();
+
+      const count = shown ? 1 : 0;
+      expect(page.getByRole("button", { name: /widget_sources_count/ }).elements()).toHaveLength(
+        count
+      );
+      expect(page.getByRole("group", { name: "widget_activity" }).elements()).toHaveLength(count);
+    }
+  );
 
   test("the send arrow sends and hands focus back to the question field", async () => {
     renderApp();
