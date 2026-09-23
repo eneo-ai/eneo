@@ -33,6 +33,7 @@
   import AuditConfigTab from "./AuditConfigTab.svelte";
   import AccessJustificationForm from "./AccessJustificationForm.svelte";
   import { getActionLabel, getActionOptions } from "./audit-action-labels";
+  import { escapeHtml } from "$lib/core/formatting/escapeHtml";
 
   type AuditLogResponse = components["schemas"]["AuditLogResponse"];
   type ActionType = components["schemas"]["ActionType"];
@@ -341,8 +342,9 @@
     return new Date(timestamp).toLocaleString(getLocale());
   }
 
+  // Rendered with {@html}: metadata holds user-provided values, so escape before adding markup.
   function formatJsonWithSyntaxHighlighting(obj: Record<string, unknown>): string {
-    const json = JSON.stringify(obj, null, 2);
+    const json = escapeHtml(JSON.stringify(obj, null, 2));
     return json
       .replace(/"([^"]+)":/g, '<span class="text-blue-600 dark:text-blue-400">"$1"</span>:') // Keys
       .replace(/: "([^"]*)"/g, ': <span class="text-green-600 dark:text-green-400">"$1"</span>') // String values
