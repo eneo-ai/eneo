@@ -28,7 +28,7 @@
   const eneo = getEneo();
 
   const showEditDialog: Writable<boolean> = writable(false);
-  const showDeleteDialog: Writable<boolean> = writable(false);
+  let showDeleteDialog = $state(false);
 
   let syncing = $state(false);
 
@@ -94,7 +94,7 @@
     <DropdownMenu.Item
       variant="destructive"
       onSelect={() => {
-        $showDeleteDialog = true;
+        showDeleteDialog = true;
       }}
     >
       <Trash2 class="h-4 w-4" />{m.delete()}
@@ -103,4 +103,4 @@
 </DropdownMenu.Root>
 
 <MCPServerDialog openController={showEditDialog} {mcpServer} onSubmit={handleSave} />
-<DeleteMCPDialog openController={showDeleteDialog} {mcpServer} onDelete={handleDelete} />
+<DeleteMCPDialog bind:open={showDeleteDialog} {mcpServer} onDelete={handleDelete} />

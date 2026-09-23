@@ -7,9 +7,8 @@
 <script lang="ts">
   import type { User } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { MoreVertical, Edit, UserMinus, UserPlus, Trash2 } from "@lucide/svelte";
   import { invalidate } from "$app/navigation";
   import UserEditor from "./editor/UserEditor.svelte";
@@ -23,15 +22,8 @@
   let { user } = $props<{ user: User }>();
 
   async function deleteUser() {
-    isProcessing = true;
-    try {
-      await eneo.users.delete(user);
-      invalidate("admin:users"); // Stable dependency key
-      showDeleteDialog = false;
-    } catch (e) {
-      console.error(e);
-    }
-    isProcessing = false;
+    await eneo.users.delete(user);
+    invalidate("admin:users"); // Stable dependency key
   }
 
   async function deactivateUser() {
@@ -58,7 +50,6 @@
   const isActive = $derived(user.state === "active" || user.state === "invited");
   const isInactive = $derived(user.state === "inactive");
 
-  let isProcessing = $state(false);
   let showEditDialog = $state(false);
   let showDeleteDialog = $state(false);
 </script>
@@ -117,21 +108,16 @@
 <UserEditor {user} mode="update" hideTrigger={true} bind:open={showEditDialog}></UserEditor>
 
 <!-- Delete Confirmation Dialog -->
-<AlertDialog.Root bind:open={showDeleteDialog}>
-  <AlertDialog.Content class={dialogLayout.content("small")}>
-    <AlertDialog.Header class={dialogLayout.header}>
-      <AlertDialog.Title>{m.delete_user()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.do_you_really_want_to_delete()}
-        <span class="italic">{user.email}</span>?
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-
-    <AlertDialog.Footer class={dialogLayout.footer}>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <Button variant="destructive" onclick={deleteUser}>
-        {isProcessing ? m.deleting() : m.delete()}
-      </Button>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={showDeleteDialog}
+  title={m.delete_user()}
+  confirmLabel={m.delete()}
+  pendingLabel={m.deleting()}
+  errorContext={m.could_not_delete_user()}
+  onConfirm={deleteUser}
+>
+  {#snippet description()}
+    {m.do_you_really_want_to_delete()}
+    <span class="italic">{user.email}</span>?
+  {/snippet}
+</ConfirmDialog>

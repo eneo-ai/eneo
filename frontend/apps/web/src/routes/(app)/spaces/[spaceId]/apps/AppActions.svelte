@@ -3,9 +3,8 @@
   import { IconEdit } from "@eneo/icons/edit";
   import { IconTrash } from "@eneo/icons/trash";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import type { AppSparse } from "@eneo/eneo-js";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -14,7 +13,6 @@
   import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
   import { IconArrowUpToLine } from "@eneo/icons/arrow-up-to-line";
   import { m } from "$lib/paraglide/messages";
-  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   export let app: AppSparse;
@@ -26,20 +24,11 @@
 
   const eneo = getEneo();
 
-  async function deleteService() {
-    isProcessing = true;
-    try {
-      await eneo.apps.delete(app);
-      refreshCurrentSpace();
-      showDeleteDialog = false;
-    } catch (e) {
-      toastError(e, m.could_not_delete_app());
-      console.error(e);
-    }
-    isProcessing = false;
+  async function deleteApp() {
+    await eneo.apps.delete(app);
+    refreshCurrentSpace();
   }
 
-  let isProcessing = false;
   let showDeleteDialog = false;
   const showPublishDialog = writable(false);
 
@@ -108,21 +97,15 @@
   </DropdownMenu.Root>
 {/if}
 
-<AlertDialog.Root bind:open={showDeleteDialog}>
-  <AlertDialog.Content class={dialogLayout.content("small")}>
-    <AlertDialog.Header class={dialogLayout.header}>
-      <AlertDialog.Title>{m.delete_app()}</AlertDialog.Title>
-      <AlertDialog.Description>{m.confirm_delete_app()}</AlertDialog.Description>
-    </AlertDialog.Header>
-
-    <AlertDialog.Footer class={dialogLayout.footer}>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <Button variant="destructive" onclick={deleteService}
-        >{isProcessing ? m.deleting() : m.delete()}</Button
-      >
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={showDeleteDialog}
+  title={m.delete_app()}
+  description={m.confirm_delete_app()}
+  confirmLabel={m.delete()}
+  pendingLabel={m.deleting()}
+  errorContext={m.could_not_delete_app()}
+  onConfirm={deleteApp}
+/>
 
 <PublishingDialog
   resource={app}

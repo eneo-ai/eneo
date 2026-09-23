@@ -5,7 +5,7 @@
   import { AlertCircle, CheckCircle2, Loader2, Pencil, Plus, Trash2 } from "@lucide/svelte";
   import { Page, Settings } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -26,9 +26,7 @@
   let serviceKeys = $state<ApiKeyV2[]>([]);
   let loading = $state(true);
   let saving = $state(false);
-  let removing = $state(false);
   let errorMessage = $state<string | null>(null);
-  let removalError = $state<string | null>(null);
   let moduleKey = $state("");
   let redirectUrisInput = $state("");
   let serviceKeyId = $state("");
@@ -169,28 +167,16 @@
 
   function confirmRemoval(installation: ModuleInstallation) {
     pendingRemoval = installation;
-    removalError = null;
     removalDialogOpen = true;
   }
 
   async function removeInstallation() {
     if (!pendingRemoval) return;
-    removing = true;
-    removalError = null;
-    try {
-      await eneo.modules.uninstall({ moduleKey: pendingRemoval.module_key });
-      toast.success(m.module_admin_removed());
-      if (editingModuleKey === pendingRemoval.module_key) resetForm();
-      removalDialogOpen = false;
-      pendingRemoval = null;
-      removalError = null;
-      await refreshInstallations();
-    } catch (error) {
-      console.error(error);
-      removalError = getErrorMessage(error);
-    } finally {
-      removing = false;
-    }
+    const removedKey = pendingRemoval.module_key;
+    await eneo.modules.uninstall({ moduleKey: removedKey });
+    toast.success(m.module_admin_removed());
+    if (editingModuleKey === removedKey) resetForm();
+    await refreshInstallations();
   }
 
   onMount(() => void loadPage());
@@ -413,31 +399,12 @@
   </Page.Main>
 </Page.Root>
 
-<AlertDialog.Root bind:open={removalDialogOpen}>
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.module_admin_remove_title()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.module_admin_remove_description({ moduleKey: pendingRemoval?.module_key ?? "" })}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    {#if removalError}
-      <Alert.Root variant="destructive" role="alert">
-        <AlertCircle />
-        <Alert.Description>{removalError}</Alert.Description>
-      </Alert.Root>
-    {/if}
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={removing}>{m.cancel()}</AlertDialog.Cancel>
-      <Button
-        type="button"
-        variant="destructive"
-        disabled={removing}
-        onclick={() => void removeInstallation()}
-      >
-        {#if removing}<Loader2 class="animate-spin" />{/if}
-        {m.remove()}
-      </Button>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={removalDialogOpen}
+  title={m.module_admin_remove_title()}
+  description={m.module_admin_remove_description({ moduleKey: pendingRemoval?.module_key ?? "" })}
+  confirmLabel={m.remove()}
+  pendingLabel={m.removing()}
+  errorDisplay="inline"
+  onConfirm={removeInstallation}
+/>

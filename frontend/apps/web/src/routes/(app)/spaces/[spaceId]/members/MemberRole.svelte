@@ -7,9 +7,8 @@
 <script lang="ts">
   import { IconTrash } from "@eneo/icons/trash";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
-  import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import type { Space, SpaceRole } from "@eneo/eneo-js";
@@ -38,17 +37,11 @@
   // After changing the role we update with the passed prop as source of truth
   let selectedRole = $derived(member.role);
 
-  const removeMember = createAsyncState(async () => {
-    try {
-      await eneo.spaces.members.remove({ spaceId: $currentSpace.id, user: member });
-      showRemoveDialog = false;
-      // Will cause an update in the parent page and remove this component instance form the tree
-      refreshCurrentSpace();
-    } catch (e) {
-      toastError(e, m.couldnt_remove_user());
-      console.error(e);
-    }
-  });
+  async function removeMember() {
+    await eneo.spaces.members.remove({ spaceId: $currentSpace.id, user: member });
+    // Will cause an update in the parent page and remove this component instance form the tree
+    refreshCurrentSpace();
+  }
 
   const changeRole = createAsyncState(async (newRole: SpaceRole["value"]) => {
     try {
@@ -64,8 +57,6 @@
       selectedRole = member.role;
     }
   });
-
-  let showRemoveDialog = $state(false);
 </script>
 
 <div class="flex items-center gap-2">
@@ -90,29 +81,18 @@
     </Select.Content>
   </Select.Root>
 
-  <Button
-    variant="destructive"
-    size="icon"
-    aria-label={m.remove_member()}
-    onclick={() => (showRemoveDialog = true)}
+  <ConfirmDialog
+    title={m.remove_member()}
+    description={m.confirm_remove_member({ memberEmail: member.email })}
+    confirmLabel={m.remove()}
+    pendingLabel={m.removing()}
+    errorContext={m.couldnt_remove_user()}
+    onConfirm={removeMember}
   >
-    <IconTrash class="h-4 w-4" />
-  </Button>
+    {#snippet trigger({ props })}
+      <Button {...props} variant="destructive" size="icon" aria-label={m.remove_member()}>
+        <IconTrash class="h-4 w-4" />
+      </Button>
+    {/snippet}
+  </ConfirmDialog>
 </div>
-
-<AlertDialog.Root bind:open={showRemoveDialog}>
-  <AlertDialog.Content class={dialogLayout.content("small")}>
-    <AlertDialog.Header class={dialogLayout.header}>
-      <AlertDialog.Title>{m.remove_member()}</AlertDialog.Title>
-      <AlertDialog.Description
-        >{m.confirm_remove_member({ memberEmail: member.email })}</AlertDialog.Description
-      >
-    </AlertDialog.Header>
-    <AlertDialog.Footer class={dialogLayout.footer}>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <Button variant="destructive" onclick={removeMember}
-        >{removeMember.isLoading ? m.removing() : m.remove()}</Button
-      >
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>

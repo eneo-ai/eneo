@@ -4,9 +4,8 @@
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { type UserIntegration } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
@@ -25,7 +24,6 @@
       toast.warning(m.integration_not_setup_correctly());
       return;
     }
-    showDisconnectDialog = false;
     await eneo.integrations.user.disconnect({ id });
     onDisconnect?.(integration);
   }
@@ -57,17 +55,11 @@
   </DropdownMenu.Root>
 </div>
 
-<AlertDialog.Root bind:open={showDisconnectDialog}>
-  <AlertDialog.Content class={dialogLayout.content("dynamic")}>
-    <AlertDialog.Header class={dialogLayout.header}>
-      <AlertDialog.Title>{m.disconnect_name({ name: integration.name })}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.do_you_really_want_to_disconnect_name({ name: integration.name })}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer class={dialogLayout.footer}>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <Button variant="destructive" onclick={disconnect}>{m.disconnect()}</Button>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={showDisconnectDialog}
+  title={m.disconnect_name({ name: integration.name })}
+  description={m.do_you_really_want_to_disconnect_name({ name: integration.name })}
+  confirmLabel={m.disconnect()}
+  width="dynamic"
+  onConfirm={disconnect}
+/>

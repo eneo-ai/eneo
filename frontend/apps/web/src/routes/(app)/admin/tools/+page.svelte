@@ -39,7 +39,7 @@
   setSecurityContext(untrack(() => data.securityClassifications));
   const open = writable(false);
   const tabController = writable("functions");
-  const deleteOpen = writable(false);
+  let deleteOpen = $state(false);
   let deleting = $state<Provider | null>(null);
   let purpose = $state("general");
   let editing = $state<Provider | null>(null);
@@ -266,7 +266,7 @@
                             variant="destructive"
                             onSelect={() => {
                               deleting = source;
-                              deleteOpen.set(true);
+                              deleteOpen = true;
                             }}
                           >
                             <Trash2 class="h-4 w-4" aria-hidden="true" />{m.delete()}
@@ -330,8 +330,4 @@
   )?.name}
 />
 
-{#if deleting}<DeleteMCPDialog
-    openController={deleteOpen}
-    mcpServer={deleting}
-    onDelete={remove}
-  />{/if}
+{#if deleting}<DeleteMCPDialog bind:open={deleteOpen} mcpServer={deleting} onDelete={remove} />{/if}

@@ -23,11 +23,11 @@
   } from "$lib/features/api-keys/notificationPreferences";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import ExtendExpirationDialog from "$lib/features/api-keys/ExtendExpirationDialog.svelte";
   import RotateApiKeyDialog from "$lib/features/api-keys/RotateApiKeyDialog.svelte";
 
@@ -152,22 +152,13 @@
   }
 
   async function purgeKey() {
-    actionPending = true;
-    try {
-      if (isAdmin) {
-        await eneo.apiKeys.admin.purge({ id: apiKey.id });
-      } else {
-        await eneo.apiKeys.purge({ id: apiKey.id });
-      }
-      onChanged();
-      showPurgeDialog = false;
-      toast.success(m.api_keys_action_purge());
-    } catch (error) {
-      console.error(error);
-      toast.error(getErrorMessage(error));
-    } finally {
-      actionPending = false;
+    if (isAdmin) {
+      await eneo.apiKeys.admin.purge({ id: apiKey.id });
+    } else {
+      await eneo.apiKeys.purge({ id: apiKey.id });
     }
+    onChanged();
+    toast.success(m.api_keys_action_purge());
   }
 
   async function toggleFollow() {
@@ -377,25 +368,17 @@
 
 <ExtendExpirationDialog {apiKey} {mode} bind:open={showExtendDialog} {onChanged} />
 
-<AlertDialog.Root bind:open={showPurgeDialog}>
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.api_keys_purge_dialog_title()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.api_keys_purge_dialog_description()}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <div class="bg-subtle border-default rounded-lg border p-3">
-      <p class="text-default text-sm font-medium">{apiKey.name}</p>
-      <p class="text-muted mt-0.5 font-mono text-xs">
-        {apiKey.key_prefix}...{apiKey.key_suffix}
-      </p>
-    </div>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action variant="destructive" onclick={purgeKey} disabled={actionPending}>
-        {m.api_keys_purge_confirm()}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={showPurgeDialog}
+  title={m.api_keys_purge_dialog_title()}
+  description={m.api_keys_purge_dialog_description()}
+  confirmLabel={m.api_keys_purge_confirm()}
+  onConfirm={purgeKey}
+>
+  <div class="bg-subtle border-default rounded-lg border p-3">
+    <p class="text-default text-sm font-medium">{apiKey.name}</p>
+    <p class="text-muted mt-0.5 font-mono text-xs">
+      {apiKey.key_prefix}...{apiKey.key_suffix}
+    </p>
+  </div>
+</ConfirmDialog>
