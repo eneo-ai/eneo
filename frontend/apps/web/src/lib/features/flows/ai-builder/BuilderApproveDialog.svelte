@@ -7,7 +7,9 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import IconCheck from "@lucide/svelte/icons/check";
+  import IconInfo from "@lucide/svelte/icons/info";
   import IconLoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import IconPencil from "@lucide/svelte/icons/pencil";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
 
@@ -19,6 +21,8 @@
     /** Edit mode: the steps the change adds, modifies or removes, from the diff. */
     changedStepCount?: number;
     unchangedStepCount?: number;
+    /** Edit mode: "Steg 3: Skriv sammanfattning ändras" when one step changes. */
+    changedStepLine?: string | null;
     phase?: ApprovePhase;
     onconfirm: () => void;
   }
@@ -29,6 +33,7 @@
     stepCount,
     changedStepCount = 0,
     unchangedStepCount = 0,
+    changedStepLine = null,
     phase = "idle",
     onconfirm
   }: Props = $props();
@@ -56,22 +61,29 @@
       </AlertDialog.Description>
     </AlertDialog.Header>
     <div class="flex flex-col gap-1.5 text-[0.8125rem]">
-      <ul class="text-secondary flex list-none flex-col gap-1.5 p-0">
-        <li>
-          {isCreate
-            ? m.ai_builder_approve_dialog_steps({ count: stepCount })
-            : unchangedStepCount > 0
-              ? m.ai_builder_approve_dialog_steps_edit({
-                  changed: changedStepCount,
-                  unchanged: unchangedStepCount
-                })
-              : m.ai_builder_approve_dialog_steps_edit_all({ count: changedStepCount })}
-        </li>
-        <!-- An edit's description already says no run starts. -->
-        {#if isCreate}
+      {#if isCreate}
+        <ul class="text-secondary flex list-none flex-col gap-1.5 p-0">
+          <li>{m.ai_builder_approve_dialog_steps({ count: stepCount })}</li>
           <li>{m.ai_builder_approve_dialog_no_data()}</li>
-        {/if}
-      </ul>
+        </ul>
+      {:else}
+        <!-- What changes and what stays, a step named when it is one. An
+             edit's description already says no run starts. -->
+        <ul class="text-primary flex list-none flex-col gap-2 p-0">
+          <li class="flex items-start gap-2.5">
+            <IconPencil class="text-secondary mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            {changedStepLine ?? m.ai_builder_approve_dialog_steps_edit_all({ count: changedStepCount })}
+          </li>
+          {#if unchangedStepCount > 0}
+            <li class="flex items-start gap-2.5">
+              <IconCheck class="text-secondary mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              {unchangedStepCount === 1
+                ? m.ai_builder_approve_dialog_unchanged_one()
+                : m.ai_builder_approve_dialog_unchanged({ count: unchangedStepCount })}
+            </li>
+          {/if}
+        </ul>
+      {/if}
       <!-- The last line is the dialog's status: what stays editable until the
            reader confirms, then how the work goes. Mounted from the start so
            the announcement lands when the text changes; it keeps one line, so
@@ -97,7 +109,10 @@
               : m.ai_builder_approve_dialog_pending_hint_edit()}
           </span>
         {:else}
-          <span class="text-secondary">{m.ai_builder_approve_dialog_step_editable()}</span>
+          <span class="text-secondary flex items-start gap-2.5">
+            <IconInfo class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            {m.ai_builder_approve_dialog_step_editable()}
+          </span>
         {/if}
       </p>
     </div>

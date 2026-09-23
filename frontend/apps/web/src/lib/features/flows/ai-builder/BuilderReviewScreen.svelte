@@ -225,6 +225,16 @@
       ? stepChangeCounts.added + stepChangeCounts.modified + stepChangeCounts.removed
       : 0
   );
+  // The dialog names a lone changed step instead of counting it.
+  const changedStepLine = $derived.by(() => {
+    if (changedStepCount !== 1 || (stepChangeCounts?.removed ?? 0) > 0) return null;
+    const index = steps.findIndex((step) => changeBadge(step) !== null);
+    if (index === -1) return null;
+    const step = m.ai_builder_step_choice_item({ step: index + 1, name: steps[index].name });
+    return changeBadge(steps[index]) === "new"
+      ? m.ai_builder_approve_dialog_step_added({ step })
+      : m.ai_builder_approve_dialog_step_changes({ step });
+  });
   // Byggspec §9: four counters, so the size of the change is read before any
   // step is. Swedish inflects the adjective for one step ("1 ändrat").
   const diffCounters = $derived(
@@ -2217,6 +2227,7 @@
     {stepCount}
     {changedStepCount}
     unchangedStepCount={stepChangeCounts?.unchanged ?? 0}
+    {changedStepLine}
     phase={approvePhase}
     onconfirm={() => void handlePrimaryAction()}
   />

@@ -112,12 +112,19 @@ export interface AIBuilderSuggestChangeIntent {
   editContext?: AIBuilderPlanEditContext | null;
 }
 
+/** The part of a saved step the editor's "Ändra med AI" menu asked to change. */
+export type AIBuilderStepIntent = "instruction" | "underlag" | "format";
+
 export interface AIBuilderSavedFlowStepScope {
   editContext: AIBuilderSavedFlowStepEditContext;
   stepName: string;
   stepNumber: number;
   /** A request the editor hands over with the step; it waits in the composer, unsent. */
   request?: string;
+  /** The part the menu asked about; the task screen asks about that part. */
+  intent?: AIBuilderStepIntent;
+  /** What that part is now, in the editor's words ("Läser föregående steg"). */
+  current?: string | null;
 }
 
 export interface AIBuilderStepScopePresentation {

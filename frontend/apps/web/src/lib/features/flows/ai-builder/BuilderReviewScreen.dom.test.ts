@@ -774,8 +774,13 @@ describe("BuilderReviewScreen plan document", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_approve() }));
     expect(
-      await screen.findByText(m.ai_builder_approve_dialog_steps_edit({ changed: 1, unchanged: 1 }))
+      await screen.findByText(
+        m.ai_builder_approve_dialog_step_changes({
+          step: m.ai_builder_step_choice_item({ step: 2, name: "Sammanfatta" })
+        })
+      )
     ).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_approve_dialog_unchanged_one())).toBeTruthy();
   });
 
   it("keeps the request beside the change, not a later confirmation", () => {
