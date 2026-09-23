@@ -75,7 +75,7 @@
 </script>
 
 <Card.Root
-  class="overflow-hidden motion-safe:transition-[background-color,border-color] motion-safe:duration-(--duration-fast) {focused
+  class="gap-0 overflow-hidden py-0 motion-safe:transition-[background-color,border-color] motion-safe:duration-(--duration-fast) {focused
     ? 'border-accent-default/40 bg-accent-dimmer/15'
     : ''} {isRunning ? 'ring-accent-default/35 ring-2' : ''} {isFailed
     ? 'ring-negative-default/30 ring-1'
@@ -111,13 +111,7 @@
             <span class="text-secondary shrink-0 text-xs tabular-nums">{duration}</span>
           {/if}
         </div>
-        {#if focused && isRunning}
-          <p class="text-secondary mt-1 text-xs">
-            {step.speakerIdentification
-              ? m.flow_run_progress_transcribing_with_speakers_hint()
-              : m.flow_run_progress_active_step_hint()}
-          </p>
-        {:else if focused && step.status === "queued"}
+        {#if focused && step.status === "queued"}
           <p class="text-secondary mt-1 text-xs">
             {m.flow_run_progress_next_step_hint()}
           </p>
@@ -201,22 +195,14 @@
             {/if}
           </div>
         {:else if isRunning}
-          <div class="flex flex-col gap-3">
-            <div class="text-secondary flex items-center gap-2 text-xs">
-              <IconLoadingSpinner class="size-3.5 animate-spin" />
-              {step.speakerIdentification
-                ? m.flow_run_progress_transcribing_with_speakers()
-                : m.flow_run_status_running()}
-            </div>
-            <div class="flex flex-col gap-2">
-              <div
-                class="bg-hover-dimmer h-3 w-3/4 animate-pulse rounded motion-reduce:animate-none"
-              ></div>
-              <div
-                class="bg-hover-dimmer h-3 w-1/2 animate-pulse rounded motion-reduce:animate-none"
-              ></div>
-            </div>
-          </div>
+          <!-- The badge already says the step runs; the body says what that
+               means for the reader instead of drawing placeholder text. -->
+          <p class="text-secondary flex items-center gap-2 text-sm">
+            <IconLoadingSpinner class="size-3.5 shrink-0 motion-safe:animate-spin" />
+            {step.speakerIdentification
+              ? m.flow_run_progress_transcribing_with_speakers_hint()
+              : m.flow_run_progress_running_body()}
+          </p>
         {:else if isCompleted && step.detailsStale}
           <div class="text-secondary text-xs italic">
             {m.flow_run_progress_details_stale()}

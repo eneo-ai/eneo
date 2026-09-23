@@ -713,7 +713,12 @@
                       aria-controls={isExpanded ? getEvidenceRowId(run.id) : undefined}
                       onclick={() => toggleRunDetails(run.id)}
                     >
-                      {isExpanded ? m.flow_run_hide_details() : m.flow_run_show_details()}
+                      <!-- A run waiting for a person says what that person does next. -->
+                      {isExpanded
+                        ? m.flow_run_hide_details()
+                        : run.status === "awaiting_review"
+                          ? m.flow_run_review_open()
+                          : m.flow_run_show_details()}
                       <IconChevronDown
                         data-icon="inline-end"
                         class="motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {isExpanded

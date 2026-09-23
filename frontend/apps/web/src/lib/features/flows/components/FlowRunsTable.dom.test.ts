@@ -144,6 +144,27 @@ describe("FlowRunsTable retry from the failed step", () => {
   });
 });
 
+describe("FlowRunsTable row actions", () => {
+  it("names the next step for a run waiting for review", async () => {
+    const { eneo, calls } = makeRunsListEneo(() => ({
+      items: [
+        makeFlowRun({ id: "aaa", status: "awaiting_review" }),
+        makeFlowRun({ id: "bbb", status: "completed" })
+      ],
+      has_more: false
+    }));
+    renderTable(eneo);
+    await waitFor(() => expect(calls).toHaveLength(1));
+
+    expect((await screen.findByTestId("flow-run-evidence-toggle-aaa")).textContent).toContain(
+      m.flow_run_review_open()
+    );
+    expect(screen.getByTestId("flow-run-evidence-toggle-bbb").textContent).toContain(
+      m.flow_run_show_details()
+    );
+  });
+});
+
 describe("FlowRunsTable search and pagination", () => {
   it("follows step statuses on the poll but loads audited step outputs only on demand", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });

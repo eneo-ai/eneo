@@ -201,9 +201,10 @@
          textareas ran to 137 characters, about twice a comfortable measure.
          Splitting the columns spends the width on shorter lines rather than
          longer ones. Nested objects stay single-column: a grid inside a
-         disclosure inside a grid stops being scannable. -->
+         disclosure inside a grid stops being scannable. A lone field (a
+         step's one list, say) takes the whole row instead of half of it. -->
     <div
-      class={depth === 0
+      class={depth === 0 && shownFields.length > 1
         ? "grid min-w-0 gap-x-6 gap-y-3 @[1040px]/review-fields:grid-cols-2"
         : "flex min-w-0 flex-col gap-3"}
     >
