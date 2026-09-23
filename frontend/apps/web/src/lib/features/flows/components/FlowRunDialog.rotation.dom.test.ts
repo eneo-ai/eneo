@@ -2,8 +2,10 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type {
   Eneo,
   Flow,
+  FlowLiveTranscriptionSession,
   FlowRunContract,
   FlowRunContractStepInput,
+  FlowRunContractTranscription,
   UploadedFile
 } from "@eneo/eneo-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +17,11 @@ import {
   readSessionRecords,
   scanRecoverableSessionsForSteps
 } from "$lib/features/audio/flowRunRecordingSession";
+import {
+  FakeLiveSocket,
+  installLiveTranscriptFakes,
+  liveSession
+} from "$lib/features/audio/live/liveTranscriptTestFakes";
 import {
   RETRY_BACKOFF_MS,
   ROTATION_OVERLAP_MS,
@@ -556,6 +563,40 @@ describe("FlowRunDialog recording rotation", () => {
     await waitFor(() => expect(start.disabled).toBe(false));
     expect(failedRecordingAlert()).toBeNull();
   });
+
+  it("keeps one live text session across a rotation and ends it with the recording", async () => {
+    installLiveTranscriptFakes();
+    const createSession = vi.fn(async () => liveSession);
+    const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
+    await openDialogAndStartRecording(upload, {
+      createSession,
+      transcription: {
+        live: { available: true, reason: null },
+        speaker_labels: { selectable: true, required: false, default: true }
+      }
+    });
+
+    const socket = FakeLiveSocket.instances[0];
+    expect(socket?.protocols).toEqual(["eneo-live.v1", "ticket.t0k3n"]);
+    socket.open();
+    socket.receive({ type: "ready", sample_rate: 16000, max_seconds: 18000 });
+    await flush();
+    expect(screen.getByText(m.live_transcription_listening())).toBeTruthy();
+
+    await rotate();
+    await endOverlap();
+    media.recorders[0]?.finish();
+    await flush();
+    expect(media.recorders).toHaveLength(2);
+    expect(socket.texts).toEqual([]);
+    expect(socket.close).not.toHaveBeenCalled();
+
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[1]?.finish();
+    await flush();
+    expect(socket.texts).toEqual([JSON.stringify({ type: "stop" })]);
+    expect(createSession).toHaveBeenCalledOnce();
+  });
 });
 
 type PendingUpload = {
@@ -587,7 +628,12 @@ async function endOverlap() {
 }
 
 type Upload = (args: { file: File; stepId: string }) => Promise<UploadedFile>;
-type DialogOptions = { create?: () => Promise<unknown>; steps?: FlowRunContractStepInput[] };
+type DialogOptions = {
+  create?: () => Promise<unknown>;
+  steps?: FlowRunContractStepInput[];
+  transcription?: FlowRunContractTranscription | null;
+  createSession?: () => Promise<FlowLiveTranscriptionSession>;
+};
 
 function renderDialog(upload: Upload, options: DialogOptions = {}) {
   return render(FlowRunDialog, {
@@ -729,6 +775,7 @@ function installFakeMedia() {
 
   class FakeAudioContext {
     state = "running";
+    audioWorklet = { addModule: vi.fn(async () => undefined) };
     close = vi.fn(async () => {
       this.state = "closed";
     });
@@ -806,25 +853,33 @@ const audioStepSnapshot = {
 
 function buildEneo(
   upload: Upload,
-  { create = vi.fn(async () => ({ id: "run-1" })), steps = [audioStep] }: DialogOptions = {}
+  {
+    create = vi.fn(async () => ({ id: "run-1" })),
+    steps = [audioStep],
+    transcription = null,
+    createSession = vi.fn()
+  }: DialogOptions = {}
 ): Eneo {
   const contract: FlowRunContract = {
     flow_id: "flow-1",
     published_flow_version: 7,
     form_fields: [],
     steps_requiring_input: steps,
-    template_readiness: []
+    template_readiness: [],
+    transcription
   };
   return {
     flows: {
       runContract: { get: vi.fn(async () => contract) },
+      liveTranscription: { createSession },
       steps: { runtimeFiles: { upload } },
       runs: {
         deriveUploadIntentIdempotencyKey: vi.fn(async () => "derived-key"),
         create
       }
     },
-    files: { delete: vi.fn(async () => undefined) }
+    files: { delete: vi.fn(async () => undefined) },
+    client: { baseUrl: new URL("https://eneo.example.test") }
   } as unknown as Eneo;
 }
 

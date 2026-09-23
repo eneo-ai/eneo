@@ -1193,13 +1193,15 @@
       const runIntent = buildFlowRunIntent({
         publishedFlowVersion: runContract.published_flow_version,
         inputPayloadJson: payload,
-        stepInputs
+        stepInputs,
+        speakerLabels: launchInputState.speakerLabels(runContract.transcription)
       });
+      // The key covers the whole intent: the API fingerprints every field of it.
+      const { expected_flow_version, ...intent } = runIntent;
       const idempotencyKey = await eneo.flows.runs.deriveUploadIntentIdempotencyKey({
         flowId: flow.id,
-        expectedFlowVersion: runIntent.expected_flow_version,
-        input_payload_json: runIntent.input_payload_json,
-        ...(runIntent.step_inputs ? { step_inputs: runIntent.step_inputs } : {})
+        expectedFlowVersion: expected_flow_version,
+        ...intent
       });
       const createdRun = await eneo.flows.runs.create({
         flow: { id: flow.id },
@@ -1320,6 +1322,10 @@
         {:else if currentPage.kind === "runtime-step" && currentRuntimeStep}
           <FlowRunDialogRuntimeStep
             step={currentRuntimeStep}
+            {eneo}
+            flowId={flow.id}
+            transcription={runContract?.transcription ?? null}
+            {launchInputState}
             files={currentStepUploadedFiles}
             hasFailedRecording={currentStepHasFailedRecording}
             recorderResetToken={currentStepRecorderResetToken}

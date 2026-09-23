@@ -1,5 +1,11 @@
 <script lang="ts">
-  import type { FlowRunContractStepInput, UploadedFile } from "@eneo/eneo-js";
+  import type {
+    Eneo,
+    FlowRunContractStepInput,
+    FlowRunContractTranscription,
+    UploadedFile
+  } from "@eneo/eneo-js";
+  import { onDestroy } from "svelte";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import ChevronRight from "lucide-svelte/icons/chevron-right";
   import { IconUploadCloud } from "@eneo/icons/upload-cloud";
@@ -10,6 +16,8 @@
   import { IconTrash } from "@eneo/icons/trash";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import {
     classifyUploadError,
@@ -17,15 +25,25 @@
     friendlyMimeNames
   } from "$lib/features/flows/flowRuntimeErrorMapping";
   import AudioRecorder from "$lib/features/audio/AudioRecorder.svelte";
+  import LiveTranscriptPanel from "$lib/features/audio/live/LiveTranscriptPanel.svelte";
+  import {
+    LiveTranscriptPreview,
+    type RecorderAudioGraph
+  } from "$lib/features/audio/live/LiveTranscriptPreview.svelte";
   import type { RecordingStopReason } from "$lib/features/audio/recordedAudioFile";
   import type { SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
   import { formatBytes } from "$lib/features/flows/flowByteSize";
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
+  import type { FlowRunLaunchInputState } from "./FlowRunLaunchInputState.svelte";
   import FlowRunResumePrompt from "./FlowRunResumePrompt.svelte";
   import FlowRunStorageDegradedNotice from "./FlowRunStorageDegradedNotice.svelte";
 
   let {
     step,
+    eneo,
+    flowId,
+    transcription,
+    launchInputState,
     files,
     hasFailedRecording,
     recorderResetToken,
@@ -66,6 +84,12 @@
     onDragLeave
   }: {
     step: FlowRunContractStepInput;
+    eneo: Eneo;
+    flowId: string;
+    // The flow's transcription options from the run contract; null when the
+    // flow transcribes no audio.
+    transcription: FlowRunContractTranscription | null;
+    launchInputState: FlowRunLaunchInputState;
     files: UploadedFile[];
     // Recorded segments whose upload failed are waiting for Retry.
     hasFailedRecording: boolean;
@@ -168,6 +192,27 @@
   // Drive the disclosure chevrons.
   let allowedTypesOpen = $state(false);
   let technicalMimeOpen = $state(false);
+
+  const uid = $props.id();
+  const liveTextAvailable = $derived(transcription?.live.available === true);
+  const liveTextOn = $derived(liveTextAvailable && launchInputState.liveTextOn);
+  const speakerLabels = $derived(launchInputState.speakerLabels(transcription));
+
+  // The preview listens to the recorder's audio graph, which exists from the
+  // moment the microphone opens until the recording is over.
+  const livePreview = new LiveTranscriptPreview();
+  let recorderAudioGraph = $state.raw<RecorderAudioGraph | null>(null);
+
+  function handleAudioGraph(graph: RecorderAudioGraph | null) {
+    recorderAudioGraph = graph;
+    if (!graph) {
+      livePreview.stop();
+    } else if (liveTextOn) {
+      void livePreview.start(graph, { eneo, flowId, stepId: step.step_id });
+    }
+  }
+
+  onDestroy(() => livePreview.dispose());
 </script>
 
 <div class="flex flex-col gap-5">
@@ -367,6 +412,66 @@
           </p>
         </div>
 
+        {#if liveTextAvailable || transcription?.speaker_labels.selectable || transcription?.speaker_labels.required}
+          <!-- Settings chosen before recording: quiet, so the record control
+               stays the thing to press. -->
+          <div class="mb-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
+            {#if liveTextAvailable}
+              <Field.Field
+                orientation="horizontal"
+                class="gap-2.5"
+                data-disabled={recorderAudioGraph !== null}
+              >
+                <Switch
+                  id="{uid}-live-text"
+                  aria-describedby="{uid}-live-text-help"
+                  disabled={recorderAudioGraph !== null}
+                  bind:checked={
+                    () => launchInputState.liveTextOn, (on) => launchInputState.setLiveTextOn(on)
+                  }
+                />
+                <Field.Content>
+                  <Field.Label for="{uid}-live-text" class="text-xs font-medium">
+                    {m.live_transcription_toggle()}
+                  </Field.Label>
+                  <Field.Description
+                    id="{uid}-live-text-help"
+                    class="text-secondary text-[0.8125rem] leading-[1.6]"
+                  >
+                    {m.live_transcription_toggle_help()}
+                  </Field.Description>
+                </Field.Content>
+              </Field.Field>
+            {/if}
+            {#if transcription?.speaker_labels.selectable}
+              <Field.Field orientation="horizontal" class="gap-2.5">
+                <Switch
+                  id="{uid}-speaker-labels"
+                  aria-describedby="{uid}-speaker-labels-help"
+                  bind:checked={
+                    () => speakerLabels === true, (on) => launchInputState.setSpeakerLabels(on)
+                  }
+                />
+                <Field.Content>
+                  <Field.Label for="{uid}-speaker-labels" class="text-xs font-medium">
+                    {m.speaker_labels_toggle()}
+                  </Field.Label>
+                  <Field.Description
+                    id="{uid}-speaker-labels-help"
+                    class="text-secondary text-[0.8125rem] leading-[1.6]"
+                  >
+                    {m.speaker_labels_help()}
+                  </Field.Description>
+                </Field.Content>
+              </Field.Field>
+            {:else if transcription?.speaker_labels.required}
+              <p class="text-secondary text-[0.8125rem] leading-[1.6]">
+                {m.speaker_labels_required()}
+              </p>
+            {/if}
+          </div>
+        {/if}
+
         <AudioRecorder
           bind:this={recorderRef}
           maxBytes={step.max_file_size_bytes ?? null}
@@ -374,7 +479,12 @@
           canStart={canStartRecording}
           {onRecordingDone}
           onRecordingStateChange={onRecordingStateChange ?? (() => {})}
+          onAudioGraph={handleAudioGraph}
         />
+
+        {#if liveTextOn && livePreview.stepId === step.step_id}
+          <LiveTranscriptPanel status={livePreview.status} pieces={livePreview.pieces} />
+        {/if}
 
         {#if sessionPhase === "reconnecting"}
           <div

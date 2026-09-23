@@ -20,6 +20,7 @@
   import type { RecordingStopReason } from "./recordedAudioFile";
   import { downloadRecordedAudioFile } from "./downloadRecordedAudioFile";
   import { ROTATION_OVERLAP_MS } from "./recordingSession";
+  import type { RecorderAudioGraph } from "./live/LiveTranscriptPreview.svelte";
 
   // Every stop reports once. `blob` is null when nothing was captured, so a
   // caller still hears a failure to retry, or the user's own stop.
@@ -41,6 +42,11 @@
     isRecording: boolean,
     meta?: { origin: "user" | "external" }
   ) => void = () => {};
+
+  // The live transcript preview listens to this recorder's own audio graph: it
+  // gets the graph once the microphone is open and `null` before the graph is
+  // released. Rotation keeps the graph, so one preview spans every segment.
+  export let onAudioGraph: (graph: RecorderAudioGraph | null) => void = () => {};
 
   type RecordingStartOrigin = "user" | "external";
   export let maxBytes: number | null = null;
@@ -372,6 +378,7 @@
   }
 
   function releaseMediaCapture() {
+    if (audioContext) onAudioGraph(null);
     stopMonitoringLoop();
     stopStallChecker();
     detachVisibilityHandler();
@@ -448,9 +455,12 @@
     levelBuffer = new Float32Array(analyserNode.fftSize);
     mediaStreamNode = audioContext.createMediaStreamSource(mediaStream);
     mediaStreamNode.connect(analyserNode);
+    const graph = { context: audioContext, source: mediaStreamNode };
     if (audioContext.state === "suspended") {
       await audioContext.resume();
     }
+    // Unless the recorder closed while the context resumed.
+    if (audioContext === graph.context) onAudioGraph(graph);
 
     return mediaStream;
   }

@@ -11,6 +11,7 @@ type FlowRunIntentParams = {
   publishedFlowVersion: number;
   inputPayloadJson: Record<string, unknown>;
   stepInputs?: FlowRunStepInputs;
+  speakerLabels?: boolean;
 };
 
 type FlowRunInputModeParams = {
@@ -61,16 +62,19 @@ export function buildStepInputsPayload(
 export function buildFlowRunIntent({
   publishedFlowVersion,
   inputPayloadJson,
-  stepInputs
+  stepInputs,
+  speakerLabels
 }: FlowRunIntentParams): {
   expected_flow_version: number;
   input_payload_json: Record<string, unknown>;
   step_inputs?: FlowRunStepInputs;
+  speaker_labels?: boolean;
 } {
   return {
     expected_flow_version: publishedFlowVersion,
     input_payload_json: inputPayloadJson,
-    ...(stepInputs ? { step_inputs: stepInputs } : {})
+    ...(stepInputs ? { step_inputs: stepInputs } : {}),
+    ...(speakerLabels !== undefined ? { speaker_labels: speakerLabels } : {})
   };
 }
 

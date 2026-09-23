@@ -5,6 +5,7 @@ import type {
   FlowRun,
   FlowRunContract,
   FlowRunContractStepInput,
+  FlowRunContractTranscription,
   UploadedFile
 } from "@eneo/eneo-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -730,6 +731,104 @@ describe("FlowRunDialog recording upload reconciliation", () => {
   });
 });
 
+describe("FlowRunDialog transcription options", () => {
+  it.each([
+    { contract: "no transcription", transcription: null, requiredLine: false },
+    {
+      contract: "speaker labels the flow requires",
+      transcription: {
+        live: { available: false, reason: "model_not_realtime" },
+        speaker_labels: { selectable: false, required: true, default: true }
+      } satisfies FlowRunContractTranscription,
+      requiredLine: true
+    }
+  ])("offers no switch for $contract", async ({ transcription, requiredLine }) => {
+    renderDialog(buildEneo({ upload: vi.fn(), transcription }));
+    await screen.findByText("Audio input");
+
+    expect(screen.queryAllByRole("switch")).toHaveLength(0);
+    expect(screen.queryByText(m.speaker_labels_required()) !== null).toBe(requiredLine);
+  });
+
+  it("keeps speaker labels off while live text is on, unless the user chose them", async () => {
+    renderDialog(buildEneo({ upload: vi.fn(), transcription: offeredTranscription(true) }));
+    const liveText = await screen.findByRole("switch", { name: m.live_transcription_toggle() });
+    const speakers = screen.getByRole("switch", { name: m.speaker_labels_toggle() });
+    const checked = (element: HTMLElement) => element.getAttribute("aria-checked");
+
+    expect(checked(liveText)).toBe("true");
+    expect(checked(speakers)).toBe("false");
+    expect(describedBy(liveText)).toBe(m.live_transcription_toggle_help());
+    expect(describedBy(speakers)).toBe(m.speaker_labels_help());
+
+    await fireEvent.click(liveText);
+    expect(checked(speakers)).toBe("true");
+    await fireEvent.click(liveText);
+    expect(checked(speakers)).toBe("false");
+
+    await fireEvent.click(speakers);
+    await fireEvent.click(liveText);
+    await fireEvent.click(liveText);
+    expect(checked(liveText)).toBe("true");
+    expect(checked(speakers)).toBe("true");
+  });
+
+  it.each([
+    { contract: "offers the choice", transcription: offeredTranscription(true), sent: false },
+    {
+      contract: "decides itself",
+      transcription: {
+        live: { available: true, reason: null },
+        speaker_labels: { selectable: false, required: false, default: true }
+      } satisfies FlowRunContractTranscription,
+      sent: undefined
+    }
+  ])("creates the run with a speaker choice only when the flow $contract", async (options) => {
+    const upload = vi.fn(async ({ file }: { file: File }) => uploadedFile("file-1", file.name));
+    const deriveUploadIntentIdempotencyKey = vi.fn(async () => "derived-key");
+    const create = vi.fn(async () => ({ id: "run-1" }) as FlowRun);
+    renderDialog(
+      buildEneo({
+        upload,
+        deriveUploadIntentIdempotencyKey,
+        create,
+        transcription: options.transcription
+      })
+    );
+    await screen.findByText("Audio input");
+
+    await fireEvent.drop(screen.getByRole("button", { name: /Audio input/ }), {
+      dataTransfer: { files: [new File(["audio"], "audio.webm", { type: "audio/webm" })] }
+    });
+    await waitFor(() => expect(screen.getByText("audio.webm")).toBeTruthy());
+    await fireEvent.click(screen.getByRole("button", { name: "Nästa" }));
+    await fireEvent.click(
+      await screen.findByRole("button", { name: m.flow_run_trigger_confirm() })
+    );
+
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    const [runRequest] = create.mock.calls[0] as unknown as [Record<string, unknown>];
+    const [keyIntent] = deriveUploadIntentIdempotencyKey.mock.calls[0] as unknown as [
+      Record<string, unknown>
+    ];
+    expect(runRequest.speaker_labels).toBe(options.sent);
+    expect(keyIntent.speaker_labels).toBe(options.sent);
+    expect("speaker_labels" in runRequest).toBe(options.sent !== undefined);
+  });
+});
+
+function offeredTranscription(speakerDefault: boolean): FlowRunContractTranscription {
+  return {
+    live: { available: true, reason: null },
+    speaker_labels: { selectable: true, required: false, default: speakerDefault }
+  };
+}
+
+function describedBy(element: HTMLElement): string | null {
+  const id = element.getAttribute("aria-describedby");
+  return id ? (document.getElementById(id)?.textContent?.trim() ?? null) : null;
+}
+
 type PendingUpload = {
   file: File;
   resolve: (file: UploadedFile) => void;
@@ -784,19 +883,22 @@ function buildEneo({
   upload,
   deriveUploadIntentIdempotencyKey = vi.fn(async () => "derived-key"),
   create = vi.fn(async () => ({ id: "run-1" }) as FlowRun),
-  steps = [runtimeStep]
+  steps = [runtimeStep],
+  transcription = null
 }: {
   upload: (args: { file: File; stepId: string }) => Promise<UploadedFile>;
   deriveUploadIntentIdempotencyKey?: ReturnType<typeof vi.fn>;
   create?: ReturnType<typeof vi.fn>;
   steps?: FlowRunContractStepInput[];
+  transcription?: FlowRunContractTranscription | null;
 }): Eneo {
   const contract: FlowRunContract = {
     flow_id: "flow-1",
     published_flow_version: 7,
     form_fields: [],
     steps_requiring_input: steps,
-    template_readiness: []
+    template_readiness: [],
+    transcription
   };
   return {
     flows: {
