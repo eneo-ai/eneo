@@ -267,8 +267,8 @@ describe("flowRuntimeErrorMapping", () => {
     );
 
     expect([
-      "The selected DOCX template could not be read because file content is missing.",
-      "Den valda DOCX-mallen kunde inte läsas eftersom filinnehållet saknas."
+      "The selected Word template could not be read because the file content is missing. Upload the template again.",
+      "Den valda Word-mallen kunde inte läsas eftersom filinnehållet saknas. Ladda upp mallen igen."
     ]).toContain(getFlowRuntimeErrorMessage(error, "fallback"));
   });
 
@@ -296,15 +296,15 @@ describe("flowRuntimeErrorMapping", () => {
     [
       "flow_run_evidence_forbidden",
       [
-        "You do not have permission to view evidence for this run.",
-        "Du har inte behörighet att visa evidens för den här körningen."
+        "You do not have permission to view the evidence for this run.",
+        "Du har inte behörighet att se bevisunderlaget för den här körningen."
       ]
     ],
     [
       "flow_run_evidence_raw_export_forbidden",
       [
-        "Raw evidence export is blocked by policy for this run.",
-        "Råexport av evidens blockeras av policy för den här körningen."
+        "Exporting evidence with content is turned off for this run.",
+        "Export av bevisunderlag med innehåll är avstängd för den här körningen."
       ]
     ]
   ])("maps %s through the localized Flow API descriptor", (code, messages) => {

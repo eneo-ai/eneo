@@ -388,8 +388,8 @@ describe("BuilderFindingsScreen suggestions", () => {
         });
         const hint = screen.getByTestId("review-suggestions").textContent ?? "";
         expect(hint).toMatch(/instruktioner|instructions/i);
-        expect(hint).toMatch(/indata|inputs/i);
-        expect(hint).toMatch(/utdata|outputs/i);
+        expect(hint).toMatch(/underlag|material/i);
+        expect(hint).toMatch(/resultat|results/i);
         expect(hint).toMatch(/planeringsmodell|planning model/i);
         closed.unmount();
 

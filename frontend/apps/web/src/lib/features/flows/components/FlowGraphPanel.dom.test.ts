@@ -81,13 +81,13 @@ it("recovers to a rendered graph when a failed load is retried", async () => {
   render(Panel, { props: { flow, activeStepId: null } });
   await openPanel();
 
-  await waitFor(() => expect(screen.getByText("Kunde inte ladda flödesvyn.")).toBeTruthy());
+  await waitFor(() => expect(screen.getByText("Flödesvyn kunde inte laddas.")).toBeTruthy());
   expect(console.error).toHaveBeenCalled();
 
   load.fail = false;
   await fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
 
   expect(await screen.findByTestId("flow-graph-stub")).toBeTruthy();
-  expect(screen.queryByText("Kunde inte ladda flödesvyn.")).toBeNull();
+  expect(screen.queryByText("Flödesvyn kunde inte laddas.")).toBeNull();
   expect(screen.queryByText("Laddar flödesvy…")).toBeNull();
 });
