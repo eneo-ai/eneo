@@ -1,7 +1,7 @@
 <script lang="ts">
   import placeholderImageUrl from "$lib/assets/GeneratedImagePlaceholder.svg";
   import { IconDownload } from "@eneo/icons/download";
-  import { sanitizeImageSrc, sanitizeLinkHref } from "@eneo/ui/components/markdown";
+  import { sanitizeImageSrc, sanitizeLinkHref } from "$lib/components/markdown/index.js";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {

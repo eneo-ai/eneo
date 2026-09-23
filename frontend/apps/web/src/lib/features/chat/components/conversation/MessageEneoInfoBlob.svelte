@@ -3,7 +3,7 @@
   import McpResourceSnippetModal from "./McpResourceSnippetModal.svelte";
   import { mergeProps } from "bits-ui";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import type { EneoInrefCustomComponentProps } from "@eneo/ui/components/markdown";
+  import type { EneoInrefCustomComponentProps } from "$lib/components/markdown/index.js";
   import { getMessageContext } from "../../MessageContext.svelte";
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
   import {

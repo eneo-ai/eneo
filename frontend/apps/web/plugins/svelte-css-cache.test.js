@@ -10,8 +10,8 @@ import tailwindcss from "@tailwindcss/vite";
 import { svelteCssCache } from "./svelte-css-cache.js";
 
 for (const [component, selector] of [
-  ["Dialog/Content.svelte", ".dialog-shadow"],
-  ["Tooltip/Root.svelte", ".renderInline"]
+  ["ShadowCard.svelte", ".shadow-card"],
+  ["InlineChip.svelte", ".inline-chip"]
 ]) {
   test(`serves cold and warm CSS for ${component}`, async () => {
     const cacheDir = await mkdtemp(join(tmpdir(), "eneo-css-test-"));
@@ -27,9 +27,7 @@ for (const [component, selector] of [
     });
     try {
       await server.pluginContainer.buildStart({});
-      const filename = fileURLToPath(
-        new URL(`../../../packages/ui/src/lib/${component}`, import.meta.url)
-      );
+      const filename = fileURLToPath(new URL(`./fixtures/${component}`, import.meta.url));
       const styleId = `${filename}?svelte&type=style&lang.css`;
 
       // Request styles first, as a browser with cached component modules can

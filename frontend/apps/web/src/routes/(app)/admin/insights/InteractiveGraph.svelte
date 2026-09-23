@@ -7,7 +7,7 @@
 <script lang="ts">
   import { IconSession } from "@eneo/icons/session";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
-  import { Chart } from "@eneo/ui";
+  import * as Chart from "$lib/components/chart/index.js";
   import { Info, BarChart3 } from "lucide-svelte";
   import type { AnalyticsAggregatedData } from "@eneo/eneo-js";
   import { getConfig, prepareData } from "./prepareData";

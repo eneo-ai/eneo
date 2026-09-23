@@ -9,6 +9,7 @@
   import yaml from "highlight.js/lib/languages/yaml";
   import sql from "highlight.js/lib/languages/sql";
   import { IconCopy } from "@eneo/icons/copy";
+  import { m } from "$lib/paraglide/messages";
 
   hljs.registerLanguage("javascript", js);
   hljs.registerLanguage("python", python);
@@ -47,7 +48,9 @@
     ></pre>
 
   <button
-    class="border-stronger bg-secondary hover:bg-tertiary absolute top-2 right-2 hidden gap-1 rounded-md border p-1 shadow group-hover:flex"
+    type="button"
+    aria-label={m.copy_to_clipboard()}
+    class="border-stronger bg-secondary hover:bg-tertiary absolute top-2 right-2 flex gap-1 rounded-md border p-1 opacity-0 shadow group-hover:opacity-100 focus-visible:opacity-100"
     on:click={() => {
       navigator.clipboard.writeText(source);
       showCopiedMessage = true;
@@ -56,9 +59,7 @@
       }, 1000);
     }}
     ><IconCopy></IconCopy>
-    {#if showCopiedMessage}
-      <span class="text-base">Copied!</span>
-    {/if}</button
+    <span class="text-base" aria-live="polite">{showCopiedMessage ? m.copied() : ""}</span></button
   >
 </div>
 

@@ -115,8 +115,8 @@ export default defineConfig({
   // crashes at startup with ERR_MODULE_NOT_FOUND on the first SSR render that
   // needs it. marked + dompurify were added to apps/web/dependencies for the
   // Prompt Guide markdown component; without `noExternal` here they would be
-  // externalized, and the chat page (which renders messages via @eneo/ui's
-  // Markdown, also using marked) would 500 on hard refresh.
+  // externalized, and the chat page (which renders messages via
+  // $lib/components/markdown, also using marked) would 500 on hard refresh.
   ssr: {
     noExternal: ["marked", "dompurify"]
   }

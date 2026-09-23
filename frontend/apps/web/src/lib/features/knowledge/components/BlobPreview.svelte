@@ -4,7 +4,7 @@
   import { IconCopy } from "@eneo/icons/copy";
   import { IconDocument } from "@eneo/icons/document";
   import { IconDownload } from "@eneo/icons/download";
-  import { Markdown } from "@eneo/ui";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";

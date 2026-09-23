@@ -5,11 +5,8 @@
 -->
 
 <!--
-  Small markdown renderer scoped to the Prompt Guide modal. The modal is built
-  on shadcn primitives, and the repo's only Markdown component lives in
-  `@eneo/ui` — importing it here would break the "don't mix the two UI
-  systems in one file" rule (see `$lib/components/ui/README.md`). So we render
-  markdown locally with `marked` + DOMPurify instead of cross-importing.
+  Small markdown renderer scoped to the Prompt Guide modal: `marked` with
+  `breaks: true`, sanitized with DOMPurify.
 -->
 
 <script lang="ts">
@@ -48,7 +45,7 @@
 
 <style>
   /* {@html} output isn't scoped, so the rendered nodes are targeted with
-     :global. `.prose` (from @eneo/ui) styles text/lists/headings but leaves
+     :global. `.prose` (from @eneo/ui/styles) styles text/lists/headings but leaves
      code blocks bare — give fenced blocks a card-like surface so the guide's
      final prompt reads as a distinct artifact. */
   .pg-markdown :global(pre) {
