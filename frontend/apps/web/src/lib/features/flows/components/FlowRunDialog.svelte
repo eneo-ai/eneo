@@ -111,7 +111,7 @@
   // drives the recorder via the imperative startExternal/stopExternal API.
   type RecorderImperativeRef = {
     startExternal: () => Promise<void>;
-    stopExternal: () => void;
+    stopExternal: (reason: RecordingStopReason) => void;
   };
   const recordingSessionsByStepId: Record<string, RecordingSession | null> = {};
   const recorderRefsByStepId: Record<string, RecorderImperativeRef | null> = {};
@@ -699,9 +699,10 @@
           return { ok: false, error };
         }
       },
-      stopSegment: () => {
-        recorderRefsByStepId[stepId]?.stopExternal();
-      }
+      stopSegment: (reason) => {
+        recorderRefsByStepId[stepId]?.stopExternal(reason);
+      },
+      segmentsAwaitingUpload: () => fileInputState.segmentsAwaitingUpload(stepId)
     };
   }
 
@@ -780,6 +781,8 @@
         return m.recording_stalled();
       case "error":
         return m.recording_saved_after_error();
+      case "backlog":
+        return m.recording_stopped_upload_backlog();
       default:
         return null;
     }
@@ -830,7 +833,7 @@
     );
     if (isStale(operationGeneration, operationFlowId)) return;
     if (result.uploadedCount > 0 && !result.failed) {
-      fileInputState.clearPreservedRecording(step.step_id);
+      fileInputState.recordedSegmentUploaded(step.step_id, file);
     }
   }
 
@@ -841,6 +844,18 @@
     const operationGeneration = dialogGeneration;
     const operationFlowId = flow.id;
     const prepared = fileInputState.prepareRecordedSegment(step.step_id);
+    // Hand the reason to the session controller as soon as the segment
+    // arrives, so a recording started while this upload runs gets a fresh
+    // session. A rotation records on; error/stall trip the reconnect retry
+    // loop; every other reason closes out the session.
+    const session = recordingSessionsByStepId[step.step_id];
+    if (session && params.reason !== "rotation") {
+      if (params.reason === "error" || params.reason === "stall") {
+        session.notifyHardFailure();
+      } else {
+        disposeRecordingSession(step.step_id);
+      }
+    }
     const capturedAt = Date.now();
     const filenameBase = buildSegmentFilenameBase(
       prepared.sessionId,
@@ -897,20 +912,7 @@
         });
         if (isStale(operationGeneration, operationFlowId)) return;
       }
-      fileInputState.clearPreservedRecording(step.step_id);
-    }
-
-    // After persistence + upload settles, hand the reason to the session
-    // controller. error/stall trip the reconnect retry loop; manual/limit
-    // close out the session so the next user-click starts fresh.
-    if (isStale(operationGeneration, operationFlowId)) return;
-    const session = recordingSessionsByStepId[step.step_id];
-    if (session) {
-      if (params.reason === "error" || params.reason === "stall") {
-        session.notifyHardFailure();
-      } else {
-        disposeRecordingSession(step.step_id);
-      }
+      fileInputState.recordedSegmentUploaded(step.step_id, file);
     }
   }
 

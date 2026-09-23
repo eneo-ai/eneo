@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MAX_RETRY_ATTEMPTS,
+  MAX_SEGMENTS_AWAITING_UPLOAD,
   RETRY_BACKOFF_MS,
   RETRY_WALL_CLOCK_CAP_MS,
   RecordingSession,
@@ -25,6 +26,7 @@ function makeDeps(overrides: Partial<RecordingSessionDeps> = {}): RecordingSessi
   return {
     startSegment: vi.fn(async () => ({ ok: true })) as RecordingSessionDeps["startSegment"],
     stopSegment: vi.fn() as RecordingSessionDeps["stopSegment"],
+    segmentsAwaitingUpload: () => 0,
     ...overrides
   };
 }
@@ -113,7 +115,7 @@ describe("diffContractSnapshot", () => {
 });
 
 describe("RecordingSession lifecycle", () => {
-  it("begins external recording and arms recorder rotation without starting capture", () => {
+  it("begins external recording and rotates the recorder every period while it keeps recording", () => {
     vi.useFakeTimers();
     const states: string[] = [];
     const startSegment = vi.fn(async () => ({ ok: true as const }));
@@ -131,8 +133,33 @@ describe("RecordingSession lifecycle", () => {
     expect(startSegment).not.toHaveBeenCalled();
 
     vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
-    expect(session.summary().state).toBe("rotating");
-    expect(stopSegment).toHaveBeenCalledWith("rotation");
+    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
+    expect(stopSegment.mock.calls).toEqual([["rotation"], ["rotation"]]);
+    expect(session.summary().state).toBe("recording");
+    expect(states).toEqual(["recording"]);
+    expect(startSegment).not.toHaveBeenCalled();
+    session.dispose();
+  });
+
+  it("stops instead of rotating when the finished segment would fill the upload backlog", () => {
+    vi.useFakeTimers();
+    const stopSegment = vi.fn();
+    let awaitingUpload = MAX_SEGMENTS_AWAITING_UPLOAD - 2;
+    const session = new RecordingSession(
+      makeDeps({ stopSegment, segmentsAwaitingUpload: () => awaitingUpload }),
+      {}
+    );
+
+    session.beginRecordingExternal();
+    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
+    expect(stopSegment).toHaveBeenLastCalledWith("rotation");
+
+    awaitingUpload = MAX_SEGMENTS_AWAITING_UPLOAD - 1;
+    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
+    expect(stopSegment).toHaveBeenLastCalledWith("backlog");
+
+    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
+    expect(stopSegment).toHaveBeenCalledTimes(2);
     session.dispose();
   });
 

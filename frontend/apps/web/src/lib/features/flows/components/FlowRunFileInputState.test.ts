@@ -148,6 +148,7 @@ describe("FlowRunFileInputState", () => {
     expect(state.isStepRecording("step-a")).toBe(false);
     expect(state.getSessionPhase("step-a")).toBe("idle");
     expect(state.sessionIdsByStepIdSnapshot).toEqual({});
+    expect(state.segmentsAwaitingUpload("step-a")).toBe(0);
     expect(state.isStorageDegraded).toBe(true);
   });
 
@@ -165,17 +166,28 @@ describe("FlowRunFileInputState", () => {
     expect(firstB.sessionId).not.toBe(firstA.sessionId);
   });
 
-  it("clears a preserved recording after successful upload without resetting the recorder", () => {
+  it("keeps recorded segments awaiting upload until their own upload succeeds", () => {
     const state = new FlowRunFileInputState();
-    state.recordSegmentPersistence({
-      stepId: "step-a",
-      file: recordingFile(),
-      notice: "upload pending",
-      degraded: false
-    });
+    const rotated = recordingFile("rotated.webm");
+    const final = recordingFile("final.webm");
+    for (const file of [rotated, final]) {
+      state.recordSegmentPersistence({
+        stepId: "step-a",
+        file,
+        notice: "upload pending",
+        degraded: false
+      });
+    }
+    expect(state.segmentsAwaitingUpload("step-a")).toBe(2);
 
-    state.clearPreservedRecording("step-a");
+    // An earlier segment finishing its upload must not drop the preserved
+    // later one, whose upload may still fail.
+    state.recordedSegmentUploaded("step-a", rotated);
+    expect(state.segmentsAwaitingUpload("step-a")).toBe(1);
+    expect(state.getRecordedFile("step-a")).toBe(final);
 
+    state.recordedSegmentUploaded("step-a", final);
+    expect(state.segmentsAwaitingUpload("step-a")).toBe(0);
     expect(state.getRecordedFile("step-a")).toBeNull();
     expect(state.getRecorderResetToken("step-a")).toBe(0);
     expect(state.getRecordingNotice("step-a")).toBe("upload pending");
@@ -237,6 +249,7 @@ describe("FlowRunFileInputState", () => {
     expect(state.isDraggingStep("step-a")).toBe(false);
     expect(state.getResumeHint("step-a")).toBeNull();
     expect(state.getRecordedFile("step-a")).toBeNull();
+    expect(state.segmentsAwaitingUpload("step-a")).toBe(0);
     expect(state.isStorageDegraded).toBe(false);
 
     state.recordUploadedFile("step-b", uploadedFile("file-b"));

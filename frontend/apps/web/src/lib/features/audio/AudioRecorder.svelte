@@ -59,7 +59,6 @@
   let analyserNode: AnalyserNode | null;
   let levelBuffer = new Float32Array();
 
-  let recordingBuffer: Blob[] = [];
   let recordedBlob: Blob | null = null;
   let recordedMimeType = "";
   let completedRecordingAt = dayjs();
@@ -313,7 +312,6 @@
     clearAudioPreviewUrl();
     recordedBlob = null;
     recordedMimeType = "";
-    recordingBuffer = [];
     recordingError = null;
     recordingErrorHint = null;
     recordingStats = {
@@ -460,7 +458,6 @@
 
   async function doStartRecording(origin: RecordingStartOrigin): Promise<void> {
     try {
-      recordingBuffer = [];
       recordedBlob = null;
       recordedMimeType = "";
       recordingError = null;
@@ -498,120 +495,12 @@
       }
 
       if (stream) {
-        const recordingOptions = selectAudioRecordingOptions();
-        activeAudioBitsPerSecond = recordingOptions.audioBitsPerSecond;
-        const recorder = new MediaRecorder(stream, recordingOptions);
-        mediaRecorder = recorder;
-        const initialMimeType = recorder.mimeType || recordingOptions.mimeType || "";
-
-        recorder.addEventListener("dataavailable", (event) => {
-          if (event.data.size > 0) {
-            const now = performance.now();
-            const maxBytesValue =
-              typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
-                ? maxBytes
-                : null;
-            const nextTotalBytes = recordingStats.totalBytes + event.data.size;
-
-            // Always retain the chunk before the size-limit stop. Dropping
-            // it would discard up to TIMESLICE_MS of audio that the user
-            // already produced; a few hundred bytes over the cap is the
-            // less-bad outcome.
-            recordingBuffer.push(event.data);
-            recordingStats.chunks++;
-            recordingStats.totalBytes = nextTotalBytes;
-            recordingStats.lastChunkTime = now;
-            requestDataPendingAt = null;
-            if (!firstChunkSeen) {
-              firstChunkSeen = true;
-              recordingStats.firstChunkSeenAt = now;
-            }
-
-            if (maxBytesValue && nextTotalBytes >= maxBytesValue) {
-              recordingStats.errors.push(
-                "Recording stopped after reaching size limit at " + new Date().toISOString()
-              );
-              setStopReason("limit");
-              stopRecording();
-            }
-          } else {
-            // Empty chunks must NOT bump lastChunkTime: that would silently
-            // disarm the stall watchdog when the microphone is producing
-            // zero audio, which is exactly the failure we are trying to
-            // detect (Windows + Firefox produced only 287 B / 6.9 KB files).
-            console.warn("Received empty data chunk");
-            recordingStats.errors.push("Empty chunk received at " + new Date().toISOString());
-          }
-        });
-
-        recorder.addEventListener("error", (event) => {
-          const errorMsg = "MediaRecorder error: " + (event.error?.message || "Unknown error");
-          console.error(errorMsg, event);
-          setRecordingErrorState(errorMsg, event.error);
-          recordingStats.errors.push(errorMsg);
-          recordingState = "error";
-          setStopReason("error");
-          stopRecording();
-        });
-
-        recorder.addEventListener("stop", () => {
-          try {
-            if (discardRecordingOnStop) {
-              return;
-            }
-            recordingState = "processing";
-
-            if (recordingBuffer.length === 0) {
-              const errorMsg = m.no_audio_data_captured();
-              setRecordingErrorState(errorMsg);
-              recordingStats.errors.push(errorMsg);
-              recordingState = "error";
-              setStopReason("error");
-              return;
-            }
-
-            recordedMimeType =
-              recorder.mimeType ||
-              initialMimeType ||
-              recordingBuffer.find((chunk) => chunk.type)?.type ||
-              "audio/webm";
-            completedRecordingAt = dayjs();
-            recordedBlob = new Blob(recordingBuffer, { type: recordedMimeType });
-            audioURL = URL.createObjectURL(recordedBlob);
-            const reason = stopReason;
-            const durationMs = Math.max(
-              0,
-              completedRecordingAt.diff(startedRecordingAt, "millisecond")
-            );
-            resetStopReason();
-            onRecordingDone({
-              blob: recordedBlob,
-              mimeType: recordedMimeType,
-              reason,
-              durationMs
-            });
-            recordingState = "complete";
-          } catch (error) {
-            const errorMsg =
-              "Failed to process recording: " +
-              (error instanceof Error ? error.message : String(error));
-            console.error(errorMsg, error);
-            setRecordingErrorState(errorMsg, error);
-            recordingStats.errors.push(errorMsg);
-            recordingState = "error";
-            setStopReason("error");
-          } finally {
-            releaseMediaCapture();
-          }
-        });
-
-        recorder.start(TIMESLICE_MS);
+        mediaRecorder = startSegmentRecorder(stream);
         // Initialise the watchdog AFTER recorder.start() so getUserMedia
         // latency (especially on the very first permission grant) does not
         // eat into the stall budget.
         const startTimestamp = performance.now();
         recordingStats.lastChunkTime = startTimestamp;
-        recordingStats.recorderMimeType = recorder.mimeType || initialMimeType;
         startedRecordingAt = dayjs();
         lastMeterUpdateAt = 0;
         lastAudibleAt = startTimestamp;
@@ -624,15 +513,6 @@
         startMonitoringLoop();
         startStallChecker();
         attachVisibilityHandler();
-
-        recorder.addEventListener("pause", () => {
-          console.warn("MediaRecorder was paused unexpectedly");
-          recordingStats.errors.push("Recorder paused at " + new Date().toISOString());
-        });
-
-        recorder.addEventListener("resume", () => {
-          recordingStats.errors.push("Recorder resumed at " + new Date().toISOString());
-        });
       } else {
         const errorMsg = "No media stream available";
         setRecordingErrorState(errorMsg);
@@ -655,6 +535,169 @@
       onRecordingStateChange(false);
       recordingState = "error";
     }
+  }
+
+  // One MediaRecorder per segment. Rotation hands the live stream to a new
+  // recorder while the replaced one finishes its own file, so everything a
+  // recorder needs to finish lives in this closure.
+  function startSegmentRecorder(stream: MediaStream): MediaRecorder {
+    const recordingOptions = selectAudioRecordingOptions();
+    activeAudioBitsPerSecond = recordingOptions.audioBitsPerSecond;
+    const recorder = new MediaRecorder(stream, recordingOptions);
+    const initialMimeType = recorder.mimeType || recordingOptions.mimeType || "";
+    const chunks: Blob[] = [];
+    const segmentStartedAt = dayjs();
+    const isLive = () => mediaRecorder === recorder;
+    const finishedSegment = () => {
+      const mimeType =
+        recorder.mimeType ||
+        initialMimeType ||
+        chunks.find((chunk) => chunk.type)?.type ||
+        "audio/webm";
+      return {
+        blob: new Blob(chunks, { type: mimeType }),
+        mimeType,
+        durationMs: Math.max(0, dayjs().diff(segmentStartedAt, "millisecond"))
+      };
+    };
+
+    recorder.addEventListener("dataavailable", (event) => {
+      if (event.data.size > 0) {
+        // Always retain the chunk before the size-limit stop. Dropping
+        // it would discard up to TIMESLICE_MS of audio that the user
+        // already produced; a few hundred bytes over the cap is the
+        // less-bad outcome.
+        chunks.push(event.data);
+        // A replaced recorder's last chunk belongs to its own file, not to
+        // the live segment's size and stall bookkeeping.
+        if (!isLive()) return;
+        const now = performance.now();
+        const maxBytesValue =
+          typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
+            ? maxBytes
+            : null;
+        const nextTotalBytes = recordingStats.totalBytes + event.data.size;
+        recordingStats.chunks++;
+        recordingStats.totalBytes = nextTotalBytes;
+        recordingStats.lastChunkTime = now;
+        requestDataPendingAt = null;
+        if (!firstChunkSeen) {
+          firstChunkSeen = true;
+          recordingStats.firstChunkSeenAt = now;
+        }
+
+        if (maxBytesValue && nextTotalBytes >= maxBytesValue) {
+          recordingStats.errors.push(
+            "Recording stopped after reaching size limit at " + new Date().toISOString()
+          );
+          setStopReason("limit");
+          stopRecording();
+        }
+      } else {
+        // Empty chunks must NOT bump lastChunkTime: that would silently
+        // disarm the stall watchdog when the microphone is producing
+        // zero audio, which is exactly the failure we are trying to
+        // detect (Windows + Firefox produced only 287 B / 6.9 KB files).
+        console.warn("Received empty data chunk");
+        recordingStats.errors.push("Empty chunk received at " + new Date().toISOString());
+      }
+    });
+
+    recorder.addEventListener("error", (event) => {
+      const errorMsg = "MediaRecorder error: " + (event.error?.message || "Unknown error");
+      console.error(errorMsg, event);
+      recordingStats.errors.push(errorMsg);
+      // A replaced recorder failing to finish its file must not stop the live one.
+      if (!isLive()) return;
+      setRecordingErrorState(errorMsg, event.error);
+      recordingState = "error";
+      setStopReason("error");
+      stopRecording();
+    });
+
+    recorder.addEventListener("stop", () => {
+      if (!isLive()) {
+        // Rotation replaced this recorder: hand its file over and leave the
+        // stream, the meter and the live recorder alone.
+        if (!discardRecordingOnStop && chunks.length > 0) {
+          onRecordingDone({ ...finishedSegment(), reason: "rotation" });
+        }
+        return;
+      }
+      try {
+        if (discardRecordingOnStop) {
+          return;
+        }
+        recordingState = "processing";
+
+        if (chunks.length === 0) {
+          const errorMsg = m.no_audio_data_captured();
+          setRecordingErrorState(errorMsg);
+          recordingStats.errors.push(errorMsg);
+          recordingState = "error";
+          setStopReason("error");
+          return;
+        }
+
+        completedRecordingAt = dayjs();
+        const segment = finishedSegment();
+        recordedMimeType = segment.mimeType;
+        recordedBlob = segment.blob;
+        audioURL = URL.createObjectURL(recordedBlob);
+        const reason = stopReason;
+        resetStopReason();
+        onRecordingDone({ ...segment, reason });
+        recordingState = "complete";
+      } catch (error) {
+        const errorMsg =
+          "Failed to process recording: " +
+          (error instanceof Error ? error.message : String(error));
+        console.error(errorMsg, error);
+        setRecordingErrorState(errorMsg, error);
+        recordingStats.errors.push(errorMsg);
+        recordingState = "error";
+        setStopReason("error");
+      } finally {
+        releaseMediaCapture();
+      }
+    });
+
+    recorder.addEventListener("pause", () => {
+      console.warn("MediaRecorder was paused unexpectedly");
+      recordingStats.errors.push("Recorder paused at " + new Date().toISOString());
+    });
+
+    recorder.addEventListener("resume", () => {
+      recordingStats.errors.push("Recorder resumed at " + new Date().toISOString());
+    });
+
+    recorder.start(TIMESLICE_MS);
+    recordingStats.recorderMimeType = recorder.mimeType || initialMimeType;
+    return recorder;
+  }
+
+  // Rotation starts the next segment's recorder on the live stream before
+  // stopping the current one, so no audio falls between the two files and the
+  // microphone, AudioContext and meter keep running. The replaced recorder
+  // hands its file over with the "rotation" reason once it stops.
+  function rotateSegment() {
+    const replaced = mediaRecorder;
+    if (!isRecording || !mediaStream || !replaced || replaced.state === "inactive") return;
+    try {
+      mediaRecorder = startSegmentRecorder(mediaStream);
+    } catch (error) {
+      // Keep recording into the current file; the next rotation tries again.
+      console.warn("Segment rotation failed", error);
+      recordingStats.errors.push("Segment rotation failed: " + formatMediaError(error));
+      return;
+    }
+    // The new file starts empty: the size limit and the stall watchdog
+    // measure it from zero.
+    recordingStats.totalBytes = 0;
+    recordingStats.lastChunkTime = performance.now();
+    firstChunkSeen = false;
+    requestDataPendingAt = null;
+    replaced.stop();
   }
 
   function stopRecording() {
@@ -700,7 +743,14 @@
     }
   }
 
-  export function stopExternal(): void {
+  // "rotation" finishes the current segment and records on; any other reason
+  // stops and labels the finished recording with it.
+  export function stopExternal(reason: RecordingStopReason = "manual"): void {
+    if (reason === "rotation") {
+      rotateSegment();
+      return;
+    }
+    setStopReason(reason);
     stopRecording();
   }
 

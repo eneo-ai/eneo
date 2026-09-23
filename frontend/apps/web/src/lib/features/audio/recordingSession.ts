@@ -4,18 +4,23 @@ import type { ContractSnapshot } from "./recordingSessionStore";
 import type { RecordingStopReason } from "./recordedAudioFile";
 
 export const SEGMENT_ROTATION_MS = 20 * 60 * 1000;
+// Rotation records on only while fewer finished segments than this wait for
+// upload; the rotation that would reach it stops the recording instead.
+export const MAX_SEGMENTS_AWAITING_UPLOAD = 3;
 export const RETRY_BACKOFF_MS = [1_000, 2_000, 4_000] as const;
 export const MAX_RETRY_ATTEMPTS = 3;
 export const RETRY_WALL_CLOCK_CAP_MS = 30_000;
 const RECORDING_FILENAME_PREFIX = "recording-";
 
-export type SessionState = "idle" | "recording" | "rotating" | "reconnecting" | "paused-failed";
+export type SessionState = "idle" | "recording" | "reconnecting" | "paused-failed";
 
 export type SegmentStartOutcome = { ok: true } | { ok: false; error: unknown };
 
 export type RecordingSessionDeps = {
   startSegment: () => Promise<SegmentStartOutcome>;
   stopSegment: (reason: RecordingStopReason) => void;
+  // Finished segments of this recording's step that are not uploaded yet.
+  segmentsAwaitingUpload: () => number;
 };
 
 export type RecordingSessionEventListeners = {
@@ -238,7 +243,7 @@ export class RecordingSession {
   }
 
   notifyHardFailure(): void {
-    if (this._state === "recording" || this._state === "rotating") {
+    if (this._state === "recording") {
       this.transitionTo("reconnecting");
       this.scheduleRetry();
     }
@@ -248,14 +253,22 @@ export class RecordingSession {
     return this.deps.startSegment();
   }
 
+  // The recorder rotates on the live stream and starts the next segment at
+  // once, so the session keeps recording and only re-arms.
   private armRotationTimer(): void {
     this.cancelRotationTimer();
     this._rotationTimer = setTimeout(() => {
       this._rotationTimer = null;
-      if (this._state === "recording") {
-        this.transitionTo("rotating");
-        this.deps.stopSegment("rotation");
+      if (this._state !== "recording") return;
+      // The finished segment joins those waiting for upload. When that fills
+      // the backlog, stop visibly rather than keep piling up audio the server
+      // has not received.
+      if (this.deps.segmentsAwaitingUpload() + 1 >= MAX_SEGMENTS_AWAITING_UPLOAD) {
+        this.deps.stopSegment("backlog");
+        return;
       }
+      this.deps.stopSegment("rotation");
+      this.armRotationTimer();
     }, SEGMENT_ROTATION_MS);
   }
 

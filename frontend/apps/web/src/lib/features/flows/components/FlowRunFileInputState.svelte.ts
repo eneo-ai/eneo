@@ -24,6 +24,9 @@ export class FlowRunFileInputState {
   #recordingNoticesByStepId = $state<Record<string, string | null>>({});
   #skippedMessagesByStepId = $state<Record<string, string | null>>({});
   #activeUploadCountByStepId = $state<Record<string, number>>({});
+  // Persisted recorded segments whose upload has not succeeded: queued, in
+  // flight or failed.
+  #segmentsAwaitingUploadByStepId = $state<Record<string, number>>({});
   #recordingStepIds = $state<string[]>([]);
   #draggingStepId = $state<string | null>(null);
   #recordingSessionState = $state<RecordingSessionState>(emptyRecordingSessionState());
@@ -75,6 +78,10 @@ export class FlowRunFileInputState {
 
   isStepUploading(stepId: string): boolean {
     return (this.#activeUploadCountByStepId[stepId] ?? 0) > 0;
+  }
+
+  segmentsAwaitingUpload(stepId: string): number {
+    return this.#segmentsAwaitingUploadByStepId[stepId] ?? 0;
   }
 
   isStepRecording(stepId: string): boolean {
@@ -229,10 +236,22 @@ export class FlowRunFileInputState {
     }
     this.#recordedFilesByStepId = { ...this.#recordedFilesByStepId, [stepId]: file };
     this.#recordingNoticesByStepId = { ...this.#recordingNoticesByStepId, [stepId]: notice };
+    this.#segmentsAwaitingUploadByStepId = {
+      ...this.#segmentsAwaitingUploadByStepId,
+      [stepId]: this.segmentsAwaitingUpload(stepId) + 1
+    };
   }
 
-  clearPreservedRecording(stepId: string): void {
-    this.#recordedFilesByStepId = { ...this.#recordedFilesByStepId, [stepId]: null };
+  // Only the uploaded file leaves the preserved slot: a later segment preserved
+  // meanwhile still needs its own upload, and its retry if that fails.
+  recordedSegmentUploaded(stepId: string, file: File): void {
+    if (this.#recordedFilesByStepId[stepId] === file) {
+      this.#recordedFilesByStepId = { ...this.#recordedFilesByStepId, [stepId]: null };
+    }
+    this.#segmentsAwaitingUploadByStepId = {
+      ...this.#segmentsAwaitingUploadByStepId,
+      [stepId]: Math.max(0, this.segmentsAwaitingUpload(stepId) - 1)
+    };
   }
 
   discardStepRecording(stepId: string): void {
@@ -245,6 +264,7 @@ export class FlowRunFileInputState {
     this.#recordingNoticesByStepId = { ...this.#recordingNoticesByStepId, [stepId]: null };
     this.#skippedMessagesByStepId = { ...this.#skippedMessagesByStepId, [stepId]: null };
     this.#runtimeFilesByStepId = { ...this.#runtimeFilesByStepId, [stepId]: [] };
+    this.#segmentsAwaitingUploadByStepId = { ...this.#segmentsAwaitingUploadByStepId, [stepId]: 0 };
     this.#recordingStepIds = this.#recordingStepIds.filter((id) => id !== stepId);
     this.#recordingSessionState = clearStepSessionInState(this.#recordingSessionState, stepId);
     this.forgetSessionPhase(stepId);
@@ -333,6 +353,7 @@ export class FlowRunFileInputState {
     this.#recordingNoticesByStepId = {};
     this.#skippedMessagesByStepId = {};
     this.#activeUploadCountByStepId = {};
+    this.#segmentsAwaitingUploadByStepId = {};
     this.#recordingStepIds = [];
     this.#draggingStepId = null;
     this.#recordingSessionState = emptyRecordingSessionState();

@@ -3,7 +3,9 @@
 // segment) from a user-initiated stop (finish the session). Without
 // this distinction the dialog would either silently keep recording
 // after the user pressed Stop, or stop after every rotation tick.
-export type RecordingStopReason = "manual" | "limit" | "stall" | "error" | "rotation";
+// "backlog" is a rotation that stopped instead, because too many finished
+// segments were still waiting for upload.
+export type RecordingStopReason = "manual" | "limit" | "stall" | "error" | "rotation" | "backlog";
 
 function inferRecordedAudioExtension(mimeType: string): string {
   const normalized = mimeType.split(";")[0]?.trim().toLowerCase() ?? "";

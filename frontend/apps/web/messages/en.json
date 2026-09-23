@@ -1914,6 +1914,7 @@
   "recording_limit_reached": "Recording hit the size limit and was stopped. You can download the audio if needed.",
   "recording_stalled": "Recording stopped because no audio data was received for a while. You can download what was captured.",
   "recording_saved_after_error": "Recording stopped due to an error. You can download what was captured.",
+  "recording_stopped_upload_backlog": "Recording stopped because earlier parts have not been uploaded yet. Everything you recorded is still here. Start recording again once the upload is complete.",
   "recording_unsaved_warning": "You have an unsaved recording. Leaving this page will discard it.",
   "view_diagnostics": "View diagnostics",
   "no_audio_data_captured": "No audio data was captured",
