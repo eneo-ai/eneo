@@ -181,6 +181,8 @@ async function askFollowUp(question: string, answer: string) {
   await expect.element(composer()).toBeEnabled();
 }
 
+const liveRegion = () => document.querySelector("[data-widget-chat] > [aria-live='polite']")!;
+
 beforeEach(() => {
   fake.asks.length = 0;
   fake.feedback.length = 0;
@@ -411,6 +413,21 @@ describe("WidgetChat", () => {
 
     await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
     await vi.waitFor(() => expect(document.activeElement).toBe(helpful.element()));
+  });
+
+  test("every answer is announced as complete, not only the first", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    await vi.waitFor(() => expect(liveRegion().textContent).toContain("widget_answer_complete"));
+
+    const changes: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => changes.push(...records));
+    observer.observe(liveRegion(), { childList: true, subtree: true, characterData: true });
+    await askFollowUp("Och på lördagar?", "Lördagar har biblioteket stängt.");
+    await vi.waitFor(() => expect(changes.length).toBeGreaterThan(0));
+    observer.disconnect();
+    expect(liveRegion().textContent).toContain("widget_answer_complete");
   });
 
   test("the send arrow sends and hands focus back to the question field", async () => {

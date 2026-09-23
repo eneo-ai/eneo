@@ -93,6 +93,25 @@ describe("WidgetMessage sources", () => {
     await expect.element(page.getByText("widget_reference_copied").first()).toBeVisible();
   });
 
+  test("announces every copy, not only the first", async () => {
+    vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    renderMessage();
+    await page.getByRole("button", { name: /widget_sources_count_other/ }).click();
+    const copy = page.getByRole("button", { name: /widget_copy_reference_for/ });
+    await copy.click();
+    const region = document.querySelector("section [aria-live='polite']")!;
+    await vi.waitFor(() => expect(region.textContent).toContain("widget_reference_copied"));
+
+    // Identical text set twice leaves the DOM alone and a screen reader silent.
+    const changes: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => changes.push(...records));
+    observer.observe(region, { childList: true, subtree: true, characterData: true });
+    await copy.click();
+    await vi.waitFor(() => expect(changes.length).toBeGreaterThan(0));
+    observer.disconnect();
+    expect(region.textContent).toContain("widget_reference_copied");
+  });
+
   test("shows the reference as text when the clipboard is unavailable", async () => {
     vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"));
     renderMessage();

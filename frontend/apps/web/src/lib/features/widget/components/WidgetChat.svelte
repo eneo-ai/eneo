@@ -52,7 +52,9 @@
   let newQuestionButton = $state<HTMLButtonElement | null>(null);
 
   let status = $state<"idle" | "verifying" | "sending">("idle");
-  let announcement = $state("");
+  // Keyed so every completion is announced: the same text set again would
+  // leave the live region untouched after the first answer.
+  let announcement = $state({ id: 0, text: "" });
   let errorMessage = $state<string | null>(null);
   let unavailable = $state(false);
   // A 429 with Retry-After: the composer stays closed until the window passes.
@@ -172,6 +174,10 @@
     }
   }
 
+  function announce(text: string) {
+    announcement = { id: announcement.id + 1, text };
+  }
+
   /** The turn exists on the server: remember it and tell the host page one began. */
   function keepConversation(wasNew: boolean) {
     const sessionId = chat.currentConversation.id;
@@ -188,7 +194,7 @@
       await session.ensureToken();
       await chat.askQuestion(question);
       keepConversation(wasNew);
-      announcement = m.widget_answer_complete();
+      announce(m.widget_answer_complete());
     } catch (error) {
       if (isTokenRejected(error) && !retried) {
         // Stale after a pause/config change or simply expired: re-mint once.
@@ -341,7 +347,9 @@
     {/if}
   </main>
 
-  <div class="sr-only" aria-live="polite" aria-atomic="true">{announcement}</div>
+  <div class="sr-only" aria-live="polite" aria-atomic="true">
+    {#key announcement.id}{announcement.text}{/key}
+  </div>
 
   <footer class="border-default flex flex-col gap-2 border-t px-4 py-3">
     {#if errorMessage}

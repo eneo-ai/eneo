@@ -49,8 +49,14 @@
   let expanded = $state(false);
   let copiedId = $state<string | null>(null);
   let copyFailedId = $state<string | null>(null);
-  let announcement = $state("");
+  // Keyed so a second copy is announced too: the same text set twice would
+  // leave the live region untouched.
+  let announcement = $state({ id: 0, text: "" });
   let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function announce(text: string) {
+    announcement = { id: announcement.id + 1, text };
+  }
 
   async function revealSource(sourceIndex: number) {
     expanded = true;
@@ -80,14 +86,14 @@
       await navigator.clipboard.writeText(text);
       copiedId = source.id;
       copyFailedId = null;
-      announcement = m.widget_reference_copied();
+      announce(m.widget_reference_copied());
       if (copiedTimer) clearTimeout(copiedTimer);
       copiedTimer = setTimeout(() => (copiedId = null), 2000);
     } catch {
       // Clipboard access is denied in some embedding contexts; leave the
       // text on screen so the visitor can select it instead.
       copyFailedId = source.id;
-      announcement = m.widget_reference_copy_failed();
+      announce(m.widget_reference_copy_failed());
     }
   }
 
@@ -211,7 +217,9 @@
               {/each}
             </ol>
           {/if}
-          <span class="sr-only" aria-live="polite">{announcement}</span>
+          <span class="sr-only" aria-live="polite"
+            >{#key announcement.id}{announcement.text}{/key}</span
+          >
         </section>
       {/if}
     {/if}
