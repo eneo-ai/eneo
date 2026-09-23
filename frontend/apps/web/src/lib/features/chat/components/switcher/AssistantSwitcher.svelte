@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { IconCheck } from "@eneo/icons/check";
   import { IconChevronUpDown } from "@eneo/icons/chevron-up-down";
   import { IconPeople } from "@eneo/icons/people";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { createSelect } from "@melt-ui/svelte";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import { Select as SelectPrimitive } from "bits-ui";
   import SpaceChip from "$lib/features/spaces/components/SpaceChip.svelte";
   import { goto } from "$app/navigation";
   import { fly } from "svelte/transition";
@@ -31,95 +31,65 @@
 
   const chat = getChatService();
 
-  const {
-    elements: { trigger, menu, option },
-    states: { selected }
-  } = createSelect<GroupChatSparse | AssistantSparse>({
-    positioning: {
-      placement: "bottom-start",
-      fitViewport: true
-    },
-    defaultSelected: { value: $state.snapshot(chat.partner) },
-    onSelectedChange: ({ next }) => {
-      if (next) {
-        const url = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: next.value })}`;
-        // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with space id and chat query params
-        goto(url);
-      }
-      return next;
-    }
-  });
+  function openPartner(id: string) {
+    const partner = $currentSpace.applications.chat.find((candidate) => candidate.id === id);
+    if (!partner) return;
+    const url = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: partner })}`;
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with space id and chat query params
+    goto(url);
+  }
 </script>
 
-<button
-  {...$trigger}
-  use:trigger
-  in:fly|global={{ x: -5, duration: parent ? 300 : 0, easing: quadInOut, opacity: 0.3 }}
-  class="group text-primary hover:border-dimmer hover:bg-hover-default flex max-w-[calc(100%_-_1rem)] items-center justify-between gap-2 overflow-hidden rounded-lg border border-transparent py-0.5 pr-1 pl-2 text-[1.4rem] leading-normal font-extrabold"
->
-  <span class="truncate">{chat.partner.name}</span>
-  <!-- translate-y to make it look on the same line as the chevron in the space selector -->
-  <IconChevronUpDown
-    class="text-secondary group-hover:text-primary min-w-6 translate-y-[0.05rem]"
-  />
-</button>
-
-<div
-  class="border-default bg-primary z-10 flex min-w-[24vw] flex-col overflow-y-auto rounded-lg border shadow-xl"
-  {...$menu}
-  use:menu
->
-  <div
-    class="bg-frosted-glass-secondary border-default sticky top-0 border-b px-4 py-2 pr-12 font-mono text-sm"
-  >
-    {m.select_an_assistant()}
-  </div>
-  {#each $currentSpace.applications.chat as partner (partner.id)}
-    <div
-      class="border-default hover:bg-hover-default flex min-h-16 items-center gap-4 border-b px-4 hover:cursor-pointer"
-      {...$option({ value: partner, label: partner.name, disabled: false })}
-      use:option
-    >
-      <div class="relative flex-shrink-0">
-        {#if getIconUrl(partner)}
-          <div class="h-10 w-10 overflow-hidden rounded-lg">
-            <img src={getIconUrl(partner)} alt={partner.name} class="h-full w-full object-cover" />
+<Select.Root type="single" value={chat.partner.id} onValueChange={openPartner}>
+  <SelectPrimitive.Trigger>
+    {#snippet child({ props })}
+      <button
+        {...props}
+        in:fly|global={{ x: -5, duration: parent ? 300 : 0, easing: quadInOut, opacity: 0.3 }}
+        class="group text-primary hover:border-dimmer hover:bg-hover-default flex max-w-[calc(100%_-_1rem)] items-center justify-between gap-2 overflow-hidden rounded-lg border border-transparent py-0.5 pr-1 pl-2 text-[1.4rem] leading-normal font-extrabold"
+      >
+        <span class="truncate">{chat.partner.name}</span>
+        <!-- translate-y to make it look on the same line as the chevron in the space selector -->
+        <IconChevronUpDown
+          class="text-secondary group-hover:text-primary min-w-6 translate-y-[0.05rem]"
+        />
+      </button>
+    {/snippet}
+  </SelectPrimitive.Trigger>
+  <Select.Content align="start" class="min-w-[24vw]">
+    <Select.Group>
+      <Select.GroupHeading>{m.select_an_assistant()}</Select.GroupHeading>
+      {#each $currentSpace.applications.chat as partner (partner.id)}
+        <Select.Item value={partner.id} label={partner.name} class="min-h-12 gap-3">
+          <div class="relative flex-shrink-0">
+            {#if getIconUrl(partner)}
+              <div class="h-10 w-10 overflow-hidden rounded-lg">
+                <img src={getIconUrl(partner)} alt="" class="h-full w-full object-cover" />
+              </div>
+              {#if partner.type === "group-chat"}
+                <div class="group-chat-badge">
+                  <IconPeople class="!h-3 !w-3" />
+                </div>
+              {/if}
+            {:else if partner.type === "group-chat"}
+              <div
+                class="bg-hover-default text-secondary flex h-10 w-10 items-center justify-center rounded-lg"
+              >
+                <IconPeople class="!h-5 !w-5" />
+              </div>
+            {:else}
+              <SpaceChip space={{ ...partner, personal: false }}></SpaceChip>
+            {/if}
           </div>
-          {#if partner.type === "group-chat"}
-            <div class="group-chat-badge">
-              <IconPeople class="!h-3 !w-3" />
-            </div>
-          {/if}
-        {:else if partner.type === "group-chat"}
-          <div
-            class="bg-hover-default text-secondary flex h-10 w-10 items-center justify-center rounded-lg"
-          >
-            <IconPeople class="!h-5 !w-5" />
-          </div>
-        {:else}
-          <SpaceChip space={{ ...partner, personal: false }}></SpaceChip>
-        {/if}
-      </div>
-      <span class="flex-grow truncate">{formatEmojiTitle(partner.name)}</span>
-      <div class="check {$selected?.value.id === partner.id ? 'block' : 'hidden'}">
-        <IconCheck class="text-positive-stronger !size-8"></IconCheck>
-      </div>
-    </div>
-  {/each}
-</div>
+          <span class="truncate">{formatEmojiTitle(partner.name)}</span>
+        </Select.Item>
+      {/each}
+    </Select.Group>
+  </Select.Content>
+</Select.Root>
 
 <style lang="postcss">
   @reference "@eneo/ui/styles";
-  div[data-highlighted] {
-    @apply bg-hover-default;
-  }
-
-  /* div[data-selected] { } */
-
-  div[data-disabled] {
-    @apply opacity-30 hover:bg-transparent;
-  }
-
   .group-chat-badge {
     @apply bg-primary border-default text-secondary absolute -right-1.5 -bottom-1.5 flex h-5 w-5 items-center justify-center rounded-full border shadow-sm;
   }

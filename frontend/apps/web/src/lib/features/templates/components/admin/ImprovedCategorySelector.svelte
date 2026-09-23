@@ -1,11 +1,9 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { createSelect } from "@melt-ui/svelte";
-  import { IconChevronDown } from "@eneo/icons/chevron-down";
-  import { IconCheck } from "@eneo/icons/check";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { m } from "$lib/paraglide/messages";
   import { assistantTemplateCategories, appTemplateCategories } from "../../TemplateCategories";
 
@@ -55,27 +53,6 @@
       value = customValue;
     }
   });
-
-  const {
-    elements: { trigger, menu, option },
-    helpers: { isSelected },
-    states: { open }
-  } = createSelect<string>({
-    defaultSelected: { value: untrack(() => predefinedValue) },
-    positioning: {
-      placement: "bottom",
-      strategy: "fixed",
-      fitViewport: true,
-      sameWidth: true
-    },
-    portal: "body",
-    onSelectedChange: ({ next }) => {
-      if (next?.value) {
-        predefinedValue = next.value;
-      }
-      return next;
-    }
-  });
 </script>
 
 <div class="flex flex-col gap-4">
@@ -103,46 +80,29 @@
   <!-- Selector or Input based on mode -->
   <div class="flex flex-col gap-2">
     {#if isPredefined}
-      <button
-        {...$trigger}
-        use:trigger
-        type="button"
-        aria-label={m.select_category()}
-        class="border-default hover:bg-hover-default flex h-11 items-center justify-between rounded-lg border px-4 py-2.5"
+      <Select.Root
+        type="single"
+        value={predefinedValue}
+        onValueChange={(next) => {
+          if (next) predefinedValue = next;
+        }}
       >
-        <span class="text-default text-sm font-medium">
+        <Select.Trigger aria-label={m.select_category()} class="h-11 w-full">
           {predefinedCategories[predefinedValue]?.title || m.select_category()}
-        </span>
-        <IconChevronDown class="text-dimmer" />
-      </button>
-
-      {#if $open}
-        <div
-          class="border-default bg-primary z-50 flex max-h-64 flex-col overflow-y-auto rounded-lg border shadow-xl"
-          {...$menu}
-          use:menu
-        >
+        </Select.Trigger>
+        <Select.Content class="max-h-64">
           {#each categoryKeys as categoryKey (categoryKey)}
-            <div
-              class="border-default hover:bg-hover-default flex min-h-12 items-center justify-between border-b px-4 py-3 last:border-b-0 hover:cursor-pointer"
-              {...$option({ value: categoryKey })}
-              use:option
+            <Select.Item
+              value={categoryKey}
+              label={predefinedCategories[categoryKey].title}
+              class="flex-col items-start gap-1 py-2"
             >
-              <div class="flex flex-col gap-1">
-                <span class="text-default text-sm font-medium">
-                  {predefinedCategories[categoryKey].title}
-                </span>
-                <span class="text-secondary text-sm">
-                  {predefinedCategories[categoryKey].description}
-                </span>
-              </div>
-              <div class="check {$isSelected(categoryKey) ? 'block' : 'hidden'}">
-                <IconCheck class="text-positive-default" />
-              </div>
-            </div>
+              <span class="font-medium">{predefinedCategories[categoryKey].title}</span>
+              <span class="text-secondary">{predefinedCategories[categoryKey].description}</span>
+            </Select.Item>
           {/each}
-        </div>
-      {/if}
+        </Select.Content>
+      </Select.Root>
     {:else}
       <Input
         bind:value={customValue}
@@ -157,15 +117,3 @@
     {/if}
   </div>
 </div>
-
-<style lang="postcss">
-  @reference '@eneo/ui/styles';
-
-  div[data-highlighted] {
-    @apply bg-hover-dimmer;
-  }
-
-  div[data-disabled] {
-    @apply opacity-30 hover:bg-transparent;
-  }
-</style>
