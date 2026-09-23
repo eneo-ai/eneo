@@ -34,6 +34,7 @@
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
+  import WidgetPublishedNotice from "$lib/features/widget/admin/WidgetPublishedNotice.svelte";
   import { hasPermission } from "$lib/core/hasPermission.js";
   import { localizeHref } from "$lib/paraglide/runtime";
   import {
@@ -622,6 +623,15 @@
       </Settings.Group>
 
       <Settings.Group title={m.tools()}>
+        {#if data.servesActiveWidget}
+          <WidgetPublishedNotice
+            href={localizeHref(
+              hasPermission(data.user)("widgets")
+                ? `/spaces/${$currentSpace.routeId}/assistants/${data.assistant.id}/widget`
+                : "/admin/widgets"
+            )}
+          />
+        {/if}
         <Settings.Row
           title={m.tools()}
           description={m.select_mcp_servers_description()}

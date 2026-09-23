@@ -5362,6 +5362,8 @@
   "widget_admin_overview_active_issues": "Active, but needs fixing: {reasons}",
   "widget_admin_tab_issues_one": "1 thing to fix",
   "widget_admin_tab_issues": "{count} things to fix",
+  "widget_admin_assistant_notice_title": "Published as a web widget",
+  "widget_admin_assistant_notice_body": "This assistant answers anonymous visitors on your website through an active web widget. Changes to its tools (MCP servers) and functions here apply to those visitors straight away.",
   "upload_dropzone_prompt": "Drag and drop files or folders here",
   "add_more_files": "Add more files",
   "remove_file": "Remove {fileName}",

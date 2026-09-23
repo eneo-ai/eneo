@@ -5362,6 +5362,8 @@
   "widget_admin_overview_active_issues": "Aktiv, men behöver åtgärdas: {reasons}",
   "widget_admin_tab_issues_one": "1 sak att åtgärda",
   "widget_admin_tab_issues": "{count} saker att åtgärda",
+  "widget_admin_assistant_notice_title": "Publicerad som webbwidget",
+  "widget_admin_assistant_notice_body": "Den här assistenten svarar anonyma besökare på er webbplats via en aktiv webbwidget. Ändringar av verktyg (MCP-servrar) och funktioner här gäller direkt även för besökarna.",
   "upload_dropzone_prompt": "Dra och släpp filer eller mappar här",
   "add_more_files": "Lägg till fler filer",
   "remove_file": "Ta bort {fileName}",

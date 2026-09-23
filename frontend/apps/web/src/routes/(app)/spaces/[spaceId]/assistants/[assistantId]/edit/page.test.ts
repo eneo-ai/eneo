@@ -178,3 +178,61 @@ describe("Assistant edit loader", () => {
     });
   });
 });
+
+describe("Assistant edit loader and web widgets", () => {
+  function widgetEvent(permissions: string[], widgets: { target_id: string; status: string }[]) {
+    const list = vi.fn().mockResolvedValue(widgets);
+    const event = {
+      depends: vi.fn(),
+      params: { assistantId: "assistant-1" },
+      parent: vi.fn().mockResolvedValue({
+        user: { roles: [{ permissions }], predefined_roles: [] },
+        currentSpace: {
+          id: "space-1",
+          organization: false,
+          default_assistant: { id: "default-assistant" },
+          skill_permissions: []
+        },
+        eneo: {
+          assistants: {
+            get: vi.fn().mockResolvedValue({ id: "assistant-1" }),
+            listMCPServers: vi.fn().mockResolvedValue({ items: [] })
+          },
+          helpAssistants: { runs: { availability: vi.fn().mockResolvedValue(null) } },
+          widgets: { list }
+        }
+      })
+    };
+    return { event, list };
+  }
+
+  test("knows when an active widget publishes this assistant", async () => {
+    const { event, list } = widgetEvent(
+      ["widgets"],
+      [
+        { target_id: "other-assistant", status: "active" },
+        { target_id: "assistant-1", status: "active" }
+      ]
+    );
+    const result = await load(event as never);
+    expect(list).toHaveBeenCalledWith({ spaceId: "space-1" });
+    expect(result.servesActiveWidget).toBe(true);
+  });
+
+  test("a paused or draft widget does not count", async () => {
+    const { event } = widgetEvent(
+      ["admin"],
+      [
+        { target_id: "assistant-1", status: "paused" },
+        { target_id: "assistant-1", status: "draft" }
+      ]
+    );
+    expect((await load(event as never)).servesActiveWidget).toBe(false);
+  });
+
+  test("without access to widgets nothing is asked and nothing is claimed", async () => {
+    const { event, list } = widgetEvent(["assistants"], []);
+    expect((await load(event as never)).servesActiveWidget).toBe(false);
+    expect(list).not.toHaveBeenCalled();
+  });
+});
