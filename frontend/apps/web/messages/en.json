@@ -5235,7 +5235,7 @@
   "widget_admin_publish_live": "The widget is active and answering visitors.",
   "widget_admin_policy_description": "Ceilings every widget in the organisation must stay within. They apply to existing widgets as soon as they are saved, not only to later edits. Editors see violations as activation blockers.",
   "widget_admin_template_unset_default": "Remove as default",
-  "widget_admin_overview_open": "Open {name}",
+  "widget_admin_overview_open": "Open widget settings for {name}",
   "widget_admin_overview_budget_inactive": "Not serving visitors (budget {budget} tokens)",
   "widget_admin_tab_widgets": "Widgets",
   "widget_admin_tab_policy": "Policy",

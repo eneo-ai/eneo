@@ -5235,7 +5235,7 @@
   "widget_admin_publish_live": "Widgeten är aktiv och svarar besökare.",
   "widget_admin_policy_description": "Tak som alla organisationens widgetar måste hålla sig inom. De gäller befintliga widgetar så fort de sparas, inte bara senare ändringar. Redaktörer ser överträdelser som aktiveringsblockerare.",
   "widget_admin_template_unset_default": "Ta bort som standard",
-  "widget_admin_overview_open": "Öppna {name}",
+  "widget_admin_overview_open": "Öppna widgetinställningar för {name}",
   "widget_admin_overview_budget_inactive": "Svarar inte besökare (budget {budget} tokens)",
   "widget_admin_tab_widgets": "Widgetar",
   "widget_admin_tab_policy": "Policy",
