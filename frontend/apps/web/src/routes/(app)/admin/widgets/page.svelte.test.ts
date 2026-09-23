@@ -127,12 +127,42 @@ describe("widget policy retention window", () => {
     await expect.element(page.getByText("widget_admin_retention_window_min(365)")).toBeVisible();
     await expect.element(min).toHaveAttribute("aria-invalid", "true");
 
+    // Raising the maximum makes the typed minimum valid: the pair is saved
+    // together and neither field keeps a stale error.
     const max = page.getByLabelText("widget_admin_policy_retention_max");
     await userEvent.fill(max, "500");
     await userEvent.tab();
     await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
-    expect(update).toHaveBeenCalledWith({ max_retention_days: 500 });
-    expect(update).not.toHaveBeenCalledWith({ min_retention_days: 400 });
+    expect(update).toHaveBeenCalledWith({ min_retention_days: 400, max_retention_days: 500 });
+    await expect.element(min).toHaveAttribute("aria-invalid", "false");
+    expect(page.getByText(/widget_admin_retention_window/).elements()).toHaveLength(0);
+  });
+
+  test("a maximum below the minimum waits for the minimum to follow", async () => {
+    const update = vi.fn(async (patch: Partial<WidgetPolicy>) => ({ ...policy, ...patch }));
+    render(WidgetsAdminPage, {
+      data: {
+        policy: { ...policy, min_retention_days: 30 },
+        templates: [],
+        overview: {
+          totals: { widgets: 0, active: 0, questions_30d: 0, tokens_30d: 0, blocked_30d: 0 },
+          items: []
+        },
+        eneo: { widgets: { policy: { update }, templates: {}, pause: vi.fn() } }
+      } as never
+    });
+
+    const max = page.getByLabelText("widget_admin_policy_retention_max");
+    await userEvent.fill(max, "20");
+    await userEvent.tab();
+    await expect.element(page.getByText("widget_admin_retention_window_max(30)")).toBeVisible();
+
+    const min = page.getByLabelText("widget_admin_policy_retention_min");
+    await userEvent.fill(min, "10");
+    await userEvent.tab();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update).toHaveBeenCalledWith({ min_retention_days: 10, max_retention_days: 20 });
+    await expect.element(max).toHaveAttribute("aria-invalid", "false");
   });
 
   test("the policy card title is a section heading", async () => {

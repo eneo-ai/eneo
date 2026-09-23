@@ -96,25 +96,57 @@
     apply(value);
   }
 
-  // The API refuses a retention window whose minimum exceeds its maximum.
+  // The API refuses a retention window whose minimum exceeds its maximum. Both
+  // bounds are kept as typed until the pair is valid, so fixing one bound
+  // also settles the other, and the pair is saved together.
+  let retentionTyped = $state<{ min: string | null; max: string | null }>({
+    min: null,
+    max: null
+  });
   function commitRetention(event: Event, bound: "min" | "max") {
-    const key = `retention-${bound}`;
-    commitNumber(event, key, 0, 3650, (value) => {
-      if (bound === "min" && value > policy.max_retention_days) {
-        rangeErrors = {
-          ...rangeErrors,
-          [key]: m.widget_admin_retention_window_min({ max: String(policy.max_retention_days) })
-        };
-      } else if (bound === "max" && value < policy.min_retention_days) {
-        rangeErrors = {
-          ...rangeErrors,
-          [key]: m.widget_admin_retention_window_max({ min: String(policy.min_retention_days) })
-        };
-      } else {
-        patch(bound === "min" ? { min_retention_days: value } : { max_retention_days: value });
+    retentionTyped = {
+      ...retentionTyped,
+      [bound]: (event.currentTarget as HTMLInputElement).value
+    };
+    const value = (side: "min" | "max") => {
+      const typed = retentionTyped[side];
+      if (typed !== null) return typed.trim() === "" ? NaN : Number(typed);
+      return side === "min" ? policy.min_retention_days : policy.max_retention_days;
+    };
+    const errors: Partial<Record<"min" | "max", string>> = {};
+    for (const side of ["min", "max"] as const) {
+      const days = value(side);
+      if (retentionTyped[side] !== null && (!Number.isInteger(days) || days < 0 || days > 3650)) {
+        errors[side] = m.widget_admin_value_out_of_range({
+          min: "0",
+          max: (3650).toLocaleString()
+        });
       }
-    });
+    }
+    if (!errors.min && !errors.max && value("min") > value("max")) {
+      errors[bound] =
+        bound === "min"
+          ? m.widget_admin_retention_window_min({ max: String(value("max")) })
+          : m.widget_admin_retention_window_max({ min: String(value("min")) });
+    }
+    const { "retention-min": _min, "retention-max": _max, ...others } = rangeErrors;
+    rangeErrors = {
+      ...others,
+      ...(errors.min ? { "retention-min": errors.min } : {}),
+      ...(errors.max ? { "retention-max": errors.max } : {})
+    };
+    if (errors.min || errors.max) return;
+    const update: WidgetPolicyUpdate = {};
+    if (value("min") !== policy.min_retention_days) update.min_retention_days = value("min");
+    if (value("max") !== policy.max_retention_days) update.max_retention_days = value("max");
+    retentionTyped = { min: null, max: null };
+    if (Object.keys(update).length > 0) patch(update);
   }
+
+  // Out-of-range numbers stay in their fields; leaving the page asks first.
+  $effect(() => {
+    autosave.markDraft("policy-numbers", Object.keys(rangeErrors).length > 0);
+  });
 
   const statusLabel = $derived.by(() => {
     switch (autosave.status) {
