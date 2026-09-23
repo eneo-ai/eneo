@@ -1,6 +1,6 @@
-import { get } from "svelte/store";
+import { get, writable } from "svelte/store";
 import { describe, expect, test } from "vitest";
-import { createWithResource } from "./create.js";
+import { createWithResource, createWithStore } from "./create.js";
 
 type Item = { id: string; name: string; size: number; tags: string[] };
 
@@ -99,6 +99,47 @@ describe("resource table view model", () => {
     expect(names(get(view.pageRows))).toEqual(["Beta"]);
     stopRows();
     stopCount();
+  });
+
+  test("keys rows by position, so items without or with repeated ids still render", () => {
+    const table = createWithResource([{ name: "a" }, { name: "b" }, { name: "b" }] as Record<
+      string,
+      unknown
+    >[]);
+    const view = table.createViewModel([table.column({ accessor: "name", header: "Name" })]);
+    const stop = watch(view.pageRows);
+
+    const ids = get(view.pageRows).map((row) => row.id);
+    expect(new Set(ids).size).toBe(3);
+    stop();
+  });
+
+  test("shows the value as text when a column has no cell function", () => {
+    const table = createWithResource(items);
+    const view = table.createViewModel([table.column({ accessor: "size", header: "Size" })]);
+    const stop = watch(view.pageRows);
+
+    const cell = get(view.pageRows)[0].getVisibleCells()[0];
+    const render = cell.column.columnDef.cell as (context: unknown) => unknown;
+    expect(render(cell.getContext())).toBe("30");
+    stop();
+  });
+
+  test("rebuilds rows when items are changed in place and re-emitted", () => {
+    const data = writable(items.map((item) => ({ ...item })));
+    const table = createWithStore(data);
+    const view = table.createViewModel([table.column({ accessor: "name", header: "Name" })]);
+    const stop = watch(view.pageRows);
+
+    const before = get(view.pageRows)[0];
+    data.update((current) => {
+      current[0].name = "Renamed";
+      return current;
+    });
+    const after = get(view.pageRows)[0];
+    expect(after).not.toBe(before);
+    expect(after.original.name).toBe("Renamed");
+    stop();
   });
 
   test("refuses a column it cannot identify", () => {

@@ -282,12 +282,13 @@ function createViewModel<Resource extends Record<string, unknown>>(
     columns: columns.map((definition) => ({
       ...definition,
       cell: (context) =>
-        definition.meta.cell?.({ value: context.getValue(), row: context.row as Row<unknown> })
+        definition.meta.cell
+          ? definition.meta.cell({ value: context.getValue(), row: context.row as Row<unknown> })
+          : `${context.getValue() ?? ""}`
     })),
     state: {},
     onStateChange: () => {},
     renderFallbackValue: null,
-    getRowId: (item) => String(item.id),
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -305,8 +306,11 @@ function createViewModel<Resource extends Record<string, unknown>>(
   });
   const initialState: TableState = table.initialState;
 
+  // A fresh array per emission so rows are rebuilt when a page mutates items in place.
+  const freshData = derived(data, ($data) => [...$data]);
+
   const model = derived(
-    [data, sortKeys, filterValue, pageIndex, pageSize],
+    [freshData, sortKeys, filterValue, pageIndex, pageSize],
     ([$data, $sortKeys, $filterValue, $pageIndex, $pageSize]) => {
       const sorting: SortingState = $sortKeys.map((key) => {
         const invert = metaById.get(key.id)?.sort?.invert === true;

@@ -284,6 +284,7 @@
         <Table.Group
           filterFn={groupFilterFor(group.key)}
           title=" "
+          toggleLabel={provider?.name ?? group.name}
           open={groupOpenState[group.key] ?? true}
           onOpenChange={(open) => {
             groupOpenState[group.key] = open;

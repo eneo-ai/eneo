@@ -20,6 +20,8 @@
 
   type Props = {
     title?: string | null;
+    /** Accessible name for the group toggle when the visible title is not descriptive. */
+    toggleLabel?: string;
     filterFn?: (value: Resource) => boolean;
     /** Controlled open state; leave undefined to let the group manage it. */
     open?: boolean;
@@ -32,6 +34,7 @@
 
   let {
     title,
+    toggleLabel,
     filterFn = () => true,
     open,
     onOpenChange,
@@ -85,6 +88,7 @@
   <Button
     variant="ghost"
     aria-expanded={isOpen}
+    aria-label={toggleLabel}
     onclick={toggleOpen}
     class="-ml-2 font-mono font-medium"
   >
@@ -173,7 +177,7 @@
     {/if}
   {/if}
 {/if}
-{#if rows.length > 0 && $pageCount > 1}
+{#snippet pager()}
   <div
     class="bg-hover-dimmer my-4 flex h-12 w-fit items-center justify-start gap-6 rounded-lg border p-2"
   >
@@ -196,6 +200,20 @@
       onclick={() => ($pageIndex += 1)}>→</Button
     >
   </div>
+{/snippet}
+
+{#if rows.length > 0 && $pageCount > 1}
+  {#if $displayType === "list"}
+    <tbody>
+      <tr>
+        <td colspan="99">
+          {@render pager()}
+        </td>
+      </tr>
+    </tbody>
+  {:else}
+    {@render pager()}
+  {/if}
 {:else if title}
   <svelte:element this={$displayType === "list" ? "tbody" : "div"} class="h-6" />
 {/if}
