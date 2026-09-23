@@ -567,3 +567,156 @@ test("Assistant binding list and configuration preserve their independent contra
     }
   ]);
 });
+
+test("organization removal sends one bounded batch and returns removed IDs", async () => {
+  const calls = [];
+  const result = {
+    removed_ids: ["skill-1", "skill-2"],
+    detached: { assistant_count: 0, app_count: 0, personal_chat_count: 0 }
+  };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return result;
+    }
+  });
+  assert.equal(await skills.organization.removeMany({ skill_ids: result.removed_ids }), result);
+  assert.equal(
+    await skills.organization.removeMany({ skill_ids: result.removed_ids, detach_bindings: true }),
+    result
+  );
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/remove/",
+      request: {
+        method: "post",
+        requestBody: {
+          "application/json": { skill_ids: result.removed_ids, detach_bindings: false }
+        }
+      }
+    },
+    {
+      endpoint: "/api/v1/skills/organization/remove/",
+      request: {
+        method: "post",
+        requestBody: {
+          "application/json": { skill_ids: result.removed_ids, detach_bindings: true }
+        }
+      }
+    }
+  ]);
+});
+
+test("organization single removal forwards the detach flag as a query parameter", async () => {
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return undefined;
+    }
+  });
+  await skills.organization.delete({ skillId: "skill-1" });
+  await skills.organization.delete({ skillId: "skill-1", detachBindings: true });
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/",
+      request: {
+        method: "delete",
+        params: { path: { skill_id: "skill-1" }, query: { detach_bindings: false } }
+      }
+    },
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/",
+      request: {
+        method: "delete",
+        params: { path: { skill_id: "skill-1" }, query: { detach_bindings: true } }
+      }
+    }
+  ]);
+});
+
+test("organization catalogue can request retained removed skills", async () => {
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return { items: [] };
+    }
+  });
+  await skills.organization.list({
+    removed: true,
+    search: "payroll",
+    cursor: "payroll:skill-1",
+    limit: 25
+  });
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/",
+      request: {
+        method: "get",
+        params: {
+          query: { removed: true, search: "payroll", cursor: "payroll:skill-1", limit: 25 }
+        }
+      }
+    }
+  ]);
+});
+
+test("organization adoption forwards search and filters as query parameters", async () => {
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return { summary: null, items: [], limit: 25, next_cursor: null, matched_count: 0 };
+    }
+  });
+  await skills.organization.getAdoption({
+    skillId: "skill-1",
+    limit: 25,
+    cursor: null,
+    query: "payroll",
+    kind: "assistant",
+    drift: "behind"
+  });
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/adoption/",
+      request: {
+        method: "get",
+        params: {
+          path: { skill_id: "skill-1" },
+          query: { limit: 25, cursor: null, query: "payroll", kind: "assistant", drift: "behind" }
+        }
+      }
+    }
+  ]);
+});
+
+test("organization detach posts the selected resources for one skill", async () => {
+  const calls = [];
+  const result = { assistant_count: 1, app_count: 1, personal_chat_count: 0 };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return result;
+    }
+  });
+  assert.equal(
+    await skills.organization.detach({
+      skillId: "skill-1",
+      assistant_ids: ["assistant-1"],
+      app_ids: ["app-1"]
+    }),
+    result
+  );
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/detach/",
+      request: {
+        method: "post",
+        params: { path: { skill_id: "skill-1" } },
+        requestBody: { "application/json": { assistant_ids: ["assistant-1"], app_ids: ["app-1"] } }
+      }
+    }
+  ]);
+});

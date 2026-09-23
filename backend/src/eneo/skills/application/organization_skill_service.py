@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
@@ -13,6 +14,7 @@ from eneo.main.exceptions import (
 )
 from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import (
+    MAX_SKILL_REMOVAL_BATCH_SIZE,
     AppFleetAdvanceCursor,
     AppFleetChunkOutcome,
     AppPinAdvanceOutcome,
@@ -38,17 +40,22 @@ from eneo.skills.domain.skill import (
     Skill,
     SkillActivationMode,
     SkillAdoptionCursor,
+    SkillAdoptionFilter,
     SkillAdoptionProjectionPage,
+    SkillAdoptionResourceKind,
     SkillBindingReference,
     SkillBlockedForBindingError,
+    SkillDetachment,
     SkillNotPublishedForBindingError,
     SkillPublicationChange,
+    SkillRemovalOutcome,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionConflictError,
     SkillRevisionPage,
     SkillRevisionRestore,
     SkillRuntimeResolution,
+    SkillUsageCounts,
     parse_skill_revision_cursor,
     validate_skill_slug,
 )
@@ -173,16 +180,30 @@ class OrganizationSkillService:
         limit: int,
         cursor: str | None,
         search: str | None = None,
+        removed: bool = False,
     ) -> OrganizationSkillSummaryProjectionPage:
         self._require_admin()
         normalized_search = search.strip() if search else None
+        after_slug, after_id = cursor, None
+        if cursor and ":" in cursor:
+            after_slug, id_value = cursor.rsplit(":", 1)
+            try:
+                validate_skill_slug(after_slug)
+                after_id = UUID(id_value)
+            except (ValueError, BadRequestException) as error:
+                raise BadRequestException("Invalid Skill catalogue cursor") from error
         summaries = await self.repo.list_organization_for_tenant(
             tenant_id=self.user.tenant_id,
             limit=limit + 1,
-            after_slug=cursor,
+            after_slug=after_slug,
+            after_id=after_id,
+            removed=removed,
             search=normalized_search or None,
         )
         visible = summaries[:limit]
+        usage = await self.repo.get_usage_counts(
+            tenant_id=self.user.tenant_id, skill_ids=[summary.id for summary in visible]
+        )
         blocks = (
             await self.repo.list_active_execution_blocks(
                 tenant_id=self.user.tenant_id,
@@ -196,12 +217,19 @@ class OrganizationSkillService:
                 OrganizationSkillSummaryProjection(
                     skill=summary,
                     execution_blocked=summary.id in blocks,
+                    usage=usage.get(summary.id, SkillUsageCounts()),
                 )
                 for summary in visible
             ),
             limit=limit,
             next_cursor=(
-                visible[-1].slug if len(summaries) > limit and visible else None
+                (
+                    f"{visible[-1].slug}:{visible[-1].id}"
+                    if removed
+                    else visible[-1].slug
+                )
+                if len(summaries) > limit and visible
+                else None
             ),
         )
 
@@ -224,9 +252,13 @@ class OrganizationSkillService:
             tenant_id=self.user.tenant_id,
             skill_ids=[skill.id],
         )
+        usage = await self.repo.get_usage_counts(
+            tenant_id=self.user.tenant_id, skill_ids=[skill.id]
+        )
         return OrganizationSkillProjection(
             skill=skill,
             execution_blocked=skill.id in blocks,
+            usage=usage.get(skill.id, SkillUsageCounts()),
         )
 
     async def get_organization_skill_projection(
@@ -243,14 +275,26 @@ class OrganizationSkillService:
         skill_id: UUID,
         limit: int,
         cursor: str | None,
+        filters: SkillAdoptionFilter = SkillAdoptionFilter(),
     ) -> SkillAdoptionProjectionPage:
         self._require_admin()
         after = SkillAdoptionCursor.parse(cursor)
         projection = await self.repo.get_organization_adoption_projection_page(
             tenant_id=self.user.tenant_id,
             skill_id=skill_id,
+            actor_user_id=self.user.id,
+            actor_group_ids=self.user.user_groups_ids,
+            readable_kinds={
+                kind
+                for kind, permission in (
+                    (SkillAdoptionResourceKind.ASSISTANT, Permission.ASSISTANTS),
+                    (SkillAdoptionResourceKind.APP, Permission.APPS),
+                )
+                if permission in self.user.permissions
+            },
             limit=limit,
             after=after,
+            filters=filters,
         )
         if projection is None:
             raise NotFoundException()
@@ -500,8 +544,11 @@ class OrganizationSkillService:
         skill_id: UUID,
         expected_published_revision_id: UUID,
         cursor: str | None,
+        assistant_ids: Sequence[UUID] | None = None,
     ) -> AssistantFleetChunkOutcome:
         self._require_admin()
+        if assistant_ids is not None and cursor is not None:
+            raise BadRequestException("A selection cannot be combined with a cursor")
         parsed_cursor = AssistantFleetAdvanceCursor.parse(cursor)
         if parsed_cursor is not None and (
             parsed_cursor.skill_id != skill_id
@@ -531,6 +578,7 @@ class OrganizationSkillService:
                 parsed_cursor.after_assistant_id if parsed_cursor is not None else None
             ),
             limit=_FLEET_ADVANCE_CHUNK_SIZE,
+            only_ids=assistant_ids,
         )
         if not targets:
             return AssistantFleetChunkOutcome(
@@ -787,8 +835,11 @@ class OrganizationSkillService:
         skill_id: UUID,
         expected_published_revision_id: UUID,
         cursor: str | None,
+        app_ids: Sequence[UUID] | None = None,
     ) -> AppFleetChunkOutcome:
         self._require_admin()
+        if app_ids is not None and cursor is not None:
+            raise BadRequestException("A selection cannot be combined with a cursor")
         parsed_cursor = AppFleetAdvanceCursor.parse(cursor)
         if parsed_cursor is not None and (
             parsed_cursor.skill_id != skill_id
@@ -819,6 +870,7 @@ class OrganizationSkillService:
                 parsed_cursor.after_app_id if parsed_cursor is not None else None
             ),
             limit=_FLEET_ADVANCE_CHUNK_SIZE,
+            only_ids=app_ids,
         )
         if not targets:
             return AppFleetChunkOutcome(
@@ -987,12 +1039,128 @@ class OrganizationSkillService:
             )
         return outcome
 
-    async def delete(self, *, skill_id: UUID) -> Skill:
+    async def delete(
+        self, *, skill_id: UUID, detach_bindings: bool = False
+    ) -> SkillRemovalOutcome:
+        return (
+            await self.remove_many(
+                skill_ids=[skill_id], detach_bindings=detach_bindings
+            )
+        )[0]
+
+    async def detach_bindings(
+        self,
+        *,
+        skill_id: UUID,
+        assistant_ids: Sequence[UUID],
+        app_ids: Sequence[UUID],
+    ) -> SkillDetachment:
+        """Detach one organisation Skill from selected Assistants and Apps.
+
+        Bounded like removal batches; the request model enforces distinct
+        ids. The audit row lists what was actually deleted.
+        """
         self._require_admin()
-        deleted = await self.repo.delete_organization(
+        if not 1 <= len(assistant_ids) + len(app_ids) <= MAX_SKILL_REMOVAL_BATCH_SIZE:
+            raise BadRequestException(
+                f"Select between 1 and {MAX_SKILL_REMOVAL_BATCH_SIZE} resources"
+            )
+        detached = await self.repo.detach_organization_bindings(
             tenant_id=self.user.tenant_id,
             skill_id=skill_id,
+            selection=SkillDetachment(
+                assistant_ids=tuple(assistant_ids), app_ids=tuple(app_ids)
+            ),
         )
-        if deleted is None:
+        if detached is None:
             raise NotFoundException()
-        return deleted
+        if detached.is_empty:
+            return detached
+        skill = await self.repo.get_organization_for_tenant(
+            tenant_id=self.user.tenant_id, skill_id=skill_id
+        )
+        assert skill is not None
+        await self.audit_service.log(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.SKILL_BINDINGS_DETACHED,
+            entity_type=EntityType.SKILL,
+            entity_id=skill_id,
+            description=(
+                f"Detached Skill '{skill.current_revision.display_name}' from "
+                f"{len(detached.assistant_ids)} Assistants and "
+                f"{len(detached.app_ids)} Apps"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=self.user,
+                target=skill,
+                changes={
+                    "assistant_count": len(detached.assistant_ids),
+                    "app_count": len(detached.app_ids),
+                },
+                extra={
+                    **skill_audit_extra(skill),
+                    "assistant_ids": [str(id) for id in detached.assistant_ids],
+                    "app_ids": [str(id) for id in detached.app_ids],
+                },
+            ),
+        )
+        return detached
+
+    async def remove_many(
+        self, *, skill_ids: list[UUID], detach_bindings: bool = False
+    ) -> list[SkillRemovalOutcome]:
+        self._require_admin()
+        valid_size = 1 <= len(skill_ids) <= MAX_SKILL_REMOVAL_BATCH_SIZE
+        if not valid_size or len(set(skill_ids)) != len(skill_ids):
+            raise BadRequestException(
+                f"Select between 1 and {MAX_SKILL_REMOVAL_BATCH_SIZE} distinct Skills"
+            )
+        outcomes = await self.repo.remove_organization_many(
+            tenant_id=self.user.tenant_id,
+            skill_ids=skill_ids,
+            detach_bindings=detach_bindings,
+        )
+        if outcomes is None:
+            raise NotFoundException()
+        for outcome in outcomes:
+            skill = outcome.skill
+            if skill.removed_at is not None:
+                continue
+            detached = outcome.detached
+            # Write with the removal transaction, so a failed batch cannot
+            # leave successful deletion events behind in the audit queue.
+            await self.audit_service.log(
+                tenant_id=self.user.tenant_id,
+                user=self.user,
+                action=ActionType.SKILL_DELETED,
+                entity_type=EntityType.SKILL,
+                entity_id=skill.id,
+                description=f"Removed Skill '{skill.display_name}'",
+                metadata=AuditMetadata.standard(
+                    actor=self.user,
+                    target=skill,
+                    extra={
+                        "slug": skill.slug,
+                        "display_name": skill.display_name,
+                        "current_revision_id": str(skill.current_revision_id),
+                        "current_revision_number": skill.current_revision_number,
+                        "content_digest": skill.content_digest,
+                        "published_revision_number": skill.published_revision_number,
+                        "history_retained": True,
+                        # Every resource this removal changed, so the trail
+                        # answers "what lost this Skill?" without a join.
+                        "detached": {
+                            "assistant_count": len(detached.assistant_ids),
+                            "app_count": len(detached.app_ids),
+                            "personal_chat_count": len(detached.policy_ids),
+                            "assistant_ids": [str(id) for id in detached.assistant_ids],
+                            "app_ids": [str(id) for id in detached.app_ids],
+                            "personal_chat_policy_ids": [
+                                str(id) for id in detached.policy_ids
+                            ],
+                        },
+                    },
+                ),
+            )
+        return outcomes
