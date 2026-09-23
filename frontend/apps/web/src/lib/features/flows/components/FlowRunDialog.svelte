@@ -74,7 +74,7 @@
   import FlowRunDialogFooter from "./FlowRunDialogFooter.svelte";
   import { FlowRunFileInputState } from "./FlowRunFileInputState.svelte";
   import { FlowRunLaunchInputState } from "./FlowRunLaunchInputState.svelte";
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
 
   let {
     open = $bindable(false),
@@ -328,6 +328,35 @@
       );
     }
   }
+
+  // Start where the person works: once the run contract has rendered the first
+  // page, focus its first field, one handoff per open. Until then the dialog
+  // keeps its own first focus stop, and a key press or click inside the dialog
+  // cancels the handoff so focus the person chose is never taken back.
+  let dialogContentEl = $state<HTMLElement | null>(null);
+  let firstFieldFocusPending = false;
+  const FIRST_FIELD_SELECTOR =
+    "input:not([type=hidden]):not([type=file]):not(:disabled), textarea:not(:disabled), select:not(:disabled), [data-slot=select-trigger]:not(:disabled)";
+
+  // bits-ui applies the dialog's own first focus on the next frame; the
+  // handoff is queued after it, and runs once per open.
+  function handOffToFirstField() {
+    requestAnimationFrame(() => {
+      if (!firstFieldFocusPending) return;
+      firstFieldFocusPending = false;
+      dialogContentEl?.querySelector<HTMLElement>(FIRST_FIELD_SELECTOR)?.focus();
+    });
+  }
+
+  function handleOpenAutoFocus() {
+    firstFieldFocusPending = true;
+    if (runContract) handOffToFirstField();
+  }
+
+  $effect(() => {
+    if (!runContract || !dialogContentEl) return;
+    void tick().then(handOffToFirstField);
+  });
 
   $effect(() => {
     if (open && flow?.id && runContractLoadedForFlowId !== flow.id) {
@@ -1166,6 +1195,10 @@
     escapeKeydownBehavior={closeBehavior}
     onInteractOutside={handleInteractOutside}
     onEscapeKeydown={handleEscapeKeydown}
+    bind:ref={dialogContentEl}
+    onOpenAutoFocus={handleOpenAutoFocus}
+    onkeydowncapture={() => (firstFieldFocusPending = false)}
+    onpointerdowncapture={() => (firstFieldFocusPending = false)}
   >
     <FlowRunDialogHeader
       flowName={flow.name}
