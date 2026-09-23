@@ -91,6 +91,7 @@ class FlowApiErrorCode(str, Enum):
     WEBHOOK_DELIVERY_FAILED = "flow_webhook_delivery_failed"
     RUNTIME_FILE_EMPTY = "flow_runtime_file_empty"
     RUNTIME_FILE_ATTACHED = "flow_runtime_file_attached"
+    LIVE_TRANSCRIPTION_UNAVAILABLE = "flow_live_transcription_unavailable"
     EVIDENCE_AUDIT_LOGGING_FAILED = "flow_evidence_audit_logging_failed"
     EVIDENCE_EXPORT_REASON_REQUIRED = "flow_evidence_export_reason_required"
     EVIDENCE_EXPORT_TOO_LARGE = "flow_evidence_export_too_large"

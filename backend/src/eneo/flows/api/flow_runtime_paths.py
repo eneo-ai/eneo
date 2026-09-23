@@ -17,6 +17,9 @@ PUBLISHED_FLOW_RUNTIME_PATH: Final[str] = "/{id}/published/"
 RUN_CONTRACT_PATH: Final[str] = "/{id}/run-contract/"
 UPLOAD_STEP_RUNTIME_FILE_PATH: Final[str] = "/{id}/steps/{step_id}/runtime-files/"
 DELETE_RUNTIME_FILE_PATH: Final[str] = "/{id}/runtime-files/{file_id}/"
+FLOW_LIVE_TRANSCRIPTION_SESSIONS_PATH: Final[str] = (
+    "/{id}/steps/{step_id}/live-transcription-sessions/"
+)
 
 FLOW_RUN_STATUS_CAPABILITIES_PATH: Final[str] = "/runs/status-capabilities/"
 # Collection-level, so it is never captured by the earlier `/{id}/` route.

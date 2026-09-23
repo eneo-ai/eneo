@@ -720,6 +720,18 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Do not delete files that are bound to run history.",
         user_action="Keep the file or purge the related run history through retention policy.",
     ),
+    FlowApiErrorCode.LIVE_TRANSCRIPTION_UNAVAILABLE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause=(
+            "Live preview needs the flow's own transcription model to transcribe, with "
+            "realtime support, and the error context names the missing condition."
+        ),
+        consumer_action=(
+            "Record without live preview and upload the file; the run transcribes it."
+        ),
+        user_action="Record as usual; the text is created when the recording is done.",
+    ),
     FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED: _entry(
         category="Evidence and artifacts",
         surfaced_through="API error response",

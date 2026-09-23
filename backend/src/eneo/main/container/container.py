@@ -164,6 +164,10 @@ from eneo.flows.infrastructure.flow_transcript_words_repo import (
 )
 from eneo.flows.runtime.flow_webhook_delivery import FlowRunWebhookDeliveryService
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
+from eneo.flows.runtime.live_transcription.service import (
+    LiveTranscriptionSessionService,
+)
+from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionTicketStore
 from eneo.flows.runtime.platform_execution_backend import PlatformFlowExecutionBackend
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.governance_policy.application.effective_config_service import (
@@ -1626,6 +1630,18 @@ class Container(containers.DeclarativeContainer):
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
         audit_service=audit_service,
+    )
+    flow_live_transcription_session_service = providers.Factory(
+        LiveTranscriptionSessionService,
+        user=user,
+        flow_service=flow_service,
+        flow_version_repo=flow_version_repo,
+        settings_service=settings_service,
+        space_repo=space_repo,
+        ticket_store=providers.Factory(
+            LiveTranscriptionTicketStore, redis_client=redis_client
+        ),
+        settings=providers.Callable(get_settings),
     )
     flow_run_contract_service = providers.Factory(
         FlowRunContractService,

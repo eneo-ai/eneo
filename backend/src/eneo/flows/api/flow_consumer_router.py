@@ -1,10 +1,14 @@
 from fastapi import APIRouter
 
+from eneo.flows.api.flow_live_transcription_router import (
+    router as flow_live_transcription_router,
+)
 from eneo.flows.api.flow_run_router import router as flow_run_router
 from eneo.flows.api.flow_upload_router import router as flow_upload_router
 
 router = APIRouter()
 router.include_router(flow_upload_router)
+router.include_router(flow_live_transcription_router)
 router.include_router(flow_run_router)
 
 __all__ = ["router"]

@@ -110,6 +110,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FLOW_RUN_DOCUMENT_GENERATED.value: "user_actions",
     ActionType.FLOW_RUN_CONTRACT_REJECTED.value: "user_actions",
     ActionType.FLOW_RUN_AUDIO_TRANSCRIBED.value: "user_actions",
+    ActionType.FLOW_LIVE_TRANSCRIPTION_STARTED.value: "user_actions",
     ActionType.FLOW_HTTP_OUTBOUND_CALL.value: "user_actions",
     ActionType.FLOW_EVIDENCE_VIEWED.value: "audit_access",
     ActionType.FLOW_EVIDENCE_EXPORTED_JSON.value: "audit_access",

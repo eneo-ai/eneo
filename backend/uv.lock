@@ -785,6 +785,7 @@ dependencies = [
     { name = "uuid-utils" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "weasyprint" },
+    { name = "websockets" },
     { name = "wrapt" },
 ]
 
@@ -880,6 +881,7 @@ requires-dist = [
     { name = "uuid-utils", specifier = ">=0.9,<1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0,<1" },
     { name = "weasyprint", specifier = ">=66,<67" },
+    { name = "websockets", specifier = ">=14,<18" },
     { name = "wrapt", specifier = ">=1.16.0,<2" },
 ]
 

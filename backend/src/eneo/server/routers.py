@@ -55,6 +55,9 @@ from eneo.flow_packages.api import (
 from eneo.flow_packages.api import (
     tenant_router as flow_package_tenant_router,
 )
+from eneo.flows.api.flow_live_transcription_socket_router import (
+    router as flow_live_transcription_socket_router,
+)
 from eneo.flows.api.flow_router import router as flows_router
 from eneo.flows.api.flow_runtime_paths import FLOW_ROOT_PATH
 from eneo.governance_policy.presentation.governance_policy_router import (
@@ -528,6 +531,9 @@ router.include_router(
     ],
 )
 router.include_router(websocket_router, prefix="", tags=["websockets"])
+router.include_router(
+    flow_live_transcription_socket_router, prefix="", tags=["websockets"]
+)
 router.include_router(
     prompt_router,
     prefix="/prompts",

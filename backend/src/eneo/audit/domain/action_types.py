@@ -123,6 +123,7 @@ class ActionType(str, Enum):
     FLOW_RUN_RETENTION_POLICY_CHANGED = "flow_run_retention_policy_changed"
     FLOW_RUN_HISTORY_PURGED = "flow_run_history_purged"
     FLOW_RUN_CREATED = "flow_run_created"
+    FLOW_LIVE_TRANSCRIPTION_STARTED = "flow_live_transcription_started"
     FLOW_RUN_COMPLETED = "flow_run_completed"
     FLOW_RUN_FAILED = "flow_run_failed"
     FLOW_RUN_REDISPATCHED = "flow_run_redispatched"

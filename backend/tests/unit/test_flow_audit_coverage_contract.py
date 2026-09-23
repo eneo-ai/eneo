@@ -365,6 +365,12 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
         metadata_keys=("flow_id", "run_id", "revision", "reused_prefix"),
         idempotency="same key and source revision replay one child without a duplicate event",
     ),
+    "create_flow_live_transcription_session": _required_transaction(
+        ActionType.FLOW_LIVE_TRANSCRIPTION_STARTED,
+        owner="flow_live_transcription_router.create_flow_live_transcription_session",
+        metadata_keys=("flow_id", "step_id", "flow_version", "model_id"),
+        idempotency="every call admits a new single-use session and records one event",
+    ),
     "create_flow_run": _required_transaction(
         ActionType.FLOW_RUN_CREATED,
         owner="flow_run_lifecycle_router.create_flow_run",

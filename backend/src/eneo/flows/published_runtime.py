@@ -50,6 +50,7 @@ class FlowRuntimePublicationIntent(Enum):
     RUN_CONTRACT = "run_contract"
     RUNTIME_UPLOAD = "runtime_upload"
     RUNTIME_DELETE = "runtime_delete"
+    LIVE_TRANSCRIPTION = "live_transcription"
 
     @property
     def unpublished_message(self) -> str:
@@ -60,6 +61,8 @@ class FlowRuntimePublicationIntent(Enum):
                 return "Flow must be published before runtime files can be uploaded."
             case FlowRuntimePublicationIntent.RUNTIME_DELETE:
                 return "Flow must be published before runtime files can be deleted."
+            case FlowRuntimePublicationIntent.LIVE_TRANSCRIPTION:
+                return "Flow must be published before live transcription can start."
         assert_never(self)
 
 

@@ -45,6 +45,7 @@ dependencies = [
     "sqlalchemy-mixins>=2.0.5,<3",
     "python-magic>=0.4.27,<0.5",
     "redis>=5.0.8,<6",
+    "websockets>=14,<18",  # asyncio client of the live transcription relay
     "sentry-sdk[fastapi]==2.8.0",
     "greenlet>=3.2.2,<4",
     "litellm==1.101.0",
