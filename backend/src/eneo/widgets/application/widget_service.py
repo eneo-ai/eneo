@@ -214,6 +214,10 @@ class WidgetService:
         space = await self._space_for_edit(space_id)
         # Raises NotFound when the assistant is not part of this space.
         space.get_assistant(target_id)
+        # Held until commit: moving or deleting the assistant waits for the
+        # new widget, so it sees it and refuses the move or archives it.
+        if await self.repo.lock_target_space(target_id) != space_id:
+            raise NotFoundException("Assistant not found in this space.")
         template = (
             await self._template_to_follow(template_id)
             if template_id is not None

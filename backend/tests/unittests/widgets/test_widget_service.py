@@ -22,6 +22,8 @@ class _InMemoryRepo:
     def __init__(self) -> None:
         self.rows: dict = {}
         self.locked_reads: list = []
+        # assistant id -> the space it is in, as the row lock would read it
+        self.target_spaces: dict = {}
         self.revoked: list = []
 
     async def add(self, widget: Widget) -> Widget:
@@ -57,6 +59,16 @@ class _InMemoryRepo:
 
     async def is_target_published(self, widget):
         return True
+
+    async def lock_target_space(self, target_id):
+        return self.target_spaces.get(target_id)
+
+    async def list_by_target(self, target_id):
+        return [
+            w
+            for w in self.rows.values()
+            if w.target_id == target_id and w.status != WidgetStatus.ARCHIVED
+        ]
 
     async def revoke_tokens(self, tenant_id, *, bot_protection):
         self.revoked.append((tenant_id, bot_protection))
@@ -109,6 +121,7 @@ def _user(*permissions: Permission, widget_policy=None):
 def _space(space_id, assistant, *, can_edit=True):
     space = MagicMock()
     space.id = space_id
+    space.assistant_ids = [assistant.id]
     space.get_assistant = MagicMock(
         side_effect=lambda aid: assistant
         if aid == assistant.id
@@ -129,9 +142,12 @@ def _service(user, space, can_edit=True, repo=None, template_repo=None):
     tenant_service.update_widget_policy = AsyncMock(
         side_effect=lambda tenant_id, policy: SimpleNamespace(widget_policy=policy)
     )
+    repo = repo or _InMemoryRepo()
+    for assistant_id in space.assistant_ids:
+        repo.target_spaces.setdefault(assistant_id, space.id)
     return WidgetService(
         user=user,
-        repo=repo or _InMemoryRepo(),
+        repo=repo,
         template_repo=template_repo or _InMemoryTemplateRepo(),
         space_service=space_service,
         actor_manager=actor_manager,
@@ -652,3 +668,13 @@ async def test_forbidding_bot_protection_none_revokes_tokens_minted_without_it(
 
     await service.update_policy({"allow_bot_protection_none": False})
     assert repo.revoked == [(user.tenant_id, BotProtection.NONE)]
+
+
+async def test_create_refuses_an_assistant_that_left_the_space_meanwhile(assistant):
+    space, _ = _space(uuid4(), assistant)
+    repo = _InMemoryRepo()
+    service = _service(_user(Permission.WIDGETS), space, repo=repo)
+    repo.target_spaces[assistant.id] = uuid4()
+    with pytest.raises(NotFoundException):
+        await service.create_widget(space_id=space.id, target_id=assistant.id, name="w")
+    assert repo.rows == {}

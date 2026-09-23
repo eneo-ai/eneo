@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from eneo.skills.domain.skill_repo import SkillRepo
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.spaces.space_service import SpaceService
+    from eneo.widgets.domain.widget_repo import WidgetRepo
 
 
 class ResourceMoverService:
@@ -24,6 +25,7 @@ class ResourceMoverService:
         actor_manager: "ActorManager",
         group_service: "GroupService",
         skill_repo: "SkillRepo",
+        widget_repo: "WidgetRepo | None" = None,
     ):
         super().__init__()
         self.space_service = space_service
@@ -31,6 +33,11 @@ class ResourceMoverService:
         self.actor_manager = actor_manager
         self.group_service = group_service
         self.skill_repo = skill_repo
+        if widget_repo is None:
+            from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
+
+            widget_repo = WidgetRepoImpl(space_repo.session)
+        self.widget_repo: "WidgetRepo" = widget_repo
 
     async def link_website_to_space(self, website_id: "UUID", space_id: "UUID"):
         source_space = await self.space_service.get_space_by_website(website_id)
@@ -149,6 +156,12 @@ class ResourceMoverService:
         if await self.skill_repo.has_assistant_bindings(assistant_id=assistant_id):
             raise BadRequestException(
                 "Remove the Assistant's Skill bindings before moving it to another Space"
+            )
+        # A widget serves its assistant from the widget's own space; moving
+        # the assistant away would take the widget offline without a word.
+        if await self.widget_repo.list_by_target(assistant_id):
+            raise BadRequestException(
+                "Archive the Assistant's web widget before moving it to another Space"
             )
 
         target_space.add_assistant(assistant)

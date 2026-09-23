@@ -25,6 +25,16 @@ class WidgetRepo(Protocol):
 
     async def policy_for(self, tenant_id: UUID) -> WidgetPolicy: ...
 
+    async def lock_target_space(self, target_id: UUID) -> UUID | None:
+        """The space the target assistant is in, share-locked until the
+        transaction ends so it cannot move or be deleted meanwhile."""
+        ...
+
+    async def list_by_target(self, target_id: UUID) -> list[Widget]:
+        """The widgets serving the assistant that are not archived, locked
+        for the rest of the transaction."""
+        ...
+
     async def revoke_tokens(
         self, tenant_id: UUID, *, bot_protection: BotProtection
     ) -> int:

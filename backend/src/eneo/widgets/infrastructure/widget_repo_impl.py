@@ -126,6 +126,26 @@ class WidgetRepoImpl:
             )
         )
 
+    async def lock_target_space(self, target_id: UUID) -> UUID | None:
+        return await self.session.scalar(
+            sa.select(Assistants.space_id)
+            .where(Assistants.id == target_id)
+            .with_for_update(read=True, key_share=True)
+        )
+
+    async def list_by_target(self, target_id: UUID) -> list[Widget]:
+        rows = await self.session.scalars(
+            sa.select(Widgets)
+            .where(
+                Widgets.target_type == WidgetTargetType.ASSISTANT.value,
+                Widgets.target_id == target_id,
+                Widgets.status != WidgetStatus.ARCHIVED.value,
+            )
+            .order_by(Widgets.created_at.asc())
+            .with_for_update()
+        )
+        return [to_entity(row) for row in rows]
+
     async def revoke_tokens(
         self, tenant_id: UUID, *, bot_protection: BotProtection
     ) -> int:
