@@ -61,7 +61,12 @@
 
   function emit() {
     if (duplicates.length > 0) return;
-    onChange(clean(rows.map((row) => row.text)));
+    const questions = clean(rows.map((row) => row.text));
+    // Leaving a row unchanged is not an edit: sending the list again would
+    // also resend whatever else the texts group holds back.
+    if (questions.join("\n") === seen) return;
+    seen = questions.join("\n");
+    onChange(questions);
   }
 
   async function add() {

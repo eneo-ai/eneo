@@ -122,6 +122,21 @@ describe("WidgetRulesFields origins", () => {
     });
     await expect.element(origins()).toHaveAccessibleDescription(/widget_admin_origins_refused/);
   });
+
+  test("a live widget's list cannot be emptied: it stays in the field and is not sent", async () => {
+    const save = vi.fn(async (update: WidgetUpdate) => widget(update as Partial<Widget>));
+    setup(widget({ status: "active" }), save);
+
+    await userEvent.clear(origins());
+    await userEvent.tab();
+
+    await expect.element(origins()).toHaveValue("");
+    await expect
+      .element(origins())
+      .toHaveAccessibleDescription(/widget_admin_blocker_allowed_origins_empty/);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(save).not.toHaveBeenCalled();
+  });
 });
 
 describe("WidgetRulesFields policy", () => {

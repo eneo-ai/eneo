@@ -391,6 +391,9 @@
                 lockedFields={lockedTexts}
                 {lockHint}
                 errors={textErrors}
+                subtitleRequired={current.status === "active"
+                  ? m.widget_admin_blocker_subtitle_empty()
+                  : undefined}
                 onChange={(change) => autosave.patch({ texts: { ...current.texts, ...change } })}
               />
             </Card.Content>

@@ -113,6 +113,26 @@ describe("SuggestedQuestionsEditor and the save's echo", () => {
     await expect.element(page.getByRole("textbox").nth(1)).toHaveValue("Tre");
   });
 
+  test("leaving a row unchanged sends nothing", async () => {
+    const onChange = vi.fn();
+    render(SuggestedQuestionsEditor, { questions: ["Öppettider?", "Parkering?"], onChange });
+    const first = page.getByRole("textbox").nth(0);
+
+    await userEvent.click(first);
+    await userEvent.tab();
+    await userEvent.click(first);
+    await userEvent.keyboard("{Enter}");
+    expect(onChange).not.toHaveBeenCalled();
+
+    await userEvent.type(first, "!");
+    await userEvent.tab();
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith(["Öppettider?!", "Parkering?"]);
+    await userEvent.click(first);
+    await userEvent.tab();
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
   test("a repeated question is flagged at the row and never sent", async () => {
     const onChange = vi.fn<(questions: string[]) => void>();
     render(SuggestedQuestionsEditor, { questions: ["Öppettider?"], onChange });

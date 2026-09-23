@@ -115,6 +115,18 @@ describe("WidgetEditor", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  test("a live widget's disclosure cannot be emptied: it stays in the field and is not sent", async () => {
+    const { update } = renderEditor(widget());
+    const subtitle = page.getByLabelText("widget_admin_text_subtitle", { exact: true });
+    await userEvent.clear(subtitle);
+    await expect.element(subtitle).toHaveAttribute("aria-invalid", "true");
+    await expect
+      .element(subtitle)
+      .toHaveAccessibleDescription(/widget_admin_blocker_subtitle_empty/);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(update).not.toHaveBeenCalled();
+  });
+
   test("the content cards are section headings", async () => {
     renderEditor(widget());
     await expect.element(page.getByRole("heading", { level: 2, name: "general" })).toBeVisible();

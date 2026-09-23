@@ -91,6 +91,12 @@
     }
   );
   const parsedOrigins = $derived(parseOrigins(origins.text));
+  // A live widget must keep serving: the API refuses an empty list for it.
+  const emptiedWhileActive = $derived(
+    widget.status === "active" &&
+      parsedOrigins.origins.length === 0 &&
+      parsedOrigins.invalid.length === 0
+  );
   let originsTouched = $state(false);
   const originsProblem = $derived.by(() => {
     if (originsTouched && parsedOrigins.invalid.length > 0) {
@@ -99,13 +105,14 @@
     if (originsTouched && parsedOrigins.tooMany) {
       return m.widget_admin_origins_too_many({ max: String(MAX_ALLOWED_ORIGINS) });
     }
+    if (originsTouched && emptiedWhileActive) return blockerLabel("allowed_origins_empty");
     if (autosave.refusals["allowed_origins"]) return autosave.refusals["allowed_origins"];
     if ((widget.allowed_origins ?? []).length === 0) return blockerLabel("allowed_origins_empty");
     return undefined;
   });
   function commitOrigins() {
     originsTouched = true;
-    if (parsedOrigins.invalid.length > 0 || parsedOrigins.tooMany) return;
+    if (parsedOrigins.invalid.length > 0 || parsedOrigins.tooMany || emptiedWhileActive) return;
     const saved = widget.allowed_origins ?? [];
     if (parsedOrigins.origins.join("\n") !== saved.join("\n")) {
       autosave.patch({ allowed_origins: parsedOrigins.origins });
