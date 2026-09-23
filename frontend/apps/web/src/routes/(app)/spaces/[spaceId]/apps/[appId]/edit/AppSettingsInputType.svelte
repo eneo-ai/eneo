@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { IconCheck } from "@eneo/icons/check";
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { IconEdit } from "@eneo/icons/edit";
   import { IconFileAudio } from "@eneo/icons/file-audio";
@@ -8,7 +7,8 @@
   import { IconMicrophone } from "@eneo/icons/microphone";
   import { m } from "$lib/paraglide/messages";
   import type { App } from "@eneo/eneo-js";
-  import { createSelect } from "@melt-ui/svelte";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import { Select as SelectPrimitive } from "bits-ui";
   import type { ComponentType } from "svelte";
 
   type InputType = App["input_fields"][number]["type"];
@@ -29,92 +29,40 @@
     audio: ["audio-recorder", "audio-upload"],
     image: ["image-upload"]
   };
-
-  const {
-    elements: { trigger, menu, option, group, groupLabel },
-    states: { selected },
-    helpers: { isSelected }
-  } = createSelect<InputType>({
-    positioning: {
-      placement: "bottom",
-      fitViewport: true,
-      sameWidth: true
-    },
-    defaultSelected: { value },
-    portal: null,
-    onSelectedChange: ({ next }) => {
-      value = next?.value ?? value;
-      return next;
-    }
-  });
-
-  function watchChanges(value: InputType) {
-    if ($selected?.value !== value) {
-      $selected = { value };
-    }
-  }
-  // Watch outside changes
-  $: watchChanges(value);
 </script>
 
-<button
-  {...$trigger}
-  {...aria}
-  use:trigger
-  class="border-default hover:bg-hover-dimmer flex h-16 items-center justify-between border-b px-4"
->
-  {#if $selected}
-    <div class="flex items-center gap-3">
-      <svelte:component this={inputTypes[$selected.value].icon}></svelte:component>
-      <span>{inputTypes[$selected.value].label}</span>
-    </div>
-  {:else}
-    {m.nothing_selected()}
-  {/if}
-  <IconChevronDown />
-</button>
-
-<div
-  class="border-stronger bg-primary z-20 flex flex-col overflow-y-auto rounded-lg border shadow-xl"
-  {...$menu}
-  use:menu
->
-  {#each Object.entries(groupedTypes) as [type, inputOptions] (type)}
-    <div {...$group(type)} use:group class="">
-      <div
-        class="bg-frosted-glass-secondary border-default flex items-center gap-3 border-b px-4 py-2 font-mono text-sm capitalize"
-        {...$groupLabel(type)}
-        use:groupLabel
+<Select.Root type="single" {value} onValueChange={(next) => (value = next as InputType)}>
+  <SelectPrimitive.Trigger>
+    {#snippet child({ props })}
+      <button
+        {...props}
+        {...aria}
+        class="border-default hover:bg-hover-dimmer flex h-16 items-center justify-between border-b px-4"
       >
-        {type}
-      </div>
-      {#each inputOptions as inputOption (inputOption)}
-        {@const { icon, label } = inputTypes[inputOption]}
-        <div
-          class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between border-b px-4 last-of-type:border-b-0 hover:cursor-pointer"
-          {...$option({ value: inputOption })}
-          use:option
-        >
+        {#if value}
           <div class="flex items-center gap-3">
+            <svelte:component this={inputTypes[value].icon}></svelte:component>
+            <span>{inputTypes[value].label}</span>
+          </div>
+        {:else}
+          {m.nothing_selected()}
+        {/if}
+        <IconChevronDown />
+      </button>
+    {/snippet}
+  </SelectPrimitive.Trigger>
+  <Select.Content>
+    {#each Object.entries(groupedTypes) as [type, inputOptions] (type)}
+      <Select.Group>
+        <Select.GroupHeading class="capitalize">{type}</Select.GroupHeading>
+        {#each inputOptions as inputOption (inputOption)}
+          {@const { icon, label } = inputTypes[inputOption]}
+          <Select.Item value={inputOption} {label} class="min-h-10 gap-3">
             <svelte:component this={icon}></svelte:component>
             <span>{label}</span>
-          </div>
-          <div class="check {$isSelected(inputOption) ? 'block' : 'hidden'}">
-            <IconCheck class="text-positive-default !size-8"></IconCheck>
-          </div>
-        </div>
-      {/each}
-    </div>
-  {/each}
-</div>
-
-<style lang="postcss">
-  @reference "@eneo/ui/styles";
-  div[data-highlighted] {
-    @apply bg-hover-default;
-  }
-
-  div[data-disabled] {
-    @apply opacity-30 hover:bg-transparent;
-  }
-</style>
+          </Select.Item>
+        {/each}
+      </Select.Group>
+    {/each}
+  </Select.Content>
+</Select.Root>

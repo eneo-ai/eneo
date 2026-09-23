@@ -6,11 +6,11 @@
     type ModelBehaviour,
     type ModelKwArgs
   } from "../ModelBehaviours";
-  import { createSelect } from "@melt-ui/svelte";
   import { IconChevronDown } from "@eneo/icons/chevron-down";
-  import { IconCheck } from "@eneo/icons/check";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
   import { Input } from "$lib/components/ui/input/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import { Select as SelectPrimitive } from "bits-ui";
   import { Slider } from "$lib/components/ui/slider/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -39,39 +39,28 @@
     selectedModelHasCapabilityContract && !supportsBehaviorPresets(selectedModel);
   $: finalIsDisabled = isDisabled || isDisabledDueToUnsupportedTemperature;
 
-  const {
-    elements: { trigger, menu, option },
-    helpers: { isSelected },
-    states: { selected }
-  } = createSelect<ModelBehaviour>({
-    defaultSelected: { value: getBehaviour(kwArgs) },
-    positioning: {
-      placement: "bottom",
-      fitViewport: true,
-      sameWidth: true
-    },
-    portal: null,
-    onSelectedChange: ({ next }) => {
-      const behaviorKwargs = next?.value ? getKwargs(next.value) : getKwargs("default");
+  let selectedBehaviour: ModelBehaviour = getBehaviour(kwArgs);
 
-      if (behaviorKwargs) {
-        kwArgs = {
-          ...kwArgs,
-          ...behaviorKwargs
-        };
-      } else {
-        const customArgs =
-          getBehaviour(kwArgs) === "custom"
-            ? kwArgs
-            : {
-                ...kwArgs,
-                temperature: 1
-              };
-        kwArgs = customArgs;
-      }
-      return next;
+  function selectBehaviour(next: ModelBehaviour) {
+    selectedBehaviour = next;
+    const behaviorKwargs = getKwargs(next);
+
+    if (behaviorKwargs) {
+      kwArgs = {
+        ...kwArgs,
+        ...behaviorKwargs
+      };
+    } else {
+      const customArgs =
+        getBehaviour(kwArgs) === "custom"
+          ? kwArgs
+          : {
+              ...kwArgs,
+              temperature: 1
+            };
+      kwArgs = customArgs;
     }
-  });
+  }
 
   let customTemp: number = 1;
   function maybeSetKwArgsCustom() {
@@ -87,8 +76,8 @@
   function watchChanges(currentKwArgs: ModelKwArgs) {
     const behaviour = getBehaviour(currentKwArgs);
 
-    if ($selected?.value !== behaviour) {
-      $selected = { value: behaviour };
+    if (selectedBehaviour !== behaviour) {
+      selectedBehaviour = behaviour;
     }
 
     if (
@@ -105,7 +94,7 @@
   let previousDisabledState = finalIsDisabled;
   $: {
     if (finalIsDisabled && !previousDisabledState) {
-      $selected = { value: "default" };
+      selectedBehaviour = "default";
       const defaultKwargs = getKwargs("default") || { temperature: null };
       kwArgs = {
         ...kwArgs,
@@ -116,48 +105,39 @@
   }
 </script>
 
-<button
-  {...$trigger}
-  {...aria}
-  use:trigger
+<Select.Root
+  type="single"
+  value={selectedBehaviour}
+  onValueChange={(next) => selectBehaviour(next as ModelBehaviour)}
   disabled={finalIsDisabled}
-  class:hover:cursor-default={finalIsDisabled}
-  class:text-secondary={finalIsDisabled}
-  class="border-default hover:bg-hover-default flex h-16 items-center justify-between border-b px-4"
 >
-  <span class="capitalize"
-    >{$selected?.value ? behaviourLabels[$selected?.value] : m.no_behaviour_found()}</span
-  >
-  <IconChevronDown />
-</button>
+  <SelectPrimitive.Trigger>
+    {#snippet child({ props })}
+      <button
+        {...props}
+        {...aria}
+        class:hover:cursor-default={finalIsDisabled}
+        class:text-secondary={finalIsDisabled}
+        class="border-default hover:bg-hover-default flex h-16 w-full items-center justify-between border-b px-4"
+      >
+        <span class="capitalize">{behaviourLabels[selectedBehaviour]}</span>
+        <IconChevronDown />
+      </button>
+    {/snippet}
+  </SelectPrimitive.Trigger>
+  <Select.Content>
+    <Select.Group>
+      <Select.GroupHeading>{m.select_model_behaviour()}</Select.GroupHeading>
+      {#each behaviourList as behavior (behavior)}
+        <Select.Item value={behavior} label={behaviourLabels[behavior]} class="capitalize">
+          {behaviourLabels[behavior]}
+        </Select.Item>
+      {/each}
+    </Select.Group>
+  </Select.Content>
+</Select.Root>
 
-<div
-  class="border-stronger bg-primary z-20 flex flex-col overflow-y-auto rounded-lg border shadow-xl"
-  {...$menu}
-  use:menu
->
-  <div
-    class="bg-frosted-glass-secondary border-default sticky top-0 border-b px-4 py-2 font-mono text-sm"
-  >
-    {m.select_model_behaviour()}
-  </div>
-  {#each behaviourList as behavior (behavior)}
-    <div
-      class="border-default hover:bg-hover-stronger flex min-h-16 items-center justify-between border-b px-4 hover:cursor-pointer"
-      {...$option({ value: behavior })}
-      use:option
-    >
-      <span class="capitalize">
-        {behaviourLabels[behavior]}
-      </span>
-      <div class="check {$isSelected(behavior) ? 'block' : 'hidden'}">
-        <IconCheck class="text-positive-default" />
-      </div>
-    </div>
-  {/each}
-</div>
-
-{#if $selected?.value === "custom"}
+{#if selectedBehaviour === "custom"}
   <div
     class="border-default hover:bg-hover-stronger flex h-[4.125rem] items-center justify-between gap-8 border-b px-4"
   >
@@ -211,14 +191,3 @@
     <span class="font-bold">{m.warning()}:&nbsp;</span>{m.temperature_not_available()}
   </p>
 {/if}
-
-<style lang="postcss">
-  @reference "@eneo/ui/styles";
-  div[data-highlighted] {
-    @apply bg-hover-default;
-  }
-
-  div[data-disabled] {
-    @apply opacity-30 hover:bg-transparent;
-  }
-</style>

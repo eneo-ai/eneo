@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { createAccordion } from "@melt-ui/svelte";
-  import { slide } from "svelte/transition";
-  import { IconChevronRight } from "@eneo/icons/chevron-right";
+  import * as Accordion from "$lib/components/ui/accordion/index.js";
+  import { Accordion as AccordionPrimitive } from "bits-ui";
   import DashboardTile from "./DashboardTile.svelte";
   import DashboardAppTile from "./DashboardAppTile.svelte";
   import type { Dashboard } from "@eneo/eneo-js";
@@ -23,75 +22,43 @@
   if (hasAssistants) defaultSections.push(`${space.id}-assistants`);
   if (hasApps) defaultSections.push(`${space.id}-apps`);
 
-  const {
-    elements: { content, item, trigger, root },
-    helpers: { isSelected }
-  } = createAccordion({
-    multiple: true,
-    defaultValue: defaultSections
-  });
+  let openSections = defaultSections;
 </script>
 
-<div {...$root} class="flex flex-col">
-  <!-- Assistants Section -->
+<Accordion.Root type="multiple" bind:value={openSections}>
   {#if hasAssistants}
-    <div {...$item(`${space.id}-assistants`)} use:item>
-      <button
-        class="hover:bg-hover-dimmer flex w-full items-center justify-between px-4 py-3 font-mono text-xs uppercase"
-        {...$trigger(`${space.id}-assistants`)}
-        use:trigger
+    <Accordion.Item value={`${space.id}-assistants`}>
+      <Accordion.Trigger
+        level={3}
+        class="hover:bg-hover-dimmer items-center rounded-none px-4 py-3 font-mono text-xs uppercase hover:no-underline"
       >
-        <span>{m.dashboard_assistants_count({ count: allAssistants.length })}</span>
-        <IconChevronRight
-          class={$isSelected(`${space.id}-assistants`)
-            ? "h-4 w-4 rotate-90 transition-all"
-            : "h-4 w-4 transition-all"}
-        />
-      </button>
-
-      {#if $isSelected(`${space.id}-assistants`)}
-        <div
-          {...$content(`${space.id}-assistants`)}
-          use:content
-          transition:slide
-          class="grid grid-cols-2 gap-4 px-4 pb-4 md:grid-cols-3 lg:grid-cols-4"
-        >
-          {#each allAssistants as assistant (assistant.id)}
-            <DashboardTile {assistant} />
-          {/each}
-        </div>
-      {/if}
-    </div>
+        {m.dashboard_assistants_count({ count: allAssistants.length })}
+      </Accordion.Trigger>
+      <AccordionPrimitive.Content
+        class="grid grid-cols-2 gap-4 px-4 pb-4 md:grid-cols-3 lg:grid-cols-4"
+      >
+        {#each allAssistants as assistant (assistant.id)}
+          <DashboardTile {assistant} />
+        {/each}
+      </AccordionPrimitive.Content>
+    </Accordion.Item>
   {/if}
 
-  <!-- Apps Section -->
   {#if hasApps}
-    <div {...$item(`${space.id}-apps`)} use:item>
-      <button
-        class="hover:bg-hover-dimmer flex w-full items-center justify-between px-4 py-3 font-mono text-xs uppercase"
-        {...$trigger(`${space.id}-apps`)}
-        use:trigger
+    <Accordion.Item value={`${space.id}-apps`}>
+      <Accordion.Trigger
+        level={3}
+        class="hover:bg-hover-dimmer items-center rounded-none px-4 py-3 font-mono text-xs uppercase hover:no-underline"
       >
-        <span>{m.dashboard_apps_count({ count: space.applications?.apps.count ?? 0 })}</span>
-        <IconChevronRight
-          class={$isSelected(`${space.id}-apps`)
-            ? "h-4 w-4 rotate-90 transition-all"
-            : "h-4 w-4 transition-all"}
-        />
-      </button>
-
-      {#if $isSelected(`${space.id}-apps`)}
-        <div
-          {...$content(`${space.id}-apps`)}
-          use:content
-          transition:slide
-          class="grid grid-cols-2 gap-4 px-4 pb-4 md:grid-cols-3 lg:grid-cols-4"
-        >
-          {#each space.applications?.apps.items ?? [] as app (app.id)}
-            <DashboardAppTile {app} />
-          {/each}
-        </div>
-      {/if}
-    </div>
+        {m.dashboard_apps_count({ count: space.applications?.apps.count ?? 0 })}
+      </Accordion.Trigger>
+      <AccordionPrimitive.Content
+        class="grid grid-cols-2 gap-4 px-4 pb-4 md:grid-cols-3 lg:grid-cols-4"
+      >
+        {#each space.applications?.apps.items ?? [] as app (app.id)}
+          <DashboardAppTile {app} />
+        {/each}
+      </AccordionPrimitive.Content>
+    </Accordion.Item>
   {/if}
-</div>
+</Accordion.Root>

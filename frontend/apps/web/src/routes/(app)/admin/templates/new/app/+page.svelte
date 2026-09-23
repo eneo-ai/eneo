@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { Page, Settings } from "$lib/components/layout";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
@@ -21,8 +21,8 @@
   import ImprovedCategorySelector from "$lib/features/templates/components/admin/ImprovedCategorySelector.svelte";
   import LucideIconPicker from "$lib/features/templates/components/LucideIconPicker.svelte";
   import HelpTooltip from "../../../models/components/HelpTooltip.svelte";
-  import { createSelect } from "@melt-ui/svelte";
-  import { IconCheck } from "@eneo/icons/check";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import { Select as SelectPrimitive } from "bits-ui";
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { IconEdit } from "@eneo/icons/edit";
   import { IconFileAudio } from "@eneo/icons/file-audio";
@@ -64,24 +64,6 @@
     audio: ["audio-recorder", "audio-upload"],
     image: ["image-upload"]
   } as const;
-
-  const {
-    elements: { trigger, menu, option, group, groupLabel },
-    states: { selected },
-    helpers: { isSelected }
-  } = createSelect<typeof inputType>({
-    positioning: {
-      placement: "bottom",
-      fitViewport: true,
-      sameWidth: true
-    },
-    defaultSelected: { value: untrack(() => inputType) },
-    portal: null,
-    onSelectedChange: ({ next }) => {
-      if (next?.value) inputType = next.value;
-      return next;
-    }
-  });
 
   // Wizard configuration
   let wizardAttachmentsEnabled = $state(false);
@@ -151,8 +133,12 @@
     />
 
     <Page.Flex>
-      <Button variant="outlined" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
-      <Button variant="positive" class="w-32" onclick={handleCreateTemplate} disabled={isSaving}>
+      <Button variant="outline" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
+      <Button
+        class="bg-positive-default hover:bg-positive-stronger w-32"
+        onclick={handleCreateTemplate}
+        disabled={isSaving}
+      >
         {isSaving ? m.loading() : m.create_template()}
       </Button>
     </Page.Flex>
@@ -222,58 +208,48 @@
           hasChanges={false}
           let:aria
         >
-          <button
-            {...$trigger}
-            {...aria}
-            use:trigger
-            type="button"
-            class="border-default hover:bg-hover-dimmer flex h-16 items-center justify-between border-b px-4"
+          <Select.Root
+            type="single"
+            value={inputType}
+            onValueChange={(next) => {
+              if (next) inputType = next as typeof inputType;
+            }}
           >
-            {#if $selected}
-              {@const IconComponent = inputTypes[$selected.value].icon}
-              <div class="flex items-center gap-3">
-                <IconComponent />
-                <span>{inputTypes[$selected.value].label}</span>
-              </div>
-            {:else}
-              {m.nothing_selected()}
-            {/if}
-            <IconChevronDown />
-          </button>
-
-          <div
-            class="border-stronger bg-primary z-20 flex flex-col overflow-y-auto rounded-lg border shadow-xl"
-            {...$menu}
-            use:menu
-          >
-            {#each Object.entries(groupedTypes) as [type, inputOptions] (type)}
-              <div {...$group(type)} use:group>
-                <div
-                  class="bg-frosted-glass-secondary border-default flex items-center gap-3 border-b px-4 py-2 font-mono text-sm capitalize"
-                  {...$groupLabel(type)}
-                  use:groupLabel
+            <SelectPrimitive.Trigger>
+              {#snippet child({ props })}
+                <button
+                  {...props}
+                  {...aria}
+                  class="border-default hover:bg-hover-dimmer flex h-16 w-full items-center justify-between border-b px-4"
                 >
-                  {type}
-                </div>
-                {#each inputOptions as inputOption (inputOption)}
-                  {@const { icon: IconComponent, label } = inputTypes[inputOption]}
-                  <div
-                    class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between border-b px-4 last-of-type:border-b-0 hover:cursor-pointer"
-                    {...$option({ value: inputOption })}
-                    use:option
-                  >
+                  {#if inputType}
+                    {@const IconComponent = inputTypes[inputType].icon}
                     <div class="flex items-center gap-3">
                       <IconComponent />
+                      <span>{inputTypes[inputType].label}</span>
+                    </div>
+                  {:else}
+                    {m.nothing_selected()}
+                  {/if}
+                  <IconChevronDown />
+                </button>
+              {/snippet}
+            </SelectPrimitive.Trigger>
+            <Select.Content>
+              {#each Object.entries(groupedTypes) as [type, inputOptions] (type)}
+                <Select.Group>
+                  <Select.GroupHeading class="capitalize">{type}</Select.GroupHeading>
+                  {#each inputOptions as inputOption (inputOption)}
+                    {@const { icon: IconComponent, label } = inputTypes[inputOption]}
+                    <Select.Item value={inputOption} {label} class="min-h-10 gap-3">
+                      <IconComponent />
                       <span>{label}</span>
-                    </div>
-                    <div class="check {$isSelected(inputOption) ? 'block' : 'hidden'}">
-                      <IconCheck class="text-positive-default !size-8"></IconCheck>
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            {/each}
-          </div>
+                    </Select.Item>
+                  {/each}
+                </Select.Group>
+              {/each}
+            </Select.Content>
+          </Select.Root>
         </Settings.Row>
       </Settings.Group>
 
@@ -408,14 +384,3 @@
     </Settings.Page>
   </Page.Main>
 </Page.Root>
-
-<style lang="postcss">
-  @reference "@eneo/ui/styles";
-  div[data-highlighted] {
-    @apply bg-hover-default;
-  }
-
-  div[data-disabled] {
-    @apply opacity-30 hover:bg-transparent;
-  }
-</style>
