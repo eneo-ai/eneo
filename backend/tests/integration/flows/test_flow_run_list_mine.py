@@ -5,12 +5,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
 import pytest
+import sqlalchemy as sa
 from httpx import AsyncClient
 
+from eneo.database.tables.flow_tables import FlowRuns
 from tests.integration.module_session_support import (
     enable_module,
     install_module,
@@ -24,8 +27,24 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 class RunHistory:
     admin_token: str
     runs_path: str
-    admin_run_ids: set[str]
+    newest_admin_run_id: str
     colleague_run_id: str
+    oldest_admin_run_id: str
+
+    @property
+    def all_run_ids(self) -> list[str]:
+        """Newest first, as the list orders them: the colleague's run sits
+        between the admin's, so paging over the admin's runs has to skip it
+        inside the query."""
+        return [
+            self.newest_admin_run_id,
+            self.colleague_run_id,
+            self.oldest_admin_run_id,
+        ]
+
+    @property
+    def admin_run_ids(self) -> list[str]:
+        return [self.newest_admin_run_id, self.oldest_admin_run_id]
 
 
 @pytest.fixture
@@ -39,7 +58,8 @@ async def history(
 ) -> RunHistory:
     flow = await create_published_compose_text_flow(client, flow_process_auth_headers)
     async with db_container() as container:
-        colleague = await user_factory(container.session())
+        session = container.session()
+        colleague = await user_factory(session)
         colleague_id = colleague.id
         published = await container.flow_repo().get(
             UUID(flow.flow_id), admin_user.tenant_id
@@ -64,16 +84,26 @@ async def history(
             )
             return str(run.id)
 
-        # The colleague's run lands between the admin's, so paging over the
-        # admin's own runs has to skip it inside the query.
-        first_admin_run = await run_by(admin_user.id)
+        oldest_admin_run = await run_by(admin_user.id)
         colleague_run = await run_by(colleague_id)
-        second_admin_run = await run_by(admin_user.id)
+        newest_admin_run = await run_by(admin_user.id)
+        # Inserts in one transaction share now(), so each run gets its own
+        # created_at; otherwise the id tie-break would decide the order.
+        started = datetime(2026, 9, 1, 8, 0, tzinfo=timezone.utc)
+        for minutes, run_id in enumerate(
+            (oldest_admin_run, colleague_run, newest_admin_run)
+        ):
+            await session.execute(
+                sa.update(FlowRuns)
+                .where(FlowRuns.id == UUID(run_id))
+                .values(created_at=started + timedelta(minutes=minutes))
+            )
     return RunHistory(
         admin_token=flow_process_auth_headers.token,
         runs_path=f"/api/v1/flows/{flow.flow_id}/runs/",
-        admin_run_ids={first_admin_run, second_admin_run},
+        newest_admin_run_id=newest_admin_run,
         colleague_run_id=colleague_run,
+        oldest_admin_run_id=oldest_admin_run,
     )
 
 
@@ -94,23 +124,19 @@ async def test_mine_narrows_an_admins_run_list_to_their_own_runs(
 ):
     headers = {"Authorization": f"Bearer {history.admin_token}"}
 
-    everything = await _runs(client, history, headers)
-    mine = await _runs(client, history, headers, mine=True)
-
-    assert set(_ids(everything)) == {
-        *history.admin_run_ids,
-        history.colleague_run_id,
-    }
-    assert set(_ids(mine)) == history.admin_run_ids
-    assert _ids(mine) == [
-        run_id for run_id in _ids(everything) if run_id in history.admin_run_ids
-    ]
+    assert _ids(await _runs(client, history, headers)) == history.all_run_ids
+    assert _ids(await _runs(client, history, headers, mine=True)) == (
+        history.admin_run_ids
+    )
     pages = [
         await _runs(client, history, headers, mine=True, limit=1, offset=offset)
         for offset in (0, 1)
     ]
     assert [page["has_more"] for page in pages] == [True, False]
-    assert [run_id for page in pages for run_id in _ids(page)] == _ids(mine)
+    assert [_ids(page) for page in pages] == [
+        [history.newest_admin_run_id],
+        [history.oldest_admin_run_id],
+    ]
 
 
 async def test_a_module_session_lists_the_humans_own_runs_with_mine(
@@ -128,10 +154,7 @@ async def test_a_module_session_lists_the_humans_own_runs_with_mine(
     )
     headers = {"X-API-Key": secret, "Authorization": f"Bearer {module_token}"}
 
-    assert set(_ids(await _runs(client, history, headers))) == {
-        *history.admin_run_ids,
-        history.colleague_run_id,
-    }
-    assert set(_ids(await _runs(client, history, headers, mine=True))) == (
+    assert _ids(await _runs(client, history, headers)) == history.all_run_ids
+    assert _ids(await _runs(client, history, headers, mine=True)) == (
         history.admin_run_ids
     )
