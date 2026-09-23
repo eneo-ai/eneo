@@ -40,6 +40,30 @@ export function parseLauncherColors(raw: unknown): LauncherColors | null {
   return light && dark ? { light, dark } : null;
 }
 
+export type WidgetPosition = "bottom-right" | "bottom-left";
+
+/**
+ * The saved settings the launcher itself needs, from `/widget/settings/<id>`,
+ * so an edit reaches every site without a new snippet. `language` is null
+ * while the widget follows the host page.
+ */
+export type WidgetSettings = {
+  language: "sv" | "en" | null;
+  position: WidgetPosition | null;
+  colors: LauncherColors | null;
+};
+
+export function parseWidgetSettings(raw: unknown): WidgetSettings | null {
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as { language?: unknown; position?: unknown; colors?: unknown };
+  return {
+    language: value.language === "sv" || value.language === "en" ? value.language : null,
+    position:
+      value.position === "bottom-right" || value.position === "bottom-left" ? value.position : null,
+    colors: parseLauncherColors(value.colors)
+  };
+}
+
 /** Messages the embed page sends to the loader. */
 export type FrameMessage =
   | { type: "ready"; payload?: { colors: LauncherColors } }

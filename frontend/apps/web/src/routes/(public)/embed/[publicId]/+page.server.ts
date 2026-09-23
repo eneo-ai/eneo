@@ -1,6 +1,8 @@
 import { createWidgetClient, EneoError } from "@eneo/eneo-js";
+import { redirect } from "@sveltejs/kit";
 import { frameAncestorsFor, originSource } from "$lib/core/csp";
 import { getBackendUrl } from "$lib/core/environment.server";
+import { embedLanguageRedirect } from "$lib/features/widget/embedLanguage";
 import { PREVIEW_QUERY } from "$lib/features/widget/preview";
 import type { PageServerLoad } from "./$types";
 
@@ -52,6 +54,12 @@ export const load: PageServerLoad = async ({ params, url, fetch, locals, setHead
     : standalone || !config
       ? "'self'"
       : frameAncestorsFor(config.frame_ancestors);
+
+  // A fixed language wins over the one the loader or a copied link asked
+  // for. The frame policy above is already set for the redirect response.
+  const localized = config ? embedLanguageRedirect(url, config.language) : null;
+  if (localized) redirect(307, localized);
+
   // The page fetches its API and the organisation's logo from other origins
   // at most; answer Markdown must not be able to reach anything else. The
   // preview has no configuration yet, so it accepts any https image.

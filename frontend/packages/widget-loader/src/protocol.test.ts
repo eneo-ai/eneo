@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { BRIDGE_NAMESPACE, BRIDGE_VERSION, envelope, parseFrameMessage } from "./protocol";
+import {
+  BRIDGE_NAMESPACE,
+  BRIDGE_VERSION,
+  envelope,
+  parseFrameMessage,
+  parseWidgetSettings
+} from "./protocol";
 
 describe("parseFrameMessage", () => {
   it("accepts every message the embed page sends", () => {
@@ -60,5 +66,28 @@ describe("parseFrameMessage", () => {
       v: BRIDGE_VERSION,
       type: "open"
     });
+  });
+});
+
+describe("parseWidgetSettings", () => {
+  const colors = {
+    light: { accent: "#1F4E79", on_accent: "#FFFFFF" },
+    dark: { accent: "#9CC7F0", on_accent: "#111111" }
+  };
+
+  it("keeps a fixed language, the position and valid colours", () => {
+    expect(parseWidgetSettings({ language: "en", position: "bottom-left", colors })).toEqual({
+      language: "en",
+      position: "bottom-left",
+      colors
+    });
+  });
+
+  it("treats an automatic language and anything unknown as unset", () => {
+    expect(
+      parseWidgetSettings({ language: "auto", position: "top-left", colors: { light: 1 } })
+    ).toEqual({ language: null, position: null, colors: null });
+    expect(parseWidgetSettings(null)).toBeNull();
+    expect(parseWidgetSettings("bottom-left")).toBeNull();
   });
 });
