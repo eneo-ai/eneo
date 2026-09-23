@@ -61,6 +61,8 @@ TOOL_RESULT = "RAW TOOL RESULT 2026-123"
 RESOURCE_CONTENT = "Personnummer 19XX i ärende 2026-123"
 PRIVATE_META = "internal-row-42"
 TOOL_META = "internal-tool-model"
+UNCITED_URI = "https://arenden.kommun.se/2026-999"
+UNCITED_TITLE = "Ärende 2026-999: Namn Namnsson"
 ASSISTANT_NAME = "Kommunassistenten"
 
 PROMPT_TOKENS, ANSWER_TOKENS = 4_800, 300
@@ -278,7 +280,18 @@ async def visitor_pipeline(
                         content=RESOURCE_CONTENT,
                         meta={"title": "Ärende 2026-123", "row": PRIVATE_META},
                         order=0,
-                    )
+                    ),
+                    # Returned by the tool, never cited by the answer.
+                    McpToolReference(
+                        id=uuid4(),
+                        tool_call_id="call_1",
+                        mcp_tool_name="arendesystem__run",
+                        uri=UNCITED_URI,
+                        mime_type="text/plain",
+                        content=RESOURCE_CONTENT,
+                        meta={"title": UNCITED_TITLE},
+                        order=1,
+                    ),
                 ],
             )
             yield Completion(
@@ -341,6 +354,8 @@ def _assert_no_internal_data(payload: str) -> None:
         PRIVATE_META,
         TOOL_META,
         ASSISTANT_NAME,
+        UNCITED_URI,
+        UNCITED_TITLE,
     ):
         assert secret not in payload, secret
 
@@ -378,9 +393,14 @@ async def test_visitor_runs_the_assistant_as_configured_and_sees_only_its_answer
     assert not any("/internal-mcp/" in server.http_url for server in servers)
     assert identity_headers == {}
 
-    # The stream: no model, reasoning, image, tool result, resource content
-    # or token counts.
-    assert [event for event, _ in events] == ["first_chunk", "tool_call", "text"]
+    # The stream: no model, reasoning, image, tool result, resource content,
+    # uncited resource or token counts.
+    assert [event for event, _ in events] == [
+        "first_chunk",
+        "tool_call",
+        "tool_call",
+        "text",
+    ]
     _assert_no_internal_data(json.dumps(events))
     first = events[0][1]
     assert first["completion_model"] is None
@@ -390,13 +410,17 @@ async def test_visitor_runs_the_assistant_as_configured_and_sees_only_its_answer
     assert [
         (call["tool_name"], call["result"], call["meta"]) for call in tool["tools"]
     ] == [("run", None, None)]
-    [ref] = tool["mcp_tool_references"]
+    assert tool["mcp_tool_references"] == []
+    # The cited resource arrives just before the text that cites it.
+    cited = events[2][1]
+    assert cited["tools"] == []
+    [ref] = cited["mcp_tool_references"]
     assert (ref["uri"], ref["content"], ref["meta"]) == (
         "https://arenden.kommun.se/2026-123",
         None,
         {"title": "Ärende 2026-123"},
     )
-    text = events[2][1]
+    text = events[3][1]
     assert [r["metadata"]["title"] for r in text["references"]] == [
         "Öppettider biblioteket"
     ]

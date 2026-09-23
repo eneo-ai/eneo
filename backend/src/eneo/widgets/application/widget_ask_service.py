@@ -243,8 +243,7 @@ class WidgetAskService:
         completed = False
         try:
             async for chunk in answer:
-                visible = view.chunk(chunk)
-                if visible is not None:
+                for visible in view.events(chunk):
                     yield visible
             completed = True
         finally:

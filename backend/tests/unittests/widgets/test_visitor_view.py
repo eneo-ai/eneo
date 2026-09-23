@@ -1,6 +1,7 @@
 """What a widget visitor receives, checked on the serialised payloads."""
 
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -146,6 +147,18 @@ def test_first_chunk_names_no_model_assistant_or_retrieved_document(show_sources
 # --- stream -------------------------------------------------------------------
 
 
+def _text(text: str) -> Completion:
+    return Completion(text=text, response_type=ResponseType.TEXT)
+
+
+def _cite(ref: McpToolReference) -> str:
+    return f'<inref id="{str(ref.id)[:8]}"/>'
+
+
+def _stream(view: VisitorView, *chunks: Completion) -> list[dict]:
+    return [_sse(event) for chunk in chunks for event in view.events(chunk)]
+
+
 def test_reasoning_approval_and_token_usage_never_reach_a_visitor():
     view = VisitorView(_widget())
     for response_type in (
@@ -162,7 +175,7 @@ def test_reasoning_approval_and_token_usage_never_reach_a_visitor():
             usage=TokenUsage(prompt_tokens=900, completion_tokens=10),
             skill_context_tokens=400,
         )
-        assert view.chunk(chunk) is None
+        assert view.events(chunk) == []
 
 
 def test_hidden_sources_strip_cited_documents_from_text():
@@ -170,22 +183,20 @@ def test_hidden_sources_strip_cited_documents_from_text():
         text="Hej", response_type=ResponseType.TEXT, reference_chunks=[_blob()]
     )
 
-    hidden = VisitorView(_widget(show_sources=False)).chunk(chunk)
-    shown = VisitorView(_widget(show_sources=True)).chunk(chunk)
+    [hidden] = VisitorView(_widget(show_sources=False)).events(chunk)
+    [shown] = VisitorView(_widget(show_sources=True)).events(chunk)
 
-    assert hidden is not None and _sse(hidden)["references"] == []
-    assert shown is not None
+    assert _sse(hidden)["references"] == []
     assert _sse(shown)["references"][0]["metadata"]["title"] == (
         "Intern rutin för bibliotek"
     )
 
 
-def test_tool_event_with_everything_shown_keeps_calls_and_titles_only():
+def test_tool_event_keeps_the_call_and_holds_back_its_resources():
     original = _tool_chunk()
 
-    visible = VisitorView(_widget()).chunk(original)
+    [visible] = VisitorView(_widget()).events(original)
 
-    assert visible is not None
     event = _sse(visible)
     assert event["tools"] == [
         {
@@ -203,11 +214,7 @@ def test_tool_event_with_everything_shown_keeps_calls_and_titles_only():
             "generated_file_ids": None,
         }
     ]
-    [ref] = event["mcp_tool_references"]
-    assert ref["uri"] == "https://casefiles.kommun.se/2026-123"
-    assert ref["content"] is None
-    assert ref["meta"] == {"title": "Ärende 2026-123", "sourceType": "web"}
-    assert ref["tool_call_id"] == "call_1"
+    assert event["mcp_tool_references"] == []
     assert SECRET_CONTENT not in json.dumps(event)
     # The stream's own objects keep their content: the answer's references
     # are persisted from them after the stream ends.
@@ -217,39 +224,98 @@ def test_tool_event_with_everything_shown_keeps_calls_and_titles_only():
     assert original.tool_calls_metadata[0].result == SECRET_CONTENT
 
 
-def test_hidden_tool_activity_keeps_tool_sources_without_naming_the_tool():
-    visible = VisitorView(_widget(show_tool_activity=False)).chunk(_tool_chunk())
+def test_a_tool_resource_reaches_the_visitor_only_once_the_answer_cites_it():
+    cited, uncited = _mcp_ref(), _mcp_ref()
+    uncited.uri = "https://casefiles.kommun.se/2026-999"
+    uncited.meta = {"title": "Ärende 2026-999: Namn Namnsson"}
+    tool = replace(_tool_chunk(), mcp_tool_references=[cited, uncited])
+    view = VisitorView(_widget())
 
-    assert visible is not None
-    event = _sse(visible)
-    assert event["tools"] == []
-    [ref] = event["mcp_tool_references"]
+    events = _stream(view, tool, _text("Enligt ärendet "), _text(_cite(cited)))
+
+    assert [event.get("mcp_tool_references") for event in events[:2]] == [[], None]
+    # The resource arrives just before the text that cites it.
+    [ref] = events[2]["mcp_tool_references"]
+    assert events[2]["tools"] == []
     assert ref["uri"] == "https://casefiles.kommun.se/2026-123"
     assert ref["meta"] == {"title": "Ärende 2026-123", "sourceType": "web"}
-    assert ref["tool_call_id"] is None and ref["mcp_tool_name"] is None
-    assert "casefiles__" not in json.dumps(event)
-    assert "search_casefiles" not in json.dumps(event)
+    assert ref["content"] is None
+    assert ref["tool_call_id"] == "call_1"
+    assert events[3]["answer"] == _cite(cited)
+    payload = json.dumps(events)
+    assert "2026-999" not in payload and "Namnsson" not in payload
+    # A second citation of the same resource sends nothing new.
+    assert [event["answer"] for event in _stream(view, _text(_cite(cited)))] == [
+        _cite(cited)
+    ]
+
+
+def test_a_citation_split_across_text_chunks_still_releases_its_resource():
+    ref = _mcp_ref()
+    marker = _cite(ref)
+    view = VisitorView(_widget())
+
+    events = _stream(view, _tool_chunk_with(ref), _text(marker[:9]), _text(marker[9:]))
+
+    assert [len(event.get("mcp_tool_references") or []) for event in events] == [
+        0,
+        0,
+        1,
+        0,
+    ]
+    assert events[2]["mcp_tool_references"][0]["uri"] == ref.uri
+
+
+def test_tool_images_are_not_held_back():
+    image = replace(_mcp_ref(), mime_type="image/png", uri="https://img/x.png")
+
+    [event] = _stream(VisitorView(_widget()), _tool_chunk_with(image))
+
+    assert [ref["uri"] for ref in event["mcp_tool_references"]] == ["https://img/x.png"]
+
+
+def test_hidden_tool_activity_keeps_cited_sources_without_naming_the_tool():
+    ref = _mcp_ref()
+    view = VisitorView(_widget(show_tool_activity=False))
+
+    events = _stream(view, _tool_chunk_with(ref), _text(_cite(ref)))
+
+    [source_event, text_event] = events
+    assert source_event["tools"] == []
+    [shown] = source_event["mcp_tool_references"]
+    assert shown["uri"] == "https://casefiles.kommun.se/2026-123"
+    assert shown["meta"] == {"title": "Ärende 2026-123", "sourceType": "web"}
+    assert shown["tool_call_id"] is None and shown["mcp_tool_name"] is None
+    assert "casefiles__" not in json.dumps(events)
+    assert "search_casefiles" not in json.dumps(events)
+    assert text_event["answer"] == _cite(ref)
 
 
 def test_hidden_sources_keep_tool_calls_but_no_tool_references():
-    visible = VisitorView(_widget(show_sources=False)).chunk(_tool_chunk())
+    ref = _mcp_ref()
+    view = VisitorView(_widget(show_sources=False))
 
-    assert visible is not None
-    event = _sse(visible)
-    assert [tool["tool_name"] for tool in event["tools"]] == ["search_casefiles"]
-    assert event["mcp_tool_references"] == []
+    events = _stream(view, _tool_chunk_with(ref), _text(_cite(ref)))
+
+    assert [tool["tool_name"] for tool in events[0]["tools"]] == ["search_casefiles"]
+    assert [event.get("mcp_tool_references") for event in events] == [[], None]
+    assert ref.uri not in json.dumps(events)
 
 
 def test_tool_event_is_dropped_when_nothing_in_it_may_be_shown():
     view = VisitorView(_widget(show_sources=False, show_tool_activity=False))
-    assert view.chunk(_tool_chunk()) is None
+    assert view.events(_tool_chunk()) == []
 
     only_calls = Completion(
         text="",
         response_type=ResponseType.TOOL_CALL,
         tool_calls_metadata=[_tool_call()],
     )
-    assert VisitorView(_widget(show_tool_activity=False)).chunk(only_calls) is None
+    assert VisitorView(_widget(show_tool_activity=False)).events(only_calls) == []
+
+
+def _tool_chunk_with(ref: McpToolReference) -> Completion:
+    return replace(_tool_chunk(), mcp_tool_references=[ref])
 
 
 # --- restore and feedback ---------------------------------------------------

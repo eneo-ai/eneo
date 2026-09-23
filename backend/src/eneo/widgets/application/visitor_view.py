@@ -3,8 +3,9 @@
 # Licensed under the MIT License.
 
 
+import re
 from dataclasses import replace
-from typing import Any, Optional
+from typing import Any
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
@@ -13,6 +14,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
 )
 from eneo.assistants.api.assistant_models import AssistantResponse
+from eneo.assistants.assistant_service import REFERENCE_PATTERN
 from eneo.questions.question import (
     McpToolReferencePublic,
     Question,
@@ -27,6 +29,10 @@ from eneo.widgets.domain.widget import Widget
 # is implementation detail.
 DISPLAY_META_KEYS = frozenset({"title", "sourceType", "pageRange", "section"})
 
+# A citation marker split across two text chunks is found in the tail of the
+# previous chunk plus the next one.
+_MARKER_TAIL = len('<inref id="00000000"/>') - 1
+
 
 class VisitorView:
     """What an anonymous widget visitor may see of an answer.
@@ -37,15 +43,19 @@ class VisitorView:
     cleared, so the embed page drives the same client code as the app.
 
     Never shown: the model record, reasoning, token counts, the assistant and
-    Skills behind the answer, tool results and tool ``_meta``, and the raw content of tool
-    resources. With ``show_sources`` off no reference of any kind leaves the
-    server. With ``show_tool_activity`` off no tool call does, but resources a
-    tool returned still reach the visitor as sources (on a tool event with an
-    empty tool list) when sources are shown.
+    Skills behind the answer, tool results and tool ``_meta``, and the raw
+    content of tool resources. With ``show_sources`` off no reference of any kind leaves the server. With
+    ``show_tool_activity`` off no tool call does. A resource a tool returned
+    reaches the visitor only once the answer cites it, on a tool event with an
+    empty tool list, so the stream carries what a restore does.
+
+    One instance filters one answer stream: it holds the uncited resources.
     """
 
     def __init__(self, widget: Widget) -> None:
         self.widget = widget
+        self._uncited: dict[str, McpToolReference] = {}
+        self._tail = ""
 
     # --- ask ----------------------------------------------------------------
 
@@ -65,8 +75,8 @@ class VisitorView:
             }
         )
 
-    def chunk(self, chunk: Completion) -> Optional[Completion]:
-        """A stream event as the visitor gets it, or None to drop it."""
+    def events(self, chunk: Completion) -> list[Completion]:
+        """The stream events a visitor gets for one pipeline event, in order."""
         if chunk.response_type in (
             ResponseType.REASONING,
             # Visitors are never asked to approve a tool.
@@ -75,34 +85,66 @@ class VisitorView:
             # The widget shows no context meter; counts reveal prompt sizes.
             ResponseType.TOKEN_USAGE,
         ):
-            return None
+            return []
         if chunk.response_type == ResponseType.TOOL_CALL:
-            calls: list[ToolCallMetadata] = (
-                [
-                    replace(call, result=None, meta=None)
-                    for call in chunk.tool_calls_metadata or []
-                ]
-                if self.widget.show_tool_activity
-                else []
-            )
-            references: list[McpToolReference] = (
-                [
-                    replace(ref, **self._reference_changes(ref.meta))
-                    for ref in chunk.mcp_tool_references or []
-                ]
-                if self.widget.show_sources
-                else []
-            )
-            if not calls and not references:
-                return None
-            return replace(
+            return self._tool_events(chunk)
+        if chunk.response_type == ResponseType.TEXT:
+            cited = self._newly_cited(chunk.text or "")
+            if not self.widget.show_sources and chunk.reference_chunks is not None:
+                chunk = replace(chunk, reference_chunks=None)
+            return [*cited, chunk]
+        return [chunk]
+
+    def _tool_events(self, chunk: Completion) -> list[Completion]:
+        calls: list[ToolCallMetadata] = (
+            [
+                replace(call, result=None, meta=None)
+                for call in chunk.tool_calls_metadata or []
+            ]
+            if self.widget.show_tool_activity
+            else []
+        )
+        shown: list[McpToolReference] = []
+        if self.widget.show_sources:
+            for ref in chunk.mcp_tool_references or []:
+                # Images cannot be cited and are kept on the answer as is.
+                if (ref.mime_type or "").startswith("image/"):
+                    shown.append(self._visible_reference(ref))
+                else:
+                    self._uncited.setdefault(str(ref.id)[:8], ref)
+        if not calls and not shown:
+            return []
+        return [
+            replace(
                 chunk,
                 tool_calls_metadata=calls or None,
-                mcp_tool_references=references or None,
+                mcp_tool_references=shown or None,
             )
-        if not self.widget.show_sources and chunk.reference_chunks is not None:
-            return replace(chunk, reference_chunks=None)
-        return chunk
+        ]
+
+    def _newly_cited(self, text: str) -> list[Completion]:
+        if not self._uncited or not text:
+            self._tail = (self._tail + text)[-_MARKER_TAIL:]
+            return []
+        window = self._tail + text
+        self._tail = window[-_MARKER_TAIL:]
+        cited = [
+            self._uncited.pop(short_id)
+            for short_id in dict.fromkeys(re.findall(REFERENCE_PATTERN, window))
+            if short_id in self._uncited
+        ]
+        if not cited:
+            return []
+        return [
+            Completion(
+                text="",
+                response_type=ResponseType.TOOL_CALL,
+                mcp_tool_references=[self._visible_reference(ref) for ref in cited],
+            )
+        ]
+
+    def _visible_reference(self, ref: McpToolReference) -> McpToolReference:
+        return replace(ref, **self._reference_changes(ref.meta))
 
     # --- sessions -----------------------------------------------------------
 

@@ -2,7 +2,7 @@ import json
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -298,6 +298,9 @@ async def _visitor_events(response) -> list[tuple[str, dict]]:
     return [(event.event, json.loads(event.data)) async for event in sse.body_iterator]
 
 
+CITED_RESOURCE_ID = UUID("a1b2c3d4-0000-4000-8000-000000000001")
+
+
 def _tool_event() -> Completion:
     return Completion(
         text="",
@@ -316,7 +319,7 @@ def _tool_event() -> Completion:
         ],
         mcp_tool_references=[
             McpToolReference(
-                id=uuid4(),
+                id=CITED_RESOURCE_ID,
                 tool_call_id="call_1",
                 mcp_tool_name="casefiles__search",
                 uri="https://casefiles.kommun.se/2026-123",
@@ -335,7 +338,9 @@ async def _answer_with_everything():
     )
     yield _tool_event()
     yield Completion(
-        text="Hej", response_type=ResponseType.TEXT, reference_chunks=[_blob()]
+        text=f'Hej <inref id="{str(CITED_RESOURCE_ID)[:8]}"/>',
+        response_type=ResponseType.TEXT,
+        reference_chunks=[_blob()],
     )
 
 
@@ -354,19 +359,28 @@ async def test_stream_never_carries_model_reasoning_or_tool_internals():
     events = await _ask_as_visitor(_widget())
     payload = json.dumps(events)
 
-    assert [event for event, _ in events] == ["first_chunk", "tool_call", "text"]
+    assert [event for event, _ in events] == [
+        "first_chunk",
+        "tool_call",
+        "tool_call",
+        "text",
+    ]
     first = events[0][1]
     assert first["completion_model"] is None
     assert first["tools"] == {"assistants": []}
     # Retrieved documents are not listed up front; cited ones come with text.
     assert first["references"] == []
-    assert events[2][1]["references"][0]["metadata"]["title"] == "Intern rutin"
+    assert events[3][1]["references"][0]["metadata"]["title"] == "Intern rutin"
     for leaked in (RESOURCE_CONTENT, "llm.internal", "internal_id", "Instruktionen"):
         assert leaked not in payload
     tool = events[1][1]
     assert [call["tool_name"] for call in tool["tools"]] == ["search"]
     assert tool["tools"][0]["meta"] is None
-    assert tool["mcp_tool_references"][0]["meta"] == {"title": "Ärende 2026-123"}
+    assert tool["mcp_tool_references"] == []
+    # The resource follows once the answer cites it.
+    cited = events[2][1]
+    assert cited["tools"] == []
+    assert cited["mcp_tool_references"][0]["meta"] == {"title": "Ärende 2026-123"}
 
 
 async def test_hidden_sources_never_leave_the_server():
