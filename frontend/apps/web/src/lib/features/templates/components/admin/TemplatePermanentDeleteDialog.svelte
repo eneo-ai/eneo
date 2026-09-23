@@ -6,7 +6,9 @@
 
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
-  import { Button, Dialog } from "@eneo/ui";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -85,53 +87,59 @@
   }
 </script>
 
-<Dialog.Root {openController}>
-  <Dialog.Content>
-    <Dialog.Title>{m.permanent_delete_template()}</Dialog.Title>
-    <Dialog.Description>
-      {m.permanent_delete_warning()}
-    </Dialog.Description>
+<Dialog.Root bind:open={$openController}>
+  <Dialog.Content class={dialogLayout.content()} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{m.permanent_delete_template()}</Dialog.Title>
+      <Dialog.Description>
+        {m.permanent_delete_warning()}
+      </Dialog.Description>
+    </Dialog.Header>
 
-    <Dialog.Section>
-      <div class="flex flex-col gap-4 py-4">
-        <!-- Warning box with template name -->
-        <div class="border-negative-default bg-negative-default/15 rounded-lg border px-4 py-3">
-          <div class="flex items-start gap-3">
-            <AlertTriangle class="text-negative-default shrink-0" size={20} />
-            <div class="flex flex-col gap-1.5">
-              <div class="text-default font-semibold">{template.name}</div>
-              <div class="text-secondary text-sm">
-                {m.permanent_delete_cannot_undo()}
+    <div class={dialogLayout.body}>
+      <div class={dialogLayout.section}>
+        <div class="flex flex-col gap-4 py-4">
+          <!-- Warning box with template name -->
+          <div class="border-negative-default bg-negative-default/15 rounded-lg border px-4 py-3">
+            <div class="flex items-start gap-3">
+              <AlertTriangle class="text-negative-default shrink-0" size={20} />
+              <div class="flex flex-col gap-1.5">
+                <div class="text-default font-semibold">{template.name}</div>
+                <div class="text-secondary text-sm">
+                  {m.permanent_delete_cannot_undo()}
+                </div>
               </div>
             </div>
           </div>
+
+          <!-- Confirmation input -->
+          <Field.Field>
+            <Field.Label for={`${uid}-confirm`}>
+              {m.permanent_delete_type_to_confirm({ word: template.name })}
+            </Field.Label>
+            <Input
+              id={`${uid}-confirm`}
+              bind:value={confirmationText}
+              placeholder={template.name}
+              autocomplete="off"
+              autocorrect="off"
+              spellcheck={false}
+            />
+          </Field.Field>
+
+          {#if errorMessage}
+            <div class="bg-negative-default/10 text-negative-default rounded-lg px-3 py-2 text-sm">
+              {errorMessage}
+            </div>
+          {/if}
         </div>
-
-        <!-- Confirmation input -->
-        <Field.Field>
-          <Field.Label for={`${uid}-confirm`}>
-            {m.permanent_delete_type_to_confirm({ word: template.name })}
-          </Field.Label>
-          <Input
-            id={`${uid}-confirm`}
-            bind:value={confirmationText}
-            placeholder={template.name}
-            autocomplete="off"
-            autocorrect="off"
-            spellcheck={false}
-          />
-        </Field.Field>
-
-        {#if errorMessage}
-          <div class="bg-negative-default/10 text-negative-default rounded-lg px-3 py-2 text-sm">
-            {errorMessage}
-          </div>
-        {/if}
       </div>
-    </Dialog.Section>
+    </div>
 
-    <Dialog.Controls let:close>
-      <Button is={close} disabled={isLoading}>{m.cancel()}</Button>
+    <Dialog.Footer class={dialogLayout.footer}>
+      <Dialog.Close class={buttonVariants({ variant: "outline" })} disabled={isLoading}>
+        {m.cancel()}
+      </Dialog.Close>
       <Button
         variant="destructive"
         onclick={handlePermanentDelete}
@@ -139,6 +147,6 @@
       >
         {isLoading ? m.deleting() : m.permanent_delete()}
       </Button>
-    </Dialog.Controls>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

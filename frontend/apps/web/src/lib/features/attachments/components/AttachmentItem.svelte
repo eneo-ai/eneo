@@ -2,7 +2,7 @@
   import type { Attachment } from "../AttachmentManager";
   import { IconCheck } from "@eneo/icons/check";
   import { IconCancel } from "@eneo/icons/cancel";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { Progress } from "$lib/components/ui/progress/index.js";
   import { m } from "$lib/paraglide/messages";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
@@ -53,8 +53,9 @@
   <div class="min-w-8">
     <Button
       variant="destructive"
-      padding="icon"
-      on:click={() => {
+      size="icon"
+      aria-label={m.remove_file({ fileName: attachment.file.name })}
+      onclick={() => {
         attachment.remove();
       }}
     >

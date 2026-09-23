@@ -5,8 +5,9 @@
 -->
 
 <script lang="ts">
-  import { Button, Dialog } from "@eneo/ui";
-  import { writable } from "svelte/store";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
   import { toastError } from "$lib/core/errors";
   import { Settings } from "$lib/components/layout";
@@ -19,20 +20,24 @@
   const security = getSecurityClassificationService();
 
   let isEnabled = $derived(security.isSecurityEnabled);
-  let showEnableDialog = writable(false);
-  let showDisableDialog = writable(false);
+  let showEnableDialog = $state(false);
+  let showDisableDialog = $state(false);
 
   function onValueChange({ current, next }: { current: boolean; next: boolean }) {
     if (current !== next) {
-      $showEnableDialog = next;
-      $showDisableDialog = !next;
+      showEnableDialog = next;
+      showDisableDialog = !next;
     }
+  }
+
+  function resetOnClose(open: boolean) {
+    if (!open) isEnabled = security.isSecurityEnabled;
   }
 
   const enable = createAsyncState(async () => {
     try {
       await security.enable();
-      $showEnableDialog = false;
+      showEnableDialog = false;
     } catch (e) {
       toastError(e);
     }
@@ -41,7 +46,7 @@
   const disable = createAsyncState(async () => {
     try {
       await security.disable();
-      $showDisableDialog = false;
+      showDisableDialog = false;
     } catch (e) {
       toastError(e);
     }
@@ -80,44 +85,36 @@
   </div>
 </Settings.Row>
 
-<Dialog.Root openController={showEnableDialog}>
-  <Dialog.Content>
-    <Dialog.Title>{m.enable_security_classifications()}</Dialog.Title>
+<Dialog.Root bind:open={showEnableDialog} onOpenChange={resetOnClose}>
+  <Dialog.Content class={dialogLayout.content()} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{m.enable_security_classifications()}</Dialog.Title>
+      <Dialog.Description>
+        {m.enable_security_classifications_dialog_description()}
+      </Dialog.Description>
+    </Dialog.Header>
 
-    <Dialog.Description>
-      {m.enable_security_classifications_dialog_description()}
-    </Dialog.Description>
-
-    <Dialog.Controls>
-      <Button
-        onclick={() => {
-          isEnabled = security.isSecurityEnabled;
-          $showEnableDialog = false;
-        }}>{m.cancel()}</Button
-      >
-      <Button variant="primary" onclick={enable} disabled={enable.isLoading}>{m.enable()}</Button>
-    </Dialog.Controls>
+    <Dialog.Footer class={dialogLayout.footer}>
+      <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
+      <Button onclick={enable} disabled={enable.isLoading}>{m.enable()}</Button>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root openController={showDisableDialog}>
-  <Dialog.Content>
-    <Dialog.Title>{m.disable_security_classifications()}</Dialog.Title>
+<Dialog.Root bind:open={showDisableDialog} onOpenChange={resetOnClose}>
+  <Dialog.Content class={dialogLayout.content()} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{m.disable_security_classifications()}</Dialog.Title>
+      <Dialog.Description>
+        {m.disable_security_classifications_dialog_description()}
+      </Dialog.Description>
+    </Dialog.Header>
 
-    <Dialog.Description>
-      {m.disable_security_classifications_dialog_description()}
-    </Dialog.Description>
-
-    <Dialog.Controls>
-      <Button
-        onclick={() => {
-          isEnabled = security.isSecurityEnabled;
-          $showDisableDialog = false;
-        }}>{m.cancel()}</Button
-      >
+    <Dialog.Footer class={dialogLayout.footer}>
+      <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
       <Button variant="destructive" onclick={disable} disabled={disable.isLoading}
         >{m.disable()}</Button
       >
-    </Dialog.Controls>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

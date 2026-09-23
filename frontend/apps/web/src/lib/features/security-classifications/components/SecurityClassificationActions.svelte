@@ -5,11 +5,13 @@
 -->
 
 <script lang="ts">
-  import { Button, Dialog, Dropdown } from "@eneo/ui";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
-  import { writable } from "svelte/store";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
   import { type SecurityClassification } from "@eneo/eneo-js";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
@@ -34,8 +36,8 @@
   );
 
   const security = getSecurityClassificationService();
-  const showDeleteDialog = writable(false);
-  const showEditDialog = writable(false);
+  let showDeleteDialog = $state(false);
+  let showEditDialog = $state(false);
 
   // This is a bit counter intuitive as the classifications array has the highest class first (index 0)
   // Because we want to render it first, whereas the backend (and service internally) has it the other way round.
@@ -50,7 +52,7 @@
   const remove = createAsyncState(async () => {
     try {
       await security.deleteClassification(classification);
-      $showDeleteDialog = false;
+      showDeleteDialog = false;
     } catch (error) {
       toastError(error);
     }
@@ -64,126 +66,137 @@
         // Need to keep in mind description can be null, but defaults to empty string
         description: description === (classification.description ?? "") ? undefined : description
       });
-      $showEditDialog = false;
+      showEditDialog = false;
     } catch (error) {
       toastError(error);
     }
   });
 </script>
 
-<Dropdown.Root>
-  <Dropdown.Trigger let:trigger asFragment>
-    <Button is={trigger} disabled={false} padding="icon">
-      <IconEllipsis></IconEllipsis>
-    </Button>
-  </Dropdown.Trigger>
-  <Dropdown.Menu let:item>
-    <Button
-      is={item}
-      onclick={() => {
+<DropdownMenu.Root>
+  <DropdownMenu.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+        <IconEllipsis></IconEllipsis>
+      </Button>
+    {/snippet}
+  </DropdownMenu.Trigger>
+  <DropdownMenu.Content align="end">
+    <DropdownMenu.Item
+      onSelect={() => {
         security.move(classification, "up");
       }}
       disabled={isHighest}
-      padding="icon-leading"
     >
       <IconArrowUpToLine size="sm" />
       {m.move_up()}
-    </Button>
-    <Button
-      is={item}
-      onclick={() => {
+    </DropdownMenu.Item>
+    <DropdownMenu.Item
+      onSelect={() => {
         security.move(classification, "down");
       }}
       disabled={isLowest}
-      padding="icon-leading"
     >
       <IconArrowDownToLine size="sm" />
       {m.move_down()}
-    </Button>
-    <Button
-      is={item}
-      onclick={() => {
-        $showEditDialog = true;
+    </DropdownMenu.Item>
+    <DropdownMenu.Item
+      onSelect={() => {
+        showEditDialog = true;
       }}
-      padding="icon-leading"
     >
       <IconEdit size="sm" />
       {m.edit()}
-    </Button>
-    <Button
-      is={item}
+    </DropdownMenu.Item>
+    <DropdownMenu.Item
       variant="destructive"
-      onclick={() => {
-        $showDeleteDialog = true;
+      onSelect={() => {
+        showDeleteDialog = true;
       }}
-      padding="icon-leading"
     >
-      <IconTrash size="sm"></IconTrash>{m.delete()}</Button
+      <IconTrash size="sm"></IconTrash>{m.delete()}</DropdownMenu.Item
     >
-  </Dropdown.Menu>
-</Dropdown.Root>
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
 
-<Dialog.Root openController={showDeleteDialog}>
-  <Dialog.Content width="medium" form>
-    <Dialog.Title>{m.delete_security_classification()}</Dialog.Title>
+<Dialog.Root bind:open={showDeleteDialog}>
+  <Dialog.Content class={dialogLayout.content("medium")} closeLabel={m.close()}>
+    <form
+      class="contents"
+      onsubmit={(event) => {
+        event.preventDefault();
+        remove();
+      }}
+    >
+      <Dialog.Header class={dialogLayout.header}>
+        <Dialog.Title>{m.delete_security_classification()}</Dialog.Title>
+        <Dialog.Description>
+          {m.confirm_delete_classification({ name: classification.name })}
+        </Dialog.Description>
+      </Dialog.Header>
 
-    <Dialog.Description>
-      {m.confirm_delete_classification({ name: classification.name })}
-    </Dialog.Description>
-
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" onclick={remove} type="submit" disabled={remove.isLoading}
-        >{remove.isLoading ? m.deleting() : m.delete_classification()}</Button
-      >
-    </Dialog.Controls>
+      <Dialog.Footer class={dialogLayout.footer}>
+        <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
+        <Button variant="destructive" type="submit" disabled={remove.isLoading}
+          >{remove.isLoading ? m.deleting() : m.delete_classification()}</Button
+        >
+      </Dialog.Footer>
+    </form>
   </Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root openController={showEditDialog}>
-  <Dialog.Content width="medium" form>
-    <Dialog.Title>{m.edit_security_classification()}</Dialog.Title>
+<Dialog.Root bind:open={showEditDialog}>
+  <Dialog.Content class={dialogLayout.content("medium")} closeLabel={m.close()}>
+    <form
+      class="contents"
+      onsubmit={(event) => {
+        event.preventDefault();
+        update();
+      }}
+    >
+      <Dialog.Header class={dialogLayout.header}>
+        <Dialog.Title>{m.edit_security_classification()}</Dialog.Title>
+      </Dialog.Header>
 
-    <Dialog.Section>
-      <Field.Field class="border-default hover:bg-hover-dimmer border-b p-4">
-        <Field.Label for={`${uid}-name`}>
-          {m.name()}
-          <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
-        </Field.Label>
-        <Input
-          id={`${uid}-name`}
-          bind:value={name}
-          required
-          aria-describedby={`${uid}-name-description`}
-        />
-        <Field.Description id={`${uid}-name-description`}>
-          {m.recognisable_display_name()}
-        </Field.Description>
-      </Field.Field>
+      <div class={dialogLayout.body}>
+        <div class={dialogLayout.section}>
+          <Field.Field class="border-default hover:bg-hover-dimmer border-b p-4">
+            <Field.Label for={`${uid}-name`}>
+              {m.name()}
+              <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+            </Field.Label>
+            <Input
+              id={`${uid}-name`}
+              bind:value={name}
+              required
+              aria-describedby={`${uid}-name-description`}
+            />
+            <Field.Description id={`${uid}-name-description`}>
+              {m.recognisable_display_name()}
+            </Field.Description>
+          </Field.Field>
 
-      <Field.Field class="border-default hover:bg-hover-dimmer border-b p-4">
-        <Field.Label for={`${uid}-description`}>{m.description()}</Field.Label>
-        <Textarea
-          id={`${uid}-description`}
-          bind:value={description}
-          rows={4}
-          aria-describedby={`${uid}-description-description`}
-        />
-        <Field.Description id={`${uid}-description-description`}>
-          {m.describe_when_classification_chosen()}
-        </Field.Description>
-      </Field.Field>
-    </Dialog.Section>
+          <Field.Field class="border-default hover:bg-hover-dimmer border-b p-4">
+            <Field.Label for={`${uid}-description`}>{m.description()}</Field.Label>
+            <Textarea
+              id={`${uid}-description`}
+              bind:value={description}
+              rows={4}
+              aria-describedby={`${uid}-description-description`}
+            />
+            <Field.Description id={`${uid}-description-description`}>
+              {m.describe_when_classification_chosen()}
+            </Field.Description>
+          </Field.Field>
+        </div>
+      </div>
 
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button
-        variant="primary"
-        onclick={update}
-        type="submit"
-        disabled={update.isLoading || !hasChanges}
-        >{update.isLoading ? m.updating() : m.update_classification()}</Button
-      >
-    </Dialog.Controls>
+      <Dialog.Footer class={dialogLayout.footer}>
+        <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
+        <Button type="submit" disabled={update.isLoading || !hasChanges}
+          >{update.isLoading ? m.updating() : m.update_classification()}</Button
+        >
+      </Dialog.Footer>
+    </form>
   </Dialog.Content>
 </Dialog.Root>

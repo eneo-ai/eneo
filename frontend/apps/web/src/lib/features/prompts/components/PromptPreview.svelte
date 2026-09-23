@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { getPromptManager } from "../PromptManager";
   import dayjs from "dayjs";
   import relativeTime from "dayjs/plugin/relativeTime";
@@ -58,11 +58,10 @@
 
         <Button
           disabled={$previewedPrompt.is_selected ?? false}
-          on:click={() => {
+          onclick={() => {
             $showPromptVersionDialog = false;
             onPromptSelected($previewedPrompt);
           }}
-          variant="primary"
           >{m.restore_this_version()}
         </Button>
       </div>

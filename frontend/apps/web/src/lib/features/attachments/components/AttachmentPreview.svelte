@@ -5,7 +5,10 @@
   import { IconCopy } from "@eneo/icons/copy";
   import { IconDocument } from "@eneo/icons/document";
   import { IconDownload } from "@eneo/icons/download";
-  import { Button, Dialog, Markdown } from "@eneo/ui";
+  import { Markdown } from "@eneo/ui";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -31,7 +34,7 @@
   let loadingFile = $state(false);
   let loadError = $state(false);
   let copied = $state(false);
-  let isOpen = $state<Dialog.OpenState>();
+  let isOpen = $state(false);
 
   // Text files include plain text, PDFs, DOCX, PPTX, etc. (all are returned as text from backend)
   const isTextFile = $derived(
@@ -110,19 +113,19 @@
   }
 
   const showFile = () => {
-    $isOpen = true;
+    isOpen = true;
     loadFile();
   };
 </script>
 
-<Dialog.Root bind:isOpen>
+<Dialog.Root bind:open={isOpen}>
   {#if children}
     {@render children({ showFile })}
   {:else}
     <Button
-      class={isTableView ? "-ml-1" : "bg-preview !border-default max-w-[30ch] border shadow-sm"}
-      on:click={showFile}
-      padding="icon-leading"
+      variant="ghost"
+      class={isTableView ? "-ml-1" : "bg-preview border-default max-w-[30ch] shadow-sm"}
+      onclick={showFile}
     >
       {#if index}
         <span
@@ -134,51 +137,55 @@
         <IconDocument class="text-muted" />
       {/if}
 
-      {file.name}
+      <span class="truncate">{file.name}</span>
     </Button>
   {/if}
 
-  <Dialog.Content width="medium">
-    <Dialog.Title>{file.name}</Dialog.Title>
-    <Dialog.Description hidden>
-      {m.attachment_file_preview_for({ name: file.name })}
-    </Dialog.Description>
+  <Dialog.Content class={dialogLayout.content("medium")} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{file.name}</Dialog.Title>
+      <Dialog.Description class="sr-only">
+        {m.attachment_file_preview_for({ name: file.name })}
+      </Dialog.Description>
+    </Dialog.Header>
 
-    <Dialog.Section class="max-h-[60vh]" scrollable>
-      <div class="p-4">
-        {#if loadingFile}
-          <pre>{m.loading()}</pre>
-        {:else if loadError}
-          <pre>{m.attachment_error_loading_content()}</pre>
-        {:else if isTextFile && loadedContent}
-          <Markdown source={loadedContent}></Markdown>
-        {:else if isImageFile && signedUrl}
-          <img src={signedUrl} alt={file.name} class="max-w-full rounded-lg" />
-        {:else if isAudioFile && signedUrl}
-          <audio controls class="w-full">
-            <source src={signedUrl} type={file.mimetype} />
-            {m.attachment_audio_not_supported()}
-          </audio>
-        {:else}
-          <div class="text-center">
-            <p class="mb-4">{m.preview_not_available()}</p>
-            <Button variant="outlined" on:click={downloadFile} padding="icon-leading">
-              <IconDownload />
-              {m.download_file()}
-            </Button>
-          </div>
-        {/if}
+    <div class={dialogLayout.body}>
+      <div class={dialogLayout.section}>
+        <div class="p-4">
+          {#if loadingFile}
+            <pre>{m.loading()}</pre>
+          {:else if loadError}
+            <pre>{m.attachment_error_loading_content()}</pre>
+          {:else if isTextFile && loadedContent}
+            <Markdown source={loadedContent}></Markdown>
+          {:else if isImageFile && signedUrl}
+            <img src={signedUrl} alt={file.name} class="max-w-full rounded-lg" />
+          {:else if isAudioFile && signedUrl}
+            <audio controls class="w-full">
+              <source src={signedUrl} type={file.mimetype} />
+              {m.attachment_audio_not_supported()}
+            </audio>
+          {:else}
+            <div class="text-center">
+              <p class="mb-4">{m.preview_not_available()}</p>
+              <Button variant="outline" onclick={downloadFile}>
+                <IconDownload />
+                {m.download_file()}
+              </Button>
+            </div>
+          {/if}
+        </div>
       </div>
-    </Dialog.Section>
+    </div>
 
-    <Dialog.Controls let:close>
-      <Button variant="simple" on:click={downloadFile} padding="icon-leading">
+    <Dialog.Footer class={dialogLayout.footer}>
+      <Button variant="ghost" onclick={downloadFile}>
         <IconDownload />
         {m.download_file()}
       </Button>
 
       {#if isTextFile && loadedContent}
-        <Button variant="simple" on:click={copyText} padding="icon-leading">
+        <Button variant="ghost" onclick={copyText}>
           {#if copied}
             <IconCheck />
             {m.copied()}
@@ -190,7 +197,7 @@
       {/if}
 
       <div class="flex-grow"></div>
-      <Button variant="primary" is={close}>{m.done()}</Button>
-    </Dialog.Controls>
+      <Dialog.Close class={buttonVariants()}>{m.done()}</Dialog.Close>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

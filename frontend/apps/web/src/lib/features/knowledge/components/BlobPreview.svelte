@@ -4,7 +4,10 @@
   import { IconCopy } from "@eneo/icons/copy";
   import { IconDocument } from "@eneo/icons/document";
   import { IconDownload } from "@eneo/icons/download";
-  import { Button, Dialog, Markdown } from "@eneo/ui";
+  import { Markdown } from "@eneo/ui";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { getEneo } from "$lib/core/Eneo";
   import * as m from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -48,7 +51,7 @@
     return true;
   }
 
-  let isOpen: Dialog.OpenState;
+  let isOpen = false;
 
   async function downloadText() {
     await loadBlob();
@@ -105,19 +108,19 @@
   }
 
   const showBlob = () => {
-    $isOpen = true;
+    isOpen = true;
     loadBlob();
   };
 </script>
 
-<Dialog.Root bind:isOpen>
+<Dialog.Root bind:open={isOpen}>
   {#if $$slots.default}
     <slot {showBlob}></slot>
   {:else}
     <Button
-      class={isTableView ? "-ml-1" : "bg-preview !border-default max-w-[30ch] border shadow-sm"}
-      on:click={showBlob}
-      padding="icon-leading"
+      variant="ghost"
+      class={isTableView ? "-ml-1" : "bg-preview border-default max-w-[30ch] shadow-sm"}
+      onclick={showBlob}
     >
       {#if index}
         <span
@@ -129,53 +132,52 @@
         <IconDocument class="text-muted" />
       {/if}
 
-      {blob.metadata.title}
+      <span class="truncate">{blob.metadata.title}</span>
     </Button>
   {/if}
 
-  <Dialog.Content width="medium">
-    <Dialog.Title>{blob.metadata.title}</Dialog.Title>
-    <Dialog.Description hidden
-      >{m.file_contents_of({ title: blob.metadata.title || "" })}</Dialog.Description
-    >
+  <Dialog.Content class={dialogLayout.content("medium")} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{blob.metadata.title}</Dialog.Title>
+      <Dialog.Description class="sr-only"
+        >{m.file_contents_of({ title: blob.metadata.title || "" })}</Dialog.Description
+      >
+    </Dialog.Header>
 
-    <Dialog.Section scrollable>
-      <div class="p-4">
-        {#if loadingBlob}
-          <pre>{m.loading()}</pre>
-        {:else if loadError}
-          <pre>{m.attachment_error_loading_content()}</pre>
-        {:else}
-          <Markdown source={loadedBlobText ?? ""}></Markdown>
-        {/if}
+    <div class={dialogLayout.body}>
+      <div class={dialogLayout.section}>
+        <div class="p-4">
+          {#if loadingBlob}
+            <pre>{m.loading()}</pre>
+          {:else if loadError}
+            <pre>{m.attachment_error_loading_content()}</pre>
+          {:else}
+            <Markdown source={loadedBlobText ?? ""}></Markdown>
+          {/if}
+        </div>
       </div>
-    </Dialog.Section>
+    </div>
 
-    <Dialog.Controls let:close>
+    <Dialog.Footer class={dialogLayout.footer}>
       {#if loadedBlobText}
-        <Button variant="simple" on:click={downloadText} padding="icon-leading">
+        <Button variant="ghost" onclick={downloadText}>
           <IconDownload />
           {m.download_extracted_text()}
         </Button>
 
-        <Button variant="simple" padding="icon-leading" on:click={copyText}>
+        <Button variant="ghost" onclick={copyText}>
           <IconCopy />
           {copyButtonText}</Button
         >
         <div class="flex-grow"></div>
       {/if}
       {#if originalAvailable}
-        <Button
-          variant="simple"
-          on:click={downloadOriginal}
-          disabled={loadingOriginal}
-          padding="icon-leading"
-        >
+        <Button variant="ghost" onclick={downloadOriginal} disabled={loadingOriginal}>
           <IconDownload />
           {loadingOriginal ? m.downloading() : m.download_original()}
         </Button>
       {/if}
-      <Button variant="primary" is={close}>{m.done()}</Button>
-    </Dialog.Controls>
+      <Dialog.Close class={buttonVariants()}>{m.done()}</Dialog.Close>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

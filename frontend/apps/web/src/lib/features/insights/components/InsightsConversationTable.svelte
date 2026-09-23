@@ -5,7 +5,8 @@
 -->
 
 <script lang="ts">
-  import { Button, Table } from "@eneo/ui";
+  import { Table } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { createRender } from "svelte-headless-table";
   import { getInsightsService } from "../InsightsService.svelte";
   import { toStore } from "svelte/store";
@@ -108,8 +109,9 @@
         <p role="status" aria-live="polite">{m.loading_ellipsis()}</p>
       {:else if insights.hasMoreConversations}
         <Button
-          variant="primary-outlined"
-          on:click={() => insights.loadMoreConversations()}
+          variant="outline"
+          class="border-accent-default text-accent-default"
+          onclick={() => insights.loadMoreConversations()}
           aria-label={m.load_more_conversations()}
           disabled={insights.loadMoreConversations.isLoading ||
             insights.searchConversations.isLoading}

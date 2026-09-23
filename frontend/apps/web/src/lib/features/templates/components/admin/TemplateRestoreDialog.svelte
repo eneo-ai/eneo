@@ -6,7 +6,9 @@
 
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
-  import { Button, Dialog } from "@eneo/ui";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo.js";
   import { invalidate } from "$app/navigation";
@@ -55,38 +57,48 @@
   }
 </script>
 
-<Dialog.Root {openController}>
-  <Dialog.Content>
-    <Dialog.Title>{m.restore_template()}</Dialog.Title>
-    <Dialog.Description>
-      {m.restore_template_confirmation()}
-    </Dialog.Description>
+<Dialog.Root bind:open={$openController}>
+  <Dialog.Content class={dialogLayout.content()} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{m.restore_template()}</Dialog.Title>
+      <Dialog.Description>
+        {m.restore_template_confirmation()}
+      </Dialog.Description>
+    </Dialog.Header>
 
-    <Dialog.Section>
-      <div class="flex flex-col gap-4">
-        <div class="border-positive-default bg-positive-default/15 rounded-lg border px-4 py-3">
-          <div class="flex items-start gap-3">
-            <Undo class="text-positive-default shrink-0" size={20} />
-            <div class="flex flex-col gap-1">
-              <div class="text-default font-semibold">{template.name}</div>
-              <div class="text-dimmer text-sm">{m.template_will_be_restored()}</div>
+    <div class={dialogLayout.body}>
+      <div class={dialogLayout.section}>
+        <div class="flex flex-col gap-4">
+          <div class="border-positive-default bg-positive-default/15 rounded-lg border px-4 py-3">
+            <div class="flex items-start gap-3">
+              <Undo class="text-positive-default shrink-0" size={20} />
+              <div class="flex flex-col gap-1">
+                <div class="text-default font-semibold">{template.name}</div>
+                <div class="text-dimmer text-sm">{m.template_will_be_restored()}</div>
+              </div>
             </div>
           </div>
+
+          {#if errorMessage}
+            <div class="bg-negative-default/10 text-negative-default rounded-lg px-3 py-2 text-sm">
+              {errorMessage}
+            </div>
+          {/if}
         </div>
-
-        {#if errorMessage}
-          <div class="bg-negative-default/10 text-negative-default rounded-lg px-3 py-2 text-sm">
-            {errorMessage}
-          </div>
-        {/if}
       </div>
-    </Dialog.Section>
+    </div>
 
-    <Dialog.Controls let:close>
-      <Button is={close} disabled={isLoading}>{m.cancel()}</Button>
-      <Button variant="positive" onclick={handleRestore} disabled={isLoading}>
+    <Dialog.Footer class={dialogLayout.footer}>
+      <Dialog.Close class={buttonVariants({ variant: "outline" })} disabled={isLoading}>
+        {m.cancel()}
+      </Dialog.Close>
+      <Button
+        class="bg-positive-default hover:bg-positive-stronger"
+        onclick={handleRestore}
+        disabled={isLoading}
+      >
         {isLoading ? m.restoring() : m.restore()}
       </Button>
-    </Dialog.Controls>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
