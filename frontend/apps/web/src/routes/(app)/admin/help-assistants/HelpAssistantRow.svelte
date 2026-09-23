@@ -5,7 +5,9 @@
 -->
 
 <script lang="ts">
-  import { Button, Input } from "@eneo/ui";
+  import { Button } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { IconSparkles } from "@eneo/icons/sparkles";
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { invalidate } from "$app/navigation";
@@ -18,6 +20,7 @@
   type Role = Awaited<ReturnType<Eneo["helpAssistants"]["admin"]["listRoles"]>>[number];
 
   let { role, eneo }: { role: Role; eneo: Eneo } = $props();
+  const uid = $props.id();
 
   let isOpen = $state(false);
 
@@ -43,7 +46,7 @@
   const displayName = $derived(role.assistant_name ?? roleKindLabel(role.kind));
   const settingsHref = $derived(resolve(`/admin/help-assistants/${role.kind}`));
 
-  // Input.Switch only fires sideEffect on a real user change; flip optimistically
+  // The switch only fires onCheckedChange on a real user change; flip optimistically
   // (the bind already did), persist, then re-sync from the loader. Revert on error.
   async function onToggleEnabled({ current, next }: { current: boolean; next: boolean }) {
     if (current === next) return;
@@ -102,23 +105,39 @@
 
   {#if isOpen}
     <div class="border-default flex flex-col gap-4 border-t px-5 py-4">
-      <Input.Switch bind:value={isEnabled} sideEffect={onToggleEnabled}>
-        <span class="flex flex-col gap-0.5">
-          <span class="font-medium">{m.admin_help_assistants_toggle_enabled()}</span>
-          <span class="text-secondary text-sm">
+      <Field.Field orientation="horizontal">
+        <Field.Content>
+          <Field.Label for={`${uid}-enabled`}
+            >{m.admin_help_assistants_toggle_enabled()}</Field.Label
+          >
+          <Field.Description id={`${uid}-enabled-description`}>
             {m.admin_help_assistants_toggle_enabled_description()}
-          </span>
-        </span>
-      </Input.Switch>
+          </Field.Description>
+        </Field.Content>
+        <Switch
+          id={`${uid}-enabled`}
+          bind:checked={isEnabled}
+          onCheckedChange={(next) => onToggleEnabled({ current: !next, next })}
+          aria-describedby={`${uid}-enabled-description`}
+        />
+      </Field.Field>
 
-      <Input.Switch bind:value={isVisible} sideEffect={onToggleVisible}>
-        <span class="flex flex-col gap-0.5">
-          <span class="font-medium">{m.admin_help_assistants_toggle_visible()}</span>
-          <span class="text-secondary text-sm">
+      <Field.Field orientation="horizontal">
+        <Field.Content>
+          <Field.Label for={`${uid}-visible`}
+            >{m.admin_help_assistants_toggle_visible()}</Field.Label
+          >
+          <Field.Description id={`${uid}-visible-description`}>
             {m.admin_help_assistants_toggle_visible_description()}
-          </span>
-        </span>
-      </Input.Switch>
+          </Field.Description>
+        </Field.Content>
+        <Switch
+          id={`${uid}-visible`}
+          bind:checked={isVisible}
+          onCheckedChange={(next) => onToggleVisible({ current: !next, next })}
+          aria-describedby={`${uid}-visible-description`}
+        />
+      </Field.Field>
 
       <div class="border-default flex flex-wrap items-center justify-between gap-2 border-t pt-4">
         <Button variant="primary" href={settingsHref}>

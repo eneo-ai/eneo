@@ -5,7 +5,8 @@
 -->
 
 <script lang="ts">
-  import { Button, Input, Tooltip } from "@eneo/ui";
+  import { Button, Tooltip } from "@eneo/ui";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { RefreshCw, AlertTriangle, Trash2, Check, Pencil, X, ShieldAlert } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
@@ -562,12 +563,11 @@
                       {/if}
                     {/if}
                   </div>
-                  <Input.Switch
-                    value={tool.is_enabled_by_default}
-                    sideEffect={() => toggleToolEnabled(tool)}
-                    ><span class="sr-only">{m.mcp_activate_tool({ name: tool.name })}</span
-                    ></Input.Switch
-                  >
+                  <Switch
+                    checked={tool.is_enabled_by_default}
+                    onCheckedChange={() => toggleToolEnabled(tool)}
+                    aria-label={m.mcp_activate_tool({ name: tool.name })}
+                  />
                 </div>
               {/if}
             {/each}

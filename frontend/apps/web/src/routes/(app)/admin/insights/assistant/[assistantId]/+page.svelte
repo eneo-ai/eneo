@@ -7,6 +7,9 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout";
   import { Input } from "@eneo/ui";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import ChatView from "./ChatView.svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
@@ -14,6 +17,8 @@
   import { m } from "$lib/paraglide/messages";
 
   export let data;
+
+  const includeFollowupsId = useId();
 
   let includeFollowups: boolean = data.includeFollowups;
   let timeframe = data.timeframe;
@@ -68,9 +73,10 @@
     <Input.DateRange bind:value={timeframe} class="border-0 p-0"
       >{m.included_timeframe()}</Input.DateRange
     >
-    <Input.Switch bind:value={includeFollowups} class="border-0 p-0 text-sm"
-      >{m.include_follow_up_questions()}</Input.Switch
-    >
+    <Field.Field orientation="horizontal" class="w-auto gap-4">
+      <Field.Label for={includeFollowupsId}>{m.include_follow_up_questions()}</Field.Label>
+      <Switch id={includeFollowupsId} bind:checked={includeFollowups} />
+    </Field.Field>
   </div>
 
   <Page.Main>

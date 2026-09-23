@@ -10,7 +10,9 @@
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { IconCheck } from "@eneo/icons/check";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
-  import { Input, Tooltip } from "@eneo/ui";
+  import { Tooltip } from "@eneo/ui";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Slider } from "$lib/components/ui/slider/index.js";
   import { m } from "$lib/paraglide/messages";
   import {
     shouldShowModelSpecificParametersInfo,
@@ -160,28 +162,34 @@
     class="border-default hover:bg-hover-stronger flex h-[4.125rem] items-center justify-between gap-8 border-b px-4"
   >
     <div class="flex items-center gap-2">
-      <p class="w-24" aria-label={m.model_temperature_setting()} id="temperature_label">
-        {m.temperature()}
-      </p>
+      <p class="w-24">{m.temperature()}</p>
       <Tooltip text={m.temperature_tooltip()}>
         <IconQuestionMark class="text-muted hover:text-primary" />
       </Tooltip>
     </div>
-    <Input.Slider
+    <Slider
+      type="single"
       bind:value={customTemp}
       max={2}
       min={0}
       step={0.01}
-      onInput={maybeSetKwArgsCustom}
+      onValueChange={maybeSetKwArgsCustom}
+      aria-label={m.model_temperature_setting()}
     />
-    <Input.Number
-      onInput={maybeSetKwArgsCustom}
+    <Input
+      type="number"
       bind:value={customTemp}
       step={0.01}
       max={2}
       min={0}
-      hiddenLabel={true}
-    ></Input.Number>
+      aria-label={m.model_temperature_setting()}
+      class="w-24 shrink-0 text-center"
+      oninput={() => {
+        if (typeof customTemp !== "number") return;
+        customTemp = Math.min(2, Math.max(0, customTemp));
+        maybeSetKwArgsCustom();
+      }}
+    />
   </div>
 {/if}
 

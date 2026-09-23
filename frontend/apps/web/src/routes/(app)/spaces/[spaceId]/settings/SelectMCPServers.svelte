@@ -7,7 +7,9 @@
 <script lang="ts">
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Input, Tooltip } from "@eneo/ui";
+  import { Tooltip } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { derived } from "svelte/store";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
@@ -49,6 +51,7 @@
   };
 
   const { selectableServers }: Props = $props();
+  const uid = $props.id();
 
   // This section manages general-purpose servers only; capabilities (web
   // search, image generation) have their own settings rows (CapabilityRow).
@@ -208,23 +211,21 @@
 
             <!-- Server Toggle -->
             <div class="min-w-0 flex-1 py-2.5 pr-4">
-              <Input.Switch
-                value={$currentlySelectedServers.includes(server.id)}
-                sideEffect={() => {
-                  if (meetsClassification) {
-                    toggleServer(server);
-                  }
-                }}
-              >
-                <div class="flex flex-col gap-1">
-                  <div class="flex items-center gap-2">
+              <Field.Field orientation="horizontal">
+                <Field.Content class="gap-1">
+                  <Field.Label for={`${uid}-server-${server.id}`}>
                     <span class="font-medium">{server.name}</span>
                     {#if hasTools}
-                      <span class="text-muted text-xs">({serverTools.length} {m.tools()})</span>
+                      <span class="text-muted text-xs font-normal"
+                        >({serverTools.length} {m.tools()})</span
+                      >
                     {/if}
-                  </div>
+                  </Field.Label>
                   {#if server.description}
-                    <div class="text-muted text-sm">{server.description}</div>
+                    <Field.Description
+                      id={`${uid}-server-${server.id}-description`}
+                      class="text-muted text-sm">{server.description}</Field.Description
+                    >
                   {/if}
                   {#if server.tags && server.tags.length > 0}
                     <div class="text-muted flex gap-2 text-xs">
@@ -236,8 +237,20 @@
                       {/each}
                     </div>
                   {/if}
-                </div>
-              </Input.Switch>
+                </Field.Content>
+                <Switch
+                  id={`${uid}-server-${server.id}`}
+                  checked={$currentlySelectedServers.includes(server.id)}
+                  onCheckedChange={() => {
+                    if (meetsClassification) {
+                      toggleServer(server);
+                    }
+                  }}
+                  aria-describedby={server.description
+                    ? `${uid}-server-${server.id}-description`
+                    : undefined}
+                />
+              </Field.Field>
             </div>
           </div>
 
@@ -247,14 +260,26 @@
               <div class="text-muted mb-2 text-xs font-medium">{m.tools()}</div>
               {#each serverTools as tool (tool.id)}
                 <div class="border-dimmer hover:bg-hover-dimmer border-b py-2 last:border-b-0">
-                  <Input.Switch value={tool.is_enabled} sideEffect={() => toggleTool(tool)}>
-                    <div class="flex flex-col">
-                      <div class="text-sm font-medium">{tool.name}</div>
+                  <Field.Field orientation="horizontal">
+                    <Field.Content>
+                      <Field.Label for={`${uid}-tool-${tool.id}`}>{tool.name}</Field.Label>
                       {#if tool.description}
-                        <div class="text-muted line-clamp-2 text-xs">{tool.description}</div>
+                        <Field.Description
+                          id={`${uid}-tool-${tool.id}-description`}
+                          class="text-muted line-clamp-2 text-xs"
+                          >{tool.description}</Field.Description
+                        >
                       {/if}
-                    </div>
-                  </Input.Switch>
+                    </Field.Content>
+                    <Switch
+                      id={`${uid}-tool-${tool.id}`}
+                      checked={tool.is_enabled}
+                      onCheckedChange={() => toggleTool(tool)}
+                      aria-describedby={tool.description
+                        ? `${uid}-tool-${tool.id}-description`
+                        : undefined}
+                    />
+                  </Field.Field>
                 </div>
               {/each}
             </div>

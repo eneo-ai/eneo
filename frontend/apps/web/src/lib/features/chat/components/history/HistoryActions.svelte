@@ -1,7 +1,10 @@
 <script lang="ts">
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEdit } from "@eneo/icons/edit";
-  import { Button, Dialog, Input } from "@eneo/ui";
+  import { Button, Dialog } from "@eneo/ui";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { getChatService } from "../../ChatService.svelte";
   import type { ConversationSparse } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
@@ -17,6 +20,7 @@
   $: newName = conversation?.name ?? "";
 
   const untitled = m.chat_history_untitled();
+  const renameId = useId();
 
   let renameOpen: Dialog.OpenState;
 
@@ -47,17 +51,13 @@
       <Dialog.Description>{m.chat_history_rename_description()}</Dialog.Description>
 
       <Dialog.Section class="p-6">
-        <div class="flex flex-col gap-3">
-          <label for="rename-name" class="text-default text-sm font-medium">
+        <Field.Field class="gap-3">
+          <Field.Label for={renameId} class="text-default text-sm font-medium">
             {m.chat_history_name_label()}
-          </label>
+          </Field.Label>
 
-          <Input.Text
-            id="rename-name"
-            bind:value={newName}
-            placeholder={conversation?.name ?? untitled}
-          />
-        </div>
+          <Input id={renameId} bind:value={newName} placeholder={conversation?.name ?? untitled} />
+        </Field.Field>
       </Dialog.Section>
 
       <Dialog.Controls let:close>

@@ -7,7 +7,9 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Input, Tooltip } from "@eneo/ui";
+  import { Tooltip } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";
@@ -50,6 +52,7 @@
     selectedModel = null,
     allowedMCPServers = undefined
   }: Props = $props();
+  const uid = $props.id();
 
   /** Type-safe view of selectedMCPServers */
   let servers = $derived((selectedMCPServers ?? []) as unknown as MCPServer[]);
@@ -316,13 +319,9 @@
 
             <!-- Server Toggle -->
             <div class="flex-1 py-2.5 pr-4">
-              <Input.Switch
-                value={isSelected}
-                disabled={unavailable && !isSelected}
-                sideEffect={() => toggleServer(server)}
-              >
-                <div class="flex flex-col gap-0.5">
-                  <div class="flex items-center gap-2">
+              <Field.Field orientation="horizontal" class="gap-4">
+                <Field.Content>
+                  <Field.Label for={`${uid}-${server.id}`}>
                     <span class="text-default font-medium">{server.name}</span>
                     {#if unavailable}
                       <span
@@ -339,18 +338,33 @@
                         <span>{toolCount}</span>
                       </span>
                     {/if}
-                  </div>
+                  </Field.Label>
                   {#if unavailable}
-                    <p class="text-muted text-xs leading-snug">
+                    <Field.Description
+                      id={`${uid}-${server.id}-description`}
+                      class="text-muted text-xs leading-snug"
+                    >
                       {readinessMessage("server_disabled")}
-                    </p>
+                    </Field.Description>
                   {:else if server.description}
-                    <p class="text-muted line-clamp-1 text-xs leading-snug">
+                    <Field.Description
+                      id={`${uid}-${server.id}-description`}
+                      class="text-muted line-clamp-1 text-xs leading-snug"
+                    >
                       {server.description}
-                    </p>
+                    </Field.Description>
                   {/if}
-                </div>
-              </Input.Switch>
+                </Field.Content>
+                <Switch
+                  id={`${uid}-${server.id}`}
+                  checked={isSelected}
+                  disabled={unavailable && !isSelected}
+                  onCheckedChange={() => toggleServer(server)}
+                  aria-describedby={unavailable || server.description
+                    ? `${uid}-${server.id}-description`
+                    : undefined}
+                />
+              </Field.Field>
             </div>
           </div>
 
@@ -404,20 +418,29 @@
                         : 'opacity-40 grayscale-[30%]'}"
                     >
                       <div class="min-w-0 flex-1">
-                        <span class="text-default block truncate font-mono text-xs font-medium"
+                        <span
+                          id={`${uid}-${server.id}-${tool.id}`}
+                          class="text-default block truncate font-mono text-xs font-medium"
                           >{tool.name}</span
                         >
                         {#if tool.description}
                           <Tooltip text={tool.description} placement="bottom">
-                            <p class="text-muted cursor-help truncate text-xs leading-snug">
+                            <p
+                              id={`${uid}-${server.id}-${tool.id}-description`}
+                              class="text-muted cursor-help truncate text-xs leading-snug"
+                            >
                               {tool.description}
                             </p>
                           </Tooltip>
                         {/if}
                       </div>
-                      <Input.Switch
-                        value={toolEnabled}
-                        sideEffect={() => toggleTool(server, tool)}
+                      <Switch
+                        checked={toolEnabled}
+                        onCheckedChange={() => toggleTool(server, tool)}
+                        aria-labelledby={`${uid}-${server.id}-${tool.id}`}
+                        aria-describedby={tool.description
+                          ? `${uid}-${server.id}-${tool.id}-description`
+                          : undefined}
                       />
                     </div>
                   {/each}

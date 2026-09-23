@@ -4,7 +4,10 @@
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEdit } from "@eneo/icons/edit";
   import { IconRefresh } from "@eneo/icons/refresh";
-  import { Button, Dialog, Dropdown, Input } from "@eneo/ui";
+  import { Button, Dialog, Dropdown } from "@eneo/ui";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
@@ -22,6 +25,7 @@
   let isRenaming = false;
   let isSyncing = false;
   let newName = knowledgeItem.name;
+  const nameId = useId();
 
   async function deleteKnowledge() {
     isDeleting = true;
@@ -125,7 +129,10 @@
   <Dialog.Content width="small">
     <Dialog.Title>{m.integration_rename_title()}</Dialog.Title>
     <Dialog.Section scrollable={false}>
-      <Input.Text bind:value={newName} label={m.name()} class="px-4 py-4" />
+      <Field.Field class="px-4 py-4">
+        <Field.Label for={nameId}>{m.name()}</Field.Label>
+        <Input id={nameId} bind:value={newName} />
+      </Field.Field>
     </Dialog.Section>
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>

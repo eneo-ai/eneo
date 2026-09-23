@@ -5,14 +5,17 @@
 -->
 
 <script lang="ts">
-  import { Button, Dialog, Input } from "@eneo/ui";
+  import { Button, Dialog } from "@eneo/ui";
   import { writable } from "svelte/store";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
   import { toastError } from "$lib/core/errors";
   import { Settings } from "$lib/components/layout";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
 
+  const uid = $props.id();
   const security = getSecurityClassificationService();
 
   let isEnabled = $derived(security.isSecurityEnabled);
@@ -45,14 +48,35 @@
   });
 </script>
 
-<Settings.Row title={m.security_classification()} description={m.enable_security_description()}>
+<Settings.Row
+  title={m.security_classification()}
+  description={m.enable_security_description()}
+  let:aria
+>
   <div class="border-default flex h-14 border-b py-2">
-    <Input.RadioSwitch
-      bind:value={isEnabled}
-      sideEffect={onValueChange}
-      labelTrue={m.enabled()}
-      labelFalse={m.disabled()}
-    ></Input.RadioSwitch>
+    <RadioGroup.Root
+      value={isEnabled ? "on" : "off"}
+      onValueChange={(v) => {
+        const next = v === "on";
+        onValueChange({ current: isEnabled, next });
+        isEnabled = next;
+      }}
+      class="grid w-full grid-cols-2 gap-2"
+      {...aria}
+    >
+      <Field.Label for={`${uid}-on`} class="font-normal">
+        <Field.Field orientation="horizontal">
+          <RadioGroup.Item value="on" id={`${uid}-on`} />
+          <span>{m.enabled()}</span>
+        </Field.Field>
+      </Field.Label>
+      <Field.Label for={`${uid}-off`} class="font-normal">
+        <Field.Field orientation="horizontal">
+          <RadioGroup.Item value="off" id={`${uid}-off`} />
+          <span>{m.disabled()}</span>
+        </Field.Field>
+      </Field.Label>
+    </RadioGroup.Root>
   </div>
 </Settings.Row>
 

@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout/index.js";
-  import { Input } from "@eneo/ui";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { getAppContext } from "$lib/core/AppContext.js";
   import { getWhatsNewStore } from "$lib/features/whats-new/whatsNewStore";
   import { getEneo } from "$lib/core/Eneo.js";
@@ -159,26 +159,49 @@
   <Page.Main>
     <Settings.Page>
       <Settings.Group title={m.features()}>
-        <Settings.Row title={m.enable_templates()} description={m.enable_templates_description()}>
-          <Input.Switch bind:value={usingTemplates} sideEffect={handleToggleTemplates} />
+        <Settings.Row
+          title={m.enable_templates()}
+          description={m.enable_templates_description()}
+          let:aria
+        >
+          <Switch
+            {...aria}
+            checked={usingTemplates}
+            onCheckedChange={(next) => handleToggleTemplates({ current: !next, next })}
+          />
         </Settings.Row>
         <Settings.Row
           title={m.enable_audit_logging()}
           description={m.enable_audit_logging_description()}
+          let:aria
         >
-          <Input.Switch bind:value={auditLoggingEnabled} sideEffect={handleToggleAuditLogging} />
+          <Switch
+            {...aria}
+            checked={auditLoggingEnabled}
+            onCheckedChange={(next) => handleToggleAuditLogging({ current: !next, next })}
+          />
         </Settings.Row>
         <Settings.Row
           title={m.enable_provisioning()}
           description={m.enable_provisioning_description()}
+          let:aria
         >
-          <Input.Switch bind:value={provisioningEnabled} sideEffect={handleToggleProvisioning} />
+          <Switch
+            {...aria}
+            checked={provisioningEnabled}
+            onCheckedChange={(next) => handleToggleProvisioning({ current: !next, next })}
+          />
         </Settings.Row>
-        <Settings.Row title={m.enable_whats_new()} description={m.enable_whats_new_description()}>
-          <Input.Switch
-            bind:value={whatsNewEnabled}
+        <Settings.Row
+          title={m.enable_whats_new()}
+          description={m.enable_whats_new_description()}
+          let:aria
+        >
+          <Switch
+            {...aria}
+            checked={whatsNewEnabled}
             disabled={savingWhatsNew}
-            sideEffect={handleToggleWhatsNew}
+            onCheckedChange={(next) => handleToggleWhatsNew({ current: !next, next })}
           />
         </Settings.Row>
       </Settings.Group>
@@ -186,8 +209,13 @@
         <Settings.Row
           title={m.show_model_pricing()}
           description={m.show_model_pricing_description()}
+          let:aria
         >
-          <Input.Switch bind:value={showModelPricing} sideEffect={handleToggleModelPricing} />
+          <Switch
+            {...aria}
+            checked={showModelPricing}
+            onCheckedChange={(next) => handleToggleModelPricing({ current: !next, next })}
+          />
         </Settings.Row>
       </Settings.Group>
     </Settings.Page>

@@ -4,7 +4,11 @@
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { type Website } from "@eneo/eneo-js";
-  import { Dialog, Button, Input, Select, Tooltip } from "@eneo/ui";
+  import { Dialog, Button, Select, Tooltip } from "@eneo/ui";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import { tick } from "svelte";
@@ -37,6 +41,13 @@
   let websiteName = website.name ?? "";
   let isProcessing = false;
   let validUrl = false;
+
+  const urlId = useId();
+  const nameId = useId();
+  const httpAuthId = useId();
+  const usernameId = useId();
+  const passwordId = useId();
+  const downloadFilesId = useId();
 
   // HTTP Basic Authentication state
   let httpAuthEnabled = website?.requires_http_auth ?? false;
@@ -294,36 +305,42 @@
         <div class="border-default border-t"></div>
       {/if}
 
-      <Input.Text
-        bind:value={editableWebsite.url}
-        label={m.url_required()}
-        description={editableWebsite.crawl_type === "sitemap"
-          ? m.full_url_sitemap()
-          : m.url_description()}
-        type="url"
-        required
-        placeholder={editableWebsite.crawl_type === "sitemap"
-          ? "https://example.com/sitemap.xml"
-          : "https://example.com"}
-        class="border-default hover:bg-hover-dimmer border-b p-4"
-        bind:isValid={validUrl}
-      ></Input.Text>
+      <Field.Field class="border-default hover:bg-hover-dimmer border-b p-4">
+        <Field.Label for={urlId}>{m.url_required()}</Field.Label>
+        <Input
+          id={urlId}
+          bind:value={editableWebsite.url}
+          type="url"
+          required
+          placeholder={editableWebsite.crawl_type === "sitemap"
+            ? "https://example.com/sitemap.xml"
+            : "https://example.com"}
+          aria-describedby={`${urlId}-description`}
+          oninput={(e) => (validUrl = e.currentTarget.validity.valid)}
+        />
+        <Field.Description id={`${urlId}-description`}>
+          {editableWebsite.crawl_type === "sitemap" ? m.full_url_sitemap() : m.url_description()}
+        </Field.Description>
+      </Field.Field>
 
-      <Input.Text
-        label={m.display_name()}
-        class="border-default hover:bg-hover-dimmer border-b p-4"
-        description={m.display_name_optional()}
-        bind:value={websiteName}
-        placeholder={editableWebsite.url.split("//")[1] ?? editableWebsite.url}
-      ></Input.Text>
+      <Field.Field class="border-default hover:bg-hover-dimmer border-b p-4">
+        <Field.Label for={nameId}>{m.display_name()}</Field.Label>
+        <Input
+          id={nameId}
+          bind:value={websiteName}
+          placeholder={editableWebsite.url.split("//")[1] ?? editableWebsite.url}
+          aria-describedby={`${nameId}-description`}
+        />
+        <Field.Description id={`${nameId}-description`}>
+          {m.display_name_optional()}
+        </Field.Description>
+      </Field.Field>
 
       <!-- HTTP Basic Authentication -->
-      <Input.Switch
-        bind:value={httpAuthEnabled}
-        class="border-default hover:bg-hover-dimmer p-4 px-6"
-      >
-        {m.requires_http_auth()}
-      </Input.Switch>
+      <Field.Field orientation="horizontal" class="border-default hover:bg-hover-dimmer p-4 px-6">
+        <Field.Label for={httpAuthId}>{m.requires_http_auth()}</Field.Label>
+        <Switch id={httpAuthId} bind:checked={httpAuthEnabled} />
+      </Field.Field>
 
       {#if httpAuthEnabled}
         <div
@@ -346,32 +363,50 @@
           </div>
         {/if}
 
-        <Input.Text
-          bind:value={httpAuthUsername}
-          label={m.username()}
-          description={m.http_auth_username_description()}
-          required={httpAuthEnabled}
-          placeholder={m.enter_username()}
-          autocomplete="username"
-          class="border-default hover:bg-hover-dimmer border-b p-4"
-        />
+        <Field.Field class="border-default hover:bg-hover-dimmer border-b p-4">
+          <Field.Label for={usernameId}>
+            {m.username()}
+            {#if httpAuthEnabled}
+              <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+            {/if}
+          </Field.Label>
+          <Input
+            id={usernameId}
+            bind:value={httpAuthUsername}
+            required={httpAuthEnabled}
+            placeholder={m.enter_username()}
+            autocomplete="username"
+            aria-describedby={`${usernameId}-description`}
+          />
+          <Field.Description id={`${usernameId}-description`}>
+            {m.http_auth_username_description()}
+          </Field.Description>
+        </Field.Field>
 
         <div class="relative">
-          <Input.Text
-            bind:value={httpAuthPassword}
-            label={m.password()}
-            description={website
-              ? m.leave_blank_keep_password()
-              : m.http_auth_password_description()}
-            type={showPassword ? "text" : "password"}
-            required={httpAuthEnabled && !website?.requires_http_auth}
-            placeholder={m.enter_password()}
-            autocomplete="current-password"
-            class="border-default hover:bg-hover-dimmer border-b p-4"
-          />
+          <Field.Field class="border-default hover:bg-hover-dimmer border-b p-4">
+            <Field.Label for={passwordId}>
+              {m.password()}
+              {#if httpAuthEnabled && !website?.requires_http_auth}
+                <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+              {/if}
+            </Field.Label>
+            <Input
+              id={passwordId}
+              bind:value={httpAuthPassword}
+              type={showPassword ? "text" : "password"}
+              required={httpAuthEnabled && !website?.requires_http_auth}
+              placeholder={m.enter_password()}
+              autocomplete="current-password"
+              aria-describedby={`${passwordId}-description`}
+            />
+            <Field.Description id={`${passwordId}-description`}>
+              {website ? m.leave_blank_keep_password() : m.http_auth_password_description()}
+            </Field.Description>
+          </Field.Field>
           <button
             type="button"
-            class="text-dimmer hover:text-default absolute top-12 right-6 p-1"
+            class="text-dimmer hover:text-default absolute top-11 right-6 p-1"
             onclick={() => (showPassword = !showPassword)}
             aria-label={showPassword ? m.hide_password() : m.show_password()}
           >
@@ -429,21 +464,27 @@
       </div>
 
       {#if editableWebsite.crawl_type !== "sitemap"}
-        <Input.Switch
-          bind:value={editableWebsite.download_files}
-          class="border-default hover:bg-hover-dimmer p-4 px-6"
-        >
-          {m.download_analyse_files()}
-        </Input.Switch>
+        <Field.Field orientation="horizontal" class="border-default hover:bg-hover-dimmer p-4 px-6">
+          <Field.Label for={downloadFilesId}>{m.download_analyse_files()}</Field.Label>
+          <Switch
+            id={downloadFilesId}
+            checked={editableWebsite.download_files ?? false}
+            onCheckedChange={(next) => (editableWebsite.download_files = next)}
+          />
+        </Field.Field>
       {:else}
         <Tooltip text={m.option_only_basic_crawls()}>
-          <Input.Switch
-            disabled
-            bind:value={editableWebsite.download_files}
+          <Field.Field
+            orientation="horizontal"
             class="border-default hover:bg-hover-dimmer p-4 px-6 opacity-40"
           >
-            {m.download_analyse_files()}
-          </Input.Switch>
+            <Field.Label for={downloadFilesId}>{m.download_analyse_files()}</Field.Label>
+            <Switch
+              id={downloadFilesId}
+              disabled
+              checked={editableWebsite.download_files ?? false}
+            />
+          </Field.Field>
         </Tooltip>
       {/if}
 

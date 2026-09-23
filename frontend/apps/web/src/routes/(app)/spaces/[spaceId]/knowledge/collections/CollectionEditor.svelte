@@ -3,7 +3,10 @@
   import { getEneo } from "$lib/core/Eneo";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Dialog, Button, Input } from "@eneo/ui";
+  import { Dialog, Button } from "@eneo/ui";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
@@ -17,6 +20,7 @@
   export let collection: { id: string; name: string } | undefined;
   let collectionName = collection?.name ?? "";
   let embeddingModel: { id: string } | undefined = undefined;
+  const nameId = useId();
 
   let isProcessing = false;
   async function editCollection() {
@@ -90,24 +94,26 @@
           </p>
           <div class="border-default border-b"></div>
         {/if}
-        <Input.Text
-          bind:value={collectionName}
-          label={m.name()}
-          required
-          class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
-        ></Input.Text>
+        <Field.Field class="border-default hover:bg-hover-dimmer border-b px-4 py-4">
+          <Field.Label for={nameId}>
+            {m.name()}
+            <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+          </Field.Label>
+          <Input id={nameId} bind:value={collectionName} required />
+        </Field.Field>
         <SelectEmbeddingModel
           hideWhenNoOptions
           bind:value={embeddingModel}
           selectableModels={$currentSpace.embedding_models}
         ></SelectEmbeddingModel>
       {:else}
-        <Input.Text
-          bind:value={collectionName}
-          label={m.name()}
-          required
-          class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
-        ></Input.Text>
+        <Field.Field class="border-default hover:bg-hover-dimmer border-b px-4 py-4">
+          <Field.Label for={nameId}>
+            {m.name()}
+            <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+          </Field.Label>
+          <Input id={nameId} bind:value={collectionName} required />
+        </Field.Field>
       {/if}
     </Dialog.Section>
 

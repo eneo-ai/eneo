@@ -9,12 +9,16 @@
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { IconPeople } from "@eneo/icons/people";
   import { type Settings } from "@eneo/eneo-js";
-  import { Button, Dialog, Dropdown, Input } from "@eneo/ui";
+  import { Button, Dialog, Dropdown } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
   let { data }: { data: { settings: Settings } } = $props();
+  const uid = $props.id();
 
   const eneo = getEneo();
 
@@ -91,21 +95,27 @@
         <div class=" border-dimmer mt-14 mb-4 border-t"></div>
         <div class="flex flex-col gap-1 pt-6 pb-4">
           <span class="px-4 pb-1 text-lg font-medium">{m.group_chat_name()}</span>
-          <Input.Text
-            bind:value={newGroupChatName}
-            hiddenLabel
-            inputClass="!text-lg !py-6 !px-4"
-            placeholder="{m.name()}..."
-            required>{m.group_chat_name()}</Input.Text
-          >
+          <Field.Field>
+            <Field.Label for={`${uid}-name`} class="sr-only">{m.group_chat_name()}</Field.Label>
+            <Input
+              id={`${uid}-name`}
+              bind:value={newGroupChatName}
+              class="!px-4 !py-6 !text-lg"
+              placeholder="{m.name()}..."
+              required
+            />
+          </Field.Field>
         </div>
       </div>
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Input.Switch bind:value={openGroupChatAfterCreation} class="flex-row-reverse p-2"
-        >{m.open_group_chat_editor_after_creation()}</Input.Switch
-      >
+      <Field.Field orientation="horizontal" class="w-auto p-2">
+        <Switch id={`${uid}-open-after`} bind:checked={openGroupChatAfterCreation} />
+        <Field.Label for={`${uid}-open-after`}>
+          {m.open_group_chat_editor_after_creation()}
+        </Field.Label>
+      </Field.Field>
       <div class="flex-grow"></div>
       <Button is={close}>{m.cancel()}</Button>
       <Button is={close} onclick={createNewGroupChat} variant="primary"

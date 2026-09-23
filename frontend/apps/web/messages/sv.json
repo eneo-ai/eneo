@@ -569,6 +569,8 @@
   "website_pages_indexed_with_files": "{successPages} av {totalPages} sidor, {successFiles} av {totalFiles} filer",
   "website_all_pages_indexed": "Alla {count} sidor indexerade",
   "website_crawl_in_progress": "Crawl pågår",
+  "website_select": "Välj {name}",
+  "websites_select_all": "Välj alla webbplatser",
   "create_anyway": "Skapa ändå",
   "go_back": "Gå tillbaka",
   "filter_apps_placeholder": "Filtrera appar...",
