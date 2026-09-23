@@ -19268,6 +19268,11 @@ export interface components {
      *         "min_timeout_seconds": 120,
      *         "seconds_per_mebibyte": 8
      *       },
+     *       "security_classification": {
+     *         "description": "Do not upload personal data.",
+     *         "name": "Open information",
+     *         "security_level": 0
+     *       },
      *       "steps_requiring_input": [
      *         {
      *           "accepted_mimetypes": [
@@ -19342,6 +19347,8 @@ export interface components {
       published_flow_version: number;
       /** @description Client-side timeout policy for runtime file uploads. Consumers should calculate each upload's initial timeout from the actual file size: `clamp(min_timeout_seconds, max_timeout_seconds, ceil(file_size_mib * seconds_per_mebibyte))`, then keep a progressing upload alive until `idle_timeout_seconds` passes without progress. */
       runtime_upload_policy?: components["schemas"]["FlowRuntimeUploadPolicyPublic"];
+      /** @description The security classification of the flow's space, which tells users what information the flow may take. Null when the space has none or the organization has turned security classifications off. */
+      security_classification?: components["schemas"]["FlowSecurityClassificationPublic"] | null;
       /** Steps Requiring Input */
       steps_requiring_input?: components["schemas"]["FlowRuntimeInputContractPublic"][];
       /**
@@ -23898,6 +23905,24 @@ export interface components {
        * @default 0
        */
       pending_count?: number;
+    };
+    /** FlowSecurityClassificationPublic */
+    FlowSecurityClassificationPublic: {
+      /**
+       * Description
+       * @description What information the classification allows, as the organization wrote it. Null when it has no description.
+       */
+      description?: string | null;
+      /**
+       * Name
+       * @description The classification's name as the organization set it, to show users.
+       */
+      name: string;
+      /**
+       * Security Level
+       * @description The classification's rank among the organization's classifications. A higher level allows more sensitive information.
+       */
+      security_level: number;
     };
     /** FlowServicePrincipalActorPublic */
     FlowServicePrincipalActorPublic: {
