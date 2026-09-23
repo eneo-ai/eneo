@@ -153,7 +153,7 @@
       aria-label="{m.ai_builder_step_label({ step: stepNumber })}: {step.name}"
     >
       <span
-        class="inline-flex size-[1.625rem] shrink-0 items-center justify-center rounded-[7px] text-xs font-bold tabular-nums
+        class="inline-flex size-[1.625rem] shrink-0 items-center justify-center rounded-md text-xs font-bold tabular-nums
           {pausesForReview
           ? 'bg-warning-dimmer text-warning-stronger'
           : 'bg-accent-dimmer text-accent-stronger'}"
@@ -163,7 +163,7 @@
       </span>
       <span class="flex min-w-0 flex-1 flex-col gap-0.5">
         <span class="flex flex-wrap items-center gap-1.5">
-          <span class="text-primary text-[0.875rem] font-semibold tracking-[-0.01em]">
+          <span class="text-primary text-[0.9375rem] font-semibold tracking-[-0.01em]">
             {step.name}
           </span>
           {#if pausesForReview}

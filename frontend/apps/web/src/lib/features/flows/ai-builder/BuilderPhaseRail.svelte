@@ -165,9 +165,9 @@
     border: 1.5px solid var(--border-stronger);
     color: var(--text-secondary);
     transition:
-      background-color 200ms ease-out,
-      border-color 200ms ease-out,
-      color 200ms ease-out;
+      background-color var(--duration-fast) var(--ease-smooth-out),
+      border-color var(--duration-fast) var(--ease-smooth-out),
+      color var(--duration-fast) var(--ease-smooth-out);
   }
   .pip-done,
   .pip-active {
@@ -186,7 +186,7 @@
     font-weight: 500;
     color: var(--text-secondary);
     white-space: nowrap;
-    transition: color 200ms ease-out;
+    transition: color var(--duration-fast) var(--ease-smooth-out);
   }
   .rail-label.is-reachable {
     color: var(--text-primary);
@@ -200,7 +200,7 @@
     height: 1px;
     margin: 0 0.625rem;
     background: var(--border-default);
-    transition: background-color 200ms ease-out;
+    transition: background-color var(--duration-fast) var(--ease-smooth-out);
   }
   .rail-rule.is-done {
     background: var(--accent-default);

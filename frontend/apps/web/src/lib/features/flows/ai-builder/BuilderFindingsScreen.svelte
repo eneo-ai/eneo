@@ -6,7 +6,7 @@
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
-  import IconSparkles from "@lucide/svelte/icons/sparkles";
+  import IconLightbulb from "@lucide/svelte/icons/lightbulb";
   import IconCheck from "@lucide/svelte/icons/check";
   import IconInfo from "@lucide/svelte/icons/info";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
@@ -263,7 +263,7 @@
             {/if}
           </div>
         {:else if packet && runCount === 0}
-          <p class="text-secondary text-[0.875rem] text-pretty" data-testid="findings-no-runs">
+          <p class="text-secondary text-[0.9375rem] text-pretty" data-testid="findings-no-runs">
             {m.ai_builder_review_no_runs()}
           </p>
           {#if omittedCount > 0}
@@ -311,11 +311,11 @@
           </div>
           {#if findings.length === 0}
             <p
-              class="text-secondary flex items-center gap-1.5 text-[0.875rem] text-pretty"
+              class="text-secondary flex items-center gap-1.5 text-[0.9375rem] text-pretty"
               data-testid="findings-none"
             >
               {#if hiddenCount === 0}
-                <IconCheck class="text-success-default size-4 shrink-0" aria-hidden="true" />
+                <IconCheck class="text-positive-stronger size-4 shrink-0" aria-hidden="true" />
               {/if}
               {hiddenCount > 0
                 ? m.ai_builder_review_all_hidden()
@@ -352,7 +352,7 @@
                   <div class="min-w-0 flex-1">
                     <h4
                       tabindex="-1"
-                      class="text-primary text-[0.9rem] font-semibold outline-none first-letter:uppercase"
+                      class="text-primary text-[0.9375rem] font-semibold outline-none first-letter:uppercase"
                     >
                       {described.title}
                     </h4>
@@ -456,7 +456,7 @@
                     disabled={disabled || runCount === 0}
                     onclick={() => onsuggest?.()}
                   >
-                    <IconSparkles class="size-3.5" aria-hidden="true" />
+                    <IconLightbulb class="size-3.5" aria-hidden="true" />
                     {m.ai_builder_review_suggest()}
                   </Button>
                   {@render plannerControls?.()}
@@ -551,7 +551,7 @@
               </p>
               {#if judged.suggestions.length === 0 && judged.unverified_count > 0}
                 <div
-                  class="text-secondary mt-3 text-[0.875rem] text-pretty"
+                  class="text-secondary mt-3 text-[0.9375rem] text-pretty"
                   data-testid="suggestions-unverified"
                 >
                   <p>
@@ -573,7 +573,7 @@
                 </div>
               {:else if judged.suggestions.length === 0}
                 <p
-                  class="text-secondary mt-3 text-[0.875rem] text-pretty"
+                  class="text-secondary mt-3 text-[0.9375rem] text-pretty"
                   data-testid="suggestions-none"
                 >
                   {m.ai_builder_review_suggestions_none()}
@@ -585,15 +585,14 @@
                   data-testid="suggestions-list"
                 >
                   {#each judged.suggestions as suggestion, index (index)}
-                    <!-- A suggestion row is deliberately not a finding row.
-                         Both halves carried the identical class, so anyone
-                         scanning rather than reading saw one uniform list of
-                         tickable items, with the only cue that half of them
-                         are a model's opinion sitting in a section heading
-                         far above the row being decided. The gutter travels
-                         with the row. -->
+                    <!-- A suggestion row is deliberately not a finding row:
+                         the bulb beside its heading, the same mark as the
+                         button that asked for it, says on every row that this
+                         is a model's idea and not a measurement. A tinted
+                         left gutter said it before; the design keeps colour
+                         off borders. -->
                     <li
-                      class="border-stronger border-l-accent-default/45 flex items-start gap-3 border-t border-l-2 py-3.5 pl-3 first:border-t-0 first:pt-0"
+                      class="border-stronger flex items-start gap-3 border-t py-3.5 first:border-t-0 first:pt-0"
                     >
                       <Checkbox
                         class="mt-1 shrink-0"
@@ -608,7 +607,13 @@
                       />
                       <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                          <h4 class="text-primary text-[0.9rem] font-semibold">
+                          <h4
+                            class="text-primary inline-flex items-center gap-1.5 text-[0.9375rem] font-semibold"
+                          >
+                            <IconLightbulb
+                              class="text-secondary size-3.5 shrink-0"
+                              aria-hidden="true"
+                            />
                             {suggestionKindLabel(suggestion.kind)}
                           </h4>
                           <span class="text-secondary text-[0.8125rem]">

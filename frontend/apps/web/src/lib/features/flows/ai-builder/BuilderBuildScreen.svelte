@@ -44,7 +44,7 @@
 <div
   class="flex min-h-full shrink-0 justify-center px-7 pt-6 pb-12 max-lg:px-5 max-md:px-4 max-sm:pt-4"
 >
-  <div class="my-auto w-full max-w-[43.75rem] 2xl:max-w-[48.125rem]">
+  <div class="w-full max-w-[43.75rem] 2xl:max-w-[48.125rem]">
     {#if confirmedLine}
       <div
         class="border-default bg-primary mb-4 flex flex-wrap items-center gap-2.5 rounded-[10px] border px-3.5 py-2.5"
@@ -95,7 +95,7 @@
             class="border-dimmer bg-secondary flex min-h-[3.625rem] items-center gap-3 rounded-[10px] border px-3 py-3"
           >
             <span
-              class="bg-tertiary text-secondary inline-flex size-6 shrink-0 items-center justify-center rounded-[7px] text-xs font-bold"
+              class="bg-tertiary text-secondary inline-flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-bold"
             >
               {i + 1}
             </span>

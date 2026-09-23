@@ -1,6 +1,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { fade } from "svelte/transition";
+  import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import IconAlertTriangle from "@lucide/svelte/icons/triangle-alert";
@@ -24,9 +25,17 @@
     targetKind: "create" | "edit";
     /** Another surface (the build screen) already shows this stream error. */
     suppressStreamError?: boolean;
+    /** The screen's column width, so the alert's edges line up with the card below. */
+    columnClass?: string;
   }
 
-  let { targetKind, suppressStreamError = false }: Props = $props();
+  let {
+    targetKind,
+    suppressStreamError = false,
+    columnClass = "max-w-[43.75rem]"
+  }: Props = $props();
+
+  const reducedMotion = prefersReducedMotion();
 
   const service = getAIBuilderService();
 
@@ -125,13 +134,13 @@
 {#if visible}
   <div
     class="w-full shrink-0 px-7 pt-3 max-sm:px-3 max-sm:pt-2"
-    transition:fade={{ duration: 160 }}
+    transition:fade={{ duration: reducedMotion ? 0 : 160 }}
   >
     <Alert.Root
       variant="default"
       role="status"
       aria-live="polite"
-      class="mx-auto grid max-w-[43.75rem] grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 rounded-lg px-3.5 py-3"
+      class="mx-auto grid {columnClass} grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 rounded-lg px-3.5 py-3"
     >
       {#if presentation}
         <IconAlertTriangle

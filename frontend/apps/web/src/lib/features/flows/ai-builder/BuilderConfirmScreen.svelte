@@ -8,10 +8,11 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import IconX from "@lucide/svelte/icons/x";
   import IconCornerDownRight from "@lucide/svelte/icons/corner-down-right";
   import BuilderChangeRequest from "./BuilderChangeRequest.svelte";
-  import { summaryTerm } from "./aiBuilderSummaryText";
+  import { fieldTypeLabel, summaryTerm } from "./aiBuilderSummaryText";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
   import IconCheck from "@lucide/svelte/icons/check";
   import IconChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -357,15 +358,6 @@
     return `${total} · ${requiredText}`;
   });
 
-  function fieldTypeLabel(type: string): string {
-    if (type === "number") return m.flow_form_field_type_number();
-    if (type === "date") return m.flow_form_field_type_date();
-    if (type === "select") return m.flow_form_field_type_select();
-    if (type === "multiselect") return m.flow_form_field_type_multiselect();
-    if (type === "list") return m.flow_form_field_type_list();
-    return m.flow_form_field_type_text();
-  }
-
   const reducedMotion = prefersReducedMotion();
   // The change box lives under the card it rewrites, never in a side panel:
   // the user is reading the summary while describing the change.
@@ -421,6 +413,23 @@
   const PLACEHOLDERS_SHOWN = 4;
   const weakRoleIds = $derived(new Set(summary.weak_role_file_ids ?? []));
   const runPreview = $derived(summary.run_preview ?? null);
+  // Like the contract rows: a preview line that repeats a decision the user
+  // just read is left out, and a preview with nothing new is not shown.
+  const previewInput = $derived.by(() => {
+    const label = runPreview?.runtime_input_label?.trim();
+    return label && !decisionsState.has(label) ? label : null;
+  });
+  const previewResult = $derived.by(() => {
+    const label = runPreview?.result_type_label?.trim();
+    if (!label) return null;
+    const layout = runPreview?.report_layout_label?.trim();
+    if (layout) return `${label}, ${layout}`;
+    return decisionsState.has(label) ? null : label;
+  });
+  const showRunPreview = $derived(
+    runPreview !== null &&
+      (previewInput !== null || previewResult !== null || !!runPreview.template)
+  );
   const attachmentRoleLabel = (role: string): string => {
     switch (role) {
       case "runtime_input_sample":
@@ -440,7 +449,7 @@
 <div
   class="flex min-h-full shrink-0 justify-center px-7 pt-6 pb-16 max-lg:px-5 max-md:px-4 max-sm:pt-4 max-sm:pb-12"
 >
-  <div class="confirm-screen my-auto w-full max-w-[43.75rem] 2xl:max-w-[48.125rem]">
+  <div class="confirm-screen w-full max-w-[43.75rem] 2xl:max-w-[48.125rem]">
     {#if unlistedAnswers.length > 0 && !readOnly}
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <span class="text-secondary text-xs">{m.ai_builder_question_answers_label()}</span>
@@ -610,7 +619,7 @@
                   class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
                 >
                   <dt class="text-secondary text-[0.8125rem]">{decision.topic}</dt>
-                  <dd class="text-primary text-[0.85rem] font-medium">
+                  <dd class="text-primary text-[0.8125rem] font-medium">
                     {decision.decision}
                     <!-- The heading already says these are Eneo's reading of
                          the task, so only the rows the user settled themselves
@@ -652,7 +661,7 @@
                   class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
                 >
                   <dt class="text-secondary text-[0.8125rem]">{row.label}</dt>
-                  <dd class="text-primary text-[0.85rem] font-medium">{row.value}</dd>
+                  <dd class="text-primary text-[0.8125rem] font-medium">{row.value}</dd>
                   {#if !readOnly && !confirmed}
                     <Button
                       variant="outline"
@@ -674,7 +683,7 @@
                   <dt class="text-secondary text-[0.8125rem]">
                     {m.ai_builder_attachment_rows_title()}
                   </dt>
-                  <dd class="text-primary text-[0.85rem]">
+                  <dd class="text-primary text-[0.8125rem]">
                     <ul class="flex flex-col gap-1.5" data-testid="attachment-rows">
                       {#each attachmentRows as row (row.file_id)}
                         <li
@@ -712,16 +721,20 @@
                             {:else}
                               <!-- A long list opens with keyboard or touch; a tooltip is not
                                    a place to read what one confirms. -->
-                              <details class="text-secondary inline-block">
-                                <summary
-                                  class="text-accent-stronger cursor-pointer list-none font-medium underline-offset-2 hover:underline focus-visible:underline"
+                              <Collapsible.Root class="text-secondary inline-block">
+                                <Collapsible.Trigger
+                                  class="text-accent-stronger focus-visible:ring-accent-stronger rounded-sm font-medium underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
                                 >
                                   · {m.ai_builder_attachment_placeholders({
                                     count: String(row.placeholders.length)
                                   })}
-                                </summary>
-                                <span class="font-mono text-xs">{row.placeholders.join(", ")}</span>
-                              </details>
+                                </Collapsible.Trigger>
+                                <Collapsible.Content>
+                                  <span class="font-mono text-xs"
+                                    >{row.placeholders.join(", ")}</span
+                                  >
+                                </Collapsible.Content>
+                              </Collapsible.Root>
                             {/if}
                           {/if}
                           {#if weakRoleIds.has(row.file_id)}
@@ -741,7 +754,7 @@
                   <dt class="text-secondary text-[0.8125rem]">
                     {m.ai_builder_confirm_attachments()}
                   </dt>
-                  <dd class="text-primary flex flex-wrap gap-1.5 text-[0.85rem] font-medium">
+                  <dd class="text-primary flex flex-wrap gap-1.5 text-[0.8125rem] font-medium">
                     {#each attachments as file (file.id)}
                       <span
                         class="border-default inline-flex h-7 items-center rounded-full border px-2.5 text-[0.8rem]"
@@ -757,31 +770,27 @@
           </section>
         {/if}
 
-        {#if runPreview}
+        {#if runPreview && showRunPreview}
           <section class="border-default mt-4 border-t pt-3.5" data-testid="run-preview">
             <h3 class="text-primary text-[0.8125rem] font-bold">
               {m.ai_builder_run_preview_title()}
             </h3>
             <p class="text-secondary mt-0.5 text-[0.8rem]">{m.ai_builder_run_preview_note()}</p>
             <dl class="mt-1.5 flex flex-col">
-              {#if runPreview.runtime_input_label}
+              {#if previewInput}
                 <div class="grid gap-x-4 gap-y-0.5 py-1.5 sm:grid-cols-[12.5rem_1fr]">
                   <dt class="text-secondary text-[0.8125rem]">
                     {m.ai_builder_run_preview_input()}
                   </dt>
-                  <dd class="text-primary text-[0.85rem] font-medium">
-                    {runPreview.runtime_input_label}
-                  </dd>
+                  <dd class="text-primary text-[0.8125rem] font-medium">{previewInput}</dd>
                 </div>
               {/if}
-              {#if runPreview.result_type_label}
+              {#if previewResult}
                 <div class="grid gap-x-4 gap-y-0.5 py-1.5 sm:grid-cols-[12.5rem_1fr]">
                   <dt class="text-secondary text-[0.8125rem]">
                     {m.ai_builder_run_preview_result()}
                   </dt>
-                  <dd class="text-primary text-[0.85rem] font-medium">
-                    {runPreview.result_type_label}{#if runPreview.report_layout_label}, {runPreview.report_layout_label}{/if}
-                  </dd>
+                  <dd class="text-primary text-[0.8125rem] font-medium">{previewResult}</dd>
                 </div>
               {/if}
               {#if runPreview.template}
@@ -789,7 +798,7 @@
                   <dt class="text-secondary text-[0.8125rem]">
                     {m.ai_builder_run_preview_template()}
                   </dt>
-                  <dd class="text-primary text-[0.85rem] font-medium">
+                  <dd class="text-primary text-[0.8125rem] font-medium">
                     {runPreview.template.filename ?? m.ai_builder_run_preview_template_unnamed()}, {m.ai_builder_attachment_placeholders(
                       {
                         count: String(runPreview.template.placeholder_count)
@@ -1155,7 +1164,7 @@
                       class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
                     >
                       <dt class="text-secondary text-[0.8125rem]">{row.topic}</dt>
-                      <dd class="text-primary text-[0.85rem] font-medium">{row.label}</dd>
+                      <dd class="text-primary text-[0.8125rem] font-medium">{row.label}</dd>
                       {#if !readOnly && !confirmed && onreopenassumption}
                         <Button
                           variant="outline"

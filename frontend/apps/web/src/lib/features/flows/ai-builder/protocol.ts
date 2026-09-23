@@ -116,6 +116,8 @@ export interface AIBuilderSavedFlowStepScope {
   editContext: AIBuilderSavedFlowStepEditContext;
   stepName: string;
   stepNumber: number;
+  /** A request the editor hands over with the step; it waits in the composer, unsent. */
+  request?: string;
 }
 
 export interface AIBuilderStepScopePresentation {

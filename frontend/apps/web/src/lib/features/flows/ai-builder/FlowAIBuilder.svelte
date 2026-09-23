@@ -699,7 +699,9 @@
     service.setSavedFlowStepScope(scope);
     peekPhase = null;
     await tick();
-    const focus = { placeholder: m.ai_builder_saved_step_prompt_placeholder() };
+    const focus = scope.request
+      ? { prefill: scope.request }
+      : { placeholder: m.ai_builder_saved_step_prompt_placeholder() };
     if (taskScreenRef) {
       taskScreenRef.focusInput(focus);
     } else {
@@ -997,11 +999,15 @@
     </div>
 
     <div class="flex min-h-0 flex-1 flex-col overflow-y-auto" bind:this={screenScrollEl}>
-      <BuilderTurnAlert {targetKind} suppressStreamError={planSurfaceClaimsError} />
+      <BuilderTurnAlert {targetKind} {columnClass} suppressStreamError={planSurfaceClaimsError} />
       {#if showModelNotice}
         <div class="px-7 pt-3 max-sm:px-3" data-testid="ai-builder-model-notice">
+          <!-- The trigger's own inset is pulled back so its icon starts on the
+               card's left edge. -->
           <div class="mx-auto flex w-full flex-wrap items-center gap-2 {columnClass}">
-            <FlowAIBuilderModelSelect />
+            <div class="-ml-2.5 flex min-w-0 flex-wrap items-center gap-2">
+              <FlowAIBuilderModelSelect />
+            </div>
           </div>
         </div>
       {/if}
@@ -1166,10 +1172,7 @@
     </AlertDialog.Header>
     <AlertDialog.Footer>
       <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action
-        class="bg-negative-default text-on-fill hover:bg-negative-stronger"
-        onclick={discardChangeAndStartOver}
-      >
+      <AlertDialog.Action variant="destructive" onclick={discardChangeAndStartOver}>
         {m.ai_builder_discard_change_action()}
       </AlertDialog.Action>
     </AlertDialog.Footer>

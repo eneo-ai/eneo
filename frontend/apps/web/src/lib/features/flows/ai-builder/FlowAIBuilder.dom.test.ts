@@ -1137,7 +1137,7 @@ describe("FlowAIBuilder discovery screens", () => {
         await fireEvent.click(edit);
       } else if (kind === "custom") {
         await fireEvent.click(
-          (await screen.findByText(m.ai_builder_question_custom())).closest("button")!
+          (await screen.findByText(m.ai_builder_question_custom())).closest("label")!
         );
       }
       const input = await screen.findByRole("textbox", {
@@ -1311,16 +1311,15 @@ describe("FlowAIBuilder discovery screens", () => {
     expect(rows.textContent).toContain("mall.docx");
     expect(rows.textContent).toContain(m.ai_builder_attachment_travels());
     expect(rows.textContent).toContain(m.ai_builder_attachment_placeholders({ count: "5" }));
-    // Every placeholder is inspectable without a pointer: the long list sits in
-    // a native disclosure the keyboard can open.
-    const placeholderDetails = rows.querySelector("details") as HTMLDetailsElement;
-    expect(placeholderDetails).toBeTruthy();
-    // Collapsed: the list is in the DOM but not exposed until the user opens it.
-    expect(placeholderDetails.open).toBe(false);
-    await fireEvent.click(placeholderDetails.querySelector("summary") as HTMLElement);
-    await waitFor(() => expect(placeholderDetails.open).toBe(true));
-    const placeholderList = placeholderDetails.querySelector("span") as HTMLElement;
-    expect(placeholderList.textContent).toContain("beslutsfattare");
+    // Every placeholder is inspectable without a pointer: the long list sits
+    // behind a disclosure button the keyboard can open.
+    const placeholderToggle = within(rows).getByRole("button", {
+      name: (name) => name.includes(m.ai_builder_attachment_placeholders({ count: "5" }))
+    });
+    expect(placeholderToggle.getAttribute("aria-expanded")).toBe("false");
+    await fireEvent.click(placeholderToggle);
+    await waitFor(() => expect(placeholderToggle.getAttribute("aria-expanded")).toBe("true"));
+    expect(rows.textContent).toContain("beslutsfattare");
     expect(rows.textContent).toContain(m.ai_builder_attachment_coverage_full());
     expect(rows.textContent).toContain(m.ai_builder_attachment_coverage_inventory());
     expect(rows.textContent).toContain("underlag.pdf (1)");
@@ -1337,6 +1336,55 @@ describe("FlowAIBuilder discovery screens", () => {
     expect(preview.textContent).not.toContain(m.ai_builder_run_preview_max_files({ count: "5" }));
     expect(preview.textContent).toContain("Word-dokument");
     expect(preview.textContent).toContain("mall.docx");
+  });
+
+  it("leaves out run-preview lines that repeat a decision, and the preview when nothing is new", async () => {
+    const preview = (runtime: string) => ({
+      ...SUMMARY,
+      run_preview: {
+        runtime_input: "documents",
+        runtime_input_label: runtime,
+        max_files: null,
+        result_type: "pdf_document",
+        // The fixture's own decision: "Slutresultat: PDF-dokument".
+        result_type_label: "PDF-dokument",
+        report_layout: null,
+        report_layout_label: null,
+        template: null
+      }
+    });
+    const render = (runtime: string) => {
+      const { fetch } = makeFetch({
+        sessions: [
+          makeSession({
+            conversation: [
+              userMessage("u1", "Sammanfatta underlaget"),
+              assistantMessage("a1", "Här är min tolkning.", {
+                requirements_summary: {
+                  ...preview(runtime),
+                  key_decisions: [
+                    ...SUMMARY.key_decisions,
+                    { topic: "Indata vid körning", decision: "Text" }
+                  ]
+                }
+              })
+            ]
+          })
+        ]
+      });
+      const { stream } = makeStream();
+      renderShell({ fetch, stream, resumeSessionId: "s-1" });
+    };
+
+    render("Dokument");
+    const shown = await screen.findByTestId("run-preview");
+    expect(shown.textContent).toContain("Dokument");
+    expect(shown.textContent).not.toContain("PDF-dokument");
+    cleanup();
+
+    render("Text");
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    expect(screen.queryByTestId("run-preview")).toBeNull();
   });
 
   it("names the edited flow's own template in the run preview with its origin", async () => {
@@ -1794,7 +1842,7 @@ describe("FlowAIBuilder discovery screens", () => {
     const { stream, calls } = makeStream();
     renderShell({ fetch, stream, resumeSessionId: "s-1" });
 
-    const customRow = (await screen.findByText(m.ai_builder_question_custom())).closest("button")!;
+    const customRow = (await screen.findByText(m.ai_builder_question_custom())).closest("label")!;
     await fireEvent.click(customRow);
     await fireEvent.input(
       await screen.findByRole("textbox", { name: m.ai_builder_question_custom() }),

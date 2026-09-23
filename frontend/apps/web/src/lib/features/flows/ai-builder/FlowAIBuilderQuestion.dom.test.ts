@@ -118,6 +118,10 @@ describe("FlowAIBuilderQuestion single choice keyboard", () => {
     const radios = screen.getAllByRole("radio");
     expect(radios.map((radio) => radio.getAttribute("tabindex"))).toEqual(["0", "-1", "-1"]);
 
+    // Space chooses; from then on the arrow keys carry the choice with focus.
+    await fireEvent.keyDown(radios[0]!, { key: " " });
+    expect(radios[0]!.getAttribute("aria-checked")).toBe("true");
+
     await fireEvent.keyDown(radios[0]!, { key: "ArrowDown" });
     expect(radios[1]!.getAttribute("aria-checked")).toBe("true");
     expect(radios.map((radio) => radio.getAttribute("tabindex"))).toEqual(["-1", "0", "-1"]);

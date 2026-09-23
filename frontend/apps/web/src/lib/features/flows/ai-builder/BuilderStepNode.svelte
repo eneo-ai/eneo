@@ -36,10 +36,10 @@
 <div
   class="flex items-start gap-3 rounded-[10px] border px-3.5 py-3 {quiet
     ? 'border-dimmer bg-secondary'
-    : 'border-default bg-primary shadow-sm'} {changeBadge === 'updated' ? 'step-updated' : ''}"
+    : 'border-default bg-primary'} {changeBadge === 'updated' ? 'step-updated' : ''}"
 >
   <span
-    class="mt-px inline-flex size-[1.625rem] shrink-0 items-center justify-center rounded-[7px] text-xs font-bold tabular-nums
+    class="mt-px inline-flex size-[1.625rem] shrink-0 items-center justify-center rounded-md text-xs font-bold tabular-nums
       {pausesForReview
       ? 'bg-warning-dimmer text-warning-stronger'
       : 'bg-accent-dimmer text-accent-stronger'}"
@@ -50,7 +50,7 @@
   <div class="min-w-0 flex-1">
     <div class="flex flex-wrap items-center gap-1.5">
       <span
-        class="text-primary min-w-0 flex-1 truncate text-[0.875rem] font-semibold tracking-[-0.01em]"
+        class="text-primary min-w-0 flex-1 truncate text-[0.9375rem] font-semibold tracking-[-0.01em]"
         title={name}
       >
         {name}

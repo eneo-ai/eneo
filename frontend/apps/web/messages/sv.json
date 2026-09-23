@@ -4662,6 +4662,7 @@
   "ai_builder_step_choice_label": "Ändringen gäller",
   "ai_builder_step_choice_required": "Välj vilket steg ändringen gäller innan du skickar.",
   "ai_builder_step_choice_placeholder": "Välj steg",
+  "ai_builder_step_choice_whole_flow": "Hela flödet",
   "ai_builder_step_choice_item": "Steg {step}: {name}",
   "flow_package_continue_in_ai_builder": "Fortsätt i AI-byggaren",
   "ai_builder_package_with_references_refused": "Släpp paketet ensamt. Referensmaterial och andra filer bifogar du sedan i det importerade flödets AI-byggare.",

@@ -4662,6 +4662,7 @@
   "ai_builder_step_choice_label": "The change applies to",
   "ai_builder_step_choice_required": "Choose which step the change applies to before sending.",
   "ai_builder_step_choice_placeholder": "Choose a step",
+  "ai_builder_step_choice_whole_flow": "The whole flow",
   "ai_builder_step_choice_item": "Step {step}: {name}",
   "flow_package_continue_in_ai_builder": "Continue in the AI Builder",
   "ai_builder_package_with_references_refused": "Drop the package on its own. Attach reference material and other files afterwards in the imported flow's AI Builder.",

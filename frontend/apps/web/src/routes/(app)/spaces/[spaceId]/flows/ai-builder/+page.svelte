@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { goto } from "$app/navigation";
+  import { goto, replaceState } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { Page } from "$lib/components/layout";
@@ -24,6 +24,17 @@
 
   // A draft chosen in the Flöden list arrives as ?session=<id>; read once at mount.
   const resumeSessionId = untrack(() => page.url.searchParams.get("session"));
+
+  // The address names the draft once it exists, so a reload or a copied link
+  // reopens it instead of starting a blank one.
+  $effect(() => {
+    const sessionId = aiBuilderService.session?.session_id;
+    if (!sessionId || page.url.searchParams.get("session") === sessionId) return;
+    const url = new URL(page.url);
+    url.searchParams.set("session", sessionId);
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- this page's own resolved URL, with the draft appended
+    replaceState(url, page.state);
+  });
 
   // A flow package dropped into the composer is an existing flow, not
   // reference material: the importer installs it exactly, and the request

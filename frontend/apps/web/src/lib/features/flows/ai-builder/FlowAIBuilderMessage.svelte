@@ -4,6 +4,7 @@
      through */
   import { m } from "$lib/paraglide/messages";
   import { Markdown } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
   import type { RequirementsSummary } from "./protocol";
   import type {
@@ -94,14 +95,15 @@
           </p>
         {/if}
         {#if questionAnswered && onEditAnswer}
-          <button
-            type="button"
-            class="edit-answer"
+          <Button
+            variant="link"
+            size="xs"
+            class="text-accent-stronger mt-1.5 h-auto p-0 font-semibold"
             onclick={onEditAnswer}
             disabled={interactionDisabled}
           >
             {m.ai_builder_conversation_edit_answer()}
-          </button>
+          </Button>
         {/if}
       {/if}
       {#if requirementsSummary}
@@ -133,13 +135,6 @@
     line-height: var(--text-xs--line-height);
     color: var(--text-secondary);
   }
-  .edit-answer {
-    @apply mt-1.5 font-semibold underline-offset-[3px] hover:underline disabled:opacity-50;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    color: var(--accent-default);
-  }
-
   @reference "@eneo/ui/styles";
 
   .message-row {

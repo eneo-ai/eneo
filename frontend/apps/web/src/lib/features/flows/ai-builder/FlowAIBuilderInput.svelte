@@ -235,6 +235,11 @@
   // consumed, whatever the persisted draft still says.
   const sessionHasAcceptedTurn = $derived(service.session?.latest_turn != null);
   const stepScopeMissing = $derived(scopeRequired && !sessionHasAcceptedTurn && !editContext);
+  const stepChoiceShown = $derived(
+    stepScopeMissing
+      ? m.ai_builder_step_choice_placeholder()
+      : m.ai_builder_step_choice_whole_flow()
+  );
   const canSubmit = $derived(
     (inputValue.trim().length > 0 || completedUploads.length > 0 || restoredFiles.length > 0) &&
       service.canSendMessage &&
@@ -606,8 +611,9 @@
     {/if}
 
     {#if !resolvedEditContextLabel && stepChoices && stepChoices.length > 0}
+      <!-- Without a step the change is read as a whole-flow edit, so the
+           picker says that instead of looking like a required field. -->
       <div class="composer-edit-context" class:composer-edit-context-required={stepScopeMissing}>
-        <span class="composer-edit-context-dot" aria-hidden="true"></span>
         <label class="composer-edit-context-text" for="ai-builder-step-choice">
           {stepScopeMissing
             ? m.ai_builder_step_choice_required()
@@ -628,7 +634,7 @@
             class="composer-control"
             aria-label={m.ai_builder_step_choice_label()}
           >
-            <span class="truncate">{m.ai_builder_step_choice_placeholder()}</span>
+            <span class="truncate">{stepChoiceShown}</span>
           </Select.Trigger>
           <Select.Content align="start">
             {#each stepChoices as choice (choice.id)}
@@ -646,7 +652,6 @@
 
     {#if resolvedEditContextLabel}
       <div class="composer-edit-context" role="status" aria-live="polite">
-        <span class="composer-edit-context-dot" aria-hidden="true"></span>
         <span class="composer-edit-context-text">{resolvedEditContextLabel}</span>
         {#if editContextLocked}
           <span class="composer-edit-context-note">{m.ai_builder_edit_context_repair_note()}</span>
@@ -795,7 +800,7 @@
     gap: 0;
     border: 1px solid var(--border-default);
     background: var(--background-primary);
-    border-radius: 1rem;
+    border-radius: 0.75rem;
     box-shadow: 0 1px 2px oklch(0% 0 0 / 0.04);
     transition:
       border-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -948,18 +953,10 @@
     padding: 0.5rem 0.625rem;
     background: var(--background-secondary);
     border: 1px solid var(--border-default);
-    border-radius: 0.75rem;
+    border-radius: 0.5rem;
     color: var(--text-secondary);
     font-size: 0.8125rem;
     line-height: 1.25;
-  }
-
-  .composer-edit-context-dot {
-    width: 0.5rem;
-    height: 0.5rem;
-    border-radius: 999px;
-    background: var(--accent-default);
-    flex: 0 0 auto;
   }
 
   .composer-edit-context-text {
@@ -974,7 +971,7 @@
     flex: 0 0 auto;
     border: 0;
     background: transparent;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     font-size: 0.8rem;
     font-weight: 600;
     cursor: pointer;
@@ -989,7 +986,7 @@
 
   .composer-edit-context-note {
     flex: 0 0 auto;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     font-size: 0.8rem;
   }
 

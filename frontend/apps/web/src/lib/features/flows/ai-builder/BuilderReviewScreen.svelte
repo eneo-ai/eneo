@@ -20,6 +20,7 @@
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import { describeFailure, type FailureAction } from "./aiBuilderFailurePresentation";
+  import { fieldTypeLabel } from "./aiBuilderSummaryText";
   import type {
     AIBuilderPlanEditContext,
     AIBuilderStatus,
@@ -1085,12 +1086,12 @@
                 : spec.flow_name}
             </h2>
             {#if isScopedStepReview && activeStepScope}
-              <p class="text-secondary mt-1.5 max-w-[70ch] text-[0.875rem] leading-relaxed">
+              <p class="text-secondary mt-1.5 max-w-[70ch] text-[0.9375rem] leading-relaxed">
                 {m.ai_builder_saved_step_review_scope()}
               </p>
             {:else if spec.flow_description && !descriptionDiff && !hasDescriptionAdvisory}
               <p
-                class="text-secondary mt-1.5 max-w-[70ch] text-[0.875rem] leading-relaxed text-pretty"
+                class="text-secondary mt-1.5 max-w-[70ch] text-[0.9375rem] leading-relaxed text-pretty"
               >
                 {spec.flow_description}
               </p>
@@ -1323,7 +1324,7 @@
                     <div class="text-secondary mt-1 flex flex-wrap items-center gap-x-2 text-xs">
                       <span class="font-mono">{field.name}</span>
                       <span aria-hidden="true">·</span>
-                      <span>{field.type}</span>
+                      <span>{fieldTypeLabel(field.type)}</span>
                       <span aria-hidden="true">·</span>
                       <span>
                         {field.required === true

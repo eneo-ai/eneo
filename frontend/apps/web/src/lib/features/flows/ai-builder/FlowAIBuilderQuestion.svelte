@@ -17,7 +17,9 @@
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { SvelteSet } from "svelte/reactivity";
   import CheckIcon from "@lucide/svelte/icons/check";
-  import PencilIcon from "@lucide/svelte/icons/pencil-line";
+  import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
   import {
     buildStructuredQuestionCustomAnswer,
     buildStructuredQuestionInputFieldsAnswer,
@@ -32,6 +34,7 @@
     type StructuredInputFieldType,
     type StructuredQuestionOption
   } from "./structuredQuestionAnswer";
+  import { fieldTypeLabel } from "./aiBuilderSummaryText";
 
   interface Props {
     question: StructuredQuestion;
@@ -337,68 +340,40 @@
     visibleOptions.filter((option) => matchingOptions.includes(option)).length
   );
 
-  // A single-choice group is one tab stop: the chosen option carries it, and
-  // the arrow keys move both selection and focus inside the group.
-  const radioKeys = $derived(
-    isSingle
-      ? [
-          ...visibleOptions.map(getStructuredQuestionOptionKey),
-          ...(question.allow_custom ? [CUSTOM_RADIO_KEY] : [])
-        ]
-      : []
+  // DESIGN.md option row: 10px corners, hairline, 0.75rem padding; hover turns
+  // the rule strong over linen, a checked control turns it civic blue with an
+  // inset ring over a 7% wash.
+  const optionRowClass =
+    "w-full cursor-pointer items-start gap-3 rounded-[10px] border border-default bg-primary p-3 text-left font-normal text-primary transition-colors duration-(--duration-quick) ease-(--ease-smooth-out) hover:border-stronger hover:bg-secondary has-data-[state=checked]:border-accent-default has-data-[state=checked]:bg-accent-default/7 has-data-[state=checked]:shadow-[inset_0_0_0_1px_var(--accent-default)] has-data-[state=checked]:hover:bg-accent-default/10 dark:has-data-[state=checked]:border-accent-default dark:has-data-[state=checked]:bg-accent-default/10 has-[:disabled]:cursor-default has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-accent-stronger motion-reduce:transition-none";
+
+  // The radio group owns one-tab-stop and arrow-key selection; this only maps
+  // its single value onto the selection the answer is built from.
+  const singleValue = $derived(
+    customSelected ? CUSTOM_RADIO_KEY : ([...selectedOptionKeys][0] ?? "")
   );
-  const activeRadioKey = $derived.by(() => {
-    if (!isSingle) return null;
-    if (customSelected) return CUSTOM_RADIO_KEY;
-    return radioKeys.find((key) => selectedOptionKeys.has(key)) ?? radioKeys[0] ?? null;
-  });
-  function radioTabIndex(key: string): number | undefined {
-    if (!isSingle) return undefined;
-    return key === activeRadioKey ? 0 : -1;
-  }
+  // A click on the custom row puts the caret in its text box; arrowing onto it
+  // only selects it, so the next arrow press still moves inside the group.
+  let customPointerSelect = false;
 
-  let optionsStackEl = $state<HTMLDivElement | null>(null);
-
-  function moveRadioSelection(fromKey: string, event: KeyboardEvent) {
-    if (!isSingle || answered || disabled) return;
-    const keys = radioKeys;
-    const index = keys.indexOf(fromKey);
-    if (index === -1 || keys.length === 0) return;
-    let next: number;
-    switch (event.key) {
-      case "ArrowDown":
-      case "ArrowRight":
-        next = (index + 1) % keys.length;
-        break;
-      case "ArrowUp":
-      case "ArrowLeft":
-        next = (index - 1 + keys.length) % keys.length;
-        break;
-      case "Home":
-        next = 0;
-        break;
-      case "End":
-        next = keys.length - 1;
-        break;
-      default:
-        return;
-    }
-    event.preventDefault();
-    const nextKey = keys[next]!;
-    if (nextKey === CUSTOM_RADIO_KEY) {
-      // Arrowing onto the custom row selects it but keeps focus on the radio,
-      // so the next arrow press still moves inside the group.
-      selectCustom({ focusTextarea: false });
+  function selectSingle(key: string) {
+    if (key === CUSTOM_RADIO_KEY) {
+      selectCustom({ focusTextarea: customPointerSelect });
     } else {
       const option = visibleOptions.find(
-        (candidate) => getStructuredQuestionOptionKey(candidate) === nextKey
+        (candidate) => getStructuredQuestionOptionKey(candidate) === key
       );
-      if (!option) return;
-      selectOption(option);
+      if (option) selectOption(option);
     }
-    queueMicrotask(() =>
-      optionsStackEl?.querySelector<HTMLElement>(`[data-radio-index="${next}"]`)?.focus()
-    );
+    customPointerSelect = false;
+  }
+
+  function toggleCustom(on: boolean) {
+    if (on) {
+      selectCustom();
+    } else if (!answered && !disabled) {
+      customSelected = false;
+      customText = "";
+    }
   }
 
   const confirmLabel = $derived.by(() => {
@@ -499,15 +474,6 @@
     }
   }
 
-  function typeLabel(type: StructuredInputFieldType): string {
-    if (type === "number") return m.flow_form_field_type_number();
-    if (type === "date") return m.flow_form_field_type_date();
-    if (type === "select") return m.flow_form_field_type_select();
-    if (type === "multiselect") return m.flow_form_field_type_multiselect();
-    if (type === "list") return m.flow_form_field_type_list();
-    return m.flow_form_field_type_text();
-  }
-
   function addInputField() {
     if (inputFields.length >= 20) return;
     inputFields.push(blankField());
@@ -528,7 +494,7 @@
       <span class="min-w-0">
         {question.question}
         {#if answerLabel}
-          <span class="text-primary font-medium">— {answerLabel}</span>
+          <span class="text-primary font-semibold">{answerLabel}</span>
         {/if}
       </span>
     </div>
@@ -612,7 +578,7 @@
                 {#if showTechnicalNames && field.variableName.trim()}
                   <span class="field-summary-name">{field.variableName.trim()}</span>
                 {/if}
-                <span class="field-summary-type">{typeLabel(field.fieldType)}</span>
+                <span class="field-summary-type">{fieldTypeLabel(field.fieldType)}</span>
                 {#if field.required}
                   <span class="field-summary-required"
                     >{m.ai_builder_requirements_field_required()}</span
@@ -808,127 +774,182 @@
       <p id="{questionLabelId}-keys" class="sr-only">
         {isSingle ? m.ai_builder_question_keys_single() : m.ai_builder_question_keys_multi()}
       </p>
-      <div
-        bind:this={optionsStackEl}
-        class="options-stack"
-        role={isSingle ? "radiogroup" : "group"}
-        aria-labelledby={questionLabelId}
-        aria-describedby="{questionLabelId}-keys"
-      >
-        {#each visibleOptions as option, optionIndex (getStructuredQuestionOptionKey(option))}
-          {@const optionKey = getStructuredQuestionOptionKey(option)}
-          {@const isSelected = selectedOptionKeys.has(optionKey)}
-          <button
-            type="button"
-            class="option-row"
-            class:is-selected={isSelected}
-            onclick={() => selectOption(option)}
-            onkeydown={(event) => moveRadioSelection(optionKey, event)}
-            role={isSingle ? "radio" : "checkbox"}
-            aria-checked={isSelected}
-            tabindex={radioTabIndex(optionKey)}
-            data-radio-index={isSingle ? optionIndex : undefined}
-            {disabled}
-          >
-            <span
-              class="option-indicator"
-              class:is-selected={isSelected}
-              class:is-radio={isSingle}
-              aria-hidden="true"
-            >
-              {#if isSelected}
-                {#if isSingle}
-                  <span class="option-indicator-dot"></span>
-                {:else}
-                  <CheckIcon class="size-3" />
-                {/if}
-              {/if}
-            </span>
-            <span class="option-body">
-              <span class="option-label-row">
-                <span class="option-label">{option.label}</span>
-                {#if optionKey === currentKey}
-                  <span class="option-current">{m.ai_builder_question_in_use_today()}</span>
-                {:else if optionKey === recommendedKey}
-                  <span class="option-recommendation">{m.ai_builder_question_recommended()}</span>
-                {/if}
-              </span>
-              {#if option.description}
-                <span class="option-description">{option.description}</span>
-              {/if}
-              {#if option.example}
-                <span class="option-example">{option.example}</span>
-              {/if}
-              {#if optionKey === recommendedKey && question.recommended_option_evidence}
-                <!-- The user's own words, so the recommendation is traceable
-                     rather than asserted. -->
-                <span class="option-evidence">
-                  {m.ai_builder_question_evidence({
-                    quote: question.recommended_option_evidence
-                  })}
-                </span>
-              {/if}
-            </span>
-          </button>
-        {/each}
+      <!-- Each row is a label for its radio or checkbox, so the whole row is
+           the hit target; the name is the option's own words and the rest of
+           the row describes it. -->
+      {#snippet optionRow(
+        key: string,
+        control: import("svelte").Snippet<
+          [{ id: string; labelledby: string; describedby: string }]
+        >,
+        body: import("svelte").Snippet<[{ labelId: string; detailId: string }]>,
+        onpointerdown?: () => void
+      )}
+        {@const id = `${questionLabelId}-option-${key}`}
+        <Field.Label for={id} class={optionRowClass} data-option-key={key} {onpointerdown}>
+          <!-- The name is the option's words plus its tag ("Eneo föreslår"). -->
+          {@render control({
+            id,
+            labelledby: `${id}-label ${id}-label-tag`,
+            describedby: `${id}-detail`
+          })}
+          <span class="option-body">
+            {@render body({ labelId: `${id}-label`, detailId: `${id}-detail` })}
+          </span>
+        </Field.Label>
+      {/snippet}
 
-        {#if question.allow_custom}
-          <button
-            type="button"
-            class="option-row option-row-custom"
-            class:is-selected={customSelected}
-            onclick={() => selectCustom()}
-            onkeydown={(event) => moveRadioSelection(CUSTOM_RADIO_KEY, event)}
-            role={isSingle ? "radio" : "checkbox"}
-            aria-checked={customSelected}
-            aria-expanded={customSelected}
-            aria-controls={customSelected ? `${questionLabelId}-custom` : undefined}
-            tabindex={radioTabIndex(CUSTOM_RADIO_KEY)}
-            data-radio-index={isSingle ? visibleOptions.length : undefined}
-            {disabled}
-          >
-            <span
-              class="option-indicator"
-              class:is-selected={customSelected}
-              class:is-radio={isSingle}
-              aria-hidden="true"
+      {#snippet presetBody(
+        option: StructuredQuestionOption,
+        optionKey: string,
+        ids: { labelId: string; detailId: string }
+      )}
+        <span class="option-label-row">
+          <span class="option-label" id={ids.labelId}>{option.label}</span>
+          {#if optionKey === currentKey}
+            <span class="option-current" id="{ids.labelId}-tag"
+              >{m.ai_builder_question_in_use_today()}</span
             >
-              {#if customSelected}
-                {#if isSingle}
-                  <span class="option-indicator-dot"></span>
-                {:else}
-                  <CheckIcon class="size-3" />
-                {/if}
-              {:else}
-                <PencilIcon class="text-secondary size-3" />
-              {/if}
-            </span>
-            <span class="option-body">
-              <span class="option-label">{m.ai_builder_question_custom()}</span>
-              <span class="option-description">{m.ai_builder_question_custom_helper()}</span>
-            </span>
-          </button>
-
-          {#if customSelected}
-            <div
-              class="custom-input-wrap"
-              id="{questionLabelId}-custom"
-              transition:slide={{ duration: reducedMotion ? 0 : 180, easing: cubicOut }}
+          {:else if optionKey === recommendedKey}
+            <span class="option-recommendation" id="{ids.labelId}-tag"
+              >{m.ai_builder_question_recommended()}</span
             >
-              <Textarea
-                bind:ref={textareaRef}
-                bind:value={customText}
-                rows={2}
-                placeholder={m.ai_builder_question_custom_placeholder()}
-                onkeydown={handleTextareaKeydown}
-                class="resize-none"
-                aria-label={m.ai_builder_question_custom()}
-                {disabled}
-              />
-            </div>
           {/if}
+        </span>
+        <span class="contents" id={ids.detailId}>
+          {#if option.description}
+            <span class="option-description">{option.description}</span>
+          {/if}
+          {#if option.example}
+            <span class="option-example">{option.example}</span>
+          {/if}
+          {#if optionKey === recommendedKey && question.recommended_option_evidence}
+            <!-- The user's own words, so the recommendation is traceable
+                 rather than asserted. -->
+            <span class="option-evidence">
+              {m.ai_builder_question_evidence({
+                quote: question.recommended_option_evidence
+              })}
+            </span>
+          {/if}
+        </span>
+      {/snippet}
+
+      {#snippet customBody(ids: { labelId: string; detailId: string })}
+        <span class="option-label" id={ids.labelId}>{m.ai_builder_question_custom()}</span>
+        <span class="option-description" id={ids.detailId}>
+          {m.ai_builder_question_custom_helper()}
+        </span>
+      {/snippet}
+
+      {#snippet customInput()}
+        {#if customSelected}
+          <div
+            class="custom-input-wrap"
+            id="{questionLabelId}-custom"
+            transition:slide={{ duration: reducedMotion ? 0 : 180, easing: cubicOut }}
+          >
+            <Textarea
+              bind:ref={textareaRef}
+              bind:value={customText}
+              rows={2}
+              placeholder={m.ai_builder_question_custom_placeholder()}
+              onkeydown={handleTextareaKeydown}
+              class="resize-none"
+              aria-label={m.ai_builder_question_custom()}
+              {disabled}
+            />
+          </div>
         {/if}
-      </div>
+      {/snippet}
+
+      {#if isSingle}
+        <RadioGroup.Root
+          class="border-dimmer flex flex-col gap-1.5 border-t px-2.5 pt-1.5 pb-2.5"
+          bind:value={() => singleValue, selectSingle}
+          {disabled}
+          aria-labelledby={questionLabelId}
+          aria-describedby="{questionLabelId}-keys"
+        >
+          {#each visibleOptions as option (getStructuredQuestionOptionKey(option))}
+            {@const optionKey = getStructuredQuestionOptionKey(option)}
+            {#snippet radio(ids: { id: string; labelledby: string; describedby: string })}
+              <RadioGroup.Item
+                value={optionKey}
+                id={ids.id}
+                class="mt-0.5"
+                aria-labelledby={ids.labelledby}
+                aria-describedby={ids.describedby}
+              />
+            {/snippet}
+            {#snippet body(ids: { labelId: string; detailId: string })}
+              {@render presetBody(option, optionKey, ids)}
+            {/snippet}
+            {@render optionRow(optionKey, radio, body)}
+          {/each}
+          {#if question.allow_custom}
+            {#snippet customRadio(ids: { id: string; labelledby: string; describedby: string })}
+              <RadioGroup.Item
+                value={CUSTOM_RADIO_KEY}
+                id={ids.id}
+                class="mt-0.5"
+                aria-labelledby={ids.labelledby}
+                aria-describedby={ids.describedby}
+                aria-expanded={customSelected}
+                aria-controls={customSelected ? `${questionLabelId}-custom` : undefined}
+              />
+            {/snippet}
+            {@render optionRow(
+              CUSTOM_RADIO_KEY,
+              customRadio,
+              customBody,
+              () => (customPointerSelect = true)
+            )}
+            {@render customInput()}
+          {/if}
+        </RadioGroup.Root>
+      {:else}
+        <div
+          class="border-dimmer flex flex-col gap-1.5 border-t px-2.5 pt-1.5 pb-2.5"
+          role="group"
+          aria-labelledby={questionLabelId}
+          aria-describedby="{questionLabelId}-keys"
+        >
+          {#each visibleOptions as option (getStructuredQuestionOptionKey(option))}
+            {@const optionKey = getStructuredQuestionOptionKey(option)}
+            {#snippet box(ids: { id: string; labelledby: string; describedby: string })}
+              <Checkbox
+                id={ids.id}
+                class="mt-0.5"
+                bind:checked={() => selectedOptionKeys.has(optionKey), () => selectOption(option)}
+                {disabled}
+                aria-labelledby={ids.labelledby}
+                aria-describedby={ids.describedby}
+              />
+            {/snippet}
+            {#snippet body(ids: { labelId: string; detailId: string })}
+              {@render presetBody(option, optionKey, ids)}
+            {/snippet}
+            {@render optionRow(optionKey, box, body)}
+          {/each}
+          {#if question.allow_custom}
+            {#snippet customBox(ids: { id: string; labelledby: string; describedby: string })}
+              <Checkbox
+                id={ids.id}
+                class="mt-0.5"
+                bind:checked={() => customSelected, toggleCustom}
+                {disabled}
+                aria-labelledby={ids.labelledby}
+                aria-describedby={ids.describedby}
+                aria-expanded={customSelected}
+                aria-controls={customSelected ? `${questionLabelId}-custom` : undefined}
+              />
+            {/snippet}
+            {@render optionRow(CUSTOM_RADIO_KEY, customBox, customBody)}
+            {@render customInput()}
+          {/if}
+        </div>
+      {/if}
     {/if}
 
     {#if sendBlockedReason !== null}
@@ -957,7 +978,7 @@
            be able to reach it and hear why it does not fire yet. -->
       <Button
         variant="default"
-        class="ml-auto max-sm:ml-0 max-sm:h-[44px] max-sm:w-full max-sm:text-sm"
+        class="ml-auto aria-disabled:cursor-default aria-disabled:opacity-50 max-sm:ml-0 max-sm:h-[44px] max-sm:w-full max-sm:text-sm"
         onclick={handleConfirm}
         aria-disabled={!canConfirm || submissionDisabled}
         aria-describedby={sendBlockedReason !== null
@@ -1024,11 +1045,6 @@
     color: var(--text-primary);
   }
 
-  .options-stack {
-    @apply flex flex-col gap-1.5 border-t px-2.5 pt-1.5 pb-2.5;
-    border-color: var(--border-dimmer);
-  }
-
   .option-filter {
     @apply mx-4 mb-1 flex flex-col gap-1 font-medium;
     font-size: var(--text-xs);
@@ -1059,27 +1075,6 @@
     @apply mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full;
     background: oklch(from var(--accent-default) l c h / 0.11);
     color: var(--accent-stronger);
-  }
-
-  .option-row {
-    @apply relative flex min-h-11 w-full items-start gap-3 rounded-[10px] border px-3 py-3 text-left;
-    border-color: var(--border-default);
-    background: var(--background-primary);
-    color: var(--text-primary);
-    cursor: pointer;
-    transition:
-      background 0.15s ease,
-      border-color 0.15s ease;
-  }
-
-  .option-row:not(:disabled):hover {
-    border-color: var(--border-stronger);
-    background: var(--background-secondary);
-  }
-
-  .option-row.is-selected:not(:disabled):hover {
-    border-color: var(--accent-default);
-    background: oklch(from var(--accent-default) l c h / 0.1);
   }
 
   .option-label-row {
@@ -1120,7 +1115,7 @@
   }
 
   .delegate-block {
-    @apply flex min-w-0 flex-col gap-0.5;
+    @apply flex min-w-0 flex-col items-start gap-0.5;
   }
 
   .delegate-note {
@@ -1130,7 +1125,7 @@
   }
 
   .delegate-action {
-    @apply rounded text-[0.8125rem] font-semibold;
+    @apply rounded text-left text-[0.8125rem] font-semibold;
     color: var(--accent-stronger);
   }
 
@@ -1141,51 +1136,6 @@
   .delegate-action:focus-visible {
     outline: 2px solid var(--accent-stronger);
     outline-offset: 2px;
-  }
-
-  .option-row:focus-visible {
-    outline: 2px solid var(--accent-stronger);
-    outline-offset: 1px;
-  }
-
-  .option-row:disabled {
-    cursor: default;
-  }
-
-  .option-row.is-selected {
-    border-color: var(--accent-default);
-    box-shadow: inset 0 0 0 1px var(--accent-default);
-    background: oklch(from var(--accent-default) l c h / 0.07);
-  }
-
-  .option-indicator {
-    @apply relative mt-0.5 flex size-[1.1875rem] shrink-0 items-center justify-center rounded-md;
-    border: 1.5px solid var(--border-stronger);
-    background: var(--background-primary);
-    color: var(--text-primary);
-    transition:
-      border-color 0.15s ease,
-      background 0.15s ease,
-      color 0.15s ease;
-  }
-
-  .option-indicator.is-radio {
-    border-radius: 9999px;
-  }
-
-  .option-row:not(:disabled):hover .option-indicator {
-    border-color: var(--border-stronger);
-  }
-
-  .option-indicator.is-selected {
-    border-color: var(--accent-default);
-    background: var(--accent-default);
-    color: var(--text-on-fill);
-  }
-
-  .option-indicator-dot {
-    @apply size-[0.4375rem] rounded-full;
-    background: var(--text-on-fill);
   }
 
   .option-body {
@@ -1456,7 +1406,7 @@
     }
 
     .delegate-action {
-      @apply h-10 w-full;
+      @apply h-10 w-full text-center;
     }
 
     /* One field per line: two columns leave no room for a label at 375 px. */
@@ -1576,7 +1526,7 @@
     color: var(--text-secondary);
   }
   .understanding-sentence {
-    font-size: 0.9rem;
+    font-size: 0.9375rem;
     color: var(--text-primary);
   }
   .understanding-open {
