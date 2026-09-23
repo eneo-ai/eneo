@@ -21,9 +21,11 @@ import { AUDIO_GRAPH_PREPARATION_MS } from "$lib/features/audio/AudioRecorder.sv
 import {
   FakeLiveSocket,
   FakeWorkletNode,
+  frameTags,
   installLiveTranscriptFakes,
   liveSession
 } from "$lib/features/audio/live/liveTranscriptTestFakes";
+import { PCM16_FLUSH, PCM16_FLUSHED } from "$lib/features/audio/live/pcm16-worklet.js";
 import {
   RETRY_BACKOFF_MS,
   ROTATION_OVERLAP_MS,
@@ -642,6 +644,78 @@ describe("FlowRunDialog recording rotation", () => {
     loadWorklet();
     await flush();
     expect(FakeWorkletNode.instances).toHaveLength(0);
+  });
+});
+
+describe("FlowRunDialog live text across a rotation", () => {
+  it("keeps the tap and the one socket through a rotation, and the text keeps arriving", async () => {
+    installLiveTranscriptFakes();
+    const createSession = vi.fn(async () => liveSession);
+    await openDialogAndStartRecording(
+      vi.fn(() => new Promise<UploadedFile>(() => undefined)),
+      {
+        ...liveText,
+        createSession
+      }
+    );
+    const socket = FakeLiveSocket.instances[0];
+    const node = FakeWorkletNode.instances[0];
+    socket.open();
+    socket.receive({ type: "ready", sample_rate: 16000, max_seconds: 18000 });
+    socket.receive({ type: "transcript.delta", text: "Före" });
+
+    await rotate();
+    node.frame(1);
+    socket.receive({ type: "transcript.delta", text: " under" });
+    await endOverlap();
+    media.recorders[0]?.finish();
+    await flush();
+    node.frame(2);
+    socket.receive({ type: "transcript.delta", text: " efter" });
+    await flush();
+
+    expect(screen.getByRole("log").textContent).toBe("Före under efter");
+    expect(frameTags(socket)).toEqual([1, 2]);
+    expect(media.addModule).toHaveBeenCalledOnce();
+    expect(FakeWorkletNode.instances).toHaveLength(1);
+    expect(node.port.close).not.toHaveBeenCalled();
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(FakeLiveSocket.instances).toHaveLength(1);
+  });
+
+  it("sends the last audio, then asks for the final text once, when stopped during the overlap", async () => {
+    installLiveTranscriptFakes();
+    await openDialogAndStartRecording(
+      vi.fn(() => new Promise<UploadedFile>(() => undefined)),
+      liveText
+    );
+    const socket = FakeLiveSocket.instances[0];
+    const node = FakeWorkletNode.instances[0];
+    node.answersFlush = false;
+    socket.open();
+    socket.receive({ type: "ready", sample_rate: 16000, max_seconds: 18000 });
+    const flushRequests = () =>
+      node.port.postMessage.mock.calls.filter(([message]) => message === PCM16_FLUSH);
+
+    await rotate();
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+    // The replaced recorder's file is handed over; the microphone is still open.
+    expect(flushRequests()).toHaveLength(0);
+
+    media.recorders[1]?.finish();
+    await flush();
+    expect(flushRequests()).toHaveLength(1);
+    expect(socket.texts).toEqual([]);
+
+    node.frame(9, 1600);
+    node.post(PCM16_FLUSHED);
+    await flush();
+    expect(frameTags(socket)).toEqual([9]);
+    expect(socket.texts).toEqual([JSON.stringify({ type: "stop" })]);
+    expect(socket.sent.at(-1)).toBe(JSON.stringify({ type: "stop" }));
+    expect(flushRequests()).toHaveLength(1);
   });
 });
 
