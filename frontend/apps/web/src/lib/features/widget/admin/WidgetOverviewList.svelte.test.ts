@@ -67,6 +67,15 @@ describe("WidgetOverviewList", () => {
     await expect.element(page.getByRole("button", { name: "widget_admin_pause" })).toBeEnabled();
   });
 
+  test("one allowed site is counted in the singular", async () => {
+    renderList([
+      item({}),
+      item({ id: "w2", name: "Bygglov", allowed_origins: ["https://a.se", "https://b.se"] })
+    ]);
+    await expect.element(page.getByText(/widget_admin_overview_origins_one/)).toBeVisible();
+    await expect.element(page.getByText(/widget_admin_overview_origins\(2\)/)).toBeVisible();
+  });
+
   test("a healthy active widget has no warning, and each card is a heading", async () => {
     renderList([item({}), item({ id: "w2", name: "Bygglov", status: "paused" })]);
     expect(document.body.textContent).not.toContain("widget_admin_overview_active_issues");

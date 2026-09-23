@@ -281,7 +281,9 @@
                   <p class="text-2xl font-semibold tabular-nums">
                     {number.format(totals.widgets)}
                     <span class="text-secondary text-sm font-normal">
-                      {m.widget_admin_stat_active({ count: number.format(totals.active) })}
+                      {totals.active === 1
+                        ? m.widget_admin_stat_active_one()
+                        : m.widget_admin_stat_active({ count: number.format(totals.active) })}
                     </span>
                   </p>
                 </Card.Content>

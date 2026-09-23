@@ -121,12 +121,21 @@
       </Table.Root>
       <p class="text-secondary text-sm">
         {m.widget_admin_usage_totals({
-          questions: number.format(totals.questions),
-          blocked: number.format(totals.blocked)
+          questions:
+            totals.questions === 1
+              ? m.widget_admin_usage_questions_total_one()
+              : m.widget_admin_usage_questions_total({ count: number.format(totals.questions) }),
+          blocked:
+            totals.blocked === 1
+              ? m.widget_admin_usage_blocked_total_one()
+              : m.widget_admin_usage_blocked_total({ count: number.format(totals.blocked) })
         })}
         {m.widget_admin_usage_feedback_totals({
           helpful: number.format(totals.helpful),
-          unhelpful: number.format(totals.unhelpful)
+          unhelpful:
+            totals.unhelpful === 1
+              ? m.widget_admin_usage_unhelpful_total_one()
+              : m.widget_admin_usage_unhelpful_total({ count: number.format(totals.unhelpful) })
         })}
       </p>
     {/if}

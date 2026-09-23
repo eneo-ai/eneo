@@ -120,9 +120,11 @@
               </Card.Title>
               <Card.Description>
                 {item.space_name ?? "–"} · {item.assistant_name ?? "–"} ·
-                {m.widget_admin_overview_origins({
-                  count: number.format(item.allowed_origins.length)
-                })}
+                {item.allowed_origins.length === 1
+                  ? m.widget_admin_overview_origins_one()
+                  : m.widget_admin_overview_origins({
+                      count: number.format(item.allowed_origins.length)
+                    })}
               </Card.Description>
               <Card.Action>
                 <!-- eslint-disable svelte/no-navigation-without-resolve -- localized href built from typed route segments -->

@@ -41,15 +41,15 @@ const policy: WidgetPolicy = {
   allow_bot_protection_none: false
 };
 
-function renderPage(update: (patch: Partial<WidgetPolicy>) => Promise<WidgetPolicy>) {
+function renderPage(
+  update: (patch: Partial<WidgetPolicy>) => Promise<WidgetPolicy>,
+  totals = { widgets: 0, active: 0, questions_30d: 0, tokens_30d: 0, blocked_30d: 0 }
+) {
   return render(WidgetsAdminPage, {
     data: {
       policy,
       templates: [],
-      overview: {
-        totals: { widgets: 0, active: 0, questions_30d: 0, tokens_30d: 0, blocked_30d: 0 },
-        items: []
-      },
+      overview: { totals, items: [] },
       eneo: {
         widgets: {
           policy: { update },
@@ -113,6 +113,22 @@ describe("widget policy page", () => {
     await userEvent.tab();
     await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
     expect(update).toHaveBeenCalledWith({ max_daily_token_budget: 3000 });
+  });
+});
+
+describe("widget overview totals", () => {
+  test("one active widget is counted in the singular", async () => {
+    renderPage(vi.fn(), {
+      widgets: 3,
+      active: 1,
+      questions_30d: 0,
+      tokens_30d: 0,
+      blocked_30d: 0
+    });
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain("widget_admin_stat_active_one")
+    );
+    expect(document.body.textContent).not.toContain("widget_admin_stat_active(");
   });
 });
 
