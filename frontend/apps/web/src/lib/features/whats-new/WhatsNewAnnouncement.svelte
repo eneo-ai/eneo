@@ -10,7 +10,7 @@
   import { m } from "$lib/paraglide/messages";
   import { getLocale, localizeHref } from "$lib/paraglide/runtime";
   import type { Localized, Release } from "@eneo/whats-new";
-  import { ArrowRight } from "lucide-svelte";
+  import { ArrowRight } from "@lucide/svelte";
   import { announcementSummary } from "./announcement";
   import { areaIcon, labelFor, typeClass, typeLabel } from "./labels";
   import { getWhatsNewTour, tourSteps } from "./tour";

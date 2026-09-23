@@ -8,7 +8,7 @@
   import { getTemplateController } from "../../TemplateController";
   import TemplateLanguageSwitcher from "./TemplateLanguageSwitcher.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { BookOpen, FileUp, Check } from "lucide-svelte";
+  import { BookOpen, FileUp, Check } from "@lucide/svelte";
 
   let {
     getCategorisedTemplates,

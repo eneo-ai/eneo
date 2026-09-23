@@ -1,11 +1,11 @@
 <script lang="ts">
   import type { Icon } from "@eneo/icons";
-  import type { ComponentType } from "svelte";
+  import type { Component } from "svelte";
   import { cva } from "class-variance-authority";
 
   export let href: string;
   export let isActive: boolean;
-  export let icon: Icon | ComponentType;
+  export let icon: Icon | Component<{ class?: string }>;
   export let label: string;
 
   const link = cva(

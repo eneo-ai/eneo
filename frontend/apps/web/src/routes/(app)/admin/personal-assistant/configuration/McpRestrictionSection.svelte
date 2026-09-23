@@ -8,7 +8,7 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { AlertCircle, ChevronRight, Info, Plug } from "lucide-svelte";
+  import { AlertCircle, ChevronRight, Info, Plug } from "@lucide/svelte";
   import { isCapabilityPurpose, type CapabilityDescriptor } from "$lib/features/mcp/capabilities";
   import { SvelteSet } from "svelte/reactivity";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";

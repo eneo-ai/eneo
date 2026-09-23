@@ -12,7 +12,7 @@
   import { SkillCatalogQuery } from "$lib/features/skills/skillCatalogQuery.svelte";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
-  import { LoaderCircle, Plus, Search, Trash2, BookOpenCheck } from "lucide-svelte";
+  import { LoaderCircle, Plus, Search, Trash2, BookOpenCheck } from "@lucide/svelte";
   import { onDestroy, untrack } from "svelte";
 
   const CREATE_SKILL_PERMISSION: ResourcePermission = "create";

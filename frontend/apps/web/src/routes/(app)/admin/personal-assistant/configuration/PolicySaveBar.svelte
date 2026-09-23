@@ -7,7 +7,7 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { AlertCircle, CheckCircle2 } from "lucide-svelte";
+  import { AlertCircle, CheckCircle2 } from "@lucide/svelte";
 
   type Props = {
     dirty: boolean;

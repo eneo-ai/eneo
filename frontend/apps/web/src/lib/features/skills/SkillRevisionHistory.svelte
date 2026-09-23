@@ -5,7 +5,7 @@
     SkillRevisionSummaryPage,
     SkillRevisionSummaryPublic
   } from "@eneo/eneo-js";
-  import { Eye, LoaderCircle, RotateCcw } from "lucide-svelte";
+  import { Eye, LoaderCircle, RotateCcw } from "@lucide/svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@eneo/eneo-js";
-  import { AlertCircle } from "lucide-svelte";
+  import { AlertCircle } from "@lucide/svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "svelte-sonner";

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Permission, Role } from "@eneo/eneo-js";
   import { invalidate } from "$app/navigation";
-  import { Plus } from "lucide-svelte";
+  import { Plus } from "@lucide/svelte";
   import { untrack } from "svelte";
   import { toast } from "$lib/components/toast";
   import { Button } from "$lib/components/ui/button/index.js";

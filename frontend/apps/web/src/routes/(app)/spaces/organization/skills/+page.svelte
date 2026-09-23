@@ -24,7 +24,7 @@
     Trash2,
     X,
     BookOpenCheck
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { untrack } from "svelte";
   import { SvelteURLSearchParams } from "svelte/reactivity";
 

@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Globe, KeyRound, Shield, ShieldCheck, Sparkles, UsersRound } from "lucide-svelte";
+  import { Globe, KeyRound, Shield, ShieldCheck, Sparkles, UsersRound } from "@lucide/svelte";
   import { getCapability } from "$lib/features/mcp/capabilities";
 
   type Props = {

@@ -8,7 +8,7 @@
 
 <script lang="ts">
   import { EneoError } from "@eneo/eneo-js";
-  import { Loader2, CircleCheck, CircleX, Zap, Trash2 } from "lucide-svelte";
+  import { Loader2, CircleCheck, CircleX, Zap, Trash2 } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo";

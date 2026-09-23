@@ -9,7 +9,7 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import type { Snippet } from "svelte";
-  import { AlertTriangle, ChevronRight } from "lucide-svelte";
+  import { AlertTriangle, ChevronRight } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { getCapability, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import MCPServerPrimaryCell from "./MCPServerPrimaryCell.svelte";

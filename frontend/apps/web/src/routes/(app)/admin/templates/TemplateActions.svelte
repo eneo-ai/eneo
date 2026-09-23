@@ -15,7 +15,7 @@
     RotateCcw,
     ArrowUpToLine,
     ArrowDownToLine
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import { writable } from "svelte/store";

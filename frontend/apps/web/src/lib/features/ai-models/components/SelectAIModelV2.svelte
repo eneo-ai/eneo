@@ -8,7 +8,7 @@
 <script lang="ts" generics="T extends TranscriptionModel | CompletionModel">
   import type { CompletionModel, TranscriptionModel } from "@eneo/eneo-js";
   import { uid } from "uid";
-  import { Ban, ChevronsUpDown } from "lucide-svelte";
+  import { Ban, ChevronsUpDown } from "@lucide/svelte";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";
   import { sortModels } from "../sortModels";

@@ -9,7 +9,7 @@
   import ApiKeyTable from "./ApiKeyTable.svelte";
   import CreateApiKeyDialog from "$lib/features/api-keys/CreateApiKeyDialog.svelte";
   import ApiKeySecretDialog from "$lib/features/api-keys/ApiKeySecretDialog.svelte";
-  import { Key, AlertCircle, RefreshCw, Search, X, ShieldAlert } from "lucide-svelte";
+  import { Key, AlertCircle, RefreshCw, Search, X, ShieldAlert } from "@lucide/svelte";
   import ExpiringKeysBanner from "$lib/features/api-keys/ExpiringKeysBanner.svelte";
   import NotificationPreferences from "$lib/features/api-keys/NotificationPreferences.svelte";
   import ApiKeyStateFilter from "$lib/features/api-keys/ApiKeyStateFilter.svelte";

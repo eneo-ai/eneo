@@ -19,7 +19,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import { Loader2, AlertTriangle, ShieldAlert, Info } from "lucide-svelte";
+  import { Loader2, AlertTriangle, ShieldAlert, Info } from "@lucide/svelte";
 
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";

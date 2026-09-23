@@ -8,7 +8,7 @@
     FlaskConical,
     LoaderCircle,
     RefreshCw
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";

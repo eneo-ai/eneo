@@ -10,7 +10,7 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
-  import { MoreVertical, Edit, UserMinus, UserPlus, Trash2 } from "lucide-svelte";
+  import { MoreVertical, Edit, UserMinus, UserPlus, Trash2 } from "@lucide/svelte";
   import { invalidate } from "$app/navigation";
   import UserEditor from "./editor/UserEditor.svelte";
   import { getAppContext } from "$lib/core/AppContext";

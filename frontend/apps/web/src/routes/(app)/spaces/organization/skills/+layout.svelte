@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Menu } from "lucide-svelte";
+  import { Menu } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Sheet from "$lib/components/ui/sheet/index.js";
   import { getAppContext } from "$lib/core/AppContext";

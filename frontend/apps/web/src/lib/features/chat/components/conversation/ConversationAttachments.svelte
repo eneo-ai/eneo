@@ -2,7 +2,7 @@
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { X, Loader2, Paperclip } from "lucide-svelte";
+  import { X, Loader2, Paperclip } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatFileType } from "$lib/core/formatting/formatFileType";

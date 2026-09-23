@@ -11,7 +11,7 @@
 
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
-  import { ArrowLeft, Loader2 } from "lucide-svelte";
+  import { ArrowLeft, Loader2 } from "@lucide/svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";

@@ -10,7 +10,7 @@
 
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Loader2, ChevronDown, AlertTriangle, Search } from "lucide-svelte";
+  import { Loader2, ChevronDown, AlertTriangle, Search } from "@lucide/svelte";
 
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";

@@ -12,7 +12,7 @@
     RefreshCw,
     RotateCcw,
     Trash2
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "svelte-sonner";

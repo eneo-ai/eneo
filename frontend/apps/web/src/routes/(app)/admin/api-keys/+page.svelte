@@ -31,7 +31,7 @@
     RefreshCw,
     Lock,
     Globe
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { fly, slide } from "svelte/transition";
   import {
     getAdminNotificationPolicy,

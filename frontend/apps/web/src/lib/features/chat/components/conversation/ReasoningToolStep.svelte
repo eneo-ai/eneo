@@ -7,7 +7,7 @@
 -->
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Check, X, Loader2, ChevronRight } from "lucide-svelte";
+  import { Check, X, Loader2, ChevronRight } from "@lucide/svelte";
   import ToolCallDetailsPanel from "./ToolCallDetailsPanel.svelte";
 
   type Status = "preparing" | "running" | "complete" | "failed" | "denied";

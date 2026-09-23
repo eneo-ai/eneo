@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { resolve } from "$app/paths";
   import type { ApiKeyV2, ModuleInstallation } from "@eneo/eneo-js";
-  import { AlertCircle, CheckCircle2, Loader2, Pencil, Plus, Trash2 } from "lucide-svelte";
+  import { AlertCircle, CheckCircle2, Loader2, Pencil, Plus, Trash2 } from "@lucide/svelte";
   import { Page, Settings } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";

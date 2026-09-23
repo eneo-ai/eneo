@@ -11,7 +11,7 @@
 
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { Loader2, ListPlus } from "lucide-svelte";
+  import { Loader2, ListPlus } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { getEneo } from "$lib/core/Eneo";

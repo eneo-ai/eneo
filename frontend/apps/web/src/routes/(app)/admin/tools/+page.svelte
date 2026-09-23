@@ -19,7 +19,7 @@
     Pencil,
     Trash2,
     ChevronRight
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { CAPABILITIES } from "$lib/features/mcp/capabilities";
   import { readinessMessage } from "$lib/features/mcp/readiness";

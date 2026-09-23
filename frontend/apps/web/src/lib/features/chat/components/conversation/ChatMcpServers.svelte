@@ -20,7 +20,7 @@
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
   import { serverDisplayName } from "$lib/features/chat/internalToolLabels";
-  import { BookOpen, Paperclip, Plug, ShieldCheck } from "lucide-svelte";
+  import { BookOpen, Paperclip, Plug, ShieldCheck } from "@lucide/svelte";
   import { readinessMessage } from "$lib/features/mcp/readiness";
   import { getCapability } from "$lib/features/mcp/capabilities";
   import type { SvelteSet } from "svelte/reactivity";

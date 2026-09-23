@@ -15,7 +15,7 @@
   import { getErrorMessage, SKILL_STILL_ATTACHED } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { formatSkillUsage } from "./skillUsage";
-  import { TriangleAlert } from "lucide-svelte";
+  import { TriangleAlert } from "@lucide/svelte";
   import { onDestroy, tick } from "svelte";
 
   type Target = Pick<OrganizationSkillSummaryPublic, "id" | "display_name" | "usage">;

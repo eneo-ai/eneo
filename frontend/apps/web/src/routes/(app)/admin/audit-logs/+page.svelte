@@ -30,7 +30,7 @@
     FileText,
     Settings,
     Trash2
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { fade, slide, scale } from "svelte/transition";
   import { onDestroy, untrack } from "svelte";
   import { getEneo } from "$lib/core/Eneo";
