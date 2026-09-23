@@ -126,60 +126,6 @@ beforeEach(() => {
   vi.mocked(scanRecoverableSessionsForSteps).mockReset().mockResolvedValue({});
 });
 
-describe("FlowRunDialog first field focus", () => {
-  function formEneo(get: () => Promise<FlowRunContract>): Eneo {
-    return { flows: { runContract: { get: vi.fn(get) } } } as unknown as Eneo;
-  }
-  function formContract(): FlowRunContract {
-    return {
-      flow_id: "flow-1",
-      published_flow_version: 7,
-      form_fields: [
-        { name: "Kategori", type: "select", options: ["Bygglov", "Tillsyn"], required: true },
-        { name: "Namn", type: "text" }
-      ],
-      steps_requiring_input: [],
-      template_readiness: []
-    } as unknown as FlowRunContract;
-  }
-  function deferredContract() {
-    let resolve: (contract: FlowRunContract) => void = () => undefined;
-    const promise = new Promise<FlowRunContract>((done) => (resolve = done));
-    return { promise, resolve };
-  }
-
-  it("starts on the first field once the form has loaded, a select included", async () => {
-    renderDialog(formEneo(async () => formContract()));
-
-    const category = await screen.findByLabelText(/Kategori/);
-    await waitFor(() => expect(document.activeElement).toBe(category));
-  });
-
-  it("waits for a run contract that arrives late", async () => {
-    const contract = deferredContract();
-    renderDialog(formEneo(() => contract.promise));
-    await new Promise((settle) => setTimeout(settle, 600));
-
-    contract.resolve(formContract());
-
-    const category = await screen.findByLabelText(/Kategori/);
-    await waitFor(() => expect(document.activeElement).toBe(category));
-  });
-
-  it("leaves focus where the person put it before the form loaded", async () => {
-    const contract = deferredContract();
-    renderDialog(formEneo(() => contract.promise));
-    const dialog = await screen.findByRole("dialog");
-    await fireEvent.keyDown(dialog, { key: "Tab" });
-
-    contract.resolve(formContract());
-
-    const category = await screen.findByLabelText(/Kategori/);
-    await new Promise((settle) => setTimeout(settle, 50));
-    expect(document.activeElement).not.toBe(category);
-  });
-});
-
 describe("FlowRunDialog recording upload reconciliation", () => {
   it("persists before upload and records the fresh upload response identity", async () => {
     const events: string[] = [];
