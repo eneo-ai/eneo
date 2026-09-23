@@ -5,6 +5,7 @@
 -->
 
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { untrack } from "svelte";
   import type { components } from "@eneo/eneo-js";
   import * as Table from "$lib/components/resource-table/index.js";
@@ -12,7 +13,6 @@
   import TemplateActions from "./TemplateActions.svelte";
   import TemplateNameCell from "./TemplateNameCell.svelte";
   import TemplateCategoryBadge from "./TemplateCategoryBadge.svelte";
-  import dayjs from "dayjs";
 
   type AssistantTemplate = components["schemas"]["AssistantTemplateAdminPublic"];
 
@@ -89,7 +89,7 @@
       accessor: "created_at",
       header: m.created_date(),
       cell: (item) => {
-        return dayjs(item.value).format("YYYY-MM-DD HH:mm");
+        return formatDateTime(item.value);
       },
       plugins: {
         sort: {

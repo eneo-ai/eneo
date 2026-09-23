@@ -175,6 +175,7 @@
   "storage_unit_kb": "KB",
   "storage_unit_mb": "MB",
   "storage_unit_gb": "GB",
+  "storage_unit_tb": "TB",
   "storage_effective_limits_caption": "Så beräknas de gällande uppladdningsgränserna",
   "storage_effective_limits_use_case": "Användningsfall",
   "storage_effective_limits_configured": "Konfigurerad",

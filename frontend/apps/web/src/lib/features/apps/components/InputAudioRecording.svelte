@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import type { AttachmentValidationError } from "$lib/features/attachments/AttachmentManager";
   import { IconTrash } from "@eneo/icons/trash";
   import { IconDownload } from "@eneo/icons/download";
@@ -9,7 +10,6 @@
   import { browser } from "$app/environment";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import FileSizeValidationPanel from "$lib/features/attachments/components/FileSizeValidationPanel.svelte";
-  import dayjs from "dayjs";
   import AudioRecorder from "./AudioRecorder.svelte";
   import AttachmentItem from "$lib/features/attachments/components/AttachmentItem.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -153,7 +153,7 @@
     }}
     onRecordingDone={({ blob, mimeType, reason }) => {
       const extension = mimeType.replaceAll("audio/", "").split(";")[0] ?? "";
-      const fileName = `${m.recording_filename_template({ datetime: dayjs().format("YYYY-MM-DD HH:mm:ss") })}.${extension}`;
+      const fileName = `${m.recording_filename_template({ datetime: formatDateTime(new Date(), { seconds: true }) })}.${extension}`;
       audioFile = new File([blob], fileName, { type: mimeType });
       audioURL = URL.createObjectURL(blob);
       if (reason === "limit") {

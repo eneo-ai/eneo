@@ -1,5 +1,5 @@
 import type { App, AppRun, UploadedFile } from "@eneo/eneo-js";
-import dayjs from "dayjs";
+import { formatDateTime } from "$lib/core/formatting/dateTime";
 import { onMount } from "svelte";
 import { getEneo } from "$lib/core/Eneo";
 import { getEneoSocket } from "$lib/core/EneoSocket";
@@ -24,9 +24,7 @@ export function createAppRunResult(getData: () => { app: App; result: AppRun }) 
     result.output ? result.input.files.filter(isTranscribedFile) : []
   );
   const title = $derived(getResultTitle(result));
-  const textFileName = $derived(
-    getData().app.name + dayjs(result.created_at).format(" YYYY-MM-DD HH:mm") + ".txt"
-  );
+  const textFileName = $derived(`${getData().app.name} ${formatDateTime(result.created_at)}.txt`);
 
   onMount(() => {
     if (isComplete) return;

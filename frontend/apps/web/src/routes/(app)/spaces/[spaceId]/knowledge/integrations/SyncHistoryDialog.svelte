@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
@@ -10,7 +11,6 @@
   import { IconXMark } from "@eneo/icons/x-mark";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { getEneo } from "$lib/core/Eneo";
-  import dayjs from "dayjs";
 
   // Get eneo during component initialization
   const eneo = getEneo();
@@ -107,8 +107,7 @@
   }
 
   function formatDate(value: string): string {
-    const d = dayjs(value);
-    return d.isValid() ? d.format("YYYY-MM-DD HH:mm") : value;
+    return Number.isNaN(new Date(value).getTime()) ? value : formatDateTime(value);
   }
 
   function getDuration(log: SyncLog): string {

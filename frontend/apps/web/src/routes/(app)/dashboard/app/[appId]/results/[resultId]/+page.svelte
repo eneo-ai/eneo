@@ -1,10 +1,9 @@
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { IconDownload } from "@eneo/icons/download";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { Markdown } from "$lib/components/markdown/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import dayjs from "dayjs";
-  import utc from "dayjs/plugin/utc";
   import AppResultStatus from "$lib/features/apps/components/AppResultStatus.svelte";
   import AppResultToolbar from "$lib/features/apps/components/AppResultToolbar.svelte";
   import { createAppRunResult } from "$lib/features/apps/createAppRunResult.svelte";
@@ -16,8 +15,6 @@
   import { localizeHref } from "$lib/paraglide/runtime";
   import { fade, fly } from "svelte/transition";
   import { quadInOut } from "svelte/easing";
-
-  dayjs.extend(utc);
 
   const { data } = $props();
 
@@ -69,7 +66,7 @@
   <div class="border-default flex flex-wrap items-center gap-4 border-b px-4 py-2">
     <AppResultStatus run={run.result} variant="full" />
     <span class="text-secondary text-sm">
-      {dayjs(run.result.created_at).format("YYYY-MM-DD HH:mm")}
+      {formatDateTime(run.result.created_at)}
     </span>
   </div>
 

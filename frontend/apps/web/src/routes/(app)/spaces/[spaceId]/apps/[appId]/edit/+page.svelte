@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { Page, Settings } from "$lib/components/layout";
   import EditorPageHeader from "$lib/components/settings/EditorPageHeader.svelte";
   import { guardUnsavedChanges } from "$lib/core/editing/guardUnsavedChanges";
@@ -14,7 +15,6 @@
     hasModelSpecificSettings
   } from "$lib/features/ai-models/ModelKwargCapabilities";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
-  import dayjs from "dayjs";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
   import { m } from "$lib/paraglide/messages";
   import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
@@ -184,7 +184,7 @@
                 return data.eneo.apps.listPrompts({ id: data.app.id });
               }}
               onPromptSelected={(prompt) => {
-                const restoredDate = dayjs(prompt.created_at).format("YYYY-MM-DD HH:mm");
+                const restoredDate = formatDateTime(prompt.created_at);
                 $update.prompt.text = prompt.text;
                 $update.prompt.description = `Restored prompt from ${restoredDate}`;
               }}

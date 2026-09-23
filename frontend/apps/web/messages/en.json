@@ -175,6 +175,7 @@
   "storage_unit_kb": "KB",
   "storage_unit_mb": "MB",
   "storage_unit_gb": "GB",
+  "storage_unit_tb": "TB",
   "storage_effective_limits_caption": "Effective upload limit projection",
   "storage_effective_limits_use_case": "Use case",
   "storage_effective_limits_configured": "Configured",

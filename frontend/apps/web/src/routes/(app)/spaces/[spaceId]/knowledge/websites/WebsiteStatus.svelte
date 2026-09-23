@@ -1,22 +1,13 @@
 <script lang="ts">
+  import { formatDateTime, formatRelativeTime, DAY_MS } from "$lib/core/formatting/dateTime";
   import type { WebsiteSparse } from "@eneo/eneo-js";
   import StatusBadge, { type StatusBadgeColor } from "$lib/components/StatusBadge.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
-  import dayjs from "dayjs";
-  import relativeTime from "dayjs/plugin/relativeTime";
-  import utc from "dayjs/plugin/utc";
-  import "dayjs/locale/sv";
-  import "dayjs/locale/en";
-  dayjs.extend(relativeTime);
-  dayjs.extend(utc);
 
   export let website: WebsiteSparse;
   const SKIPPED_PREFIX = "skipped duplicate crawl";
 
-  // Set dayjs locale based on paraglide locale
   // eslint-disable-next-line svelte/no-immutable-reactive-statements
-  $: dayjs.locale(getLocale());
   /* TODO colours */
   function statusInfo(): { label: string; color: StatusBadgeColor; tooltip?: string } {
     const skipReason = website.latest_crawl?.result_location;
@@ -42,8 +33,8 @@
 
     switch (website.latest_crawl?.status) {
       case "complete": {
-        const completed = dayjs(website.latest_crawl?.finished_at);
-        const label = m.synced_ago({ timeAgo: dayjs().to(completed) });
+        const completed = website.latest_crawl?.finished_at ?? Date.now();
+        const label = m.synced_ago({ timeAgo: formatRelativeTime(completed) });
 
         // If there are failures, show warning color and include failure info in tooltip
         if (hasFailures) {
@@ -67,7 +58,7 @@
         }
 
         return {
-          color: dayjs().diff(completed, "days") < 10 ? "green" : "yellow",
+          color: Date.now() - new Date(completed).getTime() < 10 * DAY_MS ? "green" : "yellow",
           label,
           tooltip: m.synced_on({ date: completed.format("YYYY-MM-DD HH:mm") })
         };
@@ -77,7 +68,7 @@
           color: "yellow",
           label: m.sync_in_progress(),
           tooltip: m.started_on({
-            date: dayjs(website.latest_crawl?.created_at).format("YYYY-MM-DD HH:mm")
+            date: formatDateTime(website.latest_crawl?.created_at)
           })
         };
       case "failed":

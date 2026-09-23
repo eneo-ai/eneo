@@ -65,7 +65,6 @@
         "@vitest/coverage-v8": "3.2.7",
         "bits-ui": "^2.18.1",
         "clsx": "^2.1.1",
-        "dayjs": "^1.11.21",
         "dompurify": "^3.4.11",
         "echarts": "^5.6.0",
         "eslint": "^9.39.4",

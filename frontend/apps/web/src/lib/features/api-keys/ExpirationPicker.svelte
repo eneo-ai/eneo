@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import {
     Calendar as CalendarIcon,
     TriangleAlert,
@@ -7,7 +8,6 @@
   } from "@lucide/svelte";
   import { fly } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import { SvelteDate } from "svelte/reactivity";
   import { type DateValue, parseDate, today, getLocalTimeZone } from "@internationalized/date";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -38,7 +38,7 @@
   const minDateValue = $derived(today(getLocalTimeZone()).add({ days: 1 }));
   const maxDateValue = $derived(maxDays ? minDateValue.add({ days: maxDays - 1 }) : undefined);
 
-  const locale = $derived(getLocale() === "sv" ? "sv-SE" : "en-US");
+  const locale = $derived(intlLocale());
 
   function safeParseDate(iso: string): DateValue | undefined {
     try {
@@ -131,8 +131,7 @@
   // Format display date
   function formatDisplayDate(isoString: string): string {
     const date = new Date(isoString);
-    const locale = getLocale();
-    return date.toLocaleDateString(locale === "sv" ? "sv-SE" : "en-US", {
+    return date.toLocaleDateString(intlLocale(), {
       year: "numeric",
       month: "short",
       day: "numeric",

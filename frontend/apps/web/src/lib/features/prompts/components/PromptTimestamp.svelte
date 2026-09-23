@@ -5,11 +5,8 @@
 -->
 
 <script lang="ts">
+  import { formatTime } from "$lib/core/formatting/dateTime";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
-  import dayjs from "dayjs";
-  import utc from "dayjs/plugin/utc";
-
-  dayjs.extend(utc);
 
   import { m } from "$lib/paraglide/messages";
 
@@ -21,7 +18,7 @@
 </script>
 
 <div class="flex items-center gap-4 px-3">
-  <span>{dayjs(prompt.created_at).format("HH:mm")}</span>
+  <span>{formatTime(prompt.created_at)}</span>
 
   {#if prompt.is_selected}
     <StatusBadge item={{ label: m.latest(), color: "green" }} />
