@@ -76,6 +76,7 @@
   /*     - lib/components/ui/field/field-label.svelte                  */
   /*     - lib/components/ui/badge/badge.svelte (default + link)       */
   /*     - lib/components/ui/slider/slider.svelte (range)              */
+  /*     - lib/components/ui/progress/progress.svelte (indicator)      */
   /*   Any future shadcn component that uses bg-primary / text-primary-*/
   /*   foreground in its checked/active state needs the same patch.    */
   /*                                                                   */
