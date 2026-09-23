@@ -1,7 +1,7 @@
 <!--
   The real embed page in an iframe, driven by a preview token so drafts work
   too. Reloads after every saved change; re-mints the token when a change
-  bumps the widget's token generation.
+  bumps the widget's token generation and shortly before it expires.
 -->
 <script lang="ts">
   import type { Eneo, Widget } from "@eneo/eneo-js";
@@ -36,6 +36,11 @@
       : null
   );
 
+  // setTimeout fires at once for longer delays.
+  const MAX_TIMEOUT = 2_147_483_647;
+  let renewal: ReturnType<typeof setTimeout> | undefined;
+  let destroyed = false;
+
   async function mint(): Promise<void> {
     // A token is minted for the generation current when it was requested. A
     // rules save can advance the generation (and start another mint) before
@@ -45,12 +50,24 @@
     const requested = { id: widget.id, generation: widget.token_generation };
     const current = () =>
       requested.id === widget.id && requested.generation === widget.token_generation;
+    clearTimeout(renewal);
     failed = false;
     try {
       const minted = await eneo.widgets.previewToken({ id: requested.id });
       if (!current()) return;
       token = minted.token;
       tokenGeneration = requested.generation;
+      // The framed chat sends this token with every request, so it is renewed
+      // a minute before it expires rather than left to die in the frame.
+      clearTimeout(renewal);
+      if (destroyed) return;
+      const renewIn = Math.max(minted.expires_in - 60, minted.expires_in / 2);
+      renewal = setTimeout(
+        () => {
+          if (widget.status !== "archived") void mint();
+        },
+        Math.min(renewIn * 1000, MAX_TIMEOUT)
+      );
     } catch (error) {
       if (!current()) return;
       failed = true;
@@ -58,9 +75,20 @@
     }
   }
 
+  // One automatic attempt per generation: every edit hands this effect a new
+  // widget, and a failed mint is retried with the reload button, not per
+  // keystroke.
+  let attempted: number | null = null;
   $effect(() => {
     if (widget.status === "archived") return;
-    if (tokenGeneration !== widget.token_generation) void mint();
+    const generation = widget.token_generation;
+    if (tokenGeneration === generation || attempted === generation) return;
+    attempted = generation;
+    void mint();
+  });
+  $effect(() => () => {
+    destroyed = true;
+    clearTimeout(renewal);
   });
 
   const src = $derived.by(() => {
