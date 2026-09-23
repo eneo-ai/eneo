@@ -9,6 +9,7 @@ import {
   getChapterAdvancedStatus,
   getTechnicalSettingsCount
 } from "./flowStepChapterStatus";
+import { buildContext } from "./flowPromptVariables";
 
 function step(partial: Partial<FlowStep>): FlowStep {
   return {
@@ -109,14 +110,16 @@ describe("task and material chapter summaries", () => {
   });
 
   it("describes the concrete previous step and extra material", () => {
+    const current = step({ input_source: "previous_step" });
     expect(
       getChapterInputStatus({
-        step: step({ input_source: "previous_step" }),
+        step: current,
         previousStep: step({ step_order: 1, user_description: "Transkribera ljud" }),
+        context: buildContext([current], undefined, false, current.step_order),
         hasKnowledge: true,
         hasAttachments: false
       })
-    ).toBe("Svaret från Steg 1: Transkribera ljud · Kunskap eller filer tillagda");
+    ).toBe("Läser steg 1 · Kunskap eller filer tillagda");
   });
 
   it("names the underlag instead of an inactive all-previous source", () => {
@@ -128,10 +131,11 @@ describe("task and material chapter summaries", () => {
           input_bindings: { question: "Samtal: {{ step_2.output.text }}" }
         }),
         previousStep: step({ step_order: 3 }),
+        context: buildContext([], undefined, false, 4),
         hasKnowledge: false,
         hasAttachments: false
       })
-    ).toBe("Din egen text med svar från Steg 2 · Ingen extra kunskap eller filer");
+    ).toBe("Läser steg 2 · Ingen extra kunskap eller filer");
   });
 });
 

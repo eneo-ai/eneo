@@ -543,6 +543,8 @@
     activeStepId={$activeStepId}
     isPublished={$isPublished}
     validationErrors={$validationErrors}
+    formSchema={formSchemaMetadata}
+    {transcriptionEnabled}
     onSelectStep={(stepId) => void selectProcessingStep(stepId)}
     onMoveStep={(index, direction) => void moveProcessingStep(index, direction)}
     onRemoveStep={(index) => void removeProcessingStep(index)}

@@ -60,6 +60,7 @@
   import { updateTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
   import FlowStepAIMenu from "./FlowStepAIMenu.svelte";
   import FlowStepRequestPreview from "./FlowStepRequestPreview.svelte";
+  import { buildContext } from "./flowPromptVariables";
   import Eye from "@lucide/svelte/icons/eye";
   import { describeStepMaterial, getStepMaterial } from "$lib/features/flows/flowStepMaterial";
   import { getFlowStepUxCopy } from "$lib/features/flows/flowStepUxCopy";
@@ -723,7 +724,7 @@
     const material = activeStep ? getStepMaterial(activeStep, previousStep) : null;
     return material
       ? m.flow_material_reads({
-          what: describeStepMaterial(material, { below: material.kind === "own_text" })
+          what: describeStepMaterial(material)
         })
       : null;
   });
@@ -790,6 +791,7 @@
       ? getChapterInputStatus({
           step: activeStep,
           previousStep,
+          context: buildContext(steps, formSchema, transcriptionEnabled, activeStep.step_order),
           hasKnowledge: hasKnowledgeSelections,
           hasAttachments: hasAttachmentSelections
         })

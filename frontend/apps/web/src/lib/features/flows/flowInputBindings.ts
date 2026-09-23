@@ -1,5 +1,4 @@
 import type { FlowStep } from "@eneo/eneo-js";
-import { m } from "$lib/paraglide/messages";
 import {
   collectTemplateNonStepTokens,
   collectTemplateStepReferenceOrders
@@ -216,16 +215,6 @@ export function getFlowInputMaterialOptions(
     }
   }
   return options;
-}
-
-/** Card and chapter copy for what an underlag reads. */
-export function describeUnderlag(underlag: FlowStepUnderlag): string {
-  const parts = [
-    ...(underlag.readsFlowInput ? [m.flow_input_source_flow_input()] : []),
-    ...underlag.stepOrders.map((order) => m.flow_input_template_effective_step({ step: order }))
-  ];
-  if (parts.length === 0) return m.flow_step_card_source_underlag_fixed_text();
-  return m.flow_step_card_source_underlag({ steps: parts.join(", ") });
 }
 
 export type FlowStepUnderlag = {

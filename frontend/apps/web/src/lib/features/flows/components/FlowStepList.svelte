@@ -10,12 +10,19 @@
   import { SvelteSet } from "svelte/reactivity";
   import { parseValidationError } from "$lib/features/flows/flowStepValidationMessages";
   import FlowAddStepDialog from "./FlowAddStepDialog.svelte";
+  import { buildContext } from "./flowPromptVariables";
+  import { getStepSourceLine, groupStepSources } from "$lib/features/flows/flowStepMaterial";
+  import FileInput from "@lucide/svelte/icons/file-input";
+  import { cn } from "$lib/utils.js";
+  import type { FlowFormSchemaMetadata } from "$lib/features/flows/flowFormSchema";
 
   let {
     steps,
     activeStepId,
     isPublished,
     validationErrors = new Map(),
+    formSchema,
+    transcriptionEnabled = false,
     onSelectStep,
     onMoveStep,
     onRemoveStep
@@ -24,12 +31,31 @@
     activeStepId: string | null;
     isPublished: boolean;
     validationErrors?: Map<string, string[]>;
+    /** The flow's form, so a step that reads it says so. */
+    formSchema?: FlowFormSchemaMetadata;
+    transcriptionEnabled?: boolean;
     onSelectStep?: (stepId: string | null) => void;
     onMoveStep?: (index: number, direction: -1 | 1) => void | Promise<void>;
     onRemoveStep?: (index: number) => void | Promise<void>;
   } = $props();
 
   const mode = getFlowUserMode();
+  const uid = $props.id();
+  // Where each step's material comes from, in the words the step panel uses.
+  const sourceLines = $derived(
+    steps.map((step) =>
+      step.output_mode === "template_fill"
+        ? null // names its template instead
+        : getStepSourceLine(
+            step,
+            steps.find((candidate) => candidate.step_order === step.step_order - 1),
+            buildContext(steps, formSchema, transcriptionEnabled, step.step_order)
+          )
+    )
+  );
+  // Per step, the index of the step whose caption says what it reads.
+  const captionOf = $derived(groupStepSources(sourceLines));
+  const captionId = (index: number) => `${uid}-reads-${index}`;
   const flowEditor = getFlowEditor();
 
   let showAddStep = $state(false);
@@ -100,6 +126,25 @@
       </div>
     {:else}
       {#each steps as step, index (step.id ?? index)}
+        {@const caption = captionOf[index] === index ? sourceLines[index] : null}
+        {@const captionedBy = captionOf[index]}
+        {#if caption}
+          <!-- Drawn once for its group; every step in it names it through
+               aria-describedby, so each still announces what it reads. -->
+          <div
+            id={captionId(index)}
+            aria-hidden="true"
+            class={cn(
+              "flex items-center gap-1.5 px-3.5 pt-3 pb-1 text-xs leading-snug font-medium",
+              caption.readsRunInput ? "text-primary" : "text-secondary"
+            )}
+          >
+            {#if caption.readsRunInput}
+              <FileInput class="size-3.5 shrink-0" aria-hidden="true" />
+            {/if}
+            <span class="min-w-0">{caption.text}</span>
+          </div>
+        {/if}
         <FlowStepCard
           {step}
           {index}
@@ -109,6 +154,7 @@
           canMoveUp={index > 0}
           canMoveDown={index < steps.length - 1}
           hasValidationError={stepOrdersWithErrors.has(step.step_order)}
+          describedBy={captionedBy === null ? undefined : captionId(captionedBy)}
           onClick={() => onSelectStep?.(step.id ?? null)}
           onMoveUp={() => void onMoveStep?.(index, -1)}
           onMoveDown={() => void onMoveStep?.(index, 1)}

@@ -181,7 +181,7 @@
   });
   const currentMaterial = $derived.by(() => {
     const material = getStepMaterial(step, previousStep);
-    return material ? describeStepMaterial(material, { below: true }) : null;
+    return material ? describeStepMaterial(material) : null;
   });
   const chosenSources = $derived(
     effectiveInputSources.filter(

@@ -2,10 +2,8 @@ import type { FlowStep, SecurityClassification } from "@eneo/eneo-js";
 import { getTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
 import { m } from "$lib/paraglide/messages";
 import { describeAnswerFields } from "$lib/features/flows/flowStepRequestPreview";
-import {
-  describeStepMaterialAsSummary,
-  getStepMaterial
-} from "$lib/features/flows/flowStepMaterial";
+import { getStepSourceLine } from "$lib/features/flows/flowStepMaterial";
+import type { VariableClassificationContext } from "$lib/features/flows/flowVariableTokens";
 import { OUTPUT_MODES } from "$lib/features/flows/flowStepTypes";
 import {
   getEnkelAwareOutputTypeLabel,
@@ -85,20 +83,21 @@ export function getChapterTaskStatus(
 export function getChapterInputStatus({
   step,
   previousStep,
+  context,
   hasKnowledge,
   hasAttachments
 }: {
   step: Pick<FlowStep, "input_source" | "step_order" | "input_bindings"> &
     Partial<Pick<FlowStep, "input_config">>;
   previousStep?: Pick<FlowStep, "step_order" | "user_description"> | null;
+  /** The step's variable context, so form fields read as the form. */
+  context: VariableClassificationContext;
   hasKnowledge: boolean;
   hasAttachments: boolean;
 }): string {
-  // The same phrase the material block leads with (flowStepMaterial owns it).
-  const material = getStepMaterial(step, previousStep);
-  const source = material
-    ? describeStepMaterialAsSummary(material)
-    : m.flow_input_source_flow_input();
+  // The step list's line (flowStepMaterial owns it), so both say the same.
+  const source =
+    getStepSourceLine(step, previousStep, context)?.text ?? m.flow_input_source_flow_input();
   const extra =
     hasKnowledge || hasAttachments
       ? m.flow_chapter_input_extra_active()

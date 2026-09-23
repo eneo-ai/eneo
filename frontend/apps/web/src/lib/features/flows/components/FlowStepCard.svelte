@@ -6,8 +6,6 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { m } from "$lib/paraglide/messages";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
-  import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
-  import { describeUnderlag, getFlowStepUnderlag } from "$lib/features/flows/flowInputBindings";
   import {
     getTemplateFillOutputConfig,
     getTemplateFillReadiness,
@@ -21,6 +19,7 @@
     canMoveUp,
     canMoveDown,
     hasValidationError = false,
+    describedBy,
     index = 0,
     onClick,
     onMoveUp,
@@ -34,6 +33,8 @@
     canMoveUp: boolean;
     canMoveDown: boolean;
     hasValidationError?: boolean;
+    /** The caption of the group this step belongs to: what it reads. */
+    describedBy?: string;
     index?: number;
     onClick?: () => void;
     onMoveUp?: () => void;
@@ -42,12 +43,6 @@
   } = $props();
 
   let menuOpen = $state(false);
-
-  const INPUT_SOURCE_LABELS: Record<string, () => string> = {
-    flow_input: () => m.flow_input_source_flow_input(),
-    previous_step: () => m.flow_input_source_previous_step(),
-    all_previous_steps: () => m.flow_input_source_all_previous_steps()
-  };
 
   function handleKeydown(e: KeyboardEvent) {
     if ((e.key === "Enter" || e.key === " ") && !e.altKey) {
@@ -66,15 +61,10 @@
     }
   }
 
-  const OUTPUT_TYPE_LABELS: Record<string, () => string> = {
-    text: () => m.flow_output_type_text(),
-    json: () => m.flow_output_type_json(),
-    pdf: () => m.flow_output_type_pdf(),
-    docx: () => m.flow_output_type_docx()
-  };
+  // Short labels keep the chain on one line in the narrow list.
   const RAIL_OUTPUT_LABELS: Record<string, string> = {
     text: m.flow_output_type_text(),
-    json: m.flow_output_type_json(),
+    json: m.flow_type_json(),
     pdf: "PDF",
     docx: "Word"
   };
@@ -87,91 +77,17 @@
     audio: () => m.flow_type_audio(),
     any: () => m.flow_type_any()
   };
-  const INPUT_BADGE_CLASSES: Record<string, string> = {
-    text: "bg-hover-dimmer text-secondary",
-    json: "bg-positive-dimmer text-positive-stronger",
-    document: "bg-warning-dimmer text-warning-stronger",
-    file: "bg-warning-dimmer text-warning-stronger",
-    image: "bg-hover-dimmer text-secondary",
-    audio: "bg-accent-dimmer text-accent-stronger",
-    any: "bg-warning-dimmer text-warning-stronger"
-  };
-  const OUTPUT_BADGE_CLASSES: Record<string, string> = {
-    text: "bg-hover-dimmer text-secondary",
-    json: "bg-positive-dimmer text-positive-stronger",
-    pdf: "bg-warning-dimmer text-warning-stronger",
-    docx: "bg-warning-dimmer text-warning-stronger"
-  };
-
   const label = $derived(
     step.user_description || m.flow_step_fallback_label({ order: String(step.step_order) })
   );
-  const inputLabel = $derived(INPUT_SOURCE_LABELS[step.input_source]?.() ?? step.input_source);
-  // Enkel speaks plain language: "JSON" and abbreviated channel names are
-  // Avancerad vocabulary.
-  const outputLabel = $derived(
-    !isPowerUser && step.output_type === "json"
-      ? m.flow_output_type_simple_structured()
-      : (OUTPUT_TYPE_LABELS[step.output_type]?.() ?? step.output_type)
-  );
-  const railOutputLabel = $derived(
-    !isPowerUser && step.output_type === "json"
-      ? m.flow_output_type_simple_structured()
-      : (RAIL_OUTPUT_LABELS[step.output_type] ?? outputLabel)
-  );
-  const nextChannelLabel = $derived(
-    step.output_mode === "transcribe_only"
-      ? m.flow_step_summary_next_channel_transcript_short()
-      : getDownstreamKindForOutput(step.output_type) === "text_and_structured"
-        ? isPowerUser
-          ? m.flow_step_summary_next_channel_text_and_structured_short()
-          : m.flow_step_summary_next_channel_text_and_structured()
-        : m.flow_step_summary_next_channel_text_short()
-  );
+  const railOutputLabel = $derived(RAIL_OUTPUT_LABELS[step.output_type] ?? step.output_type);
   const inputTypeLabel = $derived(INPUT_TYPE_LABELS[step.input_type]?.() ?? step.input_type);
-  // Explicit underlag is the whole step input; the input source describes
-  // only a step without it.
-  const underlag = $derived(getFlowStepUnderlag(step));
   const readsInSections = $derived(getTextProcessingMode(step) === "process_each_section");
-  const sourceSummary = $derived.by(() => {
-    if (step.output_mode === "template_fill") {
-      return getTemplateFillTemplateName(step) ?? m.flow_template_fill_card_secondary();
-    }
-    if (underlag !== null) {
-      return describeUnderlag(underlag);
-    }
-    switch (step.input_source) {
-      case "flow_input":
-        return m.flow_step_card_source_flow_input();
-      case "previous_step":
-        return m.flow_step_card_source_previous_step();
-      case "all_previous_steps":
-        return m.flow_step_card_source_all_previous_steps();
-      case "http_get":
-        return m.flow_step_card_source_http_get();
-      default:
-        return inputLabel;
-    }
-  });
-  // Quieter rail: the repeated default "Föregående steg" source line is noise on
-  // every row. Show the source only when it carries real information — a
-  // non-default source, the active row, a row needing attention, or advanced mode.
-  const isDefaultSource = $derived(
-    step.output_mode !== "template_fill" &&
-      (underlag !== null
-        ? !underlag.readsFlowInput &&
-          underlag.stepOrders.length === 1 &&
-          underlag.stepOrders[0] === step.step_order - 1
-        : step.input_source === "previous_step")
-  );
-  const showSourceSummary = $derived(
-    isPowerUser || isActive || hasValidationError || !isDefaultSource
-  );
-  const inputBadgeClass = $derived(
-    INPUT_BADGE_CLASSES[step.input_type] ?? "bg-hover-dimmer text-secondary"
-  );
-  const outputBadgeClass = $derived(
-    OUTPUT_BADGE_CLASSES[step.output_type] ?? "bg-hover-dimmer text-secondary"
+  const isTemplateFill = $derived(step.output_mode === "template_fill");
+  const templateSummary = $derived(
+    isTemplateFill
+      ? (getTemplateFillTemplateName(step) ?? m.flow_template_fill_card_secondary())
+      : ""
   );
   const templateReadiness = $derived(
     step.output_mode === "template_fill"
@@ -204,6 +120,7 @@
     type="button"
     class="focus-visible:ring-ring flex min-w-0 flex-1 items-start gap-2.5 rounded text-left focus-visible:ring-2 focus-visible:outline-none"
     aria-current={isActive ? "true" : undefined}
+    aria-describedby={describedBy}
     onclick={() => onClick?.()}
     onkeydown={handleKeydown}
   >
@@ -232,14 +149,12 @@
         title={label}>{label}</span
       >
 
-      {#if showSourceSummary}
-        <div class="text-secondary truncate text-xs leading-snug">
-          {sourceSummary}
-        </div>
+      {#if isTemplateFill}
+        <div class="text-secondary line-clamp-2 text-xs leading-snug">{templateSummary}</div>
       {/if}
 
-      {#if step.output_mode === "template_fill" || step.output_mode === "transcribe_only" || readsInSections}
-        <div class="mt-0.5 flex flex-wrap items-center gap-1.5">
+      {#if isTemplateFill || step.output_mode === "transcribe_only" || readsInSections || isPowerUser}
+        <div class="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
           {#if readsInSections}
             <Badge
               variant="secondary"
@@ -273,26 +188,12 @@
               {m.flow_transcribe_only_title()}
             </Badge>
           {/if}
-        </div>
-      {/if}
-
-      {#if isPowerUser}
-        <div class="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1">
-          <Badge
-            variant="secondary"
-            class="h-5 px-1.5 text-xs font-semibold tracking-wide {inputBadgeClass}"
-            >{inputTypeLabel}</Badge
-          >
-          <span class="text-muted text-xs" aria-hidden="true">&rarr;</span>
-          <Badge
-            variant="secondary"
-            class="h-5 px-1.5 text-xs font-semibold tracking-wide {outputBadgeClass}"
-            >{railOutputLabel}</Badge
-          >
-          <span class="text-muted text-xs" aria-hidden="true">&middot;</span>
-          <span class="text-secondary text-xs font-medium tabular-nums">
-            {m.flow_step_card_chain_short()}: {nextChannelLabel}
-          </span>
+          {#if isPowerUser}
+            <!-- What the step takes in and hands on, in the short Avancerad words. -->
+            <span class="text-secondary text-xs whitespace-nowrap tabular-nums"
+              >{inputTypeLabel} → {railOutputLabel}</span
+            >
+          {/if}
         </div>
       {/if}
     </div>
