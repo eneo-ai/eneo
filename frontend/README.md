@@ -25,7 +25,9 @@ bun run dev
 ```
 
 This is the canonical frontend start command. It starts both the UI package watcher and the
-web app on the fixed development URL `http://localhost:3000`.
+web app on the fixed development URL `http://localhost:3000`. It also builds the widget loader
+once, so `/widget/v1/eneo.js` and "Test in Eneo" work; rerun
+`bun run --filter @eneo/widget-loader build:dev` after changing the loader.
 
 The command is safe to run more than once: it reports an existing Eneo frontend instead of
 trying to start a second Vite server. Use the lifecycle commands when a previous terminal was

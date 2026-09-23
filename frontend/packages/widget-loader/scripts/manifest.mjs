@@ -3,7 +3,8 @@
 // /widget/<channel>/eneo.js, the SRI hash the admin snippet prints for pinned
 // installs, and the sizes the budget below is enforced on.
 // Then stops the build when the bytes differ from what release.json records
-// for this version (see release.mjs); `--lock` records a new version instead.
+// for this version (see release.mjs); `--lock` records a new version instead,
+// and `--dev` (the dev server's build of work in progress) skips the check.
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
@@ -58,7 +59,7 @@ if (process.argv.includes("--lock")) {
   }
   writeFileSync(releasePath, JSON.stringify(result.release, null, 2) + "\n");
   console.log(`release.json records ${built.version}`);
-} else {
+} else if (!process.argv.includes("--dev")) {
   const problem = releaseProblem(built, locked);
   if (problem) {
     console.error(problem);

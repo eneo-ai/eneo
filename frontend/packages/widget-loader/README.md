@@ -99,12 +99,14 @@ submitted) and popups for source links.
 
 ```bash
 bun run --filter @eneo/widget-loader build   # dist/eneo.js + manifest.json, size budget, release check
+bun run --filter @eneo/widget-loader build:dev   # the same without the release check, for work in progress
 bun run --filter @eneo/widget-loader test    # builds, then Vitest in headless Chromium and the release check's tests
 bun run --filter @eneo/widget-loader lock    # records a new version's bytes in release.json
 ```
 
 The web app's `/widget/...` route reads `dist/` at build time and answers 503
-until the package has been built.
+until the package has been built. `bun run dev` in `frontend/` runs `build:dev`
+once before it starts the web app.
 
 ## Releases
 
