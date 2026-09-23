@@ -1887,9 +1887,9 @@ async def test_large_source_is_reviewed_and_regenerated_through_api(
     assert child.json()["segments"] == detail.json()["segments"]
 
 
-@pytest.mark.parametrize("split_undone", [False, True])
+@pytest.mark.parametrize("split_state", ["kept", "undone", "passage_deleted"])
 async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
-    split_undone,
+    split_state,
     client,
     db_container,
     patch_auth_service_jwt,
@@ -2069,7 +2069,10 @@ async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
         checkpoint_path, headers=headers, json=edit(anna, unnamed, split_name)
     )
     assert edited.status_code == 200, edited.text
-    if split_undone:
+    if split_state != "kept":
+        # Undo the split, or keep a split of "direkt." whose words are deleted.
+        span = {"segment_index": 1, "char_start": 15, "char_end": 22}
+        deleted = split_state == "passage_deleted"
         undone = await client.patch(
             f"{run_path}/steps/{scenario.transcription_step_id}/transcript-corrections/",
             headers=headers,
@@ -2077,8 +2080,23 @@ async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
                 "schema_version": 3,
                 "segments_hash": segments_content_hash(SEGMENTS),
                 "expected_revision": split.json()["revision"],
-                "occurrences": [],
-                "speaker_edits": [],
+                "occurrences": (
+                    [{**span, "original": "direkt.", "corrected": ""}]
+                    if deleted
+                    else []
+                ),
+                "speaker_edits": (
+                    [
+                        {
+                            **span,
+                            "original": "direkt.",
+                            "original_speaker": "SPEAKER_01",
+                            "speaker": "SPEAKER_05",
+                        }
+                    ]
+                    if deleted
+                    else []
+                ),
             },
         )
         assert undone.status_code == 200, undone.text
@@ -2092,9 +2110,9 @@ async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
     assert approved.status_code == 200, approved.text
     document = approved.json()["current_payload_json"]["text"]
     assert "] Anna: Vi frågade sugary om planen." in document
-    if split_undone:
+    if split_state != "kept":
         # The split's name has no passage left: nothing names it, nothing blocks.
-        assert "] SPEAKER_01: sugary svarade direkt." in document
+        assert "] SPEAKER_01: sugary svarade" in document
         assert "SPEAKER_05" not in approved.text
         assert "Eva Ek" not in approved.text
     else:

@@ -48,7 +48,10 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewRunNotAwaitingReviewError,
 )
 from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
-from eneo.flows.domain.speaker_labels import apply_speaker_names
+from eneo.flows.domain.speaker_labels import (
+    apply_speaker_names,
+    build_speaker_inventory,
+)
 from eneo.flows.domain.step_output import (
     FileBackedStepText,
     InlineTranscript,
@@ -1131,15 +1134,27 @@ class FlowRunReviewCheckpointService:
             )
         if not isinstance(mapping, dict):
             return skip_folded_transcript(correction_set, "payload_invalid")
-        edited_mapping = cast(StructuredOutputValue, mapping)
+        pruned_mapping = cast(dict[str, Any], mapping)
         expected_attempt = extension.get("source_attempt_no")
 
         def rebuild(folded_source: str) -> FlowPersistedJsonObject:
+            # A split whose words the corrections deleted has nothing to name.
+            with_text = {
+                entry["label"]
+                for entry in build_speaker_inventory(folded_source)
+                if entry["samples"]
+            }
+            surviving = [label for label in split_labels if label in with_text]
             return build_edited_review_payload(
                 checkpoint=checkpoint,
-                edited_value=edited_mapping,
+                edited_value=cast(
+                    StructuredOutputValue,
+                    drop_undone_split_names(
+                        pruned_mapping, extension=extension, split_labels=surviving
+                    ),
+                ),
                 source_text=folded_source,
-                split_labels=split_labels,
+                split_labels=surviving,
             )
 
         return build_folded_transcript(
