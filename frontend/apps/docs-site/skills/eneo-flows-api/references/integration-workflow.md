@@ -61,6 +61,8 @@ Send only the published request fields:
 }
 ```
 
+Add a top-level `speaker_labels` only when the run contract's `transcription.speaker_labels.selectable` is true; see the speaker-label rules in `inputs-and-results.md`.
+
 Send `Idempotency-Key` with create. Persist the key with the local submission until the outcome is known.
 
 - Same key and same request: returns the existing run.
@@ -80,7 +82,7 @@ A practical cadence is every 2 seconds for 30 seconds, every 5 seconds until two
 - open review when `is_awaiting_review` is true;
 - stop when `is_terminal` is true.
 
-`awaiting_review` is non-terminal and remains pollable. There is no caller-registered webhook, SSE stream, or WebSocket. A Flow-authored terminal `outbound_http` step is separate and does not report intermediate states to the caller.
+`awaiting_review` is non-terminal and remains pollable. There is no caller-registered webhook, SSE stream, or run-status WebSocket; the live text socket carries preview text only. A Flow-authored terminal `outbound_http` step is separate and does not report intermediate states to the caller.
 
 Use run lists and status for routine views. They omit content. Read detail only for a screen that needs accepted inputs, results, files, error content, provider usage, or outbound-delivery metadata.
 

@@ -124,6 +124,7 @@ type FlowRunCreateRequest = {
   expected_flow_version: number;
   input_payload_json: Record<string, unknown>;
   step_inputs: Record<string, { file_ids: string[] }>;
+  speaker_labels?: boolean | null;
 };
 
 async function createRun(
@@ -148,7 +149,7 @@ async function createRun(
 }
 ```
 
-Generate the key once when the local submission is created. Store it with the exact serialized intent and reuse it across timeouts and transport retries. A changed form value, version, step binding, or file order is a new logical submission and needs a new key.
+Generate the key once when the local submission is created. Store it with the exact serialized intent and reuse it across timeouts and transport retries. A changed form value, version, step binding, speaker-label choice, or file order is a new logical submission and needs a new key. Set `speaker_labels` only when the run contract's `transcription.speaker_labels.selectable` is true.
 
 ## Poll from capabilities
 

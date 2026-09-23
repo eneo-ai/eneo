@@ -36,7 +36,7 @@ Read [references/integration-workflow.md](references/integration-workflow.md) be
 ## Select the relevant reference
 
 - For discovery, authentication, request order, polling, and retries, read [references/integration-workflow.md](references/integration-workflow.md).
-- For run-contract fields, uploads, form values, result kinds, step outputs, and artifacts, read [references/inputs-and-results.md](references/inputs-and-results.md).
+- For run-contract fields, uploads, form values, speaker labels, live text while recording, result kinds, step outputs, and artifacts, read [references/inputs-and-results.md](references/inputs-and-results.md).
 - For human review, evidence, audit boundaries, sensitive content, and retention, read [references/review-evidence-and-retention.md](references/review-evidence-and-retention.md).
 - For exact runtime paths and typed error recovery, read [references/endpoints-and-errors.md](references/endpoints-and-errors.md).
 - For compact TypeScript request patterns, read [references/typescript-patterns.md](references/typescript-patterns.md).

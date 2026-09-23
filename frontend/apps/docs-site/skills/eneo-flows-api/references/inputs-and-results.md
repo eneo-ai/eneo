@@ -4,16 +4,17 @@ The run contract is the client form schema and result preview. Fetch it for the 
 
 ## Run-contract fields
 
-| Field                    | Consumer use                                                                                                                                              |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `published_flow_version` | Send as `expected_flow_version` so stale forms fail explicitly.                                                                                           |
-| `form_fields`            | Render structured values placed inside `input_payload_json`.                                                                                              |
-| `steps_requiring_input`  | Render step-specific file controls and build `step_inputs`.                                                                                               |
-| `runtime_upload_policy`  | Derive upload timeouts from size within the published minimum and maximum.                                                                                |
-| `steps_requiring_review` | Prepare review UI for the modes and output types that may pause.                                                                                          |
-| `aggregate_max_files`    | `0` means no runtime file steps. A positive value is the combined limit. `null` means at least one step is unbounded, so enforce per-step limits instead. |
-| `final_output`           | Prepare terminal rendering for payload, artifact, or outbound delivery.                                                                                   |
-| `template_readiness`     | Explain a document-generation Flow that is not ready to run.                                                                                              |
+| Field                    | Consumer use                                                                                                                                                                     |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `published_flow_version` | Send as `expected_flow_version` so stale forms fail explicitly.                                                                                                                  |
+| `form_fields`            | Render structured values placed inside `input_payload_json`.                                                                                                                     |
+| `steps_requiring_input`  | Render step-specific file controls and build `step_inputs`.                                                                                                                      |
+| `runtime_upload_policy`  | Derive upload timeouts from size within the published minimum and maximum.                                                                                                       |
+| `steps_requiring_review` | Prepare review UI for the modes and output types that may pause.                                                                                                                 |
+| `aggregate_max_files`    | `0` means no runtime file steps. A positive value is the combined limit. `null` means at least one step is unbounded, so enforce per-step limits instead.                        |
+| `final_output`           | Prepare terminal rendering for payload, artifact, or outbound delivery.                                                                                                          |
+| `template_readiness`     | Explain a document-generation Flow that is not ready to run.                                                                                                                     |
+| `transcription`          | `null` unless the Flow transcribes recorded audio. `live` reports whether live text is available, and why not; `speaker_labels` reports whether a run may choose speaker labels. |
 
 Each item in `steps_requiring_input` reports `step_id`, order, label, description, whether input is required, input format, maximum files, maximum bytes per file, and accepted MIME types. Never infer these limits from the label or from a previous Flow version.
 
@@ -27,10 +28,18 @@ The server rejects these runtime-owned keys when a consumer sends them inside `i
 
 - `expected_flow_version`
 - `file_ids`
+- `speaker_labels`
 - `step_inputs`
+- `transcript_regeneration`
 - `transkribering`
 
 The server validates required fields, dates, finite numbers, collection shapes, allowed options, and reserved payload keys. Treat validation failures as a form correction, not a run failure.
+
+## Speaker labels
+
+`transcription.speaker_labels` in the run contract has `selectable`, `required`, and `default`. When `selectable` is true, the create request may carry a top-level `speaker_labels` of `true` or `false`; omit it or send `null` to keep the Flow's `default`. `selectable` is false when no transcription service labels speakers, or when `required` is true because a step maps speakers to names.
+
+Sending `true` or `false` while `selectable` is false returns `422 flow_run_speaker_labels_not_selectable`. The choice is part of the logical request: a changed choice needs a new `Idempotency-Key`. Labelling speakers makes the run take longer.
 
 ## Step-bound uploads
 
@@ -56,6 +65,17 @@ The multipart field must be `upload_file`. Bind the result to the same logical s
 A file ID may be reused under multiple compatible step IDs when the same binary should feed multiple steps. Keep per-step file order stable between key derivation and run creation. Do not rely on file order to express business meaning; model semantic ordering in the published Flow.
 
 There is no chunked or resumable upload and no general mid-run file injection. A supported step rerun may accept replacement input for that step only.
+
+## Live text while recording
+
+When `transcription.live.available` is true, an app can show preview text while someone records. The preview never becomes the run's transcript: keep the recording, then upload it and create the run as usual. When it is false, `live.reason` is `transcription_disabled`, `transcription_service_mode`, `model_unavailable`, or `model_not_realtime`; record without a preview.
+
+1. Request a ticket for the audio step with `POST /flows/{flow_id}/steps/{step_id}/live-transcription-sessions/` (no body, `201`). It needs the same access as creating a run.
+2. Within 30 seconds, open a WebSocket to the returned `websocket_path`, resolved against the deployment origin, offering the subprotocols `eneo-live.v1` and `ticket.<ticket>`. A ticket opens one socket.
+3. After the `ready` event, send binary frames of mono 16-bit little-endian PCM at 16 kHz, 2 bytes to 64 KiB each with an even length, then the text frame `{"type": "stop"}`.
+4. Append the `text` of each `transcript.delta`. `transcript.done` carries the full preview; an `error` event carries `code`, `message`, and `retryable`. The socket closes after either.
+
+The ticket request returns `409 flow_live_transcription_unavailable` with the reason in `context.reason` when live text is unavailable. Keep service keys and module tokens on the server; a browser-facing app relays the socket through its own backend. For the full protocol, limits, and relay pattern, read "Show live text while recording" in the Integrating Flows guide, and for every socket code, "Live transcription socket codes" in the Flow error reference, both on docs.eneo.ai.
 
 ## Closed final-result union
 

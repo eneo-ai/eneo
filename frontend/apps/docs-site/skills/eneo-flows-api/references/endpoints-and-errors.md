@@ -14,6 +14,8 @@ Paths are relative to the deployment API base. Prefer `runtime_paths` from `GET 
 | Runtime-safe graph                  | `GET /flows/{flow_id}/graph/`                                              |
 | Upload a step input                 | `POST /flows/{flow_id}/steps/{step_id}/runtime-files/`                     |
 | Delete an abandoned upload          | `DELETE /flows/{flow_id}/runtime-files/{file_id}/`                         |
+| Live text ticket                    | `POST /flows/{flow_id}/steps/{step_id}/live-transcription-sessions/`       |
+| Live text socket                    | WebSocket at the ticket's `websocket_path`, resolved against the origin    |
 | Create or list runs                 | `POST` or `GET /flows/{flow_id}/runs/`                                     |
 | Poll content-free status            | `GET /flows/{flow_id}/runs/{run_id}/status/`                               |
 | Read audited run detail             | `GET /flows/{flow_id}/runs/{run_id}/`                                      |
@@ -75,6 +77,8 @@ Always keep an unknown-code branch that shows a generic failure, records the raw
 | `flow_run_required_step_input_missing`      | Attach files to every required step in the contract.                        |
 | `flow_run_unknown_step_input`               | Remove stale step IDs after refetching the contract.                        |
 | `flow_run_top_level_file_ids_not_supported` | Move IDs into `step_inputs[step_id].file_ids`.                              |
+| `flow_run_speaker_labels_not_selectable`    | Send `speaker_labels` only when the run contract marks it selectable.       |
+| `flow_live_transcription_unavailable`       | Record without live text; upload the file and create the run as usual.      |
 | `flow_runtime_file_attached`                | Stop orphan cleanup; the run now owns the file lifecycle.                   |
 | `flow_review_stale_revision`                | Refetch the active checkpoint and show the competing change.                |
 | `flow_review_not_approved`                  | Approve first, then resume with the newest revision.                        |
