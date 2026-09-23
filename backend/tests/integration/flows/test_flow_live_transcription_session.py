@@ -139,6 +139,7 @@ async def _published_flow(
     audio: bool = True,
     input_required: bool = True,
     wizard: Mapping[str, object] | None = None,
+    summarize: bool = False,
 ) -> LiveFlow:
     space_id = await _create_space(client, headers)
     model = await _create_transcription_model(
@@ -187,12 +188,25 @@ async def _published_flow(
                 }
             },
         }
+    steps = [step]
+    if summarize:
+        steps.append(
+            {
+                "assistant_id": assistant.json()["id"],
+                "step_order": 2,
+                "user_description": "Sammanfatta mötet",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_mode": "pass_through",
+                "output_type": "text",
+            }
+        )
     updated = await client.patch(
         f"/api/v1/flows/{flow_id}/",
         json={
             "name": f"Live {flow_id[:8]}",
             "description": None,
-            "steps": [step],
+            "steps": steps,
             "metadata_json": {
                 "wizard": {
                     "transcription_enabled": audio,

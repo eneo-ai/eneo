@@ -318,7 +318,6 @@ class FlowRunRetryService:
             input_payload_json=read_semantic_flow_input_payload(
                 source.input_payload_json
             ),
-            speaker_labels=read_speaker_labels_choice(source.input_payload_json),
             expected_flow_version=source.flow_version,
             step_inputs={
                 step.step_id: FlowRunStepInputFiles(file_ids=tuple(files[step.id]))
@@ -334,6 +333,7 @@ class FlowRunRetryService:
                 kind="reused_prefix",
                 review_established_step_ids=frozenset(review_established_step_ids),
                 transcript=inline,
+                speaker_labels=read_speaker_labels_choice(source.input_payload_json),
             ),
         )
         if created.created:

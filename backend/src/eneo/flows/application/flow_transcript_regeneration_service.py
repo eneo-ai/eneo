@@ -329,7 +329,6 @@ class FlowTranscriptRegenerationService:
             input_payload_json=read_semantic_flow_input_payload(
                 source.input_payload_json
             ),
-            speaker_labels=read_speaker_labels_choice(source.input_payload_json),
             expected_flow_version=source.flow_version,
             step_inputs=step_inputs,
             idempotency_key=key,
@@ -350,6 +349,7 @@ class FlowTranscriptRegenerationService:
                     for step in prefix_steps
                     if step.review_policy is not None
                 ),
+                speaker_labels=read_speaker_labels_choice(source.input_payload_json),
             ),
         )
         if not created.created:

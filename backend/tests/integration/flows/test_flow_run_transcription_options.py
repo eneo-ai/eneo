@@ -15,11 +15,27 @@ import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient, Response
 
-from eneo.database.tables.flow_tables import FlowRuns
-from eneo.flows.api import flow_run_lifecycle_router
+from eneo.database.tables.flow_tables import FlowRuns, FlowStepResults
+from eneo.flows.api import (
+    flow_run_lifecycle_router,
+    flow_run_retry_router,
+    flow_transcript_regeneration_router,
+)
+from eneo.flows.application.flow_transcript_regeneration_service import (
+    render_original_segments,
+)
+from eneo.flows.domain.flow import FlowRunStatus
+from eneo.flows.domain.transcript_corrections import segments_content_hash
+from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import FlowRunError
 from eneo.main.config import get_settings, set_settings
 from tests.integration.flows.test_flow_live_transcription_session import (
     _published_flow,
+)
+from tests.integration.flows.test_transcript_corrections import (
+    SEGMENTS,
+    _store_segments,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -52,9 +68,14 @@ def dispatched(monkeypatch: pytest.MonkeyPatch) -> list[UUID]:
     async def record(*, run_id: UUID, tenant_id: UUID, expected_revision: int) -> None:
         runs.append(run_id)
 
-    monkeypatch.setattr(
-        flow_run_lifecycle_router, "dispatch_flow_run_recoverably_after_commit", record
-    )
+    for router in (
+        flow_run_lifecycle_router,
+        flow_run_retry_router,
+        flow_transcript_regeneration_router,
+    ):
+        monkeypatch.setattr(
+            router, "dispatch_flow_run_recoverably_after_commit", record
+        )
     return runs
 
 
@@ -210,3 +231,79 @@ async def test_a_speaker_choice_the_contract_does_not_offer_creates_no_run(
     assert smuggled.json()["context"] == {"keys": ["speaker_labels"]}
     assert await _stored_inputs(db_container, flow.flow_id) == {}
     assert dispatched == []
+
+
+async def test_retry_and_regeneration_keep_an_accepted_choice_after_the_service_is_gone(
+    client, flow_process_auth_headers, db_container, admin_user, dispatched: list[UUID]
+):
+    headers = dict(flow_process_auth_headers)
+    flow = await _published_flow(
+        client, headers, db_container, input_required=False, summarize=True
+    )
+    with _deployment(service_mode="diarize"):
+        created = [
+            await _create_run(client, headers, flow.flow_id, {"speaker_labels": False})
+            for _ in range(2)
+        ]
+    failed_id, completed_id = (UUID(run.json()["id"]) for run in created)
+    async with db_container() as container:
+        session = container.session()
+        for run_id in (failed_id, completed_id):
+            await _store_segments(
+                session=session,
+                run_id=run_id,
+                step_id=UUID(flow.step_id),
+                segments=SEGMENTS,
+            )
+            await session.execute(
+                sa.update(FlowStepResults)
+                .where(
+                    FlowStepResults.flow_run_id == run_id,
+                    FlowStepResults.step_order == 1,
+                )
+                .values(
+                    status="completed",
+                    output_payload_json={"text": render_original_segments(SEGMENTS)},
+                )
+            )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == completed_id)
+            .values(status="completed", finished_at=sa.func.now())
+        )
+        await container.flow_run_terminalizer().terminalize_run(
+            run_id=failed_id,
+            tenant_id=admin_user.tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
+            error=FlowRunError(
+                code=FlowApiErrorCode.STEP_EXECUTION_FAILED,
+                message="The summary failed.",
+            ),
+        )
+        completed_revision = await session.scalar(
+            sa.select(FlowRuns.revision).where(FlowRuns.id == completed_id)
+        )
+
+    retried = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/{failed_id}/retry/",
+        headers={**headers, "Idempotency-Key": "retry-without-a-service"},
+    )
+    regenerated = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/{completed_id}/steps/{flow.step_id}"
+        "/transcript-regenerations/",
+        headers={**headers, "Idempotency-Key": "regenerate-without-a-service"},
+        json={
+            "expected_run_revision": completed_revision,
+            "expected_correction_revision": None,
+            "segments_hash": segments_content_hash(SEGMENTS),
+        },
+    )
+
+    assert (retried.status_code, regenerated.status_code) == (201, 201), (
+        retried.text,
+        regenerated.text,
+    )
+    stored = await _stored_inputs(db_container, flow.flow_id)
+    for child in (retried.json()["run"], regenerated.json()["run"]):
+        assert stored[child["id"]]["speaker_labels"] is False

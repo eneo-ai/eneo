@@ -64,6 +64,7 @@ from eneo.flows.flow_run_contract_service import (
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
+    SPEAKER_LABELS_KEY,
     TRANSCRIPT_REGENERATION_KEY,
     build_initial_run_input_envelope,
     read_speaker_labels_choice,
@@ -398,6 +399,8 @@ class FlowRunService:
                 payload[FLOW_INPUT_TRANSCRIPTION_KEY] = transcript.model_dump(
                     mode="json"
                 )
+            if prefix_seed.speaker_labels is not None:
+                payload[SPEAKER_LABELS_KEY] = prefix_seed.speaker_labels
             ensure_inline_payload_size_allowed(
                 flow_id=flow_id, input_payload_json=payload
             )

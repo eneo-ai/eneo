@@ -194,16 +194,6 @@ async def test_naming_snapshot_preserves_confirmed_unresolved_and_provisional(co
     assert context.service.audit_service.log.await_args.kwargs["required"] is True
 
 
-async def test_regeneration_keeps_the_source_runs_speaker_choice(context):
-    context.source.input_payload_json = {"question": "Meeting", "speaker_labels": False}
-
-    await context.service.regenerate(**context.request)
-
-    args = context.service.run_service.create_run.await_args.kwargs
-    assert args["speaker_labels"] is False
-    assert args["input_payload_json"] == {"question": "Meeting"}
-
-
 @pytest.mark.parametrize(
     "failure,reason",
     [

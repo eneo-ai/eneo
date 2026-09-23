@@ -23,3 +23,7 @@ class FlowRunPrefixSeed:
     transcript_sources: Mapping[UUID, TranscriptSource] = field(
         default_factory=dict[UUID, TranscriptSource]
     )
+    # The source run's speaker-label choice, accepted when that run was created.
+    # It is kept as it is; only a caller's new choice is checked against what
+    # the run contract offers now.
+    speaker_labels: bool | None = None
