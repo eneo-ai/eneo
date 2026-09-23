@@ -90,6 +90,7 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.flow_variable_definitions import PREVIOUS_STEP_TEXT_ALIAS
 from eneo.flows.input_binding_contract_rules import (
     effective_question_binding,
+    has_explicit_underlag,
     source_ref_bindings,
 )
 from eneo.flows.template_reference_analyzer import (
@@ -870,23 +871,51 @@ def _field_reuse_requires_input_bindings_evidence(context: CriticContext) -> boo
 
 # ── Prose references to another step ─────────────────────────────────────
 
-# "steg 4", "step 4": a step named in running text. The underscore in a
-# template head (`step_4.output.text`) is not a space, so a real reference
-# never matches this.
-_PROSE_STEP_NUMBER = re.compile(r"\b(?:steg|step)\s+(\d{1,2})\b", re.IGNORECASE)
+# "från steg 4", "from step 4": material asked for from another step. Only
+# this shape counts. A bare mention is as often a list item ("Steg 1: läs
+# underlaget") or an exclusion ("använd inte steg 1"), and this rule does not
+# parse prose - it catches the one phrasing that asks for another step's
+# material and leaves the rest to the reader. The underscore in a template
+# head (`step_4.output.text`) is not a space, so a real reference never
+# matches this either.
+_PROSE_STEP_SOURCE = re.compile(
+    r"\b(?:från|from)\s+(?:steg|step)\s+(\d{1,2})\b", re.IGNORECASE
+)
+_PROSE_NEGATION = re.compile(
+    r"\b(?:inte|aldrig|utan|not|never|without)\b", re.IGNORECASE
+)
+_PROSE_SENTENCE = re.compile(r"(?<=[.!?:\n])\s+")
 
 
-def _earlier_steps_named_in_prose(instructions: str, order: int) -> set[int]:
-    """Earlier steps the instruction names in running text.
+def _earlier_steps_asked_for_in_prose(instructions: str, order: int) -> set[int]:
+    """Earlier steps the instruction asks to take material from.
 
-    A later step or the step itself is another invariant's business.
+    A sentence that denies the step before naming it asks for nothing. A later
+    step or the step itself is another invariant's business.
     """
 
-    return {
-        named
-        for match in _PROSE_STEP_NUMBER.finditer(instructions)
-        if 1 <= (named := int(match.group(1))) < order
-    }
+    asked: set[int] = set()
+    for sentence in _PROSE_SENTENCE.split(instructions):
+        for match in _PROSE_STEP_SOURCE.finditer(sentence):
+            named = int(match.group(1))
+            if not 1 <= named < order:
+                continue
+            if _PROSE_NEGATION.search(sentence[: match.start()]):
+                continue
+            asked.add(named)
+    return asked
+
+
+def _delivers_step_content(reference: TemplateReference) -> bool:
+    """True when a reference carries the step's material, not a fact about it.
+
+    `{{step_1}}` and anything under `output` deliver what the step produced;
+    `status`, `error_message` and `input` describe the run and leave the model
+    without the material the instruction asked for.
+    """
+
+    tail = reference.tail
+    return tail in ("", "output") or tail.startswith("output.")
 
 
 def _step_orders_read(
@@ -895,7 +924,7 @@ def _step_orders_read(
     step_refs: dict[str, int],
     form_field_names: set[str],
 ) -> set[int]:
-    """Steps this step actually reads, by 1-based order.
+    """Steps whose material this step actually receives, by 1-based order.
 
     Both ways a step can name another one count: a template reference, which
     the runtime resolves, and a `source_refs` binding, which the runtime
@@ -913,6 +942,7 @@ def _step_orders_read(
         )
         if reference.kind is TemplateReferenceKind.STEP
         and reference.step_order is not None
+        and _delivers_step_content(reference)
     }
     source_refs = cast(object, (step.input_bindings or {}).get("source_refs"))
     if isinstance(source_refs, list):
@@ -942,21 +972,28 @@ def _instruction_step_reference_requires_binding_evidence(
     form_field_names = {field.name for field in (spec.form_fields or [])}
     for index, step in enumerate(spec.steps):
         order = index + 1
-        named = _earlier_steps_named_in_prose(step.assistant_spec.instructions, order)
-        if not named:
+        asked = _earlier_steps_asked_for_in_prose(
+            step.assistant_spec.instructions, order
+        )
+        if not asked:
             continue
-        if step.input_source == InputSource.ALL_PREVIOUS_STEPS:
+        # Explicit underlag replaces the implicit input entirely, so a step
+        # that declares one receives nothing its input_source would have given
+        # it (input_binding_contract_rules.has_explicit_underlag).
+        implicit_input = not has_explicit_underlag(step.input_bindings)
+        if implicit_input and step.input_source == InputSource.ALL_PREVIOUS_STEPS:
             continue
         read = _step_orders_read(
             step,
             step_refs=step_refs,
             form_field_names=form_field_names,
         )
-        for named_order in named:
+        for named_order in asked:
             if named_order in read:
                 continue
             if (
-                step.input_source == InputSource.PREVIOUS_STEP
+                implicit_input
+                and step.input_source == InputSource.PREVIOUS_STEP
                 and named_order == order - 1
             ):
                 continue

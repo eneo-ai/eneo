@@ -336,12 +336,16 @@ def test_field_reuse_requires_a_downstream_structured_reference() -> None:
     }
 
 
-def test_instruction_naming_an_unread_step_in_prose_is_an_issue() -> None:
+def test_instruction_asking_for_an_unread_step_in_prose_is_an_issue() -> None:
     # Reproduced live 2026-09-23: asked to make step 4 read step 1, the planner
     # rewrote the instruction to "Läs underlaget från steg 1 ..." and left the
     # step reading the previous one. The runtime hands the step its underlag and
     # resolves its templates; it does not read the prose, so the model never
     # sees step 1 while the plan reads as though it does.
+    asks_for_step_one = (
+        "Läs underlaget från steg 1 (Ta fram fakta) och skriv en kort sammanfattning."
+    )
+
     def _spec_with_step_four(step_four: StepSpec) -> FlowDraftSpecCore:
         return FlowDraftSpecCore(
             flow_name="Steglista",
@@ -363,55 +367,20 @@ def test_instruction_naming_an_unread_step_in_prose_is_an_issue() -> None:
             ],
         )
 
-    prose_only = _spec_with_step_four(
-        _step(
+    def _step_four(
+        instructions: str = asks_for_step_one,
+        *,
+        input_source: InputSource = InputSource.PREVIOUS_STEP,
+        input_bindings: dict | None = None,
+    ) -> StepSpec:
+        return _step(
             "step_d",
             "Sammanfatta",
-            "Läs underlaget från steg 1 (Ta fram fakta) och skriv en kort sammanfattning.",
-            input_source=InputSource.PREVIOUS_STEP,
+            instructions,
+            input_source=input_source,
+            input_bindings=input_bindings,
         )
-    )
-    with_reference = _spec_with_step_four(
-        _step(
-            "step_d",
-            "Sammanfatta",
-            "Sammanfatta {{step_1.output.text}} kort.",
-            input_source=InputSource.PREVIOUS_STEP,
-        )
-    )
-    reading_every_earlier_step = _spec_with_step_four(
-        _step(
-            "step_d",
-            "Sammanfatta",
-            "Läs underlaget från steg 1 (Ta fram fakta) och skriv en kort sammanfattning.",
-            input_source=InputSource.ALL_PREVIOUS_STEPS,
-        )
-    )
-    bound_to_that_step = _spec_with_step_four(
-        _step(
-            "step_d",
-            "Sammanfatta",
-            "Läs underlaget från steg 1 (Ta fram fakta) och skriv en kort sammanfattning.",
-            input_source=InputSource.PREVIOUS_STEP,
-            input_bindings={"source_refs": [{"step_ref": "step_a", "output": "text"}]},
-        )
-    )
-    naming_the_previous_step = _spec_with_step_four(
-        _step(
-            "step_d",
-            "Sammanfatta",
-            "Bygg vidare på steg 3 och skriv en kort sammanfattning.",
-            input_source=InputSource.PREVIOUS_STEP,
-        )
-    )
-    naming_a_later_step = _spec_with_step_four(
-        _step(
-            "step_d",
-            "Sammanfatta",
-            "Resultatet går vidare till steg 9.",
-            input_source=InputSource.PREVIOUS_STEP,
-        )
-    )
+
     conversation = [
         {"role": "user", "content": "Ändra underlaget så att steget läser steg 1."}
     ]
@@ -424,12 +393,78 @@ def test_instruction_naming_an_unread_step_in_prose_is_an_issue() -> None:
             )
         }
 
-    assert _fires(prose_only)
-    assert not _fires(with_reference)
-    assert not _fires(reading_every_earlier_step)
-    assert not _fires(bound_to_that_step)
-    assert not _fires(naming_the_previous_step)
-    assert not _fires(naming_a_later_step)
+    # The defect: asked for in prose, delivered by nothing.
+    assert _fires(_spec_with_step_four(_step_four()))
+
+    # A reference the runtime resolves delivers it, by runtime alias or plan
+    # ref, and the prose stays exactly as it was.
+    for reference in ("{{step_1.output.text}}", "{{step_a.output.text}}", "{{step_1}}"):
+        assert not _fires(
+            _spec_with_step_four(_step_four(f"{asks_for_step_one} {reference}"))
+        )
+
+    # Metadata is not material: the model still never sees step 1's output.
+    assert _fires(
+        _spec_with_step_four(_step_four(f"{asks_for_step_one} {{{{step_1.status}}}}"))
+    )
+
+    # Reading every earlier step delivers it - but only while the step has no
+    # explicit underlag, which replaces the implicit input entirely.
+    assert not _fires(
+        _spec_with_step_four(_step_four(input_source=InputSource.ALL_PREVIOUS_STEPS))
+    )
+    bound_to_step_three = {"source_refs": [{"step_ref": "step_c", "output": "text"}]}
+    assert _fires(
+        _spec_with_step_four(
+            _step_four(
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_bindings=bound_to_step_three,
+            )
+        )
+    )
+    assert not _fires(
+        _spec_with_step_four(
+            _step_four(
+                input_bindings={
+                    "source_refs": [{"step_ref": "step_a", "output": "text"}]
+                }
+            )
+        )
+    )
+
+    # The previous step is what an implicit previous-step input delivers; with
+    # an explicit underlag elsewhere it is not.
+    asks_for_step_three = "Bygg vidare på underlaget från steg 3 och sammanfatta."
+    assert not _fires(_spec_with_step_four(_step_four(asks_for_step_three)))
+    assert _fires(
+        _spec_with_step_four(
+            _step_four(
+                asks_for_step_three,
+                input_bindings={
+                    "source_refs": [{"step_ref": "step_a", "output": "text"}]
+                },
+            )
+        )
+    )
+
+    # Neither an exclusion nor a step's own numbered list asks for material.
+    assert not _fires(
+        _spec_with_step_four(
+            _step_four(
+                "Använd endast underlaget från steg 3. Använd inte underlaget från steg 1."
+            )
+        )
+    )
+    assert not _fires(
+        _spec_with_step_four(
+            _step_four("Steg 1: Läs underlaget. Steg 2: Skriv sammanfattningen.")
+        )
+    )
+
+    # A later step is another invariant's business.
+    assert not _fires(
+        _spec_with_step_four(_step_four("Resultatet går vidare från steg 9."))
+    )
 
 
 def test_field_reuse_with_only_a_terminal_producer_is_unsatisfiable() -> None:
