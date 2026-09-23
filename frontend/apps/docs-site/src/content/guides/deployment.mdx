@@ -414,6 +414,18 @@ value and a comment.
       **High CPU usage on worker?** Reduce `WORKER_MAX_JOBS` to limit concurrent document processing.
     </Callout>
 
+    **Flows live transcription:**
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `FLOW_LIVE_TRANSCRIPTION_IDLE_TIMEOUT_SECONDS` | `300` | Ends a live transcription session that receives no audio for this many seconds. A recording sends audio the whole time, silence included, so only a paused or stalled recording reaches it |
+    | `FLOW_LIVE_TRANSCRIPTION_FINAL_TEXT_TIMEOUT_SECONDS` | `60` | How long Eneo waits for the model server's final text after a recording stops. Raise it for a server that falls behind, such as a CPU server or a busy GPU |
+
+    Both values must be greater than zero. A live session also accepts at most
+    `FLOW_AUDIO_MAX_DURATION_SECONDS` of audio (template value `18000`, 5 hours),
+    the same limit as an uploaded recording. To set up a model for live
+    transcription, see [Live transcription](/guides/ai-providers#live-transcription).
+
     **Dynamic Credential Management:**
 
     | Variable | Default | Description |
@@ -654,7 +666,7 @@ These are the exact prefixes the shipped Traefik labels route to the backend.
 
 **Requirements:**
 
-- WebSocket support (for real-time features)
+- WebSocket support on `/api/*`. The backend serves the `/api/v1/ws` socket and, for live transcription, `/api/v1/live-transcription`. A proxy that upgrades only `/api/v1/ws` needs the same rule for `/api/v1/live-transcription`.
 - TLS termination with valid certificate
 
 ### Using nginx Instead of Traefik
