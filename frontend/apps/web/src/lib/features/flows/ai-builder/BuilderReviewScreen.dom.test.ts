@@ -570,7 +570,10 @@ describe("BuilderReviewScreen plan document", () => {
 
     expect(screen.getAllByText(m.ai_builder_node_review_checkpoint()).length).toBeGreaterThan(0);
     expect(screen.getAllByText(m.ai_builder_node_per_file()).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(m.flow_output_type_pdf()).length).toBeGreaterThan(0);
+    // The node says what the step answers with, the artifact included.
+    expect(
+      screen.getAllByText(new RegExp(`${m.ai_builder_answer_pdf_phrase()}$`)).length
+    ).toBeGreaterThan(0);
     expect(screen.getByText(m.ai_builder_review_checkpoint_note({ count: 1 }))).toBeTruthy();
   });
 
@@ -760,14 +763,44 @@ describe("BuilderReviewScreen plan document", () => {
     expect(
       screen.getByText(m.ai_builder_footer_steps_change_when_approved({ count: 1 }))
     ).toBeTruthy();
-    // One step reads in the singular: "1 ändrat", not "1 ändrade".
-    expect(screen.getByText(m.ai_builder_diff_modified_one({ count: "1" }))).toBeTruthy();
-    expect(screen.getByText(m.ai_builder_diff_unchanged_one({ count: "1" }))).toBeTruthy();
+    // The step leads the page; the flow card adds no count chips to the
+    // footer's count.
+    expect(screen.getByTestId("scoped-change-card")).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_diff_modified_one({ count: "1" }))).toBeNull();
 
     await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_approve() }));
     expect(
       await screen.findByText(m.ai_builder_approve_dialog_steps_edit({ changed: 1, unchanged: 1 }))
     ).toBeTruthy();
+  });
+
+  it("keeps the request beside the change, not a later confirmation", () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        ...scopedStepEditState(),
+        messages: [
+          { role: "user", content: "Gör sammanfattningen kortare.", timestamp: 1 },
+          { role: "assistant", content: "Så här förstår jag det.", timestamp: 2 },
+          {
+            role: "user",
+            content: "Det stämmer.",
+            metadata: { requirements_confirmed: true },
+            timestamp: 3
+          }
+        ]
+      }
+    });
+
+    const context = screen.getByRole("complementary", {
+      name: m.ai_builder_review_context_label()
+    });
+    expect(within(context).getByText("Gör sammanfattningen kortare.")).toBeTruthy();
+    expect(within(context).queryByText("Det stämmer.")).toBeNull();
+    // A one-step change leaves out how the whole flow runs.
+    expect(
+      within(context).queryByRole("button", { name: m.ai_builder_execution_profile() })
+    ).toBeNull();
   });
 
   it("reads a reference to a planned step as that step, not as the plan's key", async () => {
@@ -828,6 +861,10 @@ describe("BuilderReviewScreen plan document", () => {
                   name: "Strukturera transkriberingen",
                   output_mode: "pass_through",
                   output_type: "json",
+                  output_contract: {
+                    type: "object",
+                    properties: { talare: { type: "array" } }
+                  },
                   assistant_spec: {
                     instructions: "Strukturera texten källnära.",
                     knowledge_refs: [],
@@ -890,68 +927,66 @@ describe("BuilderReviewScreen plan document", () => {
     });
 
     await fireEvent.click(screen.getByRole("tab", { name: m.ai_builder_canvas_tab_details() }));
-    // The changed step is open on its own; the untouched one stays folded.
+    // The changed step is open on its own; the untouched one waits behind "Visa".
     const changedTrigger = screen.getByRole("button", {
-      name: `${m.ai_builder_step_label({ step: 2 })}: Strukturera transkriberingen`
+      name: stepCard(2, "Strukturera transkriberingen")
     });
     await waitFor(() => expect(changedTrigger.getAttribute("aria-expanded")).toBe("true"));
+    expect(screen.queryByRole("button", { name: stepCard(1, "Transkribera ljud") })).toBeNull();
+    expect(screen.getByText(m.ai_builder_review_unchanged_hidden_one())).toBeTruthy();
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_review_unchanged_show() })
+    );
     expect(
-      screen
-        .getByRole("button", { name: `${m.ai_builder_step_label({ step: 1 })}: Transkribera ljud` })
-        .getAttribute("aria-expanded")
+      (await screen.findByRole("button", { name: stepCard(1, "Transkribera ljud") })).getAttribute(
+        "aria-expanded"
+      )
     ).toBe("false");
 
     const changes = await screen.findByTestId("step-field-changes");
-    const rows = within(changes)
-      .getAllByRole("definition")
-      .map((dd) => dd.textContent?.replace(/\s+/g, " ").trim());
-    expect(rows[0]).toBe(
-      `${m.ai_builder_step_change_previous_label()}: Strukturera → ${m.ai_builder_step_change_current_label()}: Strukturera transkriberingen`
+    // One sentence says what the answer becomes, naming the field.
+    expect(
+      within(changes).getByText(m.ai_builder_change_sentence_fields_named_one({ fields: "talare" }))
+    ).toBeTruthy();
+    // The step's three parts: what it reads stays; what it does and answers with change.
+    const parts = within(changes)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent?.replace(/\s+/g, " ").trim() ?? "");
+    expect(parts).toHaveLength(3);
+    expect(parts[0]).toContain(m.ai_builder_reads_previous());
+    expect(parts[0]).toContain(m.ai_builder_change_tag_unchanged());
+    expect(parts[1]).toContain(m.ai_builder_change_does_instruction());
+    expect(parts[1]).toContain(m.ai_builder_change_tag_changes());
+    expect(parts[2]).toContain(
+      `${m.ai_builder_step_change_previous_label()}: ${m.ai_builder_answer_text()}`
     );
-    expect(rows[1]).toBe(
-      `${m.ai_builder_step_change_previous_label()}: ${m.flow_type_text()} → ${m.ai_builder_step_change_current_label()}: ${m.flow_output_type_simple_structured()}`
+    expect(parts[2]).toContain(
+      `${m.ai_builder_step_change_current_label()}: ${m.ai_builder_answer_fields_one()}`
     );
-    // A structured value whose short reading did not change says so and
-    // keeps the complete value behind its own fold.
-    expect(rows[2]).toContain(m.ai_builder_step_change_changed());
-    const detailFold = within(changes).getByRole("button", {
-      name: m.ai_builder_step_change_show_detail()
-    });
-    expect(detailFold.getAttribute("aria-expanded")).toBe("false");
-    await fireEvent.click(detailFold);
-    await waitFor(() =>
-      expect(
-        within(changes)
-          .getByRole("button", { name: m.ai_builder_step_change_hide_detail() })
-          .getAttribute("aria-expanded")
-      ).toBe("true")
-    );
-    const detail = await within(changes).findByTestId("step-field-change-detail");
-    expect(detail.textContent).toContain('"type": "array"');
-    expect(rows[3]).toBe(
-      `${m.ai_builder_step_change_previous_label()}: ${m.flow_step_review_policy_none()} → ${m.ai_builder_step_change_current_label()}: ${m.flow_step_review_policy_view()}`
-    );
+    // The new field, then the changes no part tells: the name and the review.
     expect(
       within(changes)
         .getAllByRole("term")
         .map((dt) => dt.textContent?.trim())
-    ).toEqual([
-      m.ai_builder_step_change_field_name(),
-      m.ai_builder_step_change_field_output_type(),
-      m.ai_builder_step_change_field_output_contract(),
-      m.flow_step_review_policy(),
-      m.ai_builder_step_instructions()
+    ).toEqual(["Talare", m.ai_builder_step_change_field_name(), m.flow_step_review_policy()]);
+    const rows = within(changes)
+      .getAllByRole("definition")
+      .map((dd) => dd.textContent?.replace(/\s+/g, " ").trim());
+    // The arrow between the values is drawn; the labels carry the order.
+    expect(rows.slice(1)).toEqual([
+      `${m.ai_builder_step_change_previous_label()}: Strukturera ${m.ai_builder_step_change_current_label()}: Strukturera transkriberingen`,
+      `${m.ai_builder_step_change_previous_label()}: ${m.flow_step_review_policy_none()} ${m.ai_builder_step_change_current_label()}: ${m.flow_step_review_policy_view()}`
     ]);
-    // The previous wording waits behind a fold; the current text is already on screen.
+    // Both wordings of the instruction wait behind one fold in the "does" part.
     const fold = within(changes).getByRole("button", {
-      name: m.ai_builder_step_change_show_previous_instructions()
+      name: m.ai_builder_change_show_before_after()
     });
     expect(fold.getAttribute("aria-expanded")).toBe("false");
     await fireEvent.click(fold);
     await waitFor(() =>
       expect(
         within(changes)
-          .getByRole("button", { name: m.ai_builder_step_change_hide_previous_instructions() })
+          .getByRole("button", { name: m.ai_builder_change_hide_before_after() })
           .getAttribute("aria-expanded")
       ).toBe("true")
     );
@@ -1048,9 +1083,7 @@ describe("BuilderReviewScreen plan document", () => {
         name: `${m.ai_builder_change_request_scope({ step: 3, name: "Sammanfatta" })} ${m.ai_builder_change_list_new_step()}`
       })
     );
-    const trigger = await screen.findByRole("button", {
-      name: `${m.ai_builder_step_label({ step: 3 })}: Sammanfatta`
-    });
+    const trigger = await screen.findByRole("button", { name: stepCard(3, "Sammanfatta") });
     await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("true"));
     // The handoff lands on the step, not back at the top of the document.
     await waitFor(() => expect(document.activeElement).toBe(trigger));
@@ -1113,10 +1146,7 @@ describe("BuilderReviewScreen plan document", () => {
     await fireEvent.click(detailsTab);
     await waitFor(() => expect(detailsTab.getAttribute("data-state")).toBe("active"));
 
-    const trigger = () =>
-      screen.getByRole("button", {
-        name: `${m.ai_builder_step_label({ step: 1 })}: Transkribera ljud`
-      });
+    const trigger = () => screen.getByRole("button", { name: stepCard(1, "Transkribera ljud") });
     await fireEvent.click(trigger());
     await waitFor(() => expect(trigger().getAttribute("aria-expanded")).toBe("true"));
 
@@ -1138,11 +1168,7 @@ describe("BuilderReviewScreen change requests", () => {
     });
 
     await fireEvent.click(screen.getByRole("tab", { name: m.ai_builder_canvas_tab_details() }));
-    await fireEvent.click(
-      screen.getByRole("button", {
-        name: `${m.ai_builder_step_label({ step: 2 })}: Rendera PDF`
-      })
-    );
+    await fireEvent.click(screen.getByRole("button", { name: stepCard(2, "Rendera PDF") }));
     await fireEvent.click(
       screen.getByRole("button", { name: m.ai_builder_step_request_change({ step: 2 }) })
     );
@@ -1470,6 +1496,12 @@ function makeError(code: string): AIBuilderError {
     diagnostic_context: null,
     details: {}
   };
+}
+
+/** A step card's trigger reads its number, name, badges and line; match its opening. */
+function stepCard(step: number, name: string): RegExp {
+  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${escape(m.ai_builder_step_label({ step }))}\\s*${escape(name)}`);
 }
 
 function makeTranscribeStep(overrides: Partial<StepSpec> = {}): StepSpec {

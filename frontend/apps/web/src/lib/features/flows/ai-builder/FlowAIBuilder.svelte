@@ -288,18 +288,6 @@
         service.isRequirementsSummaryConfirmed(message.requirementsSummary)
     );
   });
-  function latestUserRequestBefore(index: number): string | null {
-    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-      const message = service.messages[cursor];
-      if (!message || message.role !== "user") continue;
-      const metadata = message.metadata ?? {};
-      if (metadata.requirements_confirmed === true || message.questionAnswer !== undefined)
-        continue;
-      const content = message.content.trim();
-      if (content.length > 0) return content;
-    }
-    return null;
-  }
   const lastAssistantText = $derived.by(() => {
     for (let i = service.messages.length - 1; i >= 0; i -= 1) {
       const message = service.messages[i];
@@ -357,7 +345,8 @@
   const columnClass = $derived.by(() => {
     switch (screen) {
       case "review":
-        return BUILDER_COLUMN.review;
+        // A failure or conflict without a plan is a message, not a sheet.
+        return service.currentPlan ? BUILDER_COLUMN.review : BUILDER_COLUMN.standard;
       case "task":
         return BUILDER_COLUMN.task;
       case "findings":
@@ -963,48 +952,39 @@
     <p class="sr-only" role="status" aria-live="polite" data-builder-announcer>
       {screenAnnouncementText}
     </p>
-    <!-- Phase header: rail + saved state + the conversation one gesture away.
-         The header column is as wide as the review card and centred with it,
-         so the rail starts on the same line as the plan the user reads most. -->
+    <!-- Phase header: one row, the rail where the reader is and the saved
+         state with the conversation at its far end. The row is as wide as the
+         screen's column and centred with it, so the rail starts on the same
+         line as the plan the user reads most; a narrow column wraps it. -->
     <div class="bg-primary border-default sticky top-0 z-20 shrink-0 border-b px-7 max-sm:px-3">
-      {#if !statusInPageHeader}
-        <!-- The status belongs on the title row; a host that has no room for it
-             there (the flow page's tab bar) keeps it above the rail. -->
-        <div class="mx-auto flex w-full items-center gap-3 pt-3 {columnClass}">
-          <BuilderSessionStatus isEdit={targetKind === "edit"} />
-          {#if canStartOver}
-            <Button
-              variant="outline"
-              size="sm"
-              onclick={handleStartOver}
-              disabled={service.isCreating}
-            >
-              {m.ai_builder_start_fresh()}
-            </Button>
-          {/if}
+      <div class="mx-auto flex w-full flex-wrap items-center gap-x-6 gap-y-2 py-3 {columnClass}">
+        <div class="min-w-[18rem] flex-1">
+          <BuilderPhaseRail
+            current={phaseIndex}
+            viewing={viewingPhase}
+            isEdit={targetKind === "edit"}
+            onselect={handleRailSelect}
+          />
         </div>
-      {:else if canStartOver}
-        <div class="mx-auto flex w-full justify-end pt-3 {columnClass}">
-          <Button
-            variant="outline"
-            size="sm"
-            onclick={handleStartOver}
-            disabled={service.isCreating}
-          >
-            {m.ai_builder_start_fresh()}
-          </Button>
-        </div>
-      {/if}
-      <div
-        class="mx-auto w-full py-3 {columnClass}"
-        class:pt-3={statusInPageHeader && !canStartOver}
-      >
-        <BuilderPhaseRail
-          current={phaseIndex}
-          viewing={viewingPhase}
-          isEdit={targetKind === "edit"}
-          onselect={handleRailSelect}
-        />
+        {#if !statusInPageHeader || canStartOver}
+          <!-- The status belongs on the title row; a host that has no room for
+               it there (the flow page's tab bar) keeps it here. -->
+          <div class="ml-auto flex items-center gap-3">
+            {#if !statusInPageHeader}
+              <BuilderSessionStatus isEdit={targetKind === "edit"} />
+            {/if}
+            {#if canStartOver}
+              <Button
+                variant="outline"
+                size="sm"
+                onclick={handleStartOver}
+                disabled={service.isCreating}
+              >
+                {m.ai_builder_start_fresh()}
+              </Button>
+            {/if}
+          </div>
+        {/if}
       </div>
     </div>
 
@@ -1092,7 +1072,7 @@
       {:else if screen === "confirm" && latestSummary}
         <BuilderConfirmScreen
           summary={latestSummary}
-          userRequest={latestUserRequestBefore(latestSummaryMessageIndex)}
+          userRequest={service.latestUserRequestBefore(latestSummaryMessageIndex)}
           savedFlowStepScope={service.activeStepScope}
           attachments={service.session?.attachments ?? []}
           answered={answeredQuestions}

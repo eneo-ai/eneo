@@ -20,6 +20,9 @@
     placeholder?: string;
     hint?: string;
     onclearscope?: () => void;
+    /** A row of a sheet rather than a card of its own: no frame, the sheet's
+     *  side padding. */
+    flush?: boolean;
     /** The collapsed opener asks to be opened rather than opening itself: the
      *  owner decides what else has to close first. */
     onopen?: () => void;
@@ -39,9 +42,12 @@
     placeholder = m.ai_builder_change_request_placeholder(),
     hint = m.ai_builder_change_request_hint(),
     onclearscope,
+    flush = false,
     onopen,
     onsend
   }: Props = $props();
+
+  const inset = $derived(flush ? "px-6 max-sm:px-4" : "px-[1.125rem]");
 
   let textarea = $state<HTMLTextAreaElement | null>(null);
 
@@ -71,9 +77,9 @@
   }
 </script>
 
-<div class="border-default bg-primary overflow-hidden rounded-xl border">
+<div class={flush ? "" : "border-default bg-primary overflow-hidden rounded-xl border"}>
   {#if open}
-    <div class="px-[1.125rem] pt-3.5 pb-3">
+    <div class="{inset} pt-3.5 pb-3">
       <div class="mb-2.5 flex flex-wrap items-center gap-2.5">
         <span class="text-primary text-[0.84375rem] font-semibold">{title}</span>
         {#if scopeLabel}
@@ -126,7 +132,7 @@
   {:else}
     <button
       type="button"
-      class="hover:bg-secondary focus-visible:ring-accent-stronger flex w-full flex-wrap items-center gap-2.5 px-[1.125rem] py-3.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
+      class="hover:bg-secondary focus-visible:ring-accent-stronger flex w-full flex-wrap items-center gap-2.5 {inset} py-3.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
       onclick={() => {
         if (onopen) onopen();
         else open = true;

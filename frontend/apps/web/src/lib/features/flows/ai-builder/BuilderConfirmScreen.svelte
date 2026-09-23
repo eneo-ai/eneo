@@ -598,7 +598,7 @@
                   ? m.ai_builder_requirements_hide_full_request()
                   : m.ai_builder_requirements_show_full_request()}
                 <IconChevronDown
-                  class="size-3.5 ease-out motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) motion-reduce:duration-0 {userRequestExpanded
+                  class="size-3.5 motion-safe:transition-transform motion-safe:duration-(--duration-fast) motion-safe:ease-(--ease-smooth-out) motion-reduce:duration-0 {userRequestExpanded
                     ? 'rotate-180'
                     : ''}"
                   aria-hidden="true"
@@ -1213,7 +1213,9 @@
           </span>
         {:else}
           <span class="flex flex-col">
-            <span class="text-secondary text-[0.8125rem]">{m.ai_builder_confirm_note()}</span>
+            <span class="text-secondary text-[0.8125rem]">
+              {isEdit ? m.ai_builder_confirm_note_edit() : m.ai_builder_confirm_note()}
+            </span>
             <span class="text-secondary text-xs">{m.ai_builder_confirm_note_after()}</span>
           </span>
           {#if !readOnly}

@@ -1,7 +1,10 @@
 /**
  * The Builder's reading columns, one owner for the widths each screen, the
  * phase rail and the status rows share (DESIGN.md: 41.25, 43.75 and 53.75rem,
- * about 10% wider at 2xl). Tailwind reads these literals from this file.
+ * about 10% wider at 2xl). The plan review is the exception: one wide sheet
+ * with the change and its context side by side, sized by the Builder's
+ * container rather than the viewport. Tailwind reads these literals from this
+ * file.
  */
 export const BUILDER_COLUMN = {
   /** The first task prompt. */
@@ -10,6 +13,6 @@ export const BUILDER_COLUMN = {
   question: "max-w-[41.25rem] 2xl:max-w-[45.625rem]",
   /** Confirm, build, findings, repair and the conversation. */
   standard: "max-w-[43.75rem] 2xl:max-w-[48.125rem]",
-  /** The plan review. */
-  review: "max-w-[53.75rem] 2xl:max-w-[62.5rem]"
+  /** The plan review sheet. */
+  review: "max-w-[84rem] @min-[140rem]:max-w-[96rem]"
 } as const;

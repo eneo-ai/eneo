@@ -177,7 +177,7 @@
   @keyframes narration-in {
     from {
       opacity: 0;
-      transform: translateY(3px);
+      transform: translateY(var(--distance-micro));
     }
     to {
       opacity: 1;

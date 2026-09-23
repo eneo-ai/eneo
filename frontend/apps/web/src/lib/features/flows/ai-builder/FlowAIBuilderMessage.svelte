@@ -222,7 +222,7 @@
   @keyframes user-enter {
     from {
       opacity: 0.6;
-      transform: translateX(0.375rem);
+      transform: translateX(var(--distance-micro));
     }
     to {
       opacity: 1;
@@ -233,7 +233,7 @@
   @keyframes assistant-enter {
     from {
       opacity: 0.6;
-      transform: translateX(-0.375rem);
+      transform: translateX(calc(-1 * var(--distance-micro)));
     }
     to {
       opacity: 1;

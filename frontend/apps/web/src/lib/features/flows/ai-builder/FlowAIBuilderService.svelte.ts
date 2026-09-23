@@ -736,6 +736,24 @@ export class FlowAIBuilderService {
     this.conversationOpen = false;
   }
 
+  /** The user's own latest request before `index`: the words that asked for
+   *  the plan, not an answer to a question or a confirmation. */
+  latestUserRequestBefore(index: number): string | null {
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const message = this.messages[cursor];
+      if (!message || message.role !== "user") continue;
+      const metadata = message.metadata ?? {};
+      if (metadata.requirements_confirmed === true || message.questionAnswer !== undefined)
+        continue;
+      const content = message.content.trim();
+      if (content.length > 0) return content;
+    }
+    return null;
+  }
+
+  /** The request behind the plan on screen (the latest own request). */
+  latestUserRequest = $derived(this.latestUserRequestBefore(this.messages.length));
+
   /** Messages worth counting on the Samtal button: the ones a reader sees. */
   visibleMessageCount = $derived(
     this.messages.filter(
