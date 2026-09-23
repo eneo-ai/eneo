@@ -864,7 +864,7 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     # get_flow is called once per endpoint via enforce_flow_scope space check.
     assert flow_service.get_flow.await_count == 4
     run_service.list_run_statuses.assert_awaited_once_with(
-        flow_id=flow_id, statuses=None, limit=21, offset=2
+        flow_id=flow_id, statuses=None, mine=False, limit=21, offset=2
     )
     run_service.get_run_detail_with_result_files_and_usage.assert_awaited_once_with(
         run_id=run.id, flow_id=flow_id

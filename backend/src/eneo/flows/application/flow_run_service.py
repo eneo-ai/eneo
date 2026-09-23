@@ -756,42 +756,41 @@ class FlowRunService:
         *,
         flow_id: UUID | None = None,
         statuses: Sequence[FlowRunStatus] | None = None,
+        mine: bool = False,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[FlowRunStatusSnapshot]:
         principal = self._principal()
-        is_human_tenant_admin = self.access_policy.is_human_tenant_admin()
-        if (
-            not is_human_tenant_admin
-            and not principal.is_service_key
-            and flow_id is not None
-        ):
-            if await self.access_policy.can_list_all_runs_in_flow(flow_id=flow_id):
-                return await self.flow_run_repo.list_statuses(
-                    tenant_id=self.user.tenant_id,
-                    flow_id=flow_id,
-                    principal_user_id=None,
-                    principal_service_id=None,
-                    statuses=statuses,
-                    limit=limit,
-                    offset=offset,
-                )
+        own_runs_only = mine or not await self._lists_every_run(
+            principal, flow_id=flow_id
+        )
+        # A principal holds exactly one of the two ids, so filtering on both
+        # keeps the runs it started.
         return await self.flow_run_repo.list_statuses(
             tenant_id=self.user.tenant_id,
             flow_id=flow_id,
             statuses=statuses,
-            principal_user_id=(
-                None
-                if is_human_tenant_admin or principal.is_service_key
-                else principal.principal_user_id
-            ),
+            principal_user_id=principal.principal_user_id if own_runs_only else None,
             principal_service_id=(
-                principal.principal_service_id
-                if not is_human_tenant_admin and principal.is_service_key
-                else None
+                principal.principal_service_id if own_runs_only else None
             ),
             limit=limit,
             offset=offset,
+        )
+
+    async def _lists_every_run(
+        self, principal: FlowPrincipal, *, flow_id: UUID | None
+    ) -> bool:
+        """Tenant admins list every run in the tenant, and same-space admins and
+        owners every run of a flow in their space. Everyone else, service keys
+        included, lists the runs they started."""
+        if principal.is_service_key:
+            return False
+        if self.access_policy.is_human_tenant_admin():
+            return True
+        return (
+            flow_id is not None
+            and await self.access_policy.can_list_all_runs_in_flow(flow_id=flow_id)
         )
 
     async def list_step_results(

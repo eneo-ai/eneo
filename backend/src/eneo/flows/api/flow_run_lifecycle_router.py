@@ -570,6 +570,15 @@ async def list_flow_runs(
             ),
         ),
     ] = None,
+    mine: Annotated[
+        bool,
+        Query(
+            description=(
+                "Only return runs the caller started, within the runs the caller "
+                "may see. A module session counts as its signed-in user."
+            ),
+        ),
+    ] = False,
     container: Container = Depends(
         get_container(with_user=True, with_module_user=True, with_upload_admission=True)
     ),
@@ -585,6 +594,7 @@ async def list_flow_runs(
     runs = await run_service.list_run_statuses(
         flow_id=id,
         statuses=statuses,
+        mine=mine,
         limit=limit + 1,
         offset=offset,
     )

@@ -1121,6 +1121,19 @@ def test_openapi_flow_status_and_history_document_content_boundary(
         assert "terminal errors" in description
 
 
+def test_openapi_flow_run_list_filters_to_the_callers_own_runs(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(openapi_spec, "/api/v1/flows/{id}/runs/", "get")
+    parameters = {parameter["name"]: parameter for parameter in operation["parameters"]}
+    mine = parameters["mine"]
+    assert mine["in"] == "query"
+    assert mine.get("required", False) is False
+    assert mine["schema"]["type"] == "boolean"
+    assert mine["schema"]["default"] is False
+    assert "module session" in mine["description"]
+
+
 def test_openapi_all_flow_request_bodies_have_examples(
     openapi_spec: dict,
 ) -> None:

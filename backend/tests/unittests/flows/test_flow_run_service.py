@@ -2249,6 +2249,76 @@ async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(us
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mine", [False, True], ids=["every_run", "mine"])
+async def test_list_runs_space_admin_sees_every_run_of_the_flow_unless_mine(user, mine):
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    space_service = AsyncMock()
+    actor_manager = MagicMock()
+    actor = SimpleNamespace(get_current_role=lambda: "admin")
+    actor_manager.get_space_actor_from_space.return_value = actor
+    flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
+    flow_run_repo.list_statuses.return_value = []
+    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+        access_policy=_access_policy(
+            user=user,
+            flow_repo=flow_repo,
+            flow_run_repo=flow_run_repo,
+            space_service=space_service,
+            actor_manager=actor_manager,
+        ),
+    )
+
+    await service.list_run_statuses(flow_id=flow.id, mine=mine)
+
+    flow_run_repo.list_statuses.assert_awaited_once_with(
+        tenant_id=user.tenant_id,
+        flow_id=flow.id,
+        statuses=None,
+        principal_user_id=user.id if mine else None,
+        principal_service_id=None,
+        limit=None,
+        offset=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_runs_mine_keeps_a_tenant_admin_to_their_own_runs(user):
+    admin_user = user.model_copy(
+        update={"roles": [SimpleNamespace(permissions=[Permission.ADMIN])]}
+    )
+    flow_run_repo = flow_run_repo_mock()
+    flow_run_repo.list_statuses.return_value = []
+    service = _flow_run_service(
+        user=admin_user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+    flow_id = uuid4()
+
+    await service.list_run_statuses(flow_id=flow_id, mine=True, limit=3, offset=1)
+
+    flow_run_repo.list_statuses.assert_awaited_once_with(
+        tenant_id=admin_user.tenant_id,
+        flow_id=flow_id,
+        statuses=None,
+        principal_user_id=admin_user.id,
+        principal_service_id=None,
+        limit=3,
+        offset=1,
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_run_status_uses_content_free_repository_projection(user):
     flow_run_repo = flow_run_repo_mock()
     run = _run(user=user, flow_id=uuid4())
