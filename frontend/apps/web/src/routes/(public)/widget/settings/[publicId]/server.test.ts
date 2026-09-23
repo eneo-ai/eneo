@@ -48,6 +48,18 @@ const hangingFetch: typeof globalThis.fetch = (_input, init) =>
     );
   });
 
+/** A backend that answers after `ms`, unless the request is aborted first. */
+const slowFetch =
+  (ms: number): typeof globalThis.fetch =>
+  (_input, init) =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve(new Response()), ms);
+      init?.signal?.addEventListener("abort", () => {
+        clearTimeout(timer);
+        reject(new DOMException("aborted", "AbortError"));
+      });
+    });
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -144,9 +156,34 @@ describe("GET /widget/settings/[publicId]", () => {
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("cache-control")).toBe("no-store");
 
-    // A timeout is not remembered: the next page view asks again.
+    // A backend that never answers is given up on, and the next page view asks again.
+    await vi.advanceTimersByTimeAsync(10_000);
     backend.config = async () => config({});
     expect((await request("wgt_slow")).status).toBe(200);
     expect(asked("wgt_slow")).toBe(2);
+  });
+
+  test("keeps a slow answer that came too late for one page view for the next ones", async () => {
+    vi.useFakeTimers();
+    backend.config = async (fetch) => {
+      await fetch("http://backend/api/v1/widgets/wgt_late/config/");
+      return config({ position: "bottom-left" });
+    };
+
+    const first = request("wgt_late", slowFetch(2_700));
+    await vi.advanceTimersByTimeAsync(2_400);
+    // A page view that joins the request in flight still gets its own time.
+    const joined = request("wgt_late");
+    await vi.advanceTimersByTimeAsync(100);
+    expect((await first).status).toBe(503);
+
+    await vi.advanceTimersByTimeAsync(200);
+    const answered = await joined;
+    expect(answered.status).toBe(200);
+    expect((await answered.json()).position).toBe("bottom-left");
+
+    const later = await request("wgt_late");
+    expect(later.status).toBe(200);
+    expect(asked("wgt_late")).toBe(1);
   });
 });

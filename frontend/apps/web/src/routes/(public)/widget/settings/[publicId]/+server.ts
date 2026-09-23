@@ -15,8 +15,10 @@ const HEADERS = {
   "x-content-type-options": "nosniff"
 };
 
-// The loader stops waiting after three seconds; answer before it does.
-const BACKEND_TIMEOUT_MS = 2500;
+// The loader stops waiting after three seconds; answer before it does. The
+// backend request itself runs on, so a slow answer still fills the cache.
+const RESPONSE_DEADLINE_MS = 2500;
+const BACKEND_TIMEOUT_MS = 10_000;
 const FOUND_TTL_MS = 60_000;
 const MISSING_TTL_MS = 5_000;
 const MAX_CACHED = 1000;
@@ -82,14 +84,22 @@ function cachedSettings(publicId: string, fetch: typeof globalThis.fetch): Cache
 export const GET: RequestHandler = async ({ params, fetch }) => {
   const entry = cachedSettings(params.publicId, fetch);
   let settings: WidgetLauncherSettings | null;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
-    settings = await entry.settings;
+    settings = await Promise.race([
+      entry.settings,
+      new Promise<never>((_resolve, reject) => {
+        deadline = setTimeout(() => reject(new BackendTimeout()), RESPONSE_DEADLINE_MS);
+      })
+    ]);
   } catch (error) {
     if (!(error instanceof BackendTimeout)) throw error;
     return new Response(null, {
       status: 503,
       headers: { ...HEADERS, "cache-control": "no-store", "retry-after": "5" }
     });
+  } finally {
+    clearTimeout(deadline);
   }
   if (!settings) {
     return new Response(null, {
