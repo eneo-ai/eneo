@@ -15,6 +15,7 @@ from eneo.flows.api.flow_live_transcription_models import (
     LIVE_TRANSCRIPTION_SOCKET_PATH,
     FlowLiveTranscriptionModelPublic,
     FlowLiveTranscriptionSessionPublic,
+    FlowLiveTranscriptionUnavailableError,
 )
 from eneo.flows.api.flow_runtime_paths import FLOW_LIVE_TRANSCRIPTION_SESSIONS_PATH
 from eneo.flows.flow_access_policy import FlowApiAction
@@ -73,13 +74,16 @@ this route answers 409 `flow_live_transcription_unavailable` with a `reason`.
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
         ),
-        409: error_response(
-            description="Live transcription is not available for this flow.",
-            message="Live transcription is not available for this flow.",
-            eneo_error_code=ErrorCodes.CONFLICT,
-            code=FlowApiErrorCode.LIVE_TRANSCRIPTION_UNAVAILABLE,
-            context={"reason": "model_not_realtime"},
-        ),
+        409: {
+            **error_response(
+                description="Live transcription is not available for this flow.",
+                message="Live transcription is not available for this flow.",
+                eneo_error_code=ErrorCodes.CONFLICT,
+                code=FlowApiErrorCode.LIVE_TRANSCRIPTION_UNAVAILABLE,
+                context={"reason": "model_not_realtime"},
+            ),
+            "model": FlowLiveTranscriptionUnavailableError,
+        },
     },
 )
 async def create_flow_live_transcription_session(

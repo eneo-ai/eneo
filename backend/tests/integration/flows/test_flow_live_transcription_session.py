@@ -28,8 +28,15 @@ from websockets.typing import Origin, Subprotocol
 from eneo.audit.domain.action_types import ActionType
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.spaces_table import SpacesTranscriptionModels
+from eneo.flows.api import flow_live_transcription_socket_router
 from eneo.flows.runtime.live_transcription import tickets
 from eneo.main.config import get_settings, set_settings
+from eneo.users.user import UserAdd, UserState
+from tests.integration.module_session_support import (
+    enable_module,
+    install_module,
+    module_login,
+)
 from tests.unittests.flows.live_transcription_test_support import (
     FakeRealtimeServer,
     fake_realtime_server,
@@ -213,6 +220,24 @@ async def _started_audit_extras(db_container, flow_id: str) -> list[dict[str, ob
             )
         )
         return [metadata["extra"] for metadata in rows]
+
+
+async def _started_audit_actors(
+    db_container, flow_id: str
+) -> list[tuple[str, UUID | None]]:
+    async with db_container() as container:
+        rows = await container.session().execute(
+            sa.select(AuditLogTable.actor_type, AuditLogTable.actor_id).where(
+                AuditLogTable.action
+                == ActionType.FLOW_LIVE_TRANSCRIPTION_STARTED.value,
+                AuditLogTable.entity_id == UUID(flow_id),
+            )
+        )
+        return [(str(row.actor_type), row.actor_id) for row in rows]
+
+
+def _bearer(headers: Mapping[str, str]) -> str:
+    return headers["Authorization"].removeprefix("Bearer ")
 
 
 @asynccontextmanager
@@ -445,3 +470,87 @@ async def test_a_key_for_another_space_is_forbidden_and_nothing_is_audited(
 
     assert response.status_code == 403, response.text
     assert await _started_audit_extras(db_container, flow.flow_id) == []
+
+
+async def test_a_module_session_starts_live_transcription_as_the_human(
+    live_stack: LiveStack, admin_user, db_container
+):
+    module_key = await enable_module(db_container, tenant_id=admin_user.tenant_id)
+    admin_token = _bearer(live_stack.headers)
+    secret = await install_module(
+        live_stack.client, admin_token=admin_token, module_key=module_key
+    )
+    module_token = await module_login(
+        live_stack.client,
+        service_key=secret,
+        user_token=admin_token,
+        module_key=module_key,
+    )
+
+    response = await live_stack.client.post(
+        live_stack.flow.sessions_path,
+        headers={"X-API-Key": secret, "Authorization": f"Bearer {module_token}"},
+    )
+
+    assert response.status_code == 201, response.text
+    # a service key would be audited as an api_key actor without a user
+    assert await _started_audit_actors(db_container, live_stack.flow.flow_id) == [
+        ("user", admin_user.id)
+    ]
+
+
+async def test_a_module_session_cannot_start_live_transcription_its_human_may_not_run(
+    live_stack: LiveStack, admin_user, db_container
+):
+    module_key = await enable_module(db_container, tenant_id=admin_user.tenant_id)
+    secret = await install_module(
+        live_stack.client,
+        admin_token=_bearer(live_stack.headers),
+        module_key=module_key,
+    )
+    async with db_container() as container:
+        outsider = await container.user_repo().add(
+            UserAdd(
+                email=f"outsider-{uuid4().hex[:8]}@example.com",
+                username=f"outsider-{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=admin_user.tenant_id,
+            )
+        )
+        outsider_token = container.auth_service().create_access_token_for_user(outsider)
+    module_token = await module_login(
+        live_stack.client,
+        service_key=secret,
+        user_token=outsider_token,
+        module_key=module_key,
+    )
+
+    response = await live_stack.client.post(
+        live_stack.flow.sessions_path,
+        headers={"X-API-Key": secret, "Authorization": f"Bearer {module_token}"},
+    )
+
+    # the tenant-wide key alone could run this flow; the human in the session cannot
+    assert response.status_code == 403, response.text
+    assert await _started_audit_actors(db_container, live_stack.flow.flow_id) == []
+
+
+async def test_an_unexpected_failure_still_ends_the_session_with_an_error(
+    live_stack: LiveStack, monkeypatch: pytest.MonkeyPatch
+):
+    async def broken(_grant):
+        raise RuntimeError("database went away")
+
+    monkeypatch.setattr(
+        flow_live_transcription_socket_router, "_load_upstream_target", broken
+    )
+    session = await live_stack.open_session()
+
+    async with connect(
+        live_stack.socket_url(session), subprotocols=_subprotocols(session["ticket"])
+    ) as socket:
+        events = [json.loads(message) async for message in socket]
+        close_code = socket.close_code
+
+    assert [event["code"] for event in events] == ["internal_error"]
+    assert close_code == 1000

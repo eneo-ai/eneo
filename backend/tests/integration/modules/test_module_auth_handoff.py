@@ -23,10 +23,15 @@ from eneo.database.database import get_session_with_transaction
 from eneo.modules.module import ModuleCreate
 from eneo.tenants.tenant import TenantBase
 from eneo.users.user import UserAdd, UserState
+from tests.integration.module_session_support import (
+    REDIRECT_URI,
+    enable_module,
+    install_module,
+    module_login,
+)
 
 pytestmark = pytest.mark.integration
 
-REDIRECT_URI = "https://module.example.com/auth/callback"
 UPDATED_REDIRECT_URI = "https://module.example.com/login/callback"
 
 
@@ -651,52 +656,21 @@ async def issue_module_session(
     module_key: str,
     resource_permissions: dict[str, str] | None = None,
 ) -> tuple[str, str]:
-    """Install a module with a fresh service key and complete the SSO handoff.
+    """Install a module with a fresh service key and sign the admin in.
 
     Returns the service key secret and the module user token, the two
     credentials a module backend sends on every Eneo call.
     """
-    body: dict[str, object] = {
-        "name": f"module-key-{uuid4().hex[:8]}",
-        "key_type": ApiKeyType.SK.value,
-        "ownership": ApiKeyOwnership.SERVICE.value,
-        "permission": ApiKeyPermission.WRITE.value,
-        "scope_type": ApiKeyScopeType.TENANT.value,
-        "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
-    }
-    if resource_permissions is not None:
-        body["resource_permissions"] = resource_permissions
-    admin_headers = {"Authorization": f"Bearer {admin_token}"}
-    created = await client.post("/api/v1/api-keys", json=body, headers=admin_headers)
-    assert created.status_code == 201, created.text
-    service_key = created.json()
-
-    installed = await client.put(
-        module_installation_path(module_key),
-        json={
-            "redirect_uris": [REDIRECT_URI],
-            "service_key_id": service_key["api_key"]["id"],
-        },
-        headers=admin_headers,
+    secret = await install_module(
+        client,
+        admin_token=admin_token,
+        module_key=module_key,
+        resource_permissions=resource_permissions,
     )
-    assert installed.status_code == 200, installed.text
-
-    ticket_response = await client.post(
-        "/api/v1/module-auth/tickets/",
-        json={"module_key": module_key, "redirect_uri": REDIRECT_URI, "state": "s"},
-        headers=admin_headers,
+    token = await module_login(
+        client, service_key=secret, user_token=admin_token, module_key=module_key
     )
-    assert ticket_response.status_code == 201, ticket_response.text
-    redirect_target = ticket_response.json()["redirect_target"]
-    ticket = parse_qs(urlparse(redirect_target).query)["ticket"][0]
-
-    exchange = await client.post(
-        "/api/v1/module-auth/token/",
-        json={"ticket": ticket},
-        headers={"X-API-Key": service_key["secret"]},
-    )
-    assert exchange.status_code == 200, exchange.text
-    return service_key["secret"], exchange.json()["access_token"]
+    return secret, token
 
 
 @pytest.mark.asyncio
@@ -781,6 +755,60 @@ async def test_a_token_for_an_unknown_module_is_unauthenticated_not_not_found(
     response = await client.get(
         FLOW_RUN_CAPACITY_URL,
         headers={"X-API-Key": secret, "Authorization": f"Bearer {foreign_token}"},
+    )
+
+    assert response.status_code == 401, response.text
+
+
+@pytest.mark.asyncio
+async def test_a_module_token_used_with_another_modules_key_is_refused(
+    client, admin_token, admin_user, db_container, enabled_module
+):
+    _secret, access_token = await issue_module_session(
+        client, admin_token=admin_token, module_key=enabled_module.name
+    )
+    other_module = await enable_module(db_container, tenant_id=admin_user.tenant_id)
+    other_secret = await install_module(
+        client, admin_token=admin_token, module_key=other_module
+    )
+
+    response = await client.get(
+        FLOW_RUN_CAPACITY_URL,
+        headers={"X-API-Key": other_secret, "Authorization": f"Bearer {access_token}"},
+    )
+
+    # both credentials are valid; the broker refuses the pairing
+    assert response.status_code == 403, response.text
+    assert response.json()["message"] == "API key is not registered for this module."
+
+
+@pytest.mark.asyncio
+async def test_a_module_token_for_a_user_of_another_tenant_is_unauthenticated(
+    client, admin_token, db_container, enabled_module
+):
+    secret, _access_token = await issue_module_session(
+        client, admin_token=admin_token, module_key=enabled_module.name
+    )
+    async with db_container() as container:
+        other_tenant = await container.tenant_repo().add(
+            TenantBase(name=f"other-tenant-{uuid4().hex[:8]}")
+        )
+        assert other_tenant is not None
+        stranger = await container.user_repo().add(
+            UserAdd(
+                email=f"stranger-{uuid4().hex[:8]}@example.com",
+                username=f"stranger-{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=other_tenant.id,
+            )
+        )
+        stranger_token = container.auth_service().create_access_token_for_user(
+            stranger, audience=f"eneo-module:{enabled_module.name}"
+        )
+
+    response = await client.get(
+        FLOW_RUN_CAPACITY_URL,
+        headers={"X-API-Key": secret, "Authorization": f"Bearer {stranger_token}"},
     )
 
     assert response.status_code == 401, response.text

@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import socket
 from typing import cast
 
 import pytest
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 
 from eneo.flows.runtime.live_transcription import relay
 from eneo.flows.runtime.live_transcription.relay import (
@@ -29,16 +30,19 @@ TENTH_OF_A_SECOND = b"\x01\x00" * 1600
 class FakeBrowser:
     """The browser end of the relay: queued messages in, JSON events out."""
 
-    def __init__(self, *messages: dict[str, object]) -> None:
+    def __init__(self, *messages: dict[str, object], gone: bool = False) -> None:
         self._inbox: asyncio.Queue[dict[str, object]] = asyncio.Queue()
         for message in messages:
             self._inbox.put_nowait(message)
         self.events: list[dict[str, object]] = []
+        self._gone = gone
 
     async def receive(self) -> dict[str, object]:
         return await self._inbox.get()
 
     async def send_json(self, data: dict[str, object]) -> None:
+        if self._gone:
+            raise WebSocketDisconnect(1001)
         self.events.append(data)
 
 
@@ -55,7 +59,11 @@ def leave() -> dict[str, object]:
 
 
 async def run_relay(
-    browser: FakeBrowser, upstream_url: str, *, max_seconds: int = 60
+    browser: FakeBrowser,
+    upstream_url: str,
+    *,
+    max_seconds: int = 60,
+    idle_timeout_seconds: float = 300,
 ) -> tuple[str, LiveSessionStats]:
     stats = LiveSessionStats()
     outcome = await relay_live_session(
@@ -64,6 +72,8 @@ async def run_relay(
         api_key="live-secret",
         model_name=MODEL,
         max_seconds=max_seconds,
+        idle_timeout_seconds=idle_timeout_seconds,
+        final_text_timeout_seconds=30,
         stats=stats,
     )
     return outcome, stats
@@ -173,8 +183,8 @@ async def test_audio_past_the_duration_limit_is_not_forwarded():
 
 @pytest.mark.parametrize(
     "frame",
-    [b"\x01\x00\x01", b"\x00" * (relay.MAX_FRAME_BYTES + 2)],
-    ids=["odd_length", "oversized"],
+    [b"", b"\x01\x00\x01", b"\x00" * (relay.MAX_FRAME_BYTES + 2)],
+    ids=["empty", "odd_length", "oversized"],
 )
 async def test_a_malformed_audio_frame_ends_the_session_unforwarded(frame: bytes):
     browser = FakeBrowser(audio(frame))
@@ -199,16 +209,69 @@ async def test_a_browser_that_leaves_closes_the_model_session():
     assert not [event for event in browser.events if event["type"] == "error"]
 
 
-async def test_a_silent_browser_times_out(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(relay, "IDLE_TIMEOUT_SECONDS", 0.05)
+async def test_a_silent_browser_times_out():
     browser = FakeBrowser()
 
     async with fake_realtime_server() as server:
-        outcome, _ = await run_relay(browser, server.url)
+        outcome, _ = await run_relay(browser, server.url, idle_timeout_seconds=0.05)
 
     assert outcome == "idle_timeout"
     assert browser.events[-1]["code"] == "idle_timeout"
     assert browser.events[-1]["retryable"] is False
+
+
+async def test_a_text_message_other_than_stop_ends_the_session():
+    browser = FakeBrowser(
+        audio(TENTH_OF_A_SECOND), {"type": "websocket.receive", "text": "{}"}
+    )
+
+    async with fake_realtime_server() as server:
+        outcome, _ = await run_relay(browser, server.url)
+        await server.wait_closed()
+
+    assert outcome == "invalid_message"
+    assert browser.events[-1]["code"] == "invalid_message"
+    assert appended(server) == [b64(TENTH_OF_A_SECOND)]
+
+
+async def test_a_model_server_that_stops_reading_ends_the_session_in_bounded_time(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(relay, "UPSTREAM_SEND_TIMEOUT_SECONDS", 0.3)
+    monkeypatch.setattr(relay, "UPSTREAM_CLOSE_TIMEOUT_SECONDS", 0.2)
+    # random, so the connection's compression cannot shrink it below the buffers
+    largest = os.urandom(relay.MAX_FRAME_BYTES)
+    browser = FakeBrowser(*(audio(largest) for _ in range(400)))
+
+    async with fake_realtime_server(stop_reading=True) as server:
+        outcome, _ = await asyncio.wait_for(
+            run_relay(browser, server.url, max_seconds=100_000), timeout=5
+        )
+
+    assert outcome == "upstream_timeout"
+    assert browser.events[-1]["code"] == "upstream_timeout"
+    assert browser.events[-1]["retryable"] is True
+
+
+async def test_a_model_server_that_closes_at_once_is_reported_as_retryable():
+    browser = FakeBrowser()
+
+    async with fake_realtime_server(close_at_once=True) as server:
+        outcome, _ = await run_relay(browser, server.url)
+
+    assert outcome == "upstream_closed"
+    assert browser.events[-1]["code"] == "upstream_closed"
+    assert browser.events[-1]["retryable"] is True
+
+
+async def test_a_browser_gone_before_ready_ends_the_session_quietly():
+    browser = FakeBrowser(gone=True)
+
+    async with fake_realtime_server() as server:
+        outcome, _ = await run_relay(browser, server.url)
+        await server.wait_closed()
+
+    assert outcome == "client_closed"
 
 
 @pytest.mark.parametrize(

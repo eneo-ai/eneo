@@ -34,7 +34,11 @@ async def fake_realtime_server(
     deltas: Sequence[str] = ("Hej", " världen"),
     fail_with: str | None = None,
     hang_up: bool = False,
+    close_at_once: bool = False,
+    stop_reading: bool = False,
 ) -> AsyncIterator[FakeRealtimeServer]:
+    """`close_at_once` closes right after the handshake; `stop_reading` never reads,
+    so a client's sends back up once the socket buffers are full."""
     state = FakeRealtimeServer()
 
     async def handler(connection: ServerConnection) -> None:
@@ -42,6 +46,11 @@ async def fake_realtime_server(
         pending = list(deltas)
         sent: list[str] = []
         try:
+            if close_at_once:
+                return
+            if stop_reading:
+                await connection.wait_closed()
+                return
             await connection.send(
                 json.dumps({"type": "session.created", "id": "sess-test", "created": 0})
             )
@@ -83,7 +92,7 @@ async def fake_realtime_server(
         finally:
             state.closed.set()
 
-    async with serve(handler, "127.0.0.1", 0) as server:
+    async with serve(handler, "127.0.0.1", 0, close_timeout=0.5) as server:
         port = next(iter(server.sockets)).getsockname()[1]
         state.url = f"ws://127.0.0.1:{port}/v1/realtime"
         yield state

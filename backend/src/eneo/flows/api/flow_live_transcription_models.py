@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Final, Literal
+from typing import Any, Final, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from eneo.flows.runtime.live_transcription.admission import (
     LiveTranscriptionUnavailableReason,
 )
+from eneo.main.exceptions import ErrorCodes
 
 LIVE_TRANSCRIPTION_SUBPROTOCOL: Final = "eneo-live.v1"
 LIVE_TRANSCRIPTION_TICKET_PREFIX: Final = "ticket."
@@ -80,3 +81,26 @@ class FlowLiveTranscriptionAvailabilityPublic(BaseModel):
             "own model), `model_unavailable`, or `model_not_realtime`."
         ),
     )
+
+
+class FlowLiveTranscriptionUnavailableContext(BaseModel):
+    reason: LiveTranscriptionUnavailableReason = Field(
+        description=(
+            "`transcription_disabled`: the flow does not transcribe audio. "
+            "`transcription_service_mode`: an external service transcribes with its own "
+            "model. `model_unavailable`: the flow's transcription model is not available "
+            "in its space. `model_not_realtime`: the model does not support realtime."
+        )
+    )
+
+
+class FlowLiveTranscriptionUnavailableError(BaseModel):
+    """409 body when live preview cannot start for the flow."""
+
+    message: str
+    eneo_error_code: ErrorCodes
+    code: Literal["flow_live_transcription_unavailable"]
+    context: FlowLiveTranscriptionUnavailableContext
+    request_id: str | None = None
+    error_id: str | None = None
+    details: dict[str, Any] | None = None

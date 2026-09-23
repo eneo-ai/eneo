@@ -29,12 +29,14 @@ from eneo.flows.runtime.live_transcription.relay import (
     LiveSessionEnded,
     LiveSessionStats,
     relay_live_session,
+    send_error,
 )
 from eneo.flows.runtime.live_transcription.tickets import (
     LiveTranscriptionGrant,
     LiveTranscriptionTicketStore,
 )
 from eneo.flows.runtime.live_transcription.upstream import realtime_websocket_url
+from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
@@ -91,7 +93,9 @@ async def live_transcription_socket(websocket: WebSocket) -> None:
         return
 
     await websocket.accept(subprotocol=LIVE_TRANSCRIPTION_SUBPROTOCOL)
+    settings = get_settings()
     stats = LiveSessionStats()
+    outcome = "cancelled"
     try:
         target = await _load_upstream_target(grant)
         outcome = await relay_live_session(
@@ -100,30 +104,38 @@ async def live_transcription_socket(websocket: WebSocket) -> None:
             api_key=target.api_key,
             model_name=target.model_name,
             max_seconds=grant.max_seconds,
+            idle_timeout_seconds=settings.flow_live_transcription_idle_timeout_seconds,
+            final_text_timeout_seconds=(
+                settings.flow_live_transcription_final_text_timeout_seconds
+            ),
             stats=stats,
         )
     except LiveSessionEnded as ended:
-        await websocket.send_json(
-            {
-                "type": "error",
-                "code": ended.code,
-                "message": ended.message,
-                "retryable": ended.retryable,
-            }
-        )
         outcome = ended.code
-    logger.info(
-        "flow live transcription session ended",
-        extra={
-            "outcome": outcome,
-            "tenant_id": str(grant.tenant_id),
-            "flow_id": str(grant.flow_id),
-            "step_id": str(grant.step_id),
-            "model_id": str(grant.model_id),
-            "audio_seconds": round(stats.audio_seconds, 1),
-        },
-    )
-    await _close_quietly(websocket)
+        await send_error(websocket, ended)
+    except Exception:
+        # cancellation is a BaseException and passes through untouched
+        outcome = "internal_error"
+        logger.exception("flow live transcription session failed")
+        await send_error(
+            websocket,
+            LiveSessionEnded(
+                "internal_error", "The live transcription session failed."
+            ),
+        )
+    finally:
+        logger.info(
+            "flow live transcription session ended",
+            extra={
+                "outcome": outcome,
+                "tenant_id": str(grant.tenant_id),
+                "flow_id": str(grant.flow_id),
+                "step_id": str(grant.step_id),
+                "model_id": str(grant.model_id),
+                "audio_seconds": round(stats.audio_seconds, 1),
+            },
+        )
+        await _close_quietly(websocket)
 
 
 async def _origin_allowed(websocket: WebSocket) -> bool:

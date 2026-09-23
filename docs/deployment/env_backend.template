@@ -417,6 +417,13 @@ FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS=900
 # budget together; provisional defaults pending measurement (eneo-hy7c).
 FLOW_AUDIO_MAX_DURATION_SECONDS=18000
 FLOW_AUDIO_MAX_DECODED_BYTES=2147483648
+# Live transcription preview. A recording keeps streaming audio (silence too),
+# so the idle timeout only ends a paused or stalled client. The final-text wait
+# covers what the model server has not decoded when recording stops; raise it for
+# a slow (CPU) model server. A session is never longer than
+# FLOW_AUDIO_MAX_DURATION_SECONDS.
+FLOW_LIVE_TRANSCRIPTION_IDLE_TIMEOUT_SECONDS=300
+FLOW_LIVE_TRANSCRIPTION_FINAL_TEXT_TIMEOUT_SECONDS=60
 # Provider silence deadline, not total proposal duration; classification inherits.
 AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS=300
 

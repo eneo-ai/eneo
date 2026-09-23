@@ -160,6 +160,26 @@ def test_retry_failed_run_contract(openapi_spec):
     }
 
 
+def test_live_transcription_refusal_types_its_reason(openapi_spec):
+    """The 409 reason is a closed set clients can switch on, not a free dict."""
+    path = _path_for_operation_id(
+        openapi_spec, "create_flow_live_transcription_session"
+    )
+    operation = _get_operation(openapi_spec, path, "post")
+    body = _resolve_component_ref(
+        openapi_spec,
+        operation["responses"]["409"]["content"]["application/json"]["schema"],
+    )
+    context = _resolve_component_ref(openapi_spec, body["properties"]["context"])
+
+    assert _extract_enum_values(openapi_spec, context["properties"]["reason"]) == {
+        "transcription_disabled",
+        "transcription_service_mode",
+        "model_unavailable",
+        "model_not_realtime",
+    }
+
+
 def _is_non_ai_builder_flow_related_path(path: str) -> bool:
     if path.startswith("/api/v1/flows/ai-builder"):
         return False
