@@ -4016,7 +4016,7 @@ export interface paths {
     };
     /**
      * List Flows
-     * @description List flow definitions in a space with pagination-friendly sparse metadata. The `count` field in the paginated response reports the number of items returned in the current page, not the total number of matching flows across all pages. `has_more` reports whether another page exists after this offset window. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin. Service-key principals may use this endpoint only for published-flow discovery in their scoped space. Service-key webapps should use the returned ids with `GET /api/v1/flows/{id}/published/` and the runtime paths from that response; draft authoring and AI Builder still require a user principal.
+     * @description List the flows the caller can see, with pagination-friendly sparse metadata. With `space_id` the list covers that space. Without it the list covers every space the signed-in user belongs to: their personal space, spaces shared with them directly or through a group, and the organization space when their role there shows flows. A space-scoped API key narrows the list to its space. Drafts appear only in spaces where the caller may edit flows, and `published_only=true` returns published flows only, which is what clients that run flows need. Seeing a flow does not mean the caller may run it or that it is ready to run. Items are ordered oldest first. The `count` field in the paginated response reports the number of items returned in the current page, not the total number of matching flows across all pages. `has_more` reports whether another page exists after this offset window. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin. Service-key principals may use this endpoint only for published-flow discovery in their scoped space, and must send its `space_id`: a key has no space memberships to list. Service-key webapps should use the returned ids with `GET /api/v1/flows/{id}/published/` and the runtime paths from that response; draft authoring and AI Builder still require a user principal.
      */
     get: operations["list_flows"];
     put?: never;
@@ -16836,6 +16836,7 @@ export interface components {
       | "flow_owner_required"
       | "flow_service_key_admin_required"
       | "flow_service_key_principal_not_supported"
+      | "flow_service_key_space_id_required"
       | "flow_run_invalid_idempotency_key"
       | "flow_run_stale_version"
       | "flow_run_retry_source_not_failed"
@@ -18467,6 +18468,7 @@ export interface components {
      *         "state": "configured"
      *       },
      *       "space_id": "00000000-0000-0000-0000-000000000020",
+     *       "space_name": "HR",
      *       "step_count": 2,
      *       "steps": [
      *         {
@@ -18541,6 +18543,11 @@ export interface components {
        * Format: uuid
        */
       space_id: string;
+      /**
+       * Space Name
+       * @description Name of the space the flow belongs to, as stored, so clients can group a list by space without reading spaces.
+       */
+      space_name: string;
       /**
        * Step Count
        * @description Number of steps in the flow's current step definitions. This reflects the editable draft; once a flow is published, editing is blocked, so a published flow's steps are frozen to what was published.
@@ -23940,6 +23947,7 @@ export interface components {
      *         "state": "configured"
      *       },
      *       "space_id": "00000000-0000-0000-0000-000000000020",
+     *       "space_name": "HR",
      *       "step_count": 2,
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "updated_at": "2026-03-17T10:00:00Z"
@@ -23983,6 +23991,11 @@ export interface components {
        * Format: uuid
        */
       space_id: string;
+      /**
+       * Space Name
+       * @description Name of the space the flow belongs to, as stored, so clients can group a list by space without reading spaces.
+       */
+      space_name: string;
       /**
        * Step Count
        * @description Number of steps in the flow's current step definitions. This reflects the editable draft; once a flow is published, editing is blocked, so a published flow's steps are frozen to what was published.
@@ -51507,9 +51520,11 @@ export interface operations {
   };
   list_flows: {
     parameters: {
-      query: {
-        /** @description Only return flows that belong to this space. */
-        space_id: string;
+      query?: {
+        /** @description Only return flows in this space. Omit it to list the flows of every space the signed-in user belongs to; service keys must send it. */
+        space_id?: string | null;
+        /** @description Only return published flows, for clients that run flows rather than edit them. */
+        published_only?: boolean;
         /** @description Maximum number of flows to return. */
         limit?: number;
         /** @description Number of flows to skip before returning results. */
@@ -51568,6 +51583,7 @@ export interface operations {
            *             "state": "configured"
            *           },
            *           "space_id": "00000000-0000-0000-0000-000000000020",
+           *           "space_name": "HR",
            *           "step_count": 2,
            *           "tenant_id": "00000000-0000-0000-0000-000000000010",
            *           "updated_at": "2026-03-17T10:00:00Z"
@@ -51576,6 +51592,22 @@ export interface operations {
            *     }
            */
           "application/json": components["schemas"]["OffsetPaginatedResponse_FlowSparsePublic_"];
+        };
+      };
+      /** @description A service key listed flows without `space_id`. A key has no space memberships, so it names the space it is scoped to. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_service_key_space_id_required",
+           *       "eneo_error_code": 9007,
+           *       "message": "Service keys must name the space to list flows from with space_id."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller lacks the required shared-space role, `flow_owner_required` when the caller is not allowed to override another member's draft, and the current fail-closed `flow_service_key_principal_not_supported` when a service-key principal calls flow authoring endpoints before first-class support lands. */
