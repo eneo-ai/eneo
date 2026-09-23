@@ -3,6 +3,7 @@
 # Licensed under the MIT License.
 
 
+import ipaddress
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any, Optional
@@ -39,6 +40,25 @@ def _widget_key(widget: Widget, *parts: str) -> str:
     return ":".join(["widget", str(widget.id), *parts])
 
 
+def network_key(client_ip: Optional[str]) -> str:
+    """The client network an IP limit counts against.
+
+    One IPv6 subscriber holds a whole /64 and can send every request from a
+    new address in it, so IPv6 counts per /64; IPv4 per address.
+    """
+    if not client_ip:
+        return "unknown"
+    try:
+        address = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return client_ip
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.ipv4_mapped is not None:
+            return str(address.ipv4_mapped)
+        return str(ipaddress.IPv6Network((address, 64), strict=False))
+    return str(address)
+
+
 class WidgetLimiter:
     """Request-count limits on the anonymous widget surface.
 
@@ -52,7 +72,7 @@ class WidgetLimiter:
 
     async def check_challenge(self, widget: Widget, client_ip: Optional[str]) -> None:
         await self._check(
-            _widget_key(widget, "challenge", client_ip or "unknown"),
+            _widget_key(widget, "challenge", network_key(client_ip)),
             max_requests=self.settings.widget_challenge_rate_limit_per_minute,
             window_seconds=CHALLENGE_WINDOW_SECONDS,
             code="rate_limited_challenge",
@@ -61,7 +81,7 @@ class WidgetLimiter:
 
     async def check_mint(self, widget: Widget, client_ip: Optional[str]) -> None:
         await self._check(
-            _widget_key(widget, "mint", client_ip or "unknown"),
+            _widget_key(widget, "mint", network_key(client_ip)),
             max_requests=self.settings.widget_challenge_rate_limit_per_minute,
             window_seconds=CHALLENGE_WINDOW_SECONDS,
             code="rate_limited_mint",
@@ -81,7 +101,7 @@ class WidgetLimiter:
         # IP limits are a backstop only: CGNAT and campus networks share IPs.
         if client_ip:
             await self._check(
-                _widget_key(widget, "ip", client_ip),
+                _widget_key(widget, "ip", network_key(client_ip)),
                 max_requests=widget.limits.messages_per_ip_hour,
                 window_seconds=IP_WINDOW_SECONDS,
                 code="rate_limited_ip",
