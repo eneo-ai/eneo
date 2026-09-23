@@ -77,13 +77,20 @@ one record from material that does not fit, and the loss of detail is acceptable
 ## Numbering items across sections
 
 Each section is read without knowledge of the others, so ids the AI invents
-restart in every section: two sections can both produce `F1`. If a later step
-refers to items by id, give each section its own prefix. In **Avancerad** mode
-the instruction can use the variable `section_index`, the 1-based number of the
-current section:
+would restart in every section: two sections could both produce `F1`. Eneo
+therefore tells the AI which section it is reading and asks it to start every
+new id with the section number, for example `S2-F1`. You do not need to write
+anything in the instruction for this.
+
+This is guidance to the AI, not a check: Eneo does not rewrite ids afterwards.
+Ids copied from the material stay as they are. If the instruction or the answer
+format sets another id format, the AI follows that instead.
+
+If you want the section number somewhere else, the instruction can use the
+variable `section_index`, the 1-based number of the current section:
 
 ```text
-Give every registered fact the id S{{ section_index }}-F1, S{{ section_index }}-F2, and so on.
+Start each summary with "Part {{ section_index }}:".
 ```
 
 The variable exists only on a step that reads section by section. On other steps
@@ -109,10 +116,11 @@ A single very long line without breaks can still be split mid-sentence.
 
 ## Check the result
 
-After a run, open the run's evidence for the step. A step that read section by
-section shows how many sections it produced and which part of the material each
-section covered, so a missing item can be traced to the section that should have
-produced it. The list of section entries is the step's result.
+After a run, open the run in **Historik** and expand the step. Its result says
+how many sections the step read. In **Avancerad** mode it also shows where each
+section sits in the material, in percent, so a missing item can be traced to the
+section that should have produced it. The list of section entries is the step's
+result, in the order of the material.
 
 If a section's answer still exceeds what the model may write in one reply, the
 step fails instead of returning a partial answer. The usual causes are an
@@ -123,7 +131,7 @@ optional fields. Shorten the per-item output before retrying.
 
 A care plan flow receives a transcript of a four-hour conversation. Step 1 reads
 it **Del för del** and registers every statement as a fact with a source quote
-and a `S{{ section_index }}-` id prefix. Step 2 reads the register **Allt på en
+and an id; Eneo has each section start its ids with its own number. Step 2 reads the register **Allt på en
 gång**, the facts from every section together, groups them by area, and writes
 the plan. The long reading
 happens once, in the step built for it; every later step works on a compact

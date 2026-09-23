@@ -292,6 +292,7 @@ export type FlowRunOutputPayload = {
   structured?: Record<string, unknown> | unknown[];
   template_fill_debug?: Record<string, unknown>;
   template_provenance?: Record<string, unknown>;
+  section_manifest?: Record<string, unknown>;
 };
 
 type WithTypedStepOutput<T extends { output_payload_json?: unknown }> = Omit<

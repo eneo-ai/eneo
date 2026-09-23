@@ -236,7 +236,7 @@ async def test_sections_use_measured_packages_and_persist_order_and_provenance(u
 
 async def test_longer_prompt_reduces_section_size(user):
     sizes = []
-    for prompt in ("Extract a record.", "Extract a record. " * 20):
+    for prompt in ("Extract a record.", "Extract a record. " * 6):
         executor, _, _, run, state, step, _, _, questions, _ = _case(
             user, prompt=prompt
         )
@@ -474,7 +474,71 @@ async def test_section_ordinals_are_rendered_before_each_measurement(
     if section_count == 10:
         ninth = prepared.calls[8].prepared.completion_call.selected_package
         tenth = prepared.calls[9].prepared.completion_call.selected_package
-        assert tenth.input_reserve.tokens == ninth.input_reserve.tokens + 1
+        ninth_prompt = prepared.calls[8].prepared.completion_call.effective_prompt
+        tenth_prompt = prepared.calls[9].prepared.completion_call.effective_prompt
+        assert tenth.input_reserve.tokens - ninth.input_reserve.tokens == len(
+            tenth_prompt
+        ) - len(ninth_prompt)
+
+
+@pytest.mark.parametrize("section_count", [1, 10])
+async def test_each_section_tells_the_model_its_number_before_measurement(
+    user, section_count
+):
+    # The author writes no section variable; the runtime names the section and
+    # the id prefix in every dispatched request, and that request is the one
+    # that was measured.
+    executor, _, assistant, run, state, step, text, _, _, _ = _case(
+        user, prompt="Register every fact with an id.", text="x" * (300 * section_count)
+    )
+    measured = []
+
+    async def preflight(**kwargs):
+        preview = _section_preflight(
+            len(kwargs["prompt_override"]) + len(kwargs["question"]), **kwargs
+        )
+        package = replace(preview.preferred, output_cap_tokens=300)
+        measured.append(kwargs["prompt_override"])
+        return replace(
+            preview,
+            capacity=ModelCapacity(100_000, 300),
+            preferred=package,
+            fallback=None,
+        )
+
+    assistant.preflight_response_context.side_effect = preflight
+    base = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+    prepared = await prepare_text_sections(
+        step=step, run=run, state=state, base=base, policy=FlowMappedExecutionPolicy()
+    )
+
+    assert len(prepared.calls) == section_count
+    for index, call in enumerate(prepared.calls, start=1):
+        prompt = call.prepared.completion_call.effective_prompt
+        assert prompt.startswith("Register every fact with an id.")
+        assert f"This is section {index} of the material" in prompt
+        assert f'"S{index}-"' in prompt
+        assert prompt.index('"S') < prompt.index("Return ONLY valid JSON.")
+        assert prompt in measured
+
+
+async def test_summarized_reading_gets_no_section_id_guidance(user):
+    executor, _, _, run, state, step, _, _, _, _ = _case(user)
+    step = replace(step, input_config={"text_processing": {"mode": "summarize"}})
+    base = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+    prepared = await prepare_text_sections(
+        step=step, run=run, state=state, base=base, policy=FlowMappedExecutionPolicy()
+    )
+
+    assert len(prepared.calls) > 1
+    assert not any(
+        "This is section" in call.prepared.completion_call.effective_prompt
+        for call in prepared.calls
+    )
 
 
 @pytest.mark.parametrize("mode", [None, "summarize"])

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FlowRunError, FlowRunResultFile, FlowRunStep, Eneo } from "@eneo/eneo-js";
+  import type { FlowRunError, FlowRunResultFile, FlowRunStep, FlowStep, Eneo } from "@eneo/eneo-js";
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { IconCopy } from "@eneo/icons/copy";
   import { IconCheck } from "@eneo/icons/check";
@@ -37,10 +37,12 @@
     isReviewPolicyRunErrorRelevantForStep,
     type FlowReviewPolicyErrorStep
   } from "$lib/features/flows/flowRuntimeErrorMapping";
-  import type {
-    RuntimeInputSummary,
-    TemplateProvenanceSummary
+  import {
+    getSectionReadingSummary,
+    type RuntimeInputSummary,
+    type TemplateProvenanceSummary
   } from "$lib/features/flows/flowEvidenceProvenance";
+  import { getTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
 
   type FlowRunTranscriptionTelemetry = {
     transcript_bytes?: number;
@@ -200,6 +202,21 @@
     }
   });
 
+  // A step that read its material part by part says so, and what that means for
+  // the result: one entry per part, or one folded result when it summarized.
+  const sectionReading = $derived(getSectionReadingSummary(result.output_payload_json));
+  const sectionReadingText = $derived.by(() => {
+    if (!sectionReading) return null;
+    const count = sectionReading.ranges.length;
+    if (count === 1) return m.flow_run_sections_read_one();
+    const mode = getTextProcessingMode({
+      input_config: (stepDef?.input_config ?? null) as FlowStep["input_config"]
+    });
+    return mode === "summarize"
+      ? m.flow_run_sections_read_summarized({ count: String(count) })
+      : m.flow_run_sections_read_each({ count: String(count) });
+  });
+
   const outputText = $derived(
     typeof result.output_payload_json?.text === "string" ? result.output_payload_json.text : ""
   );
@@ -353,6 +370,25 @@
 
             {#if result.output_payload_json.structured}
               <div class="mt-1">
+                {#if sectionReading && sectionReadingText}
+                  <p class="text-secondary mb-2 text-xs text-pretty">
+                    {sectionReadingText}
+                    {#if isPowerUser && sectionReading.ranges.length > 1}
+                      <span class="block tabular-nums">
+                        {m.flow_run_sections_positions()}
+                        {sectionReading.ranges
+                          .map((range, index) =>
+                            m.flow_run_section_position({
+                              index: String(index + 1),
+                              from: String(range.from),
+                              to: String(range.to)
+                            })
+                          )
+                          .join(", ")}
+                      </span>
+                    {/if}
+                  </p>
+                {/if}
                 {#if isPowerUser}
                   <Badge class="bg-accent-dimmer text-accent-stronger mb-1">
                     {m.flow_run_structured_json_badge()}

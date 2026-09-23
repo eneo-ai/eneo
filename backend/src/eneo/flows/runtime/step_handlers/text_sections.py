@@ -38,6 +38,15 @@ from eneo.flows.runtime.step_input_resolution import (
 )
 from eneo.main.exceptions import TypedIOValidationException
 
+# Each section is read without the others, so ids the model invents restart per
+# section. This is guidance, not a guarantee: the runtime does not rewrite ids.
+_SECTION_ID_GUIDANCE = (
+    "This is section {n} of the material; the other sections are read separately. "
+    'Start each new text id you create with "S{n}-" and keep it unique in this '
+    "answer, unless the instructions or the schema set another id format. Keep ids "
+    "copied from the material, and references to them, unchanged."
+)
+
 
 @dataclass(frozen=True)
 class PreparedTextSections:
@@ -122,9 +131,20 @@ async def prepare_text_processing_call(
         context,
         binding_ref="assistant_prompt",
     )
+    processing = text_processing_config(step.input_config)
     prompt = append_output_format_instructions(
         interpolation.text,
-        resolve_format_spec(step.output_type).prompt_instructions(step.output_contract),
+        (
+            *(
+                (_SECTION_ID_GUIDANCE.format(n=section_index),)
+                if processing is not None
+                and processing.mode == TextProcessingMode.PROCESS_EACH_SECTION
+                else ()
+            ),
+            *resolve_format_spec(step.output_type).prompt_instructions(
+                step.output_contract
+            ),
+        ),
     )
     binding = resolve_step_input_binding(
         step=step,

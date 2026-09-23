@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { getRuntimeInputSummary, getTemplateProvenanceSummary } from "./flowEvidenceProvenance";
+import {
+  getRuntimeInputSummary,
+  getSectionReadingSummary,
+  getTemplateProvenanceSummary
+} from "./flowEvidenceProvenance";
 
 describe("flowEvidenceProvenance", () => {
   it("extracts runtime input metadata for evidence rendering", () => {
@@ -62,6 +66,26 @@ describe("flowEvidenceProvenance", () => {
       getRuntimeInputSummary({
         runtime_input_file_ids: [],
         input_payload_json: { text: "plain input" }
+      })
+    ).toBeNull();
+  });
+
+  it("places each part of a part-by-part reading in the material, and refuses a malformed manifest", () => {
+    const core = (start_char: number, end_char: number) => ({ core: { start_char, end_char } });
+    expect(
+      getSectionReadingSummary({
+        section_manifest: { character_length: 300, sections: [core(0, 100), core(100, 300)] }
+      })
+    ).toEqual({
+      ranges: [
+        { from: 0, to: 33 },
+        { from: 33, to: 100 }
+      ]
+    });
+    expect(getSectionReadingSummary({ structured: {} })).toBeNull();
+    expect(
+      getSectionReadingSummary({
+        section_manifest: { character_length: 300, sections: [core(0, 100), { core: {} }] }
       })
     ).toBeNull();
   });

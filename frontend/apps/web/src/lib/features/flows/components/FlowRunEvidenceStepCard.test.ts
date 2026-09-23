@@ -25,7 +25,8 @@ function renderCard(
   stepResult: FlowRunStep = result,
   transcriptContext: FlowRunTranscriptContext | null = null,
   onRepairFailure: ((stepOrder: number) => void) | null = null,
-  runError: { step_order?: number | null } | null = null
+  runError: { step_order?: number | null } | null = null,
+  overrides: { stepDef?: Record<string, unknown>; isPowerUser?: boolean } = {}
 ): string {
   return render(FlowRunEvidenceStepCard, {
     props: {
@@ -51,7 +52,8 @@ function renderCard(
       onDownloadArtifact: async () => undefined,
       getRuntimeInputSummaryLabel: () => "",
       formatElapsedMs: () => "",
-      formatBytes: () => ""
+      formatBytes: () => "",
+      ...overrides
     }
   }).body;
 }
@@ -127,6 +129,38 @@ describe("FlowRunEvidenceStepCard", () => {
     };
     const html = renderCard(false, failedToStart, null, null, { step_order: 2 });
     expect(html).not.toContain(m.flow_run_step_not_run());
+  });
+
+  it("says how a step that read part by part produced its result", () => {
+    const manifest = (ends: number[]) => ({
+      character_length: ends[ends.length - 1],
+      sections: ends.map((end, index) => ({
+        core: { start_char: index === 0 ? 0 : ends[index - 1], end_char: end }
+      }))
+    });
+    const sectioned = (ends: number[]): FlowRunStep => ({
+      ...result,
+      output_payload_json: { structured: { facts: [] }, section_manifest: manifest(ends) }
+    });
+    const each = renderCard(false, sectioned([250, 500, 1000]));
+    expect(each).toContain(m.flow_run_sections_read_each({ count: "3" }));
+    expect(each).not.toContain(m.flow_run_sections_positions());
+
+    const summarizeStep = { input_config: { text_processing: { mode: "summarize" } } };
+    expect(
+      renderCard(false, sectioned([500, 1000]), null, null, null, { stepDef: summarizeStep })
+    ).toContain(m.flow_run_sections_read_summarized({ count: "2" }));
+
+    expect(renderCard(false, sectioned([1000]))).toContain(m.flow_run_sections_read_one());
+
+    const advanced = renderCard(false, sectioned([250, 500, 1000]), null, null, null, {
+      isPowerUser: true
+    });
+    expect(advanced).toContain(m.flow_run_section_position({ index: "3", from: "50", to: "100" }));
+
+    expect(renderCard(false, { ...result, output_payload_json: { structured: {} } })).not.toContain(
+      m.flow_run_sections_read_one()
+    );
   });
 
   it("shows when the current attempt's evidence was not loaded", () => {

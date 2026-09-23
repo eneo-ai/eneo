@@ -40,6 +40,33 @@ export function getRuntimeInputSummary(stepResultOrPayload: unknown): RuntimeInp
   };
 }
 
+/** Where each part of a step that read its material part by part sits in that material, in percent. */
+export type SectionReadingSummary = {
+  ranges: { from: number; to: number }[];
+};
+
+/**
+ * The runtime stores `section_manifest` on the result of a step that read its
+ * material part by part. A malformed manifest reads as no summary rather than
+ * a wrong count.
+ */
+export function getSectionReadingSummary(payload: unknown): SectionReadingSummary | null {
+  const manifest = asObject(asObject(payload)?.section_manifest);
+  const length = manifest?.character_length;
+  const sections = manifest?.sections;
+  if (typeof length !== "number" || length <= 0 || !Array.isArray(sections)) return null;
+  const ranges: SectionReadingSummary["ranges"] = [];
+  for (const section of sections) {
+    const core = asObject(asObject(section)?.core);
+    if (typeof core?.start_char !== "number" || typeof core.end_char !== "number") return null;
+    ranges.push({
+      from: Math.round((core.start_char / length) * 100),
+      to: Math.round((core.end_char / length) * 100)
+    });
+  }
+  return ranges.length > 0 ? { ranges } : null;
+}
+
 export function getTemplateProvenanceSummary(payload: unknown): TemplateProvenanceSummary | null {
   const root = asObject(payload);
   const provenance = asObject(root?.template_provenance);

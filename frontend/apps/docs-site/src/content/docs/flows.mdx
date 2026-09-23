@@ -257,9 +257,11 @@ answer exceed the cap. A response stopped by the output limit fails the step.
 The bounded search can choose smaller sections when token counts or the selected
 request package change; each accepted section has a measured fit.
 
-In section prompts, `{{ section_index }}` is the section's 1-based ordinal. For
-example, `S{{ section_index }}-F1` gives each section a distinct fact-ID prefix.
-This variable is unavailable in input bindings, ordinary steps and summarization.
+Each section request tells the model its section number and asks it to start
+new ids with `S<n>-`, so ids invented in different sections do not collide. This
+is guidance; the runtime does not rewrite ids. In section prompts,
+`{{ section_index }}` is the section's 1-based ordinal for any other use. This
+variable is unavailable in input bindings, ordinary steps and summarization.
 
 Calls run
 sequentially under the step's shared deadline, without passing earlier section
