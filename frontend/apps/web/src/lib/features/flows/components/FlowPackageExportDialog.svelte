@@ -9,7 +9,6 @@
   import { toast } from "$lib/components/toast";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as Card from "$lib/components/ui/card/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -151,7 +150,7 @@
   >
     <header class="border-default flex items-start gap-3 border-b px-5 py-4 sm:px-6 sm:py-5">
       <div
-        class="bg-accent-default/10 text-accent-default flex size-10 shrink-0 items-center justify-center rounded-xl"
+        class="bg-secondary text-secondary flex size-10 shrink-0 items-center justify-center rounded-xl"
         aria-hidden="true"
       >
         <PackageOpen class="size-5" />
@@ -169,7 +168,7 @@
     <div class="overflow-y-auto px-5 py-5 sm:px-6">
       <div class="flex flex-col gap-6">
         <section class="flex flex-col gap-4">
-          <h3 class="text-muted text-xs font-semibold tracking-wide uppercase">
+          <h3 class="text-primary text-[0.8125rem] font-bold">
             {m.flow_package_export_section_identity()}
           </h3>
           <Field.Group>
@@ -205,7 +204,7 @@
         </section>
 
         <section class="flex flex-col gap-4">
-          <h3 class="text-muted text-xs font-semibold tracking-wide uppercase">
+          <h3 class="text-primary text-[0.8125rem] font-bold">
             {m.flow_package_export_section_presentation()}
           </h3>
           <Field.Group>
@@ -233,37 +232,36 @@
           </Field.Group>
         </section>
 
-        <Card.Root>
-          <Card.Content class="grid gap-3 p-4 sm:p-5">
-            <div>
-              <h3 class="text-primary text-sm font-semibold tracking-tight">
-                {m.flow_package_export_contents_title()}
-              </h3>
-              {#if stepCount > 0}
-                <p class="text-secondary mt-1 text-sm">
-                  {stepCountLabel(stepCount)}
-                </p>
-              {/if}
-            </div>
-            <ul class="flex flex-col gap-2 text-sm">
-              <li class="flex items-start gap-2">
-                <CheckCircle2
-                  class="text-positive-stronger mt-0.5 size-4 shrink-0"
-                  aria-hidden="true"
-                />
-                <span class="text-secondary leading-relaxed">
-                  {m.flow_package_export_contents_includes()}
-                </span>
-              </li>
-              <li class="flex items-start gap-2">
-                <Minus class="text-muted mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                <span class="text-muted leading-relaxed">
-                  {m.flow_package_export_contents_excludes()}
-                </span>
-              </li>
-            </ul>
-          </Card.Content>
-        </Card.Root>
+        <!-- A linen summary block, not a card inside the dialog's card. -->
+        <div class="bg-secondary grid gap-3 rounded-[9px] px-4 py-3.5">
+          <div>
+            <h3 class="text-primary text-sm font-semibold tracking-tight">
+              {m.flow_package_export_contents_title()}
+            </h3>
+            {#if stepCount > 0}
+              <p class="text-secondary mt-1 text-sm">
+                {stepCountLabel(stepCount)}
+              </p>
+            {/if}
+          </div>
+          <ul class="flex flex-col gap-2 text-sm">
+            <li class="flex items-start gap-2">
+              <CheckCircle2
+                class="text-positive-stronger mt-0.5 size-4 shrink-0"
+                aria-hidden="true"
+              />
+              <span class="text-secondary leading-relaxed">
+                {m.flow_package_export_contents_includes()}
+              </span>
+            </li>
+            <li class="flex items-start gap-2">
+              <Minus class="text-secondary mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              <span class="text-secondary leading-relaxed">
+                {m.flow_package_export_contents_excludes()}
+              </span>
+            </li>
+          </ul>
+        </div>
 
         {#if pendingExport && omittedMcpAssistantCount > 0}
           <Alert.Root>

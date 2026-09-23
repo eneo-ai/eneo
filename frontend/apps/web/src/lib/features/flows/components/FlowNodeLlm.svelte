@@ -5,7 +5,7 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
-  import UserCheck from "lucide-svelte/icons/user-check";
+  import UserCheck from "@lucide/svelte/icons/user-check";
 
   let {
     data
@@ -79,10 +79,7 @@
 
 {#if isPowerUser}
   <!-- Power User: Technical card -->
-  <Card.Root
-    class="{surfaceClass} flow-node border-2 py-0 shadow-sm {borderColor}"
-    style="width: 300px;"
-  >
+  <Card.Root class="{surfaceClass} flow-node border-2 py-0 {borderColor}" style="width: 300px;">
     <Card.Header class="{headerClass} flex-row items-start justify-between gap-2 px-3 py-1.5">
       <div class="flex min-w-0 items-start gap-2">
         <span
@@ -130,21 +127,22 @@
           </Badge>
         {/if}
         {#if hasHumanReview}
-          <Badge variant="secondary" class="bg-accent-dimmer text-accent-stronger text-xs">
+          <Badge variant="secondary" class="bg-hover-dimmer text-primary text-xs">
+            <UserCheck aria-hidden="true" />
             {m.flow_graph_review_badge()}
           </Badge>
         {/if}
         <Badge variant="secondary" class="bg-hover-dimmer text-primary text-xs">
           {m.flow_step_card_input_short()}: {inputTypeLabel}
         </Badge>
-        <Badge variant="secondary" class="bg-positive-dimmer text-positive-stronger text-xs">
+        <Badge variant="secondary" class="bg-hover-dimmer text-primary text-xs">
           {m.flow_step_card_output_short()}: {outputTypeLabel}
         </Badge>
         <Badge
           variant="secondary"
           class="text-xs {isAssembly
             ? 'bg-warning-dimmer text-warning-stronger'
-            : 'bg-accent-dimmer text-accent-stronger'}"
+            : 'bg-hover-dimmer text-primary'}"
         >
           {m.flow_step_card_chain_short()}: {nextChannelLabel}
         </Badge>
@@ -154,7 +152,7 @@
 {:else}
   <!-- User Mode: Compact pill -->
   <Card.Root
-    class="bg-primary flow-node flex-row items-center gap-2 border-2 px-3 py-1.5 shadow-sm {borderColor}"
+    class="bg-primary flow-node flex-row items-center gap-2 border-2 px-3 py-1.5 {borderColor}"
     style="min-width: 120px; max-width: {data.direction === 'TB' ? '260px' : '200px'};"
   >
     <span
@@ -165,7 +163,7 @@
     <span class="flow-node-name min-w-0 text-xs font-medium" title={data.label}>{data.label}</span>
     {#if hasHumanReview}
       <span
-        class="text-accent-stronger shrink-0"
+        class="text-secondary shrink-0"
         role="img"
         aria-label={m.flow_graph_review_badge()}
         title={m.flow_graph_review_badge()}

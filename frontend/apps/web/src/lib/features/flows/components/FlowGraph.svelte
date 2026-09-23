@@ -36,6 +36,7 @@
     getEdgePayloadKind
   } from "$lib/features/flows/flowStepPresentation";
   import { IconDownload } from "@eneo/icons/download";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { m } from "$lib/paraglide/messages";
 
@@ -788,14 +789,10 @@
     {#if $mode === "power_user"}
       <Background variant={BackgroundVariant.Dots} />
       <Panel position="top-right">
-        <button
-          class="bg-primary text-secondary hover:bg-hover-dimmer border-default flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-xs shadow-sm transition-colors"
-          onclick={exportPng}
-          disabled={isExporting}
-        >
-          <IconDownload class="size-3" />
+        <Button variant="outline" size="xs" onclick={exportPng} disabled={isExporting}>
+          <IconDownload class="size-3" aria-hidden="true" />
           {m.flow_graph_download_png()}
-        </button>
+        </Button>
         {#if exportFailed}
           <p
             class="border-negative-default bg-primary text-negative-stronger mt-1 max-w-[16rem] rounded border px-2 py-1 text-xs shadow-sm"
@@ -850,13 +847,9 @@
     >
       <div class="border-default flex items-center justify-between border-b px-3 py-2">
         <p class="text-sm font-semibold">{m.flow_graph_preview()} · {inspectedEdge.title}</p>
-        <button
-          type="button"
-          class="hover:bg-hover-dimmer rounded px-2 py-1 text-xs"
-          onclick={() => (inspectedEdge = null)}
-        >
+        <Button variant="ghost" size="xs" onclick={() => (inspectedEdge = null)}>
           {m.close()}
-        </button>
+        </Button>
       </div>
       <div class="max-h-[240px] overflow-auto p-3">
         <dl class="space-y-1.5 text-xs">
@@ -918,7 +911,13 @@
 
   .flow-graph :global(.svelte-flow__edge-path) {
     transition:
-      stroke 160ms ease-in-out,
-      stroke-width 160ms ease-in-out;
+      stroke var(--duration-quick) var(--ease-smooth-out),
+      stroke-width var(--duration-quick) var(--ease-smooth-out);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .flow-graph :global(.svelte-flow__edge-path) {
+      transition: none;
+    }
   }
 </style>

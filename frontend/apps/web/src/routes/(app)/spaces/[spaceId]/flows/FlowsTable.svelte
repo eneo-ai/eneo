@@ -10,8 +10,11 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import * as Empty from "$lib/components/ui/empty/index.js";
+  import * as ToggleGroup from "$lib/components/ui/toggle-group/index.js";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
-  import ChevronDown from "lucide-svelte/icons/chevron-down";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Search from "@lucide/svelte/icons/search";
   import { IconTrash } from "@eneo/icons/trash";
   import FlowActions from "./FlowActions.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -99,20 +102,23 @@
   }
 
   function statusLabel(row: FlowListRow): string {
-    if (row.kind === "flow") {
-      return row.status === "published"
-        ? m.flow_list_status_published()
-        : m.flow_list_status_draft();
-    }
-    return row.phase === "reviewing"
-      ? m.flow_list_status_draft_reviewing()
-      : m.flow_list_status_draft_understanding();
+    return row.status === "published" ? m.flow_list_status_published() : m.flow_list_status_draft();
   }
 
+  // Status is a word on a quiet chip: moss for published, neutral for a draft,
+  // so civic blue stays on the things you can press.
   function statusClass(row: FlowListRow): string {
     return row.status === "published"
       ? "bg-positive-dimmer text-positive-stronger"
-      : "bg-accent-dimmer text-accent-stronger";
+      : "bg-secondary text-primary";
+  }
+
+  /** An AI draft has no steps to summarise yet; its line says where it stands. */
+  function rowSubtitle(row: FlowListRow): string | null {
+    if (row.kind === "flow") return row.subtitle;
+    return row.phase === "reviewing"
+      ? m.flow_list_status_draft_reviewing()
+      : m.flow_list_status_draft_understanding();
   }
 
   function rowHref(row: FlowListRow): string {
@@ -139,9 +145,11 @@
 </script>
 
 <!-- Rendered in the actions column on a wide list and under the name once that
-     column is dropped, so a narrow row keeps every action it had. -->
+     column is dropped, so a narrow row keeps every action it had. The owner
+     column is the first to go (below 52rem); the rest stay down to 40rem. -->
 {#snippet rowActions(row: FlowListRow)}
-  <div class="flex items-center gap-1.5">
+  <!-- Above the row-wide link, so the actions stay their own targets. -->
+  <div class="relative z-10 flex items-center gap-1.5">
     {#if row.kind === "ai_draft"}
       <Button
         variant="outline"
@@ -158,7 +166,7 @@
               {...props}
               size="icon-sm"
               variant="ghost"
-              class="text-muted hover:text-primary max-sm:size-[44px]"
+              class="text-secondary hover:text-primary max-sm:size-[44px]"
               aria-label={m.actions()}
             >
               <IconEllipsis />
@@ -181,33 +189,39 @@
 <div class="@container/list flex flex-col gap-3">
   {#if !isEmpty}
     <div class="flex flex-wrap items-center gap-2">
-      <Input
-        type="search"
-        bind:value={query}
-        aria-label={m.flow_list_search_aria()}
-        placeholder={m.flow_list_search_placeholder()}
-        class="bg-primary h-[2.125rem] w-full max-w-[15rem] text-sm max-sm:h-[44px]"
-      />
-      <div
-        class="flex flex-wrap items-center gap-1.5"
-        role="group"
+      <div class="relative w-full max-w-[16rem]">
+        <Search
+          class="text-secondary pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+          aria-hidden="true"
+        />
+        <Input
+          type="search"
+          bind:value={query}
+          aria-label={m.flow_list_search_aria()}
+          placeholder={m.flow_list_search_placeholder()}
+          class="bg-primary h-[2.125rem] w-full pl-9 text-sm max-sm:h-[44px]"
+        />
+      </div>
+      <!-- One choice of three. Clicking the chosen option again keeps it
+           rather than leaving no filter selected. spacing={1}: the joined
+           (spacing 0) look keys off a data-horizontal attribute bits-ui never
+           sets, so joined items render square. -->
+      <ToggleGroup.Root
+        type="single"
+        variant="outline"
+        value={filter}
+        spacing={0}
+        onValueChange={(value) => {
+          if (value) filter = value as FlowListFilter;
+        }}
         aria-label={m.flow_list_filter_aria()}
       >
         {#each filters as option (option.value)}
-          <Button
-            variant="outline"
-            size="sm"
-            class="focus-visible:ring-ring h-8 rounded-full px-3.5 font-medium max-sm:h-[44px] max-sm:px-4 {filter ===
-            option.value
-              ? 'border-accent-default/40 bg-accent-default/10 text-accent-stronger hover:bg-accent-default/15 hover:text-accent-stronger'
-              : 'text-secondary'}"
-            aria-pressed={filter === option.value}
-            onclick={() => (filter = option.value)}
-          >
+          <ToggleGroup.Item value={option.value} class="px-3">
             {option.label()}
-          </Button>
+          </ToggleGroup.Item>
         {/each}
-      </div>
+      </ToggleGroup.Root>
       <p class="text-secondary ml-auto text-xs max-sm:ml-0 max-sm:w-full">
         {visibleRows.length === 1
           ? m.flow_list_count_one()
@@ -222,15 +236,19 @@
 
   <div class="border-default bg-primary overflow-hidden rounded-xl border">
     {#if isEmpty}
-      <div class="flex flex-col items-center px-6 py-11 text-center">
-        <p class="text-primary text-[0.9375rem] font-semibold">{m.flow_list_empty_title()}</p>
-        <p class="text-secondary mt-1.5 max-w-[46ch] text-sm leading-relaxed text-pretty">
-          {m.flow_list_empty_description()}
-        </p>
+      <Empty.Root class="py-11">
+        <Empty.Header>
+          <Empty.Title>{m.flow_list_empty_title()}</Empty.Title>
+          <Empty.Description class="max-w-[46ch]">
+            {m.flow_list_empty_description()}
+          </Empty.Description>
+        </Empty.Header>
         {#if canCreate}
-          <Button class="mt-4" onclick={() => oncreate?.()}>{m.flow_create_button()}</Button>
+          <Empty.Content>
+            <Button onclick={() => oncreate?.()}>{m.flow_create_button()}</Button>
+          </Empty.Content>
         {/if}
-      </div>
+      </Empty.Root>
     {:else}
       <Table.Root class="table-fixed border-separate border-spacing-0">
         <Table.Header>
@@ -241,17 +259,17 @@
               {m.name()}
             </Table.Head>
             <Table.Head
-              class="text-secondary border-default hidden h-10 w-[16rem] border-b px-4 text-xs font-semibold @[52rem]/list:table-cell"
+              class="text-secondary border-default hidden h-10 w-[9rem] border-b px-4 text-xs font-semibold @[40rem]/list:table-cell"
             >
               {m.status()}
             </Table.Head>
             <Table.Head
-              class="text-secondary border-default hidden h-10 w-[8rem] border-b px-4 text-xs font-semibold @[52rem]/list:table-cell"
+              class="text-secondary border-default hidden h-10 w-[10rem] border-b px-4 text-xs font-semibold @[52rem]/list:table-cell"
             >
               {m.flow_list_owner()}
             </Table.Head>
             <Table.Head
-              class="text-secondary border-default hidden h-10 w-[9.5rem] border-b px-4 text-xs font-semibold @[52rem]/list:table-cell"
+              class="text-secondary border-default hidden h-10 w-[9.5rem] border-b px-4 text-xs font-semibold @[40rem]/list:table-cell"
               aria-sort="descending"
             >
               <span class="inline-flex items-center gap-1">
@@ -260,7 +278,7 @@
               </span>
             </Table.Head>
             <Table.Head
-              class="border-default hidden h-10 w-[7.5rem] border-b px-4 text-right @[52rem]/list:table-cell"
+              class="border-default hidden h-10 w-[7.5rem] border-b px-4 text-right @[40rem]/list:table-cell"
             >
               <span class="sr-only">{m.actions()}</span>
             </Table.Head>
@@ -269,51 +287,52 @@
         <Table.Body>
           {#if noMatch}
             <Table.Row class="hover:bg-transparent">
-              <Table.Cell colspan={5} class="px-6 py-9 text-center whitespace-normal">
-                {#if query.trim()}
-                  <p class="text-primary text-sm font-semibold">{m.flow_list_no_match_title()}</p>
-                  <Button
-                    variant="link"
-                    class="text-accent-stronger mt-1 h-auto p-0"
-                    onclick={() => (query = "")}
-                  >
-                    {m.flow_list_clear_search()}
-                  </Button>
-                {:else}
-                  <p class="text-primary text-sm font-semibold">
-                    {filter === "published"
-                      ? m.flow_list_no_published_title()
-                      : m.flow_list_no_drafts_title()}
-                  </p>
-                  <Button
-                    variant="link"
-                    class="text-accent-stronger mt-1 h-auto p-0"
-                    onclick={() => (filter = "all")}
-                  >
-                    {m.flow_list_show_all()}
-                  </Button>
-                {/if}
+              <Table.Cell colspan={5} class="whitespace-normal">
+                <Empty.Root class="gap-2 py-7">
+                  <Empty.Header>
+                    <Empty.Title>
+                      {query.trim()
+                        ? m.flow_list_no_match_title()
+                        : filter === "published"
+                          ? m.flow_list_no_published_title()
+                          : m.flow_list_no_drafts_title()}
+                    </Empty.Title>
+                  </Empty.Header>
+                  <Empty.Content>
+                    {#if query.trim()}
+                      <Button variant="link" onclick={() => (query = "")}>
+                        {m.flow_list_clear_search()}
+                      </Button>
+                    {:else}
+                      <Button variant="link" onclick={() => (filter = "all")}>
+                        {m.flow_list_show_all()}
+                      </Button>
+                    {/if}
+                  </Empty.Content>
+                </Empty.Root>
               </Table.Cell>
             </Table.Row>
           {/if}
           {#each visibleRows as row (row.kind + row.id)}
-            <Table.Row class="border-dimmer hover:bg-secondary/40 group transition-colors">
+            <!-- The name link stretches over the row, so the whole row opens the flow. -->
+            <Table.Row class="border-dimmer hover:bg-secondary/40 relative transition-colors">
               <Table.Cell class="border-dimmer border-b px-4 py-3 align-middle whitespace-normal">
                 <div class="flex min-w-0 flex-col gap-0.5">
                   <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing for dynamic paths -->
                   <a
                     href={rowHref(row)}
-                    class="text-primary focus-visible:ring-ring relative truncate rounded-sm text-[0.875rem] font-semibold outline-none before:absolute before:-inset-y-[2.5px] before:content-[''] focus-visible:ring-2"
+                    title={rowName(row)}
+                    class="text-primary focus-visible:ring-ring truncate rounded-sm text-sm font-semibold outline-none before:absolute before:inset-0 before:content-[''] focus-visible:ring-2"
                   >
                     {rowName(row)}
                   </a>
                   <!-- eslint-enable svelte/no-navigation-without-resolve -->
-                  {#if row.subtitle}
-                    <span class="text-secondary truncate text-xs" title={row.subtitle}>
-                      {row.subtitle}
+                  {#if rowSubtitle(row)}
+                    <span class="text-secondary truncate text-xs" title={rowSubtitle(row)}>
+                      {rowSubtitle(row)}
                     </span>
                   {/if}
-                  <span class="mt-0.5 flex flex-wrap items-center gap-2 @[52rem]/list:hidden">
+                  <span class="mt-0.5 flex flex-wrap items-center gap-2 @[40rem]/list:hidden">
                     <Badge
                       class="max-w-full border-transparent {statusClass(row)}"
                       title={statusLabel(row)}
@@ -324,11 +343,11 @@
                       {updatedLabel(row)}
                     </span>
                   </span>
-                  <div class="mt-2 flex @[52rem]/list:hidden">{@render rowActions(row)}</div>
+                  <div class="mt-2 flex @[40rem]/list:hidden">{@render rowActions(row)}</div>
                 </div>
               </Table.Cell>
               <Table.Cell
-                class="border-dimmer hidden border-b px-4 py-3 align-middle @[52rem]/list:table-cell"
+                class="border-dimmer hidden border-b px-4 py-3 align-middle @[40rem]/list:table-cell"
               >
                 <Badge
                   class="max-w-full border-transparent {statusClass(row)}"
@@ -338,18 +357,19 @@
                 </Badge>
               </Table.Cell>
               <Table.Cell
-                class="text-secondary border-dimmer hidden border-b px-4 py-3 align-middle text-sm @[52rem]/list:table-cell"
+                class="text-secondary border-dimmer hidden truncate border-b px-4 py-3 align-middle text-sm @[52rem]/list:table-cell"
+                title={ownerLabel(row)}
               >
                 {ownerLabel(row)}
               </Table.Cell>
               <Table.Cell
-                class="text-secondary border-dimmer hidden border-b px-4 py-3 align-middle text-sm tabular-nums @[52rem]/list:table-cell"
+                class="text-secondary border-dimmer hidden border-b px-4 py-3 align-middle text-sm tabular-nums @[40rem]/list:table-cell"
                 title={updatedTitle(row)}
               >
                 {updatedLabel(row)}
               </Table.Cell>
               <Table.Cell
-                class="border-dimmer hidden border-b px-3 py-2 text-right align-middle @[52rem]/list:table-cell"
+                class="border-dimmer hidden border-b px-3 py-2 text-right align-middle @[40rem]/list:table-cell"
               >
                 <div class="flex justify-end">{@render rowActions(row)}</div>
               </Table.Cell>

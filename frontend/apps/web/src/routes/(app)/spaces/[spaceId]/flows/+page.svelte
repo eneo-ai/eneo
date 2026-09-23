@@ -96,7 +96,9 @@
     {/if}
   </Page.Header>
   <Page.Main>
-    <div class="mx-auto flex w-full max-w-[66.25rem] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6">
+    <!-- Starts on the title's left edge and ends on the header actions' right
+         edge; past 80rem it stops growing so a row stays readable on ultrawide. -->
+    <div class="flex w-full max-w-[80rem] flex-col gap-4 py-4 pr-4 pl-2 sm:py-6">
       <FlowsTable
         flows={$flows}
         {drafts}

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 
@@ -15,23 +15,26 @@ afterEach(() => {
   cleanup();
 });
 
+function checkedTemplates() {
+  const group = screen.getByRole("radiogroup", { name: m.flow_add_step_templates_label() });
+  return within(group)
+    .getAllByRole("radio")
+    .filter((radio) => radio.getAttribute("aria-checked") === "true");
+}
+
 describe("FlowAddStepDialog keyboard flow", () => {
   it("moves the selection with arrow keys from the search field", async () => {
     renderDialog();
     const search = screen.getByLabelText(m.flow_add_step_search());
 
     await fireEvent.keyDown(search, { key: "ArrowDown" });
-    const pressed = screen
-      .getAllByRole("button")
-      .filter((b) => b.getAttribute("aria-pressed") === "true");
-    expect(pressed).toHaveLength(1);
+    const checked = checkedTemplates();
+    expect(checked).toHaveLength(1);
 
     await fireEvent.keyDown(search, { key: "ArrowDown" });
-    const pressedAfter = screen
-      .getAllByRole("button")
-      .filter((b) => b.getAttribute("aria-pressed") === "true");
-    expect(pressedAfter).toHaveLength(1);
-    expect(pressedAfter[0]).not.toBe(pressed[0]);
+    const checkedAfter = checkedTemplates();
+    expect(checkedAfter).toHaveLength(1);
+    expect(checkedAfter[0]).not.toBe(checked[0]);
   });
 
   it("confirms the arrow-selected template with Enter", async () => {

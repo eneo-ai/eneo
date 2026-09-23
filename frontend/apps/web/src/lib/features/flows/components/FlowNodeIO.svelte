@@ -16,11 +16,11 @@
   const isExternal = $derived(data.nodeType === "http_source" || data.nodeType === "http_target");
 </script>
 
+<!-- Where the flow starts and ends is a place, not an action or an outcome, so
+     it stays neutral; the word says which end it is and a dashed rule marks an
+     external system. -->
 <div
-  class="flex items-center justify-center rounded-full border-2 px-4 py-2 text-sm font-medium shadow-sm
-    {isSource
-    ? 'bg-accent-dimmer border-accent-default text-accent-stronger'
-    : 'bg-positive-dimmer border-positive-default text-positive-stronger'}
+  class="bg-secondary border-strongest text-primary flex items-center justify-center rounded-[10px] border px-4 py-2 text-sm font-medium
     {isExternal ? 'border-dashed' : ''}"
   style="min-width: 80px;"
 >

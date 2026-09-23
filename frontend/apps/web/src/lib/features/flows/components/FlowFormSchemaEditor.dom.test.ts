@@ -12,6 +12,9 @@ import {
 } from "../flowFormSchema";
 import FlowFormSchemaEditorHarness from "./test-harnesses/FlowFormSchemaEditorHarness.svelte";
 
+/** Mirrors FlowUserMode's storage key; the mode store reads it once on init. */
+const FLOW_USER_MODE_STORAGE_KEY = "eneo:flow-user-mode";
+
 function makeFlow(fields: FlowFormField[]): Flow {
   return {
     id: "00000000-0000-0000-0000-000000000001",
@@ -118,9 +121,20 @@ afterEach(() => {
 });
 
 describe("FlowFormSchemaEditor examples", () => {
-  it("renders the token a real field derives from the translated example label", async () => {
+  it("shows Enkel the plain hint without variable tokens", async () => {
     renderHarness([]);
     await flushEffects();
+
+    expect(screen.getByText(m.flow_form_schema_empty_hint())).not.toBeNull();
+    expect(screen.queryByText(m.flow_form_schema_example_field_primary())).toBeNull();
+  });
+
+  it("renders the token a real field derives from the translated example label", async () => {
+    // Tokens are Avancerad vocabulary; Enkel never sees them.
+    localStorage.setItem(FLOW_USER_MODE_STORAGE_KEY, "power_user");
+    renderHarness([]);
+    await flushEffects();
+    localStorage.removeItem(FLOW_USER_MODE_STORAGE_KEY);
 
     const label = m.flow_form_schema_example_field_primary();
     const token = getFlowFormFieldVariableToken(getSuggestedFlowFormFieldRuntimeKey(label));

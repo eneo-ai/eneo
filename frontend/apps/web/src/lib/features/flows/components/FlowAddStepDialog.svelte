@@ -3,7 +3,7 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
-  import Search from "lucide-svelte/icons/search";
+  import Search from "@lucide/svelte/icons/search";
   import { m } from "$lib/paraglide/messages";
   import {
     getRecommendedTemplates,
@@ -18,7 +18,8 @@
     getOutputTypeLabel
   } from "./flowStepEditHelpers";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
-  import { cn } from "$lib/utils.js";
+  import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
+  import * as ToggleGroup from "$lib/components/ui/toggle-group/index.js";
 
   let {
     open = $bindable(false),
@@ -49,6 +50,11 @@
   const documentFormat = $derived<"docx" | "pdf">(
     documentFormatOverride ?? (/\bpdf\b/i.test(query) ? "pdf" : "docx")
   );
+
+  const DOCUMENT_FORMATS = [
+    { value: "docx", label: () => m.flow_add_step_format_word() },
+    { value: "pdf", label: () => m.flow_add_step_format_pdf() }
+  ] as const;
 
   const mode = getFlowUserMode();
   const isAdvancedMode = $derived($mode === "power_user");
@@ -105,36 +111,35 @@
 
 {#snippet templateRow(template: FlowStepTemplate)}
   {@const Icon = template.icon}
-  <button
-    type="button"
-    aria-pressed={selectedId === template.id}
-    class={cn(
-      "border-default hover:bg-hover-dimmer/40 focus-visible:ring-ring flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none",
-      selectedId === template.id && "border-accent-default/50 bg-accent-dimmer/40"
-    )}
-    onclick={() => (selectedId = template.id)}
+  {@const itemId = `flow-step-template-${template.id}`}
+  <!-- DESIGN.md option row: the whole row labels its radio; a selected row
+       gets the civic-blue border and inset ring over a 7% wash. The
+       description is what helps someone choose, so it wraps. -->
+  <label
+    for={itemId}
+    class="border-default hover:border-strongest hover:bg-secondary has-data-[state=checked]:border-accent-default has-data-[state=checked]:bg-accent-default/7 has-data-[state=checked]:ring-accent-default flex w-full cursor-pointer items-start gap-3 rounded-[10px] border p-3 transition-colors has-data-[state=checked]:ring-1 has-data-[state=checked]:ring-inset"
     ondblclick={() => confirmTemplate(template)}
   >
-    <span
-      class="bg-secondary/40 text-secondary flex size-9 shrink-0 items-center justify-center rounded-lg"
-      aria-hidden="true"
-    >
-      <Icon class="size-4" />
-    </span>
+    <RadioGroup.Item id={itemId} value={template.id} class="mt-0.5" />
     <span class="min-w-0 flex-1">
-      <span class="text-primary block truncate text-sm font-medium">{template.name()}</span>
-      <span class="text-muted block truncate text-xs">{template.description()}</span>
+      <span class="text-primary flex items-center gap-1.5 text-sm font-medium">
+        <Icon class="text-secondary size-4 shrink-0" aria-hidden="true" />
+        {template.name()}
+      </span>
+      <span class="text-secondary mt-0.5 block text-xs leading-relaxed text-pretty">
+        {template.description()}
+      </span>
     </span>
     {#if !template.blank}
-      <span class="text-muted shrink-0 text-xs" style="font-variant-numeric: tabular-nums">
+      <span class="text-secondary shrink-0 text-xs whitespace-nowrap tabular-nums">
         {ioLabel(template)}
       </span>
     {/if}
-  </button>
+  </label>
 {/snippet}
 
 <Dialog.Root bind:open>
-  <Dialog.Content class="sm:max-w-lg">
+  <Dialog.Content class="sm:max-w-xl">
     <Dialog.Header>
       <Dialog.Title>{m.flow_step_add()}</Dialog.Title>
       <Dialog.Description>{m.flow_add_step_subtitle()}</Dialog.Description>
@@ -142,7 +147,7 @@
 
     <div class="relative">
       <Search
-        class="text-muted pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+        class="text-secondary pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
         aria-hidden="true"
       />
       <Input
@@ -159,7 +164,13 @@
       {selectedTemplate ? selectedTemplate.name() : ""}
     </div>
 
-    <div class="flex flex-col gap-4 overflow-y-auto py-1" style="max-height: 52vh">
+    <RadioGroup.Root
+      value={selectedId ?? ""}
+      onValueChange={(value) => (selectedId = value || null)}
+      aria-label={m.flow_add_step_templates_label()}
+      class="flex flex-col gap-4 overflow-y-auto py-1"
+      style="max-height: 52vh"
+    >
       {#if recommended.length > 0}
         <div class="flex flex-col gap-1.5">
           <span class="text-secondary px-1 text-xs font-medium">
@@ -183,42 +194,29 @@
       {/if}
 
       {#if !hasResults}
-        <p class="text-muted px-1 py-6 text-center text-sm">{m.flow_add_step_no_results()}</p>
+        <p class="text-secondary px-1 py-6 text-center text-sm">{m.flow_add_step_no_results()}</p>
       {/if}
-    </div>
+    </RadioGroup.Root>
 
     <Dialog.Footer class="border-default">
       {#if selectedTemplate?.id === "document"}
         <div class="mr-auto flex items-center gap-2">
           <span class="text-secondary text-xs font-medium">{m.flow_add_step_format()}</span>
-          <div class="flex gap-1">
-            <button
-              type="button"
-              aria-pressed={documentFormat === "docx"}
-              class={cn(
-                "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
-                documentFormat === "docx"
-                  ? "border-accent-default/50 bg-accent-dimmer/50 text-accent-stronger"
-                  : "border-default text-secondary hover:bg-hover-dimmer/40"
-              )}
-              onclick={() => (documentFormatOverride = "docx")}
-            >
-              {m.flow_add_step_format_word()}
-            </button>
-            <button
-              type="button"
-              aria-pressed={documentFormat === "pdf"}
-              class={cn(
-                "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
-                documentFormat === "pdf"
-                  ? "border-accent-default/50 bg-accent-dimmer/50 text-accent-stronger"
-                  : "border-default text-secondary hover:bg-hover-dimmer/40"
-              )}
-              onclick={() => (documentFormatOverride = "pdf")}
-            >
-              {m.flow_add_step_format_pdf()}
-            </button>
-          </div>
+          <ToggleGroup.Root
+            type="single"
+            variant="outline"
+            size="sm"
+            spacing={0}
+            value={documentFormat}
+            onValueChange={(value) => {
+              if (value === "docx" || value === "pdf") documentFormatOverride = value;
+            }}
+            aria-label={m.flow_add_step_format()}
+          >
+            {#each DOCUMENT_FORMATS as option (option.value)}
+              <ToggleGroup.Item value={option.value}>{option.label()}</ToggleGroup.Item>
+            {/each}
+          </ToggleGroup.Root>
         </div>
       {/if}
       <Button variant="outline" onclick={() => (open = false)}>{m.cancel()}</Button>

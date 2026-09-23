@@ -1,6 +1,8 @@
 <script lang="ts">
   import { SvelteSet } from "svelte/reactivity";
-  import ChevronRight from "lucide-svelte/icons/chevron-right";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import type { FlowStep } from "@eneo/eneo-js";
   import { IconInfo } from "@eneo/icons/info";
@@ -186,7 +188,7 @@
 {#if hasErrors}
   <div role="alert" aria-live="polite" transition:fade={{ duration: reducedMotion ? 0 : 200 }}>
     <Collapsible.Root bind:open={isExpanded}>
-      <div class="border-negative-default/30 bg-negative-dimmer/80 border-b backdrop-blur-sm">
+      <div class="border-negative-default/30 bg-negative-dimmer border-b">
         <Collapsible.Trigger
           class="hover:bg-negative-dimmer flex w-full items-center gap-2.5 px-4 py-2.5 text-sm transition-colors"
           aria-expanded={isExpanded}
@@ -203,20 +205,12 @@
           <span class="text-negative-stronger/80 hidden text-xs font-medium sm:inline">
             {isExpanded ? m.flow_validation_hide_details() : m.flow_validation_show_details()}
           </span>
-          <svg
-            class="text-negative-stronger/60 size-4 shrink-0 ease-out motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {isExpanded
+          <ChevronDown
+            class="text-negative-stronger size-4 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {isExpanded
               ? 'rotate-180'
               : ''}"
             aria-hidden="true"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M4 6l4 4 4-4" />
-          </svg>
+          />
         </Collapsible.Trigger>
 
         <Collapsible.Content>
@@ -227,7 +221,7 @@
           >
             {#each displayIssues as issue (issue.key)}
               <div
-                class="group border-negative-default/15 bg-primary flex items-start gap-3 rounded-xl border px-4 py-3 shadow-sm transition-shadow hover:shadow-md"
+                class="border-negative-default/15 bg-primary flex items-start gap-3 rounded-xl border px-4 py-3"
               >
                 {#if issue.stepOrder != null}
                   <span
@@ -242,26 +236,29 @@
                   {/if}
                   <span class="text-secondary text-[13px] leading-relaxed">{issue.message}</span>
                   {#if issue.detail}
-                    <details
+                    <Collapsible.Root
                       open={techDetailsOpen.has(issue.key)}
-                      ontoggle={(event) =>
-                        event.currentTarget.open
-                          ? techDetailsOpen.add(issue.key)
-                          : techDetailsOpen.delete(issue.key)}
-                      class="text-muted mt-0.5 text-xs"
+                      onOpenChange={(next) =>
+                        next ? techDetailsOpen.add(issue.key) : techDetailsOpen.delete(issue.key)}
+                      class="text-secondary mt-0.5 text-xs"
                     >
-                      <summary
-                        class="focus-visible:ring-ring flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 select-none focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
-                        ><ChevronRight
-                          class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {techDetailsOpen
+                      <Collapsible.Trigger
+                        class="focus-visible:ring-ring flex min-h-[24px] items-center gap-1.5 rounded-sm outline-none select-none focus-visible:ring-2"
+                      >
+                        <ChevronRight
+                          class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {techDetailsOpen.has(
+                            issue.key
+                          )
                             ? 'rotate-90'
                             : ''}"
                           aria-hidden="true"
                         />
                         {m.flow_validation_technical_details()}
-                      </summary>
-                      <span class="mt-1 block leading-relaxed break-words">{issue.detail}</span>
-                    </details>
+                      </Collapsible.Trigger>
+                      <Collapsible.Content>
+                        <span class="mt-1 block leading-relaxed break-words">{issue.detail}</span>
+                      </Collapsible.Content>
+                    </Collapsible.Root>
                   {/if}
                   {#each issue.repairs ?? [] as repair (`${repair.stepId}:${repair.target.location.kind}:${repair.target.location.kind === "source_ref" ? repair.target.location.index : ""}:${repair.target.token}`)}
                     <div class="mt-2 flex min-w-0 flex-col gap-2">
@@ -305,16 +302,17 @@
                   {/each}
                 </div>
                 {#if issue.stepId && onNavigateToStep}
-                  <button
-                    type="button"
-                    class="border-accent-default/20 bg-accent-default/5 text-accent-default hover:border-accent-default/40 hover:bg-accent-default/10 shrink-0 rounded-lg border px-3 py-1.5 text-xs font-medium hover:shadow-sm active:scale-[0.98] motion-safe:transition-[background-color,border-color,box-shadow,transform] motion-safe:duration-(--duration-quick)"
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="shrink-0"
                     onclick={(e) => {
                       e.stopPropagation();
                       handleNavigate(issue.stepId);
                     }}
                   >
                     {m.flow_validation_go_to_step()}
-                  </button>
+                  </Button>
                 {/if}
               </div>
             {/each}

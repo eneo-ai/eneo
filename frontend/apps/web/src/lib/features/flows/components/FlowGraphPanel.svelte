@@ -3,7 +3,7 @@
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { IconRefresh } from "@eneo/icons/refresh";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import Maximize2 from "lucide-svelte/icons/maximize-2";
+  import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import { m } from "$lib/paraglide/messages";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
@@ -103,7 +103,6 @@
         class="hover:bg-hover-dimmer/60 group focus-visible:ring-ring flex min-h-[44px] flex-1 items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset sm:px-5"
       >
         <span class="flex min-w-0 items-center gap-2">
-          <span class="bg-hover-dimmer/80 size-1.5 shrink-0 rounded-full" aria-hidden="true"></span>
           <span class="text-primary truncate text-sm font-medium">{m.flow_graph_preview()}</span>
           {#if hasSteps}
             <span

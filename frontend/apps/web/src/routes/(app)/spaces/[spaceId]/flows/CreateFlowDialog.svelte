@@ -8,6 +8,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
 
   interface Props {
@@ -91,34 +92,40 @@
       <div class="flex flex-col gap-2.5 px-6 pt-4">
         <button
           type="button"
-          class="border-accent-default bg-accent-default/5 hover:bg-accent-default/10 focus-visible:ring-ring w-full rounded-[10px] border px-4 py-3.5 text-left outline-none focus-visible:ring-[3px]"
+          class="border-accent-default bg-accent-default/5 hover:bg-accent-default/10 focus-visible:ring-ring flex w-full items-center gap-3 rounded-[10px] border px-4 py-3.5 text-left outline-none focus-visible:ring-[3px]"
           onclick={startWithAI}
         >
-          <span class="flex flex-wrap items-center gap-2">
-            <span class="text-primary text-[0.9375rem] font-semibold tracking-tight">
-              {m.flow_create_path_ai_title()}
+          <span class="min-w-0 flex-1">
+            <span class="flex flex-wrap items-center gap-2">
+              <span class="text-primary text-[0.9375rem] font-semibold tracking-tight">
+                {m.flow_create_path_ai_title()}
+              </span>
+              <span
+                class="text-accent-stronger bg-accent-dimmer inline-flex h-[1.375rem] items-center rounded-full px-2.5 text-xs font-semibold"
+              >
+                {m.flow_create_path_ai_recommended()}
+              </span>
             </span>
-            <span
-              class="text-accent-stronger bg-accent-dimmer inline-flex h-[1.375rem] items-center rounded-full px-2.5 text-xs font-semibold"
-            >
-              {m.flow_create_path_ai_recommended()}
+            <span class="text-secondary mt-1 block text-sm leading-relaxed text-pretty">
+              {m.flow_create_path_ai_description()}
             </span>
           </span>
-          <span class="text-secondary mt-1 block text-sm leading-relaxed text-pretty">
-            {m.flow_create_path_ai_description()}
-          </span>
+          <ChevronRight class="text-secondary size-4 shrink-0" aria-hidden="true" />
         </button>
         <button
           type="button"
-          class="border-default bg-primary hover:bg-secondary focus-visible:ring-ring w-full rounded-[10px] border px-4 py-3.5 text-left outline-none focus-visible:ring-[3px]"
+          class="border-default bg-primary hover:bg-secondary focus-visible:ring-ring flex w-full items-center gap-3 rounded-[10px] border px-4 py-3.5 text-left outline-none focus-visible:ring-[3px]"
           onclick={() => (path = "manual")}
         >
-          <span class="text-primary text-[0.9375rem] font-semibold tracking-tight">
-            {m.flow_create_path_manual_title()}
+          <span class="min-w-0 flex-1">
+            <span class="text-primary block text-[0.9375rem] font-semibold tracking-tight">
+              {m.flow_create_path_manual_title()}
+            </span>
+            <span class="text-secondary mt-1 block text-sm leading-relaxed text-pretty">
+              {m.flow_create_path_manual_description()}
+            </span>
           </span>
-          <span class="text-secondary mt-1 block text-sm leading-relaxed text-pretty">
-            {m.flow_create_path_manual_description()}
-          </span>
+          <ChevronRight class="text-secondary size-4 shrink-0" aria-hidden="true" />
         </button>
       </div>
     {:else}

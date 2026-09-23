@@ -42,27 +42,32 @@ describe("FlowValidationBanner server issues", () => {
       screen.getByText(m.flow_validation_msg_input_binding_runtime_input_unused())
     ).toBeTruthy();
 
-    // The raw server sentence appears exactly once, inside the technical
-    // details disclosure — never as the primary copy.
+    // The raw server sentence stays folded behind the technical details
+    // disclosure and appears exactly once when opened, never as the primary copy.
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_validation_technical_details() })
+    );
     const raw = screen.getAllByText(RAW_STEP_SENTENCE);
     expect(raw).toHaveLength(1);
-    expect(raw[0].closest("details")).not.toBeNull();
-    expect(screen.getByText(m.flow_validation_technical_details())).toBeTruthy();
+    expect(raw[0].closest('[data-slot="collapsible-content"]')).not.toBeNull();
 
     // The action targets the offending step.
     await fireEvent.click(screen.getByRole("button", { name: m.flow_validation_go_to_step() }));
     expect(onNavigateToStep).toHaveBeenCalledWith("step-3");
   });
 
-  it("keeps the raw detail for flow-scoped translated issues", () => {
+  it("keeps the raw detail for flow-scoped translated issues", async () => {
     const errors = new Map([["flow:server:flow_review_policy_invalid", [RAW_FLOW_SENTENCE]]]);
 
     render(FlowValidationBanner, { errors, steps: [], isExpanded: true });
 
     expect(screen.getByText(m.flow_validation_msg_review_policy_invalid())).toBeTruthy();
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_validation_technical_details() })
+    );
     const raw = screen.getAllByText(RAW_FLOW_SENTENCE);
     expect(raw).toHaveLength(1);
-    expect(raw[0].closest("details")).not.toBeNull();
+    expect(raw[0].closest('[data-slot="collapsible-content"]')).not.toBeNull();
   });
 });
 

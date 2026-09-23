@@ -2,10 +2,11 @@
   import { getFlowsManager } from "$lib/features/flows/FlowsManager";
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
-  import type { FlowSparse } from "@eneo/eneo-js";
+  import { EneoError, type FlowSparse } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
 
   let {
@@ -26,8 +27,8 @@
         await flowsManager.deleteFlow(flow.id);
       }
       showDeleteDialog = false;
-    } catch (e) {
-      console.error(e);
+    } catch (error) {
+      toast.error(error instanceof EneoError ? error.getReadableMessage() : String(error));
     }
     isProcessing = false;
   }
@@ -40,9 +41,8 @@
         {...props}
         size="icon-sm"
         variant="ghost"
-        class="text-muted hover:text-primary"
+        class="text-secondary hover:text-primary"
         aria-label={m.actions()}
-        title={m.actions()}
       >
         <IconEllipsis />
       </Button>
@@ -64,7 +64,7 @@
 <AlertDialog.Root bind:open={showDeleteDialog}>
   <AlertDialog.Content>
     <AlertDialog.Header>
-      <AlertDialog.Title>{m.delete()}</AlertDialog.Title>
+      <AlertDialog.Title>{m.flow_list_delete_title({ name: flow.name })}</AlertDialog.Title>
       <AlertDialog.Description>{m.flow_delete_confirm()}</AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>

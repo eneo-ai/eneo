@@ -21,6 +21,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -206,12 +207,6 @@
   }
 
   const formStats = $derived(getFlowFormStats(localFields));
-  const namedVariableTokens = $derived(
-    localFields
-      .map((field) => getFlowFormFieldVariableToken(field.name))
-      .filter((token) => token.length > 0)
-      .slice(0, 4)
-  );
   // Illustrative field names only: no form fields exist yet in this state. The
   // label goes through the same runtime-key derivation a real field's label
   // would, so a translation with spaces, diacritics or a reserved word shows the
@@ -221,15 +216,15 @@
     label,
     token: getFlowFormFieldVariableToken(getSuggestedFlowFormFieldRuntimeKey(label))
   });
+  // Variable tokens are Avancerad vocabulary; Enkel explains fields in words.
   const emptyStateExamples = $derived(
     $userMode === "power_user"
       ? [
           exampleField("primary", m.flow_form_schema_example_field_primary()),
           exampleField("secondary", m.flow_form_schema_example_field_secondary())
         ]
-      : [exampleField("primary", m.flow_form_schema_example_field_primary())]
+      : []
   );
-  const previewVariableTokens = $derived(namedVariableTokens.slice(0, 2));
 
   $effect(() => {
     onStatsChanged?.(formStats);
@@ -418,7 +413,7 @@
           {m.flow_form_schema_empty_hint()}
         </p>
 
-        {#if previewVariableTokens.length > 0 || emptyStateExamples.length > 0}
+        {#if emptyStateExamples.length > 0}
           <div class="text-muted mt-5 flex flex-wrap items-center justify-center gap-2 text-xs">
             <span class="text-secondary font-medium">{m.flow_form_schema_example_label()}</span>
             {#each emptyStateExamples as example, exampleIndex (example.id)}
@@ -467,68 +462,26 @@
           {@const hasValidVariable =
             field.name.trim() && isFlowFormFieldNameUsableAsVariable(field.name)}
           {@const fieldNameIssue = getFieldNameIssue(field, index)}
-          <div class="group/field hover:bg-hover-dimmer/30 px-4 py-3.5 transition-colors">
-            <div class="flex items-center gap-2">
-              <div
-                class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/field:opacity-100 focus-within:opacity-100"
-              >
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  class="text-muted hover:text-primary disabled:opacity-30"
-                  disabled={index === 0 || isPublished}
-                  onclick={() => moveField(index, -1)}
-                  aria-label={m.flow_step_move_up()}
-                >
-                  <ArrowUp class="size-3.5" aria-hidden="true" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  class="text-muted hover:text-primary disabled:opacity-30"
-                  disabled={index === localFields.length - 1 || isPublished}
-                  onclick={() => moveField(index, 1)}
-                  aria-label={m.flow_step_move_down()}
-                >
-                  <ArrowDown class="size-3.5" aria-hidden="true" />
-                </Button>
-              </div>
-
-              <label class="min-w-0 flex-1">
-                <span class="sr-only">{m.flow_form_field_label()}</span>
+          <div class="group/field hover:bg-hover-dimmer/30 px-5 py-3 transition-colors">
+            <!-- One line per field: its name, the kind of answer, whether it is
+                 required, then the row's own actions. Details (options, the
+                 technical name) follow below on the name's left edge. -->
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <Field.Field class="w-auto min-w-[12rem] flex-1">
+                <Field.Label for="{field._localId}-label" class="sr-only">
+                  {m.flow_form_field_label()}
+                </Field.Label>
                 <Input
+                  id="{field._localId}-label"
                   type="text"
-                  class="h-9 min-w-0 font-medium"
+                  class="h-8 min-w-0 font-medium"
                   placeholder={m.flow_form_field_label()}
                   value={field.label}
                   disabled={isPublished}
                   oninput={(e) => updateFieldLabel(index, e.currentTarget.value)}
                 />
-              </label>
+              </Field.Field>
 
-              <div class="flex shrink-0 items-center gap-2">
-                {#if field.required}
-                  <span
-                    class="bg-accent-dimmer/60 text-accent-stronger inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium"
-                  >
-                    {m.flow_form_field_required()}
-                  </span>
-                {/if}
-                {#if !isPublished}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="text-muted hover:text-negative-stronger hover:bg-negative-dimmer/40 opacity-0 group-hover/field:opacity-100 focus-visible:opacity-100"
-                    onclick={() => removeField(index)}
-                    aria-label={m.delete()}
-                  >
-                    <IconTrash class="size-3.5" />
-                  </Button>
-                {/if}
-              </div>
-            </div>
-
-            <div class="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 pl-[56px]">
               <Select.Root
                 type="single"
                 value={currentType}
@@ -542,7 +495,7 @@
                   });
                 }}
               >
-                <Select.Trigger class="h-8 w-44">
+                <Select.Trigger class="h-8 w-40" aria-label={m.flow_form_schema_field_type()}>
                   {currentTypeLabel}
                 </Select.Trigger>
                 <Select.Content>
@@ -554,59 +507,79 @@
                 </Select.Content>
               </Select.Root>
 
-              <label
-                class="text-secondary inline-flex cursor-pointer items-center gap-2 text-sm select-none"
-              >
+              <Field.Field orientation="horizontal" class="w-auto">
                 <Checkbox
+                  id="{field._localId}-required"
                   checked={field.required ?? false}
                   disabled={isPublished}
                   onCheckedChange={(checked) => updateField(index, { required: checked })}
                 />
-                <span>{m.flow_form_field_required()}</span>
-              </label>
+                <Field.Label for="{field._localId}-required">
+                  {m.flow_form_field_required()}
+                </Field.Label>
+              </Field.Field>
 
-              {#if hasValidVariable}
-                {@const isCopied = copiedVariableFieldId === field._localId}
-                <span class="text-muted inline-flex items-center gap-1.5 text-xs">
-                  <span>{m.flow_form_field_variable_chip_label()}</span>
-                  <button
-                    type="button"
-                    class={`${getChipClasses("field")} hover:ring-label-stronger/30 cursor-pointer transition-shadow hover:ring-1 focus-visible:ring-1 focus-visible:outline-none`}
-                    onclick={() => void copyVariableToken(field)}
-                    aria-label={m.flow_form_field_variable_copy_label()}
+              {#if !isPublished}
+                <div class="ml-auto flex shrink-0 items-center">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    class="text-secondary hover:text-primary"
+                    disabled={index === 0}
+                    onclick={() => moveField(index, -1)}
+                    aria-label={m.flow_step_move_up()}
                   >
-                    {isCopied ? m.copied() : getFlowFormFieldVariableToken(field.name)}
-                  </button>
-                </span>
-              {:else if fieldNameIssue}
-                <span class="text-warning-stronger text-xs">
-                  {getFieldNameIssueMessage(fieldNameIssue)}
-                </span>
+                    <ArrowUp class="size-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    class="text-secondary hover:text-primary"
+                    disabled={index === localFields.length - 1}
+                    onclick={() => moveField(index, 1)}
+                    aria-label={m.flow_step_move_down()}
+                  >
+                    <ArrowDown class="size-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    class="text-secondary hover:text-negative-stronger hover:bg-negative-dimmer/40"
+                    onclick={() => removeField(index)}
+                    aria-label={m.delete()}
+                  >
+                    <IconTrash class="size-3.5" />
+                  </Button>
+                </div>
               {/if}
             </div>
 
+            <!-- Avancerad: the technical name and the token it makes, on one line. -->
             {#if $userMode === "power_user"}
-              <div class="mt-2.5 pl-[56px]">
-                <label class="text-secondary inline-flex items-center gap-2 text-xs">
-                  <span class="inline-flex items-center gap-1">
+              <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <!-- The help trigger sits beside the label, not inside it, so a
+                     click on it never lands in the input. -->
+                <Field.Field orientation="horizontal" class="w-auto">
+                  <Field.Label for="{field._localId}-name">
                     {m.flow_form_field_variable_name()}
-                    <Tooltip.Provider delayDuration={150}>
-                      <Tooltip.Root>
-                        <Tooltip.Trigger aria-label={m.flow_form_field_variable_name_help_label()}>
-                          <Info
-                            class="text-muted hover:text-primary size-3.5 transition-colors"
-                            aria-hidden="true"
-                          />
-                        </Tooltip.Trigger>
-                        <Tooltip.Content class="max-w-72">
-                          {m.flow_form_field_variable_name_help()}
-                        </Tooltip.Content>
-                      </Tooltip.Root>
-                    </Tooltip.Provider>
-                  </span>
+                  </Field.Label>
+                  <Tooltip.Provider delayDuration={150}>
+                    <Tooltip.Root>
+                      <Tooltip.Trigger aria-label={m.flow_form_field_variable_name_help_label()}>
+                        <Info
+                          class="text-secondary hover:text-primary size-3.5 transition-colors"
+                          aria-hidden="true"
+                        />
+                      </Tooltip.Trigger>
+                      <Tooltip.Content class="max-w-72">
+                        {m.flow_form_field_variable_name_help()}
+                      </Tooltip.Content>
+                    </Tooltip.Root>
+                  </Tooltip.Provider>
                   <Input
+                    id="{field._localId}-name"
                     type="text"
-                    class="h-8 w-40 font-mono text-xs"
+                    class="h-8 w-56 font-mono text-xs"
                     value={field.name}
                     disabled={isPublished}
                     onfocus={() => {
@@ -615,19 +588,36 @@
                     oninput={(e) => updateFieldRuntimeName(index, e.currentTarget.value)}
                     onchange={() => void rewriteVariablesOnCommittedRename(field)}
                   />
-                </label>
+                </Field.Field>
+                {#if hasValidVariable}
+                  {@const token = getFlowFormFieldVariableToken(field.name)}
+                  <button
+                    type="button"
+                    class={`${getChipClasses("field")} hover:ring-label-stronger/30 cursor-pointer transition-shadow hover:ring-1 focus-visible:ring-1 focus-visible:outline-none`}
+                    onclick={() => void copyVariableToken(field)}
+                    aria-label={`${m.flow_form_field_variable_copy_label()} ${token}`}
+                    title={m.flow_form_field_variable_copy_label()}
+                  >
+                    {copiedVariableFieldId === field._localId ? m.copied() : token}
+                  </button>
+                {/if}
               </div>
+            {/if}
+            {#if !hasValidVariable && fieldNameIssue}
+              <p class="text-warning-stronger mt-2 text-xs">
+                {getFieldNameIssueMessage(fieldNameIssue)}
+              </p>
             {/if}
 
             {#if currentType === "list"}
-              <p class="text-muted mt-2 pl-[56px] text-xs">
+              <p class="text-muted mt-2 text-xs">
                 {m.flow_form_field_type_list_hint()}
               </p>
             {/if}
 
             <!-- Options (for select / multiselect) -->
             {#if flowFormFieldHasOptions(currentType)}
-              <div class="mt-3 pl-[56px]">
+              <div class="mt-3">
                 <div class="bg-hover-dimmer/40 rounded-lg px-3 py-2.5">
                   <span class="text-secondary text-xs font-medium">
                     {m.flow_form_field_option()}
@@ -637,7 +627,7 @@
                       {m.flow_form_field_add_option_hint()}
                     </p>
                   {/if}
-                  <div class="mt-1.5 flex flex-col gap-1.5">
+                  <div class="mt-1.5 flex max-w-md flex-col gap-1.5">
                     {#each field.options ?? [] as option, optionIndex (`${field._localId}-${optionIndex}`)}
                       <div class="flex items-center gap-2">
                         <Input

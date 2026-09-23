@@ -5,6 +5,7 @@
   import { BaseEdge, EdgeLabel, getBezierPath, type Position } from "@xyflow/svelte";
   import { IconPlus } from "@eneo/icons/plus";
   import { m } from "$lib/paraglide/messages";
+  import { Button } from "$lib/components/ui/button/index.js";
 
   let {
     id,
@@ -159,21 +160,23 @@
       class="edge-label-actions nodrag nopan text-secondary flex items-center gap-1 rounded-full px-1.5 py-0.5"
     >
       {#if data?.dataType && getDataTypeLabel(data.dataType)}
-        <button
-          class="hover:bg-hover-dimmer rounded px-1.5 py-0.5 text-xs font-medium"
+        <Button
+          variant="ghost"
+          size="xs"
           onclick={(event) => {
             event.stopPropagation();
             inspectEdge();
           }}
-          aria-label={m.flow_graph_inspect_edge()}
+          aria-label="{m.flow_graph_inspect_edge()}: {getDataTypeLabel(data.dataType)}"
         >
           {getDataTypeLabel(data.dataType)}
-        </button>
+        </Button>
       {/if}
 
       {#if !data?.readOnly && data?.allowInsert !== false}
-        <button
-          class="hover:bg-hover-dimmer rounded p-0.5"
+        <Button
+          variant="ghost"
+          size="icon-xs"
           onclick={(event) => {
             event.stopPropagation();
             insertStep();
@@ -181,7 +184,7 @@
           aria-label={m.flow_graph_insert_step_after({ order: String(data?.sourceStepOrder ?? 0) })}
         >
           <IconPlus size="sm" />
-        </button>
+        </Button>
       {/if}
     </div>
   </EdgeLabel>
@@ -208,7 +211,6 @@
     opacity: 1;
     pointer-events: auto;
     background: var(--background-color-primary);
-    backdrop-filter: blur(4px);
   }
 
   /* The travelling dot is feedback, not decoration: it appears only while

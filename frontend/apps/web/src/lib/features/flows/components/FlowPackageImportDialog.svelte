@@ -355,7 +355,7 @@
   >
     <header class="border-default flex items-start gap-3 border-b px-5 py-4 sm:px-6 sm:py-5">
       <div
-        class="bg-accent-default/10 text-accent-default flex size-10 shrink-0 items-center justify-center rounded-xl"
+        class="bg-secondary text-secondary flex size-10 shrink-0 items-center justify-center rounded-xl"
         aria-hidden="true"
       >
         <PackageOpen class="size-5" />
@@ -384,7 +384,7 @@
       {#if !selectedFile}
         <label
           for="flow-package-file-input"
-          class="bg-muted/30 border-default/70 group hover:border-accent-default/60 hover:bg-accent-default/5 focus-within:border-accent-default focus-within:ring-accent-default/25 flex min-h-[220px] cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed px-6 py-8 text-center transition-colors duration-(--duration-quick) ease-out focus-within:ring-2 sm:min-h-[260px] {isDragging
+          class="bg-muted/30 border-default/70 group hover:border-accent-default/60 hover:bg-accent-default/5 focus-within:border-accent-default focus-within:ring-accent-default/25 flex min-h-[220px] cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-8 text-center transition-colors duration-(--duration-quick) ease-out focus-within:ring-2 sm:min-h-[260px] {isDragging
             ? '!border-accent-default !bg-accent-default/10 ring-accent-default/30 ring-2'
             : ''}"
           ondragenter={handleDragEnter}
@@ -393,7 +393,7 @@
           ondrop={handleDrop}
         >
           <div
-            class="bg-secondary/60 text-secondary group-hover:bg-accent-default/15 group-hover:text-accent-default flex size-12 shrink-0 items-center justify-center rounded-2xl transition-colors duration-(--duration-quick) ease-out {isDragging
+            class="bg-secondary/60 text-secondary group-hover:bg-accent-default/15 group-hover:text-accent-default flex size-12 shrink-0 items-center justify-center rounded-xl transition-colors duration-(--duration-quick) ease-out {isDragging
               ? '!bg-accent-default/15 !text-accent-default'
               : ''}"
             aria-hidden="true"
@@ -424,7 +424,7 @@
             class="border-default bg-primary flex items-center gap-3 rounded-xl border px-3 py-2.5 shadow-xs"
           >
             <div
-              class="bg-accent-default/10 text-accent-default flex size-10 shrink-0 items-center justify-center rounded-lg"
+              class="bg-secondary text-secondary flex size-10 shrink-0 items-center justify-center rounded-lg"
               aria-hidden="true"
             >
               <FileArchive class="size-5" />

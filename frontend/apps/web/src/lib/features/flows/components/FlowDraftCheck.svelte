@@ -75,8 +75,9 @@
 </script>
 
 <div class="contents">
+  <!-- Outline: on stage 5 "Publicera" in the header is the one primary action. -->
   <Button
-    variant="default"
+    variant="outline"
     disabled={checking || steps.length === 0}
     onclick={check}
     class="h-9 gap-2"
@@ -93,7 +94,7 @@
     <p class="text-secondary order-2 w-full text-xs leading-relaxed">{m.flow_check_empty()}</p>
   {:else if checkState === "clean"}
     <div
-      class="border-positive-default/30 bg-positive-dimmer/70 text-positive-stronger order-2 flex w-full items-center gap-2 rounded-xl border px-3.5 py-2.5"
+      class="border-positive-default/30 bg-positive-dimmer/70 text-positive-stronger order-2 flex w-full items-center gap-2 rounded-[9px] border px-3.5 py-2.5"
       role="status"
     >
       <CheckCircle2 class="size-4 shrink-0" aria-hidden="true" />
@@ -101,7 +102,7 @@
     </div>
   {:else if checkState === "issues"}
     <div
-      class="border-negative-default/30 bg-negative-dimmer/70 text-negative-stronger order-2 flex w-full items-center gap-2 rounded-xl border px-3.5 py-2.5"
+      class="border-negative-default/30 bg-negative-dimmer/70 text-negative-stronger order-2 flex w-full items-center gap-2 rounded-[9px] border px-3.5 py-2.5"
       role="alert"
     >
       <AlertCircle class="size-4 shrink-0" aria-hidden="true" />
@@ -116,7 +117,7 @@
     </div>
   {:else if checkState === "stale"}
     <div
-      class="border-warning-default/30 bg-warning-dimmer/70 text-warning-stronger order-2 flex w-full items-center gap-2 rounded-xl border px-3.5 py-2.5"
+      class="border-warning-default/30 bg-warning-dimmer/70 text-warning-stronger order-2 flex w-full items-center gap-2 rounded-[9px] border px-3.5 py-2.5"
       role="status"
     >
       <AlertCircle class="size-4 shrink-0" aria-hidden="true" />
@@ -124,7 +125,7 @@
     </div>
   {:else if checkState === "save_failed"}
     <div
-      class="border-negative-default/30 bg-negative-dimmer/70 text-negative-stronger order-2 flex w-full items-center gap-2 rounded-xl border px-3.5 py-2.5"
+      class="border-negative-default/30 bg-negative-dimmer/70 text-negative-stronger order-2 flex w-full items-center gap-2 rounded-[9px] border px-3.5 py-2.5"
       role="alert"
     >
       <AlertCircle class="size-4 shrink-0" aria-hidden="true" />
