@@ -64,6 +64,7 @@ from eneo.skills.domain.skill import (
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
     SkillNotPublishedForBindingError,
+    SkillRemovalBusyError,
     SkillRuntimePolicyChangedError,
     SkillSlugConflictError,
 )
@@ -294,6 +295,12 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         409,
         "This Skill is still attached. Remove every binding before deleting it.",
         ErrorCodes.SKILL_STILL_ATTACHED,
+    ),
+    SkillRemovalBusyError: (
+        409,
+        "One or more selected Skills are being changed. Nothing was removed. "
+        "Reload and try again when the change has finished.",
+        ErrorCodes.SKILL_REMOVAL_BUSY,
     ),
     SkillNotPublishedForBindingError: (
         400,

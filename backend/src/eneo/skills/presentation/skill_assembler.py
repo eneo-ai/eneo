@@ -18,6 +18,7 @@ from eneo.skills.domain.skill import (
     SkillCatalogEntry,
     SkillRevision,
     SkillRevisionSummary,
+    SkillUsageCounts,
 )
 from eneo.skills.presentation.skill_models import (
     AssistantSkillBindingInput,
@@ -40,6 +41,7 @@ from eneo.skills.presentation.skill_models import (
     SkillRevisionPublic,
     SkillRevisionSummaryPublic,
     SkillSparse,
+    SkillUsageCountsPublic,
 )
 
 
@@ -104,6 +106,8 @@ class SkillAssembler:
             revision_id=resource.revision_id,
             revision_number=resource.revision_number,
             drift=resource.drift,
+            owner_name=resource.owner_name,
+            can_open=resource.can_open,
         )
 
     @staticmethod
@@ -166,6 +170,7 @@ class SkillAssembler:
             ],
             limit=projection.limit,
             next_cursor=projection.next_cursor,
+            matched_count=projection.matched_count,
         )
 
     @staticmethod
@@ -237,7 +242,17 @@ class SkillAssembler:
         )
 
     @staticmethod
+    def _usage_to_public(usage: SkillUsageCounts) -> SkillUsageCountsPublic:
+        return SkillUsageCountsPublic(
+            assistant_count=usage.assistant_count,
+            app_count=usage.app_count,
+            distinct_space_count=usage.distinct_space_count,
+            personal_chat_pinned=usage.personal_chat_pinned,
+        )
+
+    @classmethod
     def organization_summary_to_public(
+        cls,
         projection: OrganizationSkillSummaryProjection,
     ) -> OrganizationSkillSummaryPublic:
         skill = projection.skill
@@ -258,6 +273,8 @@ class SkillAssembler:
             first_published_at=skill.first_published_at,
             publication_state=skill.publication_state,
             execution_blocked=projection.execution_blocked,
+            removed_at=skill.removed_at,
+            usage=cls._usage_to_public(projection.usage),
         )
 
     @classmethod
@@ -272,6 +289,8 @@ class SkillAssembler:
             first_published_at=skill.first_published_at,
             publication_state=skill.publication_state,
             execution_blocked=projection.execution_blocked,
+            removed_at=skill.removed_at,
+            usage=cls._usage_to_public(projection.usage),
             current_revision=cls.revision_to_public(skill.current_revision),
         )
 

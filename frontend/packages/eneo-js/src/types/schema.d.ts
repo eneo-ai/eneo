@@ -6656,7 +6656,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Organization Skill
-     * @description Delete an eligible organisation Skill draft.
+     * @description Remove an organisation Skill while retaining its history. With detach_bindings, its Assistant, App and Personal Chat bindings are deleted in the same transaction.
      */
     delete: operations["delete_organization_skill_api_v1_skills_organization__skill_id___delete"];
     options?: never;
@@ -6842,6 +6842,46 @@ export interface paths {
      * @description Remove an organisation Skill from new catalogue use.
      */
     post: operations["unpublish_organization_skill_api_v1_skills_organization__skill_id__unpublish__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/detach/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Detach Organization Skill Bindings
+     * @description Detach an organisation Skill from up to 100 selected Assistants and Apps in one transaction. Personal Chat keeps its binding.
+     */
+    post: operations["detach_organization_skill_bindings_api_v1_skills_organization__skill_id__detach__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/remove/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Remove Organization Skills
+     * @description Remove up to 100 organisation Skills atomically, retaining history. With detach_bindings, their Assistant, App and Personal Chat bindings are deleted in the same transaction; otherwise a bound Skill refuses the whole batch.
+     */
+    post: operations["remove_organization_skills_api_v1_skills_organization_remove__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -8637,6 +8677,7 @@ export interface components {
       | "skill_published"
       | "skill_unpublished"
       | "skill_bindings_advanced"
+      | "skill_bindings_detached"
       | "skill_deleted"
       | "session_started"
       | "session_ended"
@@ -9394,6 +9435,11 @@ export interface components {
       expected_published_revision_id: string;
       /** Cursor */
       cursor?: string | null;
+      /**
+       * App Ids
+       * @description Restrict the update to these Apps (one chunk, no cursor). Apps already on the published revision are skipped.
+       */
+      app_ids?: string[] | null;
     };
     /** AppInTemplatePublic */
     AppInTemplatePublic: {
@@ -9954,6 +10000,11 @@ export interface components {
       expected_published_revision_id: string;
       /** Cursor */
       cursor?: string | null;
+      /**
+       * Assistant Ids
+       * @description Restrict the update to these Assistants (one chunk, no cursor). Assistants already on the published revision are skipped.
+       */
+      assistant_ids?: string[] | null;
     };
     /** AssistantGuard */
     AssistantGuard: {
@@ -12685,7 +12736,8 @@ export interface components {
       | 9058
       | 9059
       | 9060
-      | 9061;
+      | 9061
+      | 9062;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -15625,6 +15677,9 @@ export interface components {
       publication_state: components["schemas"]["SkillPublicationState"];
       /** Execution Blocked */
       execution_blocked: boolean;
+      /** Removed At */
+      removed_at: string | null;
+      usage: components["schemas"]["SkillUsageCountsPublic"];
       current_revision: components["schemas"]["SkillRevisionPublic"];
     };
     /** OrganizationSkillSummaryPagePublic */
@@ -15695,6 +15750,9 @@ export interface components {
       publication_state: components["schemas"]["SkillPublicationState"];
       /** Execution Blocked */
       execution_blocked: boolean;
+      /** Removed At */
+      removed_at: string | null;
+      usage: components["schemas"]["SkillUsageCountsPublic"];
     };
     /** OriginalSignedURLRequest */
     OriginalSignedURLRequest: {
@@ -18467,6 +18525,11 @@ export interface components {
       limit: number;
       /** Next Cursor */
       next_cursor?: string | null;
+      /**
+       * Matched Count
+       * @description Resources matching the filters across all pages; first page only.
+       */
+      matched_count?: number | null;
     };
     /**
      * SkillAdoptionResourceKind
@@ -18498,6 +18561,17 @@ export interface components {
       /** Revision Number */
       revision_number: number;
       drift: components["schemas"]["SkillAdoptionDrift"];
+      /**
+       * Owner Name
+       * @description Owner of the personal space, when personal.
+       */
+      owner_name?: string | null;
+      /**
+       * Can Open
+       * @description False for another user's personal space, which admins cannot open.
+       * @default true
+       */
+      can_open?: boolean;
     };
     /** SkillAdoptionRevisionCountPublic */
     SkillAdoptionRevisionCountPublic: {
@@ -18528,6 +18602,16 @@ export interface components {
       personal_chat: components["schemas"]["SkillAdoptionPersonalChatPublic"] | null;
       /** Revision Counts */
       revision_counts: components["schemas"]["SkillAdoptionRevisionCountPublic"][];
+    };
+    /**
+     * SkillBindingDetachRequest
+     * @description Assistants and Apps to detach one Skill from; at most 100 in total.
+     */
+    SkillBindingDetachRequest: {
+      /** Assistant Ids */
+      assistant_ids?: string[];
+      /** App Ids */
+      app_ids?: string[];
     };
     /** SkillBindingReferenceInput */
     SkillBindingReferenceInput: {
@@ -18591,6 +18675,21 @@ export interface components {
       instructions: string;
       /** Slug */
       slug: string;
+    };
+    /**
+     * SkillDetachmentTotalsPublic
+     * @description Distinct resources that lost a binding in one removal batch.
+     */
+    SkillDetachmentTotalsPublic: {
+      /** Assistant Count */
+      assistant_count: number;
+      /** App Count */
+      app_count: number;
+      /**
+       * Personal Chat Count
+       * @description Personal Chat policies that lost at least one selected Skill.
+       */
+      personal_chat_count: number;
     };
     /** SkillExecutionBlockPublic */
     SkillExecutionBlockPublic: {
@@ -18718,6 +18817,26 @@ export interface components {
        * Format: uuid
        */
       expected_revision_id: string;
+    };
+    /** SkillRemovalPublic */
+    SkillRemovalPublic: {
+      /**
+       * Removed Ids
+       * @description Selected Skills confirmed removed, including previously removed Skills.
+       */
+      removed_ids: string[];
+      detached: components["schemas"]["SkillDetachmentTotalsPublic"];
+    };
+    /** SkillRemovalRequest */
+    SkillRemovalRequest: {
+      /** Skill Ids */
+      skill_ids: string[];
+      /**
+       * Detach Bindings
+       * @description Also delete every Assistant, App and Personal Chat binding of the selected Skills in the same transaction. Without it, a bound Skill refuses the whole batch.
+       * @default false
+       */
+      detach_bindings?: boolean;
     };
     /** SkillRevisionCreateRequest */
     SkillRevisionCreateRequest: {
@@ -18923,6 +19042,17 @@ export interface components {
      * @enum {string}
      */
     SkillTurnEffectiveMode: "eager" | "always_only" | "selective";
+    /** SkillUsageCountsPublic */
+    SkillUsageCountsPublic: {
+      /** Assistant Count */
+      assistant_count: number;
+      /** App Count */
+      app_count: number;
+      /** Distinct Space Count */
+      distinct_space_count: number;
+      /** Personal Chat Pinned */
+      personal_chat_pinned: boolean;
+    };
     /** SkillsPolicyInput */
     SkillsPolicyInput: {
       /** Bindings */
@@ -44580,6 +44710,7 @@ export interface operations {
         limit?: number;
         cursor?: string | null;
         search?: string | null;
+        removed?: boolean;
       };
       header?: never;
       path?: never;
@@ -44727,7 +44858,9 @@ export interface operations {
   };
   delete_organization_skill_api_v1_skills_organization__skill_id___delete: {
     parameters: {
-      query?: never;
+      query?: {
+        detach_bindings?: boolean;
+      };
       header?: never;
       path: {
         skill_id: string;
@@ -44786,6 +44919,10 @@ export interface operations {
       query?: {
         limit?: number;
         cursor?: string | null;
+        /** @description Matches resource, space or owner name. */
+        query?: string | null;
+        kind?: components["schemas"]["SkillAdoptionResourceKind"] | null;
+        drift?: components["schemas"]["SkillAdoptionDrift"] | null;
       };
       header?: never;
       path: {
@@ -45384,6 +45521,146 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  detach_organization_skill_bindings_api_v1_skills_organization__skill_id__detach__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillBindingDetachRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillDetachmentTotalsPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  remove_organization_skills_api_v1_skills_organization_remove__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillRemovalRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRemovalPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

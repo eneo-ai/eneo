@@ -55,37 +55,40 @@
     ></Page.Title>
   </Page.Header>
   <Page.Main>
-    <div class="mx-auto flex w-full max-w-[44rem] flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
-      <p class="text-muted-foreground max-w-[65ch] text-sm leading-6">
-        {m.organization_skills_new_intro()}
-      </p>
-      {#if createdSkillHref}
-        <Alert.Root>
-          <CheckCircle2 aria-hidden="true" />
-          <Alert.Title>{m.organization_skills_created_title()}</Alert.Title>
-          <Alert.Description>
-            {m.organization_skills_created_navigation_failed_description()}
-          </Alert.Description>
-          <div class="col-start-2 mt-2">
-            <Button href={createdSkillHref} size="sm">
-              {m.organization_skills_open_created_action()}
-              <ArrowRight data-icon="inline-end" aria-hidden="true" />
-            </Button>
-          </div>
-        </Alert.Root>
-      {:else}
-        <Alert.Root role="note">
-          <Info aria-hidden="true" />
-          <Alert.Title>{m.organization_skills_draft_notice_title()}</Alert.Title>
-          <Alert.Description>{m.organization_skills_draft_notice_description()}</Alert.Description>
-        </Alert.Root>
-        <SkillForm
-          class="max-w-none"
-          onSubmit={createSkill}
-          showDiscardAction
-          onDirtyChange={(dirty) => (formDirty = dirty)}
-        />
-      {/if}
+    <div class="mx-auto w-full max-w-[1100px] px-4 py-6 sm:px-6 sm:py-8">
+      <div class="flex max-w-[44rem] flex-col gap-6">
+        <p class="text-muted-foreground max-w-[65ch] text-sm leading-6">
+          {m.organization_skills_new_intro()}
+        </p>
+        {#if createdSkillHref}
+          <Alert.Root>
+            <CheckCircle2 aria-hidden="true" />
+            <Alert.Title>{m.organization_skills_created_title()}</Alert.Title>
+            <Alert.Description>
+              {m.organization_skills_created_navigation_failed_description()}
+            </Alert.Description>
+            <div class="col-start-2 mt-2">
+              <Button href={createdSkillHref} size="sm">
+                {m.organization_skills_open_created_action()}
+                <ArrowRight data-icon="inline-end" aria-hidden="true" />
+              </Button>
+            </div>
+          </Alert.Root>
+        {:else}
+          <Alert.Root role="note">
+            <Info aria-hidden="true" />
+            <Alert.Title>{m.organization_skills_draft_notice_title()}</Alert.Title>
+            <Alert.Description>{m.organization_skills_draft_notice_description()}</Alert.Description
+            >
+          </Alert.Root>
+          <SkillForm
+            class="max-w-none"
+            onSubmit={createSkill}
+            showDiscardAction
+            onDirtyChange={(dirty) => (formDirty = dirty)}
+          />
+        {/if}
+      </div>
     </div>
   </Page.Main>
 </Page.Root>
