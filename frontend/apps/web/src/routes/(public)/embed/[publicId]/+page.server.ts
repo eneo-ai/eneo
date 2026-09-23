@@ -41,6 +41,9 @@ export const load: PageServerLoad = async ({ params, url, fetch, locals, setHead
       if (e instanceof EneoError && e.status === 404) {
         unavailable = true;
       } else {
+        // A backend restart or timeout: the error page may be framed too, or
+        // the loader keeps a refused, blank panel until the host page reloads.
+        locals.frameAncestors = "*";
         throw e;
       }
     }
