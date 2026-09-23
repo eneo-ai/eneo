@@ -252,11 +252,18 @@ Response:
   "transcription": {
     "live": { "available": true, "reason": null },
     "speaker_labels": { "selectable": true, "required": false, "default": true }
+  },
+  "security_classification": {
+    "name": "Open information",
+    "description": "Do not upload personal data.",
+    "security_level": 0
   }
 }
 ```
 
 `transcription` describes the audio options for a flow that transcribes recorded audio, and is `null` for any other flow. See [Live text and speaker labels](#live-text-and-speaker-labels).
+
+`security_classification` is the security classification of the flow's space, with its `name`, `description`, and `security_level`, so your app can tell users what information the flow may take; it is `null` when the space has none or the organization has turned security classifications off.
 
 ### 2. Upload runtime file
 

@@ -4,17 +4,18 @@ The run contract is the client form schema and result preview. Fetch it for the 
 
 ## Run-contract fields
 
-| Field                    | Consumer use                                                                                                                                                                     |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `published_flow_version` | Send as `expected_flow_version` so stale forms fail explicitly.                                                                                                                  |
-| `form_fields`            | Render structured values placed inside `input_payload_json`.                                                                                                                     |
-| `steps_requiring_input`  | Render step-specific file controls and build `step_inputs`.                                                                                                                      |
-| `runtime_upload_policy`  | Derive upload timeouts from size within the published minimum and maximum.                                                                                                       |
-| `steps_requiring_review` | Prepare review UI for the modes and output types that may pause.                                                                                                                 |
-| `aggregate_max_files`    | `0` means no runtime file steps. A positive value is the combined limit. `null` means at least one step is unbounded, so enforce per-step limits instead.                        |
-| `final_output`           | Prepare terminal rendering for payload, artifact, or outbound delivery.                                                                                                          |
-| `template_readiness`     | Explain a document-generation Flow that is not ready to run.                                                                                                                     |
-| `transcription`          | `null` unless the Flow transcribes recorded audio. `live` reports whether live text is available, and why not; `speaker_labels` reports whether a run may choose speaker labels. |
+| Field                     | Consumer use                                                                                                                                                                     |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `published_flow_version`  | Send as `expected_flow_version` so stale forms fail explicitly.                                                                                                                  |
+| `form_fields`             | Render structured values placed inside `input_payload_json`.                                                                                                                     |
+| `steps_requiring_input`   | Render step-specific file controls and build `step_inputs`.                                                                                                                      |
+| `runtime_upload_policy`   | Derive upload timeouts from size within the published minimum and maximum.                                                                                                       |
+| `steps_requiring_review`  | Prepare review UI for the modes and output types that may pause.                                                                                                                 |
+| `aggregate_max_files`     | `0` means no runtime file steps. A positive value is the combined limit. `null` means at least one step is unbounded, so enforce per-step limits instead.                        |
+| `final_output`            | Prepare terminal rendering for payload, artifact, or outbound delivery.                                                                                                          |
+| `template_readiness`      | Explain a document-generation Flow that is not ready to run.                                                                                                                     |
+| `transcription`           | `null` unless the Flow transcribes recorded audio. `live` reports whether live text is available, and why not; `speaker_labels` reports whether a run may choose speaker labels. |
+| `security_classification` | The Space's classification: `name`, `description`, and `security_level`. Show it where users choose what to upload. `null` when the Space has none or classifications are off.   |
 
 Each item in `steps_requiring_input` reports `step_id`, order, label, description, whether input is required, input format, maximum files, maximum bytes per file, and accepted MIME types. Never infer these limits from the label or from a previous Flow version.
 
