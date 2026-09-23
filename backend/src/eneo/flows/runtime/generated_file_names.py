@@ -6,6 +6,7 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from functools import cached_property
 
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.step_output import utf8_prefix
@@ -78,13 +79,23 @@ class GeneratedFileNames:
 
     def stem(self, *, step_order: int, output_type: str) -> str:
         """The name without its extension, which is also the document's title."""
-        siblings = self.documents.get(output_type, ())
-        # Numbering only the clashing ones could meet a third name ("Beslut
-        # Steg 1"); numbered all, the names end in distinct numbers.
-        numbered = len(
-            {self._stem(order, output_type, numbered=False) for order in siblings}
-        ) < len(siblings)
+        numbered = output_type in self._numbered_types
         return self._stem(step_order, output_type, numbered=numbered)
+
+    @cached_property
+    def _numbered_types(self) -> frozenset[str]:
+        # Numbering only the clashing ones could meet a third name ("Beslut
+        # Steg 1"); numbered all, the names end in distinct numbers. Names
+        # differing only in case are one file on Windows and macOS.
+        numbered: set[str] = set()
+        for output_type, orders in self.documents.items():
+            stems = {
+                self._stem(order, output_type, numbered=False).casefold()
+                for order in orders
+            }
+            if len(stems) < len(orders):
+                numbered.add(output_type)
+        return frozenset(numbered)
 
     def _stem(self, step_order: int, output_type: str, *, numbered: bool) -> str:
         words = [_clean(self.flow_name) or _FALLBACK_FLOW_NAME]

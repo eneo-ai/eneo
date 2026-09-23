@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 from datetime import datetime, timezone
 from pathlib import PureWindowsPath
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -119,13 +120,42 @@ def test_documents_that_would_share_a_name_all_carry_their_step_number() -> None
     assert names.name(step_order=4, output_type="docx") == "Nämndmöte 2026-09-23.docx"
 
 
-def test_step_names_that_clean_to_one_name_carry_their_step_number() -> None:
-    names = _names("Nämndmöte", _step(1, "pdf", "A/B"), _step(2, "pdf", "A:B"))
+@pytest.mark.parametrize(
+    ("first", "second", "first_shown", "second_shown"),
+    [
+        ("A/B", "A:B", "A B", "A B"),
+        # One file on case-insensitive file systems (Windows, macOS).
+        ("Beslut", "beslut", "Beslut", "beslut"),
+        ("Åtgärd", "åtgärd", "Åtgärd", "åtgärd"),
+    ],
+)
+def test_step_names_that_clean_to_one_name_carry_their_step_number(
+    first: str, second: str, first_shown: str, second_shown: str
+) -> None:
+    names = _names("Nämndmöte", _step(1, "pdf", first), _step(2, "pdf", second))
 
     assert _pdf_names(names, 1, 2) == [
-        "Nämndmöte A B Steg 1 2026-09-23.pdf",
-        "Nämndmöte A B Steg 2 2026-09-23.pdf",
+        f"Nämndmöte {first_shown} Steg 1 2026-09-23.pdf",
+        f"Nämndmöte {second_shown} Steg 2 2026-09-23.pdf",
     ]
+
+
+def test_the_numbering_is_decided_once_per_run() -> None:
+    names = _names(
+        "Nämndmöte", *(_step(order, "pdf", "Beslut") for order in range(1, 31))
+    )
+
+    with patch.object(
+        GeneratedFileNames,
+        "_stem",
+        autospec=True,
+        side_effect=GeneratedFileNames._stem,
+    ) as built:
+        for order in range(1, 31):
+            names.name(step_order=order, output_type="pdf")
+
+    # 30 stems to decide the numbering, then one for each name.
+    assert built.call_count == 60
 
 
 def test_a_flow_name_that_cuts_the_step_names_away_keeps_the_step_number() -> None:
