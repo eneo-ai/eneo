@@ -11,6 +11,10 @@
    * the title row where the design puts it, so the phase rail is the only
    * thing between the title and the work.
    */
+  // An edit's session is not the flow's draft: the flow header already says
+  // "Utkast" about the flow itself.
+  let { isEdit = false }: { isEdit?: boolean } = $props();
+
   const service = getAIBuilderService();
 
   // The server records the message before it works on it, so a recorded turn
@@ -34,7 +38,7 @@
   {:else if service.hasSession && service.messages.length > 0}
     <span
       class="text-secondary inline-flex shrink-0 items-center gap-1.5 text-xs max-sm:sr-only"
-      title={m.ai_builder_saved_state_title()}
+      title={isEdit ? m.ai_builder_saved_state_title_edit() : m.ai_builder_saved_state_title()}
     >
       <span
         class="bg-positive-dimmer text-positive-stronger inline-flex size-[0.9375rem] items-center justify-center rounded-full"
@@ -42,11 +46,11 @@
       >
         <IconCheck class="size-2.5" strokeWidth={3.5} />
       </span>
-      {m.ai_builder_saved_state_auto()}
+      {isEdit ? m.ai_builder_saved_state_auto_edit() : m.ai_builder_saved_state_auto()}
     </span>
   {:else}
     <span class="text-secondary shrink-0 text-xs max-sm:sr-only">
-      {m.ai_builder_saved_state_new()}
+      {isEdit ? m.ai_builder_saved_state_new_edit() : m.ai_builder_saved_state_new()}
     </span>
   {/if}
 

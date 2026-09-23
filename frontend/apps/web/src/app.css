@@ -372,6 +372,21 @@ body.print-mode > .printable-document {
 }
 /* ------------------------------------------ */
 
+/* The AI Builder's screens enter the same way, a short page-slide rise. One
+   keyframe for all of them; each screen still turns it off for reduced
+   motion next to where it applies it. */
+@keyframes builder-screen-in {
+  from {
+    opacity: 0.4;
+    transform: translateY(var(--distance-base));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* ------------------------------------------ */
+
 /* Honor OS-level reduced-motion across the app. Route components must not
    redefine this; component-level transitions still gate themselves via
    prefersReducedMotion() for zero-duration correctness. */

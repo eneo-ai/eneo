@@ -135,6 +135,15 @@ export class FlowAIBuilderService {
       this.#state.session?.status === "awaiting_approval"
   );
   isApplied = $derived(this.#state.session?.status === "applied");
+  /** A change is being prepared and is not in the flow yet: a conversation, a
+   *  proposed plan, or the session's plan fact. An applied change is done, so
+   *  a new launch does not ask before replacing it. */
+  hasOpenWork = $derived(
+    !this.isApplied &&
+      (this.#state.messages.length > 0 ||
+        this.#state.currentPlan !== null ||
+        this.#state.session?.latest_plan_id != null)
+  );
   canContinueEditing = $derived(
     this.#state.applyResult?.flow_id !== undefined ||
       (this.#state.session?.status === "applied" && this.#state.session?.flow_id !== null)

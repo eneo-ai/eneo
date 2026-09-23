@@ -1273,16 +1273,6 @@
   .confirm-screen {
     animation: builder-screen-in var(--duration-fast) var(--ease-smooth-out);
   }
-  @keyframes builder-screen-in {
-    from {
-      opacity: 0.4;
-      transform: translateY(6px);
-    }
-    to {
-      opacity: 1;
-      transform: none;
-    }
-  }
   @media (prefers-reduced-motion: reduce) {
     .confirm-screen {
       animation: none;

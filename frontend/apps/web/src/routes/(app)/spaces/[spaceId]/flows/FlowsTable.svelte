@@ -394,7 +394,7 @@
       <AlertDialog.Title>{m.ai_builder_draft_discard_title()}</AlertDialog.Title>
       <AlertDialog.Description>{m.ai_builder_draft_discard_body()}</AlertDialog.Description>
     </AlertDialog.Header>
-    <AlertDialog.Footer>
+    <AlertDialog.Footer class="border-border">
       <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
       <AlertDialog.Action variant="destructive" disabled={isDiscarding} onclick={confirmDiscard}>
         {m.ai_builder_draft_discard_action()}

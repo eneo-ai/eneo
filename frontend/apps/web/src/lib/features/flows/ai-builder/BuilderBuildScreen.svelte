@@ -3,10 +3,16 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
-  import type { AIBuilderStatus } from "./protocol";
+  import type { AIBuilderStatus, AIBuilderStepChoice } from "./protocol";
 
   interface Props {
     status: AIBuilderStatus | null;
+    /** Create drafts a new flow; edit changes an existing one. */
+    mode?: "create" | "edit";
+    /** Edit: the flow's own steps, shown by name instead of placeholders. */
+    flowSteps?: AIBuilderStepChoice[] | null;
+    /** Edit scoped to one step: the step being changed; the others stay as they are. */
+    targetStepNumber?: number | null;
     /** Number of skeleton rows: the last known plan length, or a typical five. */
     stepCount?: number;
     /** One-line recap of the confirmed task ("Ljud → PDF-dokument"). */
@@ -14,7 +20,24 @@
     onshowconfirmation?: () => void;
   }
 
-  let { status, stepCount = 5, confirmedLine = null, onshowconfirmation }: Props = $props();
+  let {
+    status,
+    mode = "create",
+    flowSteps = null,
+    targetStepNumber = null,
+    stepCount = 5,
+    confirmedLine = null,
+    onshowconfirmation
+  }: Props = $props();
+
+  const isEdit = $derived(mode === "edit");
+  // An edit drafts against the flow the reader knows; five generic rows would
+  // suggest a new flow of a size nobody asked for.
+  const knownSteps = $derived(
+    isEdit && flowSteps && flowSteps.length > 0
+      ? [...flowSteps].sort((a, b) => a.order - b.order)
+      : null
+  );
 
   // Planning usually finishes within a minute; past that the wait deserves a
   // calm word so nobody wonders whether the page froze. Real time, not progress.
@@ -71,10 +94,10 @@
           tabindex="-1"
           data-builder-screen-heading
         >
-          {m.ai_builder_build_title()}
+          {isEdit ? m.ai_builder_rail_planning_edit() : m.ai_builder_build_title()}
         </h2>
         <p class="text-secondary mt-1 text-[0.8125rem] text-pretty">
-          {m.ai_builder_build_subtitle()}
+          {isEdit ? m.ai_builder_build_subtitle_edit() : m.ai_builder_build_subtitle()}
         </p>
         <p class="text-secondary mt-2.5 text-[0.8125rem]" role="status" aria-live="polite">
           <!-- Each stage fades in rather than snapping: the reader sees the
@@ -91,30 +114,56 @@
         class="border-dimmer flex flex-col gap-2 border-t px-5 pt-4 pb-5 max-sm:px-4"
         aria-hidden="true"
       >
-        {#each Array.from({ length: Math.max(1, Math.min(stepCount, 12)) }) as _, i (i)}
-          <div
-            class="border-dimmer bg-secondary flex min-h-[3.625rem] items-center gap-3 rounded-[10px] border px-3 py-3"
-          >
-            <span
-              class="bg-tertiary text-secondary inline-flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-bold"
+        {#if knownSteps}
+          {#each knownSteps as step (step.id)}
+            {@const changing = targetStepNumber === null || targetStepNumber === step.order}
+            <div
+              class="border-dimmer bg-secondary flex min-h-[3.625rem] items-center gap-3 rounded-[10px] border px-3 py-3"
             >
-              {i + 1}
-            </span>
-            <div class="flex flex-1 flex-col gap-[0.4375rem]">
-              <Skeleton
-                class="bg-tertiary h-[0.6875rem] rounded"
-                style="width: {[62, 74, 58, 68, 48][i % 5]}%"
-              />
-              <Skeleton
-                class="bg-tertiary h-[0.5625rem] rounded"
-                style="width: {[38, 44, 34, 40, 30][i % 5]}%"
-              />
+              <span
+                class="bg-tertiary text-secondary inline-flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-bold"
+              >
+                {step.order}
+              </span>
+              <div class="flex min-w-0 flex-1 flex-col gap-[0.4375rem]">
+                <span class="text-primary truncate text-[0.8125rem] font-semibold">{step.name}</span
+                >
+                {#if changing}
+                  <Skeleton class="bg-tertiary h-[0.5625rem] w-2/5 rounded" />
+                {:else}
+                  <span class="text-secondary text-xs">{m.ai_builder_node_unchanged()}</span>
+                {/if}
+              </div>
             </div>
-          </div>
-        {/each}
+          {/each}
+        {:else}
+          {#each Array.from({ length: Math.max(1, Math.min(stepCount, 12)) }) as _, i (i)}
+            <div
+              class="border-dimmer bg-secondary flex min-h-[3.625rem] items-center gap-3 rounded-[10px] border px-3 py-3"
+            >
+              <span
+                class="bg-tertiary text-secondary inline-flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-bold"
+              >
+                {i + 1}
+              </span>
+              <div class="flex flex-1 flex-col gap-[0.4375rem]">
+                <Skeleton
+                  class="bg-tertiary h-[0.6875rem] rounded"
+                  style="width: {[62, 74, 58, 68, 48][i % 5]}%"
+                />
+                <Skeleton
+                  class="bg-tertiary h-[0.5625rem] rounded"
+                  style="width: {[38, 44, 34, 40, 30][i % 5]}%"
+                />
+              </div>
+            </div>
+          {/each}
+        {/if}
       </div>
       <div class="border-default bg-secondary border-t px-5 py-3 max-sm:px-4">
-        <p class="text-secondary text-[0.8125rem]">{m.ai_builder_build_footer()}</p>
+        <p class="text-secondary text-[0.8125rem]">
+          {isEdit ? m.ai_builder_build_footer_edit() : m.ai_builder_build_footer()}
+        </p>
       </div>
     </div>
   </div>

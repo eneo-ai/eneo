@@ -16,14 +16,27 @@
     eneo: Eneo;
     spaceId: string;
     flowId: string;
-    onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
+    onapplied?: (detail: {
+      flow_id: string;
+      focusStepIndex: number | null;
+    }) => void | Promise<void>;
+    /** The flow is published: the Builder says so before an apply is refused. */
+    flowIsPublished?: boolean;
     /** Whether the user may review the published version's runs. */
     canReview?: boolean;
     /** The flow's saved steps, for the composer's step picker. */
     stepChoices?: AIBuilderStepChoice[] | null;
   }
 
-  let { eneo, spaceId, flowId, onapplied, canReview = false, stepChoices = null }: Props = $props();
+  let {
+    eneo,
+    spaceId,
+    flowId,
+    onapplied,
+    flowIsPublished = false,
+    canReview = false,
+    stepChoices = null
+  }: Props = $props();
 
   const service = untrack(() => initAIBuilderService(eneo, spaceId, flowId));
   let builder = $state<FlowAIBuilder | undefined>();
@@ -31,7 +44,7 @@
   /** A change is being prepared: answers given, or a plan already proposed.
    *  The flow header uses it to stop competing with the change's own action. */
   export function hasChangeInProgress(): boolean {
-    return service.messages.length > 0 || service.currentPlan !== null;
+    return service.hasOpenWork;
   }
 
   export async function openReview() {
@@ -70,4 +83,5 @@
   {canReview}
   {stepChoices}
   onapplied={(detail) => onapplied?.(detail)}
+  {flowIsPublished}
 />

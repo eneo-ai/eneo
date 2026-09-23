@@ -15,6 +15,7 @@
 
 <script lang="ts">
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { m } from "$lib/paraglide/messages";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import IconChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -124,6 +125,23 @@
     return words.charAt(0).toUpperCase() + words.slice(1);
   }
 
+  // The plan names its steps by stable keys ("step_a"); the reader knows them
+  // by number and name, so a token that points at a planned step reads as it.
+  const TEMPLATE_TOKEN = /\{\{\s*([^{}]+?)\s*\}\}/g;
+  function readableParts(text: string): { text: string; step: string | null }[] {
+    const parts: { text: string; step: string | null }[] = [];
+    let last = 0;
+    for (const match of text.matchAll(TEMPLATE_TOKEN)) {
+      const at = match.index;
+      if (at > last) parts.push({ text: text.slice(last, at), step: null });
+      const stepRef = match[1].split(".")[0].trim();
+      parts.push({ text: match[0], step: resolveInputStepLabel?.(stepRef) ?? null });
+      last = at + match[0].length;
+    }
+    if (last < text.length) parts.push({ text: text.slice(last), step: null });
+    return parts;
+  }
+
   function inputMaterialSourceTitle(source: FlowInputBindingSourceRef): string {
     return resolveInputStepLabel?.(source.stepRef) ?? m.flow_input_material_unknown_source();
   }
@@ -141,6 +159,18 @@
     return parts.join(" · ");
   }
 </script>
+
+{#snippet readableText(text: string)}
+  {#each readableParts(text) as part, index (index)}
+    {#if part.step}
+      <Badge variant="secondary" class="max-w-full align-middle" title={part.text}>
+        <span class="truncate">{part.step}</span>
+      </Badge>
+    {:else}
+      {part.text}
+    {/if}
+  {/each}
+{/snippet}
 
 <Collapsible.Root {open} onOpenChange={onopenchange}>
   <div
@@ -313,7 +343,7 @@
             class:line-clamp-5={!instructionsExpanded &&
               instructions.length > INSTRUCTION_CLAMP_CHARS}
           >
-            {instructions}
+            {@render readableText(instructions)}
           </p>
           {#if instructions.length > INSTRUCTION_CLAMP_CHARS}
             <Button
@@ -372,7 +402,7 @@
                       {m.flow_input_material_custom_text()}
                     </p>
                     <p class="text-secondary mt-1 text-xs leading-relaxed whitespace-pre-wrap">
-                      {inputBindingsState.question}
+                      {@render readableText(inputBindingsState.question)}
                     </p>
                   </li>
                 {/if}

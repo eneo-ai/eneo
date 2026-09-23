@@ -937,7 +937,7 @@
       <AlertDialog.Title>{m.flow_run_cancel_title()}</AlertDialog.Title>
       <AlertDialog.Description>{m.flow_run_cancel_confirm()}</AlertDialog.Description>
     </AlertDialog.Header>
-    <AlertDialog.Footer>
+    <AlertDialog.Footer class="border-border">
       <AlertDialog.Cancel>{m.flow_run_cancel_keep_running()}</AlertDialog.Cancel>
       <AlertDialog.Action variant="destructive" onclick={confirmCancelRun}>
         {m.flow_run_cancel_action()}

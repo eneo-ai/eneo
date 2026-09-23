@@ -54,7 +54,13 @@
   import { outputModeUsesCompletionModel } from "$lib/features/flows/flowStepTypes";
 
   interface Props {
-    onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
+    /** Resolves once the host has shown the applied flow; the dialog waits for it. */
+    onapplied?: (detail: {
+      flow_id: string;
+      focusStepIndex: number | null;
+    }) => void | Promise<void>;
+    /** The flow being edited is published: applying is refused until it is unpublished. */
+    flowIsPublished?: boolean;
     /** The shell's composer route for a change request. This screen asks for
      *  changes in place, so the prop stays part of the contract but unused. */
     /** A generation attempt failed before a plan became available. */
@@ -69,6 +75,7 @@
 
   let {
     onapplied,
+    flowIsPublished = false,
     showGenerationFailure = false,
     onshowconversation,
     onclarify,
@@ -102,7 +109,13 @@
 
   // ---- Plan identity: what changed since the plan the user was looking at ---
 
-  let seenPlan: { sessionId: string; planKey: string; spec: FlowDraftSpecCore } | null = null;
+  let seenPlan: {
+    sessionId: string;
+    planId: string;
+    planKey: string;
+    stamped: boolean;
+    spec: FlowDraftSpecCore;
+  } | null = null;
   let previousSpec = $state<FlowDraftSpecCore | null>(null);
   let justUpdated = $state(false);
 
@@ -117,17 +130,27 @@
     }
     if (!currentPlan) return;
     const planKey = `${currentPlan.plan_id}:${currentPlan.updated_at ?? ""}:${currentPlan.spec_hash ?? ""}`;
+    const stamped = Boolean(currentPlan.updated_at || currentPlan.spec_hash);
     if (seenPlan === null || seenPlan.sessionId !== sessionId) {
       // A resumed draft's first plan is not an update the user just caused.
       justUpdated = false;
       previousSpec = null;
-    } else if (seenPlan.planKey !== planKey) {
+    } else if (seenPlan.planKey === planKey) {
+      return;
+    } else if (seenPlan.planId === currentPlan.plan_id && !seenPlan.stamped) {
+      // The streamed plan carries no server stamps; the session refresh that
+      // fills them in is the same proposal, not an update.
+    } else {
       justUpdated = true;
       previousSpec = seenPlan.spec;
-    } else {
-      return;
     }
-    seenPlan = { sessionId, planKey, spec: currentPlan.proposal.spec };
+    seenPlan = {
+      sessionId,
+      planId: currentPlan.plan_id,
+      planKey,
+      stamped,
+      spec: currentPlan.proposal.spec
+    };
   });
 
   // Create-mode plans carry no server diff, so the markers come from comparing
@@ -180,6 +203,47 @@
     }
     return counts;
   });
+  const changedStepCount = $derived(
+    stepChangeCounts
+      ? stepChangeCounts.added + stepChangeCounts.modified + stepChangeCounts.removed
+      : 0
+  );
+  // Byggspec §9: four counters, so the size of the change is read before any
+  // step is. Swedish inflects the adjective for one step ("1 ändrat").
+  const diffCounters = $derived(
+    stepChangeCounts
+      ? [
+          {
+            key: "added",
+            count: stepChangeCounts.added,
+            tone: "bg-positive-default",
+            one: m.ai_builder_diff_added_one,
+            other: m.ai_builder_diff_added
+          },
+          {
+            key: "modified",
+            count: stepChangeCounts.modified,
+            tone: "bg-accent-default",
+            one: m.ai_builder_diff_modified_one,
+            other: m.ai_builder_diff_modified
+          },
+          {
+            key: "unchanged",
+            count: stepChangeCounts.unchanged,
+            tone: "bg-border-stronger",
+            one: m.ai_builder_diff_unchanged_one,
+            other: m.ai_builder_diff_unchanged
+          },
+          {
+            key: "removed",
+            count: stepChangeCounts.removed,
+            tone: "bg-border-stronger",
+            one: m.ai_builder_diff_removed_one,
+            other: m.ai_builder_diff_removed
+          }
+        ].filter((counter) => counter.count > 0)
+      : []
+  );
   let onlyChanges = $state(false);
   const visibleSteps = $derived(
     onlyChanges && !isCreateMode
@@ -794,6 +858,9 @@
     mounted = false;
   });
 
+  // Set from the applied result until the host has shown the updated flow, so
+  // the reader never sees this screen's applied state flash past.
+  let handingOver = $state(false);
   // The confirm dialog stays open as the progress surface: it shows the
   // request in flight, then the created moment, and the flow opens from
   // there. Only a failure closes it, and then the failure panel takes focus.
@@ -804,7 +871,9 @@
         : service.isCreating
           ? "pending"
           : "idle"
-      : service.pendingOperationKind === "applying"
+      : service.pendingOperationKind === "approving" ||
+          service.pendingOperationKind === "applying" ||
+          handingOver
         ? "pending"
         : "idle"
   );
@@ -833,24 +902,24 @@
       return;
     }
     try {
+      // One confirmation for the reader. The server keeps approve and apply as
+      // two audited steps for edits (its atomic create path refuses edit
+      // plans), so the dialog runs both; an approved plan whose apply failed
+      // goes straight to apply.
+      if (service.canApprove) await service.approvePlan();
       const result = await service.applyPlan();
+      handingOver = true;
+      await onapplied?.({ flow_id: result.flow_id, focusStepIndex });
       // The edit host stays mounted behind the Builder tab, so the dialog
-      // must close itself before the screen hands over.
+      // closes itself once the updated flow is on screen.
       approveDialogOpen = false;
-      onapplied?.({ flow_id: result.flow_id, focusStepIndex });
     } catch {
       // Surfaced through service state.
       approveDialogOpen = false;
       await tick();
       footerStatusEl?.focus({ preventScroll: true });
-    }
-  }
-
-  async function handleApprove() {
-    try {
-      await service.approvePlan();
-    } catch {
-      // Surfaced through service.applyError / service.conflict.
+    } finally {
+      handingOver = false;
     }
   }
 
@@ -1099,7 +1168,7 @@
             {/if}
           </header>
 
-          {#if changeList}
+          {#if changeList && !isScopedStepReview}
             <section
               class="border-dimmer border-t px-[1.375rem] py-4 max-sm:px-3.5"
               aria-labelledby="builder-change-list-heading"
@@ -1404,27 +1473,17 @@
                   : m.ai_builder_how_flow_works()}
               </h3>
               {#if stepChangeCounts}
-                <!-- Byggspec §9: four counters, so the size of the change is
-                     read before any step is. -->
                 <ul class="flex list-none flex-wrap items-center gap-1.5 p-0">
-                  {#each [{ key: "added", count: stepChangeCounts.added, tone: "bg-positive-default" }, { key: "modified", count: stepChangeCounts.modified, tone: "bg-accent-default" }, { key: "unchanged", count: stepChangeCounts.unchanged, tone: "bg-border-stronger" }, { key: "removed", count: stepChangeCounts.removed, tone: "bg-border-stronger" }] as counter (counter.key)}
-                    {#if counter.count > 0}
-                      <li
-                        class="border-default bg-primary text-secondary inline-flex h-[1.625rem] items-center gap-1.5 rounded-full border px-2.5 text-xs"
-                      >
-                        <span
-                          class="size-[0.4375rem] rounded-full {counter.tone}"
-                          aria-hidden="true"
-                        ></span>
-                        {counter.key === "added"
-                          ? m.ai_builder_diff_added({ count: String(counter.count) })
-                          : counter.key === "modified"
-                            ? m.ai_builder_diff_modified({ count: String(counter.count) })
-                            : counter.key === "unchanged"
-                              ? m.ai_builder_diff_unchanged({ count: String(counter.count) })
-                              : m.ai_builder_diff_removed({ count: String(counter.count) })}
-                      </li>
-                    {/if}
+                  {#each diffCounters as counter (counter.key)}
+                    <li
+                      class="border-default bg-primary text-secondary inline-flex h-[1.625rem] items-center gap-1.5 rounded-full border px-2.5 text-xs"
+                    >
+                      <span class="size-[0.4375rem] rounded-full {counter.tone}" aria-hidden="true"
+                      ></span>
+                      {(counter.count === 1 ? counter.one : counter.other)({
+                        count: String(counter.count)
+                      })}
+                    </li>
                   {/each}
                 </ul>
                 {#if stepChangeCounts.unchanged > 0 && (stepChangeCounts.added > 0 || stepChangeCounts.modified > 0)}
@@ -1761,13 +1820,15 @@
             <span class="text-secondary text-xs">
               {isCreateMode
                 ? m.ai_builder_footer_steps_nothing_created({ count: stepCount })
-                : m.ai_builder_footer_steps_nothing_changed({ count: stepCount })}
+                : m.ai_builder_footer_steps_change_when_approved({ count: changedStepCount })}
             </span>
-            <span class="text-secondary text-xs text-pretty max-sm:hidden">
-              {isCreateMode
-                ? m.ai_builder_footer_draft_not_running()
-                : m.ai_builder_footer_edit_unpublishes()}
-            </span>
+            {#if isCreateMode || flowIsPublished}
+              <span class="text-secondary text-xs text-pretty max-sm:hidden">
+                {isCreateMode
+                  ? m.ai_builder_footer_draft_not_running()
+                  : m.ai_builder_footer_edit_unpublishes()}
+              </span>
+            {/if}
             {#if service.isRevisingPlan}
               <span
                 class="text-accent-stronger text-xs font-semibold"
@@ -1787,7 +1848,7 @@
         {/if}
         <!-- On a phone the primary action sits on top, within thumb reach. -->
         <div class="ml-auto flex gap-2 max-sm:w-full max-sm:flex-col-reverse">
-          {#if !service.applyResult}
+          {#if !service.applyResult && !isScopedStepReview}
             <Button
               variant="outline"
               size="sm"
@@ -1823,31 +1884,23 @@
                     : m.ai_builder_approve_create()}
               </Button>
             {/if}
-          {:else}
-            {#if service.canApprove || service.pendingOperationKind === "approving"}
-              <Button
-                size="sm"
-                class="max-sm:min-h-11"
-                disabled={isLocked}
-                onclick={() => void handleApprove()}
-              >
-                {service.pendingOperationKind === "approving"
-                  ? m.ai_builder_approving()
+          {:else if service.canApprove || service.canApply || service.pendingOperationKind === "approving" || service.pendingOperationKind === "applying"}
+            <!-- Approving and applying are one decision for the reader: the
+                 dialog confirms it and runs both. "Tillämpa" remains for a plan
+                 approved earlier whose apply did not go through. -->
+            <Button
+              size="sm"
+              class="max-sm:min-h-11"
+              disabled={isLocked || isPublishedError || applyBlockedByPrerequisites}
+              onclick={() => (approveDialogOpen = true)}
+            >
+              {service.pendingOperationKind === "approving" ||
+              service.pendingOperationKind === "applying"
+                ? m.ai_builder_updating_flow()
+                : service.canApply
+                  ? m.ai_builder_apply()
                   : m.ai_builder_approve()}
-              </Button>
-            {/if}
-            {#if service.canApply || service.pendingOperationKind === "applying"}
-              <Button
-                size="sm"
-                class="max-sm:min-h-11"
-                disabled={isLocked || isPublishedError || applyBlockedByPrerequisites}
-                onclick={() => (approveDialogOpen = true)}
-              >
-                {service.pendingOperationKind === "applying"
-                  ? m.ai_builder_applying()
-                  : m.ai_builder_apply()}
-              </Button>
-            {/if}
+            </Button>
           {/if}
         </div>
       </div>
@@ -1858,6 +1911,8 @@
     bind:open={approveDialogOpen}
     mode={isCreateMode ? "create" : "edit"}
     {stepCount}
+    {changedStepCount}
+    unchangedStepCount={stepChangeCounts?.unchanged ?? 0}
     phase={approvePhase}
     onconfirm={() => void handlePrimaryAction()}
   />

@@ -48,7 +48,12 @@
     targetKind?: "create" | "edit";
     /** The host shows the saved state and Samtal on its own title row. */
     statusInPageHeader?: boolean;
-    onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
+    onapplied?: (detail: {
+      flow_id: string;
+      focusStepIndex: number | null;
+    }) => void | Promise<void>;
+    /** The flow being edited is published: applying is refused until it is unpublished. */
+    flowIsPublished?: boolean;
     /** Whether the user may review the published version's runs; the page
      *  decides from the role permission and both entry points follow it. */
     canReview?: boolean;
@@ -64,6 +69,7 @@
     targetKind = "edit",
     statusInPageHeader = false,
     onapplied,
+    flowIsPublished = false,
     canReview = false,
     resumeSessionId = null,
     stepChoices = null,
@@ -396,7 +402,9 @@
       case "findings":
         return m.ai_builder_review_title();
       case "build":
-        return m.ai_builder_rail_planning();
+        return targetKind === "edit"
+          ? m.ai_builder_rail_planning_edit()
+          : m.ai_builder_rail_planning();
       case "review":
         return m.ai_builder_announce_review();
       case "conversation":
@@ -700,9 +708,8 @@
     service.setSavedFlowStepScope(scope);
     peekPhase = null;
     await tick();
-    const focus = scope.request
-      ? { prefill: scope.request }
-      : { placeholder: m.ai_builder_saved_step_prompt_placeholder() };
+    // The task screen words its own placeholder from the scope.
+    const focus = scope.request ? { prefill: scope.request } : {};
     if (taskScreenRef) {
       taskScreenRef.focusInput(focus);
     } else {
@@ -722,18 +729,26 @@
     }
   });
 
+  /** The last change is already in the flow and its session takes no more
+   *  turns: a new launch starts a fresh session without asking. */
+  async function freshSessionAfterApply(): Promise<boolean> {
+    if (!service.isApplied) return true;
+    try {
+      return await service.startFreshSession("edit");
+    } catch {
+      return false;
+    }
+  }
+
   async function launchSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
     // The session fact (latest_plan_id) says the edit is ongoing; the decision
     // reads it rather than the hydrated plan.
-    if (
-      service.messages.length > 0 ||
-      service.currentPlan !== null ||
-      service.session?.latest_plan_id != null
-    ) {
+    if (service.hasOpenWork) {
       pendingSavedFlowStepScope = scope;
       showReplaceEditSessionDialog = true;
       return;
     }
+    if (!(await freshSessionAfterApply())) return;
     await activateSavedFlowStep(scope);
   }
 
@@ -750,15 +765,12 @@
   });
 
   async function launchReview() {
-    if (
-      service.messages.length > 0 ||
-      service.currentPlan !== null ||
-      service.session?.latest_plan_id != null
-    ) {
+    if (service.hasOpenWork) {
       pendingReviewReplacement = true;
       showReplaceEditSessionDialog = true;
       return;
     }
+    if (!(await freshSessionAfterApply())) return;
     await activateReview();
   }
 
@@ -809,15 +821,12 @@
   });
 
   async function launchFailureRepairNow(target: FlowRunFailureRepairTarget) {
-    if (
-      service.messages.length > 0 ||
-      service.currentPlan !== null ||
-      service.session?.latest_plan_id != null
-    ) {
+    if (service.hasOpenWork) {
       pendingFailureRepairTarget = target;
       showReplaceEditSessionDialog = true;
       return;
     }
+    if (!(await freshSessionAfterApply())) return;
     await activateFailureRepair(target);
   }
 
@@ -962,7 +971,7 @@
         <!-- The status belongs on the title row; a host that has no room for it
              there (the flow page's tab bar) keeps it above the rail. -->
         <div class="mx-auto flex w-full items-center gap-3 pt-3 {columnClass}">
-          <BuilderSessionStatus />
+          <BuilderSessionStatus isEdit={targetKind === "edit"} />
           {#if canStartOver}
             <Button
               variant="outline"
@@ -1126,6 +1135,7 @@
           <BuilderReviewScreen
             showGenerationFailure={true}
             onapplied={(detail) => onapplied?.(detail)}
+            {flowIsPublished}
             onshowconversation={() => (service.conversationOpen = true)}
             onclarify={handleClarifyTask}
             onattachtemplate={handleAttachTemplate}
@@ -1134,6 +1144,9 @@
       {:else if screen === "build"}
         <BuilderBuildScreen
           status={service.statusMessage}
+          mode={targetKind}
+          flowSteps={targetKind === "edit" ? stepChoices : null}
+          targetStepNumber={service.activeStepScope?.stepNumber ?? null}
           stepCount={service.currentPlan?.proposal.spec.steps.length ?? 5}
           confirmedLine={buildConfirmedLine(latestSummary)}
           onshowconfirmation={() => (peekPhase = 0)}
@@ -1143,6 +1156,7 @@
           <BuilderReviewScreen
             showGenerationFailure={generationFailedWithoutPlan}
             onapplied={(detail) => onapplied?.(detail)}
+            {flowIsPublished}
             onshowconversation={() => (service.conversationOpen = true)}
             onclarify={handleClarifyTask}
             onattachtemplate={handleAttachTemplate}
@@ -1171,7 +1185,7 @@
       <AlertDialog.Title>{m.ai_builder_discard_change_title()}</AlertDialog.Title>
       <AlertDialog.Description>{m.ai_builder_discard_change_body()}</AlertDialog.Description>
     </AlertDialog.Header>
-    <AlertDialog.Footer>
+    <AlertDialog.Footer class="border-border">
       <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
       <AlertDialog.Action variant="destructive" onclick={discardChangeAndStartOver}>
         {m.ai_builder_discard_change_action()}
@@ -1196,7 +1210,7 @@
               })}
       </AlertDialog.Description>
     </AlertDialog.Header>
-    <AlertDialog.Footer>
+    <AlertDialog.Footer class="border-border">
       <AlertDialog.Cancel onclick={cancelSavedFlowStepReplacement}>
         {m.ai_builder_replace_edit_cancel()}
       </AlertDialog.Cancel>

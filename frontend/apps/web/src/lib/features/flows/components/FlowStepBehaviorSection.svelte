@@ -21,6 +21,7 @@
   import { supportsBehaviorPresets } from "$lib/features/ai-models/ModelKwargCapabilities.js";
   import { buildNextFlowPrompt } from "$lib/features/flows/flowPromptDraft";
   import { innerHeight } from "svelte/reactivity/window";
+  import { tick } from "svelte";
 
   let {
     step,
@@ -29,6 +30,8 @@
     isTranscribeOnly,
     assistant,
     assistantLoading,
+    assistantLoadFailed = false,
+    onRetryAssistantLoad,
     onImproveInstructionWithAI,
     availableModels,
     steps,
@@ -49,6 +52,9 @@
     isTranscribeOnly: boolean;
     assistant: LoadedAssistant | null;
     assistantLoading: boolean;
+    /** The step's AI settings could not be read; the instruction and model are unknown. */
+    assistantLoadFailed?: boolean;
+    onRetryAssistantLoad?: () => void;
     /** Opens the AI Builder on this step with a request about the instruction. */
     onImproveInstructionWithAI?: (request: string) => void;
     availableModels: CompletionModel[];
@@ -78,6 +84,30 @@
   function updateAssistantField(field: string, value: unknown) {
     onAssistantFieldChange?.({ field, value });
   }
+
+  // Retrying removes the button that held focus. Once the read has started and
+  // settled, focus goes to what the reader came for, or back to Retry if it
+  // failed again; never into a step the reader has since left.
+  let retryButton = $state<HTMLButtonElement | null>(null);
+  let promptEditor = $state<FlowPromptEditor | undefined>();
+  let retry = $state<{ stepId: string | null; started: boolean } | null>(null);
+  function retryAssistantLoad() {
+    retry = { stepId: step.id ?? null, started: false };
+    onRetryAssistantLoad?.();
+  }
+  $effect(() => {
+    if (!retry) return;
+    if (retry.stepId !== (step.id ?? null)) {
+      retry = null;
+    } else if (assistantLoading) {
+      if (!retry.started) retry = { ...retry, started: true };
+    } else if (retry.started) {
+      retry = null;
+      // The editor or the new Retry button binds in this same update.
+      const failed = assistantLoadFailed;
+      void tick().then(() => (failed ? retryButton?.focus() : promptEditor?.focus()));
+    }
+  });
 </script>
 
 <FlowStepSection>
@@ -103,6 +133,20 @@
       <IconLoadingSpinner class="size-4 animate-spin" />
       {m.flow_step_assistant_loading()}
     </div>
+  {:else if !isTranscribeOnly && assistantLoadFailed}
+    <!-- Without this the chapter was empty: no instruction, no model, no reason. -->
+    <Alert.Root variant="destructive" class="mb-4">
+      <CircleAlert />
+      <Alert.Title>{m.flow_step_assistant_load_failed_title()}</Alert.Title>
+      <Alert.Description class="flex flex-col items-start gap-3">
+        <span>{m.flow_step_assistant_load_failed_body()}</span>
+        {#if onRetryAssistantLoad}
+          <Button bind:ref={retryButton} variant="outline" size="sm" onclick={retryAssistantLoad}>
+            {m.retry()}
+          </Button>
+        {/if}
+      </Alert.Description>
+    </Alert.Root>
   {/if}
 
   {#if !isTranscribeOnly && assistant}
@@ -161,6 +205,7 @@
     {#snippet instructionEditor()}
       <div class="flex flex-col gap-2">
         <FlowPromptEditor
+          bind:this={promptEditor}
           value={instructionText}
           disabled={isPublished || assistantLoading || !assistant}
           label={stepUxCopy.instructionsTitle}

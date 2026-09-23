@@ -113,7 +113,7 @@
   class="step-card-row group flex w-full items-start gap-2.5 border-b px-3.5 py-3 text-left transition-colors duration-(--duration-quick)
     {isActive ? 'border-b-default bg-accent-dimmer/40' : 'border-default hover:bg-hover-dimmer/40'}
     active:bg-hover-default"
-  style:animation-delay="{Math.min(index, 10) * 50}ms"
+  style:animation-delay="calc(var(--duration-stagger) * {Math.min(index, 6)})"
   style:animation-fill-mode="both"
 >
   <button

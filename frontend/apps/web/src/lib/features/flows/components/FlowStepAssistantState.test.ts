@@ -59,6 +59,22 @@ describe("FlowStepAssistantState", () => {
     expect(state.loading).toBe(true);
   });
 
+  it("says when the step's assistant could not be read, and reads it again on retry", async () => {
+    const activeStep = { current: makeStep("assistant-1") };
+    const { state, flowEditor } = makeState(activeStep);
+    // The save manager swallows the error and returns null.
+    flowEditor.loadAssistant.mockResolvedValueOnce(null as never);
+
+    await state.load("assistant-1");
+    expect(state.assistant).toBeNull();
+    expect(state.loadFailed).toBe(true);
+
+    state.retryLoad();
+    await vi.waitFor(() => expect(state.assistant?.id).toBe("assistant-1"));
+    expect(state.loadFailed).toBe(false);
+    expect(flowEditor.loadAssistant).toHaveBeenCalledTimes(2);
+  });
+
   it("does not save stale assistant edits to the newly active step", () => {
     const activeStep = { current: makeStep("assistant-2") };
     const { state, flowEditor } = makeState(activeStep);

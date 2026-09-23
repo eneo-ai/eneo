@@ -1275,17 +1275,6 @@
     /* One field per line: two columns leave no room for a label at 375 px. */
   }
 
-  @keyframes builder-screen-in {
-    from {
-      opacity: 0.4;
-      transform: translateY(6px);
-    }
-    to {
-      opacity: 1;
-      transform: none;
-    }
-  }
-
   @media (prefers-reduced-motion: reduce) {
     .question-panel {
       animation: none;

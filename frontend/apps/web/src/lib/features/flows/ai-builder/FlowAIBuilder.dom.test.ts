@@ -98,7 +98,7 @@ const TURN_ID = "11111111-1111-4111-8111-111111111111";
 interface FakeSession {
   session_id: string;
   space_id: string;
-  status: "chatting" | "awaiting_approval";
+  status: "chatting" | "awaiting_approval" | "applied";
   target_kind: "create" | "edit";
   flow_id: string | null;
   latest_plan_id: string | null;
@@ -3795,6 +3795,9 @@ describe("FlowAIBuilder edit host contract", () => {
         m.ai_builder_edit_context_step({ step: 14, name: "Skriv brukarversionen" })
       )
     ).toBeTruthy();
+    // The screen talks about the step now, not the whole flow's example.
+    screen.getByRole("heading", { name: m.ai_builder_task_title_edit_step() });
+    screen.getByRole("textbox", { name: m.ai_builder_saved_step_prompt_placeholder() });
     await fireEvent.input(textbox(), { target: { value: "Skriv i du-form" } });
     await fireEvent.keyDown(textbox(), { key: "Enter" });
     await waitFor(() => expect(calls).toHaveLength(1));
@@ -3963,10 +3966,17 @@ describe("FlowAIBuilder edit host contract", () => {
     await builder().focusSavedFlowStep(SAVED_STEP_SCOPE);
     expect(await screen.findByText(SAVED_STEP_LABEL)).toBeTruthy();
     screen.getByRole("textbox", { name: m.ai_builder_saved_step_prompt_placeholder() });
+    screen.getByRole("heading", { name: m.ai_builder_task_title_edit_step() });
+    // The flow header already says "Utkast" about the flow; the edit is not a draft.
+    expect(screen.getByText(m.ai_builder_saved_state_new_edit())).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_saved_state_new())).toBeNull();
 
-    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_edit_context_clear() }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_edit_context_clear_short() })
+    );
 
     await waitFor(() => expect(screen.queryByText(SAVED_STEP_LABEL)).toBeNull());
+    screen.getByRole("heading", { name: m.ai_builder_task_title_edit() });
     expect(
       screen.queryByRole("textbox", { name: m.ai_builder_saved_step_prompt_placeholder() })
     ).toBeNull();
@@ -4192,6 +4202,49 @@ describe("FlowAIBuilder edit host contract", () => {
     expect(
       screen.queryByText(m.ai_builder_replace_edit_description({ stepName: m.flow_step_unnamed() }))
     ).toBeNull();
+  });
+
+  it("starts a fresh session without asking when the last change is already applied", async () => {
+    // An applied session takes no more turns; asking to "replace" a change that
+    // is already in the flow was a question about nothing.
+    const applied = makeSession({
+      session_id: "e-applied",
+      target_kind: "edit",
+      flow_id: "flow-1",
+      status: "applied",
+      conversation: [
+        userMessage("u1", "Förbättra instruktionen"),
+        assistantMessage("a1", "Här är förslaget.")
+      ]
+    });
+    const fresh = editSession();
+    let posts = 0;
+    const { fetch } = makeFetch({ sessions: [applied, fresh] });
+    const baseFetch = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (path, init) => {
+      if (path === SESSIONS_ROUTE && init?.method === "post") {
+        posts += 1;
+        return posts === 1 ? applied : fresh;
+      }
+      return baseFetch(path, init);
+    });
+    const { stream } = makeStream();
+    const { service, builder } = renderShell({
+      fetch,
+      stream,
+      targetKind: "edit",
+      flowId: "flow-1"
+    });
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    await waitFor(() => expect(builder()).toBeDefined());
+    expect(service().hasOpenWork).toBe(false);
+
+    await builder().focusSavedFlowStep(SAVED_STEP_SCOPE);
+
+    await waitFor(() => expect(posts).toBe(2));
+    expect(screen.queryByText(m.ai_builder_replace_edit_title())).toBeNull();
+    await waitFor(() => expect(service().session?.session_id).toBe(fresh.session_id));
+    await waitFor(() => expect(service().savedFlowStepScope?.stepNumber).toBe(2));
   });
 
   it("closes the replace question at once and opens the review only after the fresh session exists", async () => {

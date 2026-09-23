@@ -1107,6 +1107,8 @@
               instructionMissing={stepAiWork?.missing ?? false}
               assistant={assistantState.assistant}
               assistantLoading={assistantState.loading}
+              assistantLoadFailed={assistantState.loadFailed}
+              onRetryAssistantLoad={() => assistantState.retryLoad()}
               onImproveInstructionWithAI={onEditStepWithAI && activeStep.id
                 ? (request) => onEditStepWithAI?.(activeStep, request)
                 : undefined}

@@ -195,7 +195,7 @@
         {/if}
       </AlertDialog.Description>
     </AlertDialog.Header>
-    <AlertDialog.Footer>
+    <AlertDialog.Footer class="border-border">
       <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
       <AlertDialog.Action variant="destructive" onclick={confirmRemove}
         >{m.delete()}</AlertDialog.Action

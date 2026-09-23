@@ -663,7 +663,6 @@
             variant="ghost"
             size="xs"
             class="text-secondary shrink-0"
-            aria-label={m.ai_builder_edit_context_clear()}
             onclick={clearEditContext}
           >
             {m.ai_builder_edit_context_clear_short()}

@@ -1439,6 +1439,7 @@
           flowId={$resource.id}
           canReview={canReviewWithAIBuilder && $resource.published_version != null}
           {stepChoices}
+          flowIsPublished={$isPublished}
           onapplied={async (detail) => {
             try {
               const updated = await data.eneo.flows.get({ id: detail.flow_id });
@@ -1456,6 +1457,9 @@
               if (focusedStepId) {
                 flowEditor.selectStep(focusedStepId);
               }
+              // The Builder's own receipt stays behind its tab; the reader,
+              // back in the editor, still hears that the change is in.
+              toast.success(m.ai_builder_applied_success_edit());
             } catch (err) {
               console.error("Failed to refresh flow after apply:", err);
             }
@@ -1532,7 +1536,7 @@
       </AlertDialog.Title>
       <AlertDialog.Description>{m.flow_unpublish_confirm_body()}</AlertDialog.Description>
     </AlertDialog.Header>
-    <AlertDialog.Footer>
+    <AlertDialog.Footer class="border-border">
       <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
       <AlertDialog.Action
         variant="destructive"

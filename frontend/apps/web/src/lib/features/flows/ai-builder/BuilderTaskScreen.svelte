@@ -64,7 +64,13 @@
     <h2
       class="text-primary text-[1.6875rem] leading-tight font-extrabold tracking-[-0.03em] text-pretty"
     >
-      {isEdit ? m.ai_builder_task_title_edit() : m.ai_builder_task_title()}
+      {#if !isEdit}
+        {m.ai_builder_task_title()}
+      {:else if editContextLabel}
+        {m.ai_builder_task_title_edit_step()}
+      {:else}
+        {m.ai_builder_task_title_edit()}
+      {/if}
     </h2>
     <p class="text-secondary mt-2 max-w-[54ch] text-[0.9375rem] leading-relaxed text-pretty">
       {isEdit ? m.ai_builder_task_intro_edit() : m.ai_builder_task_intro()}
@@ -81,9 +87,11 @@
         {onselectstep}
         {requireStepScope}
         {onpackage}
-        placeholder={isEdit
-          ? m.ai_builder_task_placeholder_edit()
-          : m.ai_builder_task_placeholder()}
+        placeholder={!isEdit
+          ? m.ai_builder_task_placeholder()
+          : editContextLabel
+            ? m.ai_builder_saved_step_prompt_placeholder()
+            : m.ai_builder_task_placeholder_edit()}
       />
     </div>
     <p class="text-secondary mt-2 px-0.5 text-xs">{m.ai_builder_task_model_note()}</p>
@@ -155,16 +163,6 @@
 <style lang="postcss">
   .task-screen {
     animation: builder-screen-in var(--duration-fast) var(--ease-smooth-out);
-  }
-  @keyframes builder-screen-in {
-    from {
-      opacity: 0.4;
-      transform: translateY(6px);
-    }
-    to {
-      opacity: 1;
-      transform: none;
-    }
   }
   @media (prefers-reduced-motion: reduce) {
     .task-screen {

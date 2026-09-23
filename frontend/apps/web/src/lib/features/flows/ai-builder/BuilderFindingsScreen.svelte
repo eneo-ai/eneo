@@ -770,16 +770,6 @@
   .findings-screen {
     animation: builder-screen-in var(--duration-fast) var(--ease-smooth-out);
   }
-  @keyframes builder-screen-in {
-    from {
-      opacity: 0.4;
-      transform: translateY(6px);
-    }
-    to {
-      opacity: 1;
-      transform: none;
-    }
-  }
   /* The bar appears the moment the first row is ticked; it should arrive,
      not blink. Quick, because it answers a click the reader just made. */
   .selection-bar {

@@ -13,7 +13,7 @@ import type {
   StepSpec
 } from "./protocol";
 import type { AIBuilderClientTransport, PendingPlanOperation } from "./FlowAIBuilderDriver";
-import type { ComponentProps } from "svelte";
+import { tick, type ComponentProps } from "svelte";
 import BuilderReviewScreenHarness from "./test-harnesses/BuilderReviewScreenHarness.svelte";
 
 type HarnessProps = ComponentProps<typeof BuilderReviewScreenHarness>;
@@ -21,6 +21,66 @@ type HarnessProps = ComponentProps<typeof BuilderReviewScreenHarness>;
 afterEach(() => {
   cleanup();
 });
+
+// A one-step edit: step 2 of two is the scoped target and the only change.
+function scopedStepEditState(targetStep: Partial<StepSpec> = {}) {
+  return {
+    session: makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }),
+    currentPlan: makePlan({
+      proposal: makeProposal({
+        spec: {
+          flow_name: "Mötesrapport",
+          flow_description: "Skriver en rapport.",
+          form_fields: [],
+          steps: [
+            makeTranscribeStep({ existing_step_ref: "existing_step_1" }),
+            makeRenderStep({
+              existing_step_ref: "existing_step_2",
+              name: "Sammanfatta",
+              output_mode: "pass_through",
+              output_type: "text",
+              assistant_spec: {
+                instructions: "Skriv en kort sammanfattning.",
+                knowledge_refs: [],
+                model_ref: null
+              },
+              ...targetStep
+            })
+          ]
+        },
+        edit: {
+          base_flow_revision: 3,
+          removed_existing_step_refs: [],
+          scoped_target_existing_step_ref: "existing_step_2",
+          diff: {
+            step_changes: [
+              { kind: "unchanged", step_name: "Transkribera ljud", step_ref: "existing_step_1" },
+              {
+                kind: "modified",
+                step_name: "Sammanfatta",
+                step_ref: "existing_step_2",
+                field_changes: [
+                  {
+                    field: "instructions",
+                    previous: "Sammanfatta texten.",
+                    current: "Skriv en kort sammanfattning."
+                  }
+                ]
+              }
+            ],
+            net_steps_added: 0,
+            net_steps_removed: 0,
+            flow_property_changes: {}
+          },
+          warnings: [],
+          advisories: [],
+          risk_flags: [],
+          confidence: "ready"
+        }
+      })
+    })
+  };
+}
 
 describe("BuilderReviewScreen approval", () => {
   it("offers one primary action in create mode and creates only after the dialog", async () => {
@@ -238,22 +298,99 @@ describe("BuilderReviewScreen approval", () => {
     expect(screen.queryByRole("button", { name: m.ai_builder_modify() })).toBeNull();
   });
 
-  it("keeps approve then apply as two steps in edit mode", async () => {
+  it("approves and applies an edit with one confirmation, and closes once the host shows the flow", async () => {
+    const applyResult = {
+      flow_id: "flow-1",
+      flow_name: "Flöde",
+      steps_created: 0,
+      steps_updated: 1,
+      steps_removed: 0
+    };
+    const approvePlan = vi.fn().mockResolvedValue(undefined);
+    const applyPlan = vi.fn().mockResolvedValue(applyResult);
+    let finishHandoff: () => void = () => {};
+    const onapplied = vi.fn(() => new Promise<void>((resolve) => (finishHandoff = resolve)));
     render(BuilderReviewScreenHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),
       state: {
         session: makeSession({ status: "awaiting_approval" }),
         currentPlan: makePlan({ status: "proposed" })
+      },
+      screenProps: { onapplied },
+      onservice: (service) => {
+        service.approvePlan = approvePlan;
+        service.applyPlan = applyPlan;
       }
     });
+    // One primary action; a draft hears nothing about unpublishing.
     expect(screen.getByRole("button", { name: m.ai_builder_approve() })).toBeTruthy();
     expect(screen.queryByRole("button", { name: m.ai_builder_apply() })).toBeNull();
     expect(screen.queryByRole("button", { name: m.ai_builder_approve_create() })).toBeNull();
-    // An edit changes nothing until approved; no flow is "created" here.
-    expect(screen.getByText(m.ai_builder_footer_edit_unpublishes())).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_footer_edit_unpublishes())).toBeNull();
     expect(screen.queryByText(m.ai_builder_footer_draft_not_running())).toBeNull();
-    cleanup();
 
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_approve() }));
+    // An edit's description already says no run starts; the list does not repeat it.
+    const dialog = within(screen.getByRole("alertdialog"));
+    expect(dialog.queryByText(m.ai_builder_approve_dialog_no_data())).toBeNull();
+    expect(dialog.getByText(m.ai_builder_approve_dialog_step_editable())).toBeTruthy();
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_approve_dialog_confirm_edit() })
+    );
+    await waitFor(() =>
+      expect(onapplied).toHaveBeenCalledWith({
+        flow_id: "flow-1",
+        focusStepIndex: expect.anything()
+      })
+    );
+    expect(approvePlan).toHaveBeenCalledOnce();
+    expect(applyPlan).toHaveBeenCalledOnce();
+    expect(approvePlan.mock.invocationCallOrder[0]).toBeLessThan(
+      applyPlan.mock.invocationCallOrder[0]
+    );
+    // The dialog is the progress surface until the host has shown the flow:
+    // the screen's applied state never flashes past.
+    expect(screen.getByRole("alertdialog").getAttribute("data-state")).toBe("open");
+    expect(screen.getByText(m.ai_builder_approve_dialog_pending_hint_edit())).toBeTruthy();
+    // The button keeps the dialog's verb while it works.
+    expect(dialog.getByRole("button", { name: m.ai_builder_updating_flow() })).toBeTruthy();
+    finishHandoff();
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+
+  it("announces a new proposal, not the session refresh that stamps the same one", async () => {
+    let service!: Parameters<
+      NonNullable<ComponentProps<typeof BuilderReviewScreenHarness>["onservice"]>
+    >[0];
+    // The streamed plan carries no server stamps; the refresh after the turn adds them.
+    const streamed = makePlan({ status: "proposed" });
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: {
+        session: makeSession({ status: "awaiting_approval" }),
+        currentPlan: streamed
+      },
+      onservice: (instance) => (service = instance)
+    });
+    service.seedState({
+      currentPlan: { ...streamed, updated_at: "2026-09-23T10:00:00Z", spec_hash: "hash-1" }
+    });
+    await tick();
+    expect(screen.queryByText(m.ai_builder_plan_updated_announce())).toBeNull();
+
+    service.seedState({
+      currentPlan: {
+        ...streamed,
+        plan_id: "plan-2",
+        updated_at: "2026-09-23T10:05:00Z",
+        spec_hash: "hash-2"
+      }
+    });
+    expect(await screen.findByText(m.ai_builder_plan_updated_announce())).toBeTruthy();
+  });
+
+  it("applies an already approved edit without approving again, and names publishing only when published", async () => {
+    const approvePlan = vi.fn();
     const applyPlan = vi.fn().mockResolvedValue({
       flow_id: "flow-1",
       flow_name: "Flöde",
@@ -267,18 +404,20 @@ describe("BuilderReviewScreen approval", () => {
         session: makeSession({ status: "awaiting_approval" }),
         currentPlan: makePlan({ status: "approved" })
       },
+      screenProps: { flowIsPublished: true },
       onservice: (service) => {
+        service.approvePlan = approvePlan;
         service.applyPlan = applyPlan;
       }
     });
+    expect(screen.getByText(m.ai_builder_footer_edit_unpublishes())).toBeTruthy();
 
     await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_apply() }));
     await fireEvent.click(
       screen.getByRole("button", { name: m.ai_builder_approve_dialog_confirm_edit() })
     );
     await waitFor(() => expect(applyPlan).toHaveBeenCalledOnce());
-    // The edit host stays mounted behind the Builder tab: the dialog must
-    // have closed itself, not waited for a navigation.
+    expect(approvePlan).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 
@@ -537,6 +676,54 @@ describe("BuilderReviewScreen plan document", () => {
     expect(
       within(detailsPanel as HTMLElement).queryByText(m.ai_builder_node_mode_render_verbatim())
     ).toBeNull();
+  });
+
+  it("keeps a one-step edit's review to the step and counts only what changes", async () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: scopedStepEditState()
+    });
+
+    // The heading and the step card name the step; the list said it again.
+    expect(screen.queryByTestId("edit-change-list")).toBeNull();
+    // "Change your answers" sends an unscoped turn that would drop the step scope.
+    expect(screen.queryByRole("button", { name: m.ai_builder_modify() })).toBeNull();
+    expect(
+      screen.getByText(m.ai_builder_footer_steps_change_when_approved({ count: 1 }))
+    ).toBeTruthy();
+    // One step reads in the singular: "1 ändrat", not "1 ändrade".
+    expect(screen.getByText(m.ai_builder_diff_modified_one({ count: "1" }))).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_diff_unchanged_one({ count: "1" }))).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_approve() }));
+    expect(
+      await screen.findByText(m.ai_builder_approve_dialog_steps_edit({ changed: 1, unchanged: 1 }))
+    ).toBeTruthy();
+  });
+
+  it("reads a reference to a planned step as that step, not as the plan's key", async () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: scopedStepEditState({
+        assistant_spec: {
+          instructions: "Sammanfatta {{ step_a.output.text }} kort.",
+          knowledge_refs: [],
+          model_ref: null
+        },
+        input_bindings: { question: "Underlag:\n{{step_a.output.text}}" }
+      })
+    });
+
+    expect((await screen.findByTitle("{{ step_a.output.text }}")).textContent?.trim()).toBe(
+      "1. Transkribera ljud"
+    );
+    expect(screen.getByTitle("{{step_a.output.text}}").textContent?.trim()).toBe(
+      "1. Transkribera ljud"
+    );
+    // The words around a reference keep their spacing and line breaks.
+    const paragraphs = [...document.querySelectorAll("p")].map((p) => p.textContent);
+    expect(paragraphs).toContain("Sammanfatta 1. Transkribera ljud kort.");
+    expect(paragraphs).toContain("Underlag:\n1. Transkribera ljud");
   });
 
   it("shows what an edit changes in a published step and opens that step first", async () => {

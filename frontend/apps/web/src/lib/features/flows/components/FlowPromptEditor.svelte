@@ -102,6 +102,11 @@
 
   let textareaEl: HTMLTextAreaElement | null = $state(null);
   let mirrorEl: HTMLDivElement | null = $state(null);
+
+  /** Puts the caret in the editor, for a parent that replaced what held focus. */
+  export function focus() {
+    textareaEl?.focus();
+  }
   let autocompleteOpen = $state(false);
   let autocompleteQuery = $state("");
   let selectedSuggestionIndex = $state(0);
@@ -165,16 +170,9 @@
     buildMirrorSegments(segments, autocompleteAnchorIndex, autocompleteOpen)
   );
 
-  // Available variables for chip bar and autocomplete
+  // Variables the `{{` autocomplete offers
   const availableVariables = $derived.by(() =>
     buildAvailableVariables(classificationContext, steps, isAdvancedMode)
-  );
-
-  // Chip bar variables (filtered in user mode)
-  const chipBarVariables = $derived(
-    isAdvancedMode
-      ? availableVariables
-      : availableVariables.filter((v) => v.category === "field" || v.category === "step")
   );
 
   const templateValidationIssues = $derived(
@@ -505,24 +503,6 @@
       </div>
     {/if}
   </div>
-
-  <!-- Quick-insert chip bar — kept out of Enkel so the editor stays calm; the
-       toolbar's variable picker ({}) still inserts variables there. -->
-  {#if chipBarVariables.length > 0 && !disabled && isAdvancedMode}
-    <div class="border-default bg-secondary/20 flex flex-wrap gap-1.5 border-t px-3 py-2">
-      {#each chipBarVariables as v (v.token)}
-        <button
-          type="button"
-          class="{getChipClasses(
-            v.category
-          )} cursor-pointer hover:scale-105 hover:shadow-sm active:scale-95 motion-safe:transition-[transform,box-shadow] motion-safe:duration-(--duration-micro)"
-          onclick={() => void insertAtCursor(v.token)}
-        >
-          {`{{${v.displayToken ? v.token : v.label}}}`}
-        </button>
-      {/each}
-    </div>
-  {/if}
 
   {#if templateValidationIssues.length > 0}
     <Alert.Root

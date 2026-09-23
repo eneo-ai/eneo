@@ -32,11 +32,11 @@
   }
 
   :global([data-slot="collapsible-content"].collapsible-animate[data-state="open"]) {
-    animation: collapsible-open 200ms cubic-bezier(0.25, 1, 0.5, 1);
+    animation: collapsible-open var(--duration-fast) var(--ease-smooth-out);
   }
 
   :global([data-slot="collapsible-content"].collapsible-animate[data-state="closed"]) {
-    animation: collapsible-close 150ms cubic-bezier(0.25, 1, 0.5, 1);
+    animation: collapsible-close var(--duration-fast) var(--ease-smooth-out);
   }
 
   @keyframes -global-collapsible-open {

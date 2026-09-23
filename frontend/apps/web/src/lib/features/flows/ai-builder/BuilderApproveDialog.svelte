@@ -16,11 +16,22 @@
     /** Create writes a new draft flow; edit writes into an existing one. */
     mode: "create" | "edit";
     stepCount: number;
+    /** Edit mode: the steps the change adds, modifies or removes, from the diff. */
+    changedStepCount?: number;
+    unchangedStepCount?: number;
     phase?: ApprovePhase;
     onconfirm: () => void;
   }
 
-  let { open = $bindable(false), mode, stepCount, phase = "idle", onconfirm }: Props = $props();
+  let {
+    open = $bindable(false),
+    mode,
+    stepCount,
+    changedStepCount = 0,
+    unchangedStepCount = 0,
+    phase = "idle",
+    onconfirm
+  }: Props = $props();
 
   const isCreate = $derived(mode === "create");
   // Once the reader has confirmed, the dialog is the progress surface: it
@@ -44,42 +55,53 @@
         {isCreate ? m.ai_builder_approve_dialog_body() : m.ai_builder_approve_dialog_body_edit()}
       </AlertDialog.Description>
     </AlertDialog.Header>
-    <ul class="text-secondary flex list-none flex-col gap-1.5 p-0 text-[0.8125rem]">
-      <li>
-        {isCreate
-          ? m.ai_builder_approve_dialog_steps({ count: stepCount })
-          : m.ai_builder_approve_dialog_steps_edit({ count: stepCount })}
-      </li>
-      <li>{m.ai_builder_approve_dialog_no_data()}</li>
-      <li>{m.ai_builder_approve_dialog_step_editable()}</li>
-    </ul>
-    <!-- Mounted from the start so the announcement lands when the text
-         changes; reserving its height keeps the footer from jumping. -->
-    <p
-      class="text-primary flex min-h-5 items-center gap-2 text-[0.8125rem] font-medium"
-      role="status"
-      aria-live="polite"
-    >
-      {#if phase === "created"}
-        <span
-          class="text-positive-stronger motion-safe:animate-in motion-safe:fade-in-0 flex items-center gap-2 motion-safe:duration-(--duration-fast)"
-        >
-          <IconCheck class="size-4 shrink-0" aria-hidden="true" />
-          {m.ai_builder_approve_dialog_created()}
-        </span>
-      {:else if phase === "pending"}
-        <span
-          class="motion-safe:animate-in motion-safe:fade-in-0 flex items-center gap-2 motion-safe:duration-(--duration-fast)"
-        >
-          <IconLoaderCircle
-            class="text-accent-stronger size-4 shrink-0 animate-spin motion-reduce:animate-none"
-            aria-hidden="true"
-          />
-          {m.ai_builder_approve_dialog_pending_hint()}
-        </span>
-      {/if}
-    </p>
-    <AlertDialog.Footer>
+    <div class="flex flex-col gap-1.5 text-[0.8125rem]">
+      <ul class="text-secondary flex list-none flex-col gap-1.5 p-0">
+        <li>
+          {isCreate
+            ? m.ai_builder_approve_dialog_steps({ count: stepCount })
+            : unchangedStepCount > 0
+              ? m.ai_builder_approve_dialog_steps_edit({
+                  changed: changedStepCount,
+                  unchanged: unchangedStepCount
+                })
+              : m.ai_builder_approve_dialog_steps_edit_all({ count: changedStepCount })}
+        </li>
+        <!-- An edit's description already says no run starts. -->
+        {#if isCreate}
+          <li>{m.ai_builder_approve_dialog_no_data()}</li>
+        {/if}
+      </ul>
+      <!-- The last line is the dialog's status: what stays editable until the
+           reader confirms, then how the work goes. Mounted from the start so
+           the announcement lands when the text changes; it keeps one line, so
+           the footer does not jump and no empty row waits for it. -->
+      <p class="flex min-h-5 items-center gap-2" role="status" aria-live="polite">
+        {#if phase === "created"}
+          <span
+            class="text-positive-stronger motion-safe:animate-in motion-safe:fade-in-0 flex items-center gap-2 font-medium motion-safe:duration-(--duration-fast)"
+          >
+            <IconCheck class="size-4 shrink-0" aria-hidden="true" />
+            {m.ai_builder_approve_dialog_created()}
+          </span>
+        {:else if phase === "pending"}
+          <span
+            class="text-primary motion-safe:animate-in motion-safe:fade-in-0 flex items-center gap-2 font-medium motion-safe:duration-(--duration-fast)"
+          >
+            <IconLoaderCircle
+              class="text-accent-stronger size-4 shrink-0 animate-spin motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+            {isCreate
+              ? m.ai_builder_approve_dialog_pending_hint()
+              : m.ai_builder_approve_dialog_pending_hint_edit()}
+          </span>
+        {:else}
+          <span class="text-secondary">{m.ai_builder_approve_dialog_step_editable()}</span>
+        {/if}
+      </p>
+    </div>
+    <AlertDialog.Footer class="border-border">
       <!-- Plain Buttons rather than AlertDialog.Cancel/Action: those close
            the dialog on click, and the dialog now stays open while the flow
            is written. The parent closes it; cancel only closes while idle. -->
@@ -95,7 +117,7 @@
             class="size-3.5 animate-spin motion-reduce:animate-none"
             aria-hidden="true"
           />
-          {isCreate ? m.ai_builder_creating() : m.ai_builder_applying()}
+          {isCreate ? m.ai_builder_creating() : m.ai_builder_updating_flow()}
         {:else}
           {isCreate
             ? m.ai_builder_approve_dialog_confirm()

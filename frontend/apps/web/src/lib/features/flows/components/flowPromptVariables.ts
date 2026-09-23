@@ -70,7 +70,7 @@ export type VariableSuggestion = {
 };
 
 /**
- * The variables offered in the prompt editor's picker and chip bar, ordered
+ * The variables the prompt editor's `{{` autocomplete offers, ordered
  * form-fields → system → previous-step aliases → technical step outputs.
  * Technical tokens (`föregående_steg`, `step_N.output.text`) are gated behind
  * `showTechnical` (advanced mode).

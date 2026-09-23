@@ -23,6 +23,8 @@ export class FlowStepAssistantState {
 
   assistant = $state<LoadedAssistant | null>(null);
   loading = $state(false);
+  /** The step has an assistant but it could not be read (the save manager returns null on errors). */
+  loadFailed = $state(false);
 
   #lastLoadedId: string | null = null;
   #lastLoadedRevision = -1;
@@ -70,6 +72,7 @@ export class FlowStepAssistantState {
     if (!assistantId) return;
     const requestToken = ++this.#loadRequestToken;
     this.loading = true;
+    this.loadFailed = false;
     this.#lastLoadedId = assistantId;
     try {
       const loaded = await this.#flowEditor.loadAssistant(assistantId);
@@ -77,15 +80,23 @@ export class FlowStepAssistantState {
       const activeStep = this.#getActiveStep();
       if (activeStep?.assistant_id !== assistantId) return;
       this.assistant = loaded;
+      this.loadFailed = loaded === null;
     } catch (error) {
       if (requestToken !== this.#loadRequestToken) return;
       console.error("Failed to load assistant for flow step:", error);
       this.assistant = null;
+      this.loadFailed = true;
     } finally {
       if (requestToken === this.#loadRequestToken) {
         this.loading = false;
       }
     }
+  }
+
+  /** Reads the active step's assistant again after a failed load. */
+  retryLoad() {
+    const assistantId = this.#getActiveStep()?.assistant_id;
+    if (assistantId) void this.load(assistantId);
   }
 
   updateField(field: string, value: unknown) {
@@ -176,6 +187,7 @@ export class FlowStepAssistantState {
   syncWithActiveStep(activeStep: FlowStep | null, revision = 0) {
     if (activeStep?.output_mode === "template_fill") {
       this.assistant = null;
+      this.loadFailed = false;
       this.#lastLoadedId = null;
       this.#lastLoadedRevision = revision;
       this.loading = false;
@@ -188,6 +200,7 @@ export class FlowStepAssistantState {
       this.#lastLoadedId = targetId;
       this.#lastLoadedRevision = revision;
       this.assistant = null;
+      this.loadFailed = false;
       this.loading = true;
       this.cancelUploadsAndClearQueue();
       void (async () => {
@@ -197,6 +210,7 @@ export class FlowStepAssistantState {
       })();
     } else if (!activeStep || !activeStep.assistant_id) {
       this.assistant = null;
+      this.loadFailed = false;
       this.#lastLoadedId = null;
       this.#lastLoadedRevision = revision;
       this.loading = false;

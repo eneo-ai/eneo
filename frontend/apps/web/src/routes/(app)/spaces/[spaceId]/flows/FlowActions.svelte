@@ -67,7 +67,7 @@
       <AlertDialog.Title>{m.flow_list_delete_title({ name: flow.name })}</AlertDialog.Title>
       <AlertDialog.Description>{m.flow_delete_confirm()}</AlertDialog.Description>
     </AlertDialog.Header>
-    <AlertDialog.Footer>
+    <AlertDialog.Footer class="border-border">
       <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
       <AlertDialog.Action variant="destructive" disabled={isProcessing} onclick={handleDelete}>
         {isProcessing ? m.deleting() : m.delete()}
