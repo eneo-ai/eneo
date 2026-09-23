@@ -119,8 +119,8 @@ async def _validate_active_provider(
     return provider
 
 
-def _require_realtime_dialect(provider_type: str) -> None:
-    if not speaks_realtime_dialect(provider_type):
+def _require_realtime_dialect(provider_type: str | None) -> None:
+    if provider_type is None or not speaks_realtime_dialect(provider_type):
         raise BadRequestException(
             "Live transcription needs a provider of type vLLM, which serves the "
             "realtime API (for example vadsa)."
@@ -846,10 +846,13 @@ class TenantTranscriptionModelService:
             )
         if payload.supports_realtime is not None:
             if payload.supports_realtime:
-                provider = await ModelProviderRepository(
-                    session=self.session, tenant_id=self.user.tenant_id
-                ).get_by_id(model.provider_id)
-                _require_realtime_dialect(provider.provider_type)
+                provider_type = None
+                if model.provider_id is not None:
+                    provider = await ModelProviderRepository(
+                        session=self.session, tenant_id=self.user.tenant_id
+                    ).get_by_id(model.provider_id)
+                    provider_type = provider.provider_type
+                _require_realtime_dialect(provider_type)
             model.supports_realtime = payload.supports_realtime
 
         await self.session.flush()
