@@ -17,7 +17,7 @@
   import UserTokenTable from "./UserTokenTable.svelte";
   import { CalendarDate, type DateValue } from "@internationalized/date";
   import { getEneo } from "$lib/core/Eneo";
-  import { Input } from "@eneo/ui";
+  import DateRangePicker from "$lib/components/DateRangePicker.svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import { m } from "$lib/paraglide/messages";
@@ -140,7 +140,7 @@
 <Settings.Group title={m.usage_by_user()}>
   <Settings.Row title={m.usage_by_user_description()} description="" fullWidth>
     <div slot="toolbar" class="mb-4">
-      <Input.DateRange bind:value={dateRange} onValueCommit={handleDateChange}></Input.DateRange>
+      <DateRangePicker bind:value={dateRange} onValueCommit={handleDateChange}></DateRangePicker>
     </div>
 
     <form

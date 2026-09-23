@@ -13,7 +13,8 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconSendArrow } from "@eneo/icons/send-arrow";
   import { IconSparkles } from "@eneo/icons/sparkles";
-  import { Input, Markdown } from "@eneo/ui";
+  import { Markdown } from "@eneo/ui";
+  import DateRangePicker from "$lib/components/DateRangePicker.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
 
@@ -28,8 +29,8 @@
   <div
     class="bg-primary border-default sticky top-0 z-[11] mx-auto mb-4 w-full max-w-[74rem] rounded-xl rounded-t-none border border-t-0 py-2 pr-2.5 pl-4 shadow-lg"
   >
-    <Input.DateRange bind:value={insights.dateRange}
-      >{m.choose_timeframe_for_insights()}</Input.DateRange
+    <DateRangePicker bind:value={insights.dateRange}
+      >{m.choose_timeframe_for_insights()}</DateRangePicker
     >
   </div>
   <Settings.Page>

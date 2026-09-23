@@ -9,7 +9,7 @@
   import { IconSession } from "@eneo/icons/session";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
   import { Page, Settings } from "$lib/components/layout";
-  import { Input } from "@eneo/ui";
+  import DateRangePicker from "$lib/components/DateRangePicker.svelte";
   import { CalendarDate } from "@internationalized/date";
   import { getEneo } from "$lib/core/Eneo";
   import type { AnalyticsAggregatedData } from "@eneo/eneo-js";
@@ -552,7 +552,7 @@
             >
               <!-- Date Range Picker Toolbar -->
               <div slot="toolbar" class="flex items-center gap-4">
-                <Input.DateRange bind:value={dateRange} />
+                <DateRangePicker bind:value={dateRange} />
                 <!-- Quick preset chips -->
                 <div class="flex gap-1.5">
                   {#each presets as preset (preset.days)}
