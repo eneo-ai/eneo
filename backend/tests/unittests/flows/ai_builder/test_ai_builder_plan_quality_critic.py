@@ -457,6 +457,31 @@ def test_instruction_asking_for_an_unread_step_in_prose_is_an_issue() -> None:
     )
     assert not _fires(
         _spec_with_step_four(
+            _step_four(
+                "Undvik underlaget från steg 1. Sammanfatta endast det föregående steget."
+            )
+        )
+    )
+    assert not _fires(
+        _spec_with_step_four(
+            _step_four("Sammanfatta det föregående steget utan att läsa från steg 1.")
+        )
+    )
+    # A denial governs its own clause only: what follows it still asks.
+    assert _fires(
+        _spec_with_step_four(
+            _step_four(
+                "Använd inte underlaget från steg 2 utan sammanfatta underlaget från steg 1."
+            )
+        )
+    )
+    assert _fires(
+        _spec_with_step_four(
+            _step_four("Hitta inte på fakta\nLäs underlaget från steg 1.")
+        )
+    )
+    assert not _fires(
+        _spec_with_step_four(
             _step_four("Steg 1: Läs underlaget. Steg 2: Skriv sammanfattningen.")
         )
     )

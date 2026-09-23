@@ -881,28 +881,41 @@ def _field_reuse_requires_input_bindings_evidence(context: CriticContext) -> boo
 _PROSE_STEP_SOURCE = re.compile(
     r"\b(?:från|from)\s+(?:steg|step)\s+(\d{1,2})\b", re.IGNORECASE
 )
-_PROSE_NEGATION = re.compile(
-    r"\b(?:inte|aldrig|utan|not|never|without)\b", re.IGNORECASE
+# Only what governs this phrase can deny it, so the search stops at the
+# nearest clause boundary: punctuation, a line break, or a contrast that
+# starts a new claim ("... inte steg 2 UTAN sammanfatta steg 1"). Bare "utan"
+# opens a clause; "utan att" denies the one it is in.
+_PROSE_CLAUSE_BREAK = re.compile(
+    r"[.!?:;\n]|\b(?:utan\b(?!\s+att)|men|but|instead)\b", re.IGNORECASE
 )
-_PROSE_SENTENCE = re.compile(r"(?<=[.!?:\n])\s+")
+_PROSE_EXCLUSION = re.compile(
+    r"\b(?:utan\s+att|inte|icke|aldrig|undvik|undvika|uteslut|utesluta|bortse"
+    r"|hoppa|avoid|exclude|ignore|not|never|skip|without)\b",
+    re.IGNORECASE,
+)
 
 
 def _earlier_steps_asked_for_in_prose(instructions: str, order: int) -> set[int]:
     """Earlier steps the instruction asks to take material from.
 
-    A sentence that denies the step before naming it asks for nothing. A later
-    step or the step itself is another invariant's business.
+    A clause that denies the step asks for nothing; every other clause naming
+    a step as a source asks for it. The reading is deliberately shallow - one
+    phrasing, one clause, a fixed list of denials - because the alternative is
+    a prose parser, and a plan that trips this rule is asked to revise, not
+    refused. A later step or the step itself is another invariant's business.
     """
 
     asked: set[int] = set()
-    for sentence in _PROSE_SENTENCE.split(instructions):
-        for match in _PROSE_STEP_SOURCE.finditer(sentence):
-            named = int(match.group(1))
-            if not 1 <= named < order:
-                continue
-            if _PROSE_NEGATION.search(sentence[: match.start()]):
-                continue
-            asked.add(named)
+    for match in _PROSE_STEP_SOURCE.finditer(instructions):
+        named = int(match.group(1))
+        if not 1 <= named < order:
+            continue
+        before = instructions[: match.start()]
+        boundaries = list(_PROSE_CLAUSE_BREAK.finditer(before))
+        clause = before[boundaries[-1].end() :] if boundaries else before
+        if _PROSE_EXCLUSION.search(clause):
+            continue
+        asked.add(named)
     return asked
 
 
