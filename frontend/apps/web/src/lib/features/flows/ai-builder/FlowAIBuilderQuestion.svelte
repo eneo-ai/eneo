@@ -20,6 +20,10 @@
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Label } from "$lib/components/ui/label/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import * as NativeSelect from "$lib/components/ui/native-select/index.js";
   import {
     buildStructuredQuestionCustomAnswer,
     buildStructuredQuestionInputFieldsAnswer,
@@ -545,21 +549,24 @@
     </div>
 
     {#if isInputFieldCollection}
-      <div class="field-collection" aria-labelledby={questionLabelId}>
+      <div
+        class="border-dimmer flex flex-col gap-3 border-t px-4 py-3"
+        aria-labelledby={questionLabelId}
+      >
         {#if inputFields.length > 3}
-          <div class="field-list-head">
-            <span class="field-list-count">{fieldSummaryLine}</span>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-secondary text-xs">{fieldSummaryLine}</span>
             {#if inputFields.length >= FIELD_LIST_SCROLLS_FROM}
-              <input
-                class="field-search"
+              <Input
                 type="search"
+                class="ml-auto h-8 w-48 text-xs"
                 bind:value={fieldSearch}
                 placeholder={m.ai_builder_question_field_search()}
                 aria-label={m.ai_builder_question_field_search()}
                 {disabled}
               />
               {#if fieldSearch.trim()}
-                <span class="field-list-count">
+                <span class="text-secondary text-xs">
                   {m.ai_builder_question_field_search_count({
                     shown: String(visibleFieldIndexes.length),
                     total: String(inputFields.length)
@@ -569,48 +576,64 @@
             {/if}
           </div>
         {/if}
-        <div class="field-list" class:is-scrolling={inputFields.length >= FIELD_LIST_SCROLLS_FROM}>
+        <div
+          class="flex flex-col gap-1.5 {inputFields.length >= FIELD_LIST_SCROLLS_FROM
+            ? 'max-h-[26.25rem] overflow-y-auto pr-1'
+            : ''}"
+        >
           {#each visibleFieldIndexes as index (index)}
             {@const field = inputFields[index]}
             {#if expandedFieldIndex !== index}
               <button
                 type="button"
-                class="field-summary-row"
+                class="bg-secondary text-secondary hover:bg-hover-dimmer focus-visible:ring-ring flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg px-3 py-2 text-left text-xs focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed motion-safe:transition-colors motion-safe:duration-(--duration-quick)"
                 onclick={() => (expandedFieldIndex = index)}
                 {disabled}
               >
-                <span class="field-summary-label"
+                <span class="text-primary flex-1 truncate text-[0.8125rem] font-semibold"
                   >{field.label.trim() || m.ai_builder_question_field_label()}</span
                 >
                 {#if showTechnicalNames && field.variableName.trim()}
-                  <span class="field-summary-name">{field.variableName.trim()}</span>
+                  <span class="truncate font-mono text-xs">{field.variableName.trim()}</span>
                 {/if}
-                <span class="field-summary-type">{fieldTypeLabel(field.fieldType)}</span>
+                <span>{fieldTypeLabel(field.fieldType)}</span>
                 {#if field.required}
-                  <span class="field-summary-required"
-                    >{m.ai_builder_requirements_field_required()}</span
+                  <Badge
+                    variant="secondary"
+                    class="bg-accent-dimmer text-accent-stronger h-5 px-1.5"
                   >
+                    {m.ai_builder_requirements_field_required()}
+                  </Badge>
                 {/if}
                 {#if fieldNameIssue(index)}
-                  <span class="field-name-issue">{fieldNameIssue(index)}</span>
+                  <span class="text-warning-stronger font-semibold">{fieldNameIssue(index)}</span>
                 {/if}
               </button>
             {:else}
-              <div class="field-row">
-                <label>
-                  <span>{m.ai_builder_question_field_label()}</span>
-                  <input
+              {@const labelId = `${questionLabelId}-field-${index}-label`}
+              {@const typeId = `${questionLabelId}-field-${index}-type`}
+              {@const purposeId = `${questionLabelId}-field-${index}-purpose`}
+              {@const requiredId = `${questionLabelId}-field-${index}-required`}
+              <div class="bg-secondary grid gap-3 rounded-lg p-3 sm:grid-cols-2">
+                <div class="flex flex-col gap-1">
+                  <Label for={labelId} class="text-secondary text-xs font-medium">
+                    {m.ai_builder_question_field_label()}
+                  </Label>
+                  <Input
+                    id={labelId}
+                    class="bg-primary"
                     bind:value={field.label}
                     oninput={(event) => suggestFieldName(index, event.currentTarget.value)}
                     {disabled}
                   />
-                </label>
-                <div class="field-name">
-                  <span class="field-name-label">{m.ai_builder_question_field_name()}</span>
+                </div>
+                <div class="flex flex-col gap-1 text-xs font-medium">
+                  <span class="text-secondary">{m.ai_builder_question_field_name()}</span>
                   {#if fieldToken(field.variableName)}
-                    <button
-                      type="button"
-                      class="field-name-token"
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      class="text-secondary w-fit font-mono"
                       aria-label={m.ai_builder_question_field_copy({
                         token: fieldToken(field.variableName)
                       })}
@@ -620,10 +643,11 @@
                       {copiedFieldIndex === index
                         ? m.ai_builder_question_field_copied()
                         : fieldToken(field.variableName)}
-                    </button>
+                    </Button>
                   {/if}
                   {#if showTechnicalNames}
-                    <input
+                    <Input
+                      class="bg-primary"
                       bind:value={field.variableName}
                       oninput={() => (field.nameEdited = true)}
                       aria-label={m.ai_builder_question_field_name()}
@@ -631,117 +655,149 @@
                       {disabled}
                     />
                   {:else if !field.nameEdited}
-                    <span class="field-name-auto">{m.ai_builder_question_field_name_auto()}</span>
+                    <span class="text-secondary font-normal"
+                      >{m.ai_builder_question_field_name_auto()}</span
+                    >
                   {/if}
                   {#if fieldNameIssue(index)}
-                    <span class="field-name-issue">{fieldNameIssue(index)}</span>
+                    <span class="text-warning-stronger font-semibold">{fieldNameIssue(index)}</span>
                   {/if}
                 </div>
-                <label>
-                  <span>{m.ai_builder_question_field_type()}</span>
-                  <select bind:value={field.fieldType} {disabled}>
-                    <option value="text">{m.flow_form_field_type_text()}</option>
-                    <option value="number">{m.flow_form_field_type_number()}</option>
-                    <option value="date">{m.flow_form_field_type_date()}</option>
-                    <option value="select">{m.flow_form_field_type_select()}</option>
-                    <option value="multiselect">{m.flow_form_field_type_multiselect()}</option>
-                    <option value="list">{m.flow_form_field_type_list()}</option>
-                  </select>
-                </label>
-                <label class="field-purpose">
-                  <span>{m.ai_builder_question_field_purpose()}</span>
-                  <select
+                <div class="flex flex-col gap-1">
+                  <Label for={typeId} class="text-secondary text-xs font-medium">
+                    {m.ai_builder_question_field_type()}
+                  </Label>
+                  <NativeSelect.Root
+                    id={typeId}
+                    class="w-full"
+                    bind:value={field.fieldType}
+                    {disabled}
+                  >
+                    <NativeSelect.Option value="text"
+                      >{m.flow_form_field_type_text()}</NativeSelect.Option
+                    >
+                    <NativeSelect.Option value="number"
+                      >{m.flow_form_field_type_number()}</NativeSelect.Option
+                    >
+                    <NativeSelect.Option value="date"
+                      >{m.flow_form_field_type_date()}</NativeSelect.Option
+                    >
+                    <NativeSelect.Option value="select"
+                      >{m.flow_form_field_type_select()}</NativeSelect.Option
+                    >
+                    <NativeSelect.Option value="multiselect"
+                      >{m.flow_form_field_type_multiselect()}</NativeSelect.Option
+                    >
+                    <NativeSelect.Option value="list"
+                      >{m.flow_form_field_type_list()}</NativeSelect.Option
+                    >
+                  </NativeSelect.Root>
+                </div>
+                <div class="flex flex-col gap-1 sm:col-span-2">
+                  <Label for={purposeId} class="text-secondary text-xs font-medium">
+                    {m.ai_builder_question_field_purpose()}
+                  </Label>
+                  <NativeSelect.Root
+                    id={purposeId}
+                    class="w-full"
                     bind:value={field.purpose}
                     aria-label={`${field.label.trim() || field.variableName.trim() || m.ai_builder_question_field_label()}: ${question.question}`}
                     {disabled}
                   >
-                    <option value="" disabled>—</option>
+                    <NativeSelect.Option value="" disabled>—</NativeSelect.Option>
                     {#each purposeOptions as option (getStructuredQuestionOptionKey(option))}
-                      <option value={option.value}>{option.label}</option>
+                      <NativeSelect.Option value={option.value}>{option.label}</NativeSelect.Option>
                     {/each}
-                  </select>
-                </label>
+                  </NativeSelect.Root>
+                </div>
                 {#if field.fieldType === "select" || field.fieldType === "multiselect"}
-                  <div class="field-options">
-                    <span class="field-options-label">{m.ai_builder_question_field_options()}</span>
+                  <div class="flex flex-col gap-1.5 text-xs font-medium sm:col-span-2">
+                    <span class="text-secondary">{m.ai_builder_question_field_options()}</span>
                     {#each field.options as _option, optionIndex (optionIndex)}
-                      <div class="field-option-row">
-                        <input
+                      <div class="flex items-center gap-2">
+                        <Input
+                          class="bg-primary flex-1"
                           bind:value={field.options[optionIndex]}
                           aria-label={m.ai_builder_question_field_option_n({
                             number: String(optionIndex + 1)
                           })}
                           {disabled}
                         />
-                        <button
-                          type="button"
-                          class="field-option-remove"
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          class="text-secondary"
                           aria-label={m.ai_builder_question_field_option_remove({
                             number: String(optionIndex + 1)
                           })}
                           onclick={() => field.options.splice(optionIndex, 1)}
                           {disabled}
                         >
-                          <IconX class="size-3.5" aria-hidden="true" />
-                        </button>
+                          <IconX aria-hidden="true" />
+                        </Button>
                       </div>
                     {/each}
-                    <button
-                      type="button"
-                      class="field-option-add"
+                    <Button
+                      variant="link"
+                      size="xs"
+                      class="w-fit px-0"
                       onclick={() => field.options.push("")}
                       {disabled}
                     >
                       {m.ai_builder_question_field_option_add()}
-                    </button>
+                    </Button>
                   </div>
                 {/if}
-                <label class="field-required">
-                  <input type="checkbox" bind:checked={field.required} {disabled} />
-                  <span>{m.ai_builder_question_field_required()}</span>
-                </label>
+                <div class="flex min-h-6 items-center gap-2">
+                  <Checkbox id={requiredId} bind:checked={field.required} {disabled} />
+                  <Label for={requiredId} class="text-primary text-xs font-normal">
+                    {m.ai_builder_question_field_required()}
+                  </Label>
+                </div>
                 {#if inputFields.length > 1}
-                  <button
-                    type="button"
-                    class="field-remove"
+                  <Button
+                    variant="link"
+                    size="xs"
+                    class="w-fit justify-self-start px-0"
                     onclick={() => removeInputField(index)}
                     {disabled}
                   >
                     {m.ai_builder_question_field_remove()}
-                  </button>
+                  </Button>
                 {/if}
               </div>
             {/if}
           {/each}
         </div>
-        <div class="field-actions">
-          <button
-            type="button"
-            class="field-add"
+        <div class="flex flex-wrap items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
             onclick={addInputField}
             disabled={disabled || inputFields.length >= 20}
           >
             {m.ai_builder_question_field_add()}
-          </button>
-          <button
-            type="button"
-            class="field-add"
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onclick={() => (pasteOpen = !pasteOpen)}
             aria-expanded={pasteOpen}
             disabled={disabled || inputFields.length >= 20}
           >
             {m.ai_builder_question_field_paste()}
-          </button>
+          </Button>
         </div>
         {#if pasteOpen}
-          <div class="field-paste">
-            <label class="field-paste-label" for={pasteId}>
+          <div class="bg-secondary flex flex-col gap-1.5 rounded-lg p-3">
+            <Label for={pasteId} class="text-secondary text-xs font-normal">
               {m.ai_builder_question_field_paste_hint()}
-            </label>
+            </Label>
             <Textarea id={pasteId} bind:value={pasteText} rows={3} {disabled} />
-            <button
-              type="button"
-              class="field-add"
+            <Button
+              variant="outline"
+              size="sm"
+              class="w-fit"
               disabled={disabled || !pasteText.trim()}
               onclick={() => {
                 pasteFieldList(pasteText);
@@ -750,21 +806,27 @@
               }}
             >
               {m.ai_builder_question_field_paste_apply()}
-            </button>
+            </Button>
           </div>
         {/if}
         <!-- The runtime name is a developer's concern; it is derived, and only
              someone who asks to see it needs the field. -->
-        <label class="field-technical-toggle">
-          <input type="checkbox" bind:checked={showTechnicalNames} {disabled} />
-          {m.ai_builder_question_show_technical()}
-        </label>
+        <div class="flex min-h-6 items-center gap-2">
+          <Checkbox
+            id="{questionLabelId}-show-technical"
+            bind:checked={showTechnicalNames}
+            {disabled}
+          />
+          <Label for="{questionLabelId}-show-technical" class="text-secondary text-xs font-normal">
+            {m.ai_builder_question_show_technical()}
+          </Label>
+        </div>
       </div>
     {:else}
       {#if isSchemaDirection && question.options.length > schemaDirectionVisibleOptionLimit}
         <label class="option-filter">
           <span>{m.ai_builder_question_schema_filter()}</span>
-          <input
+          <Input
             type="search"
             bind:value={optionFilter}
             placeholder={m.ai_builder_question_schema_filter_placeholder()}
@@ -1063,13 +1125,6 @@
     color: var(--text-secondary);
   }
 
-  .option-filter input {
-    @apply h-9 rounded-md border px-3 text-sm font-normal;
-    border-color: var(--border-default);
-    background: var(--background-primary);
-    color: var(--text-primary);
-  }
-
   .option-filter-summary {
     @apply mx-4 mb-2;
     font-size: var(--text-xs);
@@ -1163,209 +1218,6 @@
     color: var(--text-secondary);
   }
 
-  .field-collection {
-    @apply flex flex-col gap-3 border-t px-4 py-3;
-    border-color: var(--border-dimmer);
-  }
-
-  .field-list {
-    @apply flex flex-col gap-1.5;
-  }
-
-  .field-list.is-scrolling {
-    @apply overflow-y-auto pr-1;
-    max-height: 26.25rem;
-  }
-
-  .field-list-head {
-    @apply flex flex-wrap items-center gap-2;
-  }
-
-  .field-list-count {
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    color: var(--text-secondary);
-  }
-
-  .field-search {
-    @apply ml-auto h-8 w-[11.875rem] rounded-md border px-2;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    border-color: var(--border-default);
-    background: var(--background-primary);
-  }
-
-  .field-summary-row {
-    @apply flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg px-3 py-2 text-left;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    background: var(--background-secondary);
-    color: var(--text-secondary);
-  }
-
-  .field-summary-row:hover:not(:disabled) {
-    background: oklch(from var(--background-secondary) l c h / 0.7);
-  }
-
-  .field-summary-label {
-    @apply flex-1 truncate text-[0.8125rem] font-semibold;
-    color: var(--text-primary);
-  }
-
-  .field-summary-name {
-    @apply truncate;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    font-family: var(--font-mono, ui-monospace, monospace);
-  }
-
-  .field-summary-required {
-    @apply rounded px-1.5 py-0.5 font-semibold;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    background: var(--accent-dimmer);
-    color: var(--accent-stronger);
-  }
-
-  .field-actions {
-    @apply flex flex-wrap items-center gap-3;
-  }
-
-  .field-paste {
-    @apply flex flex-col gap-1.5 rounded-lg p-3;
-    background: var(--background-secondary);
-  }
-
-  .field-paste-label {
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    color: var(--text-secondary);
-  }
-
-  .field-row {
-    @apply grid grid-cols-2 gap-3 rounded-lg p-3;
-    background: var(--background-secondary);
-  }
-
-  .field-name {
-    @apply flex flex-col gap-1 font-medium;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-  }
-
-  .field-name-label {
-    color: var(--text-secondary);
-  }
-
-  .field-name-token {
-    @apply inline-flex h-[1.375rem] w-fit items-center rounded-md border px-2;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    font-family: var(--font-mono, ui-monospace, monospace);
-    border-color: var(--border-default);
-    background: var(--background-primary);
-    color: var(--text-secondary);
-  }
-
-  .field-name-token:hover:not(:disabled) {
-    color: var(--text-primary);
-  }
-
-  .field-name-auto {
-    @apply font-normal;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    color: var(--text-secondary);
-  }
-
-  .field-technical-toggle {
-    @apply inline-flex min-h-[24px] items-center gap-2;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    color: var(--text-secondary);
-  }
-
-  .field-name-issue {
-    @apply font-semibold;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    color: var(--text-warning-stronger, var(--text-secondary));
-  }
-
-  .field-row label:not(.field-required) {
-    @apply flex flex-col gap-1 font-medium;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    color: var(--text-secondary);
-  }
-
-  .field-row input[type="checkbox"],
-  .field-technical-toggle input[type="checkbox"] {
-    @apply size-4 shrink-0;
-  }
-
-  .field-row input:not([type="checkbox"]),
-  .field-row select {
-    @apply h-9 rounded-md border px-2 text-sm;
-    border-color: var(--border-default);
-    background: var(--background-primary);
-    color: var(--text-primary);
-  }
-
-  .field-options {
-    @apply col-span-2 flex flex-col gap-1.5 font-medium;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-  }
-
-  .field-options-label {
-    color: var(--text-secondary);
-  }
-
-  .field-option-row {
-    @apply flex items-center gap-2;
-  }
-
-  .field-option-row input {
-    @apply flex-1;
-  }
-
-  .field-option-remove {
-    @apply inline-flex size-8 shrink-0 items-center justify-center rounded-md;
-    color: var(--text-secondary);
-  }
-
-  .field-option-remove:hover:not(:disabled) {
-    background: var(--background-secondary);
-    color: var(--text-primary);
-  }
-
-  .field-option-add {
-    @apply inline-flex min-h-[24px] w-fit items-center font-semibold;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    color: var(--accent-stronger);
-  }
-
-  .field-purpose {
-    @apply col-span-2;
-  }
-
-  .field-required {
-    @apply flex min-h-[24px] items-center gap-2;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    color: var(--text-primary);
-  }
-
-  .field-add,
-  .field-remove {
-    @apply inline-flex min-h-[24px] w-fit items-center font-medium underline-offset-2 hover:underline disabled:opacity-50;
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    color: var(--accent-stronger);
-  }
-
   .custom-input-wrap {
     @apply rounded-lg;
     padding: 0.125rem 0.25rem 0;
@@ -1421,88 +1273,6 @@
     }
 
     /* One field per line: two columns leave no room for a label at 375 px. */
-    .field-list {
-      @apply flex flex-col gap-1.5;
-    }
-
-    .field-list.is-scrolling {
-      @apply overflow-y-auto pr-1;
-      max-height: 26.25rem;
-    }
-
-    .field-list-head {
-      @apply flex flex-wrap items-center gap-2;
-    }
-
-    .field-list-count {
-      font-size: var(--text-xs);
-      line-height: var(--text-xs--line-height);
-      color: var(--text-secondary);
-    }
-
-    .field-search {
-      @apply ml-auto h-8 w-[11.875rem] rounded-md border px-2;
-      font-size: var(--text-xs);
-      line-height: var(--text-xs--line-height);
-      border-color: var(--border-default);
-      background: var(--background-primary);
-    }
-
-    .field-summary-row {
-      @apply flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg px-3 py-2 text-left;
-      font-size: var(--text-xs);
-      line-height: var(--text-xs--line-height);
-      background: var(--background-secondary);
-      color: var(--text-secondary);
-    }
-
-    .field-summary-row:hover:not(:disabled) {
-      background: oklch(from var(--background-secondary) l c h / 0.7);
-    }
-
-    .field-summary-label {
-      @apply flex-1 truncate text-[0.8125rem] font-semibold;
-      color: var(--text-primary);
-    }
-
-    .field-summary-name {
-      @apply truncate;
-      font-size: var(--text-xs);
-      line-height: var(--text-xs--line-height);
-      font-family: var(--font-mono, ui-monospace, monospace);
-    }
-
-    .field-summary-required {
-      @apply rounded px-1.5 py-0.5 font-semibold;
-      font-size: var(--text-xs);
-      line-height: var(--text-xs--line-height);
-      background: var(--accent-dimmer);
-      color: var(--accent-stronger);
-    }
-
-    .field-actions {
-      @apply flex flex-wrap items-center gap-3;
-    }
-
-    .field-paste {
-      @apply flex flex-col gap-1.5 rounded-lg p-3;
-      background: var(--background-secondary);
-    }
-
-    .field-paste-label {
-      font-size: var(--text-xs);
-      line-height: var(--text-xs--line-height);
-      color: var(--text-secondary);
-    }
-
-    .field-row {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .field-options,
-    .field-purpose {
-      grid-column: auto;
-    }
   }
 
   @keyframes builder-screen-in {

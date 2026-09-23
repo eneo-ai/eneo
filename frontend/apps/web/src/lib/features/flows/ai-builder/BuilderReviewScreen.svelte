@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { BUILDER_COLUMN } from "./builderColumns";
   import type { Snippet } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { onDestroy, tick, untrack } from "svelte";
@@ -950,7 +951,7 @@
     <div
       class="flex flex-1 justify-center px-7 pt-6 pb-28 max-lg:px-5 max-md:px-4 max-sm:pt-4 max-sm:pb-40"
     >
-      <div class="w-full max-w-[53.75rem] 2xl:max-w-[62.5rem]">
+      <div class="w-full {BUILDER_COLUMN.review}">
         <!-- Turn receipts and blockers, above the plan they describe -->
         {#if justUpdated}
           <div
@@ -1726,7 +1727,7 @@
       <div
         bind:this={footerStatusEl}
         tabindex="-1"
-        class="mx-auto flex max-w-[53.75rem] flex-wrap items-center gap-2.5 outline-none 2xl:max-w-[62.5rem]"
+        class="mx-auto flex flex-wrap items-center gap-2.5 outline-none {BUILDER_COLUMN.review}"
       >
         {#if isCreateMode && service.applyResult}
           <!-- The one authored moment of the flow, in the bar the reader just
@@ -1870,7 +1871,7 @@
   <div
     class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4"
   >
-    <div class="w-full max-w-[53.75rem] 2xl:max-w-[62.5rem]">
+    <div class="w-full {BUILDER_COLUMN.review}">
       <div
         bind:this={generationCardEl}
         class="t-panel-slide border-default bg-primary rounded-xl border p-6 max-sm:p-4"

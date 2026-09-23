@@ -87,6 +87,20 @@
     }
   });
 
+  // An answer to a question in this conversation is already shown, in the
+  // user's words, on that question's card; its own bubble would say it twice.
+  const shownQuestionIds = $derived(
+    new Set(
+      service.messages.flatMap((message) =>
+        message.question ? [message.question.question_id] : []
+      )
+    )
+  );
+  function repeatsAnsweredQuestion(message: (typeof service.messages)[number]): boolean {
+    const questionId = message.role === "user" ? message.questionAnswer?.question_id : undefined;
+    return typeof questionId === "string" && shownQuestionIds.has(questionId);
+  }
+
   const visibleMessages = $derived(
     service.messages.filter(
       (message) =>
@@ -112,30 +126,32 @@
       <p class="text-secondary py-6 text-center text-sm">{m.ai_builder_conversation_empty()}</p>
     {/if}
     {#each service.messages as message, i (`msg-${i}`)}
-      <FlowAIBuilderMessage
-        role={message.role}
-        content={message.content}
-        isLast={i === service.messages.length - 1}
-        isStreaming={service.isStreaming && i === service.messages.length - 1}
-        interactionDisabled={service.isCreating}
-        question={message.question}
-        questionAnswered={message.question
-          ? service.isQuestionAnswered(message.question.question_id)
-          : false}
-        questionAnswerLabel={message.question
-          ? (answerLabelByQuestionId.get(message.question.question_id) ?? null)
-          : null}
-        onEditAnswer={message.question && oneditanswer
-          ? () => oneditanswer?.(message.question!.question_id)
-          : undefined}
-        requirementsSummary={message.requirementsSummary}
-        requirementsConfirmed={message.requirementsSummary
-          ? service.isRequirementsSummaryConfirmed(message.requirementsSummary)
-          : false}
-        requirementsActive={message.requirementsSummary
-          ? service.isLatestRequirementsSummary(message.requirementsSummary)
-          : false}
-      />
+      {#if !repeatsAnsweredQuestion(message)}
+        <FlowAIBuilderMessage
+          role={message.role}
+          content={message.content}
+          isLast={i === service.messages.length - 1}
+          isStreaming={service.isStreaming && i === service.messages.length - 1}
+          interactionDisabled={service.isCreating}
+          question={message.question}
+          questionAnswered={message.question
+            ? service.isQuestionAnswered(message.question.question_id)
+            : false}
+          questionAnswerLabel={message.question
+            ? (answerLabelByQuestionId.get(message.question.question_id) ?? null)
+            : null}
+          onEditAnswer={message.question && oneditanswer
+            ? () => oneditanswer?.(message.question!.question_id)
+            : undefined}
+          requirementsSummary={message.requirementsSummary}
+          requirementsConfirmed={message.requirementsSummary
+            ? service.isRequirementsSummaryConfirmed(message.requirementsSummary)
+            : false}
+          requirementsActive={message.requirementsSummary
+            ? service.isLatestRequirementsSummary(message.requirementsSummary)
+            : false}
+        />
+      {/if}
     {/each}
     {#if service.isStreaming && service.messages[service.messages.length - 1]?.role === "user"}
       <div class="mt-4 py-2">

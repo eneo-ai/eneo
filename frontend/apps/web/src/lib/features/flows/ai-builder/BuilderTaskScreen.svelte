@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { BUILDER_COLUMN } from "./builderColumns";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
@@ -59,7 +60,7 @@
 <div
   class="flex flex-1 justify-center px-7 pt-[clamp(2.5rem,14vh,7.5rem)] pb-8 max-sm:px-3 max-sm:pt-6 max-sm:pb-5"
 >
-  <div class="task-screen w-full max-w-[40.625rem] 2xl:max-w-[45rem]">
+  <div class="task-screen w-full {BUILDER_COLUMN.task}">
     <h2
       class="text-primary text-[1.6875rem] leading-tight font-extrabold tracking-[-0.03em] text-pretty"
     >

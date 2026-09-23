@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { BUILDER_COLUMN } from "./builderColumns";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
@@ -34,7 +35,7 @@
 <div
   class="conversation-screen flex min-h-full shrink-0 justify-center px-7 pt-6 pb-12 max-lg:px-5 max-md:px-4 max-sm:pt-4"
 >
-  <div class="flex w-full max-w-[43.75rem] flex-col 2xl:max-w-[48.125rem]">
+  <div class="flex w-full flex-col {BUILDER_COLUMN.standard}">
     <div class="mb-3 flex flex-wrap items-center gap-3">
       <div class="min-w-0">
         <h2

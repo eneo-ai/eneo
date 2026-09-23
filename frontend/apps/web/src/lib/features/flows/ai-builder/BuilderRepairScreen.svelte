@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { BUILDER_COLUMN } from "./builderColumns";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
-  import IconSparkles from "@lucide/svelte/icons/sparkles";
+  import IconWrench from "@lucide/svelte/icons/wrench";
   import {
     FLOW_API_ERROR_CODE,
     getFlowRuntimeErrorMessageByCode
@@ -49,7 +50,7 @@
 </script>
 
 <div class="flex flex-1 justify-center px-7 pt-7 pb-8 max-sm:px-3 max-sm:pt-4 max-sm:pb-5">
-  <div class="repair-screen w-full max-w-[43.75rem] 2xl:max-w-[48.125rem]">
+  <div class="repair-screen w-full {BUILDER_COLUMN.standard}">
     <section
       class="border-stronger bg-primary overflow-hidden rounded-xl border shadow-xs"
       aria-label={m.ai_builder_repair_title()}
@@ -110,18 +111,18 @@
             {/if}
           </div>
         {:else if launch}
-          <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[0.875rem]">
+          <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[0.8125rem]">
             <dt class="text-secondary">{m.ai_builder_repair_error_label()}</dt>
             <dd class="text-primary" data-testid="repair-error">{errorLabel}</dd>
             <dt class="text-secondary">{m.ai_builder_repair_attempt_label()}</dt>
             <dd class="text-primary tabular-nums">{launch.attempt_no}</dd>
           </dl>
-          <p class="text-secondary mt-4 text-[0.875rem] text-pretty">
+          <p class="text-secondary mt-4 text-[0.9375rem] text-pretty">
             {hint}
           </p>
-          <div class="mt-4">
+          <div class="mt-4 flex justify-end">
             <Button class="h-9 gap-1.5" {disabled} onclick={prepare} data-testid="repair-prepare">
-              <IconSparkles class="size-4" aria-hidden="true" />
+              <IconWrench class="size-4" aria-hidden="true" />
               {m.ai_builder_repair_prepare()}
             </Button>
           </div>

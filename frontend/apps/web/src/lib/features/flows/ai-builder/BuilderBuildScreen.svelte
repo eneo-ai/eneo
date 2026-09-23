@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { BUILDER_COLUMN } from "./builderColumns";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
@@ -44,7 +45,7 @@
 <div
   class="flex min-h-full shrink-0 justify-center px-7 pt-6 pb-12 max-lg:px-5 max-md:px-4 max-sm:pt-4"
 >
-  <div class="w-full max-w-[43.75rem] 2xl:max-w-[48.125rem]">
+  <div class="w-full {BUILDER_COLUMN.standard}">
     {#if confirmedLine}
       <div
         class="border-default bg-primary mb-4 flex flex-wrap items-center gap-2.5 rounded-[10px] border px-3.5 py-2.5"

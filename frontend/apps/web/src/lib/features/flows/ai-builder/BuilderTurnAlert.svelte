@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { BUILDER_COLUMN } from "./builderColumns";
   import { m } from "$lib/paraglide/messages";
   import { fade } from "svelte/transition";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
@@ -32,7 +33,7 @@
   let {
     targetKind,
     suppressStreamError = false,
-    columnClass = "max-w-[43.75rem]"
+    columnClass = BUILDER_COLUMN.standard
   }: Props = $props();
 
   const reducedMotion = prefersReducedMotion();

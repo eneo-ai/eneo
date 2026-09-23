@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { BUILDER_COLUMN } from "./builderColumns";
   import { m } from "$lib/paraglide/messages";
   import { tick } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
@@ -449,7 +450,7 @@
 <div
   class="flex min-h-full shrink-0 justify-center px-7 pt-6 pb-16 max-lg:px-5 max-md:px-4 max-sm:pt-4 max-sm:pb-12"
 >
-  <div class="confirm-screen w-full max-w-[43.75rem] 2xl:max-w-[48.125rem]">
+  <div class="confirm-screen w-full {BUILDER_COLUMN.standard}">
     {#if unlistedAnswers.length > 0 && !readOnly}
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <span class="text-secondary text-xs">{m.ai_builder_question_answers_label()}</span>

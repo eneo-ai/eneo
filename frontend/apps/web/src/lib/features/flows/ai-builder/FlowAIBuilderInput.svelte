@@ -514,14 +514,15 @@
                 <span>{compactBytes(file.size)}</span>
               </div>
             </div>
-            <button
-              type="button"
-              class="chip-action"
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              class="text-secondary shrink-0"
               aria-label={m.remove_attachment()}
               onclick={() => service.removeAttachment(file.id)}
             >
               <IconTrash />
-            </button>
+            </Button>
           </li>
         {/each}
 
@@ -542,14 +543,15 @@
                 <span>{compactBytes(file.size)}</span>
               </div>
             </div>
-            <button
-              type="button"
-              class="chip-action"
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              class="text-secondary shrink-0"
               aria-label={m.remove_attachment()}
               onclick={() => removeRestoredFile(file.id)}
             >
               <IconTrash />
-            </button>
+            </Button>
           </li>
         {/each}
 
@@ -586,9 +588,10 @@
                 <span>{compactBytes(upload.file.size)}</span>
               </div>
             </div>
-            <button
-              type="button"
-              class="chip-action"
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              class="text-secondary shrink-0"
               aria-label={m.remove_attachment()}
               onclick={() => upload.remove()}
             >
@@ -597,7 +600,7 @@
               {:else}
                 <IconCancel />
               {/if}
-            </button>
+            </Button>
             {#if !isDone}
               <span
                 class="chip-progress"
@@ -656,14 +659,15 @@
         {#if editContextLocked}
           <span class="composer-edit-context-note">{m.ai_builder_edit_context_repair_note()}</span>
         {:else}
-          <button
-            type="button"
-            class="composer-edit-context-clear"
+          <Button
+            variant="ghost"
+            size="xs"
+            class="text-secondary shrink-0"
             aria-label={m.ai_builder_edit_context_clear()}
             onclick={clearEditContext}
           >
             {m.ai_builder_edit_context_clear_short()}
-          </button>
+          </Button>
         {/if}
       </div>
     {/if}
@@ -803,8 +807,8 @@
     border-radius: 0.75rem;
     box-shadow: 0 1px 2px oklch(0% 0 0 / 0.04);
     transition:
-      border-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
-      box-shadow 160ms cubic-bezier(0.22, 1, 0.36, 1);
+      border-color var(--duration-quick) var(--ease-smooth-out),
+      box-shadow var(--duration-quick) var(--ease-smooth-out);
   }
 
   .composer:focus-within {
@@ -844,7 +848,7 @@
     padding: 0.375rem 0.375rem 0.375rem 0.625rem;
     background: var(--background-secondary);
     border: 1px solid var(--border-default);
-    border-radius: 0.625rem;
+    border-radius: 0.5rem;
     overflow: hidden;
   }
 
@@ -892,6 +896,12 @@
     text-underline-offset: 0.15em;
   }
 
+  .chip-name:focus-visible {
+    outline: 2px solid var(--accent-stronger);
+    outline-offset: 2px;
+    border-radius: 0.375rem;
+  }
+
   .chip-meta {
     display: flex;
     align-items: center;
@@ -900,33 +910,6 @@
     line-height: 1.2;
     color: var(--text-secondary);
     font-variant-numeric: tabular-nums;
-  }
-
-  .chip-action {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    width: 1.75rem;
-    height: 1.75rem;
-    border-radius: 0.375rem;
-    color: var(--text-secondary);
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-    transition:
-      color 120ms ease,
-      background 120ms ease;
-  }
-
-  .chip-action:hover {
-    color: var(--text-primary);
-    background: var(--background-hover-default);
-  }
-
-  .chip-action :global(svg) {
-    width: 0.875rem;
-    height: 0.875rem;
   }
 
   .chip-progress {
@@ -938,7 +921,7 @@
     transform: scaleX(var(--chip-progress, 0));
     transform-origin: left center;
     background: var(--accent-default);
-    transition: transform 200ms linear;
+    transition: transform var(--duration-fast) linear;
   }
 
   .chip-uploading .chip-body {
@@ -965,23 +948,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .composer-edit-context-clear {
-    flex: 0 0 auto;
-    border: 0;
-    background: transparent;
-    color: var(--text-secondary);
-    font-size: 0.8rem;
-    font-weight: 600;
-    cursor: pointer;
-    padding: 0.125rem 0.25rem;
-    border-radius: 0.375rem;
-  }
-
-  .composer-edit-context-clear:hover {
-    color: var(--text-primary);
-    background: var(--background-hover-default);
   }
 
   .composer-edit-context-note {
@@ -1108,8 +1074,8 @@
     font-weight: 500;
     line-height: 1;
     transition:
-      color 120ms ease,
-      background 120ms ease;
+      color var(--duration-quick) var(--ease-smooth-out),
+      background var(--duration-quick) var(--ease-smooth-out);
   }
 
   .composer-attach:hover {
@@ -1150,8 +1116,8 @@
     font-weight: 500;
     line-height: 1;
     transition:
-      color 120ms ease,
-      background 120ms ease;
+      color var(--duration-quick) var(--ease-smooth-out),
+      background var(--duration-quick) var(--ease-smooth-out);
   }
 
   .composer-actions-left :global(.composer-control:hover:not(:disabled)),

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { BUILDER_COLUMN } from "./builderColumns";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { resolve } from "$app/paths";
@@ -350,16 +351,16 @@
   const columnClass = $derived.by(() => {
     switch (screen) {
       case "review":
-        return "max-w-[53.75rem] 2xl:max-w-[62.5rem]";
+        return BUILDER_COLUMN.review;
       case "task":
-        return "max-w-[40.625rem] 2xl:max-w-[45rem]";
+        return BUILDER_COLUMN.task;
       case "findings":
-        return "max-w-[43.75rem] 2xl:max-w-[48.125rem]";
+        return BUILDER_COLUMN.standard;
       case "question":
       case "reply":
-        return "max-w-[41.25rem] 2xl:max-w-[45.625rem]";
+        return BUILDER_COLUMN.question;
       default:
-        return "max-w-[43.75rem] 2xl:max-w-[48.125rem]";
+        return BUILDER_COLUMN.standard;
     }
   });
 

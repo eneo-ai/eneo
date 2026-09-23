@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { BUILDER_COLUMN } from "./builderColumns";
   import { tick, type Snippet } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { m } from "$lib/paraglide/messages";
@@ -189,7 +190,7 @@
 </script>
 
 <div class="flex flex-1 justify-center px-7 pt-7 pb-8 max-sm:px-3 max-sm:pt-4 max-sm:pb-5">
-  <div class="findings-screen w-full max-w-[43.75rem] 2xl:max-w-[48.125rem]">
+  <div class="findings-screen w-full {BUILDER_COLUMN.standard}">
     <section
       class="border-stronger bg-primary overflow-hidden rounded-xl border shadow-xs"
       aria-label={m.ai_builder_review_title()}
