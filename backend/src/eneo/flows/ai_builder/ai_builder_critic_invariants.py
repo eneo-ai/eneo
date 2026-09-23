@@ -901,8 +901,10 @@ def _earlier_steps_asked_for_in_prose(instructions: str, order: int) -> set[int]
     A clause that denies the step asks for nothing; every other clause naming
     a step as a source asks for it. The reading is deliberately shallow - one
     phrasing, one clause, a fixed list of denials - because the alternative is
-    a prose parser, and a plan that trips this rule is asked to revise, not
-    refused. A later step or the step itself is another invariant's business.
+    a prose parser. A plan that trips this rule is asked to revise; a repair
+    that never satisfies the critic still fails the turn, so the phrasing is
+    kept narrow rather than eager. A later step or the step itself is another
+    invariant's business.
     """
 
     asked: set[int] = set()
