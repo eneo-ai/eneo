@@ -36,8 +36,8 @@ class VisitorView:
     Shapes stay those of the ordinary conversation API and only values are
     cleared, so the embed page drives the same client code as the app.
 
-    Never shown: the model record, reasoning, the assistant and Skills behind
-    the answer, tool results and tool ``_meta``, and the raw content of tool
+    Never shown: the model record, reasoning, token counts, the assistant and
+    Skills behind the answer, tool results and tool ``_meta``, and the raw content of tool
     resources. With ``show_sources`` off no reference of any kind leaves the
     server. With ``show_tool_activity`` off no tool call does, but resources a
     tool returned still reach the visitor as sources (on a tool event with an
@@ -72,6 +72,8 @@ class VisitorView:
             # Visitors are never asked to approve a tool.
             ResponseType.TOOL_APPROVAL_REQUIRED,
             ResponseType.TOOL_APPROVAL_TIMEOUT,
+            # The widget shows no context meter; counts reveal prompt sizes.
+            ResponseType.TOKEN_USAGE,
         ):
             return None
         if chunk.response_type == ResponseType.TOOL_CALL:
@@ -118,6 +120,11 @@ class VisitorView:
                 "skill_provenance": None,
                 "skill_activation": None,
                 "logging_details": None,
+                "num_tokens_question": 0,
+                "num_tokens_answer": 0,
+                "context_prompt_tokens": None,
+                "context_completion_tokens": None,
+                "skill_context_tokens": None,
                 # Without them the message's tools name no assistant.
                 "assistant_id": None,
                 "assistant_name": None,

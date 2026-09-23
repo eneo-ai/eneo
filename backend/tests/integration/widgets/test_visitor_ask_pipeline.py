@@ -378,13 +378,9 @@ async def test_visitor_runs_the_assistant_as_configured_and_sees_only_its_answer
     assert not any("/internal-mcp/" in server.http_url for server in servers)
     assert identity_headers == {}
 
-    # The stream: no model, reasoning, image, tool result or resource content.
-    assert [event for event, _ in events] == [
-        "first_chunk",
-        "tool_call",
-        "text",
-        "token_usage",
-    ]
+    # The stream: no model, reasoning, image, tool result, resource content
+    # or token counts.
+    assert [event for event, _ in events] == ["first_chunk", "tool_call", "text"]
     _assert_no_internal_data(json.dumps(events))
     first = events[0][1]
     assert first["completion_model"] is None
@@ -433,6 +429,8 @@ async def test_visitor_runs_the_assistant_as_configured_and_sees_only_its_answer
         [call] = message["tool_calls"]
         assert (call["tool_name"], call["result"], call["meta"]) == ("run", None, None)
         assert call["arguments"] == {"query": "bibliotek"}
+        assert message["skill_context_tokens"] is None
+        assert message["context_prompt_tokens"] is None
 
     # Settled on what every provider round cost.
     usage = (
@@ -474,7 +472,7 @@ async def test_hidden_sources_and_tool_activity_never_leave_the_server(
     events = await _ask(client, public_id, token)
 
     # The tools still ran; the visitor learns nothing about them or the sources.
-    assert [event for event, _ in events] == ["first_chunk", "text", "token_usage"]
+    assert [event for event, _ in events] == ["first_chunk", "text"]
     payload = json.dumps(events)
     _assert_no_internal_data(payload)
     for leaked in ("intranet.kommun.se", "arenden.kommun.se", "Arendesystem"):

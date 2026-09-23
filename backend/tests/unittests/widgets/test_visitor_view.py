@@ -10,6 +10,7 @@ from eneo.ai_models.completion_models.completion_model import (
     Completion,
     McpToolReference,
     ResponseType,
+    TokenUsage,
     ToolCallMetadata,
 )
 from eneo.assistants.api import assistant_protocol
@@ -145,18 +146,21 @@ def test_first_chunk_names_no_model_assistant_or_retrieved_document(show_sources
 # --- stream -------------------------------------------------------------------
 
 
-def test_reasoning_and_approval_events_never_reach_a_visitor():
+def test_reasoning_approval_and_token_usage_never_reach_a_visitor():
     view = VisitorView(_widget())
     for response_type in (
         ResponseType.REASONING,
         ResponseType.TOOL_APPROVAL_REQUIRED,
         ResponseType.TOOL_APPROVAL_TIMEOUT,
+        ResponseType.TOKEN_USAGE,
     ):
         chunk = Completion(
             reasoning_content="The system prompt says…",
             response_type=response_type,
             tool_calls_metadata=[_tool_call()],
             approval_id="a",
+            usage=TokenUsage(prompt_tokens=900, completion_tokens=10),
+            skill_context_tokens=400,
         )
         assert view.chunk(chunk) is None
 
@@ -261,6 +265,9 @@ def _stored_session() -> SessionInDB:
         answer="Vi har öppet 10–18.",
         num_tokens_question=10,
         num_tokens_answer=5,
+        context_prompt_tokens=900,
+        context_completion_tokens=5,
+        skill_context_tokens=400,
         tenant_id=uuid4(),
         session_id=uuid4(),
         completion_model=INTERNAL_MODEL,
@@ -323,6 +330,10 @@ def test_restored_messages_never_carry_internal_data(overrides):
     assert SECRET_CONTENT not in payload
     for leaked in ("llm.internal", "gpt-internal", "Intern assistent", "internal_id"):
         assert leaked not in payload
+    assert message["skill_context_tokens"] is None
+    assert message["context_prompt_tokens"] is None
+    assert message["context_completion_tokens"] is None
+    assert (message["num_tokens_question"], message["num_tokens_answer"]) == (0, 0)
     assert message["answer"] == "Vi har öppet 10–18."
 
 
