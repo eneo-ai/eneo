@@ -4643,6 +4643,8 @@ export interface paths {
      *       and the effective `expires_after_seconds` review window
      *     - aggregate file limits
      *     - published template readiness and capability state
+     *     - for a flow that transcribes audio, whether a live transcript preview is available and
+     *       whether the run may choose `speaker_labels`
      *
      *     Recommended consumer flow:
      *     1. Render `form_fields` as the run form.
@@ -4710,12 +4712,15 @@ export interface paths {
      *            the same Flow.
      *         3. Submit the returned uploaded files through `step_inputs[step_id].file_ids`,
      *            together with any structured `input_payload_json` fields in this run request.
+     *            When the run contract's `transcription.speaker_labels.selectable` is true, the
+     *            request may also choose `speaker_labels`.
      *         4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/status/` until the run is terminal.
      *            Then retrieve this run's audited detail or use `.../steps/` for evidence.
      *
      *         Request bodies reject unknown JSON fields. The removed top-level `file_ids` field returns
      *         `400` with code `flow_run_top_level_file_ids_not_supported`; use
-     *         `step_inputs[step_id].file_ids` instead.
+     *         `step_inputs[step_id].file_ids` instead. A `speaker_labels` choice the run contract does
+     *         not offer returns `422` with code `flow_run_speaker_labels_not_selectable`.
      *
      *         `Idempotency-Key` is optional but recommended for retried writes. Reusing the same key with
      *         the same request payload returns the existing run payload. Reusing the same key with a
@@ -5558,6 +5563,8 @@ export interface paths {
      *     transcript the run uses. Live preview is only available when the flow's own
      *     transcription model transcribes and that model supports realtime; otherwise
      *     this route answers 409 `flow_live_transcription_unavailable` with a `reason`.
+     *     The run contract's `transcription.live` reports the same availability and
+     *     reason, so a client can decide before recording whether to offer the preview.
      */
     post: operations["create_flow_live_transcription_session"];
     delete?: never;
@@ -16853,6 +16860,7 @@ export interface components {
       | "flow_run_step_input_mimetype_rejected"
       | "flow_run_aggregate_max_files_exceeded"
       | "flow_run_reserved_input_payload_key"
+      | "flow_run_speaker_labels_not_selectable"
       | "flow_run_input_payload_too_large"
       | "flow_run_input_exceeds_limit"
       | "flow_input_required_field_missing"
@@ -17644,6 +17652,23 @@ export interface components {
      * @enum {string}
      */
     FlowInputType: "text" | "json" | "image" | "audio" | "document" | "file" | "any";
+    /** FlowLiveTranscriptionAvailabilityPublic */
+    FlowLiveTranscriptionAvailabilityPublic: {
+      /** Available */
+      available: boolean;
+      /**
+       * Reason
+       * @description Why live preview is unavailable: `transcription_disabled`, `transcription_service_mode` (an external service transcribes with its own model), `model_unavailable`, or `model_not_realtime`.
+       */
+      reason?:
+        | (
+            | "transcription_disabled"
+            | "transcription_service_mode"
+            | "model_unavailable"
+            | "model_not_realtime"
+          )
+        | null;
+    };
     /** FlowLiveTranscriptionModelPublic */
     FlowLiveTranscriptionModelPublic: {
       /**
@@ -19278,7 +19303,17 @@ export interface components {
      *           "status": "unavailable",
      *           "step_id": "00000000-0000-0000-0000-000000000102"
      *         }
-     *       ]
+     *       ],
+     *       "transcription": {
+     *         "live": {
+     *           "available": true
+     *         },
+     *         "speaker_labels": {
+     *           "default": true,
+     *           "required": false,
+     *           "selectable": true
+     *         }
+     *       }
      *     }
      */
     FlowRunContractPublic: {
@@ -19314,6 +19349,8 @@ export interface components {
        * @description Steps that emit one ordered record per text section, with a persisted section manifest.
        */
       text_processing_steps?: components["schemas"]["FlowTextProcessingStepPublic"][];
+      /** @description Options for a flow that transcribes recorded audio: whether the audio step can show a live transcript preview, and whether a run may choose speaker labels with `speaker_labels` on run creation. Null when the flow transcribes no audio. */
+      transcription?: components["schemas"]["FlowTranscriptionContractPublic"] | null;
     };
     /**
      * FlowRunCreateRequest
@@ -19349,6 +19386,11 @@ export interface components {
        * @description Caller-supplied run label. Normalized to Unicode NFC and trimmed on creation; must contain 1–120 characters and no line breaks or control characters. Omitted or null labels are stored as null.
        */
       run_label?: string | null;
+      /**
+       * Speaker Labels
+       * @description Whether this run's transcription labels speakers. Send it only when `transcription.speaker_labels.selectable` in the run contract is true; otherwise the request is refused with 422 `flow_run_speaker_labels_not_selectable`. Null or omitted uses the flow's default. Labelling speakers makes the run take longer.
+       */
+      speaker_labels?: boolean | null;
       /**
        * Step Inputs
        * @description Per-step runtime inputs keyed by step id. This is the supported way to route uploads to step 3, 5, 8, or any other step that declares runtime input in the run contract.
@@ -23954,6 +23996,24 @@ export interface components {
       /** Updated At */
       updated_at?: string | null;
     };
+    /** FlowSpeakerLabelsOptionPublic */
+    FlowSpeakerLabelsOptionPublic: {
+      /**
+       * Default
+       * @description The flow's own speaker-label setting, which applies when a run makes no choice.
+       */
+      default: boolean;
+      /**
+       * Required
+       * @description Whether the flow needs speaker labels, because a step maps speakers to names.
+       */
+      required: boolean;
+      /**
+       * Selectable
+       * @description Whether a run may choose with `speaker_labels` on run creation. False when no transcription service labels speakers or the flow requires labels.
+       */
+      selectable: boolean;
+    };
     /** FlowStepAttemptCompletionConfiguration */
     FlowStepAttemptCompletionConfiguration: {
       /** Capability Fallback Model Parameters */
@@ -25095,6 +25155,12 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /** FlowTranscriptionContractPublic */
+    FlowTranscriptionContractPublic: {
+      /** @description Whether the audio step can show a live transcript preview while recording. */
+      live: components["schemas"]["FlowLiveTranscriptionAvailabilityPublic"];
+      speaker_labels: components["schemas"]["FlowSpeakerLabelsOptionPublic"];
     };
     /** FormFieldChange */
     FormFieldChange: {
