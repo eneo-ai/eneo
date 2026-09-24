@@ -20,7 +20,7 @@
   import { toastWidgetError } from "./errors";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import { ExternalLink, FileText, Palette, Rocket, SlidersHorizontal } from "lucide-svelte";
+  import { ExternalLink, FileText, Palette, Rocket, SlidersHorizontal } from "@lucide/svelte";
   import { untrack } from "svelte";
   import { blockerLabel } from "./blockers";
   import { getCapability } from "$lib/features/mcp/capabilities";

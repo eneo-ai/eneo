@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
   import type { Eneo, Widget } from "@eneo/eneo-js";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { previewEmbedPath } from "../preview";
@@ -89,7 +89,7 @@
       <div role="group" aria-label={m.widget_admin_preview_scheme()} class="flex gap-1">
         {#each schemes as option (option.value)}
           <Button
-            variant={scheme === option.value ? "primary-outlined" : "outlined"}
+            variant={scheme === option.value ? "default" : "outline"}
             aria-pressed={scheme === option.value}
             disabled={pinnedScheme !== null}
             onclick={() => (scheme = option.value)}>{option.label()}</Button
@@ -97,11 +97,11 @@
         {/each}
       </div>
       <Button
-        variant={mobile ? "primary-outlined" : "outlined"}
+        variant={mobile ? "default" : "outline"}
         aria-pressed={mobile}
         onclick={() => (mobile = !mobile)}>{m.widget_admin_preview_mobile()}</Button
       >
-      <Button variant="outlined" onclick={mint}>{m.widget_admin_preview_reload()}</Button>
+      <Button variant="outline" onclick={mint}>{m.widget_admin_preview_reload()}</Button>
     </div>
   </div>
   <p class="text-secondary text-sm">

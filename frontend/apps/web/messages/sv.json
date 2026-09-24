@@ -4335,8 +4335,6 @@
   "widget_admin_snippet_pinned": "Låst version med integritetshash",
   "widget_admin_snippet_pinned_help": "För webbplatser som kräver Subresource Integrity. Den låsta koden måste bytas ut efter varje Eneo-release, annars slutar widgeten laddas.",
   "widget_admin_copy": "Kopiera",
-  "widget_admin_copied": "{what} kopierad",
-  "widget_admin_copy_failed": "Det gick inte att kopiera till urklipp",
   "widget_admin_standalone": "Fristående sida",
   "widget_admin_standalone_description": "En helsidesversion av chatten att länka till, för webbplatser som inte kan köra skript.",
   "widget_admin_live_test": "Testa i Eneo",

@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
   import type { Eneo, Widget } from "@eneo/eneo-js";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { onDestroy } from "svelte";
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
@@ -83,11 +83,9 @@
   <p class="text-secondary text-sm">{m.widget_admin_live_test_description()}</p>
   <div>
     {#if active}
-      <Button variant="outlined" onclick={stop}>{m.widget_admin_live_test_stop()}</Button>
+      <Button variant="outline" onclick={stop}>{m.widget_admin_live_test_stop()}</Button>
     {:else}
-      <Button variant="primary-outlined" onclick={start} disabled={loading}
-        >{m.widget_admin_live_test_start()}</Button
-      >
+      <Button onclick={start} disabled={loading}>{m.widget_admin_live_test_start()}</Button>
     {/if}
   </div>
 </section>

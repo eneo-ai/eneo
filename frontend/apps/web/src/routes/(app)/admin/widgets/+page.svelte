@@ -15,7 +15,7 @@
     StarOff,
     SwatchBook,
     Trash2
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { Page } from "$lib/components/layout";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -33,12 +33,13 @@
   import { Autosave } from "$lib/features/widget/admin/widgetAutosave.svelte";
   import { DEFAULT_PRIMARY_COLOR, isHexColor } from "$lib/features/widget/contrast";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale, localizeHref } from "$lib/paraglide/runtime";
+  import { localizeHref } from "$lib/paraglide/runtime";
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import { untrack } from "svelte";
 
   let { data } = $props();
 
-  const number = new Intl.NumberFormat(getLocale());
+  const number = new Intl.NumberFormat(intlLocale());
 
   // --- policy (saved as you type) -------------------------------------------
   // The shared autosave serialises saves and keeps edits made while one is in
@@ -87,8 +88,8 @@
       rangeErrors = {
         ...rangeErrors,
         [key]: m.widget_admin_value_out_of_range({
-          min: min.toLocaleString(),
-          max: max.toLocaleString()
+          min: number.format(min),
+          max: number.format(max)
         })
       };
       return;

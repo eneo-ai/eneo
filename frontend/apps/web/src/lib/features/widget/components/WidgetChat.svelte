@@ -14,7 +14,7 @@
   import { launcherColors } from "../contrast";
   import { isHttpUrl, linkHost } from "../urls";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
-  import { MessageSquarePlus, X } from "lucide-svelte";
+  import { MessageSquarePlus, X } from "@lucide/svelte";
   import { solveWithAltcha } from "../altcha";
   import { Announcer } from "../announcer.svelte";
   import { answerText } from "../answerText";

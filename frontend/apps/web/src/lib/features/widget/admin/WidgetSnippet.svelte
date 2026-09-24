@@ -4,10 +4,11 @@
 -->
 <script lang="ts">
   import type { Widget } from "@eneo/eneo-js";
-  import { Button, Input } from "@eneo/ui";
-  import { Button as LinkButton } from "$lib/components/ui/button/index.js";
-  import { ExternalLink } from "lucide-svelte";
-  import { toast } from "$lib/components/toast";
+  import { ExternalLink } from "@lucide/svelte";
+  import CopyButton from "$lib/components/CopyButton.svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { docsUrl } from "$lib/core/docs";
@@ -21,8 +22,8 @@
 
   let { widget, release, origin }: Props = $props();
 
+  const pinnedId = $props.id();
   let pinned = $state(false);
-  let announcement = $state("");
 
   const options = $derived({
     origin,
@@ -33,16 +34,6 @@
   });
   const snippet = $derived(pinned ? pinnedSnippet(options) : floatingSnippet(options));
   const standalone = $derived(standaloneUrl(options));
-
-  async function copy(text: string, what: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      announcement = m.widget_admin_copied({ what });
-      toast.success(announcement);
-    } catch {
-      toast.error(m.widget_admin_copy_failed());
-    }
-  }
 </script>
 
 <section
@@ -51,7 +42,7 @@
 >
   <h2 id="widget-snippet-title" class="text-base font-semibold">{m.widget_admin_snippet()}</h2>
   <p class="text-secondary text-sm">{m.widget_admin_snippet_description()}</p>
-  <LinkButton
+  <Button
     href={docsUrl("guides/embed-widget", getLocale(), "for-the-website-team")}
     target="_blank"
     rel="noreferrer"
@@ -61,7 +52,7 @@
   >
     {m.widget_admin_snippet_guide()}
     <ExternalLink data-icon="inline-end" aria-hidden="true" />
-  </LinkButton>
+  </Button>
 
   {#if widget.status !== "active"}
     <p class="bg-warning-dimmer text-warning-stronger rounded-lg px-3 py-2 text-sm">
@@ -75,15 +66,22 @@
       >{snippet ?? m.widget_admin_snippet_not_built()}</code
     ></pre>
   <div class="flex flex-wrap items-center justify-between gap-2">
-    <Input.Switch value={pinned} sideEffect={({ next }) => (pinned = next)} disabled={!release}>
-      {m.widget_admin_snippet_pinned()}
-    </Input.Switch>
-    <Button
-      variant="primary-outlined"
+    <Field.Field orientation="horizontal" class="w-auto">
+      <Field.Label for={pinnedId}>{m.widget_admin_snippet_pinned()}</Field.Label>
+      <Switch
+        id={pinnedId}
+        checked={pinned}
+        onCheckedChange={(next) => (pinned = next)}
+        disabled={!release}
+      />
+    </Field.Field>
+    <CopyButton
+      text={() => snippet ?? ""}
+      label={m.widget_admin_copy()}
+      showLabel
+      variant="outline"
       disabled={!snippet}
-      onclick={() => snippet && copy(snippet, m.widget_admin_snippet())}
-      >{m.widget_admin_copy()}</Button
-    >
+    />
   </div>
   {#if pinned}
     <p class="text-secondary text-sm">{m.widget_admin_snippet_pinned_help()}</p>
@@ -99,9 +97,6 @@
       aria-label={m.widget_admin_standalone()}
       value={standalone}
     />
-    <Button variant="outlined" onclick={() => copy(standalone, m.widget_admin_standalone())}
-      >{m.widget_admin_copy()}</Button
-    >
+    <CopyButton text={standalone} label={m.widget_admin_copy()} showLabel variant="outline" />
   </div>
-  <div class="sr-only" aria-live="polite" aria-atomic="true">{announcement}</div>
 </section>

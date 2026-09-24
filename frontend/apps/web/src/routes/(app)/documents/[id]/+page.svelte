@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { Markdown } from "@eneo/ui";
-  import { Check, Copy, Download, ExternalLink, FileText } from "lucide-svelte";
+  import { Check, Copy, Download, ExternalLink, FileText } from "@lucide/svelte";
   import { Page } from "$lib/components/layout";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card/index.js";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import { toast } from "$lib/components/toast";
+  import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
 
@@ -16,14 +17,8 @@
     `${data.blob?.metadata.title ?? data.id} – ${location.origin}/documents/${data.id}`
   );
 
-  let copied = $state(false);
+  const clipboard = createCopyState();
   let downloading = $state(false);
-
-  async function copyReference() {
-    await navigator.clipboard.writeText(reference);
-    copied = true;
-    setTimeout(() => (copied = false), 2000);
-  }
 
   async function downloadOriginal() {
     if (downloading) return;
@@ -75,8 +70,8 @@
               <dd class="break-all select-all">{reference}</dd>
             </dl>
             <div class="flex flex-wrap gap-2">
-              <Button variant="outline" onclick={copyReference}>
-                {#if copied}
+              <Button variant="outline" onclick={() => clipboard.copy(reference)}>
+                {#if clipboard.copied}
                   <Check aria-hidden="true" />
                   {m.copied_to_clipboard()}
                 {:else}
@@ -133,8 +128,8 @@
               <dd class="break-all select-all">{reference}</dd>
             </dl>
             <div>
-              <Button variant="outline" onclick={copyReference}>
-                {#if copied}
+              <Button variant="outline" onclick={() => clipboard.copy(reference)}>
+                {#if clipboard.copied}
                   <Check aria-hidden="true" />
                   {m.copied_to_clipboard()}
                 {:else}

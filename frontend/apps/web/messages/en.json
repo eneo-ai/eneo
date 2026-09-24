@@ -4335,8 +4335,6 @@
   "widget_admin_snippet_pinned": "Pinned version with integrity hash",
   "widget_admin_snippet_pinned_help": "For websites that require Subresource Integrity. The pinned snippet must be replaced after each Eneo release, otherwise the widget stops loading.",
   "widget_admin_copy": "Copy",
-  "widget_admin_copied": "{what} copied",
-  "widget_admin_copy_failed": "Could not copy to the clipboard",
   "widget_admin_standalone": "Stand-alone page",
   "widget_admin_standalone_description": "A full-page version of the chat to link to, for websites that cannot run scripts.",
   "widget_admin_live_test": "Test in Eneo",

@@ -11,7 +11,7 @@
   import { IconSendArrow } from "@eneo/icons/send-arrow";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { Moon, Sun } from "lucide-svelte";
+  import { Moon, Sun } from "@lucide/svelte";
   import { untrack } from "svelte";
   import { readableOn, themeColors } from "../contrast";
   import { currentAppScheme } from "./appScheme";
