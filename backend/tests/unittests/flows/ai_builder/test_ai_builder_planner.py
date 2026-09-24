@@ -1229,25 +1229,32 @@ async def test_requirements_confirmation_reuses_latest_saved_step_scope(
     assert resolve_context.await_args.kwargs["context"] == scoped_context
 
 
+_STRUCTURED_ANSWER = {
+    "kind": "structured_question_answer",
+    "question_id": "primary_runtime_input",
+    "selected_values": ["documents"],
+}
+
+
 @pytest.mark.parametrize(
-    ("sent_intent", "question_answer", "recorded_before", "expected"),
+    (
+        "sent_intent",
+        "question_answer",
+        "builder_asked",
+        "same_step",
+        "expected",
+    ),
     [
         # The request names the part: it reaches the planner and the turn.
-        ("input", None, None, "input"),
-        # An answer to the Builder's question carries the part the turn that
-        # led to the question named.
-        (
-            None,
-            {
-                "kind": "structured_question_answer",
-                "question_id": "primary_runtime_input",
-                "selected_values": ["documents"],
-            },
-            "input",
-            "input",
-        ),
-        # A later free-text turn has moved on: it names no part.
-        (None, None, "input", None),
+        ("input", None, False, True, "input"),
+        # An answer to the Builder's question carries the part the turn it
+        # answers named - chosen in the question card or typed in the composer.
+        (None, _STRUCTURED_ANSWER, True, True, "input"),
+        (None, None, True, True, "input"),
+        # A new request with no question open has moved on: it names no part.
+        (None, None, False, True, None),
+        # An answer about another step is not about the part chosen for this one.
+        (None, _STRUCTURED_ANSWER, True, False, None),
     ],
 )
 @pytest.mark.asyncio
@@ -1255,25 +1262,36 @@ async def test_the_part_of_the_step_a_turn_is_about_reaches_the_planner(
     monkeypatch: pytest.MonkeyPatch,
     sent_intent: str | None,
     question_answer: dict[str, object] | None,
-    recorded_before: str | None,
+    builder_asked: bool,
+    same_step: bool,
     expected: str | None,
 ) -> None:
     planner = _make_planner()
-    step_id = uuid4()
-    scoped_context = AIBuilderSavedFlowStepEditContext(flow_step_id=step_id)
+    scoped_context = AIBuilderSavedFlowStepEditContext(flow_step_id=uuid4())
+    earlier_context = (
+        scoped_context
+        if same_step
+        else AIBuilderSavedFlowStepEditContext(flow_step_id=uuid4())
+    )
     earlier: list[ConversationMessage] = (
         [
             ConversationMessage(
                 role="user",
                 content="Ändra underlaget för det här steget",
                 metadata={
-                    "edit_context": scoped_context.to_metadata(),
-                    "edit_intent": recorded_before,
+                    "edit_context": earlier_context.to_metadata(),
+                    "edit_intent": "input",
                 },
             ),
-            ConversationMessage(role="assistant", content="Vilket steg ska det läsa?"),
+            ConversationMessage(
+                role="assistant",
+                content="Vad ska steget läsa?",
+                metadata=(
+                    {"question_id": "primary_runtime_input"} if builder_asked else None
+                ),
+            ),
         ]
-        if recorded_before is not None
+        if sent_intent is None
         else []
     )
     planner.repo.get_session.return_value = SimpleNamespace(
@@ -1307,8 +1325,8 @@ async def test_the_part_of_the_step_a_turn_is_about_reaches_the_planner(
         session_id=uuid4(),
         client_turn_id=_TEST_CLIENT_TURN_ID,
         request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-        request_snapshot=_test_request_snapshot("Steg 1"),
-        message="Steg 1",
+        request_snapshot=_test_request_snapshot("Dokument"),
+        message="Dokument",
         question_answer=question_answer,
         edit_context=scoped_context,
         edit_intent=sent_intent,

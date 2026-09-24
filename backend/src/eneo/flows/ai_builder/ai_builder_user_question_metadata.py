@@ -54,6 +54,10 @@ from eneo.flows.domain.flow import FlowPersistedJsonObject
 class PreparedUserQuestionMetadata:
     metadata: FlowPersistedJsonObject | None
     is_requirements_confirmation: bool
+    # The turn answers something the Builder asked - a structured answer, a
+    # requirements confirmation, or free text sent while a question waits -
+    # rather than opening a request of its own.
+    answers_builder: bool = False
 
 
 def prepare_user_question_metadata(
@@ -108,10 +112,12 @@ def prepare_user_question_metadata(
             )
         )
 
+    answers_builder = question_answer is not None
     if metadata is None and not is_requirements_confirmation and message.strip():
         pending_question_id = pending_user_requirement_question_id(conversation)
         if pending_question_id is not None:
             metadata = question_response_to_metadata(pending_question_id)
+            answers_builder = True
 
     if ui_language is not None:
         metadata = {
@@ -122,6 +128,7 @@ def prepare_user_question_metadata(
     return PreparedUserQuestionMetadata(
         metadata=metadata,
         is_requirements_confirmation=is_requirements_confirmation,
+        answers_builder=answers_builder,
     )
 
 

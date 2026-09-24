@@ -370,20 +370,24 @@ class AIBuilderPlanner:
         except ValidationError as exc:
             raise_persisted_flow_mcp_plan_error(exc)
             raise
-        # The part of the step this turn is about: what the request named, or,
-        # for an answer to the Builder's question, what the turn that led to
-        # the question named. It only means something for one step, and a later
-        # free-text turn names none.
-        if edit_intent is None and question_answer is not None:
-            edit_intent = latest_user_edit_intent(conversation)
-        if plan_edit_context is not None and plan_edit_context.scope == "step":
-            plan_edit_context = replace(plan_edit_context, edit_intent=edit_intent)
         prepared_metadata = prepare_user_question_metadata(
             conversation=conversation,
             message=message,
             question_answer=question_answer,
             ui_language=ui_language,
         )
+        # The part of the step this turn is about: what the request named, or,
+        # for a turn that answers the Builder, what the turn it answers named -
+        # but only while both are about the same step. A new request of its own
+        # names none.
+        if plan_edit_context is not None and plan_edit_context.scope == "step":
+            if (
+                edit_intent is None
+                and prepared_metadata.answers_builder
+                and latest_user_edit_context(conversation) == plan_edit_context.request
+            ):
+                edit_intent = latest_user_edit_intent(conversation)
+            plan_edit_context = replace(plan_edit_context, edit_intent=edit_intent)
         initial_metadata = prepared_metadata.metadata
         if plan_edit_context is not None:
             initial_metadata = {
