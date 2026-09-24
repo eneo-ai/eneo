@@ -82,6 +82,8 @@ describe("organisation settings", () => {
       document.documentElement.dataset.theme = scheme;
       renderPage();
       await expect.element(page.getByText("admin_audit_always_logged_note")).toBeVisible();
+      // The title flies in; axe must not measure it mid-animation.
+      await vi.waitFor(() => expect(document.getAnimations()).toHaveLength(0));
 
       const result = await axe.run(document, {
         runOnly: {

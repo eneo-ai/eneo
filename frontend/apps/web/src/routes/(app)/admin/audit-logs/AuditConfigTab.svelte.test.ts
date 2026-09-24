@@ -66,6 +66,8 @@ async function renderExpanded() {
   render(AuditConfigTab);
   await page.getByRole("button", { name: /^audit_category_admin_actions/ }).click();
   await expect.element(lockedRow()).toBeVisible();
+  // The list slides open; axe must not measure it half-drawn.
+  await vi.waitFor(() => expect(document.getAnimations()).toHaveLength(0));
 }
 
 beforeEach(() => {

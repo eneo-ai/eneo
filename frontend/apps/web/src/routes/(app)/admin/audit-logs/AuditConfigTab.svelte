@@ -404,7 +404,7 @@
                         </p>
                       {/if}
                       <code
-                        class="bg-accent-default/5 text-accent-default/90 dark:bg-accent-default/10 dark:text-accent-default border-accent-default/20 inline-block rounded-md border px-2.5 py-1 font-mono text-xs"
+                        class="bg-accent-default/10 text-accent-stronger border-accent-default/20 inline-block rounded-md border px-2.5 py-1 font-mono text-xs"
                         >{action.action}</code
                       >
                     </div>

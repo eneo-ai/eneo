@@ -186,7 +186,7 @@
   },
   "src/routes/(app)/admin/audit-logs/AuditConfigTab.svelte": {
     "eneo/no-raw-color": {
-      "count": 11
+      "count": 9
     }
   },
   "src/routes/(app)/admin/insights/InteractiveGraph.svelte": {
