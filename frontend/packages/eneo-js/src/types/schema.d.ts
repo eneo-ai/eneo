@@ -39972,6 +39972,15 @@ export interface operations {
           "application/json": components["schemas"]["StorageModel"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_spaces_api_v1_storage_spaces__get: {
@@ -39990,6 +39999,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["StorageInfoModel"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
