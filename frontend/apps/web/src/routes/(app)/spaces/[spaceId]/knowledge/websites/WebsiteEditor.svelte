@@ -369,7 +369,7 @@
 
           {#if httpAuthEnabled}
             <div
-              class="bg-info-dimmer border-info-default text-info-stronger m-4 rounded-md border px-3 py-2 text-sm"
+              class="label-info border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-3 py-2 text-sm"
             >
               <span class="font-medium">{m.security_note()}</span>
               {m.credentials_encrypted_securely()}
@@ -431,7 +431,7 @@
               </Field.Field>
               <button
                 type="button"
-                class="text-dimmer hover:text-default absolute top-11 right-6 p-1"
+                class="text-muted hover:text-default absolute top-11 right-6 p-1"
                 onclick={() => (showPassword = !showPassword)}
                 aria-label={showPassword ? m.hide_password() : m.show_password()}
               >
@@ -619,11 +619,11 @@
           </div>
           <div class="flex-1">
             <div class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-              <span class="text-dimmer">{m.website_last_crawled()}:</span>
+              <span class="text-muted">{m.website_last_crawled()}:</span>
               <span>{formatDateTime(existingOnOrg.last_crawled_at)}</span>
 
               {#if crawlResult}
-                <span class="text-dimmer">{m.website_crawl_result()}:</span>
+                <span class="text-muted">{m.website_crawl_result()}:</span>
                 <span
                   class={crawlResult.hasFailures
                     ? "text-warning-stronger"
@@ -633,7 +633,7 @@
                 </span>
               {/if}
 
-              <span class="text-dimmer">{m.website_sync_interval()}:</span>
+              <span class="text-muted">{m.website_sync_interval()}:</span>
               <span>{formatUpdateInterval(existingOnOrg.update_interval)}</span>
             </div>
           </div>

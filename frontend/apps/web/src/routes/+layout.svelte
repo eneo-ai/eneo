@@ -4,9 +4,9 @@
   import { initLanguageStore } from "$lib/core/language";
   import { Toaster } from "$lib/components/ui/sonner/index.js";
 
-  initThemeStore();
+  const theme = initThemeStore();
   initLanguageStore();
 </script>
 
 <slot />
-<Toaster richColors closeButton />
+<Toaster theme={$theme} richColors closeButton />

@@ -35,7 +35,7 @@
       <AlertTriangle class="text-warning-default shrink-0" size={20} aria-hidden="true" />
       <div class="flex flex-col gap-1">
         <div class="text-default font-semibold">{mcpServer.name}</div>
-        <div class="text-dimmer text-sm">{m.permanent_action()}</div>
+        <div class="text-muted text-sm">{m.permanent_action()}</div>
       </div>
     </div>
   </div>

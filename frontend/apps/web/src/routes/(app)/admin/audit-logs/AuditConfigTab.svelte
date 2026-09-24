@@ -317,7 +317,7 @@
                 class="hover:text-accent-default group flex min-w-0 flex-1 items-center gap-3 text-left transition-colors"
               >
                 <div
-                  class="group-hover:bg-hover flex-shrink-0 rounded-md p-1 transition-all duration-200"
+                  class="group-hover:bg-hover-default flex-shrink-0 rounded-md p-1 transition-all duration-200"
                 >
                   <ChevronRight
                     class={`h-4 w-4 transition-transform duration-200 ${isExpanded ? "text-default rotate-90" : "text-muted"}`}
@@ -353,7 +353,7 @@
           {#if isExpanded && actions.length > 0}
             <div transition:slide={{ duration: 200 }} class="divide-default bg-primary divide-y">
               {#each actions as action (action.action)}
-                <div class="hover:bg-hover/50 px-6 py-5 transition-colors duration-150">
+                <div class="hover:bg-hover-default/50 px-6 py-5 transition-colors duration-150">
                   <div class="flex items-start justify-between gap-6">
                     <div class="min-w-0 flex-1">
                       <div class="mb-1.5 flex flex-wrap items-center gap-2.5">

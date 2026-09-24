@@ -53,7 +53,7 @@
       <RotateCcw class="text-accent-default mt-0.5 shrink-0" size={20} aria-hidden="true" />
       <div class="flex flex-col gap-2">
         <div class="text-default font-medium">{template.name}</div>
-        <div class="text-dimmer text-sm">{m.rollback_template_description()}</div>
+        <div class="text-muted text-sm">{m.rollback_template_description()}</div>
       </div>
     </div>
   </div>

@@ -119,7 +119,7 @@
   {:else}
     <Button
       variant="ghost"
-      class={isTableView ? "-ml-1" : "bg-preview border-default max-w-[30ch] shadow-sm"}
+      class={isTableView ? "-ml-1" : "bg-primary border-default max-w-[30ch] shadow-sm"}
       onclick={showBlob}
     >
       {#if index}

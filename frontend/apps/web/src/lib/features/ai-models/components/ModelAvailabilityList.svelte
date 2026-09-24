@@ -131,7 +131,7 @@
       {@const isCollapsed = collapsedGroups.has(group.label)}
       <section class="border-default overflow-hidden rounded-xl border">
         <div
-          class="border-default bg-surface-dimmer flex items-center justify-between gap-3 border-b px-3 py-2"
+          class="border-default bg-secondary flex items-center justify-between gap-3 border-b px-3 py-2"
         >
           <button
             type="button"
@@ -167,7 +167,7 @@
               <Field.Field orientation="horizontal" class="gap-4">
                 <div class="flex min-w-0 flex-1 items-start gap-3">
                   <div
-                    class="border-dimmer bg-surface-dimmer mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border"
+                    class="border-dimmer bg-secondary mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border"
                   >
                     <ModelSelector.Logo provider={providerForLogo(model)} class="size-5" />
                   </div>
@@ -202,7 +202,7 @@
                       >
                         {#each details as detail (`${detail.label}-${detail.value}`)}
                           <div
-                            class="border-dimmer bg-surface-dimmer inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs"
+                            class="border-dimmer bg-secondary inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs"
                           >
                             <dt class="text-muted shrink-0">{detail.label}</dt>
                             <dd

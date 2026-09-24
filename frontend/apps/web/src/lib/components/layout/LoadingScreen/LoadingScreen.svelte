@@ -18,6 +18,6 @@
   >
     <EneoWordMark class="text-brand-eneo h-8 w-20"></EneoWordMark>
     <IconLoadingSpinner class="animate-spin" aria-hidden="true" />
-    <p class="text-dimmer text-sm">{message}</p>
+    <p class="text-muted text-sm">{message}</p>
   </div>
 {/if}

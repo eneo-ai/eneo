@@ -45,7 +45,7 @@
             class="flex w-full flex-col gap-1.5 px-6 pt-4 pb-1 last-of-type:pb-4"
           >
             <!-- Category Header with Count Badge -->
-            <div class="border-border-dimmer flex items-center gap-3 border-b px-2 pb-2">
+            <div class="border-dimmer flex items-center gap-3 border-b px-2 pb-2">
               <h3 id="category-{idx}" class="flex-1 text-base font-semibold">
                 {section.title}
               </h3>

@@ -30,19 +30,17 @@
 </script>
 
 {#if !isExpired}
-  <Tooltip.Provider>
-    <Tooltip.Root>
-      <Tooltip.Trigger>
-        <div
-          class="text-warning-stronger bg-warning-dimmer/40 border-warning-default/30 inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium"
-        >
-          <Clock class="h-3 w-3" />
-          {m.api_keys_grace_remaining({ hours: hoursRemaining })}
-        </div>
-      </Tooltip.Trigger>
-      <Tooltip.Content>
-        <p>{m.api_keys_grace_tooltip({ date: formattedDate })}</p>
-      </Tooltip.Content>
-    </Tooltip.Root>
-  </Tooltip.Provider>
+  <Tooltip.Root>
+    <Tooltip.Trigger>
+      <div
+        class="text-warning-stronger bg-warning-dimmer/40 border-warning-default/30 inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium"
+      >
+        <Clock class="h-3 w-3" />
+        {m.api_keys_grace_remaining({ hours: hoursRemaining })}
+      </div>
+    </Tooltip.Trigger>
+    <Tooltip.Content>
+      <p>{m.api_keys_grace_tooltip({ date: formattedDate })}</p>
+    </Tooltip.Content>
+  </Tooltip.Root>
 {/if}

@@ -102,7 +102,7 @@
 <Tooltip.Root>
   <Tooltip.Trigger
     class="
-      border-dimmer bg-surface-dimmer text-muted
+      border-dimmer bg-secondary text-muted
       inline-flex cursor-default items-center rounded-md border font-mono tabular-nums
       {dense ? 'px-1.5 py-0 text-[11px]' : 'px-2 py-0.5 text-xs'}
     "

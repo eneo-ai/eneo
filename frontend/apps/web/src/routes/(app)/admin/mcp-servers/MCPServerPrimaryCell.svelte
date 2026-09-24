@@ -37,13 +37,13 @@
         return {
           label: "Public",
           icon: Globe,
-          classes: "bg-moss-100 text-moss-700 dark:bg-moss-900/50 dark:text-moss-300"
+          classes: "label-moss bg-label-dimmer text-label-stronger"
         };
       case "bearer":
         return {
           label: "Bearer",
           icon: Shield,
-          classes: "bg-eneo-100 text-eneo-700 dark:bg-eneo-900/50 dark:text-eneo-300"
+          classes: "label-blue bg-label-dimmer text-label-stronger"
         };
       case "api_key_header":
         return {
@@ -118,7 +118,7 @@
     {/if}
     {#if mcpServer.security_classification}
       <span
-        class="bg-amethyst-100 text-amethyst-700 dark:bg-amethyst-900/50 dark:text-amethyst-300 inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium"
+        class="label-amethyst bg-label-dimmer text-label-stronger inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium"
         role="status"
         aria-label="{m.security_classification()}: {mcpServer.security_classification.name}"
       >
@@ -133,7 +133,7 @@
   {#if mcpServer.http_auth_type === "internal"}
     <!-- A built-in provider's endpoint is Eneo's own loopback: plumbing, not
          something the admin chose. The image model is what they configured. -->
-    <span class="text-dimmer inline-flex items-center gap-1.5 truncate text-xs">
+    <span class="text-muted inline-flex items-center gap-1.5 truncate text-xs">
       <span class="text-muted">{m.mcp_builtin_image_model()}:</span>
       {#if mcpServer.image_model}
         <span>{mcpServer.image_model.nickname || mcpServer.image_model.name}</span>
@@ -146,7 +146,7 @@
     </span>
   {:else}
     <span
-      class="text-dimmer inline-flex items-center gap-1.5 truncate font-mono text-xs"
+      class="text-muted inline-flex items-center gap-1.5 truncate font-mono text-xs"
       aria-label={m.mcp_server_url_aria()}
     >
       <span

@@ -365,7 +365,7 @@
             >
               {m.mcp_all_on()}
             </button>
-            <span class="text-dimmer">|</span>
+            <span class="text-muted">|</span>
             <button
               type="button"
               class="text-muted hover:text-default hover:bg-hover-dimmer disabled:hover:text-muted rounded px-2 py-1 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"

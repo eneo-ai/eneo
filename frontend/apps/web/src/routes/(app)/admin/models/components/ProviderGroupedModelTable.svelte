@@ -326,7 +326,7 @@
                     ? m.provider_model_count_one({ count: modelCount })
                     : m.provider_model_count_other({ count: modelCount })}
                 </span>
-                <span class="bg-border-dimmer h-4 w-px"></span>
+                <span class="bg-[var(--border-dimmer)] h-4 w-px"></span>
                 <button
                   class="text-muted hover:bg-hover-dimmer hover:text-primary focus:ring-accent-default flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors duration-150 focus:ring-1 focus:outline-none"
                   on:click|stopPropagation={() => handleAddModelToProvider(provider.id)}
@@ -345,7 +345,7 @@
               <ProviderEmptyState providerId={provider.id} onAddModel={handleAddModelToProvider} />
             {:else}
               <div
-                class="text-muted/80 bg-surface-dimmer/50 border-dimmer rounded-lg border border-dashed px-4 py-3 text-sm"
+                class="text-muted/80 bg-secondary/50 border-dimmer rounded-lg border border-dashed px-4 py-3 text-sm"
               >
                 {m.no_models_in_provider()}
               </div>

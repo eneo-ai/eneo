@@ -79,6 +79,7 @@
   /*     - lib/components/ui/progress/progress.svelte (indicator)      */
   /*     - lib/components/ui/calendar/calendar-day.svelte (selected)   */
   /*     - lib/components/ui/range-calendar/range-calendar-day.svelte  */
+  /*     - lib/components/ui/field/field-description.svelte (link)    */
   /*   Any future shadcn component that uses bg-primary / text-primary-*/
   /*   foreground in its checked/active state needs the same patch.    */
   /*                                                                   */

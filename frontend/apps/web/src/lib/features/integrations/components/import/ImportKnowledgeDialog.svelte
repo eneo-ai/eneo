@@ -85,7 +85,7 @@
           </span>
         {:else}
           <span
-            class="text-secondary bg-dimmer border-default rounded border px-1.5 py-0.5 text-xs font-semibold"
+            class="text-secondary bg-secondary border-default rounded border px-1.5 py-0.5 text-xs font-semibold"
           >
             {m.personal()}
           </span>

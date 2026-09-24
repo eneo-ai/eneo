@@ -218,7 +218,7 @@
         <div class="bg-primary border-default space-y-3 rounded-lg border p-4">
           <div class="flex items-center justify-between">
             <div class="text-sm font-semibold">{m.overall_statistics()}</div>
-            <div class="text-secondary-muted text-xs">
+            <div class="text-muted text-xs">
               {m.total_syncs()}: {totalCount}
             </div>
           </div>
@@ -277,9 +277,7 @@
                   {log.status}
                 </span>
               </div>
-              <span class="text-secondary-muted flex-shrink-0 text-xs"
-                >{formatDate(log.started_at)}</span
-              >
+              <span class="text-muted flex-shrink-0 text-xs">{formatDate(log.started_at)}</span>
             </div>
 
             <!-- Summary -->
@@ -300,8 +298,8 @@
                         class="text-primary max-w-[200px] truncate font-medium"
                         title={detail.file}>{detail.file}</span
                       >
-                      <span class="text-secondary-muted">&mdash;</span>
-                      <span class="text-secondary-muted">{detail.reason}</span>
+                      <span class="text-muted">&mdash;</span>
+                      <span class="text-muted">{detail.reason}</span>
                     </li>
                   {/each}
                 </ul>
@@ -309,7 +307,7 @@
             {/if}
 
             <!-- Duration and error -->
-            <div class="text-secondary-muted flex items-center gap-4 text-xs">
+            <div class="text-muted flex items-center gap-4 text-xs">
               <span>{m.duration()}: {getDuration(log)}</span>
               {#if log.error_message}
                 <span class="text-negative-default font-medium"

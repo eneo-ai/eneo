@@ -1,9 +1,16 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { slide } from "svelte/transition";
   import { Clock, AlertTriangle, X, BellOff, Bell } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import type { ExpiringKeyDisplayItem, ExpiryLevel } from "./expirationUtils";
-  import { isDismissed, dismiss, isMutedNonCritical, setMutedNonCritical } from "./expirationPrefs";
+  import {
+    cleanupExpiredEntries,
+    dismiss,
+    isDismissed,
+    isMutedNonCritical,
+    setMutedNonCritical
+  } from "./expirationPrefs";
   import { Button } from "$lib/components/ui/button/index.js";
 
   let {
@@ -19,6 +26,8 @@
     compact?: boolean;
     qualifier?: string;
   } = $props();
+
+  onMount(cleanupExpiredEntries);
 
   let dismissed = $state<Set<string>>(new Set());
   let muteOverride = $state<boolean | null>(null);

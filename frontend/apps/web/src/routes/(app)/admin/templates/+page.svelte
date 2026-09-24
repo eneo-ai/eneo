@@ -67,7 +67,7 @@
             <h3 class="text-default text-lg font-semibold">
               {m.no_templates_yet()}
             </h3>
-            <p class="text-dimmer max-w-md text-sm">
+            <p class="text-muted max-w-md text-sm">
               {m.templates_empty_state_description()}
             </p>
           </div>
@@ -92,7 +92,7 @@
             <h3 class="text-default text-lg font-semibold">
               {m.no_templates_yet()}
             </h3>
-            <p class="text-dimmer max-w-md text-sm">
+            <p class="text-muted max-w-md text-sm">
               {m.templates_empty_state_description()}
             </p>
           </div>
@@ -117,7 +117,7 @@
             <h3 class="text-default text-lg font-semibold">
               {m.no_deleted_templates()}
             </h3>
-            <p class="text-dimmer max-w-md text-sm">
+            <p class="text-muted max-w-md text-sm">
               {m.deleted_templates_empty_state_description()}
             </p>
           </div>

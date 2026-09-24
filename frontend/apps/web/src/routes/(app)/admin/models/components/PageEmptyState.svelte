@@ -26,7 +26,7 @@
   <div class="relative mb-8" in:fly={{ y: 10, duration: 400, delay: 100 }}>
     <div class="bg-accent-dimmer/30 absolute inset-0 scale-150 rounded-full blur-2xl"></div>
     <div
-      class="from-surface to-surface-dimmer dark:from-accent-dimmer dark:to-accent-dimmer border-dimmer/60 dark:border-accent-default/20 relative
+      class="from-primary to-secondary dark:from-accent-dimmer dark:to-accent-dimmer border-dimmer/60 dark:border-accent-default/20 relative
       flex h-24 w-24
       items-center justify-center
       rounded-2xl border bg-gradient-to-br

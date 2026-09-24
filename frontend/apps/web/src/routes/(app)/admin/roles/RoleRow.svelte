@@ -80,28 +80,26 @@
     <div class="min-w-0 flex-1">
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-base font-medium">{role.name}</span>
-        <Tooltip.Provider delayDuration={150}>
-          {#if isDefault}
-            <Tooltip.Root>
-              <Tooltip.Trigger class={badgeVariants({ variant: "default" })}>
-                <Star aria-hidden="true" data-icon="inline-start" />
-                {m.roles_default_badge()}
-                <span class="sr-only">. {m.roles_default_badge_tooltip()}</span>
-              </Tooltip.Trigger>
-              <Tooltip.Content>{m.roles_default_badge_tooltip()}</Tooltip.Content>
-            </Tooltip.Root>
-          {/if}
-          {#if template}
-            <Tooltip.Root>
-              <Tooltip.Trigger class={badgeVariants({ variant: "outline" })}>
-                <LayoutTemplate aria-hidden="true" data-icon="inline-start" />
-                {template.badge}
-                <span class="sr-only">. {template.tooltip}</span>
-              </Tooltip.Trigger>
-              <Tooltip.Content>{template.tooltip}</Tooltip.Content>
-            </Tooltip.Root>
-          {/if}
-        </Tooltip.Provider>
+        {#if isDefault}
+          <Tooltip.Root delayDuration={150}>
+            <Tooltip.Trigger class={badgeVariants({ variant: "default" })}>
+              <Star aria-hidden="true" data-icon="inline-start" />
+              {m.roles_default_badge()}
+              <span class="sr-only">. {m.roles_default_badge_tooltip()}</span>
+            </Tooltip.Trigger>
+            <Tooltip.Content>{m.roles_default_badge_tooltip()}</Tooltip.Content>
+          </Tooltip.Root>
+        {/if}
+        {#if template}
+          <Tooltip.Root delayDuration={150}>
+            <Tooltip.Trigger class={badgeVariants({ variant: "outline" })}>
+              <LayoutTemplate aria-hidden="true" data-icon="inline-start" />
+              {template.badge}
+              <span class="sr-only">. {template.tooltip}</span>
+            </Tooltip.Trigger>
+            <Tooltip.Content>{template.tooltip}</Tooltip.Content>
+          </Tooltip.Root>
+        {/if}
       </div>
 
       <ul class="mt-2 flex flex-wrap gap-1.5" aria-label={m.roles_group_summary_label()}>

@@ -11,11 +11,11 @@
 </script>
 
 <div
-  class="bg-surface-dimmer/40 border-dimmer/80 flex items-center gap-4 rounded-lg border border-dashed px-4 py-3"
+  class="bg-secondary/40 border-dimmer/80 flex items-center gap-4 rounded-lg border border-dashed px-4 py-3"
   in:fade={{ duration: 200 }}
 >
   <div
-    class="bg-surface dark:bg-accent-dimmer border-dimmer/50 dark:border-accent-default/20 flex-shrink-0 rounded-lg border p-3"
+    class="bg-primary dark:bg-accent-dimmer border-dimmer/50 dark:border-accent-default/20 flex-shrink-0 rounded-lg border p-3"
   >
     <Layers class="text-muted/50 dark:text-accent-stronger h-5 w-5" strokeWidth={1.5} />
   </div>
