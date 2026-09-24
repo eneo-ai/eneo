@@ -76,7 +76,7 @@ The backend applies three guards on top of ordinary authentication. Each returns
 
 | Guard | Rejects | `code` | Applies to |
 |-------|---------|--------|------------|
-| Session required | every API key, including tenant-admin service keys | `session_auth_required` | All API key mutations (`POST /api/v1/api-keys`, update, delete, revoke, rotate, extend, purge, suspend, reactivate, notification preferences), chat-turn diagnostics, Skills, module administration and the module login handoff, object-store connection and deployment-policy administration, and the logging endpoints behind Admin Insights |
+| Session required | every API key, including tenant-admin service keys | `session_auth_required` | All API key mutations (`POST /api/v1/api-keys`, update, delete, revoke, rotate, extend, purge, suspend, reactivate, notification preferences), chat-turn diagnostics, Skills, module administration and the module login handoff, object-store connection and deployment-policy administration, the logging endpoints behind Admin Insights, space oversight changes (member management, joining and leaving a space as an administrator) and widget activation requests (requesting, withdrawing and sending back) |
 | User identity required | service keys (`ownership: "service"`) | `user_identity_required` | Endpoints scoped to the caller as a person, such as `GET /api/v1/users/me/` |
 | User required for creation | service keys | `service_key_cannot_create_resources` | `POST` endpoints that create user-owned resources (assistants, apps, services, spaces, group chats, collections, websites, files, info blobs, roles, MCP servers, help-assistant runs, and API keys) |
 

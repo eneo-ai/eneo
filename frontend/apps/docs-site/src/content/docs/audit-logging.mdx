@@ -8,7 +8,7 @@ For admin-facing guidance, see the [Audit Logging Guide](/guides/audit-logging).
 
 Audit events are created through the `AuditService` application layer:
 
-1. API routes/services call `log_async` (preferred) or `log` (synchronous).
+1. API routes/services call `log_async` (preferred) or `log` (synchronous). Mandatory actions use `log_required` (see [Mandatory actions](#mandatory-actions)).
 2. `log_async` enqueues a background job in ARQ (Redis-backed).
 3. The worker persists the audit log in PostgreSQL.
 4. Retention is enforced by a scheduled purge job.
@@ -18,6 +18,8 @@ Audit logging is gated by:
 
 - The `audit_logging_enabled` feature flag (a kill switch, evaluated per tenant).
 - Per-tenant audit configuration (category-level and action-level overrides).
+
+Mandatory actions bypass both gates.
 
 ## Storage model
 
@@ -43,6 +45,58 @@ Configuration is layered to allow broad and precise control:
 
 Changes apply immediately for new audit events; historical logs are not modified.
 
+## Mandatory actions
+
+`MANDATORY_AUDIT_ACTIONS` in `eneo.audit.domain.mandatory_actions` lists the actions that are always logged. All of them belong to the `admin_actions` category.
+
+| Action | Entity | Written when |
+|--------|--------|--------------|
+| `space_oversight_joined` | space | A tenant admin joins a shared space through oversight, with a role and a reason |
+| `space_oversight_left` | space | A tenant admin leaves a space through oversight |
+| `space_oversight_member_added` | space | A user or group is added through oversight |
+| `space_oversight_member_role_changed` | space | A user's or group's role is changed through oversight |
+| `space_oversight_member_removed` | space | A user or group is removed through oversight |
+| `widget_activation_request_declined` | widget | A tenant admin sends a widget activation request back, with a message |
+| `widget_activated`, `widget_paused`, `widget_archived` | widget | A widget is activated, paused or archived |
+
+For these actions:
+
+- `AuditService._should_log_action` returns true before it evaluates the `audit_logging_enabled` kill switch or the category and action configuration.
+- Request handlers write them with `AuditService.log_required()`. It inserts the row on the request's own database session, inside the function-scoped transaction that makes the change, so the change and its audit row commit together and a failed insert rolls the change back (fail-closed). It raises `ValueError` when called with an action that is not mandatory.
+- `GET /api/v1/audit/config/actions` reports them with `enabled: true` and `mandatory: true`. `PATCH /api/v1/audit/config/actions` returns `400` for any attempt to disable one, and the configuration UI shows them as locked.
+- The tenant's retention policy, the purge job and exports apply to them as to any other log.
+
+The one path that still uses `log_async` is the system archive of a widget whose assistant is deleted or moved: the configuration gates are bypassed, but a failure to enqueue the job does not stop the archive.
+
+`widget_activation_requested` and `widget_activation_request_withdrawn`, written when an editor requests or withdraws activation, are ordinary `admin_actions` entries written with `log_async` and follow the tenant configuration. Oversight reads (`GET /api/v1/admin/spaces/`, `GET /api/v1/admin/spaces/{space_id}/` and `GET /api/v1/admin/widgets/{id}/`) are not audited.
+
+### Oversight metadata
+
+Oversight entries use the standard `AuditMetadata` shape:
+
+```json
+{
+  "actor": { "type": "user", "id": "…", "name": "…", "email": "…" },
+  "target": { "id": "…", "name": "…", "space_id": "…", "space_name": "…" },
+  "changes": { "role": { "old": "editor", "new": "viewer" } },
+  "extra": {
+    "oversight": { "actor_is_member": false, "actor_role": null },
+    "member": { "id": "…", "name": "…", "email": "…" },
+    "role": "viewer",
+    "reason": "Case 2026/123: checking the source documents"
+  }
+}
+```
+
+- `target` is the space. `changes.role` appears only on `space_oversight_member_role_changed`.
+- `extra.oversight` records the administrator's effective role in the space before the action (`actor_role` is `null` when they were not a member).
+- `extra.member` (user variants) and `extra.group` (`id`, `name` and `user_count`, the group's live users; group variants) are mutually exclusive.
+- `extra.role` is the new role on `space_oversight_member_added` and `space_oversight_joined`. A join also records `extra.prior_group_role`, and a leave records `extra.was_oversight_join` and `extra.remaining_group_role`.
+- `extra.api_keys_revoked` counts the space-scoped API keys revoked when a user is removed or leaves.
+- `extra.reason` holds the join reason and, on `widget_activation_request_declined`, the message sent back. It is normalised before it is stored: control and bidirectional formatting characters are removed, every run of whitespace (line breaks included) becomes one space, and the result must be 10–500 characters. The reason is never part of `description`, so free-text search does not match it.
+
+Widget entries keep `extra.public_id` and `extra.space_id`, and `changes.new` holds the widget snapshot on activate, pause and archive. They add `extra.actor_is_space_member`. Activate and send-back add `extra.activation_request` (`requested_at` and `requested_by_user_id`, or `null` when nobody requested activation), activate adds `extra.reviewed_revision`, and send-back adds `extra.reason`.
+
 ## Access model and justification
 
 Viewing audit logs requires an access justification session, created with `POST /api/v1/audit/access-session`. The access event itself is logged, including:
@@ -51,7 +105,7 @@ Viewing audit logs requires an access justification session, created with `POST 
 - justification text
 - access time and actor
 
-This provides traceability for who accessed audit logs and why.
+This provides traceability for who accessed audit logs and why. Joining a space through oversight follows the same principle: the tenant admin states a reason, which is stored with the always-logged `space_oversight_joined` entry (see [Mandatory actions](#mandatory-actions)).
 
 The justification is stored server-side (Redis) and referenced by an HTTP-only cookie; it is never carried in URLs. A session lasts one hour, and each user can create at most five sessions per hour (`429` when exceeded).
 

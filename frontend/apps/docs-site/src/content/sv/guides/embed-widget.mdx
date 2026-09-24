@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@514b623d063a
+translationSource: guides/embed-widget.mdx@80b8f35d61c4
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -113,8 +113,9 @@ Du behöver behörigheten för webbwidgetar och rätt att redigera assistenten.
 4. Prova förhandsvisningen (den riktiga chattsidan) och gärna **Testa i Eneo**,
    som visar den riktiga knappen och chatten på administrationssidan innan
    något har installerats.
-5. När statusraden inte visar några hinder aktiverar en
-   organisationsadministratör widgeten. Fram till dess är den ett utkast och
+5. När statusraden inte visar några hinder väljer du **Begär aktivering** (se
+   [Begär aktivering](#request-activation)). En organisationsadministratör
+   granskar widgeten och aktiverar den. Fram till dess är den ett utkast och
    visas inte på den externa webbplatsen.
 6. Kopiera installationskoden och lämna den till webbansvarig. Den läggs in en
    gång, helst strax före `</body>`:
@@ -159,6 +160,33 @@ inaktuell sparning kan inte upphäva en paus eller arkivering.
 
 En redaktör kan **pausa** widgeten direkt för alla besökare. **Arkivering**
 kräver administratör och är permanent.
+
+### Begär aktivering [#request-activation]
+
+En organisationsadministratör bestämmer om en widget ska publiceras. När
+statusraden inte visar några hinder och alla ändringar är sparade väljer du
+**Begär aktivering** i statusraden, eller **Begär återaktivering** för en
+pausad widget. Knappen går inte att använda så länge det finns hinder eller
+osparade ändringar, och listan över hinder visar vad som behöver åtgärdas.
+
+Medan begäran väntar visar statusraden **Väntar på aktivering** och när
+aktiveringen begärdes. Du kan fortsätta ändra: administratören granskar den
+senast sparade versionen, och om widgeten ändras medan administratören har den
+öppen behöver hen granska den igen innan den kan aktiveras. **Dra tillbaka
+begäran** tar tillbaka begäran; alla som kan redigera widgeten kan göra det.
+Eneo skickar inget e-postmeddelande eller någon annan avisering om begäranden.
+Administratörer hittar dem under **Admin → Webbwidgetar** och **Admin → Ytor**.
+
+Om administratören skickar tillbaka begäran visar statusraden när det skedde,
+tillsammans med administratörens meddelande om vad som behöver ändras. Gör
+ändringarna och välj **Begär aktivering** igen. En widget som skickas tillbaka
+förblir ett utkast, eller pausad.
+
+Begäranden och tillbakadragna begäranden sparas i granskningsloggen när
+loggningen är påslagen; aktivering och tillbakaskickade begäranden sparas
+alltid. En organisationsadministratör som redigerar en widget aktiverar den i
+statusraden utan någon begäran. När en begäran väntar ser hen också när den
+gjordes, med en länk för att granska den.
 
 ### Källor, verktygsaktivitet och återkoppling [#sources-tool-activity-and-feedback]
 
@@ -323,6 +351,62 @@ Policyn gäller befintliga widgetar så som den ser ut nu, inte bara vid senare
 Widgeten behåller sina egna sparade värden och visar dem som policybrott som
 behöver åtgärdas.
 
+### Granska begäranden om aktivering [#review-activation-requests]
+
+Redaktörer begär aktivering i widgetredigeraren (se
+[Begär aktivering](#request-activation)), och en organisationsadministratör
+granskar widgeten och beslutar. Du behöver inte vara medlem i widgetens yta för
+att granska den, aktivera den, skicka tillbaka begäran, pausa den eller
+arkivera den.
+
+På fliken **Widgetar** under **Admin → Webbwidgetar** visas widgetar som väntar
+på aktivering först, äldsta begäran först, med vem som begärde, när och om
+något hindrar aktiveringen. En ruta visar hur många som väntar, och
+**Admin → Ytor** listar dem under **Behöver åtgärd** (se
+[Tillsyn över ytor](/guides/space-oversight#spaces-that-need-attention)). Välj
+**Granska** för att öppna widgetens granskningssida; alla widgetar i
+översikten länkar dit. Översikten aktiverar eller återupptar inte widgetar
+själv, så varje aktivering går via granskningssidan. **Pausa** finns kvar för
+varje aktiv widget i översikten.
+
+Granskningssidan visar:
+
+- **Status**: vem som begärde aktivering och när, ett meddelande från en
+  tidigare tillbakaskickad begäran och eventuella hinder eller policybrott.
+- **Var widgeten visas**: de webbplatser som får visa den.
+- **Vad besökarna möter**: rubrik, AI-upplysning, välkomsttext, föreslagna
+  frågor, sidfot, språk och mall.
+- **Vad besökarna får tillgång till**: assistenten med modell och
+  instruktioner, dess kunskapskällor med antal dokument och de verktyg som
+  besökarna når (se [Vad besökare kommer åt](#what-visitors-can-reach)).
+- **Integritet och skydd**: lagringstid inom policyns intervall, botskydd,
+  daglig tokenbudget, begränsningar och om fritextåterkoppling sparas.
+- **Förhandsgranskning**: hur widgeten ser ut för besökare. Den här
+  förhandsgranskningen svarar inte på frågor, eftersom svaren bygger på ytans
+  kunskap, som bara medlemmar får se. Om du är medlem i ytan och assistenten är
+  publicerad startar **Testa svaren** den riktiga widgeten; testfrågorna sparas
+  som besökarsamtal och räknas in i widgetens användning. Om du inte är medlem
+  kan du gå med i ytan härifrån (se
+  [Gå med i en yta](/guides/space-oversight#join-a-space)).
+- **Användning**, när widgeten har varit aktiv.
+
+**Aktivera…**, eller **Återuppta…** för en pausad widget, publicerar widgeten
+exakt som du granskade den: om en redaktör har ändrat widgeten efter att du
+öppnade sidan nekas aktiveringen, och **Visa senaste versionen** läser in sidan
+igen så att du kan granska ändringen först. Du kan också aktivera en widget som
+ingen har begärt aktivering för. **Skicka tillbaka…** returnerar en väntande
+begäran med ett meddelande om vad som behöver ändras (10–500 tecken). Widgeten
+förblir ett utkast eller pausad, och ytans redaktörer ser ditt meddelande i
+widgetredigeraren. Meddelandet sparas också i granskningsloggen, så skriv det
+för redaktörerna och utan personuppgifter. **Pausa…** och **Arkivera…** finns
+på samma sida, och **Öppna i widgetredigeraren** visas när du är redigerare
+eller administratör i ytan. När en widget aktiveras eller arkiveras tas en
+väntande begäran och ett eventuellt tillbakaskickat meddelande bort.
+
+Aktivering, tillbakaskickade begäranden, paus och arkivering sparas alltid i
+granskningsloggen, även när granskningsloggningen är avstängd (se
+[Granskningsloggning](/guides/audit-logging#always-logged-actions)).
+
 ### Mallar [#templates]
 
 Mallar innehåller organisationens husstil: texter, färger, logotyp, form och
@@ -370,7 +454,8 @@ att ladda om när mallen har ändrat deras widget.
 - **Flytt** av assistenten till en annan yta arkiverar dess widgetutkast och
   loggar varje arkivering i granskningsloggen. Flytten nekas så länge en aktiv
   eller pausad widget visar assistenten, eftersom widgeten hör till
-  assistentens yta; en administratör arkiverar då widgeten först.
+  assistentens yta; en organisationsadministratör arkiverar då widgeten först
+  under **Admin → Webbwidgetar**, utan att gå med i ytan.
 - **Borttagning** av assistenten arkiverar dess widgetar i samma steg och
   loggar varje arkivering i granskningsloggen. En mall som widgetarna följde
   kan därefter tas bort.
@@ -514,8 +599,10 @@ Innan en widget aktiveras på en publik webbplats, kontrollera att:
   används ändå;
 - den dagliga tokenbudgeten motsvarar den kostnad ni accepterar och att
   användningen följs upp regelbundet;
-- granskningsloggning är påslagen: skapande, ändringar, aktivering, paus,
-  arkivering och förbrukad budget loggas.
+- granskningsloggning är påslagen: skapande, ändringar, begäranden om
+  aktivering och tillbakadragna begäranden samt förbrukad budget loggas.
+  Aktivering, tillbakaskickade begäranden, paus och arkivering loggas alltid,
+  även när granskningsloggningen är avstängd.
 
 ## Tillgänglighet [#accessibility]
 

@@ -15,6 +15,8 @@ Audit logs capture actions such as:
 - Security classification and access updates
 - File and integration events
 - Audit log access and exports
+- Space oversight by organisation administrators: members added, removed or given another role, and joining or leaving a space
+- Web widget publishing: activation requests and withdrawals, requests sent back, activation, pausing and archiving
 
 Logs are stored in PostgreSQL and are scoped to your tenant.
 
@@ -25,7 +27,7 @@ Audit logging can be turned on or off globally in the admin UI.
 - Go to **Admin** and use the **Audit logging** toggle on the admin overview page to enable or disable logging for your tenant
 - The logs themselves, the per-category and per-action configuration, exports, and the retention setting live under **Admin → Analytics & logs → Audit Logs**
 
-When disabled, no new audit logs are created.
+When disabled, no new audit logs are created, except for the [always-logged actions](#always-logged-actions).
 
 ## Configure what gets logged
 
@@ -35,6 +37,19 @@ You can fine-tune logging in two levels:
 2. **Action toggles** — enable/disable specific actions within a category (e.g., `user_created`).
 
 Changes apply immediately for new events. Historical logs remain unchanged.
+
+### Always-logged actions
+
+Some actions are always logged and cannot be turned off:
+
+- **Space oversight**: Joined a space through oversight, Left a space (oversight), Member added by organisation administrator, Role changed by organisation administrator, and Member removed by organisation administrator.
+- **Web widget publishing**: Widget activation request sent back, and activating, pausing and archiving a widget.
+
+These actions are recorded even when audit logging is turned off, whatever the category and action toggles say. In the configuration their switches are locked and marked **Always logged**, each category shows how many of its actions are always logged, and switching a whole category off leaves them on. Each entry is saved together with the change it records: if the entry cannot be saved, the change is not made. The normal retention period and exports apply to them.
+
+An organisation may reduce the logging of ordinary activity, but not of access and changes made without membership, or of publishing to the open web. The administrators who could make such changes can also change the audit settings, so a record they could switch off would not be a control.
+
+The reason an administrator gives for joining a space, and the message sent back with a widget request, are stored in the entry's JSON metadata, not in its description. To review who has joined which spaces, filter on the action **Joined a space through oversight**. See [Space Oversight](/guides/space-oversight#what-the-audit-log-records) for what each entry records.
 
 ## Viewing audit logs
 

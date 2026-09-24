@@ -1,0 +1,340 @@
+---
+title: Tillsyn över ytor
+translationSource: guides/space-oversight.mdx@d5855a863733
+---
+
+# Tillsyn över ytor
+
+import { Callout } from "nextra/components";
+
+Organisationsadministratörer kan se och förvalta alla delade ytor i
+organisationen under **Admin → Ytor**, utan att vara medlemmar. Du ser varje
+ytas inställningar, medlemmar, resurser och användning, du kan rätta dess
+medlemskap och du kan granska dess webbwidgetar. Ytans dokument, frågor, svar
+och samtal är till för dess medlemmar. För att se dem går du med i ytan med en
+roll och en skriven anledning. Ytans medlemmar ser att du har gått med, och det
+sparas alltid i granskningsloggen.
+
+**Ytor** är första punkten under **Styrning** i adminmenyn. Sidan är till för
+organisationsadministratörer, det vill säga användare vars roll har
+behörigheten **Administratör**.
+
+<Callout type="info">
+  Tillsynen gäller bara delade ytor. Personliga ytor visas aldrig.
+  Organisationsytan visas inte heller, eftersom organisationsadministratörer
+  redan är medlemmar i den.
+</Callout>
+
+## Det här ser administratörer [#what-administrators-can-see]
+
+### Listan över ytor [#the-list-of-spaces]
+
+**Admin → Ytor** visar alla delade ytor i en tabell. För varje yta visas:
+
+- namn och beskrivning, med en markering när ytan saknar administratör eller
+  när en webbwidget väntar på aktivering;
+- säkerhetsklassen, när säkerhetsklassificering används;
+- ytans administratörer;
+- antalet medlemmar (personer, direkt eller via grupper) och grupper;
+- ytans resurser: assistenter, appar, kunskapskällor och aktiva webbwidgetar;
+- när ytan senast var aktiv, som en period: senaste veckan, senaste månaden,
+  senaste 3 månaderna, mer än 3 månader sedan eller ingen aktivitet;
+- ditt eget medlemskap: inte medlem, din roll, din roll via en grupp eller att
+  du gick med via tillsyn. När du är medlem tar **Öppna ytan** dig till själva
+  ytan.
+
+Sök på namn, beskrivning eller administratör, filtrera på ditt medlemskap
+(**Där jag är medlem**, **Där jag inte är medlem**) och på vad som behöver
+åtgärdas (**Behöver åtgärd**, **Saknar administratör**, **Widget väntar på
+aktivering**), och sortera på namn, medlemmar eller senaste aktivitet. Filtren
+sparas i sidans adress, så webbläsarens bakåtknapp och ett bokmärke leder till
+samma vy. Ytor där du är medlem finns som vanligt i ytväljaren; övriga ytor syns
+bara här.
+
+### En enskild yta [#a-single-space]
+
+Välj en ytas namn för att öppna den. Sidan börjar med hur du själv förhåller
+dig till ytan (se [Gå med i en yta](#join-a-space)) och följs av en
+sammanfattning: säkerhetsklass, administratörer, medlemmar, senaste aktivitet,
+frågor och aktiva användare de senaste 30 dagarna, frågor via ytans
+webbwidgetar, lagrad kunskap och när ytan skapades. Därefter kommer fem flikar:
+
+- **Inställningar**: hur länge samtal sparas, ytans språkmodeller,
+  inbäddningsmodeller och transkriberingsmodeller, om webbsökning och
+  bildgenerering är påslagna samt ytans verktyg (MCP-servrar).
+- **Assistenter och appar**: för varje assistent om den är publicerad, dess
+  modell, vilka kunskapskällor den använder, antalet bifogade filer, dess
+  verktyg, om insikter och fullständig loggning är påslagna, hur länge den
+  sparar samtal, dess webbwidget och dess instruktioner. Appar visar sina
+  modeller, instruktioner och lagringstid, och gruppchattar visar status, antal
+  assistenter och om insikter är påslagna. Instruktionerna är dolda tills du
+  väljer **Visa instruktioner**.
+- **Kunskap**: de kunskapskällor som ytan äger, med typ, antal dokument eller
+  sidor, storlek, senaste uppdatering och vilka assistenter som använder dem.
+  För webbplatser visas också hur ofta de hämtas, om de kräver inloggning och
+  om hämtningen har stängts av efter upprepade fel. Fliken räknar också de
+  källor som ytan använder från organisationsytan.
+- **Medlemmar**: personer och grupper med deras roller; se
+  [Hantera medlemmar](#manage-members).
+- **Webbwidgetar**: ytans widgetar, deras assistent och status och när
+  aktivering begärdes.
+
+Utöver medlemskap och beslut om webbwidgetar går det inte att ändra något via
+tillsynen: du kan inte ändra en ytas inställningar, assistenter eller kunskap,
+och du kan inte ta bort en yta härifrån.
+
+### Det här visas aldrig [#what-is-never-shown]
+
+Tillsynssidorna visar aldrig:
+
+- dokumentens titlar eller innehåll, eller de sidor som hämtats från en
+  webbplats;
+- frågor, svar, samtalens namn, återkoppling eller vad som skickats in till och
+  kommit ut ur appkörningar;
+- namnen på bifogade filer, bara hur många de är;
+- inloggningsuppgifter till webbplatser eller hemligheter för verktygsservrar;
+- mappar och sökvägar bakom en integration; en OneDrive-källa visas som
+  **OneDrive (personlig mapp)** utan namn;
+- vem som skapade en assistent, app eller kunskapskälla;
+- den exakta tidpunkten för den senaste aktiviteten.
+
+Instruktionerna för assistenter och appar visas, eftersom de styr hur en
+assistent beter sig och vad en publik webbwidget svarar. Instruktioner kan
+innehålla personuppgifter; se [Integritet](#privacy).
+
+## Innehåll kräver medlemskap [#content-requires-membership]
+
+En ytas innehåll är till för dess medlemmar: dokument och deras titlar, frågor,
+svar, samtal och bifogade filer. Tillsynen ändrar inte det. Tillsynssidorna
+visar inget innehåll, och ytans egna sidor, även via **Öppna ytan**, kräver
+medlemskap precis som tidigare. Att testa en webbwidgets svar räknas också som
+innehåll, eftersom svaren bygger på ytans kunskap.
+
+För att arbeta med en ytas innehåll går du med i ytan; se
+[Gå med i en yta](#join-a-space). En organisationsadministratör som redan är
+medlem, direkt eller via en användargrupp, ser det som rollen ger tillgång
+till, precis som andra medlemmar.
+
+Två vägar ger tillgång till innehåll utan att det syns som ett
+tillsynsmedlemskap. Ta med dem i era rutiner:
+
+- **Användargrupper.** En administratör som lägger till sig själv i en
+  användargrupp under **Admin → Användargrupper** får gruppens roll i alla ytor
+  där gruppen är medlem. Gruppändringen sparas i granskningsloggen, men ytans
+  medlemmar ser inget meddelande om att någon har gått med.
+- **Tjänstenycklar med omfånget Organisation.** En sådan tjänstenyckel når
+  innehållet i alla ytor; se [Åtkomst via API](#api-access).
+
+## Hantera medlemmar [#manage-members]
+
+På fliken **Medlemmar** lägger du till personer och grupper, ändrar deras
+roller och tar bort dem, utan att gå med i ytan. Varje ändring gäller direkt
+och sparas alltid i granskningsloggen.
+
+- **Lägg till person** och **Lägg till grupp** lägger till en medlem med en
+  roll. Personer och grupper som redan är medlemmar markeras **Redan medlem**.
+- Ändra roll med rollväljaren på medlemmens rad. **Visare** läser kunskapen och
+  chattar med publicerade assistenter. **Redigerare** kan dessutom ändra
+  assistenter och kunskap och ser insikter om användarnas frågor där insikter
+  är påslagna. **Administratör** kan dessutom hantera ytans medlemmar och
+  inställningar.
+- Ta bort en medlem från medlemmens rad. När en person tas bort återkallas
+  också de API-nycklar som personen har för ytan. När en grupp tas bort
+  återkallas inga API-nycklar; en persons egna API-nycklar fungerar bara i ytor
+  där personen fortfarande är medlem.
+
+Varje person visas med namn, e-postadress och roll, och med markeringar för
+**Organisationsadministratör**, **Gick med via tillsyn** (med datum och
+anledning), **Inaktivt konto** och **Inbjuden**. För varje grupp visas hur många
+personer den har.
+
+Två regler gäller för alla ändringar:
+
+- **En yta har alltid minst en administratör.** En ändring som skulle lämna
+  ytan utan en administratör som kan agera nekas: att sänka rollen för eller
+  ta bort den sista, även den sista administratörsgruppen, eller att lämna ytan
+  (se [Lämna en yta](#leave-a-space)). Bara aktiva och inbjudna konton med
+  rollen **Administratör** räknas, direkt eller via en grupp; ett inaktivt
+  eller borttaget konto kan inte hantera något. Utse en annan administratör
+  först. En yta som redan saknar administratör går alltid att rätta.
+- **Din egen åtkomst ändrar du bara genom att gå med eller lämna.** Du kan inte
+  lägga till dig själv, ändra din egen roll eller ta bort dig själv på fliken
+  **Medlemmar**. Att lägga till en grupp som du tillhör, eller ge den en högre
+  roll, nekas också om det skulle höja din egen roll; att sänka rollen för en
+  sådan grupp eller ta bort den går bra. När du går med sparas din anledning
+  och ytans medlemmar ser att du har gått med. Även att du lämnar sparas.
+
+Om en annan administratör har ändrat medlemslistan medan du hade sidan öppen
+får du veta det, och den aktuella listan visas. Medlemsändringar kräver att du
+är inloggad i Eneo; API-nycklar kan inte göra dem.
+
+## Gå med i en yta [#join-a-space]
+
+Gå med i en yta när du behöver dess innehåll, till exempel för att utreda en
+anmälan, kontrollera ett dokument eller hjälpa ytans redigerare. Välj **Gå med
+i ytan…** överst på ytans tillsynssida, eller i avsnittet för
+förhandsgranskning på en webbwidgets granskningssida.
+
+1. Välj roll. Om du redan är medlem via en grupp erbjuds bara roller över
+   gruppens roll. Välj den lägsta roll som räcker för uppgiften; den lägsta
+   tillgängliga rollen är förvald.
+2. Skriv en anledning, 10–500 tecken. Hänvisa hellre till ett ärendenummer än
+   att skriva personuppgifter: anledningen visas för ytans administratörer och
+   för andra organisationsadministratörer, och den sparas i granskningsloggen.
+   Radbrytningar sparas som mellanslag.
+3. Välj **Gå med som** följt av rollen, till exempel **Gå med som Visare**.
+
+När du har gått med finns ytan i ytväljaren, och du arbetar i den som andra
+medlemmar med samma roll. Alla medlemmar i ytan ser att du har gått med, när
+och med vilken roll: ytans översiktssida visar meddelandet
+**Organisationsadministratör i ytan**, och medlemssidan markerar dig med **Gick
+med via tillsyn** och datumet. Där är det bara ytans administratörer som ser din
+anledning. Att du gick med sparas alltid i granskningsloggen, med roll och
+anledning.
+
+Om du redan är medlem via en grupp lägger du till ett direkt medlemskap med
+en högre roll, och den högre rollen gäller. Om en grupp redan ger dig rollen
+**Administratör** finns det inget att gå med i. Om du redan har ett direkt
+medlemskap kan du inte gå med igen eller ändra din egen roll: en annan
+organisationsadministratör kan ändra den, eller så lämnar du ytan och går med
+igen med en ny anledning.
+
+Markeringen hör till medlemskapet. Om du senare förlorar behörigheten
+**Administratör** är du kvar som vanlig medlem, och fliken **Medlemmar** visar
+fortfarande **Gick med via tillsyn** men inte längre
+**Organisationsadministratör**. Sådana medlemskap är därför lätta att hitta, och
+en annan organisationsadministratör kan ta bort dem. Om ytans egna
+administratörer tar bort dig och lägger till dig igen har det nya medlemskapet
+ingen markering.
+
+## Lämna en yta [#leave-a-space]
+
+Välj **Lämna ytan…** på ytans tillsynssida när du är klar. Du förlorar
+åtkomsten till ytans dokument och assistenter, de API-nycklar du har för ytan
+återkallas och ytan syns fortfarande under **Admin → Ytor**. Om du också är
+medlem via en grupp behåller du gruppens roll; det står i dialogen. Att du
+lämnar sparas alltid i granskningsloggen, tillsammans med om du hade gått med
+via tillsyn.
+
+Du kan lämna alla direkta medlemskap på det här sättet, inte bara sådana du
+fick genom att gå med. Du kan inte lämna ytan så länge du är dess enda
+administratör: utse en annan administratör först.
+
+## Ytor som behöver åtgärd [#spaces-that-need-attention]
+
+Överst på **Admin → Ytor** visas det som behöver åtgärdas:
+
+- **Ytor utan administratör.** I en sådan yta kan ingen lägga till medlemmar
+  eller ändra ytans inställningar. **Visa ytorna** filtrerar listan på dem.
+  Rätta det på ytans flik **Medlemmar**: ge en medlem rollen **Administratör**
+  eller lägg till en person som administratör. Du behöver inte gå med. Ytorna
+  markeras också i listan och på sin egen sida.
+- **Webbwidgetar som väntar på aktivering.** Upp till tre begäranden visas,
+  var och en med länken **Granska**; **Visa alla i Webbwidgetar** öppnar hela
+  listan.
+
+När inget behöver göras står det **Inget behöver åtgärdas just nu.**
+
+En yta räknas som att den saknar administratör när inget aktivt eller inbjudet
+konto har rollen **Administratör** i den, direkt eller via en grupp.
+
+## Granska begäranden om aktivering [#review-widget-requests]
+
+Redigerare kan inte själva aktivera en webbwidget. De begär aktivering i
+widgetredigeraren, och en organisationsadministratör granskar widgeten och
+aktiverar den eller skickar tillbaka begäran med ett meddelande. Du behöver
+inte vara medlem i ytan för att granska en widget eller besluta om den. Att
+testa widgetens svar kräver däremot medlemskap, eftersom svaren bygger på ytans
+kunskap. Se
+[Granska begäranden om aktivering](/guides/embed-widget#review-activation-requests)
+i guiden om webbwidgetar.
+
+## Det här sparas i granskningsloggen [#what-the-audit-log-records]
+
+Följande händelser sparas i granskningsloggen:
+
+| Händelse i granskningsloggen                   | Sparas när                                                                 | Loggas alltid |
+| ---------------------------------------------- | -------------------------------------------------------------------------- | ------------- |
+| Gick med i yta via tillsyn                     | En organisationsadministratör går med i en yta, med roll och anledning     | Ja            |
+| Lämnade yta (tillsyn)                          | En organisationsadministratör lämnar en yta                                | Ja            |
+| Medlem tillagd av organisationsadministratör   | En person eller grupp läggs till via tillsynen                             | Ja            |
+| Roll ändrad av organisationsadministratör      | En persons eller grupps roll ändras via tillsynen                          | Ja            |
+| Medlem borttagen av organisationsadministratör | En person eller grupp tas bort via tillsynen                               | Ja            |
+| Begäran om widgetaktivering tillbakaskickad    | En administratör skickar tillbaka en begäran om aktivering, med meddelande | Ja            |
+| Widgetaktivering begärd                        | En redigerare begär aktivering av en webbwidget                            | Nej           |
+| Begäran om widgetaktivering tillbakadragen     | En redigerare drar tillbaka en begäran                                     | Nej           |
+
+Aktivering, paus och arkivering av en webbwidget loggas också alltid.
+
+**Loggas alltid** betyder att händelsen sparas även när granskningsloggningen
+är avstängd för organisationen, oavsett inställningar för kategorier och
+händelser. Reglaget i loggkonfigurationen är låst och markerat **Loggas
+alltid**. Posten skrivs tillsammans med ändringen: om den inte kan sparas blir
+ändringen inte av. Organisationens lagringstid för granskningsloggen gäller
+för de här posterna som för alla andra.
+
+En organisation får minska loggningen av vanlig aktivitet, men inte av åtkomst
+och ändringar som görs utan medlemskap, eller av publicering på den öppna
+webben. De administratörer som kan göra sådana ändringar kan också ändra
+loggningens inställningar, så en logg som de kunde stänga av vore ingen
+kontroll.
+
+Varje post anger administratören, ytan och, när det är aktuellt, medlemmen
+eller gruppen och rollerna. En anledning eller ett meddelande om tillbakaskickad
+begäran sparas i postens detaljer (dess metadata), aldrig i beskrivningen. Att
+öppna tillsynssidorna loggas inte: den som läser inställningar, medlemmar,
+instruktioner eller användning lämnar inga spår i loggen.
+
+Gå igenom tillsynsmedlemskapen regelbundet, till exempel en gång i månaden.
+Filtrera granskningsloggen på händelsen **Gick med i yta via tillsyn** och
+kontrollera att varje medlemskap fortfarande behövs. **Där jag är medlem** på
+**Admin → Ytor** visar dina egna medlemskap. Kontrollera också ändringar i
+användargrupper (se [Innehåll kräver medlemskap](#content-requires-membership)).
+
+## Åtkomst via API [#api-access]
+
+Listan över ytor, en ytas detaljer och en webbwidgets granskningssida går också
+att läsa med en API-nyckel som har omfånget Organisation och behörigheten
+`admin`. Alla ändringar kräver att du är inloggad: medlemsändringar, att gå med
+och lämna samt att begära, dra tillbaka och skicka tillbaka en aktivering.
+API-nycklar får `403` med `code: "session_auth_required"`, så en nyckel kan
+aldrig göra sig själv till medlem i en yta.
+
+Tjänstenycklar är ett undantag från regeln om medlemskap. En tjänstenyckel med
+omfånget Organisation får sin roll i **alla** ytor i organisationen
+(`read` ger Visare, `write` ger Redigerare, `admin` ger Administratör), innehåll
+inräknat, utan att gå med och utan att ytans medlemmar ser det. Regeln att
+innehåll bara nås efter ett loggat medlemskap gäller därför personer, inte
+sådana nycklar. Skapa tjänstenycklar med omfånget Organisation bara för
+granskade integrationer, och välj hellre en nyckel för en enda yta. Se
+[How Service Keys Derive Space Roles](/docs/api-key-management#how-service-keys-derive-space-roles)
+(på engelska).
+
+## Integritet [#privacy]
+
+Tillsynen visar det administratörer behöver för att styra och hålla ordning,
+utan att lyfta fram enskilda personers arbete:
+
+- **Små tal visas inte.** Siffror för frågor och användare de senaste 30
+  dagarna visas bara när minst 5 olika inloggade personer har ställt frågor
+  eller kört appar i ytan under perioden. Annars står det **Visas inte – färre
+  än 5 aktiva användare** i sammanfattningen, så att ingen enskild persons
+  användning går att utläsa. Frågor från anonyma besökare i webbwidgetar räknas
+  för sig och visas alltid.
+- **Aktivitet visas som en period, inte en tidpunkt.** Senaste aktivitet visas
+  som senaste veckan, senaste månaden, senaste 3 månaderna, mer än 3 månader
+  sedan eller ingen aktivitet.
+- **Instruktioner kan innehålla personuppgifter.** Alla
+  organisationsadministratörer, och alla API-nycklar med omfånget Organisation
+  och behörigheten `admin`, kan läsa instruktionerna för assistenter och appar,
+  och läsningen loggas inte. Skriv instruktioner utan personuppgifter, och ta
+  med den här åtkomsten i er konsekvensbedömning (DPIA).
+- **Dokumenttitlar stannar hos medlemmarna.** Kunskap visas bara som källor,
+  antal och storlek, eftersom även en titel kan innehålla personuppgifter.
+- **Andra läser anledningen.** En anledning till att gå med visas för ytans
+  administratörer och andra organisationsadministratörer, och den sparas i
+  granskningsloggen. Hänvisa till ett ärendenummer i stället för att nämna
+  personer.
+
+Skydden begränsar vad siffrorna avslöjar, men de gör inte uppgifterna anonyma.
+I en mycket liten yta kan upprepade iakttagelser ändå ringa in enskilda.

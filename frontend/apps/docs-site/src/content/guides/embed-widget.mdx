@@ -48,7 +48,7 @@ You need the **widgets** permission and edit rights on the assistant.
    - **Rules**: the websites that may show the widget (one origin per line, for example `https://www.kommun.se` or `https://*.kommun.se`; at least one is required, at most 20), limits, privacy (retention in days; `0` stores nothing after the answer, so the chat answers one question at a time without follow-ups or feedback; whether free-text feedback is stored) and protection. The organisation's policy bounds are shown at the fields they limit.
    - **Publish**: the activation checklist, what visitors get access to, the install snippet, "Test in Eneo" and usage.
 4. Check the **Preview** (the real chat page) and, if you like, **Test in Eneo**, which mounts the real widget on the admin page so you can try the button, keyboard navigation and the chat before anything is installed on your site.
-5. When the status bar shows no blockers, a tenant admin activates the widget. Until then the widget is a draft and shows nothing on your site.
+5. When the status bar shows no blockers, choose **Request activation** (see [Request activation](#request-activation)). An organisation administrator reviews the widget and activates it. Until then the widget is a draft and shows nothing on your site.
 6. Copy the **install snippet** and place it once on the website, preferably just before `</body>`:
 
 ```html
@@ -68,6 +68,16 @@ On an active widget, the description under the title and the list of allowed web
 If another editor changes the widget while you edit, autosave stops and keeps your unsaved values visible. Copy anything you want to keep, then choose **Reload and discard unsaved changes** before editing the latest version. A stale save cannot undo a pause or archive.
 
 **Pause** stops the widget immediately for every visitor; any editor can pause. **Archive** (admins) is permanent.
+
+### Request activation
+
+An organisation administrator decides whether a widget goes live. When the status bar shows no blockers and every change is saved, choose **Request activation** in the status bar, or **Request reactivation** for a paused widget. The button is unavailable while there are blockers or unsaved changes, and the list of blockers says what to fix.
+
+While the request is pending, the status bar shows **Waiting for activation** and when activation was requested. You can keep editing: the administrator reviews the latest saved version, and if the widget changes while they have it open, they are asked to review it again before they can activate it. **Withdraw request** cancels the request; anyone who can edit the widget can withdraw it. Eneo sends no email or other notification about requests. Administrators find them under **Admin → Web widgets** and **Admin → Spaces**.
+
+If the administrator sends the request back, the status bar says when, together with the administrator's message about what needs to change. Make the changes and choose **Request activation** again. A widget that is sent back stays a draft, or paused.
+
+Requests and withdrawals are recorded in the audit log when audit logging is on; activation and sending a request back are always recorded. Organisation administrators who edit a widget activate it from the status bar without a request. When a request is pending they also see when it was made, with a link to review it.
 
 ### Sources, tool activity and feedback
 
@@ -138,6 +148,26 @@ The policy applies to existing widgets as it stands, not only to later edits:
 
 The widget keeps its own saved values and shows them as policy violations to fix.
 
+### Review activation requests
+
+Editors request activation in the widget editor (see [Request activation](#request-activation)), and an organisation administrator reviews the widget and decides. You do not need to be a member of the widget's space to review it, activate it, send the request back, pause it or archive it.
+
+On the **Widgets** tab of **Admin → Web widgets**, widgets waiting for activation are listed first, oldest request first, with who asked, when and whether anything blocks activation. A tile shows how many are waiting, and **Admin → Spaces** lists them under **Needs attention** (see [Space Oversight](/guides/space-oversight#spaces-that-need-attention)). Choose **Review** to open the widget's review page; every widget in the overview links there. The overview itself does not activate or resume widgets, so every activation goes through the review page. **Pause** is still available on each active widget in the overview.
+
+The review page shows:
+
+- **Status**: who requested activation and when, a message from an earlier send-back, and any blockers or policy violations.
+- **Where the widget appears**: the websites allowed to show it.
+- **What visitors see**: title, AI disclosure, welcome message, suggested questions, footer, language and template.
+- **What visitors get access to**: the assistant with its model and instructions, its knowledge sources with document counts, and the tools visitors reach (see [What visitors can reach](#what-visitors-can-reach)).
+- **Privacy and protection**: retention within the policy range, bot protection, daily token budget, limits, and whether free-text feedback is stored.
+- **Preview**: how the widget looks to visitors. This preview does not answer questions, because answers draw on the space's knowledge, which only members may see. If you are a member of the space and the assistant is published, **Test the answers** starts the real widget; test questions are stored as visitor conversations and count toward the widget's usage. If you are not a member, you can join the space from here (see [Join a space](/guides/space-oversight#join-a-space)).
+- **Usage**, once the widget has been active.
+
+**Activate…**, or **Resume…** for a paused widget, makes the widget live exactly as you reviewed it: if an editor changed the widget after you opened the page, activation is refused, and **Show the latest version** reloads the page so you can review the change first. You can also activate a widget that nobody has requested. **Send back…** returns a pending request with a message about what needs to change (10–500 characters). The widget stays a draft or paused, and the space's editors see your message in the widget editor. The message is also stored in the audit log, so write it for the editors and leave out personal data. **Pause…** and **Archive…** are on the same page, and **Open in the widget editor** appears when you are an editor or administrator of the space. Activating or archiving a widget clears a pending request and any sent-back message.
+
+Activation, sending a request back, pausing and archiving are always recorded in the audit log, even when audit logging is turned off (see [Audit Logging](/guides/audit-logging#always-logged-actions)).
+
 ### Templates
 
 Templates hold the organisation's house style: texts, colours, logo, shape and language. Admins create them under **Admin → Web widgets → Widget templates** and preview them in light and dark mode; at most one template is the default that editors get preselected (switch it off and nothing is preselected).
@@ -150,7 +180,7 @@ The template page shows how many widgets follow it and whether the draft has unp
 
 - **Tools and functions.** A change to the assistant's MCP servers or functions reaches visitors at once; see [What visitors can reach](#what-visitors-can-reach).
 - **Unpublishing** the assistant takes an active widget offline. Visitors see the "not available" notice, and the widget shows what needs fixing.
-- **Moving** the assistant to another space archives its draft widgets and records each in the audit log. The move is refused while an active or paused widget serves the assistant, because the widget belongs to the assistant's space; an administrator archives that widget first.
+- **Moving** the assistant to another space archives its draft widgets and records each in the audit log. The move is refused while an active or paused widget serves the assistant, because the widget belongs to the assistant's space; an organisation administrator archives that widget first from **Admin → Web widgets**, without joining the space.
 - **Deleting** the assistant archives its widgets in the same step and records each in the audit log. A template those widgets followed can then be deleted.
 
 ### Security properties
@@ -215,7 +245,7 @@ Before activating a widget on a public site, confirm that:
 - every MCP server and function the assistant uses is acceptable for anonymous public use: what its tools can read or do, a visitor can ask for, and later changes to the assistant apply at once ([What visitors can reach](#what-visitors-can-reach));
 - the names of the assistant's MCP servers read well in public: visitors see them as the source of tool activity ("via TimeMCP"), and tools without a catalog title show their technical name. Turn off _Show tool activity_ to keep tool and server names internal; the tools still run;
 - the daily token budget reflects the cost you accept, and the usage view is reviewed regularly;
-- audit logging is enabled: widget creation, changes, activation, pausing, archiving and budget exhaustion are logged.
+- audit logging is enabled: widget creation, changes, activation requests and withdrawals, and budget exhaustion are logged. Activation, sending a request back, pausing and archiving are always logged, even when audit logging is turned off.
 
 ## Accessibility
 

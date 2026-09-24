@@ -38,6 +38,14 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Swedish trans
 | `backend/src/eneo/modules/**`, `frontend/apps/web/src/routes/(public)/module-login/**`                                                                | `docs/module-authentication.mdx`                                                   |
 | `backend/src/eneo/settings/encryption_service.py`, `backend/src/eneo/cli/generate_encryption_key.py`                                                  | `guides/ai-providers.mdx`, `guides/oidc-federation/*.mdx`, `guides/deployment.mdx` |
 
+## Spaces and administration
+
+| Code                                                                                                                                                                                                                                                                                                              | Pages                                                                              |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `backend/src/eneo/spaces/oversight/**`, `frontend/apps/web/src/routes/(app)/admin/spaces/**`, `frontend/apps/web/src/lib/features/spaces/oversight/**`                                                                                                                                                            | `guides/space-oversight.mdx`, `docs/architecture.mdx`                              |
+| Oversight join marker: `backend/src/eneo/spaces/space_repo.py`, `backend/src/eneo/spaces/space_factory.py`, `backend/src/eneo/spaces/api/space_assembler.py`, `frontend/apps/web/src/lib/features/spaces/components/OversightJoinNotice.svelte`, `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/members/**` | `guides/space-oversight.mdx`                                                       |
+| `backend/src/eneo/audit/domain/mandatory_actions.py` (always-logged actions)                                                                                                                                                                                                                                      | `docs/audit-logging.mdx`, `guides/audit-logging.mdx`, `guides/space-oversight.mdx` |
+
 ## AI models and providers
 
 | Code                                                                                                                                                                                                     | Pages                     |

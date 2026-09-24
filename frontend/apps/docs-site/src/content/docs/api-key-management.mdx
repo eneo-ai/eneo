@@ -195,6 +195,8 @@ Service keys are not space members, so `SpaceActor` derives a synthetic role:
 
 This means a service key with `scope: space, permission: write` gets `EDITOR` access to exactly one space, and no access to any other space.
 
+Tenant admins see a space's content only after joining it with a recorded reason ([Space Oversight](/guides/space-oversight#content-requires-membership)). That guarantee applies to people: a tenant-scoped service key already reaches every space's content without joining, so create tenant-scoped service keys only for vetted integrations.
+
 ### Scope Enforcement Details
 
 Scope enforcement distinguishes between **list endpoints** (no resource ID in URL) and **single-resource endpoints** (resource ID in URL):

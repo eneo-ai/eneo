@@ -24,6 +24,7 @@ const swedishTitles: Readonly<Record<string, string>> = {
   "/guides/oidc-federation/multi-tenant": "Federation för flera organisationer",
   "/guides/scim-provisioning": "Provisionering med SCIM",
   "/guides/audit-logging": "Granskningsloggning",
+  "/guides/space-oversight": "Tillsyn över ytor",
   "/guides/skills": "Färdigheter",
   "/guides/ai-providers": "Konfigurera AI-leverantörer",
   "/guides/mcp-servers": "MCP-servrar",
