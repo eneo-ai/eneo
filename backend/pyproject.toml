@@ -33,7 +33,7 @@ dependencies = [
     "bcrypt>=4.1.2,<5",
     "dependency-injector>=4.41.0,<5",
     "docx2python>=3.5.0,<4",
-    "scrapy>=2.14.2,<3",
+    "scrapy>=2.17.0,<3",
     "html2text>=2024.2.26,<2025",
     "beautifulsoup4>=4.12.3,<5",
     "crochet>=2.1.1,<3",
@@ -45,7 +45,9 @@ dependencies = [
     "greenlet>=3.2.2,<4",
     "litellm==1.101.0",
     "mcp>=1.2.0,<2", # Model Context Protocol SDK for MCP server integration
-    "anyio>=4.5,<5",  # memory-stream types the MCP client annotates against; floor matches mcp's
+    # MCP memory-stream types; 4.14.2 contains the security fixes. Starlette
+    # 1.3.1 TestClient warns on AnyIO 4.15; remove the cap after its upgrade.
+    "anyio>=4.14.2,<4.15",
     "cryptography>=50.0.0,<51", # For Fernet encryption of HTTP auth passwords; >=50 clears CVE-2026-69247
     "httpx~=0.28.0",
     "pandas>=2.2.3,<3",
@@ -81,7 +83,7 @@ dev = [
     "pytest-vcr>=1.0.2,<2",
     "pytest-env>=1.1.5,<1.2",  # newer releases add --envfile, which conflicts with pytest-dotenv
     "vcrpy>=8.2.1,<9",
-    "httpx2>=2.5.0,<3",  # Starlette TestClient backend for starlette>=1.3
+    "httpx2>=2.12.0,<3",  # Starlette TestClient backend for starlette>=1.3
     "testcontainers>=4.8.1,<5",
     "pytest-dotenv>=0.5.2,<0.6",
     "openpyxl>=3.1.5,<4",
