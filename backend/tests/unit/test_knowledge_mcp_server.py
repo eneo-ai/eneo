@@ -210,6 +210,35 @@ class TestSearchResultContent:
             "score": 0.87,
         }
 
+    def test_a_crawled_page_carries_its_address_and_an_upload_none(self):
+        page = _chunk(info_blob_url="https://www.kommun.se/avfall")
+        upload = _chunk(info_blob_url=None)
+
+        content = _search_result_content("q", [page, upload])
+
+        assert content[1].resource.meta["url"] == "https://www.kommun.se/avfall"
+        assert "url" not in content[2].resource.meta
+
+    def test_context_passages_keep_the_address_of_their_page(self):
+        blob_id = uuid4()
+        merged = _merge_adjacent_chunks(
+            [
+                _chunk(
+                    info_blob_id=blob_id,
+                    chunk_no=5,
+                    info_blob_url="https://www.kommun.se/avfall",
+                )
+            ],
+            [SimpleNamespace(info_blob_id=blob_id, chunk_no=6, text="Context")],
+        )
+
+        resources = _search_result_content("q", merged)[1:]
+
+        assert [r.resource.meta["url"] for r in resources] == [
+            "https://www.kommun.se/avfall",
+            "https://www.kommun.se/avfall",
+        ]
+
     def test_untitled_chunk_gets_placeholder_title(self):
         content = _search_result_content("q", [_chunk(info_blob_title=None)])
         assert content[1].resource.text.startswith("Title: Untitled source")
@@ -359,6 +388,19 @@ class TestDocumentPageContent:
         )
         assert str(resource.uri) == f"eneo://info-blob/{blob.id}"
         assert resource.meta["title"] == "Waste policy"
+
+    def test_a_crawled_page_names_its_address(self):
+        page = SimpleNamespace(
+            id=uuid4(), title="Waste policy", text="Text.", url="https://kommun.se/p"
+        )
+
+        [page_block] = _document_page_content(page, offset=0, page_cap=100)
+        [upload_block] = _document_page_content(
+            self._blob("Text."), offset=0, page_cap=100
+        )
+
+        assert page_block.resource.meta["url"] == "https://kommun.se/p"
+        assert "url" not in upload_block.resource.meta
 
     def test_long_document_truncates_with_resume_offset(self):
         blob = self._blob("a" * 250)
@@ -854,6 +896,22 @@ class TestOverviewContent:
         )
 
         assert "2 excerpt(s) sampled from 1 of these documents" in content[1].text
+
+    def test_an_excerpt_of_a_crawled_page_carries_its_address(self):
+        page, upload = uuid4(), uuid4()
+        content = _overview_content(
+            scope=self._scope(),
+            total=2,
+            offset=0,
+            title_lines=["- Avfall", "- Taxa.pdf"],
+            excerpts=[self._excerpt(page), self._excerpt(upload)],
+            excerpt_titles={page: "Avfall", upload: "Taxa.pdf"},
+            excerpt_urls={page: "https://www.kommun.se/avfall"},
+        )
+
+        page_meta, upload_meta = (block.resource.meta for block in content[-2:])
+        assert page_meta["url"] == "https://www.kommun.se/avfall"
+        assert "url" not in upload_meta
 
     def test_excerpts_are_citable_resources(self):
         blob_id = uuid4()

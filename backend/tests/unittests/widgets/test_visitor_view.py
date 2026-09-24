@@ -298,6 +298,55 @@ def test_a_citation_split_across_text_chunks_still_releases_its_resource():
     assert events[2]["mcp_tool_references"][0]["uri"] == ref.uri
 
 
+def _knowledge_passage(**meta) -> McpToolReference:
+    document = uuid4()
+    return McpToolReference(
+        id=uuid4(),
+        tool_call_id="call_k",
+        mcp_tool_name="knowledge__search_knowledge",
+        uri=f"eneo://info-blob/{document}#chunk-3",
+        mime_type="text/plain",
+        content=SECRET_CONTENT,
+        meta={
+            "title": "Avgifter för bygglov",
+            "info_blob_id": str(document),
+            "url": "https://www.kommun.se/avgifter",
+            "score": 0.91,
+            "context_for_chunk": 2,
+            **meta,
+        },
+        order=0,
+    )
+
+
+def test_a_cited_knowledge_passage_names_its_document_but_not_its_text():
+    passage = _knowledge_passage()
+    view = VisitorView(_widget())
+
+    events = _stream(view, _tool_chunk_with(passage), _text(_cite(passage)))
+
+    [ref] = events[1]["mcp_tool_references"]
+    assert ref["content"] is None
+    assert ref["meta"] == {
+        "title": "Avgifter för bygglov",
+        "info_blob_id": passage.meta["info_blob_id"],
+        "url": "https://www.kommun.se/avgifter",
+    }
+    assert SECRET_CONTENT not in json.dumps(events)
+
+
+def test_only_a_knowledge_passage_keeps_a_document_id_and_address():
+    ref = replace(
+        _mcp_ref(),
+        meta={"title": "Ärende", "info_blob_id": "x", "url": "https://tracker.example"},
+    )
+    view = VisitorView(_widget())
+
+    events = _stream(view, _tool_chunk_with(ref), _text(_cite(ref)))
+
+    assert events[1]["mcp_tool_references"][0]["meta"] == {"title": "Ärende"}
+
+
 def test_tool_images_are_not_held_back():
     image = replace(_mcp_ref(), mime_type="image/png", uri="https://img/x.png")
 
@@ -454,6 +503,33 @@ def test_restored_session_with_everything_shown():
     assert call["arguments"] == {"query": "bibliotek"}
     assert call["result"] is None and call["meta"] is None
     assert call["generated_file_ids"] is None
+
+
+def test_a_restored_knowledge_passage_names_its_document_but_not_its_text():
+    passage = _knowledge_passage()
+    stored = _stored_session()
+    question = stored.questions[0].model_copy(
+        update={
+            "mcp_tool_references": [
+                McpToolReferencePublic(
+                    id=passage.id,
+                    uri=passage.uri,
+                    content=passage.content,
+                    meta=passage.meta,
+                    tool_call_id=passage.tool_call_id,
+                    mcp_tool_name=passage.mcp_tool_name,
+                )
+            ]
+        }
+    )
+    session = VisitorView(_widget()).session(
+        stored.model_copy(update={"questions": [question]})
+    )
+
+    [message] = to_session_public(session).model_dump(mode="json")["messages"]
+    [ref] = message["mcp_tool_references"]
+    assert ref["content"] is None
+    assert set(ref["meta"]) == {"title", "info_blob_id", "url"}
 
 
 def test_restored_session_with_sources_hidden():

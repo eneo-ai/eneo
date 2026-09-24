@@ -29,6 +29,12 @@ from eneo.widgets.domain.widget import Widget
 # is implementation detail.
 DISPLAY_META_KEYS = frozenset({"title", "sourceType", "pageRange", "section"})
 
+# A passage from Eneo's knowledge tool also names its document, so the widget
+# lists it like injected knowledge: a crawled page by its address, an upload
+# by the document id a visitor can pass on.
+KNOWLEDGE_URI_PREFIX = "eneo://info-blob/"
+KNOWLEDGE_META_KEYS = DISPLAY_META_KEYS | {"info_blob_id", "url"}
+
 # The one argument the widget shows beside a tool's name, looked up in the
 # order the widget uses (widgetToolSteps.argumentDetail) and falling back to
 # the first text argument. Web search labels read `query` or `q`.
@@ -166,7 +172,7 @@ class VisitorView:
         ]
 
     def _visible_reference(self, ref: McpToolReference) -> McpToolReference:
-        return replace(ref, **self._reference_changes(ref.meta))
+        return replace(ref, **self._reference_changes(ref.uri, ref.meta))
 
     # --- sessions -----------------------------------------------------------
 
@@ -220,7 +226,7 @@ class VisitorView:
         )
 
     def _stored_reference(self, ref: McpToolReferencePublic) -> McpToolReferencePublic:
-        return ref.model_copy(update=self._reference_changes(ref.meta))
+        return ref.model_copy(update=self._reference_changes(ref.uri, ref.meta))
 
     # --- shared -------------------------------------------------------------
 
@@ -236,13 +242,18 @@ class VisitorView:
                 return {key: value}
         return {}
 
-    def _reference_changes(self, meta: dict[str, Any]) -> dict[str, Any]:
+    def _reference_changes(self, uri: str, meta: dict[str, Any]) -> dict[str, Any]:
         """One rule for a tool resource, streamed or restored: its title and
         link stay, its content does not, and with tool activity hidden
         nothing ties it to the call that produced it."""
+        shown = (
+            KNOWLEDGE_META_KEYS
+            if uri.startswith(KNOWLEDGE_URI_PREFIX)
+            else DISPLAY_META_KEYS
+        )
         changes: dict[str, Any] = {
             "content": None,
-            "meta": {key: meta[key] for key in meta if key in DISPLAY_META_KEYS},
+            "meta": {key: meta[key] for key in meta if key in shown},
         }
         if not self.widget.show_tool_activity:
             changes["tool_call_id"] = None

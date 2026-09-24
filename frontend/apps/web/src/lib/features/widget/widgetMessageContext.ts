@@ -19,12 +19,14 @@ export const [getWidgetMessageContext, setWidgetMessageContext] =
   createContext<WidgetMessageContext>("Widget message");
 
 export type WidgetSource = {
+  /** Knowledge: the Eneo document id, however it was found; else the reference id. */
   id: string;
   title: string;
   url: string | null;
   /**
    * A document in the assistant's knowledge, which Eneo can look up by id; a
-   * source from a tool (an MCP server or capability) has no such reference.
+   * source from another tool (an MCP server or capability) has no such
+   * reference.
    */
   document: boolean;
 };
@@ -34,6 +36,8 @@ type KnowledgeReference = NonNullable<ConversationMessage["references"]>[number]
 type ToolReference = NonNullable<ConversationMessage["mcp_tool_references"]>[number];
 
 const HTTP_URL = /^https?:\/\//i;
+// A passage from Eneo's knowledge tool names its document in the address.
+const KNOWLEDGE_PASSAGE = /^eneo:\/\/info-blob\/([0-9a-f-]{36})(?:#|$)/i;
 
 // One entry per document: a page by its address, anything else by its id.
 // Titles are not unique; two uploads named "Riktlinjer.pdf" stay apart.
@@ -41,9 +45,20 @@ function knowledgeKey(reference: KnowledgeReference): string {
   return reference.metadata.url ?? reference.id;
 }
 
+/** The knowledge document a passage from Eneo's knowledge tool comes from. */
+function knowledgeDocument(reference: ToolReference): { id: string; url: string | null } | null {
+  const id = KNOWLEDGE_PASSAGE.exec(reference.uri ?? "")?.[1];
+  if (!id) return null;
+  const url = (reference.meta as { url?: unknown } | null | undefined)?.url;
+  return { id, url: typeof url === "string" && HTTP_URL.test(url) ? url : null };
+}
+
 // A tool result from a web page folds into a knowledge source with the same
-// address; passages of one document (`#chunk-N`) fold into one entry.
+// address; passages of one document (`#chunk-N`) fold into one entry, and a
+// knowledge-tool passage keys like the injected knowledge it could also be.
 function toolKey(reference: ToolReference): string {
+  const document = knowledgeDocument(reference);
+  if (document) return document.url ?? document.id;
   const meta = (reference.meta ?? {}) as { section?: unknown; pageRange?: unknown };
   if (meta.section || meta.pageRange) return canonicalDocKey(reference);
   return (reference.uri ?? "").split("#")[0] || reference.id;
@@ -60,6 +75,15 @@ function hostOf(uri: string): string {
 function toolSource(reference: ToolReference): WidgetSource {
   const uri = reference.uri ?? "";
   const title = (reference.meta as { title?: unknown } | null | undefined)?.title;
+  const document = knowledgeDocument(reference);
+  if (document) {
+    return {
+      id: document.id,
+      title: typeof title === "string" && title ? title : (document.url ?? ""),
+      url: document.url,
+      document: true
+    };
+  }
   return {
     id: reference.id,
     title: typeof title === "string" && title ? title : hostOf(uri),
@@ -70,8 +94,9 @@ function toolSource(reference: ToolReference): WidgetSource {
 
 /**
  * Every source the answer can point to, one entry per document: the
- * assistant's knowledge first, then the tool results the answer cites.
- * Numbering matches the inline citations.
+ * knowledge added to the question first, then the tool results the answer
+ * cites, knowledge searched with the knowledge tool included. Numbering
+ * matches the inline citations.
  */
 function collect(message: SourceMessage) {
   const indexByKey = new Map<string, number>();

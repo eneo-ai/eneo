@@ -132,6 +132,8 @@ class _Pipeline:
         self.retrievals = 0
         self.completion_kwargs: list[dict[str, Any]] = []
         self.proxies: list[tuple[list[Any], dict[str, str]]] = []
+        # Replaces the model's canned stream when a test sets it.
+        self.stream: list[Completion] | None = None
 
 
 @pytest.fixture
@@ -252,6 +254,10 @@ async def visitor_pipeline(
             return object()
 
         async def iterate_stream(self, **kwargs):
+            if seen.stream is not None:
+                for chunk in seen.stream:
+                    yield chunk
+                return
             yield Completion(
                 reasoning_content=REASONING, response_type=ResponseType.REASONING
             )
@@ -328,6 +334,7 @@ async def visitor_pipeline(
     monkeypatch.setattr(MCPProxySessionFactory, "create", create_proxy)
     return {
         "seen": seen,
+        "blob": blob,
         "chunk": chunk,
         "casefiles_id": casefiles_id,
         "web_search_id": web_search_id,
@@ -465,6 +472,105 @@ async def test_visitor_runs_the_assistant_as_configured_and_sees_only_its_answer
         )
     ).json()
     assert usage["budget_used_today"] == PROMPT_TOKENS + ANSWER_TOKENS
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_knowledge_the_tool_found_reaches_the_visitor_as_documents_it_cites(
+    client, active_widget, visitor_pipeline
+):
+    """An assistant that searches its knowledge with the knowledge tool: the
+    visitor gets the search step and the document the answer cites, never the
+    passage text or what the answer left uncited."""
+    seen: _Pipeline = visitor_pipeline["seen"]
+    blob = visitor_pipeline["blob"]
+    async with sessionmanager.session() as db, db.begin():
+        await db.execute(
+            sa.update(Assistants)
+            .where(Assistants.id == UUID(active_widget["target_id"]))
+            .values(knowledge_mode="tool")
+        )
+    cited_id = uuid4()
+
+    def passage(ref_id: UUID, document: UUID, title: str) -> McpToolReference:
+        return McpToolReference(
+            id=ref_id,
+            tool_call_id="call_k",
+            mcp_tool_name="knowledge__search_knowledge",
+            uri=f"eneo://info-blob/{document}#chunk-0",
+            mime_type="text/plain",
+            content=RESOURCE_CONTENT,
+            meta={
+                "title": title,
+                "info_blob_id": str(document),
+                "url": blob.url,
+                "score": 0.9,
+            },
+            order=0,
+        )
+
+    seen.stream = [
+        Completion(
+            text="",
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[
+                ToolCallMetadata(
+                    server_name="knowledge",
+                    tool_name="search_knowledge",
+                    arguments={"query": "öppettider bibliotek"},
+                    tool_call_id="call_k",
+                    result_status="success",
+                    result=TOOL_RESULT,
+                    mcp_tool_name="knowledge__search_knowledge",
+                )
+            ],
+            mcp_tool_references=[
+                passage(cited_id, blob.id, blob.title),
+                passage(uuid4(), uuid4(), UNCITED_TITLE),
+            ],
+        ),
+        Completion(text=f'Öppet 10–18 <inref id="{str(cited_id)[:8]}"/>.'),
+        Completion(
+            stop=True,
+            usage=TokenUsage(
+                prompt_tokens=PROMPT_TOKENS, completion_tokens=ANSWER_TOKENS
+            ),
+        ),
+    ]
+    public_id = active_widget["public_id"]
+    token = await _mint(client, public_id)
+
+    events = await _ask(client, public_id, token)
+
+    # The knowledge tool served the visitor; nothing was injected.
+    assert seen.retrievals == 0
+    [(servers, _)] = seen.proxies
+    assert any("/internal-mcp/knowledge/" in server.http_url for server in servers)
+    assert [event for event, _ in events] == [
+        "first_chunk",
+        "tool_call",
+        "tool_call",
+        "text",
+    ]
+    _assert_no_internal_data(json.dumps(events))
+    tool = events[1][1]
+    assert [(call["server_name"], call["tool_name"]) for call in tool["tools"]] == [
+        ("knowledge", "search_knowledge")
+    ]
+    assert tool["mcp_tool_references"] == []
+    document = {"title": blob.title, "info_blob_id": str(blob.id), "url": blob.url}
+    [ref] = events[2][1]["mcp_tool_references"]
+    assert (ref["content"], ref["meta"]) == (None, document)
+
+    session_id = events[0][1]["session_id"]
+    restored = await client.get(
+        f"/api/v1/widgets/{public_id}/sessions/{session_id}/", headers=_auth(token)
+    )
+    assert restored.status_code == 200, restored.text
+    _assert_no_internal_data(restored.text)
+    [message] = restored.json()["messages"]
+    [stored] = message["mcp_tool_references"]
+    assert (stored["content"], stored["meta"]) == (None, document)
 
 
 async def _set_visibility(client, admin_token: str, widget_id: str, **flags) -> None:

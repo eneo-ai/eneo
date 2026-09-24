@@ -377,6 +377,51 @@ describe("WidgetMessage sources", () => {
     );
   });
 
+  test("lists knowledge the assistant searched like the rest of its knowledge", async () => {
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    const passage = (id: string, document: string, meta: Record<string, unknown>) => ({
+      id,
+      uri: `eneo://info-blob/${document}#chunk-2`,
+      mime_type: "text/plain",
+      content: null,
+      meta: { info_blob_id: document, ...meta }
+    });
+    render(WidgetMessage, {
+      message: {
+        ...message(
+          'Bygglovet kostar enligt taxan <inref id="c0ffee01"/>, se avgifterna <inref id="c0ffee02"/>.'
+        ),
+        references: [],
+        mcp_tool_references: [
+          passage("c0ffee01-0000-4000-8000-000000000001", FILE_ID, {
+            title: "Taxa plan- och bygglov.pdf"
+          }),
+          passage("c0ffee02-0000-4000-8000-000000000002", WEB_ID, {
+            title: "Avgifter för bygglov",
+            url: "https://sundsvall.se/bygglov/avgifter"
+          })
+        ]
+      } as unknown as ConversationMessage,
+      index: 0,
+      isLast: true,
+      isLoading: false
+    });
+
+    const citations = page.getByRole("link", { name: /widget_citation_label/ });
+    await expect.element(citations.first()).toBeVisible();
+    expect(citations.elements().map((citation) => citation.textContent)).toEqual(["1", "2"]);
+
+    await page.getByRole("button", { name: /widget_sources_count_other/ }).click();
+    await expect
+      .element(page.getByRole("link", { name: /Avgifter för bygglov/ }))
+      .toHaveAttribute("href", "https://sundsvall.se/bygglov/avgifter");
+    expect(page.getByText("widget_source_tool").elements()).toHaveLength(0);
+    await page.getByRole("button", { name: /widget_copy_reference_for/ }).click();
+    expect(writeText).toHaveBeenCalledWith(
+      `Taxa plan- och bygglov.pdf – ${location.origin}/documents/${FILE_ID}`
+    );
+  });
+
   test("an inline citation opens the list and focuses its source", async () => {
     renderMessage(`Bygglov kostar pengar <inref id="${FILE_ID.slice(0, 8)}"/>.`);
 

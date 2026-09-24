@@ -124,6 +124,7 @@ class _SearchResultChunk(NamedTuple):
     info_blob_title: str | None
     score: float | None
     context_for_chunk: int | None
+    info_blob_url: str | None = None
 
 
 class _ScopeNotResolved(Exception):
@@ -325,6 +326,7 @@ def _merge_adjacent_chunks(
                 info_blob_title=anchor.info_blob_title,
                 score=anchor.score,
                 context_for_chunk=None,
+                info_blob_url=getattr(anchor, "info_blob_url", None),
             )
         )
 
@@ -343,6 +345,7 @@ def _merge_adjacent_chunks(
                 info_blob_title=best_anchor.info_blob_title,
                 score=None,
                 context_for_chunk=best_anchor.chunk_no,
+                info_blob_url=getattr(best_anchor, "info_blob_url", None),
             )
         )
     return merged
@@ -381,6 +384,7 @@ def _document_page_content(
                 _meta={
                     "title": title,
                     "info_blob_id": str(blob.id),
+                    **_url_meta(getattr(blob, "url", None)),
                     "offset": offset,
                 },
             ),
@@ -419,12 +423,18 @@ def _blob_in_scope(blob, assistant) -> bool:
     )
 
 
+def _url_meta(url: str | None) -> dict[str, str]:
+    # A crawled page's address, so a reader can open the source itself.
+    return {"url": url} if url else {}
+
+
 def _chunk_resource(
     *,
     info_blob_id: UUID,
     chunk_no: int,
     title: str,
     text: str,
+    url: str | None = None,
     meta: dict | None = None,
 ) -> EmbeddedResource:
     """One chunk as citable content.
@@ -441,7 +451,12 @@ def _chunk_resource(
             text=f"Title: {title}\ndocument_id: {info_blob_id}\n\n{text}",
             # `title` is the generic meta key the reference UI reads for the
             # chip label (falls back to the uri host otherwise).
-            _meta={"title": title, "info_blob_id": str(info_blob_id), **(meta or {})},
+            _meta={
+                "title": title,
+                "info_blob_id": str(info_blob_id),
+                **_url_meta(url),
+                **(meta or {}),
+            },
         ),
     )
 
@@ -543,6 +558,7 @@ def _search_result_content(query: str, chunks) -> list[TextContent | EmbeddedRes
                 chunk_no=chunk.chunk_no,
                 title=chunk.info_blob_title or "Untitled source",
                 text=chunk.text,
+                url=getattr(chunk, "info_blob_url", None),
                 meta=meta,
             )
         )
@@ -557,6 +573,7 @@ def _overview_content(
     title_lines: Sequence[str],
     excerpts,
     excerpt_titles: dict[UUID, str],
+    excerpt_urls: dict[UUID, str] | None = None,
 ) -> list[TextContent | EmbeddedResource]:
     """One page describing a source: what is in it, plus a taste of the content.
 
@@ -622,6 +639,7 @@ def _overview_content(
                     chunk_no=excerpt.chunk_no,
                     title=excerpt_titles.get(excerpt.info_blob_id, "Untitled source"),
                     text=excerpt.text[:OVERVIEW_EXCERPT_CHARS],
+                    url=(excerpt_urls or {}).get(excerpt.info_blob_id),
                 )
             )
 
@@ -915,6 +933,7 @@ async def describe_source(
         title_lines=title_lines,
         excerpts=excerpts,
         excerpt_titles={listing.id: listing.label for listing in targets},
+        excerpt_urls={listing.id: listing.url for listing in targets if listing.url},
     )
 
 
