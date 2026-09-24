@@ -51,6 +51,7 @@ class UpstreamEvent:
     code: str | None = None
     audio_start: float | None = None
     audio_end: float | None = None
+    audio_seconds: float | None = None
 
 
 def parse_event(raw: str | bytes) -> UpstreamEvent:
@@ -70,7 +71,11 @@ def parse_event(raw: str | bytes) -> UpstreamEvent:
                 audio_end=_seconds(event.get("audio_end")),
             )
         case "transcription.done":
-            return UpstreamEvent("done", text=str(event.get("text") or ""))
+            return UpstreamEvent(
+                "done",
+                text=str(event.get("text") or ""),
+                audio_seconds=_seconds(event.get("audio_seconds")),
+            )
         case "error":
             code = event.get("code")
             return UpstreamEvent(

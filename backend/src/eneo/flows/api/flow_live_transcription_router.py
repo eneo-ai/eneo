@@ -44,9 +44,11 @@ The optional body `recording_id` is an opaque client string matching
 `^[A-Za-z0-9_-]{8,64}$`. To store a clean session, also send `produced_samples`
 in the stop message: a non-negative integer counting captured 16 kHz samples
 before client queueing or discarding. Missing or invalid counts disable storage
-without changing the preview. A reconciled session that completes after its final
-commit receives a `transcript_id` in `transcript.done`, only after the row commits.
-Storage failures leave the preview usable without an id.
+without changing the preview. Storage also requires a successfully sent final
+commit and upstream `audio_seconds` whose rounded 16 kHz sample count matches
+Eneo's received count exactly. The `transcript_id` in `transcript.done` is sent
+only after the row commits. Storage failures or a five-second write timeout
+leave the preview usable without an id.
 
 The preview is not the run's transcript. Upload the recording as a runtime file
 and create the run as usual; the flow's transcription model then produces the

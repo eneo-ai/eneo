@@ -7,7 +7,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.database import sessionmanager
-from eneo.database.tables.flow_tables import FlowLiveTranscripts
+from eneo.database.tables.flow_tables import FlowLiveTranscripts, Flows
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionGrant
 
@@ -64,22 +64,43 @@ class LiveTranscriptRepository:
         )
         return (await self.session.execute(statement)).scalar_one()
 
-    async def delete_expired_unbound(self, *, now: datetime, limit: int) -> None:
+    async def delete_expired_unbound(
+        self,
+        *,
+        tenant_id: UUID,
+        now: datetime,
+        limit: int,
+        space_id: UUID | None = None,
+        flow_id: UUID | None = None,
+    ) -> None:
         candidates = (
             sa.select(FlowLiveTranscripts.id)
+            .join(
+                Flows,
+                sa.and_(
+                    Flows.id == FlowLiveTranscripts.flow_id,
+                    Flows.tenant_id == FlowLiveTranscripts.tenant_id,
+                ),
+            )
             .where(
+                FlowLiveTranscripts.tenant_id == tenant_id,
                 FlowLiveTranscripts.bound_file_id.is_(None),
                 FlowLiveTranscripts.expires_at <= now,
             )
             .order_by(FlowLiveTranscripts.expires_at, FlowLiveTranscripts.id)
             .limit(limit)
-            .with_for_update(skip_locked=True)
+            .with_for_update(of=FlowLiveTranscripts, skip_locked=True)
         )
+        if space_id is not None:
+            candidates = candidates.where(Flows.space_id == space_id)
+        if flow_id is not None:
+            candidates = candidates.where(FlowLiveTranscripts.flow_id == flow_id)
         ids = list(await self.session.scalars(candidates))
         if ids:
             await self.session.execute(
                 sa.delete(FlowLiveTranscripts).where(
                     FlowLiveTranscripts.id.in_(ids),
+                    FlowLiveTranscripts.tenant_id == tenant_id,
                     FlowLiveTranscripts.bound_file_id.is_(None),
                 )
             )

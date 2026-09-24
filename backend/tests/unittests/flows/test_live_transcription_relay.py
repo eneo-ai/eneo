@@ -522,3 +522,157 @@ async def test_passages_split_at_thirty_seconds_and_drop_on_buffer_limit(
             {"start": 30.0, "end": 40.0, "text": "x" * 30},
         ]
     )
+
+
+async def test_early_done_queued_behind_slow_browser_never_stores_partial_audio(
+    monkeypatch,
+):
+    forwarding = asyncio.Event()
+    release_browser = asyncio.Event()
+    final_written = asyncio.Event()
+    writes = []
+    original_send = relay._send_upstream
+
+    async def send(upstream, message, **kwargs):
+        await original_send(upstream, message, **kwargs)
+        if json.loads(message).get("final"):
+            final_written.set()
+
+    class SlowBrowser(FakeBrowser):
+        async def send_json(self, data):
+            if data["type"] == "transcript.delta":
+                forwarding.set()
+                await release_browser.wait()
+            await super().send_json(data)
+
+    async def persist(grant, **values):
+        writes.append(values)
+        return uuid4()
+
+    monkeypatch.setattr(relay, "_send_upstream", send)
+    monkeypatch.setattr(relay, "persist_live_transcript", persist)
+    browser = SlowBrowser(audio(TENTH_OF_A_SECOND))
+    async with fake_realtime_server(
+        early_done_after_audio=True, finish=False
+    ) as server:
+        task = asyncio.create_task(
+            run_relay(browser, server.url, grant=recording_grant())
+        )
+        try:
+            await asyncio.wait_for(forwarding.wait(), 1)
+            await asyncio.wait_for(server.done_sent.wait(), 1)
+            browser._inbox.put_nowait(audio(TENTH_OF_A_SECOND))
+            browser._inbox.put_nowait(counted_stop(3200))
+            await asyncio.wait_for(final_written.wait(), 1)
+            release_browser.set()
+            outcome, stats = await asyncio.wait_for(task, 1)
+        finally:
+            release_browser.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    assert outcome == "completed"
+    assert stats.received_samples == 3200
+    assert writes == []
+    assert "transcript_id" not in browser.events[-1]
+
+
+async def test_fast_done_does_not_wait_for_the_final_send_callers_resumption(
+    monkeypatch,
+):
+    original_send = relay._send_upstream
+    caller_resumes = asyncio.Event()
+    writes = []
+
+    async def send(upstream, message, **kwargs):
+        await original_send(upstream, message, **kwargs)
+        if json.loads(message).get("final"):
+            await caller_resumes.wait()
+
+    async def persist(grant, **values):
+        writes.append(values)
+        return uuid4()
+
+    monkeypatch.setattr(relay, "_send_upstream", send)
+    monkeypatch.setattr(relay, "persist_live_transcript", persist)
+    browser = FakeBrowser(audio(TENTH_OF_A_SECOND), counted_stop(1600))
+    async with fake_realtime_server() as server:
+        outcome, _ = await asyncio.wait_for(
+            run_relay(browser, server.url, grant=recording_grant()), 1
+        )
+    assert outcome == "completed"
+    assert len(writes) == 1
+    assert "transcript_id" in browser.events[-1]
+
+
+@pytest.mark.parametrize("reported,seconds", [(False, None), (True, 1599 / 16000)])
+async def test_missing_or_mismatched_upstream_sample_evidence_does_not_store(
+    monkeypatch, reported, seconds
+):
+    writes = []
+
+    async def persist(grant, **values):
+        writes.append(values)
+        return uuid4()
+
+    monkeypatch.setattr(relay, "persist_live_transcript", persist)
+    browser = FakeBrowser(audio(TENTH_OF_A_SECOND), counted_stop(1600))
+    async with fake_realtime_server(
+        report_audio_seconds=reported, done_audio_seconds=seconds
+    ) as server:
+        outcome, _ = await run_relay(browser, server.url, grant=recording_grant())
+    assert outcome == "completed"
+    assert writes == []
+    assert "transcript_id" not in browser.events[-1]
+
+
+async def test_disconnect_after_stop_before_done_never_stores(monkeypatch):
+    writes = []
+    release = asyncio.Event()
+
+    async def persist(grant, **values):
+        writes.append(values)
+        return uuid4()
+
+    monkeypatch.setattr(relay, "persist_live_transcript", persist)
+    browser = FakeBrowser(audio(TENTH_OF_A_SECOND), counted_stop(1600), leave())
+    async with fake_realtime_server(final_release=release) as server:
+        task = asyncio.create_task(
+            run_relay(
+                browser,
+                server.url,
+                grant=recording_grant(),
+                final_text_timeout_seconds=0.05,
+            )
+        )
+        try:
+            await asyncio.wait_for(server.final_received.wait(), 1)
+            outcome, _ = await asyncio.wait_for(task, 1)
+        finally:
+            release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    assert outcome == "client_closed"
+    assert writes == []
+
+
+async def test_suspended_write_times_out_without_breaking_preview(monkeypatch):
+    cancelled = asyncio.Event()
+
+    async def persist(grant, **values):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(relay, "persist_live_transcript", persist)
+    monkeypatch.setattr(
+        relay, "LIVE_TRANSCRIPT_WRITE_TIMEOUT_SECONDS", 0.02, raising=False
+    )
+    browser = FakeBrowser(audio(TENTH_OF_A_SECOND), counted_stop(1600))
+    async with fake_realtime_server(deltas=["Hej"]) as server:
+        outcome, _ = await asyncio.wait_for(
+            run_relay(browser, server.url, grant=recording_grant()), 0.5
+        )
+    assert outcome == "completed"
+    assert cancelled.is_set()
+    assert browser.events[-1] == {"type": "transcript.done", "text": "Hej"}

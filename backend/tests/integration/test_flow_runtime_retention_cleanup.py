@@ -662,8 +662,14 @@ async def _create_unbound_runtime_upload_fixture(
     return AbandonedRuntimeUploadFixture(flow=flow, file=file, upload=upload)
 
 
-async def test_live_transcript_cleanup_obeys_expiry_and_preserves_bound_rows(
-    async_session, test_tenant, admin_user, flow_retention_space, flow_retention_service
+@pytest.mark.parametrize("scope", ["tenant", "flow", "space"])
+async def test_live_transcript_admin_purge_obeys_scope_expiry_and_bound_rows(
+    async_session,
+    test_tenant,
+    admin_user,
+    flow_retention_space,
+    flow_retention_service,
+    scope,
 ):
     from eneo.database.tables.flow_tables import FlowLiveTranscripts
     from eneo.flows.runtime.live_transcription.repository import (
@@ -719,10 +725,33 @@ async def test_live_transcript_cleanup_obeys_expiry_and_preserves_bound_rows(
         row.bound_file_id = fixture.file.id if bound else None
         ids.append(row_id)
     await async_session.flush()
-    await flow_retention_service.purge_abandoned_flow_runtime_uploads(now=now, limit=1)
+    scope_args = {}
+    if scope == "flow":
+        scope_args["flow_id"] = fixture.flow.id
+    elif scope == "space":
+        scope_args["space_id"] = flow_retention_space.id
+    purge = flow_retention_service.purge_due_flow_run_history_for_tenant
+    await purge(tenant_id=test_tenant.id, now=now, limit=10, dry_run=True, **scope_args)
+    assert set(await async_session.scalars(select(FlowLiveTranscripts.id))) == set(ids)
+    await purge(tenant_id=uuid4(), now=now, limit=10, dry_run=False, **scope_args)
+    assert set(await async_session.scalars(select(FlowLiveTranscripts.id))) == set(ids)
+    if scope_args:
+        await purge(
+            tenant_id=test_tenant.id,
+            now=now,
+            limit=10,
+            dry_run=False,
+            **{key: uuid4() for key in scope_args},
+        )
+        assert set(await async_session.scalars(select(FlowLiveTranscripts.id))) == set(
+            ids
+        )
+    await purge(tenant_id=test_tenant.id, now=now, limit=1, dry_run=False, **scope_args)
     assert await repo.get(ids[0], tenant_id=test_tenant.id) is None
     assert await repo.get(ids[1], tenant_id=test_tenant.id) is not None
-    await flow_retention_service.purge_abandoned_flow_runtime_uploads(now=now, limit=10)
+    await purge(
+        tenant_id=test_tenant.id, now=now, limit=10, dry_run=False, **scope_args
+    )
     remaining = set(await async_session.scalars(select(FlowLiveTranscripts.id)))
     assert remaining == set(ids[2:])
 

@@ -9,6 +9,7 @@ after the final commit, and ``error {error, code}`` when told to fail.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
@@ -23,6 +24,8 @@ class FakeRealtimeServer:
     received: list[dict[str, object]] = field(default_factory=list)
     authorization: str | None = None
     closed: asyncio.Event = field(default_factory=asyncio.Event)
+    done_sent: asyncio.Event = field(default_factory=asyncio.Event)
+    final_received: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def wait_closed(self) -> None:
         await asyncio.wait_for(self.closed.wait(), timeout=5)
@@ -40,6 +43,10 @@ async def fake_realtime_server(
     done_text: str | None = None,
     early_done: bool = False,
     finish: bool = True,
+    report_audio_seconds: bool = True,
+    done_audio_seconds: float | None = None,
+    early_done_after_audio: bool = False,
+    final_release: asyncio.Event | None = None,
 ) -> AsyncIterator[FakeRealtimeServer]:
     """`close_at_once` closes right after the handshake; `stop_reading` never reads,
     so a client's sends back up once the socket buffers are full."""
@@ -49,6 +56,7 @@ async def fake_realtime_server(
         state.authorization = connection.request.headers.get("Authorization")
         pending = list(deltas)
         sent: list[str] = []
+        received_samples = 0
         try:
             if close_at_once:
                 return
@@ -66,6 +74,7 @@ async def fake_realtime_server(
                 message = json.loads(raw)
                 state.received.append(message)
                 if message["type"] == "input_audio_buffer.append":
+                    received_samples += len(base64.b64decode(message["audio"])) // 2
                     if hang_up:
                         return
                     if fail_with is not None:
@@ -94,11 +103,25 @@ async def fake_realtime_server(
                                 }
                             )
                         )
+                    if early_done_after_audio and not state.done_sent.is_set():
+                        await connection.send(
+                            json.dumps(
+                                {
+                                    "type": "transcription.done",
+                                    "text": "".join(sent),
+                                    "audio_seconds": received_samples / 16000,
+                                }
+                            )
+                        )
+                        state.done_sent.set()
                 elif (
-                    message["type"] == "input_audio_buffer.commit"
-                    and message["final"]
-                    and finish
+                    message["type"] == "input_audio_buffer.commit" and message["final"]
                 ):
+                    state.final_received.set()
+                    if not finish:
+                        continue
+                    if final_release is not None:
+                        await final_release.wait()
                     await connection.send(
                         json.dumps(
                             {
@@ -107,9 +130,19 @@ async def fake_realtime_server(
                                 if done_text is None
                                 else done_text,
                                 "usage": None,
+                                **(
+                                    {
+                                        "audio_seconds": received_samples / 16000
+                                        if done_audio_seconds is None
+                                        else done_audio_seconds
+                                    }
+                                    if report_audio_seconds
+                                    else {}
+                                ),
                             }
                         )
                     )
+                    state.done_sent.set()
         finally:
             state.closed.set()
 

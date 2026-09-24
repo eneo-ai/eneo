@@ -397,6 +397,57 @@ async def test_clean_session_commits_its_transcript_before_done(
             assert await repo.get(row.id, tenant_id=uuid4()) is None
 
 
+async def test_live_transcript_write_deadline_rolls_back_insert(
+    live_stack: LiveStack, db_container, monkeypatch
+):
+    from eneo.database.tables.flow_tables import FlowLiveTranscripts
+    from eneo.flows.runtime.live_transcription import relay
+    from eneo.flows.runtime.live_transcription.repository import (
+        LiveTranscriptRepository,
+    )
+
+    original_create = LiveTranscriptRepository.create
+    release = asyncio.Event()
+    inserted = asyncio.Event()
+
+    async def suspended_create(self, grant, **values):
+        transcript_id = await original_create(self, grant, **values)
+        inserted.set()
+        await release.wait()
+        return transcript_id
+
+    monkeypatch.setattr(LiveTranscriptRepository, "create", suspended_create)
+    monkeypatch.setattr(relay, "LIVE_TRANSCRIPT_WRITE_TIMEOUT_SECONDS", 0.1)
+    response = await live_stack.client.post(
+        live_stack.flow.sessions_path,
+        headers=live_stack.headers,
+        json={"recording_id": "recording_123"},
+    )
+    assert response.status_code == 201
+    session = response.json()
+    try:
+        async with connect(
+            live_stack.socket_url(session),
+            subprotocols=_subprotocols(session["ticket"]),
+        ) as socket:
+            assert json.loads(await socket.recv())["type"] == "ready"
+            await socket.send(TENTH_OF_A_SECOND)
+            await socket.send(json.dumps({"type": "stop", "produced_samples": 1600}))
+            async with asyncio.timeout(2):
+                events = [json.loads(raw) async for raw in socket]
+        assert inserted.is_set()
+        assert events[-1] == {"type": "transcript.done", "text": "Hej"}
+        async with db_container() as container:
+            assert (
+                await container.session().scalar(
+                    sa.select(sa.func.count()).select_from(FlowLiveTranscripts)
+                )
+                == 0
+            )
+    finally:
+        release.set()
+
+
 @pytest.mark.parametrize("recording_id", ["short", "has spaces", "x" * 65, 123])
 async def test_invalid_recording_id_uses_request_validation(
     live_stack: LiveStack, recording_id: object

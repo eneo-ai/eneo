@@ -37,7 +37,6 @@ from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.infrastructure.flow_version_repo import (
     scan_flow_version_template_references,
 )
-from eneo.flows.runtime.live_transcription.repository import LiveTranscriptRepository
 
 # Bound aggregate metadata and row locks independently from the run-page size.
 # One already-oversized run still proceeds alone so cleanup cannot strand it.
@@ -299,9 +298,6 @@ class FlowRunHistoryPurgeRepository:
         Candidate row locks serialize with binding, and the delete-time run-reference
         check closes the READ COMMITTED window between candidate selection and deletion.
         """
-        await LiveTranscriptRepository(self.session).delete_expired_unbound(
-            now=now, limit=limit
-        )
         candidate_file_ids = await self._abandoned_runtime_upload_candidate_file_ids(
             now=now,
             limit=limit,

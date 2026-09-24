@@ -45,6 +45,7 @@ from eneo.flows.infrastructure.flow_run_retention_policy_query import (
     effective_flow_run_retention_policy_sql,
     flow_run_history_due_predicates,
 )
+from eneo.flows.runtime.live_transcription.repository import LiveTranscriptRepository
 
 logger = logging.getLogger(__name__)
 
@@ -554,6 +555,14 @@ class DataRetentionService:
             )
             purged_run_ids = tuple(
                 run_id for run_id in run_ids if run_id not in remaining
+            )
+        if not dry_run:
+            await LiveTranscriptRepository(self.session).delete_expired_unbound(
+                tenant_id=tenant_id,
+                now=now,
+                limit=limit,
+                space_id=space_id,
+                flow_id=flow_id,
             )
         return TenantFlowRunHistoryPurgeResult(
             candidate_count=len(run_ids), purged_run_ids=purged_run_ids, blocked=blocked

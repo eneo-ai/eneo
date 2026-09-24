@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from typing import Final, cast
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -36,6 +37,7 @@ UPSTREAM_OPEN_TIMEOUT_SECONDS: Final = 10
 # a slow one still reads, since it buffers audio it has not decoded yet.
 UPSTREAM_SEND_TIMEOUT_SECONDS: Final = 10
 UPSTREAM_CLOSE_TIMEOUT_SECONDS: Final = 2
+LIVE_TRANSCRIPT_WRITE_TIMEOUT_SECONDS: Final = 5
 # transcription.done repeats the whole session's text; five hours of speech is
 # about 0.5 MB.
 UPSTREAM_MAX_MESSAGE_BYTES: Final = 8 * 2**20
@@ -81,13 +83,13 @@ class LiveSessionStats:
 @dataclass
 class _Capture:
     produced_samples: int | None = None
-    final_commit_sent: bool = False
+    final_commit_sent: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 @dataclass(frozen=True)
 class _Completed:
     text: str
-    after_final_commit: bool
+    audio_seconds: float | None
 
 
 async def relay_live_session(
@@ -192,54 +194,74 @@ async def _run(
             capture=capture,
         )
     )
-    to_client = asyncio.create_task(_pump_upstream(client, upstream, capture, pieces))
+    to_client = asyncio.create_task(_pump_upstream(client, upstream, pieces))
+    stopped = asyncio.create_task(capture.final_commit_sent.wait())
     try:
         done, _ = await asyncio.wait(
-            {to_upstream, to_client}, return_when=asyncio.FIRST_COMPLETED
+            {to_upstream, to_client, stopped}, return_when=asyncio.FIRST_COMPLETED
         )
-        if to_client in done:
-            completed = to_client.result()
-        else:
-            to_upstream.result()  # the client asked to stop; wait for the final text
-            try:
-                completed = await asyncio.wait_for(
-                    to_client, final_text_timeout_seconds
-                )
-            except TimeoutError as exc:
+        if to_upstream in done:
+            to_upstream.result()
+        if to_client not in done:
+            done, _ = await asyncio.wait(
+                {to_upstream, to_client},
+                timeout=final_text_timeout_seconds,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if to_upstream in done:
+                to_upstream.result()
+            if to_client not in done:
                 raise LiveSessionEnded(
                     "upstream_timeout",
                     "The transcription server did not finish the session in time.",
                     retryable=True,
-                ) from exc
+                )
+        completed = to_client.result()
+        event: dict[str, object] = {"type": "transcript.done", "text": completed.text}
+        if (
+            grant is not None
+            and grant.recording_id is not None
+            and capture.final_commit_sent.is_set()
+            and capture.produced_samples == stats.received_samples
+            and completed.audio_seconds is not None
+            and math.isfinite(completed.audio_seconds * SAMPLE_RATE)
+            and round(completed.audio_seconds * SAMPLE_RATE) == stats.received_samples
+        ):
+            writing = asyncio.create_task(
+                persist_live_transcript(
+                    grant,
+                    text=completed.text,
+                    segments=pieces.passages(completed.text),
+                    received_audio_seconds=stats.audio_seconds,
+                )
+            )
+            try:
+                async with asyncio.timeout(LIVE_TRANSCRIPT_WRITE_TIMEOUT_SECONDS):
+                    await asyncio.wait(
+                        {writing, to_upstream}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if to_upstream.done():
+                        to_upstream.result()
+                    event["transcript_id"] = str(writing.result())
+            except _ClientGone:
+                raise
+            except Exception:
+                # Database exceptions can contain bound parameters, including text.
+                logger.warning(
+                    "Could not store live transcript",
+                    extra={"flow_id": str(grant.flow_id)},
+                )
+            finally:
+                writing.cancel()
+                await asyncio.gather(writing, return_exceptions=True)
+        if to_upstream.done():
+            to_upstream.result()
+        await _send_client(client, event)
+        return "completed"
     finally:
-        for task in (to_upstream, to_client):
+        for task in (to_upstream, to_client, stopped):
             task.cancel()
-        await asyncio.gather(to_upstream, to_client, return_exceptions=True)
-
-    event: dict[str, object] = {"type": "transcript.done", "text": completed.text}
-    if (
-        grant is not None
-        and grant.recording_id is not None
-        and completed.after_final_commit
-        and capture.produced_samples == stats.received_samples
-        and not to_upstream.cancelled()
-        and to_upstream.exception() is None
-    ):
-        try:
-            transcript_id = await persist_live_transcript(
-                grant,
-                text=completed.text,
-                segments=pieces.passages(completed.text),
-                received_audio_seconds=stats.audio_seconds,
-            )
-            event["transcript_id"] = str(transcript_id)
-        except Exception:
-            # Database exceptions can contain bound parameters, including text.
-            logger.warning(
-                "Could not store live transcript", extra={"flow_id": str(grant.flow_id)}
-            )
-    await _send_client(client, event)
-    return "completed"
+        await asyncio.gather(to_upstream, to_client, stopped, return_exceptions=True)
 
 
 async def _pump_client(
@@ -280,18 +302,22 @@ async def _pump_client(
                 "invalid_message",
                 'Send audio as binary frames and end with {"type": "stop"}.',
             )
-        await _send_upstream(upstream, commit(final=True))
         evidence = json.loads(message["text"]).get("produced_samples")
         if type(evidence) is int and evidence >= 0:
             capture.produced_samples = evidence
-        capture.final_commit_sent = True
-        return
+        await _send_upstream(
+            upstream, commit(final=True), final_commit_sent=capture.final_commit_sent
+        )
+        # Audio after stop is ignored, but disconnects must still cancel storage.
+        while True:
+            message = await client.receive()
+            if message["type"] == "websocket.disconnect":
+                raise _ClientGone
 
 
 async def _pump_upstream(
     client: WebSocket,
     upstream: ClientConnection,
-    capture: _Capture,
     pieces: TimedPieces,
 ) -> _Completed:
     try:
@@ -304,7 +330,7 @@ async def _pump_upstream(
                         client, {"type": "transcript.delta", "text": event.text}
                     )
             elif event.kind == "done":
-                return _Completed(event.text, capture.final_commit_sent)
+                return _Completed(event.text, event.audio_seconds)
             elif event.kind == "error":
                 raise LiveSessionEnded(
                     event.code or "upstream_error",
@@ -332,9 +358,17 @@ def _is_stop(text: str | None) -> bool:
     return cast(dict[str, object], event).get("type") == "stop"
 
 
-async def _send_upstream(upstream: ClientConnection, message: str) -> None:
+async def _send_upstream(
+    upstream: ClientConnection,
+    message: str,
+    *,
+    final_commit_sent: asyncio.Event | None = None,
+) -> None:
     try:
-        await asyncio.wait_for(upstream.send(message), UPSTREAM_SEND_TIMEOUT_SECONDS)
+        async with asyncio.timeout(UPSTREAM_SEND_TIMEOUT_SECONDS):
+            await upstream.send(message)
+            if final_commit_sent is not None:
+                final_commit_sent.set()
     except TimeoutError as exc:
         raise LiveSessionEnded(
             "upstream_timeout",
