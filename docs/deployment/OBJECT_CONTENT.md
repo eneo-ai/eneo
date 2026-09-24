@@ -804,7 +804,7 @@ possible replacement copies. These are not interchangeable capacity approvals.
 
 Physical database allocation, generated WAL, retained WAL and host free bytes
 remain `null` (unknown). Use the guide's
-[disk planning procedure](https://docs.eneo.ai/guides/file-icon-storage-upgrade#disk-use-the-affected-bytes-not-total-database-size)
+[disk planning procedure](https://docs.eneo.ai/guides/file-icon-storage-upgrade#disk-space-in-detail)
 for measurements. Preflight does not reserve capacity, hash/copy bytes, contact
 object storage, or write schema or ledger data. It uses one read-only repeatable
 snapshot, a two-second lock timeout and a total deadline. Increase
@@ -958,8 +958,9 @@ still refuses to resume if the Admin storage target differs from the campaign's
 frozen destination. The durable cursor continues across worker restarts. An
 item that fails again is stamped with the accepted revision and waits for the
 next strictly higher value instead of retrying in a loop.
-Completion is terminal and cached by each worker process; manual campaign
-edits are unsupported and require a worker restart even during diagnosis.
+Each worker process caches completion but rechecks the campaign state on every
+run, so a later backend verification failure can reopen items and halt a
+completed campaign. Manual campaign edits are unsupported.
 
 This unreleased expand revision reuses Alembic revision ID `202607231700` and
 replaces the former destructive normalization at that position. The inventory
