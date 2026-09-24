@@ -167,6 +167,7 @@ for what to do while the recording runs and after it stops.
 | `upstream_timeout` | The model server stopped reading audio, or did not send the final text in time after `stop` | `true` |
 | `upstream_closed` | The model server closed the session | `true` |
 | `capacity_exceeded`, `falling_behind`, `model_loading` | The model server is full, behind, or still loading its model | `true` |
+| `finalize_timeout` | The model server could not send the final text within its own time limit after `stop` | `true` |
 | `internal_error` | The session failed unexpectedly | `false` |
 | Any other code | The model server reported an error of its own, passed through; `upstream_error` when it sent no code | `false` |
 
