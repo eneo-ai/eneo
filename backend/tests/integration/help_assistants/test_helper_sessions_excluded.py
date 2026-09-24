@@ -6,9 +6,9 @@ regular ``sessions`` / ``questions`` tables so streaming, RAG, model
 selection, and tool calling all work — but they must never appear in normal
 session / conversation / insights / export endpoints. The filter is defined
 twice (mirrored, intentionally): ``SessionRepository._exclude_helper_run_sessions``
-for queries that issue from ``sessions_repo``, and the module-level
-``_exclude_helper_run_sessions`` in ``analysis_repo.py`` for queries that
-issue from analysis.
+for queries that issue from ``sessions_repo``, and
+``eneo.sessions.helper_filters.exclude_helper_run_sessions`` for queries that
+issue from analysis and from the admin space oversight usage.
 
 The tests are parametrised over the public methods of both repos and over a
 small set of HTTP endpoints. If a future engineer adds a list/aggregate
@@ -40,6 +40,7 @@ from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.users_table import Users
 from eneo.help_assistants.domain.helper_kind import HelperKind
 
 
@@ -737,3 +738,117 @@ async def test_analysis_http_endpoints_exclude_helper(
     assert payload[field] == expected, (
         f"{path}: {field}={payload[field]} (expected {expected}; helper leaked)"
     )
+
+
+# ---------------------------------------------------------------------------
+# Space oversight usage
+# ---------------------------------------------------------------------------
+
+
+async def _insert_user(
+    session: sa.ext.asyncio.AsyncSession, *, tenant_id: UUID
+) -> UUID:
+    user_id = uuid4()
+    await session.execute(
+        sa.insert(Users).values(
+            id=user_id,
+            tenant_id=tenant_id,
+            username=f"user-{user_id.hex[:8]}",
+            email=f"user-{user_id.hex[:8]}@example.com",
+            used_tokens=0,
+            state="active",
+        )
+    )
+    return user_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_space_oversight_usage_excludes_helper(db_container, admin_user):
+    """The admin detail of a shared space counts questions of signed-in users
+    and who asked them. A helper-backed session there adds neither: a sixth
+    person whose only question is a helper run would lift the space over the
+    five-user threshold and add a question if the filter were missing."""
+    async with db_container() as container:
+        session = container.session()
+        tenant_id = admin_user.tenant_id
+        org_space = await _get_org_space(session, tenant_id=tenant_id)
+        shared_space = uuid4()
+        await session.execute(
+            sa.insert(Spaces).values(
+                id=shared_space,
+                name="shared-space",
+                tenant_id=tenant_id,
+                tenant_space_id=org_space,
+            )
+        )
+        assistant = await _insert_assistant(
+            session, owner_user_id=admin_user.id, space_id=shared_space
+        )
+        helper_assistant = await _insert_assistant(
+            session, owner_user_id=admin_user.id, space_id=org_space
+        )
+        await _assign_helper_role(
+            container,
+            org_space_id=org_space,
+            assistant_id=helper_assistant,
+            actor_user_id=admin_user.id,
+        )
+        for _ in range(4):
+            user = await _insert_user(session, tenant_id=tenant_id)
+            regular = await _insert_session(
+                session, name="regular", user_id=user, assistant_id=assistant
+            )
+            await _insert_question(
+                session,
+                tenant_id=tenant_id,
+                session_id=regular,
+                assistant_id=assistant,
+                text="regular question",
+            )
+        helper_user = await _insert_user(session, tenant_id=tenant_id)
+        helper_session = await _insert_session(
+            session, name="helper", user_id=helper_user, assistant_id=assistant
+        )
+        await _insert_question(
+            session,
+            tenant_id=tenant_id,
+            session_id=helper_session,
+            assistant_id=assistant,
+            text="helper question",
+        )
+        await _record_helper_run(
+            container,
+            tenant_id=tenant_id,
+            org_space_id=org_space,
+            helper_assistant_id=helper_assistant,
+            target_id=assistant,
+            session_id=helper_session,
+            actor_user_id=admin_user.id,
+        )
+        await session.flush()
+
+        detail = await container.space_oversight_service().get_space(shared_space)
+
+    assert detail.usage.suppressed is True
+    assert detail.usage.questions is None
+
+    async with db_container() as container:
+        session = container.session()
+        fifth = await _insert_user(session, tenant_id=admin_user.tenant_id)
+        regular = await _insert_session(
+            session, name="regular", user_id=fifth, assistant_id=assistant
+        )
+        await _insert_question(
+            session,
+            tenant_id=admin_user.tenant_id,
+            session_id=regular,
+            assistant_id=assistant,
+            text="regular question",
+        )
+        await session.flush()
+
+        detail = await container.space_oversight_service().get_space(shared_space)
+
+    assert detail.usage.suppressed is False
+    assert (detail.usage.questions, detail.usage.active_users) == (5, 5)
