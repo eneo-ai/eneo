@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
+from eneo.files.audio import AudioDecodeLimits
 from eneo.flows.api.flow_live_transcription_models import (
     FlowLiveTranscriptionAvailabilityPublic,
 )
@@ -99,7 +100,9 @@ class FlowRunContractService:
             form_fields=_published_form_fields(runtime_inputs.definition),
             steps_requiring_input=_runtime_input_contracts(
                 runtime_inputs.input_specs,
-                audio_max_duration_seconds=self.settings.flow_audio_max_duration_seconds,
+                audio_max_duration_seconds=AudioDecodeLimits.from_settings(
+                    self.settings
+                ).longest_audio_seconds,
             ),
             runtime_upload_policy=default_runtime_upload_policy_public(),
             steps_requiring_review=_review_step_contracts(runtime_inputs.steps),
@@ -348,7 +351,7 @@ def _runtime_input_contracts(
             input_format=spec.runtime_input.input_format,
             max_files=spec.max_files,
             max_file_size_bytes=spec.max_file_size_bytes,
-            # The decoder refuses longer audio per file (files/audio.py).
+            # The decoder refuses longer audio per file.
             max_duration_seconds=(
                 audio_max_duration_seconds
                 if spec.runtime_input.input_format is FlowRuntimeInputFormat.AUDIO

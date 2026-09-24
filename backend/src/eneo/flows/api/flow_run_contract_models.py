@@ -196,9 +196,9 @@ class FlowRuntimeInputContractPublic(BaseModel):
     max_duration_seconds: int | None = Field(
         default=None,
         description=(
-            "Longest audio Eneo accepts in one file of this input, in seconds; "
-            "a longer file is refused when the run transcribes it. Set only for "
-            "audio inputs."
+            "Longest audio, in whole seconds, Eneo decodes from one file of this "
+            "input: the tighter of its duration and decoded-size limits. A longer "
+            "file is refused when the run transcribes it. Set only for audio inputs."
         ),
     )
     accepted_mimetypes: list[str] = Field(default_factory=list)

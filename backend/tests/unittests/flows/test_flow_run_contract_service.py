@@ -306,7 +306,18 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
 
 
 @pytest.mark.asyncio
-async def test_an_audio_input_states_the_longest_file_eneo_transcribes() -> None:
+@pytest.mark.parametrize(
+    ("max_duration_seconds", "max_decoded_bytes", "longest"),
+    [
+        (7200, 2 * 2**30, 7200),
+        # 16 kHz mono 16-bit decodes to 32 000 bytes a second: this size
+        # ceiling binds at one hour although the duration setting says five.
+        (18000, 115_200_000, 3600),
+    ],
+)
+async def test_an_audio_input_states_the_longest_file_eneo_transcribes(
+    max_duration_seconds: int, max_decoded_bytes: int, longest: int
+) -> None:
     audio_step = _step(step_order=1, input_type="audio")
     flow = _flow(step=audio_step).model_copy(update={"published_version": 1})
     flow_service = AsyncMock()
@@ -337,18 +348,21 @@ async def test_an_audio_input_states_the_longest_file_eneo_transcribes() -> None
             ],
         },
     )
-    two_hours = get_settings().model_copy(
-        update={"flow_audio_max_duration_seconds": 7200}
+    limits = get_settings().model_copy(
+        update={
+            "flow_audio_max_duration_seconds": max_duration_seconds,
+            "flow_audio_max_decoded_bytes": max_decoded_bytes,
+        }
     )
 
     contract = await _service(
         flow_service=flow_service,
         settings_service=settings_service,
         flow_version_repo=versions,
-        settings=two_hours,
+        settings=limits,
     ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
-    assert contract.steps_requiring_input[0].max_duration_seconds == 7200
+    assert contract.steps_requiring_input[0].max_duration_seconds == longest
 
 
 @pytest.mark.asyncio

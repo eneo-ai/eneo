@@ -23533,7 +23533,7 @@ export interface components {
       label?: string | null;
       /**
        * Max Duration Seconds
-       * @description Longest audio Eneo accepts in one file of this input, in seconds; a longer file is refused when the run transcribes it. Set only for audio inputs.
+       * @description Longest audio, in whole seconds, Eneo decodes from one file of this input: the tighter of its duration and decoded-size limits. A longer file is refused when the run transcribes it. Set only for audio inputs.
        */
       max_duration_seconds?: number | null;
       /** Max File Size Bytes */

@@ -23,7 +23,7 @@ import soundfile as sf
 from soundfile import SoundFile
 
 from eneo.files.text import MimeTypesBase
-from eneo.main.config import get_settings
+from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import FileTooLargeException
 from eneo.main.logging import get_logger
 
@@ -62,11 +62,21 @@ class AudioDecodeLimits:
     max_decoded_bytes: int
 
     @classmethod
-    def from_settings(cls) -> "AudioDecodeLimits":
-        settings = get_settings()
+    def from_settings(cls, settings: Settings | None = None) -> "AudioDecodeLimits":
+        settings = settings or get_settings()
         return cls(
             max_duration_seconds=settings.flow_audio_max_duration_seconds,
             max_decoded_bytes=settings.flow_audio_max_decoded_bytes,
+        )
+
+    @property
+    def longest_audio_seconds(self) -> int:
+        """Whole seconds of audio one decode accepts: the tighter of both ceilings."""
+        return int(
+            min(
+                self.max_duration_seconds,
+                self.max_decoded_bytes / _DECODE_BYTES_PER_SECOND,
+            )
         )
 
 
