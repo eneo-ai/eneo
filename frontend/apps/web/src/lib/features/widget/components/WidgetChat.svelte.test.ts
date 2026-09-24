@@ -4,7 +4,8 @@ import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { WidgetPublicConfig } from "@eneo/eneo-js";
 import "../../../../app.css";
-import axe from "axe-core";
+import axe, { type AxeResults } from "axe-core";
+import { virtual } from "@guidepup/virtual-screen-reader";
 
 /** Rule ids and targets of every axe violation on the page, for a readable diff. */
 async function violations() {
@@ -12,6 +13,21 @@ async function violations() {
     // Contrast needs the widget colours the page computes at runtime.
     rules: { "color-contrast": { enabled: false } }
   });
+  return summarise(result);
+}
+
+/** Every WCAG 2.0–2.2 A and AA rule, contrast included; any impact counts. */
+async function wcagViolations() {
+  const result = await axe.run(document, {
+    runOnly: {
+      type: "tag",
+      values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"]
+    }
+  });
+  return summarise(result);
+}
+
+function summarise(result: AxeResults) {
   return result.violations.map((v) => ({
     id: v.id,
     impact: v.impact,
@@ -34,6 +50,8 @@ const fake = vi.hoisted(() => ({
   sessions: 0,
   // Rejects the next feedback call when set, then clears itself.
   failNextFeedback: false,
+  // Rejects the next question when set, then clears itself.
+  failNextAsk: false,
   // A stored conversation the fake returns on restore, when set.
   restored: null as null | Record<string, unknown>
 }));
@@ -69,6 +87,10 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
           };
         }) => {
           fake.asks.push({ question, conversationId: conversation?.id });
+          if (fake.failNextAsk) {
+            fake.failNextAsk = false;
+            throw new Error("boom");
+          }
           await new Promise<void>((resolve) => {
             fake.release = resolve;
           });
@@ -83,7 +105,9 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
             generated_files: [],
             tools: { assistants: [] }
           });
-          callbacks?.onText?.({ answer: "Svaret från assistenten.", session_id, references: [] });
+          // Streamed in two pieces, like a model does.
+          callbacks?.onText?.({ answer: "Svaret ", session_id, references: [] });
+          callbacks?.onText?.({ answer: "från assistenten.", session_id, references: [] });
           return {};
         },
         get: async () => {
@@ -178,6 +202,7 @@ beforeEach(() => {
   fake.sessions = 0;
   fake.restored = null;
   fake.failNextFeedback = false;
+  fake.failNextAsk = false;
   localStorage.clear();
 });
 
@@ -392,5 +417,252 @@ describe("WidgetChat", () => {
     expect(fake.asks[1].conversationId).toBeFalsy();
     await releaseAnswer();
     expect(fake.feedback).toHaveLength(0);
+  });
+});
+
+describe("WidgetChat for screen reader users", () => {
+  /** Walk the whole page with the virtual screen reader's reading cursor. */
+  async function readThrough(): Promise<string[]> {
+    for (let step = 0; step < 100; step++) {
+      if ((await virtual.lastSpokenPhrase()) === "end of document") break;
+      await virtual.next();
+    }
+    return virtual.spokenPhraseLog();
+  }
+
+  /** What live regions said, not the reading cursor. An emptied region says nothing. */
+  async function announcements(): Promise<string[]> {
+    return (await virtual.spokenPhraseLog()).filter((phrase) =>
+      /^(polite|assertive): \S/.test(phrase)
+    );
+  }
+
+  test("reads the title, the AI disclosure and a labelled composer in landmarks", async () => {
+    renderApp();
+    await expect.element(composer()).toBeVisible();
+    await virtual.start({ container: document.body });
+    try {
+      expect(await readThrough()).toEqual([
+        "document",
+        "banner",
+        "heading, Fråga kommunen, level 1",
+        "paragraph",
+        "Du chattar med en AI-assistent.",
+        "end of paragraph",
+        "end of banner",
+        "main",
+        "paragraph",
+        "Hej! Vad kan jag hjälpa dig med?",
+        "end of paragraph",
+        "end of main",
+        "contentinfo",
+        "list, widget_suggested_questions",
+        "listitem, level 1, position 1, set size 1",
+        "button, Vad har biblioteket för öppettider?",
+        "end of listitem, level 1, position 1, set size 1",
+        "end of list, widget_suggested_questions",
+        "form",
+        "widget_input_label",
+        "textbox, widget_input_label, placeholder widget_input_placeholder",
+        "button, widget_send, disabled",
+        "end of form",
+        "end of contentinfo",
+        "end of document"
+      ]);
+    } finally {
+      await virtual.stop();
+    }
+  });
+
+  test("announces each question and every answer once, never the stream", async () => {
+    renderApp();
+    await expect.element(composer()).toBeVisible();
+    await virtual.start({ container: document.body });
+    try {
+      await userEvent.click(suggestion());
+      await vi.waitFor(async () =>
+        expect(await announcements()).toEqual(["polite: assistant_is_typing"])
+      );
+      await releaseAnswer();
+      await vi.waitFor(async () =>
+        expect(await announcements()).toEqual([
+          "polite: assistant_is_typing",
+          "polite: widget_assistant: Svaret från assistenten."
+        ])
+      );
+
+      // The same answer again is announced again.
+      await userEvent.fill(composer(), "En följdfråga");
+      await userEvent.keyboard("{Enter}");
+      await vi.waitFor(async () => expect(await announcements()).toHaveLength(3));
+      await releaseAnswer();
+      await vi.waitFor(async () =>
+        expect(await announcements()).toEqual([
+          "polite: assistant_is_typing",
+          "polite: widget_assistant: Svaret från assistenten.",
+          "polite: assistant_is_typing",
+          "polite: widget_assistant: Svaret från assistenten."
+        ])
+      );
+    } finally {
+      await virtual.stop();
+    }
+  });
+
+  test("a failed question is an alert that no pending announcement follows", async () => {
+    renderApp();
+    await expect.element(composer()).toBeVisible();
+    await virtual.start({ container: document.body });
+    try {
+      fake.failNextAsk = true;
+      await userEvent.click(suggestion());
+      // Screen readers read an alert as it appears (the virtual one does not
+      // model that), so the role is what matters here.
+      await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_generic");
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(await announcements()).toEqual([]);
+    } finally {
+      await virtual.stop();
+    }
+  });
+
+  test("announces the acknowledgement of a vote", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    await virtual.start({ container: document.body });
+    try {
+      await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
+      await vi.waitFor(async () =>
+        expect(await announcements()).toContain("polite: widget_feedback_thanks")
+      );
+    } finally {
+      await virtual.stop();
+    }
+  });
+});
+
+describe("WidgetChat against WCAG 2.2 A and AA", () => {
+  test.each(["light", "dark"] as const)(
+    "the empty and the answered chat pass every rule, contrast included (%s)",
+    async (scheme) => {
+      render(EmbedApp, {
+        config: config(),
+        publicId: "wgt_test",
+        baseUrl: "http://localhost",
+        hostOrigin: null,
+        hostScheme: scheme
+      });
+      await expect.element(composer()).toBeVisible();
+      expect(document.documentElement.dataset.theme).toBe(scheme);
+      expect(JSON.stringify(await wcagViolations())).toBe("[]");
+
+      await userEvent.click(suggestion());
+      await releaseAnswer();
+      await expect.element(page.getByText("widget_feedback_prompt")).toBeVisible();
+      expect(JSON.stringify(await wcagViolations())).toBe("[]");
+    }
+  );
+
+  test("an error and the single-turn follow-up pass every rule", async () => {
+    renderApp({ single_turn: true });
+    fake.failNextAsk = true;
+    await userEvent.click(suggestion());
+    await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_generic");
+    expect(JSON.stringify(await wcagViolations())).toBe("[]");
+
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    await expect.element(page.getByRole("button", { name: "widget_new_question" })).toBeVisible();
+    expect(JSON.stringify(await wcagViolations())).toBe("[]");
+  });
+});
+
+describe("WidgetChat when text is enlarged or spaced out", () => {
+  /** Texts as long as real widgets carry them. */
+  const fullTexts = {
+    title: "Fråga Sundsvalls kommun om bygglov och tillstånd",
+    subtitle:
+      "Du chattar med en AI-assistent. Svaren kan innehålla fel – kontrollera viktig information.",
+    welcome: "Hej! Vad kan jag hjälpa dig med?",
+    suggested_questions: [
+      "Vad har biblioteket för öppettider?",
+      "Hur ansöker jag om bygglov?",
+      "När töms mitt sopkärl?",
+      "Var kan jag parkera i centrum?"
+    ],
+    footer_text: "Läs om hur vi hanterar personuppgifter."
+  };
+
+  /** Elements that cut off their own content (overflow hidden or clip, content larger than the box). */
+  function clipped(root: Element): string[] {
+    const cuts = (value: string) => value === "hidden" || value === "clip";
+    return Array.from(root.querySelectorAll<HTMLElement>("*"))
+      .filter((element) => {
+        // Visually hidden on purpose.
+        if (element.closest(".sr-only")) return false;
+        const style = getComputedStyle(element);
+        return (
+          (cuts(style.overflowX) && element.scrollWidth > element.clientWidth + 1) ||
+          (cuts(style.overflowY) && element.scrollHeight > element.clientHeight + 1)
+        );
+      })
+      .map((element) => element.outerHTML.slice(0, 80));
+  }
+
+  /** Nothing scrolls sideways and nothing is cut off; the composer can be reached. */
+  async function expectReadable() {
+    const chat = document.querySelector("[data-widget-chat]")!;
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+    expect(chat.scrollWidth).toBeLessThanOrEqual(chat.clientWidth);
+    expect(clipped(chat)).toEqual([]);
+    const textarea = composer().element() as HTMLElement;
+    textarea.scrollIntoView();
+    const box = textarea.getBoundingClientRect();
+    expect(box.top).toBeGreaterThanOrEqual(0);
+    expect(box.bottom).toBeLessThanOrEqual(window.innerHeight);
+  }
+
+  async function atViewport(width: number, height: number, body: () => Promise<void>) {
+    const before = { width: window.innerWidth, height: window.innerHeight };
+    await page.viewport(width, height);
+    try {
+      await body();
+    } finally {
+      await page.viewport(before.width, before.height);
+    }
+  }
+
+  test("reflows at 320 px without scrolling sideways (1.4.10)", async () => {
+    await atViewport(320, 480, async () => {
+      renderApp({ texts: fullTexts });
+      await expect.element(composer()).toBeVisible();
+      await expectReadable();
+      await userEvent.click(suggestion());
+      await releaseAnswer();
+      await expectReadable();
+    });
+  });
+
+  test("keeps everything readable with WCAG text spacing (1.4.12)", async () => {
+    // The spacing 1.4.12 requires content to survive, applied to everything.
+    const spacing = document.createElement("style");
+    spacing.textContent = `
+      * { line-height: 1.5 !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important; }
+      p { margin-bottom: 2em !important; }
+    `;
+    document.head.appendChild(spacing);
+    try {
+      await atViewport(400, 700, async () => {
+        renderApp({ texts: fullTexts });
+        await expect.element(composer()).toBeVisible();
+        await expectReadable();
+        await userEvent.click(suggestion());
+        await releaseAnswer();
+        await expectReadable();
+      });
+    } finally {
+      spacing.remove();
+    }
   });
 });

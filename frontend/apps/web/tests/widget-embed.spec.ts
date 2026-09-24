@@ -19,6 +19,22 @@ const DENIED_ORIGIN = `http://127.0.0.1:${DENIED_PORT}`;
 
 type Widget = { id: string; public_id: string; status: string; revision: number };
 
+/**
+ * Every WCAG 2.0–2.2 A and AA violation on the host page and inside the
+ * widget's frame, whatever axe rates its impact: a widget that goes onto
+ * sites bound by the accessibility law has to pass all of them.
+ */
+async function wcagViolations(page: Page) {
+  const results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"])
+    .analyze();
+  return results.violations.map((v) => ({
+    id: v.id,
+    impact: v.impact,
+    targets: v.nodes.map((node) => node.target)
+  }));
+}
+
 async function createActiveWidget(page: Page, request: APIRequestContext): Promise<Widget> {
   const space = await backendFetch(page, request, "/api/v1/spaces/", {
     method: "POST",
@@ -188,6 +204,8 @@ test.describe("embeddable widget", () => {
     await expect(launcher).toHaveAttribute("aria-haspopup", "dialog");
     await expect(launcher).toHaveAttribute("aria-expanded", "false");
     await expect(launcher).toHaveAccessibleName("Öppna chatt");
+    // The closed widget adds nothing to the page that fails WCAG.
+    expect(await wcagViolations(page)).toEqual([]);
 
     // Open with the keyboard: Tab to the launcher, Enter opens the panel.
     await launcher.focus();
@@ -212,6 +230,12 @@ test.describe("embeddable widget", () => {
     await expect(dialog).not.toHaveAttribute("aria-modal", "true");
     await expect(page.locator("main")).not.toHaveAttribute("inert", "");
     await expect(page.locator("eneo-widget iframe")).toHaveAttribute("title", "Fråga kommunen");
+    // What a screen reader finds on the host page: the expanded launcher and
+    // the dialog it controls.
+    await expect(page.locator("eneo-widget")).toMatchAriaSnapshot(`
+      - button "Stäng chatt" [expanded]
+      - dialog "Chatt"
+    `);
 
     // A forged message from the host page itself is ignored (only the iframe
     // window on the Eneo origin may close the panel).
@@ -255,14 +279,20 @@ test.describe("embeddable widget", () => {
       `Assistent: ${MOCK_REPLY}`
     );
 
+    // The chat's landmarks, title, conversation and composer, as the
+    // accessibility tree exposes them inside the frame.
+    await expect(frame.locator("[data-widget-chat]")).toMatchAriaSnapshot(`
+      - banner:
+        - heading "Fråga kommunen" [level=1]
+      - main:
+        - log "Konversation"
+      - contentinfo:
+        - textbox "Din fråga"
+        - button "Skicka"
+    `);
+
     // WCAG check of the open panel (host page + iframe).
-    const results = await new AxeBuilder({ page })
-      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"])
-      .analyze();
-    const serious = results.violations.filter(
-      (v) => v.impact === "serious" || v.impact === "critical"
-    );
-    expect(serious, JSON.stringify(serious, null, 2)).toEqual([]);
+    expect(await wcagViolations(page)).toEqual([]);
 
     // Escape on the host page closes the panel too, so it never keeps covering
     // what the visitor moved on to, and focus stays there (WCAG 2.4.11).
@@ -323,6 +353,7 @@ test.describe("embeddable widget", () => {
     // so neither Tab nor a screen reader reaches content hidden behind it.
     await expect(page.getByRole("dialog", { name: "Chatt" })).toHaveAttribute("aria-modal", "true");
     await expect(page.locator("main")).toHaveAttribute("inert", "");
+    expect(await wcagViolations(page)).toEqual([]);
 
     // The notice takes part like the chat: focus moves to it, so a screen
     // reader reads it, and its own close button replaces the launcher.

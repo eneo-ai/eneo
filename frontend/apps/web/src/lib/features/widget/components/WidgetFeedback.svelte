@@ -105,12 +105,18 @@
     <ThumbsDown class="size-4" aria-hidden="true" />
   </button>
 </div>
+<!-- Always rendered: screen readers announce a change to a status region, not
+     one that appears with its text already in it. A restored vote is shown
+     without being announced. -->
+<div role="status">
+  {#if given}
+    <p class="text-secondary mt-2 flex items-center gap-1.5 text-xs">
+      <Check class="text-positive-default size-3.5 shrink-0" aria-hidden="true" />
+      {sent ? m.widget_feedback_received() : m.widget_feedback_thanks()}
+    </p>
+  {/if}
+</div>
 {#if given}
-  <!-- A live status, so the acknowledgement is read out as well as seen. -->
-  <p class="text-secondary mt-2 flex items-center gap-1.5 text-xs" role="status">
-    <Check class="text-positive-default size-3.5 shrink-0" aria-hidden="true" />
-    {sent ? m.widget_feedback_received() : m.widget_feedback_thanks()}
-  </p>
   {#if collectsText && !sent}
     <button
       type="button"
