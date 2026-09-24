@@ -26,6 +26,7 @@ from eneo.main.exceptions import BadRequestException
 from eneo.main.models import NOT_PROVIDED, NotProvided, PaginatedResponse
 from eneo.mcp_servers.application.mcp_server_service import ToolChange
 from eneo.mcp_servers.presentation.models import (
+    BundledServerCreate,
     BundledToolList,
     BundledToolPublic,
     CapabilityActivationResponse,
@@ -300,6 +301,7 @@ async def get_bundled_tools(container: Container = _WITH_USER):
         items=[
             BundledToolPublic(
                 tool=tool.tool,
+                purpose=tool.purpose,
                 available=tool.available,
                 mcp_server_id=tool.mcp_server_id,
             )
@@ -320,13 +322,15 @@ async def get_bundled_tools(container: Container = _WITH_USER):
 )
 async def create_bundled_mcp_server(
     tool: str,
+    data: BundledServerCreate,
     container: Container = _WITH_USER,
     _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.mcp_server_service()
     assembler = container.mcp_server_assembler()
+    activate = data.activate
 
-    result = await service.create_bundled_mcp_server(tool)
+    result = await service.create_bundled_mcp_server(tool, activate=activate)
     if not result.connection.success:
         raise BadRequestException(
             result.connection.error_message
@@ -346,6 +350,25 @@ async def create_bundled_mcp_server(
             actor=user, target=result.server, extra={"bundled_tool": tool}
         ),
     )
+    if activate:
+        await audit_service.log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.MCP_SERVER_ENABLED,
+            entity_type=EntityType.MCP_SERVER,
+            entity_id=result.server.id,
+            description=f"Activated {result.server.purpose} provider",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=result.server,
+                extra={
+                    "purpose": result.server.purpose,
+                    "deactivated_server_ids": [
+                        str(i) for i in result.deactivated_server_ids or []
+                    ],
+                },
+            ),
+        )
 
     return MCPServerCreateResponse(
         server=assembler.from_domain_to_model(result.server),

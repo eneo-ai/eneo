@@ -2,21 +2,43 @@ import { timingSafeEqual, createHash } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { publicError, ToolError } from "./errors";
-import type { ToolDefinition } from "./tools/compute/tool";
+import type { CallContext, ToolDefinition } from "./tools/types";
 
 const VERSION = process.env.APP_VERSION ?? "0.0.0-dev";
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_RESULT_BYTES = 512 * 1024;
 const BODY_TIMEOUT_MS = 10_000;
 
-export type Endpoint = { slug: string; tools: ToolDefinition[] };
+export type Endpoint = {
+  slug: string;
+  tools: ToolDefinition[];
+  /** Upper bound for one tool call, including downloads and sandbox children. */
+  toolTimeoutMs: number;
+  /**
+   * Tools that keep per-user state need Eneo's forwarded tenant and user ids (the server's
+   * "forward identity" setting). Listing tools works without them.
+   */
+  requiresIdentity?: boolean;
+};
 export type ServerOptions = {
   token: string;
   maxConcurrency: number;
   endpoints: Endpoint[];
-  /** Upper bound for one tool call, including sandbox spawn. */
-  toolTimeoutMs: number;
 };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function callContext(request: Request, endpoint: Endpoint): CallContext {
+  const tenantId = request.headers.get("x-eneo-tenant-id") ?? "";
+  const userId = request.headers.get("x-eneo-user-id") ?? "";
+  if (UUID.test(tenantId) && UUID.test(userId)) return { tenantId, userId };
+  if (endpoint.requiresIdentity)
+    throw new ToolError(
+      "IDENTITY_REQUIRED",
+      "This tool needs Eneo's tenant and user identity. Enable identity forwarding on the server in Eneo.",
+    );
+  return { tenantId: "", userId: "" };
+}
 
 export function equalSecret(left: string, right: string): boolean {
   return timingSafeEqual(
@@ -74,7 +96,10 @@ export function createHandler(options: ServerOptions) {
           },
           async (input) => {
             try {
-              const result = await deadline(tool.execute(input), options.toolTimeoutMs);
+              const result = await deadline(
+                tool.execute(input, callContext(request, endpoint)),
+                endpoint.toolTimeoutMs,
+              );
               const text = JSON.stringify(result);
               if (Buffer.byteLength(text) > MAX_RESULT_BYTES)
                 throw new ToolError("RESULT_TOO_LARGE", "Result exceeds the byte limit.");

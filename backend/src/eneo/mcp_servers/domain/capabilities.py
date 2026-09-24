@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-CapabilityPurpose = Literal["web_search", "image_generation"]
+CapabilityPurpose = Literal["web_search", "image_generation", "tabular_analysis"]
 
 
 class CapabilityAvailability(BaseModel):

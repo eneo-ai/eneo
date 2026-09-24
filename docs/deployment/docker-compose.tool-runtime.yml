@@ -23,6 +23,11 @@ services:
     environment:
       TOOL_RUNTIME_TOKEN: ${TOOL_RUNTIME_TOKEN:?Set TOOL_RUNTIME_TOKEN in .env (openssl rand -hex 32)}
       MAX_CONCURRENCY: ${TOOL_RUNTIME_MAX_CONCURRENCY:-16}
+      # Tabular analysis fetches attachments through Eneo's signed file links;
+      # this must be the origin of FILE_REFERENCE_BASE_URL (the backend on
+      # the shared network). Leave it empty to serve compute only.
+      TOOL_RUNTIME_FILE_ORIGINS: ${TOOL_RUNTIME_FILE_ORIGINS-http://backend:8000}
+      TABULAR_CONCURRENCY: ${TOOL_RUNTIME_TABULAR_CONCURRENCY:-2}
     # Only the backend can reach the runtime, and the runtime can reach nothing:
     # the network is internal, so guest code has no route out even if it
     # escaped the WebAssembly engine and the sandbox child.
@@ -31,14 +36,15 @@ services:
     expose:
       - "3010"
     read_only: true
+    # Job scratch space plus the parsed-sheet cache (256 MiB by default).
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /tmp:rw,noexec,nosuid,nodev,size=512m
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
     pids_limit: 256
-    mem_limit: 1g
+    mem_limit: 2g
     cpus: 2
 
 networks:

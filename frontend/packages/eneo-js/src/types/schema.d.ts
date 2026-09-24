@@ -10289,7 +10289,7 @@ export interface components {
     /** AskAssistant */
     AskAssistant: {
       /** Disabled Capabilities */
-      disabled_capabilities?: ("web_search" | "image_generation")[];
+      disabled_capabilities?: ("web_search" | "image_generation" | "tabular_analysis")[];
       /** Disabled Mcp Server Ids */
       disabled_mcp_server_ids?: string[];
       /** Question */
@@ -10367,7 +10367,7 @@ export interface components {
        */
       logging_enabled?: boolean | null;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?: ("web_search" | "image_generation" | "tabular_analysis")[] | null;
       /**
        * Space Id
        * Format: uuid
@@ -10549,7 +10549,7 @@ export interface components {
        */
       id: string;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: ("web_search" | "image_generation" | "tabular_analysis")[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Name */
@@ -11236,6 +11236,14 @@ export interface components {
       /** Errors */
       errors: components["schemas"]["WebsiteBulkActionError"][];
     };
+    /** BundledServerCreate */
+    BundledServerCreate: {
+      /**
+       * Activate
+       * @default false
+       */
+      activate?: boolean;
+    };
     /** BundledToolList */
     BundledToolList: {
       /** Items */
@@ -11250,6 +11258,8 @@ export interface components {
     BundledToolPublic: {
       /** Tool */
       tool: string;
+      /** Purpose */
+      purpose: string;
       /** Available */
       available: boolean;
       /** Mcp Server Id */
@@ -11289,7 +11299,7 @@ export interface components {
        * Purpose
        * @enum {string}
        */
-      purpose: "web_search" | "image_generation";
+      purpose: "web_search" | "image_generation" | "tabular_analysis";
       /** Available */
       available: boolean;
       /** Reason */
@@ -11963,7 +11973,7 @@ export interface components {
        */
       disabled_mcp_server_ids?: string[];
       /** Disabled Capabilities */
-      disabled_capabilities?: ("web_search" | "image_generation")[];
+      disabled_capabilities?: ("web_search" | "image_generation" | "tabular_analysis")[];
     };
     /** Counts */
     Counts: {
@@ -12379,7 +12389,7 @@ export interface components {
       /** Name */
       name: string;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?: ("web_search" | "image_generation" | "tabular_analysis")[] | null;
       from_template?: components["schemas"]["TemplateCreate"] | null;
     };
     /** CreateSpaceGroupsRequest */
@@ -12699,7 +12709,7 @@ export interface components {
        */
       id: string;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: ("web_search" | "image_generation" | "tabular_analysis")[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Name */
@@ -12910,9 +12920,9 @@ export interface components {
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: ("web_search" | "image_generation" | "tabular_analysis")[];
       /** Default Disabled Capabilities */
-      default_disabled_capabilities?: ("web_search" | "image_generation")[];
+      default_disabled_capabilities?: ("web_search" | "image_generation" | "tabular_analysis")[];
       /** Models Enforced */
       models_enforced: boolean;
       /** Available Models */
@@ -14791,7 +14801,7 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation";
+      purpose?: "general" | "web_search" | "image_generation" | "tabular_analysis";
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -14875,7 +14885,7 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation";
+      purpose?: "general" | "web_search" | "image_generation" | "tabular_analysis";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
@@ -14998,7 +15008,7 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation";
+      purpose?: "general" | "web_search" | "image_generation" | "tabular_analysis";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
@@ -15203,7 +15213,7 @@ export interface components {
       /** Http Auth Type */
       http_auth_type?: ("none" | "bearer" | "api_key_header" | "internal") | null;
       /** Purpose */
-      purpose?: ("general" | "web_search" | "image_generation") | null;
+      purpose?: ("general" | "web_search" | "image_generation" | "tabular_analysis") | null;
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -17160,7 +17170,7 @@ export interface components {
        */
       logging_enabled?: boolean | null;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?: ("web_search" | "image_generation" | "tabular_analysis")[] | null;
       /** Space Id */
       space_id?: string | null;
       prompt?: components["schemas"]["PromptCreate"] | null;
@@ -17332,7 +17342,7 @@ export interface components {
     /** PartialUpdateSpaceRequest */
     PartialUpdateSpaceRequest: {
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?: ("web_search" | "image_generation" | "tabular_analysis")[] | null;
       /** Name */
       name?: string | null;
       /** Description */
@@ -17483,7 +17493,8 @@ export interface components {
       | "modules"
       | "assistant_debug"
       | "web_search"
-      | "image_generation";
+      | "image_generation"
+      | "tabular_analysis";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -17528,7 +17539,7 @@ export interface components {
        * Purpose
        * @enum {string}
        */
-      purpose: "web_search" | "image_generation";
+      purpose: "web_search" | "image_generation" | "tabular_analysis";
       /**
        * Is Default Enabled
        * @default true
@@ -19780,7 +19791,7 @@ export interface components {
       /** Data Retention Days */
       data_retention_days?: number | null;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: ("web_search" | "image_generation" | "tabular_analysis")[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Embedding Models */
@@ -21362,7 +21373,7 @@ export interface components {
     /** UpdateSpaceDryRunResponse */
     UpdateSpaceDryRunResponse: {
       /** Capabilities */
-      capabilities?: ("web_search" | "image_generation")[];
+      capabilities?: ("web_search" | "image_generation" | "tabular_analysis")[];
       /** Assistants */
       assistants: components["schemas"]["AssistantSparse"][];
       /** Group Chats */
@@ -43164,7 +43175,7 @@ export interface operations {
     parameters: {
       query?: {
         tags?: string[] | null;
-        purpose?: ("general" | "web_search" | "image_generation") | null;
+        purpose?: ("general" | "web_search" | "image_generation" | "tabular_analysis") | null;
       };
       header?: never;
       path?: never;
@@ -43264,7 +43275,7 @@ export interface operations {
   get_tenant_mcp_settings_api_v1_mcp_servers_settings__get: {
     parameters: {
       query?: {
-        purpose?: ("general" | "web_search" | "image_generation") | null;
+        purpose?: ("general" | "web_search" | "image_generation" | "tabular_analysis") | null;
       };
       header?: never;
       path?: never;
@@ -43563,7 +43574,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BundledServerCreate"];
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {

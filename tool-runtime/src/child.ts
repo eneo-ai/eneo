@@ -2,16 +2,29 @@
 import { publicError } from "./errors";
 import type { ComputeConfig } from "./tools/compute/config";
 import type { ComputeJob } from "./tools/compute/ports";
+import type { IngestJob, QueryJob } from "./tools/tabular/ports";
 
-export type SandboxJob = { job: ComputeJob; config: ComputeConfig } | { job: { kind: "env" } };
+export type SandboxJob =
+  | { job: ComputeJob; config: ComputeConfig }
+  | { job: IngestJob }
+  | { job: QueryJob }
+  | { job: { kind: "env" } };
 
 async function execute(input: SandboxJob): Promise<Record<string, unknown>> {
+  // Engines are imported lazily so each one loads only inside the children that use it.
   switch (input.job.kind) {
     case "compute": {
-      // Imported lazily so the engine is loaded only inside children.
       const { runJavaScript } = await import("./tools/compute/engine/quickjs");
       const { config } = input as Extract<SandboxJob, { config: ComputeConfig }>;
       return { ...(await runJavaScript(input.job, config)) };
+    }
+    case "tabular_ingest": {
+      const { executeIngest } = await import("./tools/tabular/execute");
+      return executeIngest(input.job);
+    }
+    case "tabular_query": {
+      const { executeQuery } = await import("./tools/tabular/execute");
+      return executeQuery(input.job);
     }
     case "env":
       // Test probe: the variable names the child inherited, never their values.
@@ -27,5 +40,6 @@ if (import.meta.main) {
   } catch (error) {
     process.stdout.write(JSON.stringify({ ok: false, error: publicError(error) }));
   }
+  // Native engine resources (DuckDB) must never extend the lifetime of a job.
   process.exit(0);
 }

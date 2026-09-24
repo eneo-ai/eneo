@@ -1,7 +1,8 @@
 """Unit tests for bundled tool runtime servers in MCPServerService.
 
-A bundled server is an ordinary general server whose URL and credential come
-from the deployment (tool_runtime_url / tool_runtime_token). Only the preset
+A bundled server is an ordinary server whose URL and credential come from the
+deployment (tool_runtime_url / tool_runtime_token). Each runtime endpoint fixes
+the purpose its row serves and whether identity is forwarded. Only the preset
 creates one, at most once per tenant and tool, and its connection cannot be
 edited afterwards.
 """
@@ -120,29 +121,73 @@ class TestCreateBundled:
             )
 
 
+class TestCreateBundledTabular:
+    async def test_is_an_inactive_capability_provider_with_identity(
+        self, monkeypatch, runtime_configured
+    ):
+        service, _, _ = _make_service(monkeypatch)
+
+        result = await service.create_bundled_mcp_server("tabular")
+
+        server = result.server
+        assert server.http_url == f"{RUNTIME_URL}/mcp/tabular"
+        assert server.purpose == "tabular_analysis"
+        assert server.is_enabled is False
+        # The runtime scopes its parsed-file cache per tenant and user.
+        assert server.forward_identity is True
+
+    async def test_activate_switches_it_in(self, monkeypatch, runtime_configured):
+        service, _, _ = _make_service(monkeypatch)
+        activate = AsyncMock(
+            side_effect=lambda server_id: MagicMock(
+                server=MagicMock(id=server_id), deactivated_server_ids=[]
+            )
+        )
+        monkeypatch.setattr(service, "activate_capability_server", activate)
+
+        await service.create_bundled_mcp_server("tabular", activate=True)
+
+        activate.assert_awaited_once()
+
+    async def test_generic_create_cannot_repurpose_a_bundled_endpoint(
+        self, monkeypatch, runtime_configured
+    ):
+        service, _, _ = _make_service(monkeypatch)
+
+        with pytest.raises(BadRequestException):
+            await service.create_mcp_server(
+                name="Compute as search",
+                http_url=f"{RUNTIME_URL}/mcp/compute",
+                http_auth_type=BUNDLED_AUTH_TYPE,
+                purpose="web_search",
+            )
+
+
 class TestListBundled:
-    async def test_reports_availability_and_the_added_server(
+    async def test_reports_purpose_availability_and_the_added_server(
         self, monkeypatch, runtime_configured
     ):
         service, repo, user = _make_service(monkeypatch)
         added = _bundled_server(user.tenant_id)
         repo.query.return_value = [added]
 
-        [compute] = await service.list_bundled_tools()
+        tools = {tool.tool: tool for tool in await service.list_bundled_tools()}
 
-        assert compute.tool == "compute"
-        assert compute.available is True
-        assert compute.mcp_server_id == added.id
+        assert tools["compute"].purpose == "general"
+        assert tools["compute"].available is True
+        assert tools["compute"].mcp_server_id == added.id
+        assert tools["tabular"].purpose == "tabular_analysis"
+        assert tools["tabular"].mcp_server_id is None
 
     async def test_unconfigured_runtime_is_unavailable(self, monkeypatch):
         settings = get_settings().model_copy(update={"tool_runtime_url": None})
         monkeypatch.setattr(service_module, "get_settings", lambda: settings)
         service, _, _ = _make_service(monkeypatch)
 
-        [compute] = await service.list_bundled_tools()
+        tools = await service.list_bundled_tools()
 
-        assert compute.available is False
-        assert compute.mcp_server_id is None
+        assert all(tool.available is False for tool in tools)
+        assert all(tool.mcp_server_id is None for tool in tools)
 
 
 class TestUpdateBundled:

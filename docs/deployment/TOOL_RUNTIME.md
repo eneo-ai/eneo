@@ -2,7 +2,13 @@
 
 The tool runtime is an optional container shipped with Eneo. It serves
 Eneo-maintained MCP tools from an isolated process, never from the backend.
-Today it serves one tool: `run_javascript` (restricted compute over JSON).
+It has two endpoints:
+
+- `/mcp/compute`: `run_javascript`, restricted compute over JSON. It is added
+  as an ordinary MCP server.
+- `/mcp/tabular`: `inspect_table`, `query_table` and `assert_table` over
+  attached CSV and XLSX files. It is added as the provider of the **Tabular
+  analysis** capability (`tabular_analysis`, "Analysera tabelldata" in Swedish).
 
 ## TL;DR
 
@@ -31,6 +37,35 @@ returns bounded JSON output.
   join. It has no route out even if guest code escaped both the engine and
   the child.
 
+## What the tabular tools can and cannot do
+
+The model passes the signed URL of an attachment, exactly as Eneo put it in the
+conversation. The runtime then works as follows:
+
+1. It accepts only URLs of the form
+   `<origin>/api/v1/files/<id>/original/download/?token=…` whose origin is
+   listed in `TOOL_RUNTIME_FILE_ORIGINS`. Any other URL is refused before a
+   request is made.
+2. It downloads the file on every call. Eneo checks the token each time, so a
+   revoked or expired link stops working at once. Downloads are capped at 20
+   MiB and 15 s, pin the resolved address and re-validate redirects.
+3. It parses the file in a sandbox child. CSV must be UTF-8. XLSX goes through
+   a zip-bomb guard and is converted to one CSV per sheet. At most 20 sheets
+   and 64 MiB expanded.
+4. It caches the parsed sheets on local disk for 30 minutes, keyed by tenant,
+   user and the downloaded bytes' hash. The cache never replaces the download
+   in step 2, so it can never grant access. A miss simply parses again.
+5. It runs the model's SQL in a separate sandbox child with a fresh DuckDB.
+   Before any model SQL is prepared, DuckDB's external access, extensions and
+   configuration are locked. Only a single `SELECT` is accepted, as determined
+   by DuckDB's own parser. Queries are limited to 500 rows, 10 s, 256 MB and
+   1 thread.
+
+The tabular server forwards the user's identity, which the cache needs.
+At most `TOOL_RUNTIME_TABULAR_CONCURRENCY` (default 2) DuckDB children run at
+once; other calls wait. Formulas are read as their cached values. Writing
+spreadsheets is not part of this endpoint.
+
 ## Enable it
 
 1. Generate a token: `openssl rand -hex 32`.
@@ -46,7 +81,13 @@ returns bounded JSON output.
    ```bash
    TOOL_RUNTIME_URL=http://tool-runtime:3010
    TOOL_RUNTIME_TOKEN=<token>
+   # Needed for tabular analysis: signed file links must be reachable from the runtime.
+   FILE_REFERENCE_BASE_URL=http://backend:8000
    ```
+
+   The overlay sets `TOOL_RUNTIME_FILE_ORIGINS=http://backend:8000` on the
+   runtime. It must match `FILE_REFERENCE_BASE_URL`. Set it to an empty value
+   to serve compute only.
 
 4. Start it with the overlay and profile:
 
@@ -58,6 +99,11 @@ returns bounded JSON output.
 5. In **Admin > Tools > MCP servers**, choose **Add bundled compute**. Eneo
    tests the connection and discovers the tool. Review it, then enable the
    server in the spaces that should use it.
+6. In **Admin > Tools > Functions**, choose **Use bundled provider** on the
+   **Tabular analysis** card. If no provider is active yet, it becomes the
+   default. Then enable the capability in spaces and assistants. The
+   `tabular_analysis` permission is granted to the predefined User, AI
+   Configurator and Owner roles. Custom roles need it added.
 
 ## Rotate the token
 
@@ -76,10 +122,14 @@ Docker Desktop):
 | 16 concurrent CPU-bound calls (default limit)  | ~580 MiB |
 | After the burst                                | ~69 MiB  |
 
-Each concurrent call costs about 32 MiB for its child process. The overlay caps
-the container at 1 GiB, 2 CPUs and 256 processes. If you raise
-`TOOL_RUNTIME_MAX_CONCURRENCY`, raise `mem_limit` with it. Requests beyond the
-limit get HTTP 429 and surface in chat as a tool error.
+Each concurrent compute call costs about 32 MiB for its child process. A
+tabular query child can use up to 256 MB for DuckDB, which is why only
+`TOOL_RUNTIME_TABULAR_CONCURRENCY` of them run at once. The overlay caps the
+container at 2 GiB, 2 CPUs and 256 processes. `/tmp` is a 512 MiB tmpfs that
+holds job scratch space and the 256 MiB parsed-sheet cache, and it counts
+towards memory. If you raise either concurrency setting, raise `mem_limit` with
+it. Requests beyond `TOOL_RUNTIME_MAX_CONCURRENCY` get HTTP 429 and surface in
+chat as a tool error.
 
 ## Failure behaviour
 

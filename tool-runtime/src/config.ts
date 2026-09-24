@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { computeConfigSchema, type ComputeConfig } from "./tools/compute/config";
+import { tabularConfigSchema, type TabularConfig } from "./tools/tabular/config";
 
 // Everything comes from the environment: the runtime has no database, no tenant state and no
 // operator API. Eneo decides who may call a tool; this process only checks the shared bearer.
@@ -11,6 +12,33 @@ const environmentSchema = z.object({
   MAX_CONCURRENCY: z.coerce.number().int().min(1).max(256).default(16),
   COMPUTE_TIMEOUT_MS: z.coerce.number().int().optional(),
   COMPUTE_MEMORY_MB: z.coerce.number().int().optional(),
+  // Origins of Eneo's signed file links (its FILE_REFERENCE_BASE_URL), comma-separated.
+  // Without one the tabular endpoint is not served: attachments could not be fetched.
+  TOOL_RUNTIME_FILE_ORIGINS: z
+    .string()
+    .optional()
+    .transform((value) =>
+      (value ?? "")
+        .split(",")
+        .map((origin) => origin.trim().replace(/\/$/, ""))
+        .filter(Boolean),
+    )
+    .refine(
+      (origins) =>
+        origins.every((origin) => {
+          try {
+            const url = new URL(origin);
+            return ["http:", "https:"].includes(url.protocol) && url.origin === origin;
+          } catch {
+            return false;
+          }
+        }),
+      { message: "TOOL_RUNTIME_FILE_ORIGINS must list origins (scheme, host and port), no paths" },
+    ),
+  TABULAR_MAX_UPLOAD_MB: z.coerce.number().int().optional(),
+  TABULAR_CACHE_MB: z.coerce.number().int().optional(),
+  // Native DuckDB children are memory-heavy (up to memory_mb each): run few at a time.
+  TABULAR_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(2),
 });
 
 export type RuntimeConfig = {
@@ -18,6 +46,8 @@ export type RuntimeConfig = {
   port: number;
   maxConcurrency: number;
   compute: ComputeConfig;
+  /** Unset when no file origin is configured: the tabular endpoint is then disabled. */
+  tabular?: { config: TabularConfig; fileOrigins: string[]; concurrency: number };
 };
 
 export function loadConfig(environment: Record<string, string | undefined>): RuntimeConfig {
@@ -30,5 +60,21 @@ export function loadConfig(environment: Record<string, string | undefined>): Run
       ...(parsed.COMPUTE_TIMEOUT_MS !== undefined ? { timeout_ms: parsed.COMPUTE_TIMEOUT_MS } : {}),
       ...(parsed.COMPUTE_MEMORY_MB !== undefined ? { memory_mb: parsed.COMPUTE_MEMORY_MB } : {}),
     }),
+    ...(parsed.TOOL_RUNTIME_FILE_ORIGINS.length
+      ? {
+          tabular: {
+            fileOrigins: parsed.TOOL_RUNTIME_FILE_ORIGINS,
+            concurrency: parsed.TABULAR_CONCURRENCY,
+            config: tabularConfigSchema.parse({
+              ...(parsed.TABULAR_MAX_UPLOAD_MB !== undefined
+                ? { max_upload_bytes: parsed.TABULAR_MAX_UPLOAD_MB * 1024 * 1024 }
+                : {}),
+              ...(parsed.TABULAR_CACHE_MB !== undefined
+                ? { cache_max_bytes: parsed.TABULAR_CACHE_MB * 1024 * 1024 }
+                : {}),
+            }),
+          },
+        }
+      : {}),
   };
 }

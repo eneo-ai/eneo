@@ -148,7 +148,11 @@ const CAPABILITY_STEPS: Record<
       return query ? m.tool_web_search_query_done({ query }) : m.tool_web_search_done();
     }
   },
-  image_generation: INTERNAL_SERVERS.image_generation.tools.generate_image
+  image_generation: INTERNAL_SERVERS.image_generation.tools.generate_image,
+  tabular_analysis: {
+    running: () => m.tool_tabular_analysis(),
+    done: () => m.tool_tabular_analysis_done()
+  }
 };
 
 function capabilityPurpose(purpose: string | null | undefined): CapabilityPurpose | null {

@@ -31,7 +31,11 @@ MCP_TOOL_DEFINITION_HARD_MAX_BYTES = 1024 * 1024
 # provider pin, and the ask path substitutes the active provider. The tuple
 # order is the order resolved providers are prepended in at ask time.
 GENERAL_PURPOSE = "general"
-CAPABILITY_PURPOSES: tuple[CapabilityPurpose, ...] = ("web_search", "image_generation")
+CAPABILITY_PURPOSES: tuple[CapabilityPurpose, ...] = (
+    "web_search",
+    "image_generation",
+    "tabular_analysis",
+)
 
 # Who a capability provider serves. "everyone" is the tenant's default provider
 # for its purpose (at most one active per tenant and purpose); "groups" targets
@@ -59,13 +63,26 @@ def is_builtin_provider(http_auth_type: str | None) -> bool:
 
 
 # A bundled server runs in the optional tool runtime shipped with Eneo (an
-# isolated container, never the backend process). It is an ordinary general
-# server otherwise: its URL is derived from ``tool_runtime_url`` when an admin
-# adds it, and the bearer comes from ``tool_runtime_token`` at connect time,
-# so no credential is ever stored on the row. Only the bundled-server preset
-# creates such rows; the generic create and update API cannot.
+# isolated container, never the backend process). It is an ordinary server
+# otherwise: its URL is derived from ``tool_runtime_url`` when an admin adds
+# it, and the bearer comes from ``tool_runtime_token`` at connect time, so no
+# credential is ever stored on the row. Only the bundled-server preset creates
+# such rows; the generic create and update API cannot. Each runtime endpoint
+# fixes the purpose its row serves and whether it needs the caller's identity
+# (tabular analysis scopes its parsed-file cache per tenant and user).
 BUNDLED_AUTH_TYPE = "bundled"
-BUNDLED_TOOLS: tuple[str, ...] = ("compute",)
+
+
+@dataclass(frozen=True)
+class BundledToolSpec:
+    purpose: str
+    forward_identity: bool
+
+
+BUNDLED_TOOLS: dict[str, BundledToolSpec] = {
+    "compute": BundledToolSpec(purpose=GENERAL_PURPOSE, forward_identity=False),
+    "tabular": BundledToolSpec(purpose="tabular_analysis", forward_identity=True),
+}
 
 
 def is_bundled_server(http_auth_type: str | None) -> bool:

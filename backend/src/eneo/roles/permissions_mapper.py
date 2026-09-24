@@ -22,4 +22,5 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.ASSISTANT_DEBUG: "Inspect body-free chat diagnostics, including Skill activation decisions, for conversations you can access.",
     Permission.WEB_SEARCH: "Use web search in chats where an assistant offers it. Without this permission web search tools are never attached for the user.",
     Permission.IMAGE_GENERATION: "Use image generation in chats where an assistant offers it. Without this permission image generation tools are never attached for the user.",
+    Permission.TABULAR_ANALYSIS: "Analyse attached CSV and Excel files in chats where an assistant offers it. Without this permission tabular analysis tools are never attached for the user.",
 }

@@ -12,10 +12,10 @@ const jobs: ComputeJob[] = [];
 const handler = createHandler({
   token: TOKEN,
   maxConcurrency: 4,
-  toolTimeoutMs: 10_000,
   endpoints: [
     {
       slug: "compute",
+      toolTimeoutMs: 10_000,
       // In-process engine: the sandbox boundary has its own tests.
       tools: computeTools(compute, async (job) => {
         jobs.push(job);
@@ -76,6 +76,19 @@ describe("authentication", () => {
   test("the runtime refuses to start with a short token", () => {
     expect(() => loadConfig({ TOOL_RUNTIME_TOKEN: "short" })).toThrow();
     expect(loadConfig({ TOOL_RUNTIME_TOKEN: TOKEN }).port).toBe(3010);
+    expect(loadConfig({ TOOL_RUNTIME_TOKEN: TOKEN }).tabular).toBeUndefined();
+    expect(
+      loadConfig({
+        TOOL_RUNTIME_TOKEN: TOKEN,
+        TOOL_RUNTIME_FILE_ORIGINS: "http://localhost:8123, http://host.docker.internal:8123/",
+      }).tabular?.fileOrigins,
+    ).toEqual(["http://localhost:8123", "http://host.docker.internal:8123"]);
+    expect(() =>
+      loadConfig({
+        TOOL_RUNTIME_TOKEN: TOKEN,
+        TOOL_RUNTIME_FILE_ORIGINS: "http://backend:8000/api",
+      }),
+    ).toThrow();
   });
 });
 

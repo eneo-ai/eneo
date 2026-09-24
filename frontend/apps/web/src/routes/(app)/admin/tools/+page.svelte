@@ -10,6 +10,7 @@
   import { untrack } from "svelte";
   import {
     Calculator,
+    Package,
     Plus,
     Wrench,
     CircleCheck,
@@ -49,10 +50,14 @@
   let notice = $state("");
   let reviewing = $state<string | null>(null);
   const servers = $derived(data.mcpSettings.items ?? []);
-  // Bundled runtime servers the deployment offers and this tenant has not added yet.
+  // Bundled runtime servers the deployment offers and this tenant has not added yet:
+  // general ones on the MCP servers tab, capability providers on their capability card.
   const bundledToAdd = $derived(
     (data.bundled.items ?? []).filter((tool) => tool.available && !tool.mcp_server_id)
   );
+  const bundledServersToAdd = $derived(bundledToAdd.filter((tool) => tool.purpose === "general"));
+  const bundledProviderFor = (purpose: string) =>
+    bundledToAdd.find((tool) => tool.purpose === purpose);
   let addingBundled = $state(false);
   let showFunctionServers = $state(false);
   const external = $derived(
@@ -90,13 +95,13 @@
     await refresh();
   }
 
-  async function addBundled(tool: string) {
+  async function addBundled(tool: string, activate = false) {
     addingBundled = true;
     error = "";
     notice = "";
     try {
-      await data.eneo.mcpServers.createBundled({ tool });
-      notice = m.tools_bundled_added();
+      await data.eneo.mcpServers.createBundled({ tool, activate });
+      notice = activate ? m.tools_bundled_provider_added() : m.tools_bundled_added();
       await refresh();
     } catch (e) {
       error = getErrorMessage(e) || m.tools_bundled_add_failed();
@@ -165,13 +170,26 @@
                       </p>{/if}
                   </div>
                 </div>
-                <Button size="sm" onclick={() => configure(capability.purpose)}>
-                  <Plus class="size-4" />{sources.length
-                    ? m.tools_add_source()
-                    : m.capability_configure({
-                        capability: capability.label().toLocaleLowerCase()
-                      })}
-                </Button>
+                <div class="flex flex-wrap items-center gap-2">
+                  {#if bundledProviderFor(capability.purpose)}
+                    {@const bundled = bundledProviderFor(capability.purpose)!}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={addingBundled}
+                      onclick={() => addBundled(bundled.tool, !active)}
+                    >
+                      <Package class="size-4" />{m.tools_use_bundled_provider()}
+                    </Button>
+                  {/if}
+                  <Button size="sm" onclick={() => configure(capability.purpose)}>
+                    <Plus class="size-4" />{sources.length
+                      ? m.tools_add_source()
+                      : m.capability_configure({
+                          capability: capability.label().toLocaleLowerCase()
+                        })}
+                  </Button>
+                </div>
               </header>
               {#each sources as source (source.mcp_server_id)}
                 {@const expanded = reviewing === source.mcp_server_id}
@@ -210,6 +228,7 @@
                             m.tools_readiness_model_missing()}
                           {#if source.image_model?.provider_name}
                             · {source.image_model.provider_name}{/if}
+                        {:else if source.http_auth_type === "bundled"}{m.mcp_auth_bundled()} · {source.http_url}
                         {:else}{m.tools_source_external()} · {source.http_url}{/if}
                       </p>
                       {#if source.audience === "groups"}
@@ -332,7 +351,7 @@
             </Field.Field>
           {/snippet}
           {#snippet actions()}
-            {#each bundledToAdd as bundled (bundled.tool)}
+            {#each bundledServersToAdd as bundled (bundled.tool)}
               <Button
                 size="sm"
                 variant="outline"

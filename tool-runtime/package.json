@@ -12,8 +12,12 @@
     "test": "bun test tests --timeout 30000"
   },
   "dependencies": {
+    "@duckdb/node-api": "1.5.2-r.1",
     "@jitl/quickjs-ng-wasmfile-release-sync": "0.32.0",
     "@modelcontextprotocol/sdk": "1.29.0",
+    "exceljs": "4.4.0",
+    "ipaddr.js": "^2.5.0",
+    "jszip": "^3.10.2",
     "quickjs-emscripten-core": "0.32.0",
     "zod": "^4.6.5"
   },

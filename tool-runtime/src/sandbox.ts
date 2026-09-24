@@ -82,3 +82,22 @@ export async function runIsolated(
     await rm(directory, { recursive: true, force: true });
   }
 }
+
+/** Allows at most `slots` concurrent calls; the rest wait in arrival order. */
+export function concurrencyLimit(slots: number) {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  return async function run<T>(task: () => Promise<T>): Promise<T> {
+    // A released slot passes straight to the next waiter, so a newcomer cannot take it between
+    // the release and the hand-over.
+    if (active >= slots) await new Promise<void>((resolve) => waiting.push(resolve));
+    else active++;
+    try {
+      return await task();
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active--;
+    }
+  };
+}

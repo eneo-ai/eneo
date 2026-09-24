@@ -150,6 +150,8 @@ class BundledTool:
     """A server the bundled tool runtime offers, as seen by one tenant."""
 
     tool: str
+    # The purpose the added server serves ("general" or a capability).
+    purpose: str
     # The deployment configures the runtime (URL and token are both set).
     available: bool
     # The tenant's row for it, once an admin has added it.
@@ -158,8 +160,15 @@ class BundledTool:
 
 # Initial name and description of a bundled server when an admin adds it;
 # both are ordinary editable fields afterwards.
-BUNDLED_TOOL_NAMES: dict[str, str] = {"compute": "Compute"}
+BUNDLED_TOOL_NAMES: dict[str, str] = {
+    "compute": "Compute",
+    "tabular": "Tabular analysis",
+}
 BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
+    "tabular": (
+        "Inspects and queries attached CSV and Excel files with DuckDB in an "
+        "isolated sandbox. Files are fetched through short-lived signed links."
+    ),
     "compute": (
         "Runs JavaScript over JSON in an isolated sandbox for exact "
         "calculations. No network, files or state between calls."
@@ -355,11 +364,15 @@ class MCPServerService:
         return f"{settings.tool_runtime_url.rstrip('/')}/mcp/{tool}"
 
     @staticmethod
-    def _bundled_tool_of(server: MCPServer) -> str | None:
+    def _bundled_tool_name(http_url: str) -> str | None:
+        tool = http_url.rstrip("/").rsplit("/", 1)[-1]
+        return tool if tool in BUNDLED_TOOLS else None
+
+    @classmethod
+    def _bundled_tool_of(cls, server: MCPServer) -> str | None:
         if not is_bundled_server(server.http_auth_type):
             return None
-        tool = server.http_url.rstrip("/").rsplit("/", 1)[-1]
-        return tool if tool in BUNDLED_TOOLS else None
+        return cls._bundled_tool_name(server.http_url)
 
     async def _resolve_builtin_image_model(
         self, purpose: str, image_model_id: UUID | None
@@ -517,11 +530,13 @@ class MCPServerService:
         elif not http_url:
             raise BadRequestException("http_url is required")
         if is_bundled_server(http_auth_type):
-            # Compute and its successors need no identity; capability
-            # purposes for bundled servers are a later, explicit decision.
-            if purpose != GENERAL_PURPOSE:
-                raise BadRequestException("A bundled server is a general server")
-            forward_identity = False
+            # The runtime endpoint fixes the row's purpose and identity mode.
+            spec = BUNDLED_TOOLS.get(self._bundled_tool_name(str(http_url)) or "")
+            if spec is None or purpose != spec.purpose:
+                raise BadRequestException(
+                    "A bundled server serves its tool's own purpose"
+                )
+            forward_identity = spec.forward_identity
         http_url = str(http_url)
         user_groups = await self._resolve_audience(
             purpose, audience, list(user_group_ids or [])
@@ -617,20 +632,24 @@ class MCPServerService:
         return [
             BundledTool(
                 tool=tool,
+                purpose=spec.purpose,
                 available=self.bundled_tool_url(tool) is not None,
                 mcp_server_id=added[tool].id if tool in added else None,
             )
-            for tool in BUNDLED_TOOLS
+            for tool, spec in BUNDLED_TOOLS.items()
         ]
 
     @validate_permissions(Permission.ADMIN)
-    async def create_bundled_mcp_server(self, tool: str) -> MCPServerCreateResult:
+    async def create_bundled_mcp_server(
+        self, tool: str, activate: bool = False
+    ) -> MCPServerCreateResult:
         """Add one of the bundled tool runtime's servers to this tenant.
 
-        The row is an ordinary general server: it goes through the same
-        connection test, tool discovery and approval as any other, and spaces
-        enable it like any other. Only its URL and credential come from the
-        deployment instead of the admin.
+        The row is an ordinary server: it goes through the same connection
+        test and tool discovery as any other. A general server is then enabled
+        per space like any other; a capability provider is saved inactive
+        unless ``activate`` switches it in as the tenant's default. Only its
+        URL and credential come from the deployment instead of the admin.
         """
         if tool not in BUNDLED_TOOLS:
             raise NotFoundException(f"Unknown bundled tool '{tool}'")
@@ -650,7 +669,9 @@ class MCPServerService:
             name=BUNDLED_TOOL_NAMES[tool],
             http_url=url,
             http_auth_type=BUNDLED_AUTH_TYPE,
+            purpose=BUNDLED_TOOLS[tool].purpose,
             description=BUNDLED_TOOL_DESCRIPTIONS[tool],
+            activate=activate,
         )
 
     @validate_permissions(Permission.ADMIN)
@@ -710,7 +731,10 @@ class MCPServerService:
                 and http_auth_type != mcp_server.http_auth_type
             )
             or http_auth_config_schema is not None
-            or bool(forward_identity)
+            or (
+                forward_identity is not None
+                and forward_identity != mcp_server.forward_identity
+            )
             or (purpose is not None and purpose != mcp_server.purpose)
         ):
             raise BadRequestException(

@@ -1,18 +1,18 @@
 /**
  * Capability purposes: MCP servers that act as the tenant's provider for one
- * capability (web search, image generation). The backend resolves an attached
+ * capability (web search, image generation, tabular analysis). The backend resolves an attached
  * capability marker to the active provider at ask time, so every surface here
  * treats them as on/off capabilities rather than as servers.
  *
  * Adding a capability means adding one entry here (plus its messages); every
  * admin, space, assistant and chat surface renders from this list.
  */
-import { Globe, Image } from "@lucide/svelte";
+import { Globe, Image, Sheet } from "@lucide/svelte";
 import { m } from "$lib/paraglide/messages";
 
 export const GENERAL_PURPOSE = "general";
 
-export type CapabilityPurpose = "web_search" | "image_generation";
+export type CapabilityPurpose = "web_search" | "image_generation" | "tabular_analysis";
 
 export type CapabilityDescriptor = {
   purpose: CapabilityPurpose;
@@ -62,6 +62,19 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
     notAvailableHereHint: m.image_generation_not_available_here_hint,
     classificationHint: m.image_generation_classification_hint,
     builtinProvider: true
+  },
+  {
+    purpose: "tabular_analysis",
+    icon: Sheet,
+    label: m.tabular_analysis,
+    providerNamePlaceholder: m.tabular_analysis_provider_name_placeholder,
+    providerManagedNote: m.tabular_analysis_provider_managed_note,
+    forwardIdentityHint: m.tabular_analysis_forward_identity_hint,
+    capabilityHint: m.tabular_analysis_capability_hint,
+    spaceHint: m.tabular_analysis_space_group_hint,
+    noActiveProviderHint: m.tabular_analysis_no_active_provider_hint,
+    notAvailableHereHint: m.tabular_analysis_not_available_here_hint,
+    classificationHint: m.tabular_analysis_classification_hint
   }
 ];
 

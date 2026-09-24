@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { computeConfigSchema } from "../src/tools/compute/config";
-import { runIsolated } from "../src/sandbox";
+import { concurrencyLimit, runIsolated } from "../src/sandbox";
 
 const config = computeConfigSchema.parse({});
 
@@ -71,5 +71,21 @@ describe("sandbox child", () => {
       ),
     ).rejects.toMatchObject({ code: "TIMEOUT" });
     expect(performance.now() - started).toBeLessThan(5_000);
+  });
+});
+
+describe("concurrency limit", () => {
+  test("never runs more than the slot count at once", async () => {
+    const limit = concurrencyLimit(2);
+    let running = 0;
+    let peak = 0;
+    const task = async () => {
+      running++;
+      peak = Math.max(peak, running);
+      await Bun.sleep(5);
+      running--;
+    };
+    await Promise.all(Array.from({ length: 10 }, () => limit(task)));
+    expect(peak).toBe(2);
   });
 });

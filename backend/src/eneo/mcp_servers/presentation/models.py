@@ -19,7 +19,9 @@ from eneo.security_classifications.presentation.security_classification_models i
 
 T = TypeVar("T", bound=BaseModel)
 
-MCPServerPurpose = Literal["general", "web_search", "image_generation"]
+MCPServerPurpose = Literal[
+    "general", "web_search", "image_generation", "tabular_analysis"
+]
 MCPServerAudience = Literal["everyone", "groups"]
 
 
@@ -99,6 +101,8 @@ class BundledToolPublic(BaseModel):
     """A server the bundled tool runtime offers to this tenant."""
 
     tool: str
+    # "general", or the capability purpose the server provides.
+    purpose: str
     # False when the deployment has no tool runtime configured.
     available: bool
     # Set once an admin has added it; the server is then managed like any other.
@@ -107,6 +111,11 @@ class BundledToolPublic(BaseModel):
 
 class BundledToolList(BaseListModel[BundledToolPublic]):
     pass
+
+
+class BundledServerCreate(BaseModel):
+    # Capability providers only: switch it in as the tenant default right away.
+    activate: bool = False
 
 
 class MCPServerCreate(BaseModel):

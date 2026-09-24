@@ -1,18 +1,10 @@
 import { z } from "zod";
 import { ToolError } from "../../errors";
+import type { ToolDefinition } from "../types";
 import type { ComputeConfig } from "./config";
 import type { ComputeJob, ComputeOutcome } from "./ports";
 
 export type ComputeExecutor = (job: ComputeJob) => Promise<ComputeOutcome>;
-
-export type ToolDefinition = {
-  name: string;
-  title: string;
-  description: string;
-  inputSchema: z.ZodRawShape;
-  readOnly: boolean;
-  execute(raw: unknown): Promise<Record<string, unknown>>;
-};
 
 export function computeTools(config: ComputeConfig, run: ComputeExecutor): ToolDefinition[] {
   const input = z.object({

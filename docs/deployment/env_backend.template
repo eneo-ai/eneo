@@ -441,6 +441,8 @@ EXPORT_MAX_AGE_HOURS=24
 # TOOL_RUNTIME_TOKEN in .env; it is never stored in the database.
 # TOOL_RUNTIME_URL=http://tool-runtime:3010
 # TOOL_RUNTIME_TOKEN=
+# Tabular analysis also needs signed file links the runtime can reach:
+# FILE_REFERENCE_BASE_URL=http://backend:8000
 
 # ============================================================================
 # FEATURE FLAGS

@@ -33,6 +33,9 @@ services:
       # Admin > Tools offers "Add bundled compute" at this URL.
       - TOOL_RUNTIME_URL=${TOOL_RUNTIME_URL:-http://localhost:3010}
       - TOOL_RUNTIME_TOKEN=${TOOL_RUNTIME_TOKEN:-local-development-only-tool-runtime-token}
+      # Tabular analysis fetches attachments through FILE_REFERENCE_BASE_URL;
+      # both common dev values are allowed.
+      - TOOL_RUNTIME_FILE_ORIGINS=${TOOL_RUNTIME_FILE_ORIGINS:-http://localhost:8123,http://host.docker.internal:8123}
     volumes:
       - ../:/workspace
       # Isolate .venv from host to prevent host-side uv/python from corrupting it
