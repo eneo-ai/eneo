@@ -51,6 +51,11 @@ class WidgetAssembler:
             activated_by_user_id=widget.activated_by_user_id,
             activated_at=widget.activated_at,
             paused_at=widget.paused_at,
+            activation_requested_at=widget.activation_requested_at,
+            activation_requested_by_user_id=widget.activation_requested_by_user_id,
+            activation_declined_at=widget.activation_declined_at,
+            activation_declined_by_user_id=widget.activation_declined_by_user_id,
+            activation_decline_reason=widget.activation_decline_reason,
             created_at=widget.created_at,
             updated_at=widget.updated_at,
         )

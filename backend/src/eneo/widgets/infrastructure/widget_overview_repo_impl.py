@@ -5,18 +5,21 @@
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy import SQLColumnExpression
+from sqlalchemy.orm import aliased
 
 from eneo.database.database import AsyncSession
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.users_table import Users
 from eneo.database.tables.widget_usage_table import WidgetDailyUsage
 from eneo.database.tables.widgets_table import Widgets
-from eneo.widgets.domain.widget import Widget
+from eneo.spaces.oversight.oversight_models import OversightPersonRef
+from eneo.widgets.domain.widget import Widget, WidgetStatus
 from eneo.widgets.infrastructure.widget_repo_impl import to_entity
 
 
@@ -48,6 +51,38 @@ class WidgetOverviewRow:
     helpful_30d: int
     unhelpful_30d: int
     last_activity: Optional[date]
+    activation_requested_at: Optional[datetime] = None
+    # None when nobody asked, or the user who asked was deleted.
+    activation_requested_by: Optional[OversightPersonRef] = None
+
+
+@dataclass(frozen=True)
+class WidgetReviewRow:
+    overview: WidgetOverviewRow
+    created_by: Optional[OversightPersonRef]
+    activated_by: Optional[OversightPersonRef]
+    activation_declined_by: Optional[OversightPersonRef]
+
+
+def _person_columns(alias: Any, prefix: str) -> list[Any]:
+    return [
+        alias.id.label(f"{prefix}_id"),
+        alias.username.label(f"{prefix}_username"),
+        alias.email.label(f"{prefix}_email"),
+    ]
+
+
+def _person(row: Any, prefix: str) -> Optional[OversightPersonRef]:
+    id = getattr(row, f"{prefix}_id")
+    email = getattr(row, f"{prefix}_email")
+    if id is None or email is None:
+        return None
+    username = getattr(row, f"{prefix}_username")
+    return OversightPersonRef(id=id, name=username or email, email=email)
+
+
+def _live_user(alias: Any, user_id: Any) -> sa.ColumnElement[bool]:
+    return sa.and_(alias.id == user_id, alias.deleted_at.is_(None))
 
 
 class WidgetOverviewRepoImpl:
@@ -56,9 +91,7 @@ class WidgetOverviewRepoImpl:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def list_tenant(
-        self, tenant_id: UUID, *, today: date
-    ) -> list[WidgetOverviewRow]:
+    def _select(self, tenant_id: UUID, *, today: date) -> sa.Select[Any]:
         since_7 = today - timedelta(days=6)
         since_30 = today - timedelta(days=29)
         usage = WidgetDailyUsage
@@ -94,7 +127,8 @@ class WidgetOverviewRepoImpl:
             .subquery()
         )
 
-        stmt = (
+        requester = aliased(Users)
+        return (
             sa.select(
                 Widgets,
                 Spaces.name.label("space_name"),
@@ -109,47 +143,93 @@ class WidgetOverviewRepoImpl:
                 aggregates.c.unhelpful_30d,
                 aggregates.c.last_activity,
                 aggregates.c.budget_used_today,
+                *_person_columns(requester, "requester"),
             )
             .outerjoin(Spaces, Spaces.id == Widgets.space_id)
             .outerjoin(Assistants, Assistants.id == Widgets.target_id)
             .outerjoin(aggregates, aggregates.c.widget_id == Widgets.id)
-            .where(Widgets.tenant_id == tenant_id)
-            .order_by(
-                sa.case((Widgets.status == "active", 0), else_=1),
-                Widgets.updated_at.desc(),
+            .outerjoin(
+                requester,
+                _live_user(requester, Widgets.activation_requested_by_user_id),
             )
+            .where(Widgets.tenant_id == tenant_id)
+        )
+
+    @staticmethod
+    def _row(row: Any) -> WidgetOverviewRow:
+        widget: Widgets = row[0]
+        entity = to_entity(widget)
+        return WidgetOverviewRow(
+            widget=entity,
+            target_published=row.assistant_published,
+            id=widget.id,
+            public_id=widget.public_id,
+            name=widget.name,
+            status=widget.status,
+            space_id=widget.space_id,
+            space_name=row.space_name,
+            target_id=widget.target_id,
+            assistant_name=row.assistant_name,
+            allowed_origins=list(widget.allowed_origins or []),
+            daily_token_budget=entity.limits.daily_token_budget,
+            budget_used_today=int(row.budget_used_today or 0),
+            activated_at=widget.activated_at,
+            paused_at=widget.paused_at,
+            updated_at=widget.updated_at,
+            questions_7d=int(row.questions_7d or 0),
+            questions_30d=int(row.questions_30d or 0),
+            input_tokens_30d=int(row.input_tokens_30d or 0),
+            output_tokens_30d=int(row.output_tokens_30d or 0),
+            blocked_30d=int(row.blocked_30d or 0),
+            helpful_30d=int(row.helpful_30d or 0),
+            unhelpful_30d=int(row.unhelpful_30d or 0),
+            last_activity=row.last_activity,
+            activation_requested_at=widget.activation_requested_at,
+            activation_requested_by=_person(row, "requester"),
+        )
+
+    async def list_tenant(
+        self, tenant_id: UUID, *, today: date
+    ) -> list[WidgetOverviewRow]:
+        """Pending activation requests first (oldest first), then active
+        widgets, then the most recently changed."""
+        stmt = self._select(tenant_id, today=today).order_by(
+            Widgets.activation_requested_at.asc().nulls_last(),
+            sa.case((Widgets.status == WidgetStatus.ACTIVE.value, 0), else_=1),
+            Widgets.updated_at.desc(),
         )
         rows = await self.session.execute(stmt)
-        result: list[WidgetOverviewRow] = []
-        for row in rows:
-            widget: Widgets = row[0]
-            entity = to_entity(widget)
-            result.append(
-                WidgetOverviewRow(
-                    widget=entity,
-                    target_published=row.assistant_published,
-                    id=widget.id,
-                    public_id=widget.public_id,
-                    name=widget.name,
-                    status=widget.status,
-                    space_id=widget.space_id,
-                    space_name=row.space_name,
-                    target_id=widget.target_id,
-                    assistant_name=row.assistant_name,
-                    allowed_origins=list(widget.allowed_origins or []),
-                    daily_token_budget=entity.limits.daily_token_budget,
-                    budget_used_today=int(row.budget_used_today or 0),
-                    activated_at=widget.activated_at,
-                    paused_at=widget.paused_at,
-                    updated_at=widget.updated_at,
-                    questions_7d=int(row.questions_7d or 0),
-                    questions_30d=int(row.questions_30d or 0),
-                    input_tokens_30d=int(row.input_tokens_30d or 0),
-                    output_tokens_30d=int(row.output_tokens_30d or 0),
-                    blocked_30d=int(row.blocked_30d or 0),
-                    helpful_30d=int(row.helpful_30d or 0),
-                    unhelpful_30d=int(row.unhelpful_30d or 0),
-                    last_activity=row.last_activity,
-                )
+        return [self._row(row) for row in rows]
+
+    async def get_one(
+        self, tenant_id: UUID, widget_id: UUID, *, today: date
+    ) -> Optional[WidgetReviewRow]:
+        """One widget of the tenant with its usage and the people behind its
+        lifecycle; None for another tenant's widget."""
+        creator = aliased(Users)
+        activator = aliased(Users)
+        decliner = aliased(Users)
+        stmt = (
+            self._select(tenant_id, today=today)
+            .add_columns(
+                *_person_columns(creator, "creator"),
+                *_person_columns(activator, "activator"),
+                *_person_columns(decliner, "decliner"),
             )
-        return result
+            .outerjoin(creator, _live_user(creator, Widgets.created_by_user_id))
+            .outerjoin(activator, _live_user(activator, Widgets.activated_by_user_id))
+            .outerjoin(
+                decliner,
+                _live_user(decliner, Widgets.activation_declined_by_user_id),
+            )
+            .where(Widgets.id == widget_id)
+        )
+        row = (await self.session.execute(stmt)).one_or_none()
+        if row is None:
+            return None
+        return WidgetReviewRow(
+            overview=self._row(row),
+            created_by=_person(row, "creator"),
+            activated_by=_person(row, "activator"),
+            activation_declined_by=_person(row, "decliner"),
+        )
