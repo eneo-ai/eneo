@@ -97,7 +97,10 @@ class FlowRunContractService:
             text_processing_steps=_text_processing_contracts(runtime_inputs.steps),
             final_output=build_final_output_contract(runtime_inputs.steps),
             form_fields=_published_form_fields(runtime_inputs.definition),
-            steps_requiring_input=_runtime_input_contracts(runtime_inputs.input_specs),
+            steps_requiring_input=_runtime_input_contracts(
+                runtime_inputs.input_specs,
+                audio_max_duration_seconds=self.settings.flow_audio_max_duration_seconds,
+            ),
             runtime_upload_policy=default_runtime_upload_policy_public(),
             steps_requiring_review=_review_step_contracts(runtime_inputs.steps),
             aggregate_max_files=aggregate_runtime_file_limit(
@@ -332,6 +335,8 @@ def _published_form_fields(
 
 def _runtime_input_contracts(
     specs: Mapping[UUID, RuntimeStepInputSpec],
+    *,
+    audio_max_duration_seconds: int,
 ) -> list[FlowRuntimeInputContractPublic]:
     return [
         FlowRuntimeInputContractPublic(
@@ -343,6 +348,12 @@ def _runtime_input_contracts(
             input_format=spec.runtime_input.input_format,
             max_files=spec.max_files,
             max_file_size_bytes=spec.max_file_size_bytes,
+            # The decoder refuses longer audio per file (files/audio.py).
+            max_duration_seconds=(
+                audio_max_duration_seconds
+                if spec.runtime_input.input_format is FlowRuntimeInputFormat.AUDIO
+                else None
+            ),
             accepted_mimetypes=spec.accepted_mimetypes,
         )
         for spec in sorted(

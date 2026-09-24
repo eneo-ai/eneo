@@ -19282,6 +19282,7 @@ export interface components {
      *           "description": "Provide the recorded review conversation.",
      *           "input_format": "audio",
      *           "label": "Upload audio",
+     *           "max_duration_seconds": 18000,
      *           "max_file_size_bytes": 52428800,
      *           "max_files": 1,
      *           "required": true,
@@ -23530,6 +23531,11 @@ export interface components {
       input_format: components["schemas"]["FlowRuntimeInputFormat"];
       /** Label */
       label?: string | null;
+      /**
+       * Max Duration Seconds
+       * @description Longest audio Eneo accepts in one file of this input, in seconds; a longer file is refused when the run transcribes it. Set only for audio inputs.
+       */
+      max_duration_seconds?: number | null;
       /** Max File Size Bytes */
       max_file_size_bytes?: number | null;
       /** Max Files */

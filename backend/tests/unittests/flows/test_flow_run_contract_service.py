@@ -306,6 +306,52 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
 
 
 @pytest.mark.asyncio
+async def test_an_audio_input_states_the_longest_file_eneo_transcribes() -> None:
+    audio_step = _step(step_order=1, input_type="audio")
+    flow = _flow(step=audio_step).model_copy(update={"published_version": 1})
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    settings_service = AsyncMock()
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    versions = AsyncMock()
+    versions.get.return_value = _published_version(
+        version=1,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "metadata_json": {},
+            "steps": [
+                {
+                    "step_id": str(audio_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(audio_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(audio_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "audio",
+                    "input_config": {
+                        "runtime_input": {"enabled": True, "input_format": "audio"}
+                    },
+                    "output_mode": "transcribe_only",
+                    "output_type": "text",
+                },
+            ],
+        },
+    )
+    two_hours = get_settings().model_copy(
+        update={"flow_audio_max_duration_seconds": 7200}
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=versions,
+        settings=two_hours,
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    assert contract.steps_requiring_input[0].max_duration_seconds == 7200
+
+
+@pytest.mark.asyncio
 async def test_get_run_contract_requires_persisted_flow_id() -> None:
     flow_service = AsyncMock()
     settings_service = AsyncMock()
@@ -526,6 +572,7 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
     assert contract.steps_requiring_input[0].required is True
     assert contract.steps_requiring_input[0].max_files == 2
     assert contract.steps_requiring_input[0].max_file_size_bytes == 12_000_000
+    assert contract.steps_requiring_input[0].max_duration_seconds is None
     assert contract.runtime_upload_policy.min_timeout_seconds == 120
     assert contract.runtime_upload_policy.seconds_per_mebibyte == 8
     assert contract.runtime_upload_policy.max_timeout_seconds == 600

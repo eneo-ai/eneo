@@ -83,6 +83,7 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
             "input_format": "audio",
             "max_files": 1,
             "max_file_size_bytes": 52428800,
+            "max_duration_seconds": 18000,
             "accepted_mimetypes": ["audio/wav", "audio/mpeg"],
         }
     ],
@@ -192,6 +193,14 @@ class FlowRuntimeInputContractPublic(BaseModel):
     input_format: FlowRuntimeInputFormat
     max_files: int | None = None
     max_file_size_bytes: int | None = None
+    max_duration_seconds: int | None = Field(
+        default=None,
+        description=(
+            "Longest audio Eneo accepts in one file of this input, in seconds; "
+            "a longer file is refused when the run transcribes it. Set only for "
+            "audio inputs."
+        ),
+    )
     accepted_mimetypes: list[str] = Field(default_factory=list)
 
 
