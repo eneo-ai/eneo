@@ -1,10 +1,16 @@
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
+from eneo.database.tables.widgets_table import Widgets
 from eneo.main.exceptions import BadRequestException
+from eneo.widgets.domain.exceptions import WidgetActivationRequestMissingError
 from eneo.widgets.domain.widget import (
+    ACTIVATION_REVIEW_FIELDS,
     DEFAULT_AI_DISCLOSURE,
+    LIFECYCLE_FIELDS,
     BotProtection,
     Widget,
     WidgetLanguage,
@@ -229,3 +235,155 @@ def test_theme_header_colour_and_logo_are_validated():
         WidgetTheme(header_color="blue")
     with pytest.raises(ValueError):
         WidgetTheme(logo_url="javascript:alert(1)")
+
+
+def _review_state(widget: Widget) -> dict:
+    return {field: getattr(widget, field) for field in ACTIVATION_REVIEW_FIELDS}
+
+
+_NO_REVIEW = dict.fromkeys(ACTIVATION_REVIEW_FIELDS)
+
+
+def _activatable_widget() -> Widget:
+    widget = _widget()
+    widget.apply_update({"allowed_origins": ["https://www.kommun.se"]})
+    return widget
+
+
+def test_activation_can_be_requested_from_draft_or_paused_only():
+    by = uuid4()
+    widget = _activatable_widget()
+    assert widget.request_activation(by=by) is True
+    assert widget.activation_requested_by_user_id == by
+    assert widget.activation_requested_at is not None
+
+    widget.activate(by=uuid4())
+    with pytest.raises(BadRequestException):
+        widget.request_activation(by=by)
+
+    widget.pause()
+    assert widget.request_activation(by=by) is True
+
+    widget.archive()
+    with pytest.raises(BadRequestException):
+        widget.request_activation(by=by)
+
+
+def test_a_repeated_request_changes_nothing_and_a_new_one_clears_a_send_back():
+    editor, admin = uuid4(), uuid4()
+    widget = _widget()
+    first = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    assert widget.request_activation(by=editor, now=first) is True
+    assert widget.request_activation(by=uuid4()) is False
+    assert widget.activation_requested_at == first
+    assert widget.activation_requested_by_user_id == editor
+
+    widget.decline_activation_request(by=admin, reason="Lägg till fler källor.")
+    assert widget.request_activation(by=editor) is True
+    assert widget.activation_declined_at is None
+    assert widget.activation_declined_by_user_id is None
+    assert widget.activation_decline_reason is None
+
+
+def test_withdrawing_without_a_pending_request_changes_nothing():
+    widget = _widget()
+    assert widget.withdraw_activation_request() is False
+    assert _review_state(widget) == _NO_REVIEW
+
+    widget.request_activation(by=uuid4())
+    assert widget.withdraw_activation_request() is True
+    assert _review_state(widget) == _NO_REVIEW
+
+
+def test_sending_back_needs_a_pending_request():
+    widget = _widget()
+    with pytest.raises(WidgetActivationRequestMissingError) as refused:
+        widget.decline_activation_request(by=uuid4(), reason="Lägg till fler källor.")
+    assert refused.value.status_code == 409
+    assert refused.value.code == "widget_activation_request_missing"
+
+    admin = uuid4()
+    widget.request_activation(by=uuid4())
+    widget.decline_activation_request(by=admin, reason="Lägg till fler källor.")
+    assert widget.activation_requested_at is None
+    assert widget.activation_requested_by_user_id is None
+    assert widget.activation_declined_by_user_id == admin
+    assert widget.activation_declined_at is not None
+    assert widget.activation_decline_reason == "Lägg till fler källor."
+
+    with pytest.raises(WidgetActivationRequestMissingError):
+        widget.decline_activation_request(by=admin, reason="Lägg till fler källor.")
+
+
+@pytest.mark.parametrize("sent_back", [False, True])
+def test_activate_and_archive_clear_the_activation_review(sent_back):
+    # validate_assignment would reject the status change if the review
+    # fields were cleared after it, so passing proves the order.
+    widget = _activatable_widget()
+    widget.request_activation(by=uuid4())
+    if sent_back:
+        widget.decline_activation_request(by=uuid4(), reason="Lägg till fler källor.")
+    widget.activate(by=uuid4())
+    assert widget.status == WidgetStatus.ACTIVE
+    assert _review_state(widget) == _NO_REVIEW
+
+    widget.pause()
+    widget.request_activation(by=uuid4())
+    if sent_back:
+        widget.decline_activation_request(by=uuid4(), reason="Lägg till fler källor.")
+    widget.archive()
+    assert widget.status == WidgetStatus.ARCHIVED
+    assert _review_state(widget) == _NO_REVIEW
+
+
+def test_a_widget_awaiting_activation_is_draft_or_paused_and_not_sent_back():
+    now = datetime.now(timezone.utc)
+    base = _widget().model_dump()
+    with pytest.raises(ValidationError):
+        Widget.model_validate(
+            base
+            | {
+                "status": WidgetStatus.ACTIVE,
+                "activated_at": now,
+                "activation_requested_at": now,
+            }
+        )
+    with pytest.raises(ValidationError):
+        Widget.model_validate(
+            base
+            | {
+                "activation_requested_at": now,
+                "activation_declined_at": now,
+                "activation_decline_reason": "Lägg till fler källor.",
+            }
+        )
+
+    requested = _widget()
+    requested.request_activation(by=uuid4())
+    requested.activated_at = now
+    with pytest.raises(ValidationError):
+        requested.status = WidgetStatus.ACTIVE
+
+    requested = _widget()
+    requested.request_activation(by=uuid4())
+    with pytest.raises(ValidationError):
+        requested.activation_declined_at = now
+
+
+def test_the_activation_review_is_written_by_every_lifecycle_command():
+    assert ACTIVATION_REVIEW_FIELDS <= LIFECYCLE_FIELDS
+    assert ACTIVATION_REVIEW_FIELDS <= set(Widget.model_fields)
+
+
+def test_the_activation_review_round_trips_through_the_row_mapping():
+    from eneo.widgets.infrastructure.widget_repo_impl import _to_values, to_entity
+
+    widget = _widget()
+    widget.request_activation(by=uuid4())
+    widget.decline_activation_request(by=uuid4(), reason="Lägg till fler källor.")
+    values = _to_values(widget)
+    assert ACTIVATION_REVIEW_FIELDS <= set(values)
+
+    now = datetime.now(timezone.utc)
+    row = Widgets(**values, id=uuid4(), revision=0, created_at=now, updated_at=now)
+    assert _review_state(to_entity(row)) == _review_state(widget)

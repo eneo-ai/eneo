@@ -1,7 +1,8 @@
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index
+from sqlalchemy import TIMESTAMP, CheckConstraint, ForeignKey, Index, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.ai_models_table import (
@@ -149,9 +150,27 @@ class SpacesUsers(BaseCrossReference):
         ForeignKey(Users.id, ondelete="CASCADE"), primary_key=True
     )
     role: Mapped[str] = mapped_column()
+    # Set when a tenant administrator joined through oversight. The row is
+    # rewritten on every space save, so SpaceMember must carry both values.
+    oversight_joined_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    oversight_join_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
     user: Mapped["Users"] = relationship()
+
+    __table_args__ = (
+        CheckConstraint(
+            "(oversight_joined_at IS NULL) = (oversight_join_reason IS NULL)",
+            name="ck_spaces_users_oversight_join_pair",
+        ),
+        CheckConstraint(
+            "oversight_join_reason IS NULL"
+            " OR char_length(oversight_join_reason) BETWEEN 10 AND 500",
+            name="ck_spaces_users_oversight_join_reason_length",
+        ),
+    )
 
 
 class SpacesUserGroups(BaseCrossReference):

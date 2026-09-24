@@ -319,10 +319,22 @@ async def test_pause_is_allowed_for_editors_and_admins(assistant):
     assert paused.widget.token_generation == 2
 
     # The kill switch bypasses the revision check and writes lifecycle columns
-    # only, so it can neither lose to an autosave nor overwrite one.
+    # only, so it can neither lose to an autosave nor overwrite one. The
+    # activation review columns ride along so archive persists their clear.
     assert repo.last_update == {
         "check_revision": False,
-        "only": frozenset({"status", "paused_at", "token_generation"}),
+        "only": frozenset(
+            {
+                "status",
+                "paused_at",
+                "token_generation",
+                "activation_requested_at",
+                "activation_requested_by_user_id",
+                "activation_declined_at",
+                "activation_declined_by_user_id",
+                "activation_decline_reason",
+            }
+        ),
     }
 
     viewer_user = _user()

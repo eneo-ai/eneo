@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 from typing import Any, Literal, Optional, Union
 from uuid import UUID
@@ -77,8 +78,15 @@ def _empty_mcp_server_public_dict_list() -> list[MCPServerPublicDict]:
 # Members
 
 
+class SpaceMemberOversightJoin(BaseModel):
+    joined_at: datetime
+    # None when the reader may not read the space's members.
+    reason: Optional[str] = None
+
+
 class SpaceMember(UserSparse):
     role: SpaceRoleValue
+    oversight_join: Optional[SpaceMemberOversightJoin] = None
 
 
 class SpaceGroupMember(InDB):

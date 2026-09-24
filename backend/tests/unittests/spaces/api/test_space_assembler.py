@@ -11,7 +11,11 @@ from eneo.files.file_models import FileRestrictions, Limit
 from eneo.main.models import ResourcePermission
 from eneo.questions.question import UseTools
 from eneo.spaces.api.space_assembler import SpaceAssembler
-from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
+from eneo.spaces.api.space_models import (
+    SpaceMember,
+    SpaceMemberOversightJoin,
+    SpaceRoleValue,
+)
 from eneo.spaces.space import Space
 from eneo.spaces.space_applications_projection import (
     AssistantApplicationsProjection,
@@ -156,6 +160,34 @@ def test_space_members_ordering(space: Space, space_assembler: SpaceAssembler):
     space_public = space_assembler.from_space_to_model(space)
 
     assert space_public.members.items == [editor_2, admin, editor]
+
+
+@pytest.mark.parametrize("can_read_members", [True, False])
+def test_only_readers_of_the_member_list_see_why_an_admin_joined(
+    space: Space, space_assembler: SpaceAssembler, can_read_members: bool
+):
+    join = SpaceMemberOversightJoin(
+        joined_at=datetime(2026, 9, 24, tzinfo=UTC),
+        reason="Ärende KS 2026/123 – kontroll av underlag",
+    )
+    joined = SpaceMember(
+        id=uuid4(),
+        email="tenant-admin@example.com",
+        username="tenant-admin",
+        role=SpaceRoleValue.VIEWER,
+        oversight_join=join,
+    )
+    space.members = {joined.id: joined}
+    actor = space_assembler.actor_manager.get_space_actor_from_space.return_value
+    actor.can_read_members.return_value = can_read_members
+
+    [member] = space_assembler.from_space_to_model(space).members.items
+
+    assert member.oversight_join is not None
+    assert member.oversight_join.joined_at == join.joined_at
+    assert member.oversight_join.reason == (join.reason if can_read_members else None)
+    # The domain member is written back on the next save and keeps its reason.
+    assert joined.oversight_join == join
 
 
 def test_only_org_enabled_completion_models_are_returned(

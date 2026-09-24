@@ -3,7 +3,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import ForeignKey, Index, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -70,6 +70,33 @@ class Widgets(BasePublic):
     paused_at: Mapped[Optional[datetime]] = mapped_column(
         sa.DateTime(timezone=True), nullable=True
     )
+    # A pending activation request, and the last time an administrator sent
+    # one back. Activating or archiving clears all five.
+    activation_requested_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    activation_requested_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            Users.id,
+            ondelete="SET NULL",
+            name="fk_widgets_activation_requested_by_user_id",
+        ),
+        nullable=True,
+    )
+    activation_declined_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    activation_declined_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            Users.id,
+            ondelete="SET NULL",
+            name="fk_widgets_activation_declined_by_user_id",
+        ),
+        nullable=True,
+    )
+    activation_decline_reason: Mapped[Optional[str]] = mapped_column(
+        sa.Text, nullable=True
+    )
 
     __table_args__ = (
         UniqueConstraint("public_id", name="uq_widgets_public_id"),
@@ -77,4 +104,21 @@ class Widgets(BasePublic):
         Index("ix_widgets_space_id", "space_id"),
         Index("ix_widgets_template_id", "template_id"),
         Index("ix_widgets_target", "target_type", "target_id"),
+        CheckConstraint(
+            "activation_requested_at IS NULL OR status IN ('draft', 'paused')",
+            name="ck_widgets_activation_request_status",
+        ),
+        CheckConstraint(
+            "(activation_declined_at IS NULL) = (activation_decline_reason IS NULL)",
+            name="ck_widgets_activation_decline_pair",
+        ),
+        CheckConstraint(
+            "activation_requested_at IS NULL OR activation_declined_at IS NULL",
+            name="ck_widgets_activation_request_xor_decline",
+        ),
+        CheckConstraint(
+            "activation_decline_reason IS NULL"
+            " OR char_length(activation_decline_reason) BETWEEN 10 AND 500",
+            name="ck_widgets_activation_decline_reason_length",
+        ),
     )

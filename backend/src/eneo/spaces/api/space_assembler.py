@@ -60,6 +60,24 @@ if TYPE_CHECKING:
     from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
 
 
+def _without_oversight_join_reasons(members: list[SpaceMember]) -> list[SpaceMember]:
+    """Members still see who joined through oversight, and when; the reason
+    can name the subject of an investigation, so only readers of the member
+    list get it. Copies: the domain members are saved back as they are."""
+    return [
+        member.model_copy(
+            update={
+                "oversight_join": member.oversight_join.model_copy(
+                    update={"reason": None}
+                )
+            }
+        )
+        if member.oversight_join is not None
+        else member
+        for member in members
+    ]
+
+
 class SpaceAssembler:
     def __init__(
         self,
@@ -670,8 +688,11 @@ class SpaceAssembler:
         )
         knowledge = self._get_knowledge_model(space)
         self._apply_api_key_resource_caps(applications, knowledge)
+        member_items = self._sort_members(space)
+        if not actor.can_read_members():
+            member_items = _without_oversight_join_reasons(member_items)
         members = PaginatedPermissions[SpaceMember](
-            items=self._sort_members(space),
+            items=member_items,
             permissions=self._cap_space_permissions(
                 self._get_member_permissions(space)
             ),

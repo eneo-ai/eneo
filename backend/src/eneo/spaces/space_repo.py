@@ -558,11 +558,21 @@ class SpaceRepository:
 
         # Add members
         if members:
+            # Every row carries the marker columns so the bulk insert keeps one
+            # shape, and a normal save never drops an oversight join.
             spaces_users = [
                 dict(
                     space_id=space_in_db.id,
                     user_id=member.id,
                     role=member.role.value,
+                    oversight_joined_at=(
+                        member.oversight_join.joined_at
+                        if member.oversight_join
+                        else None
+                    ),
+                    oversight_join_reason=(
+                        member.oversight_join.reason if member.oversight_join else None
+                    ),
                 )
                 for member in members.values()
             ]

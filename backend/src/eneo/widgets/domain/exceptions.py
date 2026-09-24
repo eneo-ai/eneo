@@ -59,6 +59,17 @@ class WidgetRevisionConflictError(WidgetPublicError):
         super().__init__("Widget changed. Reload it before saving your changes.")
 
 
+class WidgetActivationRequestMissingError(WidgetPublicError):
+    """No activation request is pending, for example because it was just
+    withdrawn or the widget was activated."""
+
+    status_code = 409
+    code = "widget_activation_request_missing"
+
+    def __init__(self) -> None:
+        super().__init__("No activation request is pending for this widget.")
+
+
 class ChallengeInvalidError(WidgetPublicError):
     status_code = 400
     code = "challenge_invalid"
