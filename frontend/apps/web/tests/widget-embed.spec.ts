@@ -398,18 +398,14 @@ test.describe("embeddable widget", () => {
     expect(swedish.headers()["location"]).toBe(`/en/embed/${widget.public_id}${query}`);
   });
 
-  test("on a phone a paused widget is a modal notice that closes itself", async ({
+  test("on a phone the chat is modal and a paused widget has no launcher on a new visit", async ({
     page,
     request,
     baseURL
   }) => {
+    test.setTimeout(60_000);
     const widget = await createActiveWidget(page, request);
     const loaderOrigin = baseURL!.replace(/\/$/, "");
-    await expectOk(
-      await backendFetch(page, request, `/api/v1/widgets/${widget.id}/pause/`, { method: "POST" }),
-      "pause widget"
-    );
-
     await page.setViewportSize({ width: 375, height: 812 });
     hostHtml = hostPage(loaderOrigin, widget.public_id);
     await page.goto(`${HOST_ORIGIN}/index.html`);
@@ -418,7 +414,9 @@ test.describe("embeddable widget", () => {
     await launcher.click();
     await expect(launcher).toHaveAttribute("aria-expanded", "true");
     const frame = page.frameLocator("eneo-widget iframe");
-    await expect(frame.getByText("Chatten är pausad")).toBeVisible({ timeout: 20_000 });
+    await expect(frame.getByRole("textbox", { name: "Din fråga" })).toBeVisible({
+      timeout: 20_000
+    });
 
     // Full screen the panel is a modal dialog: the page behind it is inert,
     // so neither Tab nor a screen reader reaches content hidden behind it.
@@ -426,9 +424,7 @@ test.describe("embeddable widget", () => {
     await expect(page.locator("main")).toHaveAttribute("inert", "");
     expect(await wcagViolations(page)).toEqual([]);
 
-    // The notice takes part like the chat: focus moves to it, so a screen
-    // reader reads it, and its own close button replaces the launcher.
-    await expect(frame.getByRole("heading", { name: "Chatten är inte tillgänglig" })).toBeFocused();
+    // The chat's close button replaces the launcher while the panel is open.
     await expect(launcher).toBeHidden();
     await frame.getByRole("button", { name: "Stäng chatten" }).click();
     await expect(launcher).toHaveAttribute("aria-expanded", "false");
@@ -438,6 +434,19 @@ test.describe("embeddable widget", () => {
     await expect(page.locator("eneo-widget .panel")).toBeHidden();
     // The host page is usable again: a click reaches its own content.
     await page.getByRole("heading", { name: "Testkommun" }).click();
+
+    await expectOk(
+      await backendFetch(page, request, `/api/v1/widgets/${widget.id}/pause/`, { method: "POST" }),
+      "pause widget"
+    );
+    const settingsResponse = page.waitForResponse((response) =>
+      response.url().endsWith(`/widget/settings/${widget.public_id}`)
+    );
+    await page.reload();
+    expect((await settingsResponse).status()).toBe(404);
+    await expect(page.locator("eneo-widget button.launcher")).toBeHidden();
+    await expect(page.locator("eneo-widget iframe")).toHaveCount(0);
+    await expect(page.locator("main")).not.toHaveAttribute("inert", "");
   });
 
   test("a site that is not on the allowed list cannot frame the widget", async ({

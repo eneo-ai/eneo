@@ -24,11 +24,12 @@ The snippet carries nothing the editor can change later. Before it shows
 the launcher, the loader asks the Eneo origin for the widget's saved
 settings (`GET /widget/settings/<id>`: language, position and colours), so
 an edit or a template publication reaches every site without a new snippet
-and the launcher never appears in one corner and moves to the other. It
-waits at most three seconds; without an answer (a paused widget, a host CSP
-without the Eneo origin in `connect-src`) it shows with its attributes. An
-open requested before then (`auto-open`, `Eneo('open')`) waits as well, so
-the panel opens in the saved corner too.
+and the launcher never appears in one corner and moves to the other. The
+loader waits at most three seconds; a paused widget returns 404 and has no
+launcher. Without an answer (for example, when the host CSP omits the Eneo
+origin from `connect-src`) the launcher shows with its attributes. An open
+requested before then (`auto-open`, `Eneo('open')`) waits as well, so the panel
+opens in the saved corner too.
 
 Optional `data-*` attributes (also usable as attributes on a hand-written
 `<eneo-widget>` element for single-page apps):

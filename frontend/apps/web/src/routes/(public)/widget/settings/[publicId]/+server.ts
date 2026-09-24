@@ -79,7 +79,8 @@ function cachedSettings(publicId: string, fetch: typeof globalThis.fetch): Cache
  * `GET /widget/settings/wgt_…` — the language, position and colours the
  * loader needs before it shows the launcher. Cached as briefly as the
  * widget's configuration; a paused, draft or unknown widget answers 404 and
- * the loader falls back to its attributes, as it does on a slow backend.
+ * the loader hides the launcher. A slow or failed request still falls back to
+ * the element's attributes.
  */
 export const GET: RequestHandler = async ({ params, fetch }) => {
   const entry = cachedSettings(params.publicId, fetch);
