@@ -4,69 +4,39 @@
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import { IconMove } from "@eneo/icons/move";
-  import { Button, Dialog, Dropdown, Select } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import MoveToSpaceDialog from "$lib/features/spaces/components/MoveToSpaceDialog.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { derived } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
-  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   export let service: ServiceSparse;
 
   const {
-    state: { currentSpace, accessibleSpaces },
+    state: { currentSpace },
     refreshCurrentSpace
   } = getSpacesManager();
 
   const eneo = getEneo();
   async function deleteService() {
-    isProcessing = true;
-    try {
-      await eneo.services.delete(service);
-      refreshCurrentSpace();
-      $showDeleteDialog = false;
-    } catch (e) {
-      toastError(e, m.could_not_delete_service());
-      console.error(e);
-    }
-    isProcessing = false;
+    await eneo.services.delete(service);
+    refreshCurrentSpace();
   }
 
-  async function moveService() {
-    if (!moveDestination) return;
-    isProcessing = true;
-    try {
-      await eneo.services.transfer({
-        service,
-        moveResources: false,
-        targetSpace: moveDestination
-      });
-      refreshCurrentSpace();
-      $showMoveDialog = false;
-    } catch (e) {
-      toastError(e);
-      console.error(e);
-    }
-    isProcessing = false;
+  async function moveService(targetSpace: { id: string }) {
+    await eneo.services.transfer({
+      service,
+      moveResources: false,
+      targetSpace
+    });
+    refreshCurrentSpace();
   }
 
-  let isProcessing = false;
-  let showDeleteDialog: Dialog.OpenState;
-  let showMoveDialog: Dialog.OpenState;
-
-  const moveTargets = derived(accessibleSpaces, ($accessibleSpaces) => {
-    return $accessibleSpaces.reduce(
-      (acc, curr) => {
-        if (curr.id !== $currentSpace.id) {
-          acc.push({ label: curr.name, value: { id: curr.id } });
-        }
-        return acc;
-      },
-      [] as Array<{ label: string; value: { id: string } }>
-    );
-  });
-  let moveDestination: { id: string } | undefined = undefined;
+  let showDeleteDialog = false;
+  let showMoveDialog = false;
 
   let showActions = (["edit", "delete"] as const).some((permission) =>
     service.permissions?.includes(permission)
@@ -74,86 +44,58 @@
 </script>
 
 {#if showActions}
-  <Dropdown.Root>
-    <Dropdown.Trigger let:trigger asFragment>
-      <Button is={trigger} disabled={false} padding="icon">
-        <IconEllipsis />
-      </Button>
-    </Dropdown.Trigger>
-    <Dropdown.Menu let:item>
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger>
+      {#snippet child({ props })}
+        <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+          <IconEllipsis />
+        </Button>
+      {/snippet}
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Content align="end">
       {#if service.permissions?.includes("edit")}
-        <Button
-          is={item}
-          href={localizeHref(`/spaces/${$currentSpace.routeId}/services/${service.id}?tab=edit`)}
-          padding="icon-leading"
-        >
-          <IconEdit size="sm" />
-          {m.edit()}</Button
-        >
+        <DropdownMenu.Item>
+          {#snippet child({ props })}
+            <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+            <a
+              {...props}
+              href={localizeHref(
+                `/spaces/${$currentSpace.routeId}/services/${service.id}?tab=edit`
+              )}
+            >
+              <IconEdit size="sm" />
+              {m.edit()}
+            </a>
+            <!-- eslint-enable svelte/no-navigation-without-resolve -->
+          {/snippet}
+        </DropdownMenu.Item>
       {/if}
       {#if service.permissions?.includes("delete")}
-        <Button
-          is={item}
-          on:click={() => {
-            $showMoveDialog = true;
-          }}
-          padding="icon-leading"
-        >
+        <DropdownMenu.Item onSelect={() => (showMoveDialog = true)}>
           <IconMove size="sm" />
-          {m.move()}</Button
-        >
-        <Button
-          is={item}
-          variant="destructive"
-          on:click={() => {
-            $showDeleteDialog = true;
-          }}
-          padding="icon-leading"
-        >
-          <IconTrash size="sm" />{m.delete()}</Button
-        >
+          {m.move()}
+        </DropdownMenu.Item>
+        <DropdownMenu.Item variant="destructive" onSelect={() => (showDeleteDialog = true)}>
+          <IconTrash size="sm" />{m.delete()}
+        </DropdownMenu.Item>
       {/if}
-    </Dropdown.Menu>
-  </Dropdown.Root>
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
 {/if}
 
-<Dialog.Root alert bind:isOpen={showDeleteDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.delete_service()}</Dialog.Title>
-    <Dialog.Description
-      >{m.confirm_delete_service({ serviceName: service.name })}</Dialog.Description
-    >
+<ConfirmDialog
+  bind:open={showDeleteDialog}
+  title={m.delete_service()}
+  description={m.confirm_delete_service({ serviceName: service.name })}
+  confirmLabel={m.delete()}
+  pendingLabel={m.deleting()}
+  errorContext={m.could_not_delete_service()}
+  onConfirm={deleteService}
+/>
 
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={deleteService}
-        >{isProcessing ? m.deleting() : m.delete()}</Button
-      >
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
-
-<Dialog.Root bind:isOpen={showMoveDialog}>
-  <Dialog.Content width="medium" form>
-    <Dialog.Title>{m.move_service()}</Dialog.Title>
-
-    <Dialog.Section scrollable={false}>
-      <Select.Simple
-        required
-        options={$moveTargets}
-        bind:value={moveDestination}
-        fitViewport={true}
-        resourceName="space"
-        class="border-default hover:bg-hover-dimmer rounded-t-md border-b px-4 py-4"
-        >{m.destination()}</Select.Simple
-      >
-    </Dialog.Section>
-
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={moveService}
-        >{isProcessing ? m.moving() : m.move_service()}</Button
-      >
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+<MoveToSpaceDialog
+  bind:open={showMoveDialog}
+  title={m.move_service()}
+  submitLabel={m.move_service()}
+  onMove={moveService}
+/>

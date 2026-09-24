@@ -6,11 +6,12 @@
 
 <script lang="ts">
   import { IconEllipsis } from "@eneo/icons/ellipsis";
-  import { Button, Dropdown } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
   import { writable, type Writable } from "svelte/store";
-  import { Pencil, Trash2, RefreshCw } from "lucide-svelte";
+  import { Pencil, Trash2, RefreshCw } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import MCPServerDialog from "./MCPServerDialog.svelte";
   import DeleteMCPDialog from "./DeleteMCPDialog.svelte";
@@ -27,7 +28,7 @@
   const eneo = getEneo();
 
   const showEditDialog: Writable<boolean> = writable(false);
-  const showDeleteDialog: Writable<boolean> = writable(false);
+  let showDeleteDialog = $state(false);
 
   let syncing = $state(false);
 
@@ -64,38 +65,42 @@
   }
 </script>
 
-<Dropdown.Root>
-  <Dropdown.Trigger let:trigger asFragment>
-    <Button variant="on-fill" is={trigger} disabled={false} padding="icon">
-      <IconEllipsis />
-    </Button>
-  </Dropdown.Trigger>
-  <Dropdown.Menu let:item>
-    <Button
-      is={item}
-      padding="icon-leading"
-      onclick={() => {
+<DropdownMenu.Root>
+  <DropdownMenu.Trigger>
+    {#snippet child({ props })}
+      <Button
+        {...props}
+        variant="ghost"
+        size="icon"
+        class="hover:bg-hover-on-fill hover:text-primary"
+        aria-label={m.actions()}
+      >
+        <IconEllipsis />
+      </Button>
+    {/snippet}
+  </DropdownMenu.Trigger>
+  <DropdownMenu.Content align="end">
+    <DropdownMenu.Item
+      onSelect={() => {
         $showEditDialog = true;
       }}
     >
       <Pencil class="h-4 w-4" />{m.edit()}
-    </Button>
-    <Button is={item} padding="icon-leading" onclick={syncTools} disabled={syncing}>
+    </DropdownMenu.Item>
+    <DropdownMenu.Item onSelect={syncTools} disabled={syncing}>
       <RefreshCw class="h-4 w-4 {syncing ? 'animate-spin' : ''}" />
       {syncing ? m.syncing() : m.sync_tools()}
-    </Button>
-    <Button
-      is={item}
-      padding="icon-leading"
+    </DropdownMenu.Item>
+    <DropdownMenu.Item
       variant="destructive"
-      onclick={() => {
-        $showDeleteDialog = true;
+      onSelect={() => {
+        showDeleteDialog = true;
       }}
     >
       <Trash2 class="h-4 w-4" />{m.delete()}
-    </Button>
-  </Dropdown.Menu>
-</Dropdown.Root>
+    </DropdownMenu.Item>
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
 
 <MCPServerDialog openController={showEditDialog} {mcpServer} onSubmit={handleSave} />
-<DeleteMCPDialog openController={showDeleteDialog} {mcpServer} onDelete={handleDelete} />
+<DeleteMCPDialog bind:open={showDeleteDialog} {mcpServer} onDelete={handleDelete} />

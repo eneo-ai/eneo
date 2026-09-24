@@ -1,18 +1,17 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import type { ResourcePermission, SkillSparse } from "@eneo/eneo-js";
   import { invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { Page } from "$lib/components/layout";
-  import { getErrorMessage } from "$lib/core/errors";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import { SkillCatalogQuery } from "$lib/features/skills/skillCatalogQuery.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
-  import { LoaderCircle, Plus, Search, Trash2, BookOpenCheck } from "lucide-svelte";
+  import { LoaderCircle, Plus, Search, Trash2, BookOpenCheck } from "@lucide/svelte";
   import { onDestroy, untrack } from "svelte";
 
   const CREATE_SKILL_PERMISSION: ResourcePermission = "create";
@@ -21,8 +20,6 @@
   let { data } = $props();
 
   let deleteTarget = $state<SkillSparse | null>(null);
-  let deleteError = $state<string | null>(null);
-  let isDeleting = $state(false);
   let loadedInitialPage = untrack(() => data.skills);
   const skillCatalog = new SkillCatalogQuery(loadedInitialPage, (params) =>
     data.eneo.skills.list({ spaceId: data.currentSpace.id, ...params })
@@ -46,31 +43,19 @@
   const canDelete = $derived(data.currentSpace.skill_permissions.includes(DELETE_SKILL_PERMISSION));
 
   function formatUpdatedAt(value: string): string {
-    return new Date(value).toLocaleString(getLocale() === "sv" ? "sv-SE" : "en-US", {
+    return new Date(value).toLocaleString(intlLocale(), {
       dateStyle: "short",
       timeStyle: "short"
     });
   }
 
-  async function deleteSkill(event: MouseEvent) {
-    event.preventDefault();
+  async function deleteSkill() {
     if (!deleteTarget) return;
-    isDeleting = true;
-    deleteError = null;
-    try {
-      await data.eneo.skills.delete({
-        spaceId: data.currentSpace.id,
-        skillId: deleteTarget.id
-      });
-      deleteTarget = null;
-      await invalidate("space:skills");
-    } catch (error) {
-      // Each delete conflict carries its own reason code, so the localized
-      // recovery instruction names the actual blocker.
-      deleteError = getErrorMessage(error);
-    } finally {
-      isDeleting = false;
-    }
+    await data.eneo.skills.delete({
+      spaceId: data.currentSpace.id,
+      skillId: deleteTarget.id
+    });
+    await invalidate("space:skills");
   }
 </script>
 
@@ -287,30 +272,18 @@
   </Page.Main>
 </Page.Root>
 
-<AlertDialog.Root
-  open={deleteTarget !== null}
-  onOpenChange={(open) => {
-    if (!open && !isDeleting) {
-      deleteTarget = null;
-      deleteError = null;
+<!-- Each delete conflict carries its own reason code; showing it in the dialog names the actual blocker. -->
+<ConfirmDialog
+  bind:open={
+    () => deleteTarget !== null,
+    (open) => {
+      if (!open) deleteTarget = null;
     }
-  }}
->
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.skills_library_delete_title()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.skills_library_delete_description({ name: deleteTarget?.display_name ?? "" })}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    {#if deleteError}
-      <p class="text-destructive text-sm" role="alert">{deleteError}</p>
-    {/if}
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={isDeleting}>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action variant="destructive" disabled={isDeleting} onclick={deleteSkill}>
-        {isDeleting ? m.skills_library_deleting() : m.delete()}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+  }
+  title={m.skills_library_delete_title()}
+  description={m.skills_library_delete_description({ name: deleteTarget?.display_name ?? "" })}
+  confirmLabel={m.delete()}
+  pendingLabel={m.skills_library_deleting()}
+  errorDisplay="inline"
+  onConfirm={deleteSkill}
+/>

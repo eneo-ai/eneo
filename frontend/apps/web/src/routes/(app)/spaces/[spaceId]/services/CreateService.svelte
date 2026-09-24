@@ -3,9 +3,12 @@
   import { resolve } from "$app/paths";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Button, Dialog, Input } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import NameDialog from "$lib/components/NameDialog.svelte";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { toastError } from "$lib/core/errors";
 
   const {
     state: { currentSpace },
@@ -14,60 +17,38 @@
 
   const eneo = getEneo();
 
-  let newServiceName = "";
   let openServiceAfterCreation = true;
-  let isProcessing = false;
-  async function createService() {
-    if (newServiceName === "") return;
-    isProcessing = true;
+  const openAfterId = useId();
 
-    try {
-      const service = await eneo.services.create({
-        spaceId: $currentSpace.id,
-        name: newServiceName
-      });
+  async function createService(name: string) {
+    const service = await eneo.services.create({
+      spaceId: $currentSpace.id,
+      name
+    });
 
-      refreshCurrentSpace();
-      $showCreateDialog = false;
-      newServiceName = "";
-      if (openServiceAfterCreation) {
-        goto(resolve(`/spaces/${$currentSpace.routeId}/services/${service.id}?tab=edit`));
-      }
-    } catch (e) {
-      toastError(e, m.error_creating_new_service());
-      console.error(e);
+    refreshCurrentSpace();
+    if (openServiceAfterCreation) {
+      goto(resolve(`/spaces/${$currentSpace.routeId}/services/${service.id}?tab=edit`));
     }
-    isProcessing = false;
   }
-
-  let showCreateDialog: Dialog.OpenState;
 </script>
 
-<Dialog.Root alert bind:isOpen={showCreateDialog}>
-  <Dialog.Trigger asFragment let:trigger>
-    <Button is={trigger} variant="primary">{m.create_service()}</Button>
-  </Dialog.Trigger>
-  <Dialog.Content width="medium" form>
-    <Dialog.Title>{m.create_a_new_service()}</Dialog.Title>
-
-    <Dialog.Section>
-      <Input.Text
-        bind:value={newServiceName}
-        label={m.name()}
-        required
-        class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
-      ></Input.Text>
-    </Dialog.Section>
-
-    <Dialog.Controls let:close>
-      <Input.Switch bind:value={openServiceAfterCreation} class="flex-row-reverse p-2"
-        >{m.open_service_editor_after_creation()}</Input.Switch
-      >
-      <div class="flex-grow"></div>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="primary" on:click={createService} disabled={isProcessing}
-        >{isProcessing ? m.creating() : m.create_service()}</Button
-      >
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+<NameDialog
+  title={m.create_a_new_service()}
+  label={m.name()}
+  submitLabel={m.create_service()}
+  pendingLabel={m.creating()}
+  width="medium"
+  errorContext={m.error_creating_new_service()}
+  onSubmit={createService}
+>
+  {#snippet trigger({ props })}
+    <Button {...props}>{m.create_service()}</Button>
+  {/snippet}
+  {#snippet footerExtra()}
+    <Field.Field orientation="horizontal">
+      <Switch id={openAfterId} bind:checked={openServiceAfterCreation} />
+      <Field.Label for={openAfterId}>{m.open_service_editor_after_creation()}</Field.Label>
+    </Field.Field>
+  {/snippet}
+</NameDialog>

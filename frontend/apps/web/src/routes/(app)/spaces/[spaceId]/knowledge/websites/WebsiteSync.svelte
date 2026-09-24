@@ -1,24 +1,12 @@
 <script lang="ts">
+  import { formatDateTime, formatRelativeTime } from "$lib/core/formatting/dateTime";
   import type { WebsiteSparse } from "@eneo/eneo-js";
-  import { Label } from "@eneo/ui";
+  import StatusBadge, { type StatusBadgeColor } from "$lib/components/StatusBadge.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
-  import dayjs from "dayjs";
-  import relativeTime from "dayjs/plugin/relativeTime";
-  import utc from "dayjs/plugin/utc";
-  import "dayjs/locale/sv";
-  import "dayjs/locale/en";
-
-  dayjs.extend(relativeTime);
-  dayjs.extend(utc);
 
   export let website: WebsiteSparse;
 
-  // Set dayjs locale based on paraglide locale
-  // eslint-disable-next-line svelte/no-immutable-reactive-statements
-  $: dayjs.locale(getLocale());
-
-  const intervalLabels: Record<string, { label: string; color: Label.LabelColor }> = {
+  const intervalLabels: Record<string, { label: string; color: StatusBadgeColor }> = {
     daily: {
       color: "green",
       label: m.every_day()
@@ -62,9 +50,16 @@
       return m.next_crawl_after_first_run();
     }
 
-    const nextAt = dayjs(lastCrawlAt).add(days, "day");
-    const relative = dayjs().to(nextAt);
-    const formatted = `${nextAt.format("YYYY-MM-DD HH:mm")} (${relative})`;
+    const last = new Date(lastCrawlAt);
+    // Calendar days, like the crawl schedule: stays at the same local time across DST changes.
+    const nextAt = new Date(
+      last.getFullYear(),
+      last.getMonth(),
+      last.getDate() + days,
+      last.getHours(),
+      last.getMinutes()
+    );
+    const formatted = `${formatDateTime(nextAt)} (${formatRelativeTime(nextAt)})`;
     return m.next_crawl_on({ date: formatted });
   }
 
@@ -76,4 +71,4 @@
   };
 </script>
 
-<Label.Single item={intervalItem}></Label.Single>
+<StatusBadge item={intervalItem} />

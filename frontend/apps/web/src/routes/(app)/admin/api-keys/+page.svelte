@@ -22,16 +22,16 @@
   import ApiKeyStateFilter from "$lib/features/api-keys/ApiKeyStateFilter.svelte";
   import type { ApiKeyStateFilterValue } from "$lib/features/api-keys/apiKeyTableUtils";
   import {
-    Filter,
+    Funnel,
     X,
     Check,
     Key,
-    AlertCircle,
+    CircleAlert,
     ChevronDown,
     RefreshCw,
     Lock,
     Globe
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { fly, slide } from "svelte/transition";
   import {
     getAdminNotificationPolicy,
@@ -646,7 +646,7 @@
               <div
                 class="bg-primary border-default flex h-9 w-9 items-center justify-center rounded-lg border"
               >
-                <Filter class="text-muted h-4 w-4" />
+                <Funnel class="text-muted h-4 w-4" />
               </div>
               <div class="text-left">
                 <h3 class="text-default text-sm font-semibold">
@@ -691,7 +691,7 @@
                       onclick={() => (showSearchScopeDropdown = !showSearchScopeDropdown)}
                       aria-haspopup="listbox"
                       aria-expanded={showSearchScopeDropdown}
-                      class="text-muted bg-subtle/80 border-default/40 hover:bg-hover hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition-all duration-150 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
+                      class="text-muted bg-subtle/80 border-default/40 hover:bg-hover-default hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition-all duration-150 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
                     >
                       {searchScope === "entity"
                         ? m.audit_search_scope_entity()
@@ -782,7 +782,7 @@
                   <button
                     type="button"
                     onclick={clearSearch}
-                    class="text-muted hover:text-default hover:bg-hover focus-visible:ring-accent-default absolute top-1/2 right-2 -translate-y-1/2 rounded-md p-1.5 transition-all duration-150 focus-visible:ring-2 focus-visible:outline-none"
+                    class="text-muted hover:text-default hover:bg-hover-default focus-visible:ring-accent-default absolute top-1/2 right-2 -translate-y-1/2 rounded-md p-1.5 transition-all duration-150 focus-visible:ring-2 focus-visible:outline-none"
                     aria-label={m.audit_search_clear()}
                   >
                     <X class="h-4 w-4" />
@@ -1037,7 +1037,7 @@
                     {m.api_keys_admin_clear_all()}
                   </Button>
                   <Button onclick={applyFilters} class="text-sm">
-                    <Filter class="h-4 w-4" />
+                    <Funnel class="h-4 w-4" />
                     {m.api_keys_admin_apply_filters()}
                   </Button>
                 </div>
@@ -1050,7 +1050,7 @@
         {#if errorMessage}
           <div transition:fly={{ y: -8, duration: 150 }}>
             <Alert.Root variant="destructive">
-              <AlertCircle />
+              <CircleAlert />
               <Alert.Description>{errorMessage}</Alert.Description>
             </Alert.Root>
           </div>

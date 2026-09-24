@@ -2,9 +2,9 @@
   import { onMount } from "svelte";
   import type { Group, InfoBlob } from "@eneo/eneo-js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { getAppContext } from "$lib/core/AppContext";
   import { getEneo } from "$lib/core/Eneo";
   import { toastError } from "$lib/core/errors";
@@ -207,25 +207,22 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<AlertDialog.Root
-  open={duplicateFileNames.length > 0}
-  onOpenChange={(isOpen) => {
-    if (!isOpen) duplicateFileNames = [];
-  }}
+<ConfirmDialog
+  bind:open={
+    () => duplicateFileNames.length > 0,
+    (isOpen) => {
+      if (!isOpen) duplicateFileNames = [];
+    }
+  }
+  title={m.duplicate_files_dialog_title()}
+  description={m.duplicate_files_dialog_description()}
+  confirmLabel={m.replace_files()}
+  variant="default"
+  onConfirm={uploadFiles}
 >
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.duplicate_files_dialog_title()}</AlertDialog.Title>
-      <AlertDialog.Description>{m.duplicate_files_dialog_description()}</AlertDialog.Description>
-    </AlertDialog.Header>
-    <ul class="list-disc pl-5 text-sm">
-      {#each duplicateFileNames as fileName (fileName)}
-        <li>{fileName}</li>
-      {/each}
-    </ul>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action onclick={uploadFiles}>{m.replace_files()}</AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+  <ul class="list-disc pl-5 text-sm">
+    {#each duplicateFileNames as fileName (fileName)}
+      <li>{fileName}</li>
+    {/each}
+  </ul>
+</ConfirmDialog>

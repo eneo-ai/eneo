@@ -8,7 +8,8 @@
   import { IconCopy } from "@eneo/icons/copy";
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
-  import { Button, Dropdown, Tooltip } from "@eneo/ui";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
   import LinkReference from "$lib/features/knowledge/components/LinkReference.svelte";
   import McpResourceSnippetModal from "./McpResourceSnippetModal.svelte";
@@ -20,6 +21,9 @@
   const { current, isLast } = getMessageContext();
   const message = $derived(current());
   const preferredCopyFormat = $derived(getPreferredAssistantCopyFormat(settings));
+  const copyLabel = $derived(
+    preferredCopyFormat === "richtext" ? m.copy_as_richtext() : m.copy_as_markdown()
+  );
 
   let referencesExpanded = $state(false);
   let showCopiedMessage = $state(false);
@@ -86,47 +90,47 @@
 >
   <div class="flex gap-2">
     <div class="flex gap-[1px]">
-      <Tooltip
-        text={preferredCopyFormat === "richtext" ? m.copy_as_richtext() : m.copy_as_markdown()}
-      >
-        <Button
-          on:click={() => handleCopy()}
-          unstyled
-          class="border-default hover:bg-hover-stronger flex gap-2 rounded-l-lg border p-1.5 shadow-sm"
-          padding="icon"
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          onclick={() => handleCopy()}
+          class="border-default hover:bg-hover-stronger flex cursor-pointer gap-2 rounded-l-lg border p-1.5 shadow-sm"
           ><IconCopy />
+          <span class="sr-only">{copyLabel}</span>
           {#if showCopiedMessage}
             <span class="pr-2">{m.copied()}</span>
           {/if}
-        </Button>
-      </Tooltip>
-      <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
-        <Dropdown.Trigger asFragment let:trigger>
-          <Button
-            is={trigger}
-            unstyled
-            class="border-default hover:bg-hover-stronger rounded-r-lg border p-1.5 shadow-sm"
-            padding="icon"
-            aria-label={m.copy_response_options()}
-          >
-            <IconChevronDown />
-          </Button>
-        </Dropdown.Trigger>
-        <Dropdown.Menu let:item>
-          <Button is={item} onclick={() => handleCopy("markdown")}>
+        </Tooltip.Trigger>
+        <Tooltip.Content>{copyLabel}</Tooltip.Content>
+      </Tooltip.Root>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger>
+          {#snippet child({ props })}
+            <button
+              {...props}
+              type="button"
+              class="border-default hover:bg-hover-stronger cursor-pointer rounded-r-lg border p-1.5 shadow-sm"
+              aria-label={m.copy_response_options()}
+            >
+              <IconChevronDown />
+            </button>
+          {/snippet}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end">
+          <DropdownMenu.Item onSelect={() => handleCopy("markdown")}>
             {m.copy_as_markdown()}
-          </Button>
-          <Button is={item} onclick={() => handleCopy("richtext")}>
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={() => handleCopy("richtext")}>
             {m.copy_as_richtext()}
-          </Button>
-        </Dropdown.Menu>
-      </Dropdown.Root>
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
 
       {#if totalRefs > 0}
-        <Button
-          unstyled
-          class="border-default hover:bg-hover-dimmer flex gap-1 rounded-lg border p-1.5 pr-2.5 shadow-sm"
-          on:click={() => {
+        <button
+          type="button"
+          class="border-default hover:bg-hover-dimmer flex cursor-pointer gap-1 rounded-lg border p-1.5 pr-2.5 shadow-sm"
+          aria-expanded={referencesExpanded}
+          onclick={() => {
             referencesExpanded = !referencesExpanded;
           }}
         >
@@ -135,7 +139,7 @@
           />
           {totalRefs}
           {m.references()}
-        </Button>
+        </button>
       {/if}
     </div>
   </div>

@@ -5,11 +5,11 @@
 -->
 
 <script lang="ts">
-  import { Button, Table } from "@eneo/ui";
-  import dayjs from "dayjs";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
+  import * as Table from "$lib/components/resource-table/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import QuestionDetails from "./QuestionDetails.svelte";
-  import { createRender } from "svelte-headless-table";
   import type { CalendarDate } from "@internationalized/date";
   import { getEneo } from "$lib/core/Eneo";
   import { onMount } from "svelte";
@@ -54,7 +54,7 @@
       header: m.question(),
       accessor: (item) => item,
       cell(item) {
-        return createRender(QuestionDetails, {
+        return Table.renderComponent(QuestionDetails, {
           message: item.value
         });
       },
@@ -70,8 +70,8 @@
       header: m.created(),
       accessor: (item) => item.created_at,
       cell: (item) => {
-        return createRender(Table.FormattedCell, {
-          value: dayjs(item.value).format("YYYY-MM-DD HH:mm"),
+        return Table.renderComponent(Table.FormattedCell, {
+          value: formatDateTime(item.value),
           monospaced: true
         });
       }
@@ -191,7 +191,7 @@
   {#if errorMessage}
     <p class="text-sm text-red-700" role="alert">{errorMessage}</p>
   {:else if nextCursor}
-    <Button variant="outlined" on:click={loadMore} disabled={isLoading || isLoadingMore}>
+    <Button variant="outline" onclick={loadMore} disabled={isLoading || isLoadingMore}>
       {#if isLoadingMore}
         {m.loading()}
       {:else}

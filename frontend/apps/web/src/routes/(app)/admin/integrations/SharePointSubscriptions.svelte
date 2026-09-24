@@ -1,6 +1,6 @@
 <script lang="ts">
   import { SvelteSet } from "svelte/reactivity";
-  import { LoaderCircle } from "lucide-svelte";
+  import { LoaderCircle } from "@lucide/svelte";
   import type { Eneo, components } from "@eneo/eneo-js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";

@@ -8,7 +8,7 @@
 
 <script lang="ts">
   import { EneoError } from "@eneo/eneo-js";
-  import { Loader2, CircleCheck, CircleX, Zap, Trash2 } from "lucide-svelte";
+  import { LoaderCircle, CircleCheck, CircleX, Zap, Trash2 } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo";
@@ -103,7 +103,7 @@
 
           <div class="ml-2 flex shrink-0 items-center gap-1">
             {#if vs.status === "testing"}
-              <Loader2 class="text-muted-foreground size-4 animate-spin" aria-hidden="true" />
+              <LoaderCircle class="text-muted-foreground size-4 animate-spin" aria-hidden="true" />
             {:else if vs.status === "success"}
               <CircleCheck class="text-positive-default size-4" aria-label={vs.message} />
             {:else if vs.status === "error"}

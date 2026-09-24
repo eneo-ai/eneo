@@ -11,7 +11,7 @@
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import WizardBackdrop from "./WizardBackdrop.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { BookOpen, FileUp } from "lucide-svelte";
+  import { BookOpen, FileUp } from "@lucide/svelte";
 
   const {
     state: { selectedAttachments, selectedCollections, selectedTemplate }

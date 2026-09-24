@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, Circle } from "lucide-svelte";
+  import { Check, Circle } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import {
     getPasswordPolicyChecks,

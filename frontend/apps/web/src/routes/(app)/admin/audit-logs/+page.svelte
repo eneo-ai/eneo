@@ -5,7 +5,12 @@
   import { writable } from "svelte/store";
   import { SvelteDate, SvelteSet, SvelteURLSearchParams } from "svelte/reactivity";
   import { Page } from "$lib/components/layout";
-  import { Button, Input, Dropdown, ProgressBar } from "@eneo/ui";
+  import DateRangePicker from "$lib/components/DateRangePicker.svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as Popover from "$lib/components/ui/popover/index.js";
+  import { Input as TextInput } from "$lib/components/ui/input/index.js";
+  import { Progress } from "$lib/components/ui/progress/index.js";
   import * as m from "$lib/paraglide/messages";
   import type { components, UserSparse } from "@eneo/eneo-js";
   import type { CalendarDate } from "@internationalized/date";
@@ -25,19 +30,22 @@
     FileText,
     Settings,
     Trash2
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { fade, slide, scale } from "svelte/transition";
   import { onDestroy, untrack } from "svelte";
   import { getEneo } from "$lib/core/Eneo";
+  import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
   import { getLocale } from "$lib/paraglide/runtime";
   import AuditConfigTab from "./AuditConfigTab.svelte";
   import AccessJustificationForm from "./AccessJustificationForm.svelte";
   import { getActionLabel, getActionOptions } from "./audit-action-labels";
+  import { escapeHtml } from "$lib/core/formatting/escapeHtml";
 
   type AuditLogResponse = components["schemas"]["AuditLogResponse"];
   type ActionType = components["schemas"]["ActionType"];
 
   let { data } = $props();
+  const uid = $props.id();
 
   const eneo = getEneo();
 
@@ -122,6 +130,7 @@
 
   // Expandable row state
   const expandedRows = new SvelteSet<string>();
+  const clipboard = createCopyState();
   let copiedRowId = $state<string | null>(null);
 
   // Filter states
@@ -341,8 +350,9 @@
     return new Date(timestamp).toLocaleString(getLocale());
   }
 
+  // Rendered with {@html}: metadata holds user-provided values, so escape before adding markup.
   function formatJsonWithSyntaxHighlighting(obj: Record<string, unknown>): string {
-    const json = JSON.stringify(obj, null, 2);
+    const json = escapeHtml(JSON.stringify(obj, null, 2));
     return json
       .replace(/"([^"]+)":/g, '<span class="text-blue-600 dark:text-blue-400">"$1"</span>:') // Keys
       .replace(/: "([^"]*)"/g, ': <span class="text-green-600 dark:text-green-400">"$1"</span>') // String values
@@ -386,15 +396,7 @@
   }
 
   async function copyJsonToClipboard(json: Record<string, unknown>, logId: string) {
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(json, null, 2));
-      copiedRowId = logId;
-      setTimeout(() => {
-        copiedRowId = null;
-      }, 2000);
-    } catch (err) {
-      console.error("Failed to copy:", err);
-    }
+    if (await clipboard.copy(JSON.stringify(json, null, 2))) copiedRowId = logId;
   }
 
   async function applyFilters() {
@@ -859,7 +861,14 @@
               </span>
               <span class="text-default font-medium">{exportProgress}%</span>
             </div>
-            <ProgressBar progress={exportProgress} />
+            <Progress
+              value={exportProgress}
+              class="h-2"
+              indicatorClass={exportProgress === 100 ? "bg-positive-default" : undefined}
+              aria-label={exportStatus === "pending"
+                ? m.audit_export_preparing()
+                : m.audit_exporting()}
+            />
             {#if exportTotalRecords > 0}
               <span class="text-muted text-xs">
                 {exportProcessedRecords.toLocaleString()} / {exportTotalRecords.toLocaleString()}
@@ -868,7 +877,7 @@
             {/if}
           </div>
           <Button
-            variant="simple"
+            variant="ghost"
             onclick={cancelExport}
             class="text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950 dark:hover:text-red-300"
           >
@@ -885,45 +894,41 @@
             <IconInfo class="h-4 w-4" />
             <span>{exportError}</span>
           </div>
-          <Button variant="simple" onclick={resetExportState}>
+          <Button variant="ghost" onclick={resetExportState} aria-label={m.dismiss()}>
             <IconXMark class="h-4 w-4" />
           </Button>
         </div>
       {:else}
         <!-- Normal Export Buttons -->
         <div class="flex gap-[1px]">
-          <Button
-            variant="primary"
-            onclick={() => exportLogs("csv")}
-            disabled={isExporting}
-            class="!rounded-r-none"
-          >
+          <Button onclick={() => exportLogs("csv")} disabled={isExporting} class="!rounded-r-none">
             <IconDownload class="h-4 w-4" />
             {m.audit_export_with_count({ count: totalCount })}
           </Button>
-          <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
-            <Dropdown.Trigger asFragment let:trigger>
-              <Button
-                padding="icon"
-                variant="primary"
-                is={trigger}
-                disabled={isExporting}
-                class="!rounded-l-none"
-              >
-                <IconChevronDown></IconChevronDown>
-              </Button>
-            </Dropdown.Trigger>
-            <Dropdown.Menu let:item>
-              <Button is={item} onclick={() => exportLogs("csv")}>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger disabled={isExporting}>
+              {#snippet child({ props })}
+                <Button
+                  {...props}
+                  size="icon"
+                  class="!rounded-l-none"
+                  aria-label={m.audit_export_format_options()}
+                >
+                  <IconChevronDown></IconChevronDown>
+                </Button>
+              {/snippet}
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="end">
+              <DropdownMenu.Item onSelect={() => exportLogs("csv")}>
                 <IconDownload size="sm"></IconDownload>
                 {m.audit_download_csv()}
-              </Button>
-              <Button is={item} onclick={() => exportLogs("json")}>
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => exportLogs("json")}>
                 <IconDownload size="sm"></IconDownload>
                 {m.audit_download_json()}
-              </Button>
-            </Dropdown.Menu>
-          </Dropdown.Root>
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
         </div>
       {/if}
     {/if}
@@ -946,7 +951,7 @@
             class={`flex items-center justify-center gap-2 rounded-md px-6 py-2.5 text-sm font-semibold transition-all duration-150 ${
               activeTab === "logs"
                 ? "bg-accent-default text-on-fill ring-accent-default/20 shadow-accent-default/25 shadow-md ring-1"
-                : "text-muted hover:text-default hover:bg-hover hover:scale-[1.02] active:scale-[0.98]"
+                : "text-muted hover:text-default hover:bg-hover-default hover:scale-[1.02] active:scale-[0.98]"
             }`}
           >
             <FileText class="h-4 w-4" />
@@ -957,7 +962,7 @@
             class={`flex items-center justify-center gap-2 rounded-md px-6 py-2.5 text-sm font-semibold transition-all duration-150 ${
               activeTab === "config"
                 ? "bg-accent-default text-on-fill ring-accent-default/20 shadow-accent-default/25 shadow-md ring-1"
-                : "text-muted hover:text-default hover:bg-hover hover:scale-[1.02] active:scale-[0.98]"
+                : "text-muted hover:text-default hover:bg-hover-default hover:scale-[1.02] active:scale-[0.98]"
             }`}
           >
             <Settings class="h-4 w-4" />
@@ -993,8 +998,7 @@
               {#if !isEditingRetention}
                 <Button
                   onclick={() => (isEditingRetention = true)}
-                  variant="simple"
-                  size="sm"
+                  variant="ghost"
                   class="min-w-[80px]"
                 >
                   {m.audit_retention_edit()}
@@ -1036,20 +1040,20 @@
               <div class="space-y-3" transition:slide={{ duration: 200 }}>
                 <div class="bg-primary space-y-3 rounded-lg p-4">
                   <div class="max-w-xl">
-                    <!-- svelte-ignore a11y_label_has_associated_control -->
-                    <label class="text-default mb-2 block text-xs font-semibold"
+                    <label
+                      for={`${uid}-retention-days`}
+                      class="text-default mb-2 block text-xs font-semibold"
                       >{m.audit_retention_period_label()}</label
                     >
                     <div class="mb-4 flex flex-col items-start gap-2 sm:flex-row sm:items-center">
                       <div class="flex items-center gap-2">
-                        <!-- @ts-ignore Input.Text type="number" binding -->
-                        <Input.Text
+                        <TextInput
+                          id={`${uid}-retention-days`}
                           bind:value={retentionInputValue}
                           type="number"
                           min="1"
                           max="2555"
-                          class="w-20"
-                          inputClass="text-center text-sm font-medium"
+                          class="w-20 text-center text-sm font-medium"
                         />
                         <span class="text-muted text-xs">
                           {m.audit_retention_days_unit()}
@@ -1070,32 +1074,28 @@
                     <div class="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <Button
                         onclick={() => (retentionInputValue = "90")}
-                        variant={retentionInputNum === 90 ? "primary" : "simple"}
-                        size="sm"
+                        variant={retentionInputNum === 90 ? "default" : "ghost"}
                         class="w-full text-sm font-medium"
                       >
                         {m.audit_preset_3_months()}
                       </Button>
                       <Button
                         onclick={() => (retentionInputValue = "365")}
-                        variant={retentionInputNum === 365 ? "primary" : "simple"}
-                        size="sm"
+                        variant={retentionInputNum === 365 ? "default" : "ghost"}
                         class="w-full text-sm font-medium"
                       >
                         {m.audit_preset_1_year()}
                       </Button>
                       <Button
                         onclick={() => (retentionInputValue = "730")}
-                        variant={retentionInputNum === 730 ? "primary" : "simple"}
-                        size="sm"
+                        variant={retentionInputNum === 730 ? "default" : "ghost"}
                         class="w-full text-sm font-medium"
                       >
                         {m.audit_preset_2_years()}
                       </Button>
                       <Button
                         onclick={() => (retentionInputValue = "2555")}
-                        variant={retentionInputNum === 2555 ? "primary" : "simple"}
-                        size="sm"
+                        variant={retentionInputNum === 2555 ? "default" : "ghost"}
                         class="w-full text-sm font-medium"
                       >
                         {m.audit_preset_7_years()}
@@ -1159,7 +1159,7 @@
                   <div class="flex items-center justify-end gap-2">
                     <Button
                       onclick={cancelRetentionEdit}
-                      variant="simple"
+                      variant="ghost"
                       disabled={isSavingRetention}
                       class="min-w-[80px] text-sm font-medium"
                     >
@@ -1167,7 +1167,6 @@
                     </Button>
                     <Button
                       onclick={saveRetentionPolicy}
-                      variant="primary"
                       disabled={isSavingRetention || retentionInputNum === retentionDays}
                       class="min-w-[120px] text-sm font-medium"
                     >
@@ -1195,12 +1194,7 @@
             >
               <IconInfo class="h-5 w-5 text-red-600 dark:text-red-400" />
               <p class="text-sm text-red-800 dark:text-red-200">{m.audit_error_loading()}</p>
-              <Button
-                onclick={() => window.location.reload()}
-                variant="outlined"
-                size="sm"
-                class="ml-auto"
-              >
+              <Button onclick={() => window.location.reload()} variant="outline" class="ml-auto">
                 {m.audit_retry()}
               </Button>
             </div>
@@ -1225,7 +1219,7 @@
                           ? m.audit_search_scope_entity()
                           : m.audit_search_scope_user()
                     })}
-                    class="text-muted bg-subtle/80 border-default/40 hover:bg-hover hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center
+                    class="text-muted bg-subtle/80 border-default/40 hover:bg-hover-default hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center
                     gap-1.5 rounded-md border px-2.5
                     text-xs font-semibold transition-all
                     duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1"
@@ -1306,7 +1300,7 @@
                 {#if searchQuery.length > 0}
                   <button
                     onclick={clearSearch}
-                    class="text-muted hover:text-default hover:bg-hover focus-visible:ring-accent-default absolute top-1/2 right-2 -translate-y-1/2
+                    class="text-muted hover:text-default hover:bg-hover-default focus-visible:ring-accent-default absolute top-1/2 right-2 -translate-y-1/2
                     rounded-md p-1.5 transition-all
                     duration-150 focus:outline-none focus-visible:ring-2"
                     aria-label={m.audit_search_clear()}
@@ -1373,7 +1367,7 @@
 
               <!-- Filters Row (second) -->
               <div class="flex flex-wrap items-center gap-2 sm:gap-3 lg:gap-4">
-                <Input.DateRange bind:value={dateRange} />
+                <DateRangePicker bind:value={dateRange} />
 
                 <!-- Quick filter buttons (connected button group) -->
                 <div
@@ -1387,7 +1381,7 @@
                     class={`focus-visible:ring-accent-default px-4 py-2 text-xs font-semibold transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset ${
                       activePreset === 7
                         ? "bg-accent-default text-white shadow-sm"
-                        : "text-muted hover:bg-hover hover:text-default active:scale-95"
+                        : "text-muted hover:bg-hover-default hover:text-default active:scale-95"
                     }`}
                   >
                     {m.audit_date_7d()}
@@ -1398,7 +1392,7 @@
                     class={`border-default/40 focus-visible:ring-accent-default border-x px-4 py-2 text-xs font-semibold transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset ${
                       activePreset === 30
                         ? "bg-accent-default border-x-transparent text-white shadow-sm"
-                        : "text-muted hover:bg-hover hover:text-default active:scale-95"
+                        : "text-muted hover:bg-hover-default hover:text-default active:scale-95"
                     }`}
                   >
                     {m.audit_date_30d()}
@@ -1409,7 +1403,7 @@
                     class={`focus-visible:ring-accent-default px-4 py-2 text-xs font-semibold transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset ${
                       activePreset === 90
                         ? "bg-accent-default text-white shadow-sm"
-                        : "text-muted hover:bg-hover hover:text-default active:scale-95"
+                        : "text-muted hover:bg-hover-default hover:text-default active:scale-95"
                     }`}
                   >
                     {m.audit_date_90d()}
@@ -1418,41 +1412,39 @@
 
                 <!-- Action Multi-Select -->
                 <div class="relative min-w-[200px] sm:min-w-[220px]">
-                  <Dropdown.Root
-                    {...{ open: showActionDropdown }}
-                    gutter={4}
-                    placement="bottom-start"
-                  >
-                    <Dropdown.Trigger asFragment let:trigger>
-                      <Button
-                        is={trigger}
-                        variant="outlined"
-                        class="w-full justify-between"
-                        aria-haspopup="listbox"
-                        aria-expanded={showActionDropdown}
-                        aria-label={selectedActions.length === 0
-                          ? m.audit_all_actions()
-                          : `${selectedActions.length} ${m.audit_actions_selected()}`}
-                      >
-                        <span class={selectedActions.length === 0 ? "text-muted" : "text-default"}>
-                          {#if selectedActions.length === 0}
-                            {m.audit_all_actions()}
-                          {:else if selectedActions.length === 1}
-                            {actionOptions.find((o) => o.value === selectedActions[0])?.label}
-                          {:else}
-                            {selectedActions.length} {m.audit_actions_selected()}
-                          {/if}
-                        </span>
-                        <IconChevronDown
-                          class={`text-muted h-4 w-4 transition-transform duration-200 ${showActionDropdown ? "rotate-180" : ""}`}
-                        />
-                      </Button>
-                    </Dropdown.Trigger>
-                    <Dropdown.Menu>
+                  <Popover.Root bind:open={showActionDropdown}>
+                    <Popover.Trigger>
+                      {#snippet child({ props })}
+                        <Button
+                          {...props}
+                          variant="outline"
+                          class="w-full justify-between"
+                          aria-label={selectedActions.length === 0
+                            ? m.audit_all_actions()
+                            : `${selectedActions.length} ${m.audit_actions_selected()}`}
+                        >
+                          <span
+                            class={selectedActions.length === 0 ? "text-muted" : "text-default"}
+                          >
+                            {#if selectedActions.length === 0}
+                              {m.audit_all_actions()}
+                            {:else if selectedActions.length === 1}
+                              {actionOptions.find((o) => o.value === selectedActions[0])?.label}
+                            {:else}
+                              {selectedActions.length} {m.audit_actions_selected()}
+                            {/if}
+                          </span>
+                          <IconChevronDown
+                            class={`text-muted h-4 w-4 transition-transform duration-200 ${showActionDropdown ? "rotate-180" : ""}`}
+                          />
+                        </Button>
+                      {/snippet}
+                    </Popover.Trigger>
+                    <Popover.Content align="start" class="w-auto gap-0 overflow-hidden p-0">
                       <!-- Container with search and scrollable list -->
-                      <div class="-mx-2 -mb-2 min-w-[280px] sm:min-w-[300px]">
+                      <div class="min-w-[280px] sm:min-w-[300px]">
                         <!-- Search input (sticky at top) -->
-                        <div class="bg-primary border-default sticky top-0 z-30 -mt-2 border-b p-2">
+                        <div class="bg-primary border-default sticky top-0 z-30 border-b p-2">
                           <input
                             type="text"
                             bind:value={actionSearchQuery}
@@ -1504,7 +1496,7 @@
                                 role="option"
                                 aria-selected={isSelected}
                                 tabindex={showActionDropdown ? 0 : -1}
-                                class={`bg-primary hover:bg-hover focus:bg-hover focus-visible:ring-accent-default/50 flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm
+                                class={`bg-primary hover:bg-hover-default focus:bg-hover-default focus-visible:ring-accent-default/50 flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm
                               transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset sm:py-2
                               ${isSelected ? "bg-accent-default/5" : ""}`}
                                 onclick={() => toggleAction(option.value as ActionType)}
@@ -1546,17 +1538,12 @@
                           ></div>
                         </div>
                       </div>
-                    </Dropdown.Menu>
-                  </Dropdown.Root>
+                    </Popover.Content>
+                  </Popover.Root>
                 </div>
 
                 <!-- Apply Filters Button -->
-                <Button
-                  variant="primary"
-                  onclick={() => applyFilters()}
-                  disabled={isFiltering}
-                  class="min-w-[100px]"
-                >
+                <Button onclick={() => applyFilters()} disabled={isFiltering} class="min-w-[100px]">
                   {#if isFiltering}
                     <div class="flex items-center gap-2">
                       <div
@@ -1682,8 +1669,7 @@
                   <Button
                     onclick={prevPage}
                     disabled={currentPage <= 1}
-                    variant="outlined"
-                    size="sm"
+                    variant="outline"
                     class="min-w-[100px]"
                   >
                     {m.audit_previous()}
@@ -1691,8 +1677,7 @@
                   <Button
                     onclick={nextPage}
                     disabled={currentPage >= totalPages}
-                    variant="outlined"
-                    size="sm"
+                    variant="outline"
                     class="min-w-[100px]"
                   >
                     {m.audit_next()}
@@ -1753,7 +1738,7 @@
                             </p>
                           </div>
                           {#if activeFilterCount > 0}
-                            <Button onclick={clearFilters} variant="outlined" size="sm">
+                            <Button onclick={clearFilters} variant="outline">
                               {m.audit_clear_filters()}
                             </Button>
                           {/if}
@@ -1765,11 +1750,13 @@
                       {@const isExpanded = expandedRows.has(log.id || index.toString())}
                       <!-- Main Row -->
                       <tr
-                        class="hover:bg-hover/70 cursor-pointer transition-colors duration-150"
+                        class="hover:bg-hover-default/70 cursor-pointer transition-colors duration-150"
                         onclick={() => toggleRowExpansion(log.id || index.toString())}
                       >
                         <td class="px-4 py-3">
-                          <div class="hover:bg-hover rounded-md p-1 transition-colors duration-150">
+                          <div
+                            class="hover:bg-hover-default rounded-md p-1 transition-colors duration-150"
+                          >
                             <IconChevronDown
                               class={`text-muted h-5 w-5 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
                             />
@@ -1904,10 +1891,10 @@
                                           log.metadata,
                                           log.id || index.toString()
                                         )}
-                                      class="text-muted hover:bg-hover hover:text-default flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-all duration-150 hover:scale-105 active:scale-95"
+                                      class="text-muted hover:bg-hover-default hover:text-default flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-all duration-150 hover:scale-105 active:scale-95"
                                       aria-label={m.audit_copy_json()}
                                     >
-                                      {#if copiedRowId === (log.id || index.toString())}
+                                      {#if clipboard.copied && copiedRowId === (log.id || index.toString())}
                                         <IconCheck
                                           class="h-3.5 w-3.5 text-green-600 dark:text-green-400"
                                         />
@@ -1946,7 +1933,7 @@
                 <Button
                   onclick={prevPage}
                   disabled={currentPage <= 1}
-                  variant="outlined"
+                  variant="outline"
                   class="min-w-[120px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]"
                 >
                   {m.audit_previous()}
@@ -1958,7 +1945,7 @@
                 <Button
                   onclick={nextPage}
                   disabled={currentPage >= totalPages}
-                  variant="outlined"
+                  variant="outline"
                   class="min-w-[120px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]"
                 >
                   {m.audit_next()}

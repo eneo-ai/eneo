@@ -9,6 +9,16 @@
       "count": 1
     }
   },
+  "src/lib/components/CodeBlock.svelte": {
+    "eneo/no-raw-color": {
+      "count": 35
+    }
+  },
+  "src/lib/components/chart/theme.ts": {
+    "eneo/no-raw-color": {
+      "count": 90
+    }
+  },
   "src/lib/components/ui/alert-dialog/alert-dialog-overlay.svelte": {
     "eneo/no-raw-color": {
       "count": 1
@@ -67,6 +77,16 @@
   "src/lib/components/ui/input/input.svelte": {
     "eneo/no-raw-color": {
       "count": 8
+    }
+  },
+  "src/lib/components/ui/range-calendar/range-calendar-cell.svelte": {
+    "eneo/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/lib/components/ui/range-calendar/range-calendar-day.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
     }
   },
   "src/lib/components/ui/select/select-trigger.svelte": {
@@ -189,16 +209,6 @@
       "count": 1
     }
   },
-  "src/lib/components/toast/Toaster.svelte": {
-    "eneo/no-raw-color": {
-      "count": 3
-    }
-  },
-  "src/routes/(app)/admin/mcp-servers/MCPServerPrimaryCell.svelte": {
-    "eneo/no-raw-color": {
-      "count": 14
-    }
-  },
   "src/routes/(app)/admin/mcp-servers/MCPToolsPanel.svelte": {
     "eneo/no-raw-color": {
       "count": 19
@@ -246,12 +256,12 @@
   },
   "src/routes/(app)/dashboard/[assistantId]/[[sessionId]]/+page.svelte": {
     "eneo/no-raw-color": {
-      "count": 3
+      "count": 2
     }
   },
   "src/routes/(app)/dashboard/app/[appId]/+page.svelte": {
     "eneo/no-raw-color": {
-      "count": 5
+      "count": 4
     }
   },
   "src/routes/(app)/dashboard/app/[appId]/results/[resultId]/+page.svelte": {
@@ -264,19 +274,14 @@
       "count": 1
     }
   },
-  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/run/AudioRecorder.svelte": {
+  "src/lib/features/apps/components/AudioRecorder.svelte": {
     "eneo/no-raw-color": {
       "count": 18
     }
   },
-  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/run/InputAudioRecording.svelte": {
+  "src/lib/features/apps/components/InputAudioRecording.svelte": {
     "eneo/no-raw-color": {
       "count": 10
-    }
-  },
-  "src/routes/(app)/spaces/[spaceId]/assistants/AssistantTile.svelte": {
-    "eneo/no-raw-color": {
-      "count": 3
     }
   },
   "src/routes/(app)/spaces/[spaceId]/chat/insights/InsightsPage.svelte": {

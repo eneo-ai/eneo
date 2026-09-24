@@ -1,6 +1,6 @@
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Rocket } from "lucide-svelte";
+import { Rocket } from "@lucide/svelte";
 import { loadLucideIconOrNull, type LucideIconComponent } from "../lucideIcons";
 import TemplateIcon from "./TemplateIcon.svelte";
 

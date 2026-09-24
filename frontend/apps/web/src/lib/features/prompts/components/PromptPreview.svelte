@@ -5,17 +5,12 @@
 -->
 
 <script lang="ts">
-  import { Button } from "@eneo/ui";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { getPromptManager } from "../PromptManager";
-  import dayjs from "dayjs";
-  import relativeTime from "dayjs/plugin/relativeTime";
-  import utc from "dayjs/plugin/utc";
   import MemberChip from "../../spaces/components/MemberChip.svelte";
   import EditPromptDescription from "./EditPromptDescription.svelte";
   import { m } from "$lib/paraglide/messages";
-
-  dayjs.extend(relativeTime);
-  dayjs.extend(utc);
 
   const {
     state: { previewedPrompt, showPromptVersionDialog },
@@ -32,7 +27,7 @@
         <h2 class="font-medium">
           <span class="sr-only">{m.previewing_prompt_created_at()}</span>
           <span aria-hidden="true">{m.version()}:</span>
-          {dayjs($previewedPrompt?.created_at).format("YYYY-MM-DD HH:mm")}
+          {formatDateTime($previewedPrompt?.created_at)}
         </h2>
         <MemberChip member={$previewedPrompt.user}></MemberChip>
       </div>
@@ -58,11 +53,10 @@
 
         <Button
           disabled={$previewedPrompt.is_selected ?? false}
-          on:click={() => {
+          onclick={() => {
             $showPromptVersionDialog = false;
             onPromptSelected($previewedPrompt);
           }}
-          variant="primary"
           >{m.restore_this_version()}
         </Button>
       </div>

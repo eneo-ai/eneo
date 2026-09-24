@@ -1,7 +1,6 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout";
-  import { Table } from "@eneo/ui";
-  import { createRender } from "svelte-headless-table";
+  import * as Table from "$lib/components/resource-table/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
@@ -95,7 +94,7 @@
         const translatedLabel =
           (m as Record<string, ((...args: unknown[]) => string) | undefined>)[labelKey]?.() ??
           labelKey;
-        return createRender(Table.ButtonCell, {
+        return Table.renderComponent(Table.ButtonCell, {
           link: item.value.url ?? "",
           label: translatedLabel,
           linkIsExternal: true
@@ -105,7 +104,7 @@
 
     table.columnActions({
       cell: (item) => {
-        return createRender(IntegrationActions, {
+        return Table.renderComponent(IntegrationActions, {
           knowledgeItem: item.value
         });
       }

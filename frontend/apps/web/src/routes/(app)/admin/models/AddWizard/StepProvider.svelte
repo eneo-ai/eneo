@@ -17,7 +17,7 @@
 
 <script lang="ts">
   import { untrack } from "svelte";
-  import { Search, Star } from "lucide-svelte";
+  import { Search, Star } from "@lucide/svelte";
   import type { ModelProviderPublic } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo";

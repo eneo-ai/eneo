@@ -1,13 +1,13 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import {
     Calendar as CalendarIcon,
-    AlertTriangle,
+    TriangleAlert,
     Infinity as InfinityIcon,
     ChevronDown
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { fly } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import { SvelteDate } from "svelte/reactivity";
   import { type DateValue, parseDate, today, getLocalTimeZone } from "@internationalized/date";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -38,7 +38,7 @@
   const minDateValue = $derived(today(getLocalTimeZone()).add({ days: 1 }));
   const maxDateValue = $derived(maxDays ? minDateValue.add({ days: maxDays - 1 }) : undefined);
 
-  const locale = $derived(getLocale() === "sv" ? "sv-SE" : "en-US");
+  const locale = $derived(intlLocale());
 
   function safeParseDate(iso: string): DateValue | undefined {
     try {
@@ -131,8 +131,7 @@
   // Format display date
   function formatDisplayDate(isoString: string): string {
     const date = new Date(isoString);
-    const locale = getLocale();
-    return date.toLocaleDateString(locale === "sv" ? "sv-SE" : "en-US", {
+    return date.toLocaleDateString(intlLocale(), {
       year: "numeric",
       month: "short",
       day: "numeric",
@@ -243,7 +242,7 @@
 
       {#if maxDays}
         <p class="text-secondary flex items-center gap-1.5 text-xs">
-          <AlertTriangle class="h-3.5 w-3.5" aria-hidden="true" />
+          <TriangleAlert class="h-3.5 w-3.5" aria-hidden="true" />
           {m.api_keys_exp_max_days({ days: maxDays })}
         </p>
       {/if}
@@ -291,7 +290,7 @@
   <!-- Warning for no expiration -->
   {#if !value && !requireExpiration}
     <Alert.Root class="border-caution/30 bg-caution/5">
-      <AlertTriangle class="text-caution" />
+      <TriangleAlert class="text-caution" />
       <Alert.Description class="text-caution text-xs">
         {m.api_keys_exp_warning()}
       </Alert.Description>

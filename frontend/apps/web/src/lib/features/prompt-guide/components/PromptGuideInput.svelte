@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { LoaderCircle, SendHorizontal } from "lucide-svelte";
+  import { LoaderCircle, SendHorizontal } from "@lucide/svelte";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import { m } from "$lib/paraglide/messages";
 

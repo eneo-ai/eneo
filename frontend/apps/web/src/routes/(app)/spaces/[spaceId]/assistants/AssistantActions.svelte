@@ -4,71 +4,44 @@
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import { IconMove } from "@eneo/icons/move";
-  import { Button, Dialog, Dropdown, Input, Select } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import MoveToSpaceDialog from "$lib/features/spaces/components/MoveToSpaceDialog.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { derived, writable } from "svelte/store";
+  import { writable } from "svelte/store";
   import PublishingDialog from "$lib/features/publishing/components/PublishingDialog.svelte";
   import { IconArrowUpToLine } from "@eneo/icons/arrow-up-to-line";
   import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
   import { m } from "$lib/paraglide/messages";
-  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   export let assistant: AssistantSparse;
 
   const {
-    state: { currentSpace, accessibleSpaces },
+    state: { currentSpace },
     refreshCurrentSpace
   } = getSpacesManager();
 
   const eneo = getEneo();
 
   async function deleteAssistant() {
-    isProcessing = true;
-    try {
-      await eneo.assistants.delete(assistant);
-      refreshCurrentSpace("applications");
-      $showDeleteDialog = false;
-    } catch (e) {
-      toastError(e, m.could_not_delete_assistant());
-      console.error(e);
-    }
-    isProcessing = false;
+    await eneo.assistants.delete(assistant);
+    refreshCurrentSpace("applications");
   }
 
-  async function moveAssistant() {
-    if (!moveDestination) return;
-    isProcessing = true;
-    try {
-      await eneo.assistants.transfer({ assistant, moveResources, targetSpace: moveDestination });
-      refreshCurrentSpace();
-      $showMoveDialog = false;
-    } catch (e) {
-      toastError(e);
-      console.error(e);
-    }
-    isProcessing = false;
+  async function moveAssistant(
+    targetSpace: { id: string },
+    { moveResources }: { moveResources: boolean }
+  ) {
+    await eneo.assistants.transfer({ assistant, moveResources, targetSpace });
+    refreshCurrentSpace();
   }
 
-  let isProcessing = false;
-  let showDeleteDialog: Dialog.OpenState;
-  let showMoveDialog: Dialog.OpenState;
+  let showDeleteDialog = false;
+  let showMoveDialog = false;
   const showPublishDialog = writable(false);
-
-  const moveTargets = derived(accessibleSpaces, ($accessibleSpaces) => {
-    return $accessibleSpaces.reduce(
-      (acc, curr) => {
-        if (curr.id !== $currentSpace.id) {
-          acc.push({ label: curr.name, value: { id: curr.id } });
-        }
-        return acc;
-      },
-      [] as Array<{ label: string; value: { id: string } }>
-    );
-  });
-  let moveDestination: { id: string } | undefined = undefined;
-  let moveResources: boolean = false;
 
   let showActions = (["edit", "publish", "delete"] as const).some((permission) =>
     assistant.permissions?.includes(permission)
@@ -76,30 +49,43 @@
 </script>
 
 {#if showActions}
-  <Dropdown.Root>
-    <Dropdown.Trigger let:trigger asFragment>
-      <Button variant="on-fill" is={trigger} disabled={false} padding="icon">
-        <IconEllipsis />
-      </Button>
-    </Dropdown.Trigger>
-    <Dropdown.Menu let:item>
-      {#if assistant.permissions?.includes("edit")}
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger>
+      {#snippet child({ props })}
         <Button
-          is={item}
-          href={localizeHref(`/spaces/${$currentSpace.routeId}/assistants/${assistant.id}/edit`)}
-          padding="icon-leading"
+          {...props}
+          variant="ghost"
+          size="icon"
+          class="hover:bg-hover-on-fill hover:text-primary"
+          aria-label={m.actions()}
         >
-          <IconEdit size="sm" />
-          {m.edit()}</Button
-        >
+          <IconEllipsis />
+        </Button>
+      {/snippet}
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Content align="end">
+      {#if assistant.permissions?.includes("edit")}
+        <DropdownMenu.Item>
+          {#snippet child({ props })}
+            <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+            <a
+              {...props}
+              href={localizeHref(
+                `/spaces/${$currentSpace.routeId}/assistants/${assistant.id}/edit`
+              )}
+            >
+              <IconEdit size="sm" />
+              {m.edit()}
+            </a>
+            <!-- eslint-enable svelte/no-navigation-without-resolve -->
+          {/snippet}
+        </DropdownMenu.Item>
       {/if}
       {#if assistant.permissions?.includes("publish")}
-        <Button
-          is={item}
-          on:click={() => {
+        <DropdownMenu.Item
+          onSelect={() => {
             $showPublishDialog = true;
           }}
-          padding="icon-leading"
         >
           {#if assistant.published}
             <IconArrowDownToLine size="sm"></IconArrowDownToLine>
@@ -108,83 +94,47 @@
             <IconArrowUpToLine size="sm"></IconArrowUpToLine>
             {m.publish()}
           {/if}
-        </Button>
+        </DropdownMenu.Item>
       {/if}
       {#if assistant.permissions?.includes("delete")}
-        <Button
-          is={item}
-          on:click={() => {
-            $showMoveDialog = true;
+        <DropdownMenu.Item
+          onSelect={() => {
+            showMoveDialog = true;
           }}
-          padding="icon-leading"
         >
           <IconMove size="sm" />
-          {m.move()}</Button
-        >
-        <Button
-          is={item}
+          {m.move()}
+        </DropdownMenu.Item>
+        <DropdownMenu.Item
           variant="destructive"
-          on:click={() => {
-            $showDeleteDialog = true;
+          onSelect={() => {
+            showDeleteDialog = true;
           }}
-          padding="icon-leading"
         >
-          <IconTrash size="sm" />{m.delete()}</Button
-        >
+          <IconTrash size="sm" />{m.delete()}
+        </DropdownMenu.Item>
       {/if}
-    </Dropdown.Menu>
-  </Dropdown.Root>
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
 {/if}
 
-<Dialog.Root alert bind:isOpen={showDeleteDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.delete_assistant()}</Dialog.Title>
-    <Dialog.Description>{m.confirm_delete_assistant({ name: assistant.name })}</Dialog.Description>
+<ConfirmDialog
+  bind:open={showDeleteDialog}
+  title={m.delete_assistant()}
+  description={m.confirm_delete_assistant({ name: assistant.name })}
+  confirmLabel={m.delete()}
+  pendingLabel={m.deleting()}
+  errorContext={m.could_not_delete_assistant()}
+  onConfirm={deleteAssistant}
+/>
 
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={deleteAssistant}
-        >{isProcessing ? m.deleting() : m.delete()}</Button
-      >
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
-
-<Dialog.Root bind:isOpen={showMoveDialog}>
-  <Dialog.Content width="medium" form>
-    <Dialog.Title>{m.move_assistant()}</Dialog.Title>
-
-    <Dialog.Section scrollable={false}>
-      <Select.Simple
-        required
-        options={$moveTargets}
-        bind:value={moveDestination}
-        fitViewport={true}
-        resourceName="space"
-        class="border-default hover:bg-hover-dimmer rounded-t-md border-b px-4 py-4"
-        >{m.destination()}</Select.Simple
-      >
-      <Input.Switch bind:value={moveResources} class="hover:bg-hover-dimmer px-4 py-4"
-        >{m.include_assistants_knowledge()}</Input.Switch
-      >
-      {#if moveResources}
-        <p
-          class="label-warning border-label-default bg-label-dimmer text-label-stronger mx-4 mb-3 rounded-md border px-2 py-1 text-sm"
-        >
-          <span class="font-bold">{m.hint()}:</span>
-          {m.move_assistant_hint()}
-        </p>
-      {/if}
-    </Dialog.Section>
-
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={moveAssistant}
-        >{isProcessing ? m.moving() : m.move_assistant()}</Button
-      >
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+<MoveToSpaceDialog
+  bind:open={showMoveDialog}
+  title={m.move_assistant()}
+  submitLabel={m.move_assistant()}
+  resourcesOption={{ label: m.include_assistants_knowledge(), hint: m.move_assistant_hint() }}
+  onMove={moveAssistant}
+/>
 
 <PublishingDialog
   resource={assistant}

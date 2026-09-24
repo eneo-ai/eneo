@@ -18,7 +18,7 @@
   } from "$lib/features/auth/passwordChange";
   import PasswordPolicyChecklist from "$lib/features/auth/PasswordPolicyChecklist.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { Eye, EyeOff } from "lucide-svelte";
+  import { Eye, EyeOff } from "@lucide/svelte";
   import type { SubmitFunction } from "./$types";
 
   let { capability, username } = $props<{

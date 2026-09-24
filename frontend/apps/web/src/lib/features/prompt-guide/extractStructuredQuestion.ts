@@ -30,7 +30,7 @@ export type PromptGuideQuestion = {
  *   parsed or whose shape failed validation. Render `proseBefore` and fall
  *   back to rendering the raw block as a normal code block via the standard
  *   markdown pipeline (call sites typically just re-render the whole turn
- *   text and let DOMPurify-sanitised markdown deal with it).
+ *   text through the shared markdown renderer).
  * - `parsed` — a valid card. Render `proseBefore` as markdown, the card,
  *   then `proseAfter` as markdown.
  */

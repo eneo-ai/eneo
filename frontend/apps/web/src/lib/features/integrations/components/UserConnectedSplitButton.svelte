@@ -3,8 +3,9 @@
   import { IconCancel } from "@eneo/icons/cancel";
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { type UserIntegration } from "@eneo/eneo-js";
-  import { Button, Dialog, Dropdown } from "@eneo/ui";
-  import { writable } from "svelte/store";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
@@ -15,7 +16,7 @@
 
   const { integration, onDisconnect }: Props = $props();
   const eneo = getEneo();
-  const showDisconnectDialog = writable(false);
+  let showDisconnectDialog = $state(false);
 
   async function disconnect() {
     const { id } = integration;
@@ -25,7 +26,6 @@
     }
     await eneo.integrations.user.disconnect({ id });
     onDisconnect?.(integration);
-    $showDisconnectDialog = false;
   }
 </script>
 
@@ -35,31 +35,32 @@
   >
     {m.connected()}
   </div>
-  <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
-    <Dropdown.Trigger asFragment let:trigger>
-      <Button padding="icon" variant="positive" is={trigger} class="!rounded-l-none !rounded-r-lg"
-        ><IconChevronDown></IconChevronDown></Button
-      >
-    </Dropdown.Trigger>
-    <Dropdown.Menu let:item>
-      <Button is={item} onclick={() => ($showDisconnectDialog = true)} variant="destructive">
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger>
+      {#snippet child({ props })}
+        <Button
+          {...props}
+          size="icon"
+          class="bg-positive-default hover:bg-positive-stronger aria-expanded:bg-positive-stronger rounded-l-none"
+          aria-label={m.actions()}><IconChevronDown></IconChevronDown></Button
+        >
+      {/snippet}
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Content align="end">
+      <DropdownMenu.Item variant="destructive" onSelect={() => (showDisconnectDialog = true)}>
         <IconCancel></IconCancel>
-        {m.disconnect_integration()}</Button
-      >
-    </Dropdown.Menu>
-  </Dropdown.Root>
+        {m.disconnect_integration()}
+      </DropdownMenu.Item>
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
 </div>
 
-<Dialog.Root openController={showDisconnectDialog} alert>
-  <Dialog.Content width="dynamic">
-    <Dialog.Title>{m.disconnect_name({ name: integration.name })}</Dialog.Title>
-
-    <Dialog.Description
-      >{m.do_you_really_want_to_disconnect_name({ name: integration.name })}</Dialog.Description
-    >
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button is={close} onclick={disconnect} variant="destructive">{m.disconnect()}</Button>
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+<ConfirmDialog
+  bind:open={showDisconnectDialog}
+  title={m.disconnect_name({ name: integration.name })}
+  description={m.do_you_really_want_to_disconnect_name({ name: integration.name })}
+  confirmLabel={m.disconnect()}
+  width="dynamic"
+  errorContext={m.could_not_disconnect()}
+  onConfirm={disconnect}
+/>

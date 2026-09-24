@@ -244,7 +244,7 @@ graph LR
 
 - **Framework**: SvelteKit with TypeScript
 - **Package Manager**: bun with workspace support
-- **UI Components**: Custom component library (@eneo/ui)
+- **UI Components**: shadcn-svelte on bits-ui, styled with the design tokens and icons in @eneo/ui
 - **Styling**: Tailwind CSS v4
 - **API Client**: Type-safe client (@eneo/eneo-js)
 - **State Management**: Svelte stores with reactive updates

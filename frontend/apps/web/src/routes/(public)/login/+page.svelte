@@ -7,7 +7,7 @@
   import { prefersReducedMotion } from "svelte/motion";
   import { fade } from "svelte/transition";
   import { SvelteURLSearchParams } from "svelte/reactivity";
-  import { ArrowLeft } from "lucide-svelte";
+  import { ArrowLeft } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Field from "$lib/components/ui/field";
   import { Input } from "$lib/components/ui/input";

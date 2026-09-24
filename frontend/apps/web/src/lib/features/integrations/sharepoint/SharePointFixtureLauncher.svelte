@@ -1,6 +1,6 @@
 <script lang="ts">
   import { writable } from "svelte/store";
-  import { FlaskConical } from "lucide-svelte";
+  import { FlaskConical } from "@lucide/svelte";
   import { buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -23,18 +23,16 @@
   }
 </script>
 
-<Tooltip.Provider>
-  <Tooltip.Root>
-    <Tooltip.Trigger
-      class={buttonVariants({ variant: "outline", size: "icon" })}
-      aria-label={m.sharepoint_fixture_open()}
-      onclick={() => ($showFixtureDialog = true)}
-    >
-      <FlaskConical aria-hidden="true" />
-    </Tooltip.Trigger>
-    <Tooltip.Content>{m.sharepoint_fixture_open()}</Tooltip.Content>
-  </Tooltip.Root>
-</Tooltip.Provider>
+<Tooltip.Root>
+  <Tooltip.Trigger
+    class={buttonVariants({ variant: "outline", size: "icon" })}
+    aria-label={m.sharepoint_fixture_open()}
+    onclick={() => ($showFixtureDialog = true)}
+  >
+    <FlaskConical aria-hidden="true" />
+  </Tooltip.Trigger>
+  <Tooltip.Content>{m.sharepoint_fixture_open()}</Tooltip.Content>
+</Tooltip.Root>
 
 <SharepointImportDialog
   goBack={closeFixtureDialog}

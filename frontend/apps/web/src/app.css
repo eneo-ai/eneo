@@ -75,6 +75,11 @@
   /*     - lib/components/ui/radio-group/radio-group-item.svelte       */
   /*     - lib/components/ui/field/field-label.svelte                  */
   /*     - lib/components/ui/badge/badge.svelte (default + link)       */
+  /*     - lib/components/ui/slider/slider.svelte (range)              */
+  /*     - lib/components/ui/progress/progress.svelte (indicator)      */
+  /*     - lib/components/ui/calendar/calendar-day.svelte (selected)   */
+  /*     - lib/components/ui/range-calendar/range-calendar-day.svelte  */
+  /*     - lib/components/ui/field/field-description.svelte (link)    */
   /*   Any future shadcn component that uses bg-primary / text-primary-*/
   /*   foreground in its checked/active state needs the same patch.    */
   /*                                                                   */
@@ -84,14 +89,14 @@
   /*      `--text-color-primary` → `--text-color-body` (or equivalent  */
   /*      non-conflicting names). This frees the "primary" namespace.  */
   /*   2. Search-and-replace every `bg-primary` / `text-primary` usage */
-  /*      across apps/web AND packages/ui internals that meant "page   */
+  /*      across apps/web and packages/ui/src/styles that meant "page  */
   /*      bg" or "body text" — point them at the new tokens.           */
   /*   3. Drop the two `--color-primary` / `--color-primary-foreground`*/
   /*      overrides below. Tailwind will then resolve `bg-primary` /   */
   /*      `text-primary-foreground` against shadcn's canonical defs    */
   /*      (which we don't redeclare, so they fall back to upstream).   */
   /*   4. Revert the `bg-accent-default` / `text-on-fill` workaround   */
-  /*      in the four files listed above back to upstream shadcn's     */
+  /*      in the files listed above back to upstream shadcn's          */
   /*      `bg-primary` / `text-primary-foreground`.                    */
   /*                                                                   */
   /*   After step 4 the vendored shadcn components match upstream byte-*/

@@ -9,7 +9,7 @@
 <script lang="ts">
   import CloudUploadIcon from "@lucide/svelte/icons/cloud-upload";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
-  import FileCheck2Icon from "@lucide/svelte/icons/file-check-2";
+  import FileCheck2Icon from "@lucide/svelte/icons/file-check-corner";
   import FileIcon from "@lucide/svelte/icons/file";
   import FilePlusIcon from "@lucide/svelte/icons/file-plus";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
