@@ -12,6 +12,7 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { derived } from "svelte/store";
   import { Settings } from "$lib/components/layout";
+  import Hint from "$lib/components/Hint.svelte";
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight } from "@lucide/svelte";
   import type { components } from "@eneo/eneo-js";
@@ -160,11 +161,7 @@
 <Settings.Row title={m.tools()} description={m.mcp_settings_row_description()}>
   <svelte:fragment slot="description">
     {#if ($currentSpace.mcp_servers?.length ?? 0) === 0}
-      <p
-        class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
-      >
-        <span class="font-bold">{m.hint()}:&nbsp;</span>{m.mcp_enable_server_hint()}
-      </p>
+      <Hint class="mt-2.5">{m.mcp_enable_server_hint()}</Hint>
     {/if}
   </svelte:fragment>
 

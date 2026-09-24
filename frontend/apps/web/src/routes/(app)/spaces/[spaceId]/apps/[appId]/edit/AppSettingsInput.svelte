@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
   import { getAppEditor } from "$lib/features/apps/AppEditor";
-  import AppSettingsInputType from "./AppSettingsInputType.svelte";
+  import InputTypeSelect from "$lib/features/apps/components/InputTypeSelect.svelte";
   import { m } from "$lib/paraglide/messages";
 
   const {
@@ -39,6 +39,6 @@
     }}
     let:aria
   >
-    <AppSettingsInputType bind:value={input.type} {aria}></AppSettingsInputType>
+    <InputTypeSelect bind:value={input.type} {aria} />
   </Settings.Row>
 {/each}

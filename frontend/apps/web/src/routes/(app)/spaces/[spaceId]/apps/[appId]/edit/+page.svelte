@@ -8,7 +8,7 @@
 
   import { fade } from "svelte/transition";
   import { initAppEditor } from "$lib/features/apps/AppEditor";
-  import AppSettingsAttachments from "./AppSettingsAttachments.svelte";
+  import AttachmentsEditor from "$lib/features/attachments/components/AttachmentsEditor.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
@@ -331,7 +331,11 @@
             discardChanges("attachments");
           }}
         >
-          <AppSettingsAttachments bind:cancelUploadsAndClearQueue></AppSettingsAttachments>
+          <AttachmentsEditor
+            bind:attachments={$update.attachments}
+            allowedAttachments={$update.allowed_attachments}
+            bind:cancelUploadsAndClearQueue
+          />
         </Settings.Row>
       </Settings.Group>
 

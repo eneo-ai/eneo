@@ -13,7 +13,8 @@
   import { initAssistantEditor } from "$lib/features/assistants/AssistantEditor.js";
   import { fade } from "svelte/transition";
 
-  import AssistantSettingsAttachments from "./AssistantSettingsAttachments.svelte";
+  import AttachmentsEditor from "$lib/features/attachments/components/AttachmentsEditor.svelte";
+  import ConfigContextMeter from "$lib/features/assistants/components/ConfigContextMeter.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
@@ -85,6 +86,12 @@
   );
 
   let cancelUploadsAndClearQueue = $state<() => void>(() => {});
+
+  // The editor only tracks completion_model.id, so resolve the full model (with its context
+  // window) from the space: the context meter then follows the picked model before saving.
+  const selectedCompletionModel = $derived(
+    $currentSpace.completion_models.find((model) => model.id === $update.completion_model?.id)
+  );
 
   async function createSkill(value: SkillFormValue) {
     return data.eneo.skills.create({ spaceId: $currentSpace.id, ...value });
@@ -460,8 +467,17 @@
           description={m.attach_further_instructions()}
           hasChanges={$currentChanges.diff.attachments !== undefined}
         >
-          <AssistantSettingsAttachments bind:cancelUploadsAndClearQueue
-          ></AssistantSettingsAttachments>
+          <ConfigContextMeter
+            assistantId={$resource.id}
+            model={selectedCompletionModel}
+            prompt={$update.prompt.text}
+            attachments={$update.attachments}
+          />
+          <AttachmentsEditor
+            bind:attachments={$update.attachments}
+            allowedAttachments={$update.allowed_attachments}
+            bind:cancelUploadsAndClearQueue
+          />
         </Settings.Row>
 
         <Settings.Row
