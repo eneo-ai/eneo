@@ -1,5 +1,6 @@
 import { sveltekit } from "@sveltejs/kit/vite";
 import { defineConfig } from "vitest/config";
+import { playwright } from "@vitest/browser-playwright";
 import { searchForWorkspaceRoot, type PluginOption } from "vite";
 import tailwindcss from "@tailwindcss/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
@@ -64,7 +65,7 @@ export default defineConfig({
           // ignores the jsdom/node environment field here.
           browser: {
             enabled: true,
-            provider: "playwright",
+            provider: playwright(),
             headless: true,
             instances: [{ browser: "chromium" }]
           },
