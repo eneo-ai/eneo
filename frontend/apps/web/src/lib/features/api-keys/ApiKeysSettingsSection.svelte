@@ -7,7 +7,7 @@
   import {
     Key,
     ChevronDown,
-    AlertCircle,
+    CircleAlert,
     ExternalLink,
     RefreshCw,
     Bell,
@@ -158,7 +158,7 @@
     <div
       class="border-negative-default/20 bg-negative-dimmer flex items-center gap-3 rounded-lg border px-5 py-4"
     >
-      <AlertCircle class="text-negative-default h-4 w-4 flex-shrink-0" />
+      <CircleAlert class="text-negative-default h-4 w-4 flex-shrink-0" />
       <p class="text-negative-default flex-1 text-sm">{errorMessage}</p>
       <Button variant="ghost" size="sm" onclick={loadKeys}>
         <RefreshCw />

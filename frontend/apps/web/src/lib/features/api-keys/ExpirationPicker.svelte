@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     Calendar as CalendarIcon,
-    AlertTriangle,
+    TriangleAlert,
     Infinity as InfinityIcon,
     ChevronDown
   } from "@lucide/svelte";
@@ -243,7 +243,7 @@
 
       {#if maxDays}
         <p class="text-secondary flex items-center gap-1.5 text-xs">
-          <AlertTriangle class="h-3.5 w-3.5" aria-hidden="true" />
+          <TriangleAlert class="h-3.5 w-3.5" aria-hidden="true" />
           {m.api_keys_exp_max_days({ days: maxDays })}
         </p>
       {/if}
@@ -291,7 +291,7 @@
   <!-- Warning for no expiration -->
   {#if !value && !requireExpiration}
     <Alert.Root class="border-caution/30 bg-caution/5">
-      <AlertTriangle class="text-caution" />
+      <TriangleAlert class="text-caution" />
       <Alert.Description class="text-caution text-xs">
         {m.api_keys_exp_warning()}
       </Alert.Description>

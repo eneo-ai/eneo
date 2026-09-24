@@ -19,16 +19,16 @@
     type UploadLimitUseCase
   } from "@eneo/eneo-js";
   import {
-    AlertCircle,
+    CircleAlert,
     ArrowRightLeft,
-    CheckCircle2,
+    CircleCheck,
     ChevronDown,
     Database,
     ExternalLink,
     Gauge,
     HardDrive,
     Info,
-    Loader2,
+    LoaderCircle,
     RefreshCw
   } from "@lucide/svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
@@ -608,7 +608,7 @@
             variant="destructive"
             aria-live="assertive"
           >
-            <AlertCircle />
+            <CircleAlert />
             <Alert.Title>{m.storage_settings_load_error_title()}</Alert.Title>
             <Alert.Description>
               <p>{m.storage_settings_load_error_description()}</p>
@@ -687,7 +687,7 @@
 
               {#if selectedObjectStoreDegraded}
                 <Alert.Root variant="destructive">
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_settings_selected_target_degraded_title()}</Alert.Title>
                   <Alert.Description>
                     {m.storage_settings_selected_target_degraded_description()}
@@ -714,7 +714,7 @@
                   variant="destructive"
                   aria-live="assertive"
                 >
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_settings_stale_title()}</Alert.Title>
                   <Alert.Description>
                     <p>{m.storage_settings_stale_description()}</p>
@@ -725,7 +725,7 @@
                       onclick={() => requestPolicyRefresh()}
                     >
                       {#if reloading}
-                        <Loader2 data-icon="inline-start" class="animate-spin" />
+                        <LoaderCircle data-icon="inline-start" class="animate-spin" />
                         {m.storage_settings_reloading()}
                       {:else}
                         {m.storage_settings_reload_latest()}
@@ -741,7 +741,7 @@
                   variant="destructive"
                   aria-live="assertive"
                 >
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_settings_reload_error_title()}</Alert.Title>
                   <Alert.Description>
                     {m.storage_settings_reload_error_description()}
@@ -757,7 +757,7 @@
                   variant="destructive"
                   aria-live="assertive"
                 >
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_settings_target_unavailable_title()}</Alert.Title>
                   <Alert.Description>
                     {m.storage_settings_target_unavailable_description()}
@@ -773,7 +773,7 @@
                   variant="destructive"
                   aria-live="assertive"
                 >
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_settings_save_outcome_unknown_title()}</Alert.Title>
                   <Alert.Description>
                     <p>{m.storage_settings_save_outcome_unknown_description()}</p>
@@ -784,7 +784,7 @@
                       onclick={() => requestPolicyRefresh()}
                     >
                       {#if reloading}
-                        <Loader2 data-icon="inline-start" class="animate-spin" />
+                        <LoaderCircle data-icon="inline-start" class="animate-spin" />
                         {m.storage_settings_reloading()}
                       {:else}
                         {m.storage_settings_reload_latest()}
@@ -1092,7 +1092,7 @@
                     </Button>
                     <Button type="submit" disabled={saveUnavailable} aria-busy={saving}>
                       {#if saving}
-                        <Loader2 data-icon="inline-start" class="animate-spin" />
+                        <LoaderCircle data-icon="inline-start" class="animate-spin" />
                         {m.storage_settings_saving()}
                       {:else}
                         {m.storage_settings_save()}
@@ -1132,7 +1132,7 @@
                   variant="destructive"
                   aria-live="assertive"
                 >
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_moves_stale_title()}</Alert.Title>
                   <Alert.Description>
                     <p>{m.storage_moves_stale_description()}</p>
@@ -1154,7 +1154,7 @@
                   variant="destructive"
                   aria-live="assertive"
                 >
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_moves_action_error_title()}</Alert.Title>
                   <Alert.Description>
                     {m.storage_moves_action_error_description()}
@@ -1170,7 +1170,7 @@
                 </Alert.Root>
               {:else if moveQueueResult}
                 <Alert.Root aria-live="polite">
-                  <CheckCircle2 />
+                  <CircleCheck />
                   <Alert.Title>
                     {m.storage_moves_queue_result({
                       queued: storageCount(moveQueueResult.queued_count),
@@ -1271,7 +1271,7 @@
                   onclick={() => (moveConfirmationOpen = true)}
                 >
                   {#if moveActionPending === "queue"}
-                    <Loader2 data-icon="inline-start" class="animate-spin" />
+                    <LoaderCircle data-icon="inline-start" class="animate-spin" />
                   {/if}
                   {m.storage_moves_queue()}
                 </Button>
@@ -1288,7 +1288,7 @@
                     onclick={setMovesPaused}
                   >
                     {#if moveActionPending === "pause"}
-                      <Loader2 data-icon="inline-start" class="animate-spin" />
+                      <LoaderCircle data-icon="inline-start" class="animate-spin" />
                     {/if}
                     {contentMoves?.paused ? m.storage_moves_resume() : m.storage_moves_pause()}
                   </Button>
@@ -1303,7 +1303,7 @@
                   variant="destructive"
                   aria-live="assertive"
                 >
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_moves_load_error_title()}</Alert.Title>
                   <Alert.Description>
                     <p>{m.storage_moves_load_error_description()}</p>
@@ -1316,7 +1316,7 @@
 
               {#if contentMoves?.moves.length === 0}
                 <Alert.Root>
-                  <CheckCircle2 />
+                  <CircleCheck />
                   <Alert.Title>{m.storage_overview_move_idle()}</Alert.Title>
                   <Alert.Description>{m.storage_moves_empty()}</Alert.Description>
                 </Alert.Root>
@@ -1352,7 +1352,7 @@
                 </div>
               {:else if moveStatus === "loading"}
                 <p class="text-secondary flex items-center gap-2 text-sm" aria-live="polite">
-                  <Loader2 class="size-4 animate-spin" />
+                  <LoaderCircle class="size-4 animate-spin" />
                   {m.storage_moves_loading()}
                 </p>
               {/if}

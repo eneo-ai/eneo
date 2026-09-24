@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { resolve } from "$app/paths";
   import type { ApiKeyV2, ModuleInstallation } from "@eneo/eneo-js";
-  import { AlertCircle, CheckCircle2, Loader2, Pencil, Plus, Trash2 } from "@lucide/svelte";
+  import { CircleAlert, CircleCheck, LoaderCircle, Pencil, Plus, Trash2 } from "@lucide/svelte";
   import { Page, Settings } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
@@ -194,7 +194,7 @@
     <Settings.Page>
       {#if errorMessage}
         <Alert.Root variant="destructive" role="alert">
-          <AlertCircle />
+          <CircleAlert />
           <Alert.Description>{errorMessage}</Alert.Description>
         </Alert.Root>
       {/if}
@@ -351,7 +351,7 @@
             <Field.Description>{m.module_admin_service_key_help()}</Field.Description>
             {#if boundKeyMissing && !serviceKeyId}
               <Alert.Root variant="destructive" role="alert">
-                <AlertCircle />
+                <CircleAlert />
                 <Alert.Description>{m.module_admin_bound_key_missing()}</Alert.Description>
               </Alert.Root>
             {/if}
@@ -359,7 +359,7 @@
 
           {#if !loading && serviceKeys.length === 0}
             <Alert.Root>
-              <AlertCircle />
+              <CircleAlert />
               <Alert.Title>{m.module_admin_no_service_keys_title()}</Alert.Title>
               <Alert.Description>
                 {m.module_admin_no_service_keys_description()}
@@ -379,9 +379,9 @@
                 !serviceKeyId}
             >
               {#if saving}
-                <Loader2 class="animate-spin" />
+                <LoaderCircle class="animate-spin" />
               {:else if editingModuleKey}
-                <CheckCircle2 />
+                <CircleCheck />
               {:else}
                 <Plus />
               {/if}

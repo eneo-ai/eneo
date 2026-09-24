@@ -8,14 +8,14 @@
     type ObjectContentReadinessCode
   } from "@eneo/eneo-js";
   import {
-    AlertCircle,
+    CircleAlert,
     ArrowLeftRight,
-    CheckCircle2,
+    CircleCheck,
     ChevronDown,
     ExternalLink,
     HardDrive,
     KeyRound,
-    Loader2,
+    LoaderCircle,
     Settings2
   } from "@lucide/svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -558,7 +558,7 @@
 
   {#if success !== null}
     <Alert.Root aria-live="polite">
-      <CheckCircle2 />
+      <CircleCheck />
       <Alert.Title>
         {success === "create"
           ? m.storage_connection_created_title()
@@ -582,7 +582,7 @@
 
   {#if mutationOutcomeUnknown}
     <Alert.Root aria-live="polite">
-      <AlertCircle />
+      <CircleAlert />
       <Alert.Title>{m.storage_connection_mutation_outcome_unknown_title()}</Alert.Title>
       <Alert.Description>
         {m.storage_connection_mutation_outcome_unknown_description()}
@@ -592,7 +592,7 @@
 
   {#if connectionAlreadyConfigured}
     <Alert.Root aria-live="polite">
-      <CheckCircle2 />
+      <CircleCheck />
       <Alert.Title>{m.storage_connection_already_configured_title()}</Alert.Title>
       <Alert.Description>
         {m.storage_connection_already_configured_description()}
@@ -602,7 +602,7 @@
 
   {#if connectionRevisionConflict && loadStatus === "idle"}
     <Alert.Root aria-live="polite">
-      <AlertCircle />
+      <CircleAlert />
       <Alert.Title>{m.storage_connection_error_conflict_title()}</Alert.Title>
       <Alert.Description>{m.storage_connection_error_conflict_description()}</Alert.Description>
     </Alert.Root>
@@ -610,7 +610,7 @@
 
   {#if degraded}
     <Alert.Root variant="destructive">
-      <AlertCircle />
+      <CircleAlert />
       <Alert.Title>{m.storage_connection_degraded_title()}</Alert.Title>
       <Alert.Description>
         {m.storage_connection_degraded_description({
@@ -642,7 +642,7 @@
     </div>
   {:else if loadStatus === "error"}
     <Alert.Root variant="destructive">
-      <AlertCircle />
+      <CircleAlert />
       <Alert.Title>{m.storage_connection_load_error_title()}</Alert.Title>
       <Alert.Description>
         <p>{m.storage_connection_load_error_description()}</p>
@@ -729,7 +729,7 @@
                   </p>
                   {#if previousActionFailed}
                     <Alert.Root class="mt-3" variant="destructive" aria-live="assertive">
-                      <AlertCircle />
+                      <CircleAlert />
                       <Alert.Title>{errorTitle(previousActionCode)}</Alert.Title>
                       <Alert.Description>
                         {errorDescription(previousActionCode)}
@@ -745,7 +745,11 @@
                     aria-busy={switchInFlight}
                   >
                     {#if switchInFlight}
-                      <Loader2 data-icon="inline-start" class="animate-spin" aria-hidden="true" />
+                      <LoaderCircle
+                        data-icon="inline-start"
+                        class="animate-spin"
+                        aria-hidden="true"
+                      />
                     {/if}
                     {m.storage_switch_back_action()}
                   </Button>
@@ -776,7 +780,7 @@
               </p>
               {#if pendingActionFailed}
                 <Alert.Root class="mt-3" variant="destructive" aria-live="assertive">
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{errorTitle(pendingActionCode)}</Alert.Title>
                   <Alert.Description>
                     {errorDescription(pendingActionCode)}
@@ -795,7 +799,7 @@
                 aria-busy={abandonInFlight}
               >
                 {#if abandonInFlight}
-                  <Loader2 data-icon="inline-start" class="animate-spin" aria-hidden="true" />
+                  <LoaderCircle data-icon="inline-start" class="animate-spin" aria-hidden="true" />
                 {/if}
                 {m.storage_pending_abandon_action()}
               </Button>
@@ -822,7 +826,7 @@
     </div>
     {#if connection && !connection.credentials_can_be_managed}
       <Alert.Root>
-        <AlertCircle />
+        <CircleAlert />
         <Alert.Title>{m.storage_connection_encryption_required_title()}</Alert.Title>
         <Alert.Description
           >{m.storage_connection_encryption_required_description()}</Alert.Description
@@ -873,7 +877,7 @@
               variant="destructive"
               aria-live="assertive"
             >
-              <AlertCircle />
+              <CircleAlert />
               <Alert.Title>{errorTitle(submissionCode)}</Alert.Title>
               <Alert.Description>{errorDescription(submissionCode)}</Alert.Description>
             </Alert.Root>
@@ -881,7 +885,7 @@
 
           {#if dialogMode === "switch"}
             <Alert.Root>
-              <AlertCircle />
+              <CircleAlert />
               <Alert.Title>{m.storage_switch_checklist_title()}</Alert.Title>
               <Alert.Description>
                 <ul class="ml-4 list-disc space-y-1">
@@ -1051,7 +1055,7 @@
           {/if}
 
           <div class="text-secondary flex items-start gap-3 text-sm">
-            <CheckCircle2 class="text-primary mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <CircleCheck class="text-primary mt-0.5 size-4 shrink-0" aria-hidden="true" />
             <div class="min-w-0">
               <p class="text-primary font-medium">
                 {dialogMode === "rotate"
@@ -1083,7 +1087,7 @@
         </Button>
         <Button type="submit" disabled={!formValid || submitting} aria-busy={submitting}>
           {#if submitting}
-            <Loader2 data-icon="inline-start" class="animate-spin" aria-hidden="true" />
+            <LoaderCircle data-icon="inline-start" class="animate-spin" aria-hidden="true" />
             {m.storage_connection_testing()}
           {:else if dialogMode === "create"}
             {m.storage_connection_test_and_save()}

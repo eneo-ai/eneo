@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { slide } from "svelte/transition";
-  import { Clock, AlertTriangle, X, BellOff, Bell } from "@lucide/svelte";
+  import { Clock, TriangleAlert, X, BellOff, Bell } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import type { ExpiringKeyDisplayItem, ExpiryLevel } from "./expirationUtils";
   import {
@@ -152,7 +152,7 @@
       <!-- Icon -->
       <div class="mt-0.5 flex-shrink-0 {compact ? 'mt-0' : ''}" aria-hidden="true">
         {#if isUrgent}
-          <AlertTriangle class="text-negative-stronger h-4 w-4" />
+          <TriangleAlert class="text-negative-stronger h-4 w-4" />
         {:else}
           <Clock class="text-caution h-4 w-4" />
         {/if}

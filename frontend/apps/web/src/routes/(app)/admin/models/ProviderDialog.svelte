@@ -14,7 +14,7 @@
   import type { ModelProviderPublic } from "@eneo/eneo-js";
   import type { Writable } from "svelte/store";
   import { onMount } from "svelte";
-  import { Loader2 } from "@lucide/svelte";
+  import { LoaderCircle } from "@lucide/svelte";
 
   import { invalidate } from "$app/navigation";
   import { getEneo } from "$lib/core/Eneo";
@@ -326,7 +326,7 @@
         <Button type="button" variant="outline" onclick={handleCancel}>{m.cancel()}</Button>
         <Button type="submit" disabled={isSubmitting || capabilitiesLoading}>
           {#if isSubmitting}
-            <Loader2 class="animate-spin" aria-hidden="true" />
+            <LoaderCircle class="animate-spin" aria-hidden="true" />
             {m.saving()}
           {:else}
             {m.save_changes()}

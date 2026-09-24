@@ -9,7 +9,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
-  import { MoreVertical, Edit, UserMinus, UserPlus, Trash2 } from "@lucide/svelte";
+  import { EllipsisVertical, SquarePen, UserMinus, UserPlus, Trash2 } from "@lucide/svelte";
   import { invalidate } from "$app/navigation";
   import UserEditor from "./editor/UserEditor.svelte";
   import { getAppContext } from "$lib/core/AppContext";
@@ -58,19 +58,19 @@
   <DropdownMenu.Trigger>
     {#snippet child({ props })}
       <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
-        <MoreVertical size={16} />
+        <EllipsisVertical size={16} />
       </Button>
     {/snippet}
   </DropdownMenu.Trigger>
 
   <DropdownMenu.Content align="end">
-    <!-- Edit action - always available -->
+    <!-- SquarePen action - always available -->
     <DropdownMenu.Item
       onSelect={() => {
         showEditDialog = true;
       }}
     >
-      <Edit size={16} />
+      <SquarePen size={16} />
       {m.edit_user()}
     </DropdownMenu.Item>
 
@@ -104,7 +104,7 @@
   </DropdownMenu.Content>
 </DropdownMenu.Root>
 
-<!-- Edit Dialog - hide built-in trigger since we control it from dropdown -->
+<!-- SquarePen Dialog - hide built-in trigger since we control it from dropdown -->
 <UserEditor {user} mode="update" hideTrigger={true} bind:open={showEditDialog}></UserEditor>
 
 <!-- Delete Confirmation Dialog -->

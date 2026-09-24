@@ -14,7 +14,7 @@
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo.js";
   import { invalidate } from "$app/navigation";
-  import { AlertTriangle } from "@lucide/svelte";
+  import { TriangleAlert } from "@lucide/svelte";
   import type { Writable } from "svelte/store";
 
   type AssistantTemplate = components["schemas"]["AssistantTemplateAdminPublic"];
@@ -102,7 +102,7 @@
           <!-- Warning box with template name -->
           <div class="border-negative-default bg-negative-default/15 rounded-lg border px-4 py-3">
             <div class="flex items-start gap-3">
-              <AlertTriangle class="text-negative-default shrink-0" size={20} />
+              <TriangleAlert class="text-negative-default shrink-0" size={20} />
               <div class="flex flex-col gap-1.5">
                 <div class="text-default font-semibold">{template.name}</div>
                 <div class="text-secondary text-sm">

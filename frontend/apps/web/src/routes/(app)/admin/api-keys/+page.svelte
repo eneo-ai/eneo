@@ -22,11 +22,11 @@
   import ApiKeyStateFilter from "$lib/features/api-keys/ApiKeyStateFilter.svelte";
   import type { ApiKeyStateFilterValue } from "$lib/features/api-keys/apiKeyTableUtils";
   import {
-    Filter,
+    Funnel,
     X,
     Check,
     Key,
-    AlertCircle,
+    CircleAlert,
     ChevronDown,
     RefreshCw,
     Lock,
@@ -52,7 +52,7 @@
   let assistantOptions = $state<ResourceOption[]>([]);
   let appOptions = $state<ResourceOption[]>([]);
 
-  // Filter states
+  // Funnel states
   let scopeType = $state("");
   let stateFilter = $state<ApiKeyStateFilterValue>("active");
   let keyType = $state("");
@@ -632,9 +632,9 @@
   <Page.Main>
     <Settings.Page>
       <div class="space-y-6">
-        <!-- Filter Section -->
+        <!-- Funnel Section -->
         <div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
-          <!-- Filter Header -->
+          <!-- Funnel Header -->
           <button
             type="button"
             onclick={() => (showFilters = !showFilters)}
@@ -646,7 +646,7 @@
               <div
                 class="bg-primary border-default flex h-9 w-9 items-center justify-center rounded-lg border"
               >
-                <Filter class="text-muted h-4 w-4" />
+                <Funnel class="text-muted h-4 w-4" />
               </div>
               <div class="text-left">
                 <h3 class="text-default text-sm font-semibold">
@@ -675,7 +675,7 @@
             />
           </button>
 
-          <!-- Filter Content -->
+          <!-- Funnel Content -->
           {#if showFilters}
             <div
               id="admin-api-key-filters-panel"
@@ -1021,7 +1021,7 @@
                 </Select.Root>
               </Field.Field>
 
-              <!-- Filter Actions -->
+              <!-- Funnel Actions -->
               <div class="border-default flex items-center justify-between border-t pt-2">
                 <p class="text-muted text-xs">
                   {totalCount !== null
@@ -1037,7 +1037,7 @@
                     {m.api_keys_admin_clear_all()}
                   </Button>
                   <Button onclick={applyFilters} class="text-sm">
-                    <Filter class="h-4 w-4" />
+                    <Funnel class="h-4 w-4" />
                     {m.api_keys_admin_apply_filters()}
                   </Button>
                 </div>
@@ -1050,7 +1050,7 @@
         {#if errorMessage}
           <div transition:fly={{ y: -8, duration: 150 }}>
             <Alert.Root variant="destructive">
-              <AlertCircle />
+              <CircleAlert />
               <Alert.Description>{errorMessage}</Alert.Description>
             </Alert.Root>
           </div>

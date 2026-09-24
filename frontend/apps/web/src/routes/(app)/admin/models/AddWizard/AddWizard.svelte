@@ -29,7 +29,7 @@
   import { getErrorMessage, toastError } from "$lib/core/errors";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { Loader2, AlertTriangle } from "@lucide/svelte";
+  import { LoaderCircle, TriangleAlert } from "@lucide/svelte";
 
   import StepProvider from "./StepProvider.svelte";
   import StepCredentials from "./StepCredentials.svelte";
@@ -504,7 +504,7 @@
           class="border-warning-default/30 bg-warning-dimmer/50 flex items-start gap-3 rounded-lg border p-4"
           role="alert"
         >
-          <AlertTriangle
+          <TriangleAlert
             class="text-warning-default mt-0.5 h-5 w-5 flex-shrink-0"
             aria-hidden="true"
           />
@@ -576,7 +576,7 @@
         <Button variant="outline" onclick={dismissValidationWarning}>{m.back()}</Button>
         <Button onclick={createAnyway} disabled={isSubmitting}>
           {#if isSubmitting}
-            <Loader2 class="animate-spin" aria-hidden="true" />
+            <LoaderCircle class="animate-spin" aria-hidden="true" />
           {/if}
           {isSubmitting ? m.creating() : m.create_anyway()}
         </Button>
@@ -588,7 +588,7 @@
             disabled={isSubmitting || isValidating || !canFinish}
           >
             {#if isSubmitting || isValidating}
-              <Loader2 class="animate-spin" aria-hidden="true" />
+              <LoaderCircle class="animate-spin" aria-hidden="true" />
             {/if}
             {isValidating ? m.validating_models() : isSubmitting ? m.creating() : m.finish()}
           </Button>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { AlertTriangle } from "@lucide/svelte";
+  import { TriangleAlert } from "@lucide/svelte";
   import ContextMeterFill from "$lib/components/ContextMeterFill.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
@@ -127,7 +127,7 @@
         role="status"
         aria-live="polite"
       >
-        <AlertTriangle class="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+        <TriangleAlert class="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
         {m.config_attachment_meter_over_budget()}
       </p>
     {/if}

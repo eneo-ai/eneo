@@ -1,13 +1,13 @@
 <script lang="ts">
   import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@eneo/eneo-js";
   import {
-    AlertCircle,
+    CircleAlert,
     Ban,
     Bell,
     BellOff,
     CalendarClock,
     Eye,
-    MoreVertical,
+    EllipsisVertical,
     Pencil,
     RefreshCw,
     RotateCcw,
@@ -184,7 +184,7 @@
     <DropdownMenu.Trigger>
       {#snippet child({ props })}
         <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
-          <MoreVertical />
+          <EllipsisVertical />
         </Button>
       {/snippet}
     </DropdownMenu.Trigger>
@@ -300,7 +300,7 @@
 
     {#if errorMessage}
       <Alert.Root variant="destructive">
-        <AlertCircle />
+        <CircleAlert />
         <Alert.Description>{errorMessage}</Alert.Description>
       </Alert.Root>
     {/if}
@@ -339,7 +339,7 @@
 
     {#if errorMessage}
       <Alert.Root variant="destructive">
-        <AlertCircle />
+        <CircleAlert />
         <Alert.Description>{errorMessage}</Alert.Description>
       </Alert.Root>
     {/if}

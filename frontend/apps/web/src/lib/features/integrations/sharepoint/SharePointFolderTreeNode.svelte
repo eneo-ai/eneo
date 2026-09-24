@@ -2,7 +2,7 @@
   import {
     ChevronRight,
     File,
-    FileAudio,
+    FileHeadphone,
     FileImage,
     FileText,
     Folder,
@@ -149,7 +149,7 @@
           {#if IMAGE_EXTENSIONS.includes(ext)}
             <FileImage class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {:else if AUDIO_EXTENSIONS.includes(ext)}
-            <FileAudio class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+            <FileHeadphone class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {:else if TEXT_EXTENSIONS.includes(ext)}
             <FileText class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {:else}
