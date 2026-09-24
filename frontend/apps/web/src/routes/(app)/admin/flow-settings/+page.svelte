@@ -556,8 +556,7 @@
           density="compact"
         >
           <Collapsible.Root
-            open={runtimeLimitsOpen}
-            onOpenChange={setRuntimeLimitsOpen}
+            bind:open={() => runtimeLimitsOpen, setRuntimeLimitsOpen}
             class="px-4 lg:px-0.5"
           >
             <Collapsible.Trigger
