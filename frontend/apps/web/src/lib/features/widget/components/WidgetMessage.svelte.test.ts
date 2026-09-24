@@ -162,6 +162,93 @@ describe("WidgetMessage sources", () => {
     await expect.element(page.getByText(/widget_activity_via/)).toHaveTextContent("TimeMCP");
   });
 
+  test("a knowledge search is one sentence that credits no server", async () => {
+    render(WidgetMessage, {
+      message: {
+        ...message("Colombianskt kaffe är ett säkert val."),
+        tool_calls: [
+          {
+            server_name: "knowledge",
+            tool_name: "search_knowledge",
+            arguments: { query: "kaffe rekommendationer tips" },
+            tool_call_id: "k1",
+            result_status: "completed"
+          }
+        ]
+      } as unknown as ConversationMessage,
+      index: 0,
+      isLast: true,
+      isLoading: false
+    });
+
+    const activity = page.getByRole("group", { name: "widget_activity" });
+    await expect
+      .element(activity)
+      .toHaveTextContent(
+        'tool_search_knowledge_query_done {"query":"kaffe rekommendationer tips"}'
+      );
+    // The label already says where it searched.
+    expect(page.getByText(/widget_activity_via/).elements()).toHaveLength(0);
+    expect(activity.getByRole("button").elements()).toHaveLength(0);
+  });
+
+  test("several searches sum up without their queries and list each when opened", async () => {
+    const search = (id: string, query: string) => ({
+      server_name: "knowledge",
+      tool_name: "search_knowledge",
+      arguments: { query },
+      tool_call_id: id,
+      result_status: "completed"
+    });
+    render(WidgetMessage, {
+      message: {
+        ...message("Bryggkaffe passar."),
+        tool_calls: [search("k1", "kaffe"), search("k2", "bryggkaffe")]
+      } as unknown as ConversationMessage,
+      index: 0,
+      isLast: true,
+      isLoading: false
+    });
+
+    const summary = page.getByRole("button", { name: /tool_search_knowledge_done/ });
+    await expect
+      .element(summary)
+      .toHaveTextContent(/tool_search_knowledge_done · internal_tool_steps_count/);
+    expect(summary.element().textContent).not.toContain("bryggkaffe");
+
+    await summary.click();
+
+    await expect.element(page.getByText(/"query":"bryggkaffe"/)).toBeVisible();
+    await expect.element(page.getByText(/"query":"kaffe"/)).toBeVisible();
+    expect(page.getByText(/widget_activity_via/).elements()).toHaveLength(0);
+  });
+
+  test("an external step credits its server inside the sentence, not beside it", async () => {
+    render(WidgetMessage, {
+      message: {
+        ...message("Klockan är 14:02."),
+        tool_calls: [
+          {
+            server_name: "TimeMCP",
+            tool_name: "get_current_time",
+            tool_call_id: "c1",
+            result_status: "completed"
+          }
+        ]
+      } as unknown as ConversationMessage,
+      index: 0,
+      isLast: true,
+      isLoading: false
+    });
+
+    const via = page.getByText(/widget_activity_via/);
+    await expect.element(via).toHaveTextContent("TimeMCP");
+    // Part of the label's text, so it wraps with the sentence instead of
+    // standing in a squeezed column of its own.
+    const label = page.getByText("Get current time", { exact: false });
+    expect(label.element().contains(via.element())).toBe(true);
+  });
+
   test.each(["light", "dark"] as const)(
     "tells which service a step used in text that meets 4.5:1 (%s)",
     async (scheme) => {

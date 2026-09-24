@@ -12,9 +12,16 @@ export type WidgetToolStep = {
   toolCallId: string | undefined;
   /** Human label of what the step did, e.g. "Aktuell tid" or "Sökte på webben efter X". */
   label: string;
+  /** The label without its query, for the line that sums up several steps. */
+  summary: string;
   /** The one argument worth showing, e.g. a timezone or a query; null when none reads well. */
   detail: string | null;
   serverName: string;
+  /**
+   * The external server to credit ("via TimeMCP"); null for Eneo's own tools
+   * and capabilities, whose label already says where it looked.
+   */
+  via: string | null;
   status: WidgetToolStepStatus;
 };
 
@@ -77,6 +84,19 @@ export function argumentDetail(args: Record<string, unknown> | null | undefined)
   return value.length > DETAIL_MAX ? `${value.slice(0, DETAIL_MAX - 1)}…` : value;
 }
 
+/** Eneo's own label for a built-in call; without `args` it leaves the query out. */
+function builtinLabel(
+  call: ToolCall,
+  status: WidgetToolStepStatus,
+  args?: Record<string, unknown>
+): string {
+  return (
+    (status === "complete"
+      ? internalToolDoneLabel(call.tool_name, call.server_name, args, call.purpose)
+      : null) ?? toolDisplayName(call.tool_name, call.server_name, call.title, args, call.purpose)
+  );
+}
+
 /**
  * The steps a visitor sees for an answer's tool calls, in call order. Eneo's
  * own tools and capability calls keep their localized labels (which already
@@ -108,16 +128,16 @@ export function widgetToolSteps(
     const args = call.arguments ?? undefined;
     const builtin = isBuiltinToolCall(call);
     const label = builtin
-      ? ((status === "complete"
-          ? internalToolDoneLabel(call.tool_name, call.server_name, args, call.purpose)
-          : null) ??
-        toolDisplayName(call.tool_name, call.server_name, call.title, args, call.purpose))
+      ? builtinLabel(call, status, args)
       : humanizeToolName(call.tool_name, call.title);
+    const serverName = serverDisplayName(call.server_name, call.purpose);
     return {
       toolCallId: call.tool_call_id ?? undefined,
       label,
+      summary: builtin ? builtinLabel(call, status) : label,
       detail: builtin ? null : argumentDetail(args),
-      serverName: serverDisplayName(call.server_name, call.purpose),
+      serverName,
+      via: builtin ? null : serverName,
       status
     };
   });
@@ -137,7 +157,7 @@ export function groupToolSteps(steps: WidgetToolStep[]): WidgetToolGroup[] {
   return groups;
 }
 
-/** Distinct server labels, in first-seen order. */
-export function stepServers(steps: WidgetToolStep[]): string[] {
-  return [...new Set(steps.map((step) => step.serverName))];
+/** The external servers to credit, in first-seen order. */
+export function creditedServers(steps: WidgetToolStep[]): string[] {
+  return [...new Set(steps.flatMap((step) => (step.via ? [step.via] : [])))];
 }

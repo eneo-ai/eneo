@@ -3,8 +3,8 @@ import type { ConversationMessage } from "@eneo/eneo-js";
 import {
   argumentDetail,
   groupToolSteps,
+  creditedServers,
   humanizeToolName,
-  stepServers,
   widgetToolSteps
 } from "./widgetToolSteps";
 
@@ -72,17 +72,42 @@ describe("widgetToolSteps", () => {
     });
     expect(step).toMatchObject({
       label: "Get current time",
+      summary: "Get current time",
       detail: "Asia/Tokyo",
       serverName: "TimeMCP",
+      via: "TimeMCP",
       status: "complete"
+    });
+  });
+
+  it("credits no server for Eneo's own knowledge search and sums it up without the query", () => {
+    const [step] = widgetToolSteps(
+      message([
+        {
+          server_name: "knowledge",
+          tool_name: "search_knowledge",
+          arguments: { query: "kaffe rekommendationer tips" },
+          tool_call_id: "k1",
+          result_status: "completed"
+        }
+      ]),
+      { streaming: false, working: false }
+    );
+    expect(step).toMatchObject({
+      label: 'tool_search_knowledge_query_done {"query":"kaffe rekommendationer tips"}',
+      summary: "tool_search_knowledge_done",
+      detail: null,
+      via: null
     });
   });
 
   it("labels capability calls by purpose, query included, without a detail chip", () => {
     const [step] = widgetToolSteps(message([search()]), { streaming: false, working: false });
     expect(step.label).toContain("tool_web_search_query_done");
+    expect(step.summary).toBe("tool_web_search_done");
     expect(step.detail).toBeNull();
     expect(step.serverName).not.toBe("Safe Search");
+    expect(step.via).toBeNull();
   });
 
   it("prefers the streaming runtime list and marks the last call as running", () => {
@@ -125,6 +150,7 @@ describe("groupToolSteps", () => {
     const groups = groupToolSteps(steps);
     expect(groups.map((group) => group.steps.length)).toEqual([2, 1, 1]);
     expect(groups[0].steps.map((step) => step.detail)).toEqual(["UTC", "Asia/Tokyo"]);
-    expect(stepServers(steps)).toEqual(["TimeMCP", steps[2].serverName]);
+    // The web search label already says where it looked.
+    expect(creditedServers(steps)).toEqual(["TimeMCP"]);
   });
 });
