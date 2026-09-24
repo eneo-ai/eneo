@@ -2632,6 +2632,174 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/spaces/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Admin Spaces
+     * @description Every shared space in the organisation with its administrators, member and resource counts, widget states, coarse last activity and your own membership, plus the pending widget activation requests. Personal spaces and the organisation space are not listed. No content is returned. Tenant admins only.
+     */
+    get: operations["list_admin_spaces_api_v1_admin_spaces__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/spaces/{space_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Admin Space
+     * @description Configuration, members and usage of one shared space: settings, assistants and apps with their instructions, knowledge sources with document counts, widgets and members. Documents, questions, answers, file names and conversations are never returned. Usage counts are withheld below five active users. Tenant admins only; personal spaces, the organisation space and other organisations' spaces are not found.
+     */
+    get: operations["get_admin_space_api_v1_admin_spaces__space_id___get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/spaces/{space_id}/members/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Add Admin Space Member
+     * @description Add a person to a shared space without being a member yourself. Refused for yourself (join instead) and for an existing member. Always recorded in the audit log.
+     */
+    post: operations["add_admin_space_member_api_v1_admin_spaces__space_id__members__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/spaces/{space_id}/members/{user_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove Admin Space Member
+     * @description Remove a member and revoke the API keys they own for the space. Refused for yourself (leave instead) and when it would leave the space without an administrator. Always recorded in the audit log.
+     */
+    delete: operations["remove_admin_space_member_api_v1_admin_spaces__space_id__members__user_id___delete"];
+    options?: never;
+    head?: never;
+    /**
+     * Change Admin Space Member Role
+     * @description Change a member's role. Refused for yourself and when it would leave the space without an administrator who can manage it. Always recorded in the audit log.
+     */
+    patch: operations["change_admin_space_member_role_api_v1_admin_spaces__space_id__members__user_id___patch"];
+    trace?: never;
+  };
+  "/api/v1/admin/spaces/{space_id}/group-members/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Add Admin Space Group
+     * @description Add a user group to a shared space. Refused when the group is already a member, and when it contains you and would raise your own role (join instead). Always recorded in the audit log.
+     */
+    post: operations["add_admin_space_group_api_v1_admin_spaces__space_id__group_members__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/spaces/{space_id}/group-members/{group_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove Admin Space Group
+     * @description Remove a group from a shared space. Refused when it would leave the space without an administrator. Always recorded in the audit log.
+     */
+    delete: operations["remove_admin_space_group_api_v1_admin_spaces__space_id__group_members__group_id___delete"];
+    options?: never;
+    head?: never;
+    /**
+     * Change Admin Space Group Role
+     * @description Change a group's role. Refused when the group contains you and the change raises your own role, and when it would leave the space without an administrator. Always recorded in the audit log.
+     */
+    patch: operations["change_admin_space_group_role_api_v1_admin_spaces__space_id__group_members__group_id___patch"];
+    trace?: never;
+  };
+  "/api/v1/admin/spaces/{space_id}/join/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Join Admin Space
+     * @description Join a shared space to reach its content, with a role and a written reason. With a group membership only roles above the group role are allowed. The space's members see that you joined, its administrators also see the reason, and the audit log always records it.
+     */
+    post: operations["join_admin_space_api_v1_admin_spaces__space_id__join__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/spaces/{space_id}/leave/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Leave Admin Space
+     * @description Leave a shared space you are a direct member of and revoke the API keys you own for it. A role held through a group remains. Refused when you are its last administrator. Always recorded in the audit log.
+     */
+    post: operations["leave_admin_space_api_v1_admin_spaces__space_id__leave__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/credentials/{provider}": {
     parameters: {
       query?: never;
@@ -3325,9 +3493,53 @@ export interface paths {
     put?: never;
     /**
      * Create Widget Preview Token
-     * @description Mint a visitor token for the live preview on the admin page. Admits the embed page for draft and paused widgets; each call is a fresh pseudonymous visitor.
+     * @description Mint a visitor token for a live preview. Admits the embed page for draft and paused widgets; each call is a fresh pseudonymous visitor. Editors with the widgets permission test from the widget editor. A tenant admin needs to be a member of the space, and the assistant must be published (`widget_serving_blocked` otherwise): the answers come from the space's knowledge.
      */
     post: operations["create_widget_preview_token_api_v1_widgets__id__preview_token__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/widgets/{id}/activation-request/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Request Widget Activation
+     * @description Ask a tenant admin to activate the widget. Requires the `widgets` permission and edit rights in the space. Refused with `widget_policy_violation` or `widget_serving_blocked` like activation itself; a repeated request changes nothing. Editing stays open: the admin reviews and activates the latest revision.
+     */
+    post: operations["request_widget_activation_api_v1_widgets__id__activation_request__post"];
+    /**
+     * Withdraw Widget Activation Request
+     * @description Withdraw a pending activation request. Nothing changes when no request is pending.
+     */
+    delete: operations["withdraw_widget_activation_request_api_v1_widgets__id__activation_request__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/widgets/{id}/activation-request/decline/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Decline Widget Activation Request
+     * @description Send a pending activation request back to the space's editors with what needs to change. Tenant admins only, member or not. Refused with `widget_activation_request_missing` when no request is pending. Always recorded in the audit log.
+     */
+    post: operations["decline_widget_activation_request_api_v1_widgets__id__activation_request_decline__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -3345,7 +3557,7 @@ export interface paths {
     put?: never;
     /**
      * Activate Widget
-     * @description Activate a widget so it serves visitors. Tenant admins only. Fails with `widget_policy_violation` (listing `violations`) when settings are outside the tenant's widget policy and with `widget_serving_blocked` (listing `blockers`) when the configuration is incomplete.
+     * @description Activate a widget so it serves visitors. Tenant admins only, member or not. Pass the reviewed `revision` to be refused with `widget_revision_conflict` when the widget changed since. Fails with `widget_policy_violation` (listing `violations`) when settings are outside the tenant's widget policy and with `widget_serving_blocked` (listing `blockers`) when the configuration is incomplete. A pending activation request is settled. Always recorded in the audit log.
      */
     post: operations["activate_widget_api_v1_widgets__id__activate__post"];
     delete?: never;
@@ -3550,6 +3762,26 @@ export interface paths {
      * @description Every widget in the organisation with where it lives and its usage over the last 7 and 30 days. Tenant admins only.
      */
     get: operations["get_widget_overview_api_v1_admin_widgets__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/widgets/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Widget Review
+     * @description Everything an administrator reviews before a widget faces the public, without being a member of its space: the configuration, the assistant it exposes with its instructions, knowledge and visitor tools, who asked for activation and the widget's usage. Documents and conversations are never returned. Tenant admins only.
+     */
+    get: operations["get_widget_review_api_v1_admin_widgets__id___get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -9006,7 +9238,8 @@ export interface components {
      * @example {
      *       "action": "user_created",
      *       "category": "admin_actions",
-     *       "enabled": true
+     *       "enabled": true,
+     *       "mandatory": false
      *     }
      */
     ActionConfig: {
@@ -9019,6 +9252,12 @@ export interface components {
       enabled: boolean;
       /** @description Category this action belongs to */
       category: components["schemas"]["CategoryType"];
+      /**
+       * Mandatory
+       * @description Always logged, whatever the category, action and global settings; cannot be turned off
+       * @default false
+       */
+      mandatory?: boolean;
     };
     /**
      * ActionConfigResponse
@@ -9227,7 +9466,15 @@ export interface components {
       | "widget_template_created"
       | "widget_template_updated"
       | "widget_template_deleted"
-      | "widget_template_published";
+      | "widget_template_published"
+      | "widget_activation_requested"
+      | "widget_activation_request_withdrawn"
+      | "widget_activation_request_declined"
+      | "space_oversight_joined"
+      | "space_oversight_left"
+      | "space_oversight_member_added"
+      | "space_oversight_member_role_changed"
+      | "space_oversight_member_removed";
     /**
      * ActionUpdate
      * @description Represents an action-level configuration change request.
@@ -9279,6 +9526,572 @@ export interface components {
       value: {
         [key: string]: string;
       }[];
+    };
+    /** AdminPrincipal */
+    AdminPrincipal: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "user" | "group";
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+    };
+    /** AdminSpaceAdmins */
+    AdminSpaceAdmins: {
+      /**
+       * Manageable
+       * @description At least one live, active or invited user holds the admin role.
+       */
+      manageable: boolean;
+      /**
+       * Count
+       * @description Distinct manageable admin users, direct or through a group.
+       */
+      count: number;
+      /**
+       * Principals
+       * @description Admin users who can manage the space, then admin groups with at least one such user.
+       */
+      principals: components["schemas"]["AdminPrincipal"][];
+    };
+    /** AdminSpaceApp */
+    AdminSpaceApp: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Published */
+      published: boolean;
+      completion_model?: components["schemas"]["OversightModelRef"] | null;
+      transcription_model?: components["schemas"]["OversightModelRef"] | null;
+      /** Instructions */
+      instructions?: string | null;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
+    };
+    /** AdminSpaceAssistant */
+    AdminSpaceAssistant: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Published */
+      published: boolean;
+      /** Is Default */
+      is_default: boolean;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      completion_model?: components["schemas"]["OversightModelRef"] | null;
+      /**
+       * Instructions
+       * @description The selected prompt.
+       */
+      instructions?: string | null;
+      /**
+       * Knowledge Mode
+       * @enum {string}
+       */
+      knowledge_mode: "tool" | "inject";
+      /** Knowledge */
+      knowledge: components["schemas"]["OversightKnowledgeRef"][];
+      /** Attachment Count */
+      attachment_count: number;
+      /** Mcp Servers */
+      mcp_servers: components["schemas"]["OversightRef"][];
+      /** Capabilities */
+      capabilities: ("web_search" | "image_generation")[];
+      /** Insight Enabled */
+      insight_enabled: boolean;
+      /** Logging Enabled */
+      logging_enabled: boolean;
+      /**
+       * Data Retention Days
+       * @description The assistant's own value; None follows the space.
+       */
+      data_retention_days?: number | null;
+      /** @description The non-archived widget serving the assistant. */
+      widget?: components["schemas"]["AdminSpaceWidgetRef"] | null;
+    };
+    /** AdminSpaceDetail */
+    AdminSpaceDetail: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Icon Id */
+      icon_id?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      security_classification?: components["schemas"]["OversightClassification"] | null;
+      settings: components["schemas"]["AdminSpaceSettings"];
+      usage: components["schemas"]["AdminSpaceUsage"];
+      /**
+       * Assistants
+       * @description The default assistant is included and listed last.
+       */
+      assistants: components["schemas"]["AdminSpaceAssistant"][];
+      /** Apps */
+      apps: components["schemas"]["AdminSpaceApp"][];
+      /** Group Chats */
+      group_chats: components["schemas"]["AdminSpaceGroupChat"][];
+      /** Knowledge */
+      knowledge: components["schemas"]["AdminSpaceKnowledgeSource"][];
+      /**
+       * Inherited Knowledge Count
+       * @description Sources the space sees through the organisation space.
+       */
+      inherited_knowledge_count: number;
+      /**
+       * Widgets
+       * @description Non-archived widgets.
+       */
+      widgets: components["schemas"]["AdminSpaceWidgetRef"][];
+      members: components["schemas"]["AdminSpaceMembers"];
+      /** Attention */
+      attention: ("no_admin" | "widget_activation_requested")[];
+    };
+    /** AdminSpaceGroupAdd */
+    AdminSpaceGroupAdd: {
+      /**
+       * Group Id
+       * Format: uuid
+       */
+      group_id: string;
+      role: components["schemas"]["SpaceRoleValue"];
+    };
+    /** AdminSpaceGroupChat */
+    AdminSpaceGroupChat: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Published */
+      published: boolean;
+      /** Insight Enabled */
+      insight_enabled: boolean;
+      /** Assistant Count */
+      assistant_count: number;
+    };
+    /** AdminSpaceGroupMember */
+    AdminSpaceGroupMember: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      role: components["schemas"]["SpaceRoleValue"];
+      /**
+       * User Count
+       * @description Live users in the group.
+       */
+      user_count: number;
+    };
+    /** AdminSpaceJoin */
+    AdminSpaceJoin: {
+      role: components["schemas"]["SpaceRoleValue"];
+      /**
+       * Reason
+       * @description Why you need the content: 10-500 characters after line breaks, control and bidirectional characters are removed. Shown to the space's administrators and stored in the audit log.
+       */
+      reason: string;
+    };
+    /** AdminSpaceKnowledgeSource */
+    AdminSpaceKnowledgeSource: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Name
+       * @description None for a personal OneDrive folder.
+       */
+      name?: string | null;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "collection" | "website" | "integration";
+      /** Integration Type */
+      integration_type?: ("sharepoint" | "confluence" | "onedrive") | null;
+      /**
+       * Item Count
+       * @description Active documents or pages.
+       */
+      item_count: number;
+      /** Size Bytes */
+      size_bytes: number;
+      /** Updated At */
+      updated_at?: string | null;
+      /** Website Url */
+      website_url?: string | null;
+      /** Update Interval */
+      update_interval?: ("never" | "daily" | "every_other_day" | "weekly") | null;
+      /** Requires Login */
+      requires_login: boolean;
+      /**
+       * Auto Disabled
+       * @description Crawling stopped after repeated failures.
+       */
+      auto_disabled: boolean;
+      /**
+       * Used By
+       * @description Assistants in the space that use the source.
+       */
+      used_by: components["schemas"]["OversightRef"][];
+    };
+    /** AdminSpaceList */
+    AdminSpaceList: {
+      /** Items */
+      items: components["schemas"]["AdminSpaceListItem"][];
+      /**
+       * Widget Requests
+       * @description Every pending widget activation request, oldest first.
+       */
+      widget_requests: components["schemas"]["AdminWidgetRequestRef"][];
+    };
+    /** AdminSpaceListItem */
+    AdminSpaceListItem: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Icon Id */
+      icon_id?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      security_classification?: components["schemas"]["OversightClassification"] | null;
+      /**
+       * Member Count
+       * @description Distinct live users, directly or through live groups.
+       */
+      member_count: number;
+      /** Group Count */
+      group_count: number;
+      admins: components["schemas"]["AdminSpaceAdmins"];
+      resources: components["schemas"]["AdminSpaceResourceCounts"];
+      widgets: components["schemas"]["AdminSpaceWidgetCounts"];
+      /**
+       * Last Activity
+       * @enum {string}
+       */
+      last_activity: "past_week" | "past_month" | "past_quarter" | "older" | "none";
+      viewer_membership: components["schemas"]["AdminSpaceMembershipSummary"];
+      /** Attention */
+      attention: ("no_admin" | "widget_activation_requested")[];
+    };
+    /** AdminSpaceMemberAdd */
+    AdminSpaceMemberAdd: {
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string;
+      role: components["schemas"]["SpaceRoleValue"];
+    };
+    /** AdminSpaceMembers */
+    AdminSpaceMembers: {
+      /**
+       * Users
+       * @description Admins first, then by name.
+       */
+      users: components["schemas"]["AdminSpaceUserMember"][];
+      /** Groups */
+      groups: components["schemas"]["AdminSpaceGroupMember"][];
+      /** Member Count */
+      member_count: number;
+      /** Group Count */
+      group_count: number;
+      admins: components["schemas"]["AdminSpaceAdmins"];
+      viewer_membership: components["schemas"]["AdminSpaceViewerMembership"];
+    };
+    /** AdminSpaceMembershipSummary */
+    AdminSpaceMembershipSummary: {
+      /** @description Your effective role; None when you are not a member. */
+      role?: components["schemas"]["SpaceRoleValue"] | null;
+      /** Via Group Only */
+      via_group_only: boolean;
+      /** Oversight Joined At */
+      oversight_joined_at?: string | null;
+    };
+    /** AdminSpaceOversightJoin */
+    AdminSpaceOversightJoin: {
+      /**
+       * Joined At
+       * Format: date-time
+       */
+      joined_at: string;
+      /** Reason */
+      reason: string;
+    };
+    /** AdminSpaceResourceCounts */
+    AdminSpaceResourceCounts: {
+      /**
+       * Assistants
+       * @description Excludes the space's default assistant.
+       */
+      assistants: number;
+      /** Apps */
+      apps: number;
+      /** Group Chats */
+      group_chats: number;
+      /**
+       * Knowledge Sources
+       * @description Sources the space owns.
+       */
+      knowledge_sources: number;
+    };
+    /** AdminSpaceRoleUpdate */
+    AdminSpaceRoleUpdate: {
+      role: components["schemas"]["SpaceRoleValue"];
+    };
+    /** AdminSpaceSettings */
+    AdminSpaceSettings: {
+      /** Completion Models */
+      completion_models: components["schemas"]["OversightModelRef"][];
+      /** Embedding Models */
+      embedding_models: components["schemas"]["OversightModelRef"][];
+      /** Transcription Models */
+      transcription_models: components["schemas"]["OversightModelRef"][];
+      /** Mcp Servers */
+      mcp_servers: components["schemas"]["OversightRef"][];
+      /** Capabilities */
+      capabilities: ("web_search" | "image_generation")[];
+      /** Data Retention Days */
+      data_retention_days?: number | null;
+    };
+    /** AdminSpaceUsage */
+    AdminSpaceUsage: {
+      /**
+       * Window Days
+       * @default 30
+       */
+      window_days?: number;
+      /**
+       * Threshold
+       * @default 5
+       */
+      threshold?: number;
+      /**
+       * Suppressed
+       * @description Fewer active users than the threshold: questions, app runs and active users are withheld.
+       */
+      suppressed: boolean;
+      /**
+       * Questions
+       * @description Questions from signed-in users.
+       */
+      questions?: number | null;
+      /** App Runs */
+      app_runs?: number | null;
+      /** Active Users */
+      active_users?: number | null;
+      /**
+       * Widget Questions
+       * @description Questions from anonymous widget visitors; never withheld.
+       */
+      widget_questions: number;
+      /**
+       * Last Activity
+       * @enum {string}
+       */
+      last_activity: "past_week" | "past_month" | "past_quarter" | "older" | "none";
+      /** Knowledge Bytes */
+      knowledge_bytes: number;
+    };
+    /** AdminSpaceUserMember */
+    AdminSpaceUserMember: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Username */
+      username?: string | null;
+      /** Email */
+      email: string;
+      role: components["schemas"]["SpaceRoleValue"];
+      /**
+       * State
+       * @enum {string}
+       */
+      state: "active" | "invited" | "inactive";
+      /** Is Tenant Admin */
+      is_tenant_admin: boolean;
+      oversight_join?: components["schemas"]["AdminSpaceOversightJoin"] | null;
+    };
+    /** AdminSpaceViewerMembership */
+    AdminSpaceViewerMembership: {
+      role?: components["schemas"]["SpaceRoleValue"] | null;
+      direct_role?: components["schemas"]["SpaceRoleValue"] | null;
+      group_role?: components["schemas"]["SpaceRoleValue"] | null;
+      /**
+       * Via Groups
+       * @description Your live groups that are members of the space.
+       */
+      via_groups: components["schemas"]["OversightRef"][];
+      /** Oversight Joined At */
+      oversight_joined_at?: string | null;
+      /**
+       * Joinable Roles
+       * @description Roles you may join with, lowest first: empty with a direct membership, otherwise the roles above your group role.
+       */
+      joinable_roles: components["schemas"]["SpaceRoleValue"][];
+      /**
+       * Can Leave
+       * @description You have a direct membership and leaving keeps a manageable administrator in the space.
+       */
+      can_leave: boolean;
+    };
+    /** AdminSpaceWidgetCounts */
+    AdminSpaceWidgetCounts: {
+      /** Active */
+      active: number;
+      /** Paused */
+      paused: number;
+      /** Draft */
+      draft: number;
+      /** Awaiting Activation */
+      awaiting_activation: number;
+    };
+    /** AdminSpaceWidgetRef */
+    AdminSpaceWidgetRef: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      status: components["schemas"]["WidgetStatus"];
+      assistant?: components["schemas"]["OversightRef"] | null;
+      /** Activation Requested At */
+      activation_requested_at?: string | null;
+    };
+    /** AdminWidgetRequestRef */
+    AdminWidgetRequestRef: {
+      /**
+       * Widget Id
+       * Format: uuid
+       */
+      widget_id: string;
+      /** Widget Name */
+      widget_name: string;
+      space: components["schemas"]["OversightRef"];
+      /**
+       * Requested At
+       * Format: date-time
+       */
+      requested_at: string;
+      /** @description None when the user was deleted. */
+      requested_by?: components["schemas"]["OversightPersonRef"] | null;
+    };
+    /**
+     * AdminWidgetReview
+     * @description What an administrator reviews before a widget faces the public.
+     */
+    AdminWidgetReview: {
+      widget: components["schemas"]["WidgetPublic"];
+      space: components["schemas"]["OversightRef"];
+      /**
+       * Space Kind
+       * @enum {string}
+       */
+      space_kind: "shared" | "organization" | "personal";
+      space_security_classification?: components["schemas"]["OversightClassification"] | null;
+      /** @description None for a personal space's assistant, or when the assistant no longer exists. */
+      target?: components["schemas"]["AdminWidgetReviewTarget"] | null;
+      created_by?: components["schemas"]["OversightPersonRef"] | null;
+      activated_by?: components["schemas"]["OversightPersonRef"] | null;
+      activation_requested_by?: components["schemas"]["OversightPersonRef"] | null;
+      activation_declined_by?: components["schemas"]["OversightPersonRef"] | null;
+      /** @description Your effective role in the widget's space. */
+      viewer_role?: components["schemas"]["SpaceRoleValue"] | null;
+      /** @description Shared spaces only. */
+      viewer_membership?: components["schemas"]["AdminSpaceViewerMembership"] | null;
+      usage: components["schemas"]["AdminWidgetReviewUsage"];
+    };
+    /** AdminWidgetReviewTarget */
+    AdminWidgetReviewTarget: {
+      assistant: components["schemas"]["AdminSpaceAssistant"];
+      /**
+       * Knowledge
+       * @description The sources the assistant uses, with document counts.
+       */
+      knowledge: components["schemas"]["AdminSpaceKnowledgeSource"][];
+      /**
+       * Visitor Mcp Servers
+       * @description The assistant's general MCP servers that are switched on.
+       */
+      visitor_mcp_servers: components["schemas"]["OversightRef"][];
+      /**
+       * Visitor Capabilities
+       * @description Capabilities a visitor reaches; never image generation.
+       */
+      visitor_capabilities: "web_search"[];
+    };
+    /** AdminWidgetReviewUsage */
+    AdminWidgetReviewUsage: {
+      /** Questions 7D */
+      questions_7d: number;
+      /** Questions 30D */
+      questions_30d: number;
+      /** Blocked 30D */
+      blocked_30d: number;
+      /** Helpful 30D */
+      helpful_30d: number;
+      /** Unhelpful 30D */
+      unhelpful_30d: number;
+      /**
+       * Last Activity
+       * @description The last day with visitor traffic.
+       */
+      last_activity?: string | null;
     };
     /** AllowedOriginCreate */
     AllowedOriginCreate: {
@@ -13255,7 +14068,10 @@ export interface components {
       | 9060
       | 9061
       | 9062
-      | 9063;
+      | 9063
+      | 9064
+      | 9065
+      | 9066;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -16288,6 +17104,80 @@ export interface components {
      * @enum {string}
      */
     Outcome: "success" | "failure";
+    /** OversightClassification */
+    OversightClassification: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Security Level */
+      security_level: number;
+    };
+    /** OversightKnowledgeRef */
+    OversightKnowledgeRef: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Name
+       * @description None for a personal OneDrive folder.
+       */
+      name?: string | null;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "collection" | "website" | "integration";
+      /** From Organization */
+      from_organization: boolean;
+    };
+    /** OversightModelRef */
+    OversightModelRef: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Name
+       * @description The nickname, or the model name when unset.
+       */
+      name: string;
+      /** Hosting */
+      hosting?: string | null;
+      /** Org */
+      org?: string | null;
+    };
+    /** OversightPersonRef */
+    OversightPersonRef: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Name
+       * @description The username, or the email when unset.
+       */
+      name: string;
+      /** Email */
+      email: string;
+    };
+    /** OversightRef */
+    OversightRef: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+    };
     /** PaginatedPermissions[AppSparse] */
     PaginatedPermissions_AppSparse_: {
       /**
@@ -19700,6 +20590,17 @@ export interface components {
       /** Username */
       username?: string | null;
       role: components["schemas"]["SpaceRoleValue"];
+      oversight_join?: components["schemas"]["SpaceMemberOversightJoin"] | null;
+    };
+    /** SpaceMemberOversightJoin */
+    SpaceMemberOversightJoin: {
+      /**
+       * Joined At
+       * Format: date-time
+       */
+      joined_at: string;
+      /** Reason */
+      reason?: string | null;
     };
     /** SpacePublic */
     SpacePublic: {
@@ -22466,6 +23367,39 @@ export interface components {
        */
       version: string;
     };
+    /**
+     * WidgetActivate
+     * @description Optional body of the activate command.
+     */
+    WidgetActivate: {
+      /**
+       * Revision
+       * @description The revision that was reviewed. When set, activation is refused with `widget_revision_conflict` if the widget changed since.
+       */
+      revision?: number;
+    };
+    /** WidgetActivationDecline */
+    WidgetActivationDecline: {
+      /**
+       * Reason
+       * @description What needs to change: 10-500 characters after line breaks, control and bidirectional characters are removed. Shown to the space's editors and stored in the audit log.
+       */
+      reason: string;
+    };
+    /** WidgetActivationRequestMissingDetail */
+    WidgetActivationRequestMissingDetail: {
+      /**
+       * Code
+       * @constant
+       */
+      code: "widget_activation_request_missing";
+      /** Message */
+      message: string;
+    };
+    /** WidgetActivationRequestMissingResponse */
+    WidgetActivationRequestMissingResponse: {
+      detail: components["schemas"]["WidgetActivationRequestMissingDetail"];
+    };
     /** WidgetAsk */
     WidgetAsk: {
       /** Question */
@@ -22673,6 +23607,10 @@ export interface components {
        * @description Why the widget could not be activated as configured: empty when it can. A policy violation does not stop an active widget: it is served within the policy.
        */
       activation_blockers?: string[];
+      /** Activation Requested At */
+      activation_requested_at?: string | null;
+      /** @description Who asked for activation; None when that user was deleted. */
+      activation_requested_by?: components["schemas"]["OversightPersonRef"] | null;
     };
     /** WidgetOverviewPublic */
     WidgetOverviewPublic: {
@@ -22686,6 +23624,8 @@ export interface components {
       widgets: number;
       /** Active */
       active: number;
+      /** Awaiting Activation */
+      awaiting_activation: number;
       /** Questions 7D */
       questions_7d: number;
       /** Questions 30D */
@@ -22808,6 +23748,22 @@ export interface components {
       activated_at?: string | null;
       /** Paused At */
       paused_at?: string | null;
+      /**
+       * Activation Requested At
+       * @description Set while an editor's request for activation is pending.
+       */
+      activation_requested_at?: string | null;
+      /** Activation Requested By User Id */
+      activation_requested_by_user_id?: string | null;
+      /**
+       * Activation Declined At
+       * @description Set when an administrator sent the last request back.
+       */
+      activation_declined_at?: string | null;
+      /** Activation Declined By User Id */
+      activation_declined_by_user_id?: string | null;
+      /** Activation Decline Reason */
+      activation_decline_reason?: string | null;
       /**
        * Created At
        * Format: date-time
@@ -34133,6 +35089,635 @@ export interface operations {
       };
     };
   };
+  list_admin_spaces_api_v1_admin_spaces__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminSpaceList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_admin_space_api_v1_admin_spaces__space_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminSpaceDetail"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  add_admin_space_member_api_v1_admin_spaces__space_id__members__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminSpaceMemberAdd"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminSpaceMembers"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  remove_admin_space_member_api_v1_admin_spaces__space_id__members__user_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminSpaceMembers"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  change_admin_space_member_role_api_v1_admin_spaces__space_id__members__user_id___patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminSpaceRoleUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminSpaceMembers"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  add_admin_space_group_api_v1_admin_spaces__space_id__group_members__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminSpaceGroupAdd"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminSpaceMembers"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  remove_admin_space_group_api_v1_admin_spaces__space_id__group_members__group_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        group_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminSpaceMembers"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  change_admin_space_group_role_api_v1_admin_spaces__space_id__group_members__group_id___patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        group_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminSpaceRoleUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminSpaceMembers"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  join_admin_space_api_v1_admin_spaces__space_id__join__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminSpaceJoin"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminSpaceMembers"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  leave_admin_space_api_v1_admin_spaces__space_id__leave__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminSpaceMembers"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   set_credential_api_v1_admin_credentials__provider__put: {
     parameters: {
       query?: never;
@@ -36244,7 +37829,7 @@ export interface operations {
       };
     };
   };
-  activate_widget_api_v1_widgets__id__activate__post: {
+  request_widget_activation_api_v1_widgets__id__activation_request__post: {
     parameters: {
       query?: never;
       header?: never;
@@ -36254,6 +37839,179 @@ export interface operations {
       cookie?: never;
     };
     requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  withdraw_widget_activation_request_api_v1_widgets__id__activation_request__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  decline_widget_activation_request_api_v1_widgets__id__activation_request_decline__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WidgetActivationDecline"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description No activation request is pending. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetActivationRequestMissingResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  activate_widget_api_v1_widgets__id__activate__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["WidgetActivate"] | null;
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {
@@ -37210,6 +38968,55 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_widget_review_api_v1_admin_widgets__id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminWidgetReview"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

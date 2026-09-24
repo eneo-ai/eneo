@@ -371,7 +371,13 @@
       "user_deleted",
       "role_modified",
       "permission_changed",
-      "tenant_settings_updated"
+      "tenant_settings_updated",
+      "space_oversight_joined",
+      "space_oversight_left",
+      "space_oversight_member_added",
+      "space_oversight_member_role_changed",
+      "space_oversight_member_removed",
+      "widget_activation_request_declined"
     ];
 
     // System actions - GRAY

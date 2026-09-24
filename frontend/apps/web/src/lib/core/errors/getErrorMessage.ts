@@ -84,7 +84,12 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9062: () => m.eneo_error_9062(), // SKILL_REMOVAL_BUSY
 
   // --- Widgets ---
-  9063: () => m.eneo_error_9063() // ASSISTANT_PUBLISHED_AS_WIDGET
+  9063: () => m.eneo_error_9063(), // ASSISTANT_PUBLISHED_AS_WIDGET
+
+  // --- Space oversight ---
+  9064: () => m.eneo_error_9064(), // SPACE_LAST_ADMIN
+  9065: () => m.eneo_error_9065(), // SPACE_ALREADY_MEMBER
+  9066: () => m.eneo_error_9066() // SPACE_SELF_ACCESS_REQUIRES_JOIN
 };
 
 /**

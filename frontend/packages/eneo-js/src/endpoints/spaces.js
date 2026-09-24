@@ -1,4 +1,8 @@
 /** @typedef {import('../types/resources').Space} Space */
+/** @typedef {import('../types/resources').SpaceRoleValue} SpaceRoleValue */
+/** @typedef {import('../types/resources').AdminSpaceList} AdminSpaceList */
+/** @typedef {import('../types/resources').AdminSpaceDetail} AdminSpaceDetail */
+/** @typedef {import('../types/resources').AdminSpaceMembers} AdminSpaceMembers */
 /** @typedef {import('../client/client').EneoError} EneoError */
 
 /**
@@ -253,6 +257,166 @@ export function initSpaces(client) {
           params: { path: { id: spaceId, group_id } }
         });
         return true;
+      }
+    },
+
+    /**
+     * Organisation-admin oversight of shared spaces, whether or not the admin is
+     * a member. Reads never return content and accept tenant-admin API keys;
+     * every change needs a signed-in session and is always audited.
+     */
+    admin: {
+      /**
+       * Every shared space in the organisation, with the pending widget
+       * activation requests (oldest first).
+       * @returns {Promise<AdminSpaceList>}
+       * @throws {EneoError}
+       * */
+      list: async () => {
+        const res = await client.fetch("/api/v1/admin/spaces/", {
+          method: "get"
+        });
+        return res;
+      },
+
+      /**
+       * Settings, resources, members and usage of one shared space. Personal
+       * spaces and the organisation space are not found.
+       * @param {{id: string}} space
+       * @returns {Promise<AdminSpaceDetail>}
+       * @throws {EneoError}
+       * */
+      get: async ({ id }) => {
+        const res = await client.fetch("/api/v1/admin/spaces/{space_id}/", {
+          method: "get",
+          params: { path: { space_id: id } }
+        });
+        return res;
+      },
+
+      /**
+       * Join a space with a written reason. Only a role above the one held
+       * through a group can be chosen (`viewer_membership.joinable_roles`).
+       * @param {{spaceId: string, role: SpaceRoleValue, reason: string}} params
+       * @returns {Promise<AdminSpaceMembers>}
+       * @throws {EneoError}
+       * */
+      join: async ({ spaceId, role, reason }) => {
+        const res = await client.fetch("/api/v1/admin/spaces/{space_id}/join/", {
+          method: "post",
+          params: { path: { space_id: spaceId } },
+          requestBody: { "application/json": { role, reason } }
+        });
+        return res;
+      },
+
+      /**
+       * Leave a space joined directly; a role held through a group remains.
+       * @param {{spaceId: string}} params
+       * @returns {Promise<AdminSpaceMembers>}
+       * @throws {EneoError}
+       * */
+      leave: async ({ spaceId }) => {
+        const res = await client.fetch("/api/v1/admin/spaces/{space_id}/leave/", {
+          method: "post",
+          params: { path: { space_id: spaceId } }
+        });
+        return res;
+      },
+
+      members: {
+        /**
+         * Add a user without joining the space. Adding yourself is refused;
+         * use `join`.
+         * @param {{spaceId: string, userId: string, role: SpaceRoleValue}} params
+         * @returns {Promise<AdminSpaceMembers>}
+         * @throws {EneoError}
+         * */
+        add: async ({ spaceId, userId, role }) => {
+          const res = await client.fetch("/api/v1/admin/spaces/{space_id}/members/", {
+            method: "post",
+            params: { path: { space_id: spaceId } },
+            requestBody: { "application/json": { user_id: userId, role } }
+          });
+          return res;
+        },
+
+        /**
+         * @param {{spaceId: string, userId: string, role: SpaceRoleValue}} params
+         * @returns {Promise<AdminSpaceMembers>}
+         * @throws {EneoError}
+         * */
+        update: async ({ spaceId, userId, role }) => {
+          const res = await client.fetch("/api/v1/admin/spaces/{space_id}/members/{user_id}/", {
+            method: "patch",
+            params: { path: { space_id: spaceId, user_id: userId } },
+            requestBody: { "application/json": { role } }
+          });
+          return res;
+        },
+
+        /**
+         * Also revokes the user's API keys for the space.
+         * @param {{spaceId: string, userId: string}} params
+         * @returns {Promise<AdminSpaceMembers>}
+         * @throws {EneoError}
+         * */
+        remove: async ({ spaceId, userId }) => {
+          const res = await client.fetch("/api/v1/admin/spaces/{space_id}/members/{user_id}/", {
+            method: "delete",
+            params: { path: { space_id: spaceId, user_id: userId } }
+          });
+          return res;
+        }
+      },
+
+      groupMembers: {
+        /**
+         * @param {{spaceId: string, groupId: string, role: SpaceRoleValue}} params
+         * @returns {Promise<AdminSpaceMembers>}
+         * @throws {EneoError}
+         * */
+        add: async ({ spaceId, groupId, role }) => {
+          const res = await client.fetch("/api/v1/admin/spaces/{space_id}/group-members/", {
+            method: "post",
+            params: { path: { space_id: spaceId } },
+            requestBody: { "application/json": { group_id: groupId, role } }
+          });
+          return res;
+        },
+
+        /**
+         * @param {{spaceId: string, groupId: string, role: SpaceRoleValue}} params
+         * @returns {Promise<AdminSpaceMembers>}
+         * @throws {EneoError}
+         * */
+        update: async ({ spaceId, groupId, role }) => {
+          const res = await client.fetch(
+            "/api/v1/admin/spaces/{space_id}/group-members/{group_id}/",
+            {
+              method: "patch",
+              params: { path: { space_id: spaceId, group_id: groupId } },
+              requestBody: { "application/json": { role } }
+            }
+          );
+          return res;
+        },
+
+        /**
+         * @param {{spaceId: string, groupId: string}} params
+         * @returns {Promise<AdminSpaceMembers>}
+         * @throws {EneoError}
+         * */
+        remove: async ({ spaceId, groupId }) => {
+          const res = await client.fetch(
+            "/api/v1/admin/spaces/{space_id}/group-members/{group_id}/",
+            {
+              method: "delete",
+              params: { path: { space_id: spaceId, group_id: groupId } }
+            }
+          );
+          return res;
+        }
       }
     }
   };
