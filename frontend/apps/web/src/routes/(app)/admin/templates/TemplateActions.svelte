@@ -18,7 +18,6 @@
   } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
-  import { writable } from "svelte/store";
   import { goto, invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { getEneo } from "$lib/core/Eneo";
@@ -32,8 +31,8 @@
   let { template, type }: { template: Template; type: "assistant" | "app" } = $props();
 
   const eneo = getEneo();
-  let isDeleteOpen = writable(false);
-  let isRollbackOpen = writable(false);
+  let isDeleteOpen = $state(false);
+  let isRollbackOpen = $state(false);
 
   function handleEdit() {
     goto(resolve(`/admin/templates/edit/${type}/${template.id}`));
@@ -84,20 +83,20 @@
     </DropdownMenu.Item>
 
     {#if template.original_snapshot}
-      <DropdownMenu.Item onSelect={() => isRollbackOpen.set(true)}>
+      <DropdownMenu.Item onSelect={() => (isRollbackOpen = true)}>
         <RotateCcw size={16} />
         {m.rollback()}
       </DropdownMenu.Item>
     {/if}
 
-    <DropdownMenu.Item variant="destructive" onSelect={() => isDeleteOpen.set(true)}>
+    <DropdownMenu.Item variant="destructive" onSelect={() => (isDeleteOpen = true)}>
       <Trash2 size={16} />
       {m.delete()}
     </DropdownMenu.Item>
   </DropdownMenu.Content>
 </DropdownMenu.Root>
 
-<TemplateDeleteDialog openController={isDeleteOpen} {template} {type} />
+<TemplateDeleteDialog bind:open={isDeleteOpen} {template} {type} />
 {#if template.original_snapshot}
-  <TemplateRollbackDialog openController={isRollbackOpen} {template} {type} />
+  <TemplateRollbackDialog bind:open={isRollbackOpen} {template} {type} />
 {/if}

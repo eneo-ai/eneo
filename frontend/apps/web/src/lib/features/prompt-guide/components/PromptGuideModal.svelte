@@ -24,8 +24,8 @@
 <script lang="ts">
   import { CircleAlert, RefreshCw, Sparkles } from "@lucide/svelte";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { tick, untrack } from "svelte";
@@ -83,7 +83,7 @@
   let lastSend = $state<{ question: string; showUserTurn: boolean } | null>(null);
   let inputElement = $state<HTMLTextAreaElement | null>(null);
   let wasOpen = false;
-  // Overwrite-confirm dialog state (codebase AlertDialog, not window.confirm).
+  // Overwrite-confirm dialog state (ConfirmDialog, not window.confirm).
   // pendingApplyText holds the prompt to apply once the user confirms.
   let overwriteConfirmOpen = $state(false);
   let pendingApplyText = $state<string | null>(null);
@@ -284,7 +284,7 @@
     // The textarea behind the dialog is unreachable while the modal is open,
     // so a stale `hasUnsavedPromptChanges = true` at apply time means the
     // user typed manually BEFORE opening the modal — Applying overwrites
-    // their work, so confirm first via the codebase AlertDialog.
+    // their work, so confirm first via ConfirmDialog.
     if (hasUnsavedPromptChanges) {
       pendingApplyText = text;
       overwriteConfirmOpen = true;
@@ -364,24 +364,13 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<AlertDialog.Root bind:open={overwriteConfirmOpen}>
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.prompt_guide_apply_overwrite_title()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.prompt_guide_apply_overwrite_warning()}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action
-        onclick={() => {
-          overwriteConfirmOpen = false;
-          if (pendingApplyText !== null) applyNow(pendingApplyText);
-        }}
-      >
-        {m.prompt_guide_apply_button()}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={overwriteConfirmOpen}
+  title={m.prompt_guide_apply_overwrite_title()}
+  description={m.prompt_guide_apply_overwrite_warning()}
+  confirmLabel={m.prompt_guide_apply_button()}
+  variant="default"
+  onConfirm={() => {
+    if (pendingApplyText !== null) applyNow(pendingApplyText);
+  }}
+/>

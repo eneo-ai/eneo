@@ -3,7 +3,7 @@
   import { IconEdit } from "@eneo/icons/edit";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -26,7 +26,6 @@
   const renameId = useId();
 
   let renameOpen = false;
-  let deleteOpen = false;
 
   async function submitRename() {
     const trimmed = (newName ?? "").trim();
@@ -41,7 +40,6 @@
   }
 
   async function deleteConversation() {
-    deleteOpen = false;
     await chat.deleteConversation(conversation);
     onConversationDeleted?.(conversation);
   }
@@ -91,30 +89,19 @@
   </Dialog.Root>
 
   <!-- Delete -->
-  <AlertDialog.Root bind:open={deleteOpen}>
-    <AlertDialog.Trigger>
-      {#snippet child({ props })}
-        <Button {...props} variant="destructive" size="icon" aria-label={m.delete_conversation()}>
-          <IconTrash />
-        </Button>
-      {/snippet}
-    </AlertDialog.Trigger>
-
-    <AlertDialog.Content class={dialogLayout.content("small")}>
-      <AlertDialog.Header class={dialogLayout.header}>
-        <AlertDialog.Title>{m.delete_conversation()}</AlertDialog.Title>
-        <AlertDialog.Description>
-          {m.do_you_really_want_to_delete()}
-          <span class="italic">{(conversation?.name ?? untitled).slice(0, 200)}</span>?
-        </AlertDialog.Description>
-      </AlertDialog.Header>
-
-      <AlertDialog.Footer class={dialogLayout.footer}>
-        <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-        <Button variant="destructive" onclick={deleteConversation}>
-          {m.delete()}
-        </Button>
-      </AlertDialog.Footer>
-    </AlertDialog.Content>
-  </AlertDialog.Root>
+  <ConfirmDialog
+    title={m.delete_conversation()}
+    confirmLabel={m.delete()}
+    onConfirm={deleteConversation}
+  >
+    {#snippet trigger({ props })}
+      <Button {...props} variant="destructive" size="icon" aria-label={m.delete_conversation()}>
+        <IconTrash />
+      </Button>
+    {/snippet}
+    {#snippet description()}
+      {m.do_you_really_want_to_delete()}
+      <span class="italic">{(conversation?.name ?? untitled).slice(0, 200)}</span>?
+    {/snippet}
+  </ConfirmDialog>
 </div>

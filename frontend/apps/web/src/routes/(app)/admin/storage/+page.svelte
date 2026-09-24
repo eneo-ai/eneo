@@ -31,9 +31,9 @@
     Loader2,
     RefreshCw
   } from "@lucide/svelte";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { Page, Settings } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
@@ -1364,52 +1364,26 @@
   </Page.Main>
 </Page.Root>
 
-<AlertDialog.Root bind:open={targetConfirmationOpen}>
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.storage_settings_confirm_target_title()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.storage_settings_confirm_target_description()}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={saving}>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action disabled={saving} onclick={() => void savePolicy()}>
-        {#if saving}
-          <Loader2 data-icon="inline-start" class="animate-spin" />
-          {m.storage_settings_saving()}
-        {:else if storageTarget === "object_store"}
-          {m.storage_settings_confirm_object_store()}
-        {:else}
-          {m.storage_settings_confirm_postgres()}
-        {/if}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={targetConfirmationOpen}
+  title={m.storage_settings_confirm_target_title()}
+  description={m.storage_settings_confirm_target_description()}
+  confirmLabel={storageTarget === "object_store"
+    ? m.storage_settings_confirm_object_store()
+    : m.storage_settings_confirm_postgres()}
+  pendingLabel={m.storage_settings_saving()}
+  variant="default"
+  onConfirm={savePolicy}
+/>
 
-<AlertDialog.Root bind:open={moveConfirmationOpen}>
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.storage_moves_confirm_title()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.storage_moves_confirm_description({
-          count: storageCount(moveLimit),
-          target: storageTargetLabel(moveTarget)
-        })}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={moveActionPending === "queue"}>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action
-        disabled={moveActionPending === "queue"}
-        onclick={() => void queueContentMoves()}
-      >
-        {#if moveActionPending === "queue"}
-          <Loader2 data-icon="inline-start" class="animate-spin" />
-        {/if}
-        {m.storage_moves_confirm_action()}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={moveConfirmationOpen}
+  title={m.storage_moves_confirm_title()}
+  description={m.storage_moves_confirm_description({
+    count: storageCount(moveLimit),
+    target: storageTargetLabel(moveTarget)
+  })}
+  confirmLabel={m.storage_moves_confirm_action()}
+  variant="default"
+  onConfirm={queueContentMoves}
+/>

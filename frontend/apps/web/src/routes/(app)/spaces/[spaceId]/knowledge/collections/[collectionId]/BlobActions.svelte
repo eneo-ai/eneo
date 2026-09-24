@@ -2,9 +2,9 @@
   import { IconTrash } from "@eneo/icons/trash";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -38,15 +38,8 @@
   }
 
   async function deleteBlob() {
-    try {
-      await eneo.infoBlobs.delete(blob);
-      invalidate("blobs:list");
-      return true;
-    } catch (e) {
-      toastError(e, m.could_not_delete_file({ fileName: blob.metadata.title ?? m.this_file() }));
-      console.error(e);
-      return false;
-    }
+    await eneo.infoBlobs.delete(blob);
+    invalidate("blobs:list");
   }
 
   let showDeleteDialog = false;
@@ -99,24 +92,11 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<AlertDialog.Root bind:open={showDeleteDialog}>
-  <AlertDialog.Content class={dialogLayout.content()}>
-    <AlertDialog.Header class={dialogLayout.header}>
-      <AlertDialog.Title>{m.delete_group()}</AlertDialog.Title>
-      <AlertDialog.Description
-        >{m.confirm_delete_file({ fileName: blob.metadata.title || "" })}</AlertDialog.Description
-      >
-    </AlertDialog.Header>
-
-    <AlertDialog.Footer class={dialogLayout.footer}>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <Button
-        variant="destructive"
-        onclick={() => {
-          showDeleteDialog = false;
-          deleteBlob();
-        }}>{m.delete()}</Button
-      >
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={showDeleteDialog}
+  title={m.delete_file()}
+  description={m.confirm_delete_file({ fileName: blob.metadata.title || "" })}
+  confirmLabel={m.delete()}
+  errorContext={m.could_not_delete_file({ fileName: blob.metadata.title ?? m.this_file() })}
+  onConfirm={deleteBlob}
+/>

@@ -6,9 +6,9 @@
   import { IconRefresh } from "@eneo/icons/refresh";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -25,26 +25,16 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  let isDeleting = false;
   let isRenaming = false;
-  let isSyncing = false;
   let newName = knowledgeItem.name;
   const nameId = useId();
 
   async function deleteKnowledge() {
-    isDeleting = true;
-    try {
-      await eneo.integrations.knowledge.delete({
-        knowledge: knowledgeItem,
-        space: $currentSpace
-      });
-      refreshCurrentSpace();
-      showDeleteDialog = false;
-    } catch (e) {
-      toastError(e, m.integration_delete_error());
-      console.error(e);
-    }
-    isDeleting = false;
+    await eneo.integrations.knowledge.delete({
+      knowledge: knowledgeItem,
+      space: $currentSpace
+    });
+    refreshCurrentSpace();
   }
 
   async function renameKnowledge() {
@@ -65,18 +55,11 @@
   }
 
   async function triggerFullSync() {
-    isSyncing = true;
-    try {
-      await eneo.integrations.knowledge.triggerFullSync({
-        knowledge: knowledgeItem,
-        space: $currentSpace
-      });
-      refreshCurrentSpace();
-      showSyncDialog = false;
-    } catch (e) {
-      console.error(e);
-    }
-    isSyncing = false;
+    await eneo.integrations.knowledge.triggerFullSync({
+      knowledge: knowledgeItem,
+      space: $currentSpace
+    });
+    refreshCurrentSpace();
   }
 
   let showDeleteDialog = false;
@@ -138,34 +121,22 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<AlertDialog.Root bind:open={showSyncDialog}>
-  <AlertDialog.Content class={dialogLayout.content()}>
-    <AlertDialog.Header class={dialogLayout.header}>
-      <AlertDialog.Title>{m.trigger_full_sync()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.confirm_full_sync({ knowledgeName: knowledgeItem.name })}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer class={dialogLayout.footer}>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <Button onclick={triggerFullSync}>{isSyncing ? m.syncing() : m.start_full_sync()}</Button>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={showSyncDialog}
+  title={m.trigger_full_sync()}
+  description={m.confirm_full_sync({ knowledgeName: knowledgeItem.name })}
+  confirmLabel={m.start_full_sync()}
+  pendingLabel={m.syncing()}
+  variant="default"
+  onConfirm={triggerFullSync}
+/>
 
-<AlertDialog.Root bind:open={showDeleteDialog}>
-  <AlertDialog.Content class={dialogLayout.content()}>
-    <AlertDialog.Header class={dialogLayout.header}>
-      <AlertDialog.Title>{m.delete_integration_knowledge()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.confirm_delete_integration_knowledge({ knowledgeName: knowledgeItem.name })}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer class={dialogLayout.footer}>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <Button variant="destructive" onclick={deleteKnowledge}
-        >{isDeleting ? m.deleting() : m.delete()}</Button
-      >
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={showDeleteDialog}
+  title={m.delete_integration_knowledge()}
+  description={m.confirm_delete_integration_knowledge({ knowledgeName: knowledgeItem.name })}
+  confirmLabel={m.delete()}
+  pendingLabel={m.deleting()}
+  errorContext={m.integration_delete_error()}
+  onConfirm={deleteKnowledge}
+/>

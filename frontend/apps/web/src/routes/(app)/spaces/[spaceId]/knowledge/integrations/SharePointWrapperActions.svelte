@@ -8,9 +8,9 @@
   import { IconTrash } from "@eneo/icons/trash";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { untrack } from "svelte";
@@ -33,7 +33,6 @@
   } = getSpacesManager();
 
   let isRenaming = $state(false);
-  let isDeleting = $state(false);
   let newWrapperName = $state(untrack(() => wrapperName));
 
   let showRenameDialog = $state(false);
@@ -61,20 +60,11 @@
   }
 
   async function deleteWrapper() {
-    isDeleting = true;
-    try {
-      await eneo.integrations.knowledge.deleteWrapper({
-        space: $currentSpace,
-        wrapper_id: wrapperId
-      });
-      refreshCurrentSpace();
-      showDeleteDialog = false;
-    } catch (error) {
-      console.error(error);
-      toastError(error, m.integration_delete_error());
-    } finally {
-      isDeleting = false;
-    }
+    await eneo.integrations.knowledge.deleteWrapper({
+      space: $currentSpace,
+      wrapper_id: wrapperId
+    });
+    refreshCurrentSpace();
   }
 
   function openRenameDialog() {
@@ -129,19 +119,12 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<AlertDialog.Root bind:open={showDeleteDialog}>
-  <AlertDialog.Content class={dialogLayout.content()}>
-    <AlertDialog.Header class={dialogLayout.header}>
-      <AlertDialog.Title>{m.delete_wrapper()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.confirm_delete_sharepoint_wrapper({ wrapperName, count: itemCount })}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer class={dialogLayout.footer}>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <Button variant="destructive" onclick={deleteWrapper}>
-        {isDeleting ? m.deleting() : m.delete()}
-      </Button>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={showDeleteDialog}
+  title={m.delete_wrapper()}
+  description={m.confirm_delete_sharepoint_wrapper({ wrapperName, count: itemCount })}
+  confirmLabel={m.delete()}
+  pendingLabel={m.deleting()}
+  errorContext={m.integration_delete_error()}
+  onConfirm={deleteWrapper}
+/>

@@ -8,13 +8,13 @@
   import { CircleAlert, RotateCcw } from "@lucide/svelte";
   import { untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { m } from "$lib/paraglide/messages";
   import {
     isSkillRuntimePolicyDraftValid,
@@ -314,19 +314,11 @@
   </section>
 </div>
 
-<AlertDialog.Root bind:open={resetOpen}>
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.skills_runtime_policy_reset_title()}</AlertDialog.Title>
-      <AlertDialog.Description
-        >{m.skills_runtime_policy_reset_description()}</AlertDialog.Description
-      >
-    </AlertDialog.Header>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action onclick={() => void reset()}>
-        {m.skills_runtime_policy_reset()}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={resetOpen}
+  title={m.skills_runtime_policy_reset_title()}
+  description={m.skills_runtime_policy_reset_description()}
+  confirmLabel={m.skills_runtime_policy_reset()}
+  variant="default"
+  onConfirm={reset}
+/>

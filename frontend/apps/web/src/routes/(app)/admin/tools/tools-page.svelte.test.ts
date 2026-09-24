@@ -230,7 +230,7 @@ describe("Tools capability configuration", () => {
     expect(page.getByRole("button", { name: m.delete(), exact: true }).elements()).toHaveLength(0);
     await page.getByRole("button", { name: `${m.actions()}: Image Studio` }).click();
     await page.getByRole("menuitem", { name: m.delete(), exact: true }).click();
-    await expect.element(page.getByRole("dialog")).toBeVisible();
+    await expect.element(page.getByRole("alertdialog")).toBeVisible();
     expect(api.mcpServers.delete).not.toHaveBeenCalled();
     await page.getByRole("button", { name: m.delete(), exact: true }).click();
     await vi.waitFor(() => expect(api.mcpServers.delete).toHaveBeenCalledWith({ id: "images" }));

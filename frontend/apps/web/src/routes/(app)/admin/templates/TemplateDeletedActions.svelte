@@ -20,7 +20,7 @@
 
   let { template, type }: { template: Template; type: "assistant" | "app" } = $props();
 
-  let isRestoreOpen = writable(false);
+  let isRestoreOpen = $state(false);
   let isPermanentDeleteOpen = writable(false);
 </script>
 
@@ -34,7 +34,7 @@
   </DropdownMenu.Trigger>
 
   <DropdownMenu.Content align="end">
-    <DropdownMenu.Item onSelect={() => isRestoreOpen.set(true)}>
+    <DropdownMenu.Item onSelect={() => (isRestoreOpen = true)}>
       <Undo size={16} />
       {m.restore()}
     </DropdownMenu.Item>
@@ -46,5 +46,5 @@
   </DropdownMenu.Content>
 </DropdownMenu.Root>
 
-<TemplateRestoreDialog openController={isRestoreOpen} {template} {type} />
+<TemplateRestoreDialog bind:open={isRestoreOpen} {template} {type} />
 <TemplatePermanentDeleteDialog openController={isPermanentDeleteOpen} {template} {type} />

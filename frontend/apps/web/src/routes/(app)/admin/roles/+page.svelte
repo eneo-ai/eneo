@@ -7,15 +7,13 @@
   import type { Role } from "@eneo/eneo-js";
   import { invalidate } from "$app/navigation";
   import { Search } from "@lucide/svelte";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { Page } from "$lib/components/layout";
   import { toast } from "$lib/components/toast";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { getAppContext } from "$lib/core/AppContext";
   import { getEneo } from "$lib/core/Eneo";
-  import { toastError } from "$lib/core/errors";
-  import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { groupPermissions, roleMatches, sortRoles } from "$lib/features/roles/permission-groups";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -47,31 +45,32 @@
   }
 
   type PendingAction = { kind: "delete" | "reset" | "default"; role: Role };
+  // Kept after the dialog closes so its text does not vanish mid-animation.
   let pending = $state<PendingAction | null>(null);
+  let confirmOpen = $state(false);
 
-  const run = createAsyncState(async () => {
-    const action = pending;
-    if (!action) return;
-    const { kind, role } = action;
-    try {
-      if (kind === "delete") {
-        await eneo.roles.delete(role);
-        toast.success(m.roles_deleted_toast({ name: role.name }));
-      } else if (kind === "reset") {
-        await eneo.roles.resetToDefault(role);
-        toast.success(m.roles_reset_toast({ name: role.name }));
-      } else {
-        await eneo.roles.setAsDefault(role);
-        defaultRoleId = role.id;
-        updateTenant({ default_role_id: role.id });
-        toast.success(m.roles_default_toast({ name: role.name }));
-      }
-      pending = null;
-      await invalidate("admin:roles:load");
-    } catch (error) {
-      toastError(error);
+  function requestAction(kind: PendingAction["kind"], role: Role) {
+    pending = { kind, role };
+    confirmOpen = true;
+  }
+
+  async function runPending() {
+    if (!pending) return;
+    const { kind, role } = pending;
+    if (kind === "delete") {
+      await eneo.roles.delete(role);
+      toast.success(m.roles_deleted_toast({ name: role.name }));
+    } else if (kind === "reset") {
+      await eneo.roles.resetToDefault(role);
+      toast.success(m.roles_reset_toast({ name: role.name }));
+    } else {
+      await eneo.roles.setAsDefault(role);
+      defaultRoleId = role.id;
+      updateTenant({ default_role_id: role.id });
+      toast.success(m.roles_default_toast({ name: role.name }));
     }
-  });
+    await invalidate("admin:roles:load");
+  }
 
   const confirmCopy = $derived.by(() => {
     if (!pending) return null;
@@ -152,9 +151,9 @@
                   {groups}
                   isDefault={role.id === defaultRoleId}
                   onEdit={edit}
-                  onDelete={(target) => (pending = { kind: "delete", role: target })}
-                  onReset={(target) => (pending = { kind: "reset", role: target })}
-                  onSetDefault={(target) => (pending = { kind: "default", role: target })}
+                  onDelete={(target) => requestAction("delete", target)}
+                  onReset={(target) => requestAction("reset", target)}
+                  onSetDefault={(target) => requestAction("default", target)}
                 />
               {/each}
             </ul>
@@ -173,29 +172,13 @@
   hideTrigger
 />
 
-<AlertDialog.Root
-  open={pending !== null}
-  onOpenChange={(open) => {
-    if (!open && !run.isLoading) pending = null;
-  }}
->
-  {#if confirmCopy}
-    <AlertDialog.Content>
-      <AlertDialog.Header>
-        <AlertDialog.Title>{confirmCopy.title}</AlertDialog.Title>
-        <AlertDialog.Description>{confirmCopy.description}</AlertDialog.Description>
-      </AlertDialog.Header>
-      <AlertDialog.Footer>
-        <AlertDialog.Cancel disabled={run.isLoading}>{m.cancel()}</AlertDialog.Cancel>
-        <AlertDialog.Action
-          class={[confirmCopy.destructive && "bg-negative-default text-on-fill"]}
-          disabled={run.isLoading}
-          onclick={(event) => {
-            event.preventDefault();
-            void run();
-          }}>{confirmCopy.action}</AlertDialog.Action
-        >
-      </AlertDialog.Footer>
-    </AlertDialog.Content>
-  {/if}
-</AlertDialog.Root>
+{#if confirmCopy}
+  <ConfirmDialog
+    bind:open={confirmOpen}
+    title={confirmCopy.title}
+    description={confirmCopy.description}
+    confirmLabel={confirmCopy.action}
+    variant={confirmCopy.destructive ? "destructive" : "default"}
+    onConfirm={runPending}
+  />
+{/if}

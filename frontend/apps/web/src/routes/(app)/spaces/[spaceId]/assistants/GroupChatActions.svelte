@@ -4,18 +4,15 @@
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { writable } from "svelte/store";
   import PublishingDialog from "$lib/features/publishing/components/PublishingDialog.svelte";
   import { IconArrowUpToLine } from "@eneo/icons/arrow-up-to-line";
   import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
-  import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   export let groupChat: GroupChatSparse;
@@ -27,16 +24,10 @@
 
   const eneo = getEneo();
 
-  const deleteGroupChat = createAsyncState(async () => {
-    try {
-      await eneo.groupChats.delete(groupChat);
-      refreshCurrentSpace("applications");
-      showDeleteDialog = false;
-    } catch (e) {
-      toastError(e, m.could_not_delete_group_chat());
-      console.error(e);
-    }
-  });
+  async function deleteGroupChat() {
+    await eneo.groupChats.delete(groupChat);
+    refreshCurrentSpace("applications");
+  }
 
   let showDeleteDialog = false;
   const showPublishDialog = writable(false);
@@ -108,23 +99,15 @@
   </DropdownMenu.Root>
 {/if}
 
-<AlertDialog.Root bind:open={showDeleteDialog}>
-  <AlertDialog.Content class={dialogLayout.content("small")}>
-    <AlertDialog.Header class={dialogLayout.header}>
-      <AlertDialog.Title>{m.delete_group_chat()}</AlertDialog.Title>
-      <AlertDialog.Description
-        >{m.confirm_delete_group_chat({ groupChatName: groupChat.name })}</AlertDialog.Description
-      >
-    </AlertDialog.Header>
-
-    <AlertDialog.Footer class={dialogLayout.footer}>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <Button variant="destructive" onclick={deleteGroupChat}
-        >{deleteGroupChat.isLoading ? m.deleting() : m.delete()}</Button
-      >
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={showDeleteDialog}
+  title={m.delete_group_chat()}
+  description={m.confirm_delete_group_chat({ groupChatName: groupChat.name })}
+  confirmLabel={m.delete()}
+  pendingLabel={m.deleting()}
+  errorContext={m.could_not_delete_group_chat()}
+  onConfirm={deleteGroupChat}
+/>
 
 <PublishingDialog
   resource={groupChat}

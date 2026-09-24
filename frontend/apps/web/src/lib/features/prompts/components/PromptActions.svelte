@@ -8,9 +8,8 @@
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getPromptManager } from "../PromptManager";
   import type { PromptSparse } from "@eneo/eneo-js";
@@ -19,7 +18,6 @@
 
   export let prompt: PromptSparse;
   let showDeleteDialog = false;
-  let isProcessing = false;
 
   const {
     state: { previewedPrompt },
@@ -74,27 +72,14 @@
     </DropdownMenu.Content>
   </DropdownMenu.Root>
 
-  <AlertDialog.Root bind:open={showDeleteDialog}>
-    <AlertDialog.Content class={dialogLayout.content()}>
-      <AlertDialog.Header class={dialogLayout.header}>
-        <AlertDialog.Title>{m.delete_prompt()}</AlertDialog.Title>
-        <AlertDialog.Description
-          >{m.do_you_really_want_to_delete_this_version()}</AlertDialog.Description
-        >
-      </AlertDialog.Header>
-
-      <AlertDialog.Footer class={dialogLayout.footer}>
-        <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-        <Button
-          variant="destructive"
-          onclick={() => {
-            deletePrompt(prompt);
-            showDeleteDialog = false;
-          }}>{isProcessing ? m.deleting() : m.delete()}</Button
-        >
-      </AlertDialog.Footer>
-    </AlertDialog.Content>
-  </AlertDialog.Root>
+  <ConfirmDialog
+    bind:open={showDeleteDialog}
+    title={m.delete_prompt()}
+    description={m.do_you_really_want_to_delete_this_version()}
+    confirmLabel={m.delete()}
+    pendingLabel={m.deleting()}
+    onConfirm={() => deletePrompt(prompt)}
+  />
 </div>
 
 <style lang="postcss">

@@ -6,9 +6,9 @@
   import { type Website } from "@eneo/eneo-js";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -591,69 +591,54 @@
 </Dialog.Root>
 
 <!-- Duplicate URL Warning Modal -->
-<AlertDialog.Root bind:open={$showDuplicateWarning}>
-  <AlertDialog.Content class={dialogLayout.content()}>
-    <AlertDialog.Header class={dialogLayout.header}>
-      <AlertDialog.Title>{m.website_exists_on_org()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {#if existingOnOrg}
-          {m.website_exists_on_org_description({ spaceName: existingOnOrg.space_name })}
-        {/if}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
+<ConfirmDialog
+  bind:open={$showDuplicateWarning}
+  title={m.website_exists_on_org()}
+  description={existingOnOrg
+    ? m.website_exists_on_org_description({ spaceName: existingOnOrg.space_name })
+    : undefined}
+  confirmLabel={m.create_anyway()}
+  pendingLabel={m.creating()}
+  cancelLabel={m.go_back()}
+  variant="default"
+  onConfirm={createWebsite}
+>
+  {#if existingOnOrg}
+    {@const crawlResult = formatCrawlResult(existingOnOrg)}
+    <div class="{dialogLayout.section} p-4">
+      <div class="bg-hover-dimmer border-default rounded-lg border p-4">
+        <div class="flex items-start gap-3">
+          <div class="text-warning-default mt-0.5 flex-shrink-0">
+            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path
+                fill-rule="evenodd"
+                d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </div>
+          <div class="flex-1">
+            <div class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+              <span class="text-dimmer">{m.website_last_crawled()}:</span>
+              <span>{formatDateTime(existingOnOrg.last_crawled_at)}</span>
 
-    {#if existingOnOrg}
-      {@const crawlResult = formatCrawlResult(existingOnOrg)}
-      <div class={dialogLayout.body}>
-        <div class="{dialogLayout.section} p-4">
-          <div class="bg-hover-dimmer border-default rounded-lg border p-4">
-            <div class="flex items-start gap-3">
-              <div class="text-warning-default mt-0.5 flex-shrink-0">
-                <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                  <path
-                    fill-rule="evenodd"
-                    d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
-              </div>
-              <div class="flex-1">
-                <div class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-                  <span class="text-dimmer">{m.website_last_crawled()}:</span>
-                  <span>{formatDateTime(existingOnOrg.last_crawled_at)}</span>
+              {#if crawlResult}
+                <span class="text-dimmer">{m.website_crawl_result()}:</span>
+                <span
+                  class={crawlResult.hasFailures
+                    ? "text-warning-stronger"
+                    : "text-positive-stronger"}
+                >
+                  {crawlResult.text}
+                </span>
+              {/if}
 
-                  {#if crawlResult}
-                    <span class="text-dimmer">{m.website_crawl_result()}:</span>
-                    <span
-                      class={crawlResult.hasFailures
-                        ? "text-warning-stronger"
-                        : "text-positive-stronger"}
-                    >
-                      {crawlResult.text}
-                    </span>
-                  {/if}
-
-                  <span class="text-dimmer">{m.website_sync_interval()}:</span>
-                  <span>{formatUpdateInterval(existingOnOrg.update_interval)}</span>
-                </div>
-              </div>
+              <span class="text-dimmer">{m.website_sync_interval()}:</span>
+              <span>{formatUpdateInterval(existingOnOrg.update_interval)}</span>
             </div>
           </div>
         </div>
       </div>
-    {/if}
-
-    <AlertDialog.Footer class={dialogLayout.footer}>
-      <AlertDialog.Cancel>{m.go_back()}</AlertDialog.Cancel>
-      <Button
-        onclick={async () => {
-          showDuplicateWarning.set(false);
-          await createWebsite();
-        }}
-        disabled={isProcessing}
-      >
-        {isProcessing ? m.creating() : m.create_anyway()}
-      </Button>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+    </div>
+  {/if}
+</ConfirmDialog>
