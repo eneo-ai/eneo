@@ -105,30 +105,32 @@ Preflight is a read-only check that uses the new image against your current
 database. It reports how much old content will be copied and whether anything
 blocks the upgrade. It does not change data.
 
-First save the current configuration; you need it for a rollback. Then update
-the image tags in `docker-compose.yml` to the 2.2 release, as in [Deploy
-Eneo](/guides/deployment#updating-eneo):
+1. Save the current configuration. You need it for a rollback:
 
-```bash
-cp docker-compose.yml docker-compose.yml.before-2.2
-cp env_backend.env env_backend.env.before-2.2
-```
+   ```bash
+   cp docker-compose.yml docker-compose.yml.before-2.2
+   cp env_backend.env env_backend.env.before-2.2
+   ```
 
-<Callout type="warning">
-  From now until the maintenance window, nobody may run `docker compose up`.
-  It would upgrade production at once, without letting jobs finish or taking a
-  backup. Tell colleagues, and pause any automation that runs it.
-</Callout>
+2. In `docker-compose.yml`, change the image tag of `backend`, `worker`,
+   `db-init`, and `frontend` to the 2.2 release, for example
+   `ghcr.io/eneo-ai/eneo-backend:2.2.0`.
 
-Download the new images now, so the maintenance window is shorter. Pulling
-does not restart anything:
+   <Callout type="warning">
+     From now until the maintenance window, nobody may run `docker compose up`.
+     It would upgrade production at once, without letting jobs finish or taking
+     a backup. Tell colleagues, and pause any automation that runs it.
+   </Callout>
 
-```bash
-docker compose pull
-docker compose run --rm --no-deps -T --entrypoint python worker \
-  -m eneo.object_content.file_icon_migration preflight > file-icon-preflight.json
-echo "exit code: $?"
-```
+3. Download the new images, so the maintenance window is shorter, and run
+   preflight. Pulling does not restart anything:
+
+   ```bash
+   docker compose pull
+   docker compose run --rm --no-deps -T --entrypoint python worker \
+     -m eneo.object_content.file_icon_migration preflight > file-icon-preflight.json
+   echo "exit code: $?"
+   ```
 
 `run` starts a one-off container from the new image, so the old worker keeps
 running untouched. The command writes one JSON report to
@@ -390,7 +392,8 @@ Example output while the copy runs:
 }
 ```
 
-`state` moves through these values:
+Read `state`, `paused`, and `detail`; the other fields help when you
+troubleshoot. `state` moves through these values:
 
 | `state` | Meaning | What to do |
 | --- | --- | --- |
@@ -517,7 +520,8 @@ When `status` shows `state: complete`, check the result before you rely on it:
    ```bash
    docker compose exec -T db createdb -U postgres eneo_restore_test
    gunzip -c backup-after-2.2.sql.gz \
-     | docker compose exec -T db psql -U postgres -d eneo_restore_test -v ON_ERROR_STOP=1 -q
+     | docker compose exec -T db psql -U postgres -d eneo_restore_test \
+         -v ON_ERROR_STOP=1 -q
    docker compose exec -T db dropdb -U postgres eneo_restore_test
    ```
 
@@ -785,14 +789,22 @@ for the details.
 A rollback means restoring the backup from before the upgrade, not an Alembic
 downgrade. It discards everything written after the backup.
 
-1. Stop the API. Let the 2.2 worker finish its queue: repeat the Redis check
-   from [step 3](#stop-eneo-and-let-old-jobs-finish) until it shows `queued=0`
-   and `j_ongoing=0`, so that no 2.2 job is left for the old worker. Then stop
-   the worker and put the saved configuration back:
+1. Stop the API:
 
    ```bash
    docker compose stop backend
+   ```
+
+   Let the 2.2 worker finish its queue, so that no 2.2 job is left for the old
+   worker. Repeat this until it shows `queued=0` and `j_ongoing=0`:
+
+   ```bash
    docker compose exec -T redis redis-cli --raw GET arq:queue:health-check
+   ```
+
+   Then stop the worker and put the saved configuration back:
+
+   ```bash
    docker compose stop worker
    cp docker-compose.yml.before-2.2 docker-compose.yml
    cp env_backend.env.before-2.2 env_backend.env
@@ -816,7 +828,7 @@ downgrade. It discards everything written after the backup.
    ```
 
 In the Eneo test, rolling back from 2.2 to 2.1.1 took under a minute for a
-431 MB database, and every old file downloaded unchanged. Once users have
+430 MB database, and every old file downloaded unchanged. Once users have
 worked in 2.2, prefer fixing forward unless losing that data is acceptable. Do not use
 `alembic stamp`, remove the database triggers, or start an old version against
 the upgraded schema.
