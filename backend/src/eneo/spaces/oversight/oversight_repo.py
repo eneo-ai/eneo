@@ -395,7 +395,7 @@ class SpaceOversightRepo:
         )
         if lock:
             stmt = stmt.with_for_update(key_share=True, of=Spaces)
-        row = (await self.session.execute(stmt)).one_or_none()
+        row = (await self.session.execute(stmt)).tuples().one_or_none()
         if row is None:
             raise NotFoundException("Space not found")
         (
@@ -410,7 +410,7 @@ class SpaceOversightRepo:
             sc_id,
             sc_name,
             sc_level,
-        ) = row._tuple()
+        ) = row
         return SharedSpaceRow(
             id=id,
             name=name,
@@ -443,10 +443,10 @@ class SpaceOversightRepo:
             )
             .where(Spaces.id == space_id, Spaces.tenant_id == tenant_id)
         )
-        row = (await self.session.execute(stmt)).one_or_none()
+        row = (await self.session.execute(stmt)).tuples().one_or_none()
         if row is None:
             return None
-        id, name, owner_id, tenant_space_id, sc_id, sc_name, sc_level = row._tuple()
+        id, name, owner_id, tenant_space_id, sc_id, sc_name, sc_level = row
         kind: SpaceKind
         if owner_id is not None:
             kind = "personal"
@@ -492,10 +492,10 @@ class SpaceOversightRepo:
         stmt = sa.select(Spaces.user_id, direct, via_groups).where(
             Spaces.id == space_id, Spaces.tenant_id == tenant_id
         )
-        row = (await self.session.execute(stmt)).one_or_none()
+        row = (await self.session.execute(stmt)).tuples().one_or_none()
         if row is None:
             return None
-        owner_id, direct_role, group_roles = row._tuple()
+        owner_id, direct_role, group_roles = row
         if owner_id is not None:
             return SpaceRoleValue.ADMIN if owner_id == user_id else None
         # Scalar subquery: None without a direct row.
@@ -1906,7 +1906,7 @@ class SpaceOversightRepo:
             widget_questions,
         )
         question_count, app_run_count, active_users, widget_count = (
-            (await self.session.execute(stmt)).one()._tuple()
+            (await self.session.execute(stmt)).tuples().one()
         )
         return UsageCounts(
             questions=int(question_count or 0),
