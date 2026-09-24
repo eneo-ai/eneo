@@ -1,6 +1,6 @@
 ---
 title: Driftsätt Eneo
-translationSource: guides/deployment.mdx@0e64ce9832eb
+translationSource: guides/deployment.mdx@35b1e3f6d811
 ---
 
 import { Callout } from "nextra/components";
@@ -50,8 +50,9 @@ chmod 600 .env env_backend.env env_frontend.env env_db.env
 ```
 
 Lås avbildningarna för `frontend`, `backend`, `worker` och `db-init` till samma
-release i `docker-compose.yml`. Undvik den föränderliga taggen `latest` i
-produktion. Tillgängliga taggar finns i
+release i `docker-compose.yml`, till exempel
+`ghcr.io/eneo-ai/eneo-backend:2.2.0`. Eneos image-taggar har inget `v`-prefix.
+Undvik den föränderliga taggen `latest` i produktion. Tillgängliga taggar finns i
 [GitHub Releases](https://github.com/eneo-ai/eneo/releases).
 
 ### Skapa hemligheter
