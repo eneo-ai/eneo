@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { Table } from "@eneo/ui";
-  import { createRender } from "svelte-headless-table";
+  import * as Table from "$lib/components/resource-table/index.js";
   import CollectionActions from "./CollectionActions.svelte";
   import CollectionFileLabels from "./CollectionFileLabels.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -45,7 +44,7 @@
       header: m.name(),
       value: (item) => item.name,
       cell: (item) => {
-        return createRender(Table.PrimaryCell, {
+        return Table.renderComponent(Table.PrimaryCell, {
           label: item.value.name,
           link: `/spaces/${$currentSpace.routeId}/knowledge/collections/${item.value.id}`,
           icon: IconCollections
@@ -57,7 +56,7 @@
       header: m.files_header(),
       accessor: (item) => item,
       cell: (item) =>
-        createRender(CollectionFileLabels, {
+        Table.renderComponent(CollectionFileLabels, {
           collection: item.value
         }),
       plugins: {
@@ -67,7 +66,7 @@
 
     table.columnActions({
       cell: (item) => {
-        return createRender(CollectionActions, {
+        return Table.renderComponent(CollectionActions, {
           collection: item.value
         });
       }

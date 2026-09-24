@@ -3,7 +3,7 @@
   opens the sources list below the message and jumps to the matching entry.
 -->
 <script lang="ts">
-  import type { EneoInrefCustomComponentProps } from "@eneo/ui/components/markdown";
+  import type { EneoInrefCustomComponentProps } from "$lib/components/markdown/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getWidgetMessageContext } from "../widgetMessageContext";
 

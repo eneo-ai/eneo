@@ -19,7 +19,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import { Loader2, AlertTriangle, ShieldAlert, Info } from "lucide-svelte";
+  import { LoaderCircle, TriangleAlert, ShieldAlert, Info } from "@lucide/svelte";
 
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -331,7 +331,7 @@
         <!-- 1. Impact preview -->
         {#if !sourceAlreadyMigrated && isLoadingImpact}
           <div class="text-muted-foreground flex items-center gap-2 py-3 text-sm">
-            <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+            <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
             <span>{m.loading()}</span>
           </div>
         {:else if !sourceAlreadyMigrated && impactLoadError}
@@ -388,7 +388,7 @@
         <!-- 3. Validation results — split by severity -->
         {#if isValidating}
           <div class="text-muted-foreground flex items-center gap-2 py-2 text-sm">
-            <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+            <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
             <span>{m.loading()}</span>
           </div>
         {:else if anyValidationSection}
@@ -421,7 +421,7 @@
                 <ul class="space-y-1.5">
                   {#each warningMsgs as w, i (i)}
                     <li class="text-warning-stronger flex items-start gap-2">
-                      <AlertTriangle size={14} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
+                      <TriangleAlert size={14} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
                       <span>{w}</span>
                     </li>
                   {/each}
@@ -492,7 +492,7 @@
       <Button variant="outline" onclick={() => (dialogOpen = false)}>{m.cancel()}</Button>
       <Button onclick={handleMigrate} disabled={isSubmitting || !canMigrate}>
         {#if isSubmitting}
-          <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+          <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
           {m.migrating()}
         {:else}
           {m.migrate_model_usage()}

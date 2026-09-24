@@ -1,12 +1,17 @@
 <script lang="ts">
+  import { toastError } from "$lib/core/errors";
   import { browser } from "$app/environment";
   import type { InfoBlob } from "@eneo/eneo-js";
-  import { IconCopy } from "@eneo/icons/copy";
   import { IconDocument } from "@eneo/icons/document";
   import { IconDownload } from "@eneo/icons/download";
-  import { Button, Dialog, Markdown } from "@eneo/ui";
+  import CopyButton from "$lib/components/CopyButton.svelte";
+  import { Markdown } from "$lib/components/markdown/index.js";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { getEneo } from "$lib/core/Eneo";
   import { assignLocation } from "$lib/core/navigation";
+  import { downloadTextFile } from "$lib/core/helpers/download";
   import * as m from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   type BlobPreviewReference = {
@@ -42,36 +47,22 @@
       } catch (e) {
         loadError = true;
         console.error("Error retrieving blob content:", e);
-        toast.error("Error retrieving reference, see console for details.");
+        toastError(e, m.could_not_load_file_content());
       }
       loadingBlob = false;
     }
     return true;
   }
 
-  let isOpen: Dialog.OpenState;
+  let isOpen = false;
 
   async function downloadText() {
     await loadBlob();
     if (loadedBlobText && browser) {
-      const file = new Blob([loadedBlobText], { type: "application/octet-stream;charset=utf-8" });
       const filename = blob.metadata.title
         ? `${blob.metadata.title}${blob.metadata.title.endsWith(".txt") ? "" : ".txt"}`
         : "Download.txt";
-      if (window.showSaveFilePicker) {
-        const handle = await window.showSaveFilePicker({ suggestedName: filename });
-        const writable = await handle.createWritable();
-        await writable.write(file);
-        writable.close();
-      } else {
-        const a = document.createElement("a");
-        a.download = filename;
-        a.href = URL.createObjectURL(file);
-        a.click();
-        setTimeout(function () {
-          URL.revokeObjectURL(a.href);
-        }, 1500);
-      }
+      await downloadTextFile(loadedBlobText, filename);
     }
   }
 
@@ -93,32 +84,20 @@
     }
   }
 
-  let copyButtonText = m.copy_to_clipboard();
-  async function copyText() {
-    await loadBlob();
-    if (loadedBlobText && browser) {
-      navigator.clipboard.writeText(loadedBlobText);
-      copyButtonText = m.copied_to_clipboard();
-      setTimeout(() => {
-        copyButtonText = m.copy_to_clipboard();
-      }, 2000);
-    }
-  }
-
   const showBlob = () => {
-    $isOpen = true;
+    isOpen = true;
     loadBlob();
   };
 </script>
 
-<Dialog.Root bind:isOpen>
+<Dialog.Root bind:open={isOpen}>
   {#if $$slots.default}
     <slot {showBlob}></slot>
   {:else}
     <Button
-      class={isTableView ? "-ml-1" : "bg-preview !border-default max-w-[30ch] border shadow-sm"}
-      on:click={showBlob}
-      padding="icon-leading"
+      variant="ghost"
+      class={isTableView ? "-ml-1" : "bg-primary border-default max-w-[30ch] shadow-sm"}
+      onclick={showBlob}
     >
       {#if index}
         <span
@@ -130,53 +109,49 @@
         <IconDocument class="text-muted" />
       {/if}
 
-      {blob.metadata.title}
+      <span class="truncate">{blob.metadata.title}</span>
     </Button>
   {/if}
 
-  <Dialog.Content width="medium">
-    <Dialog.Title>{blob.metadata.title}</Dialog.Title>
-    <Dialog.Description hidden
-      >{m.file_contents_of({ title: blob.metadata.title || "" })}</Dialog.Description
-    >
+  <Dialog.Content class={dialogLayout.content("medium")} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{blob.metadata.title}</Dialog.Title>
+      <Dialog.Description class="sr-only"
+        >{m.file_contents_of({ title: blob.metadata.title || "" })}</Dialog.Description
+      >
+    </Dialog.Header>
 
-    <Dialog.Section scrollable>
-      <div class="p-4">
-        {#if loadingBlob}
-          <pre>{m.loading()}</pre>
-        {:else if loadError}
-          <pre>{m.attachment_error_loading_content()}</pre>
-        {:else}
-          <Markdown source={loadedBlobText ?? ""}></Markdown>
-        {/if}
+    <div class={dialogLayout.body}>
+      <div class={dialogLayout.section}>
+        <div class="p-4">
+          {#if loadingBlob}
+            <pre>{m.loading()}</pre>
+          {:else if loadError}
+            <pre>{m.attachment_error_loading_content()}</pre>
+          {:else}
+            <Markdown source={loadedBlobText ?? ""}></Markdown>
+          {/if}
+        </div>
       </div>
-    </Dialog.Section>
+    </div>
 
-    <Dialog.Controls let:close>
+    <Dialog.Footer class={dialogLayout.footer}>
       {#if loadedBlobText}
-        <Button variant="simple" on:click={downloadText} padding="icon-leading">
+        <Button variant="ghost" onclick={downloadText}>
           <IconDownload />
           {m.download_extracted_text()}
         </Button>
 
-        <Button variant="simple" padding="icon-leading" on:click={copyText}>
-          <IconCopy />
-          {copyButtonText}</Button
-        >
+        <CopyButton text={loadedBlobText} showLabel />
         <div class="flex-grow"></div>
       {/if}
       {#if originalAvailable}
-        <Button
-          variant="simple"
-          on:click={downloadOriginal}
-          disabled={loadingOriginal}
-          padding="icon-leading"
-        >
+        <Button variant="ghost" onclick={downloadOriginal} disabled={loadingOriginal}>
           <IconDownload />
           {loadingOriginal ? m.downloading() : m.download_original()}
         </Button>
       {/if}
-      <Button variant="primary" is={close}>{m.done()}</Button>
-    </Dialog.Controls>
+      <Dialog.Close class={buttonVariants()}>{m.done()}</Dialog.Close>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

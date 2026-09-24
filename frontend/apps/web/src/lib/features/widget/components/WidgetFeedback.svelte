@@ -7,7 +7,7 @@
   conversation does.
 -->
 <script lang="ts">
-  import { Check, ThumbsDown, ThumbsUp } from "lucide-svelte";
+  import { Check, ThumbsDown, ThumbsUp } from "@lucide/svelte";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";

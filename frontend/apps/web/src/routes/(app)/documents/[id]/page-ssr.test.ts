@@ -5,7 +5,10 @@ const DOCUMENT_ID = "bbbbbbbb-0000-4000-8000-000000000002";
 
 vi.mock("$app/state", () => ({
   // Inline: `vi.mock` factories are hoisted above module-level constants.
-  page: { url: new URL("https://eneo.kommun.se/documents/bbbbbbbb-0000-4000-8000-000000000002") }
+  page: {
+    url: new URL("https://eneo.kommun.se/documents/bbbbbbbb-0000-4000-8000-000000000002"),
+    state: {}
+  }
 }));
 vi.mock("$lib/core/Eneo", () => ({ getEneo: () => ({}) }));
 

@@ -119,7 +119,7 @@
     <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
     <a
       href={localizeHref("/account/api-keys")}
-      class="text-accent-default hover:bg-hover focus-visible:ring-accent-default/50 flex min-h-[44px] items-center justify-between gap-2
+      class="text-accent-default hover:bg-hover-default focus-visible:ring-accent-default/50 flex min-h-[44px] items-center justify-between gap-2
              rounded-md px-3 py-2 text-sm
              font-medium transition-colors focus-visible:ring-2
              focus-visible:outline-none"

@@ -6,8 +6,7 @@
 
 <script lang="ts">
   import type { SpaceSparse } from "@eneo/eneo-js";
-  import { Table } from "@eneo/ui";
-  import { createRender } from "svelte-headless-table";
+  import * as Table from "$lib/components/resource-table/index.js";
   import SpaceTile from "./SpaceTile.svelte";
   import SpaceActions from "./SpaceActions.svelte";
   import SpaceCell from "./SpaceCell.svelte";
@@ -22,7 +21,7 @@
       header: m.name(),
       value: (item) => item.name,
       cell: (item) => {
-        return createRender(SpaceCell, {
+        return Table.renderComponent(SpaceCell, {
           space: item.value
         });
       }
@@ -30,7 +29,7 @@
 
     table.columnActions({
       cell: (item) => {
-        return createRender(SpaceActions, {
+        return Table.renderComponent(SpaceActions, {
           space: item.value
         });
       }
@@ -39,7 +38,7 @@
     table.columnCard({
       value: (item) => item.name,
       cell: (item) => {
-        return createRender(SpaceTile, {
+        return Table.renderComponent(SpaceTile, {
           space: item.value
         });
       }

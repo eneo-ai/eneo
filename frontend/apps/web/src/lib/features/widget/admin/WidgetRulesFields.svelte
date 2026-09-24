@@ -14,6 +14,7 @@
   import { MAX_ALLOWED_ORIGINS, parseOrigins } from "./origins";
   import { TextDraft } from "./textDraft.svelte";
   import type { WidgetAutosave } from "./widgetAutosave.svelte";
+  import { intlLocale } from "$lib/core/formatting/dateTime";
 
   type Props = {
     autosave: WidgetAutosave;
@@ -46,8 +47,8 @@
       rangeErrors = {
         ...rangeErrors,
         [key]: m.widget_admin_value_out_of_range({
-          min: min.toLocaleString(),
-          max: max.toLocaleString()
+          min: min.toLocaleString(intlLocale()),
+          max: max.toLocaleString(intlLocale())
         })
       };
       return;
@@ -214,7 +215,7 @@
           <Field.Description id="widget-budget-help">
             {policy
               ? m.widget_admin_daily_budget_description_policy({
-                  max: policy.max_daily_token_budget.toLocaleString()
+                  max: policy.max_daily_token_budget.toLocaleString(intlLocale())
                 })
               : m.widget_admin_daily_budget_description()}
           </Field.Description>

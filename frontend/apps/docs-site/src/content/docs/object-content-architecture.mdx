@@ -21,9 +21,10 @@ text and vectors remain in PostgreSQL. New content is stored inline by default,
 so Eneo still needs no S3-compatible service.
 
 Legacy File and Icon adoption uses an expand, online backfill, and optional
-cleanup sequence. Two consecutive Alembic revisions own the expand phase. The first
-creates the ledger, makes legacy columns nullable, installs the payload-write
-fence, and commits. The second scans owners and obtains exact logical source
+cleanup sequence. Two consecutive Alembic revisions perform the initial expand
+and inventory; later 2.2 revisions add admission, recovery, pause, and cleanup
+tracking. The first creates the ledger, makes legacy columns nullable, installs
+the payload-write fence, and commits. The second scans owners and obtains exact logical source
 sizes in resumable, idempotent groups without hashing, converting, or copying
 external payload bytes. It never inherits
 the schema revision's exclusive table locks. New code reads a verified
@@ -38,7 +39,7 @@ variant in bounded, resumable PostgreSQL-inline transactions. The optional 2.2
 cleanup command applies the fail-closed completion check, verifies every
 retained legacy source against its adopted copy and every surviving ledger
 reference, and only then removes the legacy columns, as described in
-[Verify and clean up](/guides/file-icon-storage-upgrade#verify-and-clean-up).
+[Clean up the old columns](/guides/file-icon-storage-upgrade#clean-up-the-old-columns-optional).
 
 ```mermaid
 flowchart LR
@@ -47,7 +48,7 @@ flowchart LR
   fallback --> admission["Admission\nowner lock · reference recheck"]
   admission --> backfill["Online backfill\nbounded lease · SHA-256 · reference flip"]
   backfill --> complete["Campaign complete\none object-content path"]
-  complete --> contract["Contract\npreflight · short fence · legacy removal"]
+  complete --> contract["Optional cleanup\nEneo stopped · exclusive lock · full recheck · legacy removal"]
 ```
 
 The current online adapter targets PostgreSQL inline. It starts automatically
@@ -77,8 +78,9 @@ interrupted object-store write before publication leaves no product row visible.
 | Canonical SHA-256, exact size, and media type         | Backend-specific transport and deletion state         |
 | Durable intent, audit facts, and reconciliation state | Bytes only; never authorization or product policy     |
 
-The chosen backend is immutable for that record. Eneo never silently retries an
-inline write in object storage, or copies a failed object-store write into
+A record has exactly one byte backend at a time. Only an explicit move changes
+it, after the copy at the destination is verified. Eneo never silently retries
+an inline write in object storage, or copies a failed object-store write into
 PostgreSQL. Object keys contain neither filenames nor organization identifiers,
 and ordinary APIs expose neither backend infrastructure nor provider details.
 
@@ -99,9 +101,11 @@ flowchart LR
 
 Every write computes a canonical full-byte SHA-256 over the bounded input. An
 inline write verifies the digest and size, then commits the payload, immediately
-available control row, and exactly one first owner reference atomically. An
-object-store write commits `pending` intent, an opaque descriptor, and exactly
-one first reference before remote I/O begins.
+available control row, and exactly one first owner reference atomically. New
+File, Icon, and knowledge uploads to object storage reserve an opaque key,
+upload and verify the bytes, and then commit available content and its first
+reference in one short transaction. The older `pending` intent path remains for
+existing rows and recovery.
 
 Inline bytes have a documented deployment ceiling and are verified against the
 control row before a full or single-range response. Object-store uploads compute
@@ -119,8 +123,8 @@ purge time exists and has passed. Missing purge time means retain, not delete.
 
 ```mermaid
 stateDiagram-v2
-  [*] --> available: inline payload + first reference commit
-  [*] --> pending: object descriptor + first reference commit
+  [*] --> available: inline payload or verified object + first reference
+  [*] --> pending: older object intent (existing rows, recovery)
   pending --> available: upload verified
   pending --> failed: upload cannot converge
   available --> retained: hold or retention applies
@@ -210,7 +214,8 @@ revision instead of looping within the current recovery attempt.
 
 Inline creation has no database/object-store crash gap: payload and intent share
 one transaction. For eligible new File and Icon object-store writes, Eneo
-uploads and HEAD verifies captured bytes under a bounded PostgreSQL reservation
+uploads captured bytes under a bounded PostgreSQL reservation, then checks them
+with `HEAD` and a full read-back SHA-256,
 before one short transaction publishes product metadata, already-available
 content rows, and concrete references. A pre-publication crash therefore leaves
 no invisible product row; repeated inventory and the existing grace period own
@@ -312,8 +317,9 @@ and distroless runtime image digests, compiles a static binary, and runs as a
 non-root user.
 
 The image has its own workflow and its own version, `docker/seaweedfs/VERSION`
-(for example `4.40-eneo.3`). Because every input is pinned, the build is
-reproducible and runs only when those inputs change on `develop`. Each version
+(for example `4.40-eneo.4`). Because every input is pinned, the build is
+reproducible and runs on `develop` only when those inputs, the reference
+Compose files, or the workflow change. Each version
 tag is published once and never moved; changing the source pin, the downstream
 patch, or the builder or runtime images means bumping the version. Application
 releases record which store version they were verified against instead of

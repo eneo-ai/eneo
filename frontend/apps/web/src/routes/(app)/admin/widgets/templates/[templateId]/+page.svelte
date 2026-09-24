@@ -25,8 +25,8 @@
   import { LOCK_GROUPS, publicationSummary } from "$lib/features/widget/admin/templateLocks";
   import { collapseWhitespace, TextDraft } from "$lib/features/widget/admin/textDraft.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
-  import { FileText, Palette } from "lucide-svelte";
+  import { intlLocale } from "$lib/core/formatting/dateTime";
+  import { FileText, Palette } from "@lucide/svelte";
   import { untrack } from "svelte";
 
   let { data } = $props();
@@ -136,7 +136,7 @@
 
   // Saving edits the draft; publishing is the deliberate step that reaches
   // the widgets. With followers it asks first, since their values change.
-  const dateFormat = new Intl.DateTimeFormat(getLocale(), {
+  const dateFormat = new Intl.DateTimeFormat(intlLocale(), {
     dateStyle: "medium",
     timeStyle: "short"
   });

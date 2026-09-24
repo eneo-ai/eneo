@@ -1,33 +1,36 @@
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
+
+const locale = vi.hoisted(() => ({ current: "en" }));
+vi.mock("$lib/paraglide/runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("$lib/paraglide/runtime")>()),
+  getLocale: () => locale.current
+}));
+
 import { formatBytes } from "./formatBytes";
 
-test("Format 0 bytes", () => {
-  expect(formatBytes(0)).toEqual("0 Bytes");
+afterEach(() => {
+  locale.current = "en";
 });
 
-test("Format negative bytes", () => {
-  expect(formatBytes(-1024)).toEqual("- Bytes");
+test("zero and negative sizes", () => {
+  expect(formatBytes(0)).toEqual("0 B");
+  expect(formatBytes(-1024)).toEqual("- B");
 });
 
-test("Format bytes", () => {
-  expect(formatBytes(1)).toEqual("1 Bytes");
-});
-
-test("Format kilobytes", () => {
+test("picks the largest base-1024 unit", () => {
+  expect(formatBytes(1)).toEqual("1 B");
+  expect(formatBytes(0.5)).toEqual("1 B");
   expect(formatBytes(1024)).toEqual("1 KB");
   expect(formatBytes(1536)).toEqual("2 KB");
-});
-
-test("Format megabytes", () => {
   expect(formatBytes(1024 * 1024)).toEqual("1 MB");
   expect(formatBytes(1.5 * 1024 * 1024)).toEqual("2 MB");
+  expect(formatBytes(1024 ** 3)).toEqual("1 GB");
+  expect(formatBytes(1024 ** 5)).toEqual("1,024 TB");
 });
 
-test("Format gigabytes", () => {
-  expect(formatBytes(1024 * 1024 * 1024)).toEqual("1 GB");
-});
-
-test("Format with decimals", () => {
+test("uses fixed fraction digits in the UI language", () => {
   expect(formatBytes(1536, 1)).toEqual("1.5 KB");
   expect(formatBytes(1.5 * 1024 * 1024, 2)).toEqual("1.50 MB");
+  locale.current = "sv";
+  expect(formatBytes(1536, 1)).toEqual("1,5 KB");
 });

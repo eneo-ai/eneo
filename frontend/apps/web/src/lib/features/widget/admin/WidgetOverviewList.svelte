@@ -7,7 +7,7 @@
 <script lang="ts">
   import type { Eneo, WidgetOverview, WidgetOverviewItem } from "@eneo/eneo-js";
   import { invalidateAll } from "$app/navigation";
-  import { ArrowRight, Pause, Play } from "lucide-svelte";
+  import { ArrowRight, Pause, Play } from "@lucide/svelte";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -17,7 +17,8 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale, localizeHref } from "$lib/paraglide/runtime";
+  import { localizeHref } from "$lib/paraglide/runtime";
+  import { intlLocale } from "$lib/core/formatting/dateTime";
 
   type Props = {
     overview: WidgetOverview;
@@ -50,7 +51,7 @@
 
   let onlyActive = $state(false);
 
-  const locale = getLocale();
+  const locale = intlLocale();
   const number = new Intl.NumberFormat(locale);
   const day = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short" });
 

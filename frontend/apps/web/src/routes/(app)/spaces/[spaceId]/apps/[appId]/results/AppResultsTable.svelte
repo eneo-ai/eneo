@@ -1,18 +1,12 @@
 <script lang="ts">
-  import { Table } from "@eneo/ui";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
+  import * as Table from "$lib/components/resource-table/index.js";
   import type { App, AppRunSparse } from "@eneo/eneo-js";
-  import { createRender } from "svelte-headless-table";
-  import dayjs from "dayjs";
-  import relativeTime from "dayjs/plugin/relativeTime";
-  import utc from "dayjs/plugin/utc";
   import { getResultTitle } from "$lib/features/apps/getResultTitle";
   import { m } from "$lib/paraglide/messages";
   import ResultPrimaryCell from "./ResultPrimaryCell.svelte";
   import AppResultStatus from "$lib/features/apps/components/AppResultStatus.svelte";
   import ResultAction from "./ResultAction.svelte";
-
-  dayjs.extend(relativeTime);
-  dayjs.extend(utc);
 
   export let results: AppRunSparse[];
   export let app: App;
@@ -28,7 +22,7 @@
       header: m.name(),
       value: (item) => getResultTitle(item),
       cell: (item) => {
-        return createRender(ResultPrimaryCell, {
+        return Table.renderComponent(ResultPrimaryCell, {
           run: item.value,
           app
         });
@@ -38,7 +32,7 @@
       header: m.status(),
       accessor: (item) => item,
       cell: (item) => {
-        return createRender(AppResultStatus, {
+        return Table.renderComponent(AppResultStatus, {
           run: item.value
         });
       }
@@ -47,8 +41,8 @@
       header: m.created(),
       accessor: "created_at",
       cell: (item) => {
-        return createRender(Table.FormattedCell, {
-          value: dayjs(item.value).format("YYYY-MM-DD HH:mm"),
+        return Table.renderComponent(Table.FormattedCell, {
+          value: formatDateTime(item.value),
           monospaced: true
         });
       }
@@ -56,7 +50,7 @@
 
     table.columnActions({
       cell: (item) => {
-        return createRender(ResultAction, {
+        return Table.renderComponent(ResultAction, {
           result: item.value,
           onResultDeleted
         });

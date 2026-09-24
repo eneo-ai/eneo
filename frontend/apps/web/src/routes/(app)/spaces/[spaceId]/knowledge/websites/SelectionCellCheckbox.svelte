@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Input } from "@eneo/ui";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
+  import { m } from "$lib/paraglide/messages";
   import type { Writable } from "svelte/store";
 
   export let websiteId: string;
@@ -10,8 +11,8 @@
   $: checked = $selectedWebsiteIds.has(websiteId);
 </script>
 
-<Input.Checkbox
+<Checkbox
   {checked}
   onCheckedChange={() => onToggle(websiteId)}
-  ariaLabel={`Select ${websiteName}`}
+  aria-label={m.website_select({ name: websiteName })}
 />

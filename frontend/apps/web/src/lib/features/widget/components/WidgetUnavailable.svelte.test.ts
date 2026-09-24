@@ -11,9 +11,11 @@ vi.mock("$lib/paraglide/messages", () => ({
   m: new Proxy<Record<string, () => string>>({}, { get: (_target, key) => () => String(key) })
 }));
 
-// Vitest runs the test page in a frame, so the page is "embedded" with the
-// runner as its host; messages go to window.parent.
-const HOST_ORIGIN = location.origin;
+// Vitest runs each test file in a frame of its own page, so the notice is
+// "embedded" with the runner as its host. The runner talks over postMessage
+// too: with a foreign host origin the browser drops what the bridge posts to
+// it, while the spy still records the calls.
+const HOST_ORIGIN = "https://www.kommun.se";
 
 const posted = () =>
   vi.mocked(window.parent.postMessage).mock.calls.map((call) => (call[0] as { type: string }).type);

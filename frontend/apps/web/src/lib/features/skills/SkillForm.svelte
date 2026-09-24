@@ -1,6 +1,6 @@
 <script lang="ts">
   import { useId } from "bits-ui";
-  import { ChevronDown, ChevronRight, CircleAlert } from "lucide-svelte";
+  import { ChevronDown, ChevronRight, CircleAlert } from "@lucide/svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";

@@ -1,102 +1,57 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
+  import EditorPageHeader from "$lib/components/settings/EditorPageHeader.svelte";
+  import { guardUnsavedChanges } from "$lib/core/editing/guardUnsavedChanges";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
-  import { Button, Input } from "@eneo/ui";
-  import { afterNavigate, beforeNavigate } from "$app/navigation";
-  import { fade } from "svelte/transition";
-  import { page } from "$app/state";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { initGroupChatEditor } from "$lib/features/group-chats/GroupChatEditor.js";
   import GroupChatAssistantList from "$lib/features/group-chats/components/GroupChatAssistantList.svelte";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
   import { m } from "$lib/paraglide/messages";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import { createIconEditor } from "$lib/features/icons/createIconEditor.svelte";
+  import { untrack } from "svelte";
 
-  export let data;
+  let { data } = $props();
+
+  const mentionsId = useId();
+  const responseLabelsId = useId();
+  const insightsId = useId();
 
   const {
     state: { currentSpace },
     refreshCurrentSpace
   } = getSpacesManager();
 
-  const {
-    state: { resource, update, currentChanges, isSaving },
-    saveChanges,
-    discardChanges
-  } = initGroupChatEditor({
-    groupChat: data.groupChat,
-    eneo: data.eneo,
-    onUpdateDone() {
-      refreshCurrentSpace("applications");
-    }
-  });
-
-  // Icon state
-  let currentIconId = data.groupChat.icon_id ?? null;
-  let iconUploading = false;
-  let iconError: string | null = null;
-
-  function getIconUrl(id: string | null) {
-    return id ? data.eneo.icons.url({ id }) : null;
-  }
-
-  $: iconUrl = getIconUrl(currentIconId);
-
-  async function handleIconUpload(event: CustomEvent<File>) {
-    const file = event.detail;
-    iconUploading = true;
-    iconError = null;
-    try {
-      const newIcon = await data.eneo.icons.upload({ file });
-      await data.eneo.groupChats.update({
-        groupChat: { id: $resource.id },
-        update: { icon_id: newIcon.id }
-      });
-      currentIconId = newIcon.id;
-      await refreshCurrentSpace("applications");
-    } catch (error) {
-      console.error("Failed to upload icon:", error);
-      iconError = m.avatar_upload_failed();
-    } finally {
-      iconUploading = false;
-    }
-  }
-
-  async function handleIconDelete() {
-    iconError = null;
-    try {
-      if (currentIconId) {
-        await data.eneo.icons.delete({ id: currentIconId });
+  const editor = untrack(() =>
+    initGroupChatEditor({
+      groupChat: data.groupChat,
+      eneo: data.eneo,
+      onUpdateDone() {
+        refreshCurrentSpace("applications");
       }
+    })
+  );
+  const {
+    state: { resource, update, currentChanges },
+    discardChanges
+  } = editor;
+  guardUnsavedChanges(editor);
+
+  let iconId = $state<string | null>($resource.icon_id ?? null);
+  const icon = createIconEditor({
+    iconId: () => iconId,
+    async setIconId(id) {
       await data.eneo.groupChats.update({
         groupChat: { id: $resource.id },
-        update: { icon_id: null }
+        update: { icon_id: id }
       });
-      currentIconId = null;
+      iconId = id;
       await refreshCurrentSpace("applications");
-    } catch (error) {
-      console.error("Failed to delete icon:", error);
-      iconError = m.avatar_delete_failed();
     }
-  }
-
-  beforeNavigate((navigate) => {
-    if ($currentChanges.hasUnsavedChanges && !confirm(m.unsaved_changes_warning())) {
-      navigate.cancel();
-      return;
-    }
-    // Discard changes that have been made, this is only important so we delete uploaded
-    // files that have not been saved to the assistant
-    discardChanges();
-  });
-
-  let showSavesChangedNotice = false;
-
-  // TODO
-  let previousRoute = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.groupChat, tab: "chat" })}`;
-  afterNavigate(({ from }) => {
-    if (page.url.searchParams.get("next") === "default") return;
-    if (from) previousRoute = from.url.toString();
   });
 </script>
 
@@ -107,44 +62,11 @@
 </svelte:head>
 
 <Page.Root>
-  <Page.Header>
-    <Page.Title
-      parent={{
-        title: $resource.name,
-        href: `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.groupChat, tab: "chat" })}`
-      }}
-      title={m.edit()}
-    ></Page.Title>
-
-    <Page.Flex>
-      {#if $currentChanges.hasUnsavedChanges}
-        <Button
-          variant="destructive"
-          disabled={$isSaving}
-          on:click={() => {
-            discardChanges();
-          }}>{m.discard_all_changes()}</Button
-        >
-
-        <Button
-          variant="positive"
-          class="w-32"
-          on:click={async () => {
-            if (!(await saveChanges())) return;
-            showSavesChangedNotice = true;
-            setTimeout(() => {
-              showSavesChangedNotice = false;
-            }, 5000);
-          }}>{$isSaving ? m.saving() : m.save_changes()}</Button
-        >
-      {:else}
-        {#if showSavesChangedNotice}
-          <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
-        {/if}
-        <Button variant="primary" class="w-32" href={previousRoute}>{m.done()}</Button>
-      {/if}
-    </Page.Flex>
-  </Page.Header>
+  <EditorPageHeader
+    {editor}
+    resourceName={$resource.name}
+    backHref={`/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.groupChat, tab: "chat" })}`}
+  />
 
   <Page.Main>
     <Settings.Page>
@@ -168,11 +90,11 @@
 
         <Settings.Row title={m.avatar()} description={m.avatar_description()}>
           <IconUpload
-            {iconUrl}
-            uploading={iconUploading}
-            error={iconError}
-            on:upload={handleIconUpload}
-            on:delete={handleIconDelete}
+            iconUrl={icon.url}
+            uploading={icon.uploading}
+            error={icon.error}
+            on:upload={(event) => icon.upload(event.detail)}
+            on:delete={icon.remove}
           />
         </Settings.Row>
       </Settings.Group>
@@ -198,13 +120,28 @@
           revertFn={() => {
             discardChanges("allow_mentions");
           }}
+          let:aria
         >
           <div class="border-default flex h-14 border-b py-2">
-            <Input.RadioSwitch
-              bind:value={$update.allow_mentions}
-              labelTrue={m.enable_mentions()}
-              labelFalse={m.disable_mentions()}
-            ></Input.RadioSwitch>
+            <RadioGroup.Root
+              value={$update.allow_mentions ? "on" : "off"}
+              onValueChange={(v) => ($update.allow_mentions = v === "on")}
+              class="grid w-full grid-cols-2 gap-2"
+              {...aria}
+            >
+              <Field.Label for={`${mentionsId}-on`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="on" id={`${mentionsId}-on`} />
+                  <span>{m.enable_mentions()}</span>
+                </Field.Field>
+              </Field.Label>
+              <Field.Label for={`${mentionsId}-off`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="off" id={`${mentionsId}-off`} />
+                  <span>{m.disable_mentions()}</span>
+                </Field.Field>
+              </Field.Label>
+            </RadioGroup.Root>
           </div>
         </Settings.Row>
 
@@ -215,13 +152,28 @@
           revertFn={() => {
             discardChanges("show_response_label");
           }}
+          let:aria
         >
           <div class="border-default flex h-14 border-b py-2">
-            <Input.RadioSwitch
-              bind:value={$update.show_response_label}
-              labelTrue={m.show_labels()}
-              labelFalse={m.hide_labels()}
-            ></Input.RadioSwitch>
+            <RadioGroup.Root
+              value={$update.show_response_label ? "on" : "off"}
+              onValueChange={(v) => ($update.show_response_label = v === "on")}
+              class="grid w-full grid-cols-2 gap-2"
+              {...aria}
+            >
+              <Field.Label for={`${responseLabelsId}-on`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="on" id={`${responseLabelsId}-on`} />
+                  <span>{m.show_labels()}</span>
+                </Field.Field>
+              </Field.Label>
+              <Field.Label for={`${responseLabelsId}-off`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="off" id={`${responseLabelsId}-off`} />
+                  <span>{m.hide_labels()}</span>
+                </Field.Field>
+              </Field.Label>
+            </RadioGroup.Root>
           </div>
         </Settings.Row>
       </Settings.Group>
@@ -246,13 +198,28 @@
               }}
               title={m.insights()}
               description={m.collect_insights_about_group_chat_usage()}
+              let:aria
             >
               <div class="border-default flex h-14 border-b py-2">
-                <Input.RadioSwitch
-                  bind:value={$update.insight_enabled}
-                  labelTrue={m.enable_insights()}
-                  labelFalse={m.disable_insights()}
-                ></Input.RadioSwitch>
+                <RadioGroup.Root
+                  value={$update.insight_enabled ? "on" : "off"}
+                  onValueChange={(v) => ($update.insight_enabled = v === "on")}
+                  class="grid w-full grid-cols-2 gap-2"
+                  {...aria}
+                >
+                  <Field.Label for={`${insightsId}-on`} class="font-normal">
+                    <Field.Field orientation="horizontal">
+                      <RadioGroup.Item value="on" id={`${insightsId}-on`} />
+                      <span>{m.enable_insights()}</span>
+                    </Field.Field>
+                  </Field.Label>
+                  <Field.Label for={`${insightsId}-off`} class="font-normal">
+                    <Field.Field orientation="horizontal">
+                      <RadioGroup.Item value="off" id={`${insightsId}-off`} />
+                      <span>{m.disable_insights()}</span>
+                    </Field.Field>
+                  </Field.Label>
+                </RadioGroup.Root>
               </div>
             </Settings.Row>
           {/if}

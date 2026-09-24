@@ -1,9 +1,8 @@
 <script lang="ts">
   import type { ConversationMessage } from "@eneo/eneo-js";
-  import { Markdown } from "@eneo/ui";
-  import { sanitizeLinkHref } from "@eneo/ui/components/markdown";
+  import { Markdown, sanitizeLinkHref } from "$lib/components/markdown/index.js";
   import { tick } from "svelte";
-  import { Check, ChevronRight, Copy, ExternalLink, FileText } from "lucide-svelte";
+  import { Check, ChevronRight, Copy, ExternalLink, FileText } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { Announcer } from "../announcer.svelte";
   import {

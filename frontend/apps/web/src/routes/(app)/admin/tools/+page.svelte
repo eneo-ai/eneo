@@ -1,6 +1,9 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout";
-  import { Button, Dropdown, Input } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import { invalidate } from "$app/navigation";
   import { writable } from "svelte/store";
@@ -8,15 +11,15 @@
   import {
     Plus,
     Wrench,
-    CheckCircle2,
+    CircleCheck,
     CircleDashed,
-    AlertTriangle,
+    TriangleAlert,
     Power,
     Pause,
     Pencil,
     Trash2,
     ChevronRight
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { CAPABILITIES } from "$lib/features/mcp/capabilities";
   import { readinessMessage } from "$lib/features/mcp/readiness";
@@ -32,10 +35,11 @@
 
   type Provider = components["schemas"]["MCPServerSettingsPublic"];
   let { data }: { data: PageData } = $props();
+  const uid = $props.id();
   setSecurityContext(untrack(() => data.securityClassifications));
   const open = writable(false);
   const tabController = writable("functions");
-  const deleteOpen = writable(false);
+  let deleteOpen = $state(false);
   let deleting = $state<Provider | null>(null);
   let purpose = $state("general");
   let editing = $state<Provider | null>(null);
@@ -140,8 +144,8 @@
                       </p>{/if}
                   </div>
                 </div>
-                <Button size="sm" variant="primary" onclick={() => configure(capability.purpose)}>
-                  <Plus class="mr-2 h-4 w-4" />{sources.length
+                <Button size="sm" onclick={() => configure(capability.purpose)}>
+                  <Plus class="size-4" />{sources.length
                     ? m.tools_add_source()
                     : m.capability_configure({
                         capability: capability.label().toLocaleLowerCase()
@@ -155,8 +159,8 @@
                     class="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
                   >
                     <Button
-                      variant="simple"
-                      padding="icon"
+                      variant="ghost"
+                      size="icon"
                       aria-label={`${expanded ? m.governance_mcp_hide_tools() : m.governance_mcp_show_tools()}: ${source.name}`}
                       aria-expanded={expanded}
                       aria-controls={"source-tools-" + source.mcp_server_id}
@@ -201,9 +205,9 @@
                               : 'bg-secondary text-secondary'}"
                         >
                           {#if source.readiness_reason}
-                            <AlertTriangle class="h-3.5 w-3.5" aria-hidden="true" />
+                            <TriangleAlert class="h-3.5 w-3.5" aria-hidden="true" />
                           {:else if source.is_enabled}
-                            <CheckCircle2 class="h-3.5 w-3.5" aria-hidden="true" />
+                            <CircleCheck class="h-3.5 w-3.5" aria-hidden="true" />
                           {:else}
                             <CircleDashed class="h-3.5 w-3.5" aria-hidden="true" />
                           {/if}
@@ -228,24 +232,25 @@
                     <div
                       class="col-start-2 flex flex-wrap items-center gap-2 sm:col-start-3 sm:row-start-1"
                     >
-                      <Dropdown.Root>
-                        <Dropdown.Trigger let:trigger asFragment>
-                          <Button
-                            is={trigger}
-                            variant="on-fill"
-                            padding="icon"
-                            aria-label={`${m.actions()}: ${source.name}`}
-                          >
-                            <IconEllipsis />
-                          </Button>
-                        </Dropdown.Trigger>
-                        <Dropdown.Menu let:item>
-                          <Button
-                            is={item}
-                            padding="icon-leading"
+                      <DropdownMenu.Root>
+                        <DropdownMenu.Trigger>
+                          {#snippet child({ props })}
+                            <Button
+                              {...props}
+                              variant="ghost"
+                              size="icon"
+                              class="hover:bg-hover-on-fill hover:text-primary"
+                              aria-label={`${m.actions()}: ${source.name}`}
+                            >
+                              <IconEllipsis />
+                            </Button>
+                          {/snippet}
+                        </DropdownMenu.Trigger>
+                        <DropdownMenu.Content align="end">
+                          <DropdownMenu.Item
                             disabled={busy !== null ||
                               (!source.is_enabled && !!source.readiness_reason)}
-                            onclick={() => toggle(source)}
+                            onSelect={() => toggle(source)}
                           >
                             {#if source.is_enabled}
                               <Pause class="h-4 w-4" aria-hidden="true" />
@@ -253,27 +258,21 @@
                               <Power class="h-4 w-4" aria-hidden="true" />
                             {/if}
                             {source.is_enabled ? m.deactivate() : m.activate()}
-                          </Button>
-                          <Button
-                            is={item}
-                            padding="icon-leading"
-                            onclick={() => configure(capability.purpose, source)}
-                          >
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item onSelect={() => configure(capability.purpose, source)}>
                             <Pencil class="h-4 w-4" aria-hidden="true" />{m.tools_change()}
-                          </Button>
-                          <Button
-                            is={item}
-                            padding="icon-leading"
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item
                             variant="destructive"
-                            onclick={() => {
+                            onSelect={() => {
                               deleting = source;
-                              deleteOpen.set(true);
+                              deleteOpen = true;
                             }}
                           >
                             <Trash2 class="h-4 w-4" aria-hidden="true" />{m.delete()}
-                          </Button>
-                        </Dropdown.Menu>
-                      </Dropdown.Root>
+                          </DropdownMenu.Item>
+                        </DropdownMenu.Content>
+                      </DropdownMenu.Root>
                     </div>
                   </div>
                   {#if expanded}
@@ -302,13 +301,16 @@
         <p class="text-secondary mb-4 max-w-[72ch] text-sm">{m.tools_connections_description()}</p>
         <MCPServersTable mcpServers={external}>
           {#snippet filters()}
-            <Input.Switch bind:value={showFunctionServers} class="border-0 p-0 text-sm">
-              {m.tools_show_function_servers()}
-            </Input.Switch>
+            <Field.Field orientation="horizontal" class="w-auto gap-4">
+              <Field.Label for={`${uid}-show-function-servers`}>
+                {m.tools_show_function_servers()}
+              </Field.Label>
+              <Switch id={`${uid}-show-function-servers`} bind:checked={showFunctionServers} />
+            </Field.Field>
           {/snippet}
           {#snippet actions()}
-            <Button size="sm" variant="primary" onclick={() => configure("general")}
-              ><Wrench class="mr-2 h-4 w-4" />{m.add_mcp_server()}</Button
+            <Button size="sm" onclick={() => configure("general")}
+              ><Wrench class="size-4" />{m.add_mcp_server()}</Button
             >
           {/snippet}
         </MCPServersTable>
@@ -328,8 +330,4 @@
   )?.name}
 />
 
-{#if deleting}<DeleteMCPDialog
-    openController={deleteOpen}
-    mcpServer={deleting}
-    onDelete={remove}
-  />{/if}
+{#if deleting}<DeleteMCPDialog bind:open={deleteOpen} mcpServer={deleting} onDelete={remove} />{/if}

@@ -7,7 +7,7 @@
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
   import type { SkillFormValue } from "$lib/features/skills/skillBindings";
   import { m } from "$lib/paraglide/messages";
-  import { ArrowRight, CheckCircle2, Info } from "lucide-svelte";
+  import { ArrowRight, CircleCheck, Info } from "@lucide/svelte";
 
   let { data } = $props();
 
@@ -62,7 +62,7 @@
         </p>
         {#if createdSkillHref}
           <Alert.Root>
-            <CheckCircle2 aria-hidden="true" />
+            <CircleCheck aria-hidden="true" />
             <Alert.Title>{m.organization_skills_created_title()}</Alert.Title>
             <Alert.Description>
               {m.organization_skills_created_navigation_failed_description()}

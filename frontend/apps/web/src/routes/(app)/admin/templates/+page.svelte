@@ -5,14 +5,14 @@
 -->
 
 <script lang="ts">
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { Page } from "$lib/components/layout/index.js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import AssistantTemplatesTable from "./AssistantTemplatesTable.svelte";
   import AppTemplatesTable from "./AppTemplatesTable.svelte";
   import DeletedTemplatesTable from "./DeletedTemplatesTable.svelte";
-  import { LayoutTemplate } from "lucide-svelte";
+  import { LayoutTemplate } from "@lucide/svelte";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
@@ -44,7 +44,7 @@
   <Page.Header>
     <Page.Title title={m.assistant_and_app_templates()}></Page.Title>
 
-    <Button variant="primary" padding="icon-leading" onclick={handleCreateTemplate}>
+    <Button onclick={handleCreateTemplate}>
       <LayoutTemplate size={16} />
       {m.create_template()}
     </Button>
@@ -78,16 +78,12 @@
             <h3 class="text-default text-lg font-semibold">
               {m.no_templates_yet()}
             </h3>
-            <p class="text-dimmer max-w-md text-sm">
+            <p class="text-muted max-w-md text-sm">
               {m.templates_empty_state_description()}
             </p>
           </div>
 
-          <Button
-            variant="primary"
-            padding="icon-leading"
-            href={localizeHref("/admin/templates/new/assistant")}
-          >
+          <Button href={localizeHref("/admin/templates/new/assistant")}>
             <LayoutTemplate size={16} />
             {m.create_first_template()}
           </Button>
@@ -107,16 +103,12 @@
             <h3 class="text-default text-lg font-semibold">
               {m.no_templates_yet()}
             </h3>
-            <p class="text-dimmer max-w-md text-sm">
+            <p class="text-muted max-w-md text-sm">
               {m.templates_empty_state_description()}
             </p>
           </div>
 
-          <Button
-            variant="primary"
-            padding="icon-leading"
-            href={localizeHref("/admin/templates/new/app")}
-          >
+          <Button href={localizeHref("/admin/templates/new/app")}>
             <LayoutTemplate size={16} />
             {m.create_first_template()}
           </Button>
@@ -136,7 +128,7 @@
             <h3 class="text-default text-lg font-semibold">
               {m.no_deleted_templates()}
             </h3>
-            <p class="text-dimmer max-w-md text-sm">
+            <p class="text-muted max-w-md text-sm">
               {m.deleted_templates_empty_state_description()}
             </p>
           </div>

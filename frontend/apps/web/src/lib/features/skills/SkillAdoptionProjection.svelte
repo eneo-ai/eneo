@@ -53,7 +53,7 @@
 
 <script lang="ts">
   import type { SkillAdoptionProjectionPagePublic, SkillDetachmentTotals } from "@eneo/eneo-js";
-  import { AlertCircle, LoaderCircle, RefreshCw, Search, Unlink } from "lucide-svelte";
+  import { CircleAlert, LoaderCircle, RefreshCw, Search, Unlink } from "@lucide/svelte";
   import { resolve } from "$app/paths";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
@@ -853,7 +853,7 @@
     </div>
   {:else if initialLoadError || page === null}
     <Alert.Root>
-      <AlertCircle aria-hidden="true" />
+      <CircleAlert aria-hidden="true" />
       <Alert.Title>{m.organization_skills_adoption_error_title()}</Alert.Title>
       <Alert.Description>{m.organization_skills_adoption_error()}</Alert.Description>
       <Alert.Action>
@@ -1148,7 +1148,7 @@
           </div>
         {:else if reloadError}
           <Alert.Root class="mt-4">
-            <AlertCircle aria-hidden="true" />
+            <CircleAlert aria-hidden="true" />
             <Alert.Title>{m.organization_skills_adoption_error_title()}</Alert.Title>
             <Alert.Description>{reloadError}</Alert.Description>
             <Alert.Action>

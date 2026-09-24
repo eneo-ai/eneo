@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import { X } from "lucide-svelte";
+  import { X } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { createEmbedBridge } from "../embedBridge";
 

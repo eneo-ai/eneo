@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import type { ComponentType } from "svelte";
+  import type { Component } from "svelte";
   import {
     BookOpenCheck,
     BookText,
@@ -13,7 +13,7 @@
     ChartPie,
     Cloud,
     Cpu,
-    Fingerprint,
+    FingerprintPattern,
     HardDrive,
     History,
     KeyRound,
@@ -27,7 +27,7 @@
     UserRound,
     UsersRound,
     MessageSquareCode
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { page } from "$app/stores";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -45,10 +45,15 @@
     return normalizedRoute === normalizedUrl || normalizedRoute.startsWith(`${normalizedUrl}/`);
   }
 
-  type NavItem = { route: string; href: string; icon: ComponentType; label: string };
+  type NavItem = {
+    route: string;
+    href: string;
+    icon: Component<{ class?: string }>;
+    label: string;
+  };
   type NavGroup = { label: string; items: NavItem[] };
 
-  function navItem(route: string, icon: ComponentType, label: string): NavItem {
+  function navItem(route: string, icon: Component<{ class?: string }>, label: string): NavItem {
     return { route, href: localizeHref(route), icon, label };
   }
 
@@ -96,7 +101,7 @@
       items: [
         navItem("/admin/users", UserRound, m.users()),
         navItem("/admin/legacy/user-groups", UsersRound, m.user_groups()),
-        navItem("/admin/roles", Fingerprint, m.roles()),
+        navItem("/admin/roles", FingerprintPattern, m.roles()),
         navItem("/admin/api-keys", KeyRound, m.api_keys())
       ]
     }

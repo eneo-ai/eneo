@@ -1,7 +1,12 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
   import { EneoError, type CompletionModel, type ModelKwargs, type Service } from "@eneo/eneo-js";
-  import { Button, Input, Select } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { makeEditable } from "$lib/core/editable";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -28,6 +33,24 @@
     : "";
   let completionModel = service.completion_model as CompletionModel | null;
   let completionModelKwargs: ModelKwargs = service.completion_model_kwargs ?? {};
+
+  const nameId = useId();
+  const promptId = useId();
+  const jsonSchemaId = useId();
+  const outputFormatId = useId();
+
+  const outputFormatOptions: { value: Service["output_format"]; label: string }[] = [
+    { value: "json", label: "JSON" },
+    { value: "list", label: m.list() },
+    { value: "boolean", label: m.boolean() },
+    { value: null, label: m.none() }
+  ];
+  const outputFormatKey = (value: Service["output_format"]) => value ?? "none";
+
+  function setOutputFormat(key: string) {
+    const option = outputFormatOptions.find((option) => outputFormatKey(option.value) === key);
+    if (option) editableService.output_format = option.value;
+  }
 
   let updatingService = false;
   async function updateService() {
@@ -72,20 +95,27 @@
 </script>
 
 <div class="flex min-h-full flex-grow flex-col justify-start">
-  <Input.Text
-    bind:value={editableService.name}
-    label={m.name()}
-    required
-    class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4"
-  ></Input.Text>
+  <Field.Field class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4">
+    <Field.Label for={nameId}>
+      {m.name()}
+      <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+    </Field.Label>
+    <Input id={nameId} bind:value={editableService.name} required />
+  </Field.Field>
 
-  <Input.TextArea
-    bind:value={editableService.prompt}
-    label={m.prompt()}
-    required
-    rows={6}
-    class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4"
-  ></Input.TextArea>
+  <Field.Field class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4">
+    <Field.Label for={promptId}>
+      {m.prompt()}
+      <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+    </Field.Label>
+    <Textarea
+      id={promptId}
+      bind:value={editableService.prompt}
+      required
+      rows={6}
+      class="min-h-36"
+    />
+  </Field.Field>
 
   <div class="flex">
     <SelectAIModelV2
@@ -107,33 +137,47 @@
     />
   {/if}
 
-  <Select.Simple
-    class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4"
-    options={[
-      { value: "json", label: "JSON" },
-      { value: "list", label: m.list() },
-      { value: "boolean", label: m.boolean() },
-      { value: null, label: m.none() }
-    ]}
-    bind:value={editableService.output_format}>{m.output_format()}</Select.Simple
-  >
+  <Field.Field class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4">
+    <Field.Label for={outputFormatId}>{m.output_format()}</Field.Label>
+    <Select.Root
+      type="single"
+      value={outputFormatKey(editableService.output_format)}
+      onValueChange={setOutputFormat}
+    >
+      <Select.Trigger id={outputFormatId} class="w-full">
+        {outputFormatOptions.find(
+          (option) =>
+            outputFormatKey(option.value) === outputFormatKey(editableService.output_format)
+        )?.label ?? m.ui_select_placeholder()}
+      </Select.Trigger>
+      <Select.Content>
+        {#each outputFormatOptions as option (outputFormatKey(option.value))}
+          <Select.Item value={outputFormatKey(option.value)} label={option.label}
+            >{option.label}</Select.Item
+          >
+        {/each}
+      </Select.Content>
+    </Select.Root>
+  </Field.Field>
 
   {#if editableService.output_format === "json"}
-    <Input.TextArea
-      bind:value={stringJsonSchema}
-      class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4"
-      rows={15}
-      required
-    >
-      {m.json_schema()}</Input.TextArea
-    >
+    <Field.Field class="border-dimmer hover:bg-hover-dimmer border-b px-4 py-4">
+      <Field.Label for={jsonSchemaId}>{m.json_schema()}</Field.Label>
+      <Textarea
+        id={jsonSchemaId}
+        bind:value={stringJsonSchema}
+        rows={15}
+        required
+        class="min-h-80"
+      />
+    </Field.Field>
   {/if}
 
   <div class="flex-grow"></div>
   <div
     class="sticky bottom-0 flex justify-end bg-gradient-to-t from-[var(--background-primary)] to-transparent p-4"
   >
-    <Button variant="primary" on:click={updateService} class="w-[140px]">
+    <Button onclick={updateService} class="w-[140px]">
       {#if updatingService}
         {m.saving()}
       {:else}

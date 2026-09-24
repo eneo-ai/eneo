@@ -1,12 +1,14 @@
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Input } from "@eneo/ui";
-  import { LockKeyhole } from "lucide-svelte";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
+  import { LockKeyhole } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import type { CapabilityDescriptor } from "$lib/features/mcp/capabilities";
   import { readinessMessage } from "$lib/features/mcp/readiness";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   let { capability }: { capability: CapabilityDescriptor } = $props();
+  const uid = $props.id();
   const {
     state: { currentSpace },
     updateSpace
@@ -44,14 +46,9 @@
 >
   <div class="flex items-center gap-3">
     <capability.icon class="text-muted h-4 w-4 shrink-0" aria-hidden="true" />
-    <Input.Switch
-      class="min-w-0 flex-1 [&_button:disabled]:opacity-50"
-      bind:value={switchValue}
-      disabled={saving || (!on && !availability?.available)}
-      sideEffect={toggle}
-    >
-      <div class="flex flex-col gap-1">
-        <span class="flex flex-wrap items-center gap-2">
+    <Field.Field orientation="horizontal" class="min-w-0 flex-1">
+      <Field.Content>
+        <Field.Label for={`${uid}-switch`} class="flex-wrap">
           <span class="font-medium {availability?.available ? 'text-default' : 'text-secondary'}"
             >{capability.label()}</span
           >
@@ -62,14 +59,21 @@
               <LockKeyhole class="h-3 w-3" aria-hidden="true" />{m.not_available()}
             </span>
           {/if}
-        </span>
-        <span class="text-muted text-xs"
+        </Field.Label>
+        <Field.Description id={`${uid}-hint`} class="text-muted text-xs"
           >{availability?.available
             ? capability.spaceHint()
-            : readinessMessage(availability?.reason ?? "no_active_provider")}</span
+            : readinessMessage(availability?.reason ?? "no_active_provider")}</Field.Description
         >
-      </div>
-    </Input.Switch>
+      </Field.Content>
+      <Switch
+        id={`${uid}-switch`}
+        bind:checked={switchValue}
+        disabled={saving || (!on && !availability?.available)}
+        onCheckedChange={toggle}
+        aria-describedby={`${uid}-hint`}
+      />
+    </Field.Field>
   </div>
   {#if error}<p class="text-negative-default mt-2 ml-7 text-sm" role="alert">{error}</p>{/if}
 </div>

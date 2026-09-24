@@ -86,6 +86,15 @@
 
 /** Reset tw 3 behaviour */
 @layer base {
+  /* Tailwind 4 draws a border without a colour class in `currentColor`. */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--border-default, currentColor);
+  }
+
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;

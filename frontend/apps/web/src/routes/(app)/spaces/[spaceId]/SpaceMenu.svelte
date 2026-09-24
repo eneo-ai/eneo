@@ -38,7 +38,7 @@
   import { Navigation } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import { BookOpenCheck } from "lucide-svelte";
+  import { BookOpenCheck } from "@lucide/svelte";
 
   export let space: SpaceMenuContext;
 

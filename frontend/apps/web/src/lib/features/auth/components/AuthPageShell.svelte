@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { CircleAlert, CircleCheck, Clock } from "lucide-svelte";
+  import { CircleAlert, CircleCheck, Clock } from "@lucide/svelte";
   import * as Card from "$lib/components/ui/card";
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import { cn } from "$lib/utils";

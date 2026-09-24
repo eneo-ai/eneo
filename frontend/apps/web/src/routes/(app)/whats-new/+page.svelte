@@ -22,7 +22,7 @@
   } from "$lib/features/whats-new/filters";
   import { releases } from "@eneo/whats-new";
   import type { EntryArea, Localized, Release, ReleaseEntry } from "@eneo/whats-new";
-  import { Sparkles } from "lucide-svelte";
+  import { Sparkles } from "@lucide/svelte";
   import { get } from "svelte/store";
 
   const { user, settings } = getAppContext();

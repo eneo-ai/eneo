@@ -7,7 +7,8 @@
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getEneo } from "$lib/core/Eneo";
-  import { Button, Tooltip } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { resolve } from "$app/paths";
   import { IconInfo } from "@eneo/icons/info";
   import { IconLinkExternal } from "@eneo/icons/link-external";
@@ -126,18 +127,21 @@
        consistent whether or not the user can create. A real <button> trigger
        keeps it keyboard-focusable (tabbable), and aria-label exposes the reason
        to screen readers rather than relying on hover alone. -->
-  <Tooltip text={message} placement="bottom" asFragment let:trigger>
-    {@const tip = trigger[0]}
-    <button
-      {...tip}
-      use:tip.action
-      type="button"
-      aria-label={message}
-      class="text-secondary hover:text-primary hover:bg-hover-default focus-visible:ring-accent-default flex cursor-help items-center rounded-md p-1.5 focus:outline-none focus-visible:ring-2"
-    >
-      <IconInfo />
-    </button>
-  </Tooltip>
+  <Tooltip.Root>
+    <Tooltip.Trigger>
+      {#snippet child({ props })}
+        <button
+          {...props}
+          type="button"
+          aria-label={message}
+          class="text-secondary hover:text-primary hover:bg-hover-default focus-visible:ring-accent-default flex cursor-help items-center rounded-md p-1.5 focus:outline-none focus-visible:ring-2"
+        >
+          <IconInfo />
+        </button>
+      {/snippet}
+    </Tooltip.Trigger>
+    <Tooltip.Content side="bottom">{message}</Tooltip.Content>
+  </Tooltip.Root>
 {/snippet}
 
 <Page.Root tabController={selectedTab}>
@@ -162,7 +166,7 @@
         {@render noCreatePermission(m.collections().toLowerCase())}
       {:else if $selectedTab === "websites" && $currentSpace.hasPermission("create", "website")}
         {#if $selectedWebsiteIds.size > 0}
-          <Button variant="primary" on:click={bulkRecrawl} disabled={isBulkRecrawling}>
+          <Button onclick={bulkRecrawl} disabled={isBulkRecrawling}>
             <IconRefresh size="sm" />
             {isBulkRecrawling ? m.syncing() : m.sync_selected({ count: $selectedWebsiteIds.size })}
           </Button>
@@ -180,14 +184,12 @@
           <ImportKnowledgeDialog></ImportKnowledgeDialog>
         {:else if isPersonalSpace}
           <Button
-            variant="primary"
             onclick={() => (window.location.href = resolve("/account/integrations?tab=providers"))}
           >
             {m.configure_integrations()}
           </Button>
         {:else if isAdmin}
           <Button
-            variant="primary"
             onclick={() => (window.location.href = resolve("/admin/integrations?tab=providers"))}
           >
             {m.configure_integrations()}
@@ -241,9 +243,9 @@
               </p>
               <div class="flex-grow"></div>
               <Button
-                variant="outlined"
+                variant="outline"
                 class="min-w-24"
-                on:click={() => {
+                onclick={() => {
                   showIntegrationsNotice = false;
                 }}>{m.dismiss()}</Button
               >

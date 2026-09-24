@@ -1,3 +1,4 @@
+import { intlLocale } from "$lib/core/formatting/dateTime";
 import type { ApiKeyState, ApiKeyV2 } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
@@ -10,7 +11,7 @@ import {
   Globe,
   Lock,
   ShieldCheck
-} from "lucide-svelte";
+} from "@lucide/svelte";
 
 type LucideIcon = typeof Building2;
 
@@ -203,16 +204,12 @@ export function getKeyTypeConfig(keyType: string): {
 // Locale-aware formatters
 // ---------------------------------------------------------------------------
 
-function resolveLocale(): string {
-  return getLocale() === "sv" ? "sv-SE" : "en-US";
-}
-
 function resolveShortLocale(): string {
   return getLocale() === "sv" ? "sv" : "en";
 }
 
 export function createDateFormatter(): Intl.DateTimeFormat {
-  return new Intl.DateTimeFormat(resolveLocale(), {
+  return new Intl.DateTimeFormat(intlLocale(), {
     dateStyle: "medium",
     timeStyle: "short"
   });
@@ -223,11 +220,11 @@ export function createRelativeFormatter(): Intl.RelativeTimeFormat {
 }
 
 export function createFullNumberFormatter(): Intl.NumberFormat {
-  return new Intl.NumberFormat(resolveLocale());
+  return new Intl.NumberFormat(intlLocale());
 }
 
 export function createCompactNumberFormatter(): Intl.NumberFormat {
-  return new Intl.NumberFormat(resolveLocale(), {
+  return new Intl.NumberFormat(intlLocale(), {
     notation: "compact",
     compactDisplay: "short",
     maximumFractionDigits: 1

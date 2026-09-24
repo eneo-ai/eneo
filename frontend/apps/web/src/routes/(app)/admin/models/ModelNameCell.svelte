@@ -13,14 +13,12 @@
   import ModelNameAndVendor from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import ModelDetailDialog from "./ModelDetailDialog.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { TriangleAlert, Clock } from "lucide-svelte";
+  import { TriangleAlert, Clock } from "@lucide/svelte";
   import { getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
 
   type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
   type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
 
-  // Rendered via svelte-headless-table's `createRender`, which requires the
-  // legacy `export let` API. Keep this file on Svelte 4 component syntax.
   export let model: AnyModel;
   export let type: ModelTypeKey;
   export let completionModels: CompletionModel[] = [];
@@ -52,37 +50,35 @@
 </script>
 
 <div class="flex items-center gap-3">
-  <Tooltip.Provider delayDuration={150}>
-    <Tooltip.Root>
-      <Tooltip.Trigger>
-        {#snippet child({ props })}
-          <span {...props} class="flex-shrink-0">
-            {#if isDeprecated}
-              <span class="text-negative-default block" data-status="deprecated">
-                <TriangleAlert size={14} aria-hidden="true" />
-                <span class="sr-only">{statusLabel}</span>
-              </span>
-            {:else if isRetiring}
-              <span class="text-warning-default block" data-status="retiring">
-                <Clock size={14} aria-hidden="true" />
-                <span class="sr-only">{statusLabel}</span>
-              </span>
-            {:else}
-              <span
-                class="block h-2 w-2 rounded-full {!model.is_org_enabled
-                  ? 'bg-negative-default'
-                  : 'bg-positive-default'}"
-                data-status={statusKey}
-                aria-hidden="true"
-              ></span>
+  <Tooltip.Root delayDuration={150}>
+    <Tooltip.Trigger>
+      {#snippet child({ props })}
+        <span {...props} class="flex-shrink-0">
+          {#if isDeprecated}
+            <span class="text-negative-default block" data-status="deprecated">
+              <TriangleAlert size={14} aria-hidden="true" />
               <span class="sr-only">{statusLabel}</span>
-            {/if}
-          </span>
-        {/snippet}
-      </Tooltip.Trigger>
-      <Tooltip.Content>{statusLabel}</Tooltip.Content>
-    </Tooltip.Root>
-  </Tooltip.Provider>
+            </span>
+          {:else if isRetiring}
+            <span class="text-warning-default block" data-status="retiring">
+              <Clock size={14} aria-hidden="true" />
+              <span class="sr-only">{statusLabel}</span>
+            </span>
+          {:else}
+            <span
+              class="block h-2 w-2 rounded-full {!model.is_org_enabled
+                ? 'bg-negative-default'
+                : 'bg-positive-default'}"
+              data-status={statusKey}
+              aria-hidden="true"
+            ></span>
+            <span class="sr-only">{statusLabel}</span>
+          {/if}
+        </span>
+      {/snippet}
+    </Tooltip.Trigger>
+    <Tooltip.Content>{statusLabel}</Tooltip.Content>
+  </Tooltip.Root>
 
   {#if isTenantModel}
     <Button variant="ghost" size="sm" onclick={() => showDetailDialog.set(true)}>
@@ -95,46 +91,42 @@
   {/if}
 
   {#if "is_org_default" in model && model.is_org_default}
-    <Tooltip.Provider delayDuration={150}>
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <div
-              {...props}
-              class="
+    <Tooltip.Root delayDuration={150}>
+      <Tooltip.Trigger>
+        {#snippet child({ props })}
+          <div
+            {...props}
+            class="
                 inline-flex cursor-default items-center rounded-full
                 border border-[oklch(75%_0.06_78)] bg-transparent px-2 py-[2px]
                 text-[11px]
                 font-medium tracking-wide
                 text-[oklch(50%_0.08_78)] dark:border-[oklch(40%_0.06_78)] dark:text-[oklch(70%_0.08_78)]
               "
-            >
-              {m.default_model()}
-            </div>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content>{m.default_model_tooltip()}</Tooltip.Content>
-      </Tooltip.Root>
-    </Tooltip.Provider>
+          >
+            {m.default_model()}
+          </div>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content>{m.default_model_tooltip()}</Tooltip.Content>
+    </Tooltip.Root>
   {/if}
 
   {#if usedBy.length > 0}
-    <Tooltip.Provider delayDuration={150}>
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <div
-              {...props}
-              class="bg-warning-dimmer text-warning-stronger inline-flex cursor-default items-center rounded-full px-2 py-[2px] text-[11px] font-medium tracking-wide"
-              data-status="in-use"
-            >
-              {m.model_used_by_image_generation()}
-            </div>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content>{usedByNames}</Tooltip.Content>
-      </Tooltip.Root>
-    </Tooltip.Provider>
+    <Tooltip.Root delayDuration={150}>
+      <Tooltip.Trigger>
+        {#snippet child({ props })}
+          <div
+            {...props}
+            class="bg-warning-dimmer text-warning-stronger inline-flex cursor-default items-center rounded-full px-2 py-[2px] text-[11px] font-medium tracking-wide"
+            data-status="in-use"
+          >
+            {m.model_used_by_image_generation()}
+          </div>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content>{usedByNames}</Tooltip.Content>
+    </Tooltip.Root>
   {/if}
 </div>
 

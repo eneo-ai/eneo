@@ -7,7 +7,7 @@
  * Adding a capability means adding one entry here (plus its messages); every
  * admin, space, assistant and chat surface renders from this list.
  */
-import { Globe, Image } from "lucide-svelte";
+import { Globe, Image } from "@lucide/svelte";
 import { m } from "$lib/paraglide/messages";
 
 export const GENERAL_PURPOSE = "general";

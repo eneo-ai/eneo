@@ -4,7 +4,7 @@ Multirepo containing:
 
 - The Eneo Web GUI, a SvelteKit app in `/apps/web`
 - The Eneo.js API client, a plain JS client wrapping all Eneo endpoints used in the Web GUI in `packages/eneo.js`
-- The Eneo UI Library, offering reusable Svelte components for our frontend applications in `packages/ui`
+- The Eneo design tokens, themes and icons shared by the frontend apps in `packages/ui` (UI components live in `apps/web` on shadcn-svelte)
 
 ## Setup
 

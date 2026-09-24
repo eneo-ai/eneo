@@ -6,7 +6,9 @@
 
 <script lang="ts">
   import { page } from "$app/stores";
-  import { Table, Input, Button } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
+  import DateRangePicker from "$lib/components/DateRangePicker.svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { Page } from "$lib/components/layout";
   import SimpleTextCell from "$lib/components/layout/SimpleTextCell.svelte";
   import { Settings } from "$lib/components/layout";
@@ -15,7 +17,6 @@
   import { dynamicColour } from "$lib/core/colours";
   import { getChartColour } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { getEneo } from "$lib/core/Eneo";
-  import { createRender } from "svelte-headless-table";
   import { CalendarDate } from "@internationalized/date";
   import { m } from "$lib/paraglide/messages";
   import {
@@ -155,7 +156,7 @@
       accessor: (model) => model,
       id: "model_name",
       cell: (item) => {
-        return createRender(SimpleTextCell, {
+        return Table.renderComponent(SimpleTextCell, {
           primary: item.value.model_nickname || item.value.model_name,
           secondary: item.value.model_org || "Unknown"
         });
@@ -205,7 +206,7 @@
               rates
             )
           : null;
-        return createRender(EstimatedCostCell, { label: formatCostUSD(cost) });
+        return Table.renderComponent(EstimatedCostCell, { label: formatCostUSD(cost) });
       }
     })
   ]);
@@ -242,10 +243,10 @@
 
   function getUsageIntensity(tokens: number) {
     if (tokens > thresholds.high)
-      return { label: m.usage_level_high(), class: "bg-secondary text-error" };
+      return { label: m.usage_level_high(), class: "bg-secondary text-negative-stronger" };
     if (tokens > thresholds.medium)
-      return { label: m.usage_level_medium(), class: "bg-secondary text-warning" };
-    return { label: m.usage_level_low(), class: "bg-secondary text-success" };
+      return { label: m.usage_level_medium(), class: "bg-secondary text-warning-stronger" };
+    return { label: m.usage_level_low(), class: "bg-secondary text-positive-stronger" };
   }
 
   // Get top 5 models by token usage
@@ -266,7 +267,7 @@
     <Page.Title>
       <div class="flex items-center gap-2">
         <Button
-          variant="simple"
+          variant="ghost"
           onclick={() => history.back()}
           class="text-muted hover:text-primary"
         >
@@ -280,7 +281,7 @@
     </Page.Title>
 
     <Page.Flex>
-      <Input.DateRange bind:value={dateRange} />
+      <DateRangePicker bind:value={dateRange} />
     </Page.Flex>
   </Page.Header>
 
@@ -333,7 +334,7 @@
                 <div class="text-muted text-sm">{m.usage_total_tokens()}</div>
               </div>
               <div class="text-center">
-                <div class="text-success text-2xl font-bold">
+                <div class="text-positive-stronger text-2xl font-bold">
                   {formatNumber(user.total_input_tokens, "compact", 1)}
                 </div>
                 <div class="text-muted text-sm">{m.usage_input_tokens()}</div>
@@ -343,7 +344,7 @@
                 </div>
               </div>
               <div class="text-center">
-                <div class="text-warning text-2xl font-bold">
+                <div class="text-warning-stronger text-2xl font-bold">
                   {formatNumber(user.total_output_tokens, "compact", 1)}
                 </div>
                 <div class="text-muted text-sm">{m.usage_output_tokens()}</div>
@@ -353,7 +354,7 @@
                 </div>
               </div>
               <div class="text-center">
-                <div class="text-info text-2xl font-bold">
+                <div class="text-accent-stronger text-2xl font-bold">
                   {formatNumber(user.total_requests)}
                 </div>
                 <div class="text-muted text-sm">{m.usage_total_requests()}</div>

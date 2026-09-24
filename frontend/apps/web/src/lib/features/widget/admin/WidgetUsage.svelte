@@ -4,7 +4,7 @@
   import { untrack } from "svelte";
   import * as Table from "$lib/components/ui/table/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
+  import { intlLocale } from "$lib/core/formatting/dateTime";
 
   type Props = {
     widget: Widget;
@@ -18,7 +18,7 @@
   let usage = $state<WidgetUsage | null>(null);
   let failed = $state(false);
 
-  const locale = getLocale();
+  const locale = intlLocale();
   const number = new Intl.NumberFormat(locale);
   const day = new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short" });
 

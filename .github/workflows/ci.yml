@@ -351,12 +351,14 @@ jobs:
         uses: actions/checkout@v4
 
       # Enforced in pre-commit too, but pre-commit can be bypassed; CI is the
-      # backstop that keeps the i18n catalogs duplicate-free and in key parity.
+      # backstop that keeps the i18n catalogs duplicate-free, in key parity and free of
+      # keys the app no longer uses.
       - name: Check i18n message catalogs
         if: matrix.task == 'checks'
         run: |
           python3 apps/web/scripts/check-i18n-duplicates.py
           python3 apps/web/scripts/check-i18n-parity.py
+          python3 apps/web/scripts/check-i18n-unused.py
 
       # User-facing release notes: schema, sv+en parity, newest-first order and
       # that every "Show me" anchor still exists in the web app.

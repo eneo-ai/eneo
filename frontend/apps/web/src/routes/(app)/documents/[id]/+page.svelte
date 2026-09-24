@@ -1,11 +1,12 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { Markdown } from "@eneo/ui";
-  import { Check, Copy, Download, ExternalLink, FileText } from "lucide-svelte";
+  import { Check, Copy, Download, ExternalLink, FileText } from "@lucide/svelte";
   import { Page } from "$lib/components/layout";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card/index.js";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import { toast } from "$lib/components/toast";
+  import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { assignLocation } from "$lib/core/navigation";
   import { linkHost } from "$lib/features/widget/urls";
@@ -20,18 +21,8 @@
   // link is a full page load, so this renders on the server first.
   const reference = $derived(sourceReferenceText({ id: data.id, title }, page.url.origin));
 
-  let copied = $state(false);
+  const clipboard = createCopyState();
   let downloading = $state(false);
-
-  async function copyReference() {
-    try {
-      await navigator.clipboard.writeText(reference);
-      copied = true;
-      setTimeout(() => (copied = false), 2000);
-    } catch {
-      toast.error(m.widget_document_reference_copy_failed());
-    }
-  }
 
   async function downloadOriginal() {
     if (downloading) return;
@@ -66,8 +57,8 @@
 {/snippet}
 
 {#snippet copyButton()}
-  <Button variant="outline" onclick={copyReference}>
-    {#if copied}
+  <Button variant="outline" onclick={() => clipboard.copy(reference)}>
+    {#if clipboard.copied}
       <Check aria-hidden="true" />
       {m.copied_to_clipboard()}
     {:else}

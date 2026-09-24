@@ -10,7 +10,7 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import { IconCPU } from "@eneo/icons/CPU";
-  import { AlertCircle } from "lucide-svelte";
+  import { CircleAlert } from "@lucide/svelte";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
 
   type ModelSelection = { selected: boolean; isDefault: boolean };
@@ -186,12 +186,12 @@
     </RadioGroup.Root>
     {#if effectiveModelIds.size === 0}
       <p class="text-destructive flex items-center gap-2 text-sm" role="alert">
-        <AlertCircle class="h-4 w-4 shrink-0" aria-hidden="true" />
+        <CircleAlert class="h-4 w-4 shrink-0" aria-hidden="true" />
         {m.governance_models_error_none()}
       </p>
     {:else if !defaultValid}
       <p class="text-destructive flex items-center gap-2 text-sm" role="alert">
-        <AlertCircle class="h-4 w-4 shrink-0" aria-hidden="true" />
+        <CircleAlert class="h-4 w-4 shrink-0" aria-hidden="true" />
         {m.governance_models_error_default_invalid()}
       </p>
     {/if}

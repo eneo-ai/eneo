@@ -5,14 +5,14 @@
 -->
 
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { untrack } from "svelte";
   import type { components } from "@eneo/eneo-js";
-  import { Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
   import { m } from "$lib/paraglide/messages";
   import TemplateActions from "./TemplateActions.svelte";
   import TemplateNameCell from "./TemplateNameCell.svelte";
   import TemplateCategoryBadge from "./TemplateCategoryBadge.svelte";
-  import dayjs from "dayjs";
 
   type AssistantTemplate = components["schemas"]["AssistantTemplateAdminPublic"];
 
@@ -25,7 +25,7 @@
       accessor: "name",
       header: m.template_name(),
       cell: (item) => {
-        const row = item.row as import("svelte-headless-table").DataBodyRow<AssistantTemplate>;
+        const row = item.row;
         return Table.renderComponent(TemplateNameCell, {
           name: item.value,
           description: row.original.description,
@@ -89,7 +89,7 @@
       accessor: "created_at",
       header: m.created_date(),
       cell: (item) => {
-        return dayjs(item.value).format("YYYY-MM-DD HH:mm");
+        return formatDateTime(item.value);
       },
       plugins: {
         sort: {

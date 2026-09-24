@@ -1,11 +1,11 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
@@ -40,13 +40,13 @@
   );
 
   const timeFormatter = $derived(
-    new Intl.DateTimeFormat(getLocale() === "sv" ? "sv-SE" : "en-US", {
+    new Intl.DateTimeFormat(intlLocale(), {
       hour: "2-digit",
       minute: "2-digit"
     })
   );
   const dateTimeFormatter = $derived(
-    new Intl.DateTimeFormat(getLocale() === "sv" ? "sv-SE" : "en-US", {
+    new Intl.DateTimeFormat(intlLocale(), {
       day: "numeric",
       month: "short",
       hour: "2-digit",

@@ -1,11 +1,12 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import type {
     SkillRevisionPublic,
     SkillRevisionRestorePublic,
     SkillRevisionSummaryPage,
     SkillRevisionSummaryPublic
   } from "@eneo/eneo-js";
-  import { Eye, LoaderCircle, RotateCcw } from "lucide-svelte";
+  import { Eye, LoaderCircle, RotateCcw } from "@lucide/svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -14,7 +15,6 @@
   import * as Table from "$lib/components/ui/table/index.js";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import { tick, untrack } from "svelte";
 
   type Props = {
@@ -75,7 +75,7 @@
   }
 
   function formatCreatedAt(value: string): string {
-    return new Date(value).toLocaleString(getLocale() === "sv" ? "sv-SE" : "en-US", {
+    return new Date(value).toLocaleString(intlLocale(), {
       dateStyle: "short",
       timeStyle: "short"
     });

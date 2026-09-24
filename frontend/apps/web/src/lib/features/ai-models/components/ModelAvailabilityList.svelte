@@ -8,11 +8,14 @@
 
 <script lang="ts" generics="T extends CompletionModel | EmbeddingModel | TranscriptionModel">
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
-  import { Input, Tooltip } from "@eneo/ui";
-  import { ChevronRight, Loader2, ShieldAlert } from "lucide-svelte";
+
+  import { ChevronRight, LoaderCircle, ShieldAlert } from "@lucide/svelte";
   import { SvelteSet } from "svelte/reactivity";
 
   import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
 
   import { groupModelsByVendor, prettifyProviderType } from "../groupModels";
@@ -42,6 +45,7 @@
   };
 
   let { models, selectedIds, loadingIds, onToggle }: Props<T> = $props();
+  const uid = $props.id();
 
   const sortedModels = $derived(sortModels([...models]));
   const modelGroups = $derived(groupModelsByVendor(sortedModels, m.model_group_other()));
@@ -127,7 +131,7 @@
       {@const isCollapsed = collapsedGroups.has(group.label)}
       <section class="border-default overflow-hidden rounded-xl border">
         <div
-          class="border-default bg-surface-dimmer flex items-center justify-between gap-3 border-b px-3 py-2"
+          class="border-default bg-secondary flex items-center justify-between gap-3 border-b px-3 py-2"
         >
           <button
             type="button"
@@ -159,76 +163,104 @@
             {@const isLoading = loadingIds?.has(model.id) ?? false}
             {@const isSelected = selectedIdSet.has(model.id)}
             {@const details = modelDetails(model, group.label)}
-            <Tooltip
-              text={meetsClassification
-                ? undefined
-                : m.model_does_not_meet_security_classification()}
-            >
-              <div
-                aria-disabled={!meetsClassification || isLoading}
-                class="border-default hover:bg-hover-dimmer border-b transition-colors last:border-b-0"
-                class:opacity-60={!meetsClassification}
-                class:opacity-80={isLoading}
-              >
-                <div class="py-3 pr-4 pl-3">
-                  <Input.Switch
-                    value={isSelected}
-                    sideEffect={() => {
-                      if (meetsClassification && !isLoading) {
-                        onToggle(model);
-                      }
-                    }}
+            {#snippet modelSwitch()}
+              <Field.Field orientation="horizontal" class="gap-4">
+                <div class="flex min-w-0 flex-1 items-start gap-3">
+                  <div
+                    class="border-dimmer bg-secondary mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border"
                   >
-                    <div class="flex min-w-0 items-start gap-3">
-                      <div
-                        class="border-dimmer bg-surface-dimmer mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border"
-                      >
-                        <ModelSelector.Logo provider={providerForLogo(model)} class="size-5" />
-                      </div>
+                    <ModelSelector.Logo provider={providerForLogo(model)} class="size-5" />
+                  </div>
 
-                      <div class="min-w-0 flex-1">
-                        <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                          <ModelNameAndVendor {model} descriptionMode="non-tabbable" />
-                          {#if hasStatusDetails(model)}
-                            <ModelStatusIcons {model} showCost={false} />
-                          {/if}
-                          {#if !meetsClassification}
-                            <ShieldAlert
-                              class="text-warning-stronger size-4 shrink-0"
-                              aria-hidden="true"
-                            />
-                          {/if}
-                          {#if isLoading}
-                            <Loader2
-                              class="text-muted size-4 shrink-0 animate-spin"
-                              aria-hidden="true"
-                            />
-                          {/if}
-                        </div>
-
-                        {#if details.length > 0}
-                          <dl class="mt-1.5 flex min-w-0 flex-wrap gap-1.5">
-                            {#each details as detail (`${detail.label}-${detail.value}`)}
-                              <div
-                                class="border-dimmer bg-surface-dimmer inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs"
-                              >
-                                <dt class="text-muted shrink-0">{detail.label}</dt>
-                                <dd
-                                  class="text-secondary min-w-0 truncate"
-                                  class:font-mono={detail.mono}
-                                >
-                                  {detail.value}
-                                </dd>
-                              </div>
-                            {/each}
-                          </dl>
-                        {/if}
-                      </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                      <ModelNameAndVendor {model} descriptionMode="non-tabbable" />
+                      {#if hasStatusDetails(model)}
+                        <ModelStatusIcons {model} showCost={false} />
+                      {/if}
+                      {#if !meetsClassification}
+                        <ShieldAlert
+                          class="text-warning-stronger size-4 shrink-0"
+                          aria-hidden="true"
+                        />
+                        <span id={`${uid}-${model.id}-classification`} class="sr-only"
+                          >{m.model_does_not_meet_security_classification()}</span
+                        >
+                      {/if}
+                      {#if isLoading}
+                        <LoaderCircle
+                          class="text-muted size-4 shrink-0 animate-spin"
+                          aria-hidden="true"
+                        />
+                      {/if}
                     </div>
-                  </Input.Switch>
+
+                    {#if details.length > 0}
+                      <dl
+                        id={`${uid}-${model.id}-details`}
+                        class="mt-1.5 flex min-w-0 flex-wrap gap-1.5"
+                      >
+                        {#each details as detail (`${detail.label}-${detail.value}`)}
+                          <div
+                            class="border-dimmer bg-secondary inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs"
+                          >
+                            <dt class="text-muted shrink-0">{detail.label}</dt>
+                            <dd
+                              class="text-secondary min-w-0 truncate"
+                              class:font-mono={detail.mono}
+                            >
+                              {detail.value}
+                            </dd>
+                          </div>
+                        {/each}
+                      </dl>
+                    {/if}
+                  </div>
                 </div>
-              </div>
-            </Tooltip>
+                <Switch
+                  checked={isSelected}
+                  onCheckedChange={() => {
+                    if (meetsClassification && !isLoading) {
+                      onToggle(model);
+                    }
+                  }}
+                  aria-label={displayName(model)}
+                  aria-describedby={[
+                    !meetsClassification && `${uid}-${model.id}-classification`,
+                    details.length > 0 && `${uid}-${model.id}-details`
+                  ]
+                    .filter(Boolean)
+                    .join(" ") || undefined}
+                />
+              </Field.Field>
+            {/snippet}
+            <div
+              aria-disabled={!meetsClassification || isLoading}
+              class="border-default hover:bg-hover-dimmer border-b transition-colors last:border-b-0"
+              class:opacity-60={!meetsClassification}
+              class:opacity-80={isLoading}
+            >
+              {#if meetsClassification}
+                <div class="py-3 pr-4 pl-3">
+                  {@render modelSwitch()}
+                </div>
+              {:else}
+                <Tooltip.Root>
+                  <Tooltip.Trigger>
+                    {#snippet child({ props })}
+                      <!-- Hover-only trigger: it wraps the switch, so it must not be a tab stop. -->
+                      {@const { tabindex: _tabindex, ...triggerProps } = props}
+                      <div {...triggerProps} class="py-3 pr-4 pl-3">
+                        {@render modelSwitch()}
+                      </div>
+                    {/snippet}
+                  </Tooltip.Trigger>
+                  <Tooltip.Content
+                    >{m.model_does_not_meet_security_classification()}</Tooltip.Content
+                  >
+                </Tooltip.Root>
+              {/if}
+            </div>
           {/each}
         </div>
       </section>

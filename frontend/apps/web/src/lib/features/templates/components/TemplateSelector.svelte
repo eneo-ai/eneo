@@ -3,7 +3,8 @@
   import { getTemplateController } from "../TemplateController";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import TemplateIcon from "./TemplateIcon.svelte";
-  import { Input } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { IconChevronUpDown } from "@eneo/icons/chevron-up-down";
   import { IconInfo } from "@eneo/icons/info";
   import { IconCopy } from "@eneo/icons/copy";
@@ -17,6 +18,7 @@
   } = getTemplateController();
 
   let { settings }: { settings: Settings } = $props();
+  const uid = $props.id();
 </script>
 
 <div class="outer relative flex flex-grow flex-col items-start justify-start text-left">
@@ -33,12 +35,12 @@
     </p>
     <!-- <div class="h-8"></div> -->
     <div class="border-dimmer mt-14 mb-2 border-t"></div>
-    <div class="flex flex-col gap-1 pt-6 pb-4">
-      <span class="px-4 pb-1 text-lg font-medium">{m.assistant_name()}</span>
-      <Input.Text bind:value={$name} hiddenLabel inputClass="!text-lg !py-6 !px-4" required
-        >{m.assistant_name()}</Input.Text
+    <Field.Field class="gap-1 pt-6 pb-4">
+      <Field.Label for={`${uid}-name`} class="px-4 pb-1 text-lg font-medium"
+        >{m.assistant_name()}</Field.Label
       >
-    </div>
+      <Input id={`${uid}-name`} bind:value={$name} required class="!px-4 !py-6 !text-lg" />
+    </Field.Field>
     {#if settings.using_templates}
       <div class="grid grid-cols-2 gap-4">
         <button
