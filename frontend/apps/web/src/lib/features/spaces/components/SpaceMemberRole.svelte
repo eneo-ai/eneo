@@ -4,112 +4,141 @@
     Licensed under the MIT License.
 -->
 
+<!--
+  A member's role in a space and the button that removes them. It only takes
+  props, so the space's own members page and admin oversight share it: the
+  caller decides which API to call and how to report a failure.
+-->
 <script lang="ts">
+  import type { SpaceRoleValue } from "@eneo/eneo-js";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import { IconTrash } from "@eneo/icons/trash";
-  import type { Space, SpaceRole } from "@eneo/eneo-js";
+  import { Trash2 } from "@lucide/svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
-  import { getEneo } from "$lib/core/Eneo";
-  import { toastError } from "$lib/core/errors";
-  import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
+  import { cn } from "$lib/utils.js";
+  import { sortRolesAscending, spaceRoleLabel } from "../roles";
 
-  type Props =
-    | { kind: "user"; member: Space["members"]["items"][number] }
-    | { kind: "group"; member: Space["group_members"]["items"][number] };
+  type Props = {
+    /** The person's or group's name, which makes each control's name unique. */
+    name: string;
+    role: SpaceRoleValue;
+    /** The roles the member may be given. */
+    roles: readonly SpaceRoleValue[];
+    /**
+     * Refuses changing the role and removing, e.g. for the space's only
+     * administrator. Both controls stay focusable and read out the reason.
+     */
+    disabled?: boolean;
+    /** The id of the visible text that says why the controls are disabled. */
+    disabledReasonId?: string;
+    /** Saves the role. A rejection puts the previous role back, so report the error first. */
+    onChangeRole: (role: SpaceRoleValue) => Promise<unknown>;
+    /** Removes the member; the confirmation stays open and shows the error if it rejects. */
+    onRemove: () => Promise<unknown>;
+    removeTitle: string;
+    removeDescription: string;
+    /** Prefixes a removal failure shown in the confirmation. */
+    removeErrorContext?: string;
+    class?: string;
+  };
 
-  const props: Props = $props();
+  let {
+    name,
+    role,
+    roles,
+    disabled = false,
+    disabledReasonId,
+    onChangeRole,
+    onRemove,
+    removeTitle,
+    removeDescription,
+    removeErrorContext,
+    class: className
+  }: Props = $props();
 
-  const eneo = getEneo();
-  const {
-    state: { currentSpace },
-    refreshCurrentSpace
-  } = getSpacesManager();
+  const uid = $props.id();
+  const options = $derived(sortRolesAscending(roles));
 
-  // The member prop stays the source of truth: a failed change resets to it, a successful one refreshes it.
-  let selectedRole = $derived(props.member.role);
+  // Shows a new role straight away; the prop takes over again once the caller saves it.
+  let shownRole = $derived(role);
+  let changing = $state(false);
+  let selectOpen = $state(false);
+  let removeOpen = $state(false);
 
-  const labels = $derived(
-    props.kind === "group"
-      ? {
-          select: m.select_role_for_group(),
-          remove: m.remove_group(),
-          confirmRemove: m.confirm_remove_group({ groupName: props.member.name }),
-          removeError: m.couldnt_remove_group()
-        }
-      : {
-          select: m.select_role_for_member(),
-          remove: m.remove_member(),
-          confirmRemove: m.confirm_remove_member({ memberEmail: props.member.email }),
-          removeError: m.couldnt_remove_user()
-        }
-  );
-
-  async function remove() {
-    const spaceId = $currentSpace.id;
-    if (props.kind === "group") {
-      await eneo.spaces.groupMembers.remove({ spaceId, group: props.member });
-    } else {
-      await eneo.spaces.members.remove({ spaceId, user: props.member });
-    }
-    refreshCurrentSpace();
-  }
-
-  const changeRole = createAsyncState(async (role: SpaceRole["value"]) => {
-    const spaceId = $currentSpace.id;
-    const id = props.member.id;
+  async function change(next: SpaceRoleValue) {
+    if (disabled || changing || next === shownRole) return;
+    const previous = shownRole;
+    shownRole = next;
+    changing = true;
     try {
-      if (props.kind === "group") {
-        await eneo.spaces.groupMembers.update({ spaceId, group: { id, role } });
-      } else {
-        await eneo.spaces.members.update({ spaceId, user: { id, role } });
-      }
-      // Awaited so the spinner stays until the refreshed member prop carries the new role.
-      await refreshCurrentSpace();
-    } catch (e) {
-      toastError(e, m.couldnt_change_role());
-      console.error(e);
-      selectedRole = props.member.role;
+      await onChangeRole(next);
+    } catch {
+      shownRole = previous;
+    } finally {
+      changing = false;
     }
-  });
+  }
 </script>
 
-<div class="flex items-center gap-2">
+<div class={cn("flex min-w-0 items-center gap-2", className)}>
+  <span id={`${uid}-label`} class="sr-only">{m.admin_spaces_role_for({ name })}</span>
   <Select.Root
     type="single"
-    bind:value={selectedRole}
-    onValueChange={(role) => changeRole(role as SpaceRole["value"])}
+    bind:value={() => shownRole, (value) => void change(value as SpaceRoleValue)}
+    bind:open={() => selectOpen, (value) => (selectOpen = value && !disabled && !changing)}
   >
-    <Select.Trigger aria-label={labels.select} class="capitalize">
-      {#if changeRole.isLoading}
-        <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
-      {:else}
-        {props.member.role}
-      {/if}
+    <Select.Trigger
+      aria-labelledby={`${uid}-label ${uid}-value`}
+      aria-disabled={disabled || undefined}
+      aria-describedby={disabled ? disabledReasonId : undefined}
+      aria-busy={changing || undefined}
+      class={cn(
+        "min-w-36 justify-between max-md:min-h-12 max-md:flex-1",
+        disabled && "text-secondary cursor-not-allowed"
+      )}
+    >
+      <span class="flex items-center gap-2">
+        <span id={`${uid}-value`}>{spaceRoleLabel(shownRole)}</span>
+        {#if changing}
+          <IconLoadingSpinner class="size-4 animate-spin" aria-hidden="true" />
+        {/if}
+      </span>
     </Select.Trigger>
     <Select.Content>
-      {#each $currentSpace.available_roles as role (role.value)}
-        <Select.Item value={role.value} label={role.value} class="capitalize">
-          {role.value}
+      {#each options as option (option)}
+        <Select.Item value={option} label={spaceRoleLabel(option)}>
+          {spaceRoleLabel(option)}
         </Select.Item>
       {/each}
     </Select.Content>
   </Select.Root>
 
   <ConfirmDialog
-    title={labels.remove}
-    description={labels.confirmRemove}
+    bind:open={() => removeOpen, (value) => (removeOpen = value && !disabled)}
+    title={removeTitle}
+    description={removeDescription}
     confirmLabel={m.remove()}
     pendingLabel={m.removing()}
-    errorContext={labels.removeError}
-    onConfirm={remove}
+    errorContext={removeErrorContext}
+    errorDisplay="inline"
+    onConfirm={onRemove}
   >
     {#snippet trigger({ props: triggerProps })}
-      <Button {...triggerProps} variant="destructive" size="icon" aria-label={labels.remove}>
-        <IconTrash class="h-4 w-4" />
+      <Button
+        {...triggerProps}
+        variant="ghost"
+        size="icon"
+        class={cn(
+          "text-secondary shrink-0 max-md:size-12",
+          disabled ? "cursor-not-allowed" : "hover:text-negative-stronger"
+        )}
+        aria-label={m.admin_spaces_remove_named({ name })}
+        aria-disabled={disabled || undefined}
+        aria-describedby={disabled ? disabledReasonId : undefined}
+      >
+        <Trash2 aria-hidden="true" />
       </Button>
     {/snippet}
   </ConfirmDialog>

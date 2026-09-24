@@ -17,7 +17,8 @@
 
   const eneo = getEneo();
   const {
-    state: { currentSpace }
+    state: { currentSpace },
+    refreshCurrentSpace
   } = getSpacesManager();
 
   const userList = new UserList({});
@@ -45,9 +46,11 @@
   emptyMessage={m.no_matching_users_found()}
   items={userList.filteredUsers}
   addedIds={memberIds}
+  roles={$currentSpace.available_roles.map((role) => role.value)}
   getLabel={(user) => user.email}
   onAdd={(user, role) =>
     eneo.spaces.members.add({ spaceId: $currentSpace.id, user: { id: user.id, role } })}
+  onAdded={() => refreshCurrentSpace()}
 >
   {#snippet row(user, added)}
     {#if added}

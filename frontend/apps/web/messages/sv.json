@@ -1177,7 +1177,6 @@
   "starting": "Startar...",
   "start_crawl": "Starta crawl",
   "limitations": "Begränsningar",
-  "select_role_for_member": "Välj en roll för denna medlem",
   "couldnt_remove_user": "Kunde inte ta bort användare.",
   "couldnt_change_role": "Kunde inte ändra roll.",
   "remove_member": "Ta bort medlem",
@@ -2385,7 +2384,6 @@
   "already_added": "Redan tillagd",
   "could_not_add_group": "Kunde inte lägga till grupp i utrymmet.",
   "couldnt_remove_group": "Kunde inte ta bort grupp från utrymmet.",
-  "select_role_for_group": "Välj en roll för denna grupp",
   "remove_group": "Ta bort grupp",
   "confirm_remove_group": "Vill du verkligen ta bort gruppen '{groupName}' från detta utrymme? Alla gruppmedlemmar kommer att förlora åtkomst genom detta gruppmedlemskap.",
   "manage_members": "Hantera medlemmar",
@@ -4746,5 +4744,12 @@
   "admin_spaces_join_submit": "Gå med som {role}",
   "admin_spaces_join_pending": "Går med…",
   "admin_spaces_join_done": "Du är nu {role} i {space}. Ytan finns i din ytväljare.",
-  "admin_spaces_join_failed": "Det gick inte att gå med i ytan."
+  "admin_spaces_join_failed": "Det gick inte att gå med i ytan.",
+  "admin_spaces_role_for": "Roll för {name}:",
+  "admin_spaces_remove_named": "Ta bort {name} från ytan",
+  "space_oversight_notice_title": "Organisationsadministratör i ytan",
+  "space_oversight_notice_title_many": "Organisationsadministratörer i ytan",
+  "space_oversight_notice_item": "{name} gick med i ytan {date} som organisationsadministratör, med rollen {role}.",
+  "space_oversight_notice_reason": "Anledning: {reason}",
+  "space_oversight_member_badge": "Gick med via tillsyn {date}"
 }

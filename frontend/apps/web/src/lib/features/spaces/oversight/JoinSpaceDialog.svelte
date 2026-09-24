@@ -68,12 +68,6 @@
     onJoined
   }: Props = $props();
 
-  // At 400 % zoom the viewport is about 320 × 256 px: too short for a fixed
-  // header and footer around a scrolling body, so the whole dialog scrolls.
-  const SHORT_VIEWPORT_CONTENT = "[@media(max-height:30rem)]:overflow-y-auto";
-  const SHORT_VIEWPORT_BODY =
-    "[@media(max-height:30rem)]:flex-none [@media(max-height:30rem)]:overflow-visible";
-
   const eneo = getEneo();
   const uid = $props.id();
 
@@ -165,7 +159,7 @@
 
   <Dialog.Content
     bind:ref={content}
-    class={dialogLayout.content("medium", SHORT_VIEWPORT_CONTENT)}
+    class={dialogLayout.content("medium")}
     closeLabel={m.close()}
     onOpenAutoFocus={(event) => {
       const radio =
@@ -187,7 +181,7 @@
         </Dialog.Title>
       </Dialog.Header>
 
-      <div class={cn(dialogLayout.body, SHORT_VIEWPORT_BODY)}>
+      <div class={dialogLayout.body}>
         <!-- In the scrolling body, so a phone keeps room for the form. -->
         <Dialog.Description class="text-primary flex flex-col gap-2 text-sm">
           {#if space.security_classification}

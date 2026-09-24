@@ -1189,7 +1189,6 @@
   "starting": "Starting...",
   "start_crawl": "Start crawl",
   "limitations": "Limitations",
-  "select_role_for_member": "Select a role for this member",
   "couldnt_remove_user": "Couldn't remove user.",
   "couldnt_change_role": "Couldn't change role.",
   "remove_member": "Remove member",
@@ -2353,7 +2352,6 @@
   "already_added": "Already added",
   "could_not_add_group": "Could not add group to space.",
   "couldnt_remove_group": "Couldn't remove group from space.",
-  "select_role_for_group": "Select a role for this group",
   "remove_group": "Remove group",
   "confirm_remove_group": "Do you really want to remove the group '{groupName}' from this space? All group members will lose access through this group membership.",
   "manage_members": "Manage members",
@@ -4746,5 +4744,12 @@
   "admin_spaces_join_submit": "Join as {role}",
   "admin_spaces_join_pending": "Joining…",
   "admin_spaces_join_done": "You're now {role} in {space}. It's in your space selector.",
-  "admin_spaces_join_failed": "Couldn't join the space."
+  "admin_spaces_join_failed": "Couldn't join the space.",
+  "admin_spaces_role_for": "Role for {name}:",
+  "admin_spaces_remove_named": "Remove {name} from the space",
+  "space_oversight_notice_title": "Organisation administrator in this space",
+  "space_oversight_notice_title_many": "Organisation administrators in this space",
+  "space_oversight_notice_item": "{name} joined this space on {date} as an organisation administrator, with the {role} role.",
+  "space_oversight_notice_reason": "Reason: {reason}",
+  "space_oversight_member_badge": "Joined through oversight on {date}"
 }

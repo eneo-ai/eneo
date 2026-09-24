@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
-  import * as Alert from "$lib/components/ui/alert/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button, type ButtonVariant } from "$lib/components/ui/button/index.js";
   import { dialogLayout, type DialogWidth } from "$lib/components/dialogLayout.js";
@@ -51,6 +50,7 @@
 
   let pending = $state(false);
   let inlineError = $state<string | null>(null);
+  let cancelButton = $state<HTMLElement | null>(null);
 
   $effect(() => {
     if (open) inlineError = null;
@@ -92,7 +92,15 @@
     </AlertDialog.Trigger>
   {/if}
 
-  <AlertDialog.Content class={dialogLayout.content(width)}>
+  <AlertDialog.Content
+    class={dialogLayout.content(width)}
+    onOpenAutoFocus={(event) => {
+      // The least destructive choice first, so a stray Enter confirms nothing.
+      if (!cancelButton) return;
+      event.preventDefault();
+      cancelButton.focus();
+    }}
+  >
     <AlertDialog.Header class={dialogLayout.header}>
       <AlertDialog.Title>{title}</AlertDialog.Title>
       {#if typeof description === "string"}
@@ -106,10 +114,14 @@
       <div class={dialogLayout.body}>
         {@render children?.()}
         {#if inlineError}
-          <Alert.Root variant="destructive">
-            <CircleAlert />
-            <Alert.Description>{inlineError}</Alert.Description>
-          </Alert.Root>
+          <!-- Not the destructive Alert: its text falls below 4.5:1 in dark mode. -->
+          <div
+            role="alert"
+            class="bg-negative-dimmer text-negative-stronger flex items-start gap-2 rounded-lg p-3 text-sm"
+          >
+            <CircleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <p class="min-w-0">{inlineError}</p>
+          </div>
         {/if}
       </div>
     {/if}
@@ -117,6 +129,7 @@
     <AlertDialog.Footer class={dialogLayout.footer}>
       <!-- bits' Cancel ignores `disabled`; the open setter above already refuses to close while pending. -->
       <AlertDialog.Cancel
+        bind:ref={cancelButton}
         aria-disabled={pending}
         class={pending ? "pointer-events-none opacity-50" : undefined}
         >{cancelLabel ?? m.cancel()}</AlertDialog.Cancel

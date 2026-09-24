@@ -14,7 +14,8 @@
 
   const eneo = getEneo();
   const {
-    state: { currentSpace }
+    state: { currentSpace },
+    refreshCurrentSpace
   } = getSpacesManager();
 
   let open = $state(false);
@@ -53,9 +54,11 @@
   emptyMessage={userGroups.length === 0 ? m.no_user_groups_found() : m.no_matching_groups_found()}
   items={filteredGroups}
   addedIds={groupIds}
+  roles={$currentSpace.available_roles.map((role) => role.value)}
   getLabel={(group) => group.name}
   onAdd={(group, role) =>
     eneo.spaces.groupMembers.add({ spaceId: $currentSpace.id, group: { id: group.id, role } })}
+  onAdded={() => refreshCurrentSpace()}
 >
   {#snippet row(group, added)}
     <IconPeople class="text-secondary h-5 w-5" />

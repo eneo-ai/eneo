@@ -6,6 +6,7 @@
 
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import OversightJoinNotice from "$lib/features/spaces/components/OversightJoinNotice.svelte";
   import MembersList from "../members/MembersList.svelte";
   import { getAppContext } from "$lib/core/AppContext";
   import { Page } from "$lib/components/layout";
@@ -68,6 +69,9 @@
         <p class="min-h-20">
           {$currentSpace.description ?? m.welcome_to_space({ space: $currentSpace.name })}
         </p>
+        <div class="max-w-[70ch] pt-2">
+          <OversightJoinNotice members={$currentSpace.members} />
+        </div>
       {/if}
 
       <div class="grid gap-4 pt-4 pb-4 md:grid-cols-3">
