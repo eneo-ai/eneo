@@ -1,4 +1,9 @@
-from eneo.allowed_origins.origin_matching import origin_matches_pattern
+import pytest
+
+from eneo.allowed_origins.origin_matching import (
+    normalize_origin_pattern,
+    origin_matches_pattern,
+)
 
 
 def test_origin_matches_exact_scheme_host_and_port():
@@ -67,3 +72,57 @@ def test_port_wildcard_combines_with_subdomain_wildcard():
 def test_malformed_port_in_origin_fails_closed():
     """If the inbound Origin somehow has a malformed port, deny rather than 500."""
     assert not origin_matches_pattern("http://localhost:abc", "http://localhost:*")
+
+
+# The widget editor mirrors this rule (frontend/apps/web/src/lib/features/
+# widget/admin/origins.test.ts holds the same table), so a value the field
+# accepts is never refused by the save and the other way round.
+_PARITY = [
+    ("https://www.kommun.se", "https://www.kommun.se"),
+    ("https://www.kommun.se/", "https://www.kommun.se"),
+    ("https://www.kommun.se/kontakt", None),
+    ("HTTPS://WWW.Kommun.SE//", "https://www.kommun.se"),
+    ("https://*.kommun.se", "https://*.kommun.se"),
+    ("http://localhost:*", "http://localhost:*"),
+    ("http://localhost:3000", "http://localhost:3000"),
+    ("http://localhost:", None),
+    ("http://localhost:99999", None),
+    ("http://localhost:65535", "http://localhost:65535"),
+    ("https://user@kommun.se", None),
+    ("https://kommun.se?x=1", None),
+    ("https://kommun.se#frag", None),
+    ("ftp://kommun.se", None),
+    ("kommun.se", None),
+    ("https://", None),
+    ("https://[::1]", None),
+    ("https://[::1]:8080", "https://[::1]:8080"),
+    ("https://[::1]:*", "https://[::1]:*"),
+    ("https://kom mun.se", None),
+    ("https://kommun.se;script", None),
+    ("https://-bad.se", None),
+    ("https://bad-.se", None),
+    ("https://a..se", None),
+    ("https://*.*.se", None),
+    ("https://xn--bcher-kva.example", "https://xn--bcher-kva.example"),
+    ("https://1.2.3.4:443", "https://1.2.3.4:443"),
+    ("http://localhost:08", "http://localhost:08"),
+    ("https://kommun.se:abc", None),
+    ("https://[zz]", None),
+    ("https://example.com?", None),
+    ("https://example.com#", None),
+    ("https://@example.com", None),
+    ("https://example.com:000080", "https://example.com:000080"),
+    ("https://[abc.def]:80", None),
+    ("https://[1.2.3.4]:80", None),
+    ("https://[:::]:80", None),
+    ("https://[::ffff:1.2.3.4]:80", "https://[::ffff:1.2.3.4]:80"),
+]
+
+
+@pytest.mark.parametrize(("pattern", "expected"), _PARITY)
+def test_normalize_origin_pattern_matches_the_editor(pattern, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            normalize_origin_pattern(pattern)
+    else:
+        assert normalize_origin_pattern(pattern) == expected

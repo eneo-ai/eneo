@@ -361,8 +361,8 @@ class TestKnowledgeServerCollisionDefense:
 
 @pytest.mark.asyncio
 async def test_tool_mode_without_server_falls_back_to_injected_retrieval():
-    """What the service passes for a widget visitor: a TOOL-mode assistant and
-    no loopback server. Retrieved content must still reach the completion."""
+    """A TOOL-mode assistant without a loopback server, as for a model without
+    tool calling. Retrieved content must still reach the completion."""
     chunk = InfoBlobChunkInDBWithScore(
         id=uuid4(),
         text="Retrieved passage",

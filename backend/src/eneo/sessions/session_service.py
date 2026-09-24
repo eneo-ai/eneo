@@ -559,13 +559,16 @@ class SessionService:
         feedback: SessionFeedback,
         assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
+        keep_existing_text: bool = False,
     ) -> SessionInDB:
         session = await self.session_repo.get(id=session_id)
         owned_session = self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
         return await self.session_repo.add_feedback(
-            feedback=feedback, id=owned_session.id
+            feedback=feedback,
+            id=owned_session.id,
+            keep_existing_text=keep_existing_text,
         )
 
     async def get_sessions_by_group_chat(

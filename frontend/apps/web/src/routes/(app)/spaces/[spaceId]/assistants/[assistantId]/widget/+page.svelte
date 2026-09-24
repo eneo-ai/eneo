@@ -11,7 +11,7 @@
   import TemplatePicker from "$lib/features/widget/admin/TemplatePicker.svelte";
   import WidgetEditor from "$lib/features/widget/admin/WidgetEditor.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
 
   let { data } = $props();
 
@@ -24,6 +24,17 @@
   // Widgets follow a template's published release, so drafts are not offered.
   const templates = $derived(data.templates.filter((t) => t.published_at != null));
   let templateId = $state(untrack(() => templates.find((t) => t.is_default)?.id ?? ""));
+
+  // The archive dialog's trigger goes with the editor, so the focus it would
+  // return there moves to the note saying what happened.
+  let archived = $state(false);
+  let archivedNote = $state<HTMLElement | null>(null);
+  async function onArchived() {
+    widget = null;
+    archived = true;
+    await tick();
+    archivedNote?.focus();
+  }
 
   const create = createAsyncState(async () => {
     try {
@@ -67,12 +78,22 @@
             policy={data.policy}
             release={data.release}
             {templates}
+            {onArchived}
           />
         {/key}
       {:else}
+        {#if archived}
+          <p
+            bind:this={archivedNote}
+            tabindex="-1"
+            class="bg-secondary mx-auto w-full max-w-3xl rounded-lg px-4 py-3 text-sm"
+          >
+            {m.widget_admin_archived_note()}
+          </p>
+        {/if}
         <Card.Root class="mx-auto w-full max-w-3xl">
           <Card.Header>
-            <Card.Title>{m.widget_admin_create_title()}</Card.Title>
+            <Card.Title><h2>{m.widget_admin_create_title()}</h2></Card.Title>
             <Card.Description>{m.widget_admin_create_description()}</Card.Description>
           </Card.Header>
           <Card.Content>

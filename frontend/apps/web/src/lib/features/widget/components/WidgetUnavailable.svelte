@@ -33,7 +33,8 @@
 
 <svelte:window onkeydown={onWindowKeydown} />
 
-<div
+<!-- Every state of the page is its main landmark, like the chat itself. -->
+<main
   class="bg-primary text-primary fixed inset-0 flex flex-col items-center justify-center gap-2 p-6"
 >
   {#if bridge.embedded}
@@ -51,7 +52,7 @@
     {m.widget_not_available_title()}
   </h1>
   <p class="text-secondary text-center text-sm">{m.widget_not_available_body()}</p>
-</div>
+</main>
 
 <style>
   .widget-notice-close {

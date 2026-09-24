@@ -1,7 +1,8 @@
 <!--
   Lifecycle of one widget: status, save state, why it cannot be activated
-  yet, and the activate / pause / archive actions. Activation and archiving
-  are for tenant admins; pausing is the kill switch every editor has.
+  yet (or, once active, what keeps it from serving properly), and the
+  activate / pause / archive actions. Activation and archiving are for tenant
+  admins; pausing is the kill switch every editor has.
 -->
 <script lang="ts">
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
@@ -12,7 +13,7 @@
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { blockerLabel } from "./blockers";
-  import { widgetErrorMessage } from "./errors";
+  import { toastWidgetError, widgetErrorMessage } from "./errors";
   import type { WidgetAutosave } from "./widgetAutosave.svelte";
 
   type Props = {
@@ -28,6 +29,7 @@
 
   const widget = $derived(autosave.widget);
   const blockers = $derived(widget.activation_blockers ?? []);
+  const refusals = $derived([...new Set(Object.values(autosave.refusals))]);
   const canActivate = $derived(isAdmin && blockers.length === 0 && !autosave.hasPending);
 
   let archiveOpen = $state(false);
@@ -38,7 +40,7 @@
       if (autosave.hasPending) return;
       await onActivate();
     } catch (error) {
-      toastError(error, m.widget_admin_could_not_activate());
+      toastWidgetError(error, m.widget_admin_could_not_activate());
     }
   });
   const pause = createAsyncState(async () => {
@@ -78,6 +80,8 @@
         return m.widget_admin_saved();
       case "error":
         return m.widget_admin_save_failed();
+      case "refused":
+        return m.widget_admin_save_refused();
       case "conflict":
         // A lock published underneath the editor reads differently from
         // another person's edit; both end in a reload.
@@ -92,6 +96,23 @@
       ? m.widget_admin_activate_admin_only()
       : blockers.length > 0
         ? m.widget_admin_activate_blocked()
+        : null
+  );
+  // The tooltip never opens on touch, so the reason is also written out below.
+  const adminOnlyNote = $derived(
+    isAdmin || blockers.length > 0
+      ? null
+      : widget.status === "draft"
+        ? m.widget_admin_ready_for_admin()
+        : widget.status === "paused"
+          ? m.widget_admin_resume_admin_only()
+          : null
+  );
+  const activateReasonId = $derived(
+    blockers.length > 0
+      ? "widget-status-blockers"
+      : adminOnlyNote
+        ? "widget-status-admin-only"
         : null
   );
 </script>
@@ -143,7 +164,15 @@
           <Tooltip.Root>
             <Tooltip.Trigger>
               {#snippet child({ props })}
-                <Button {...props} variant="default" aria-disabled="true" class="opacity-50">
+                <Button
+                  {...props}
+                  variant="default"
+                  aria-disabled="true"
+                  aria-describedby={[props["aria-describedby"], activateReasonId]
+                    .filter(Boolean)
+                    .join(" ") || undefined}
+                  class="opacity-50"
+                >
                   {widget.status === "paused" ? m.widget_admin_resume() : m.widget_admin_activate()}
                 </Button>
               {/snippet}
@@ -168,17 +197,36 @@
     </div>
   </div>
 
-  {#if blockers.length > 0 && widget.status !== "active"}
-    <div class="bg-warning-dimmer text-warning-stronger rounded-lg px-3 py-2 text-sm">
-      <p class="font-medium">{m.widget_admin_blockers_title()}</p>
+  {#if refusals.length > 0}
+    <div class="bg-negative-dimmer text-negative-stronger rounded-lg px-3 py-2 text-sm">
+      <p class="font-medium">{m.widget_admin_refusals_title()}</p>
+      <ul class="mt-1 list-disc pl-5">
+        {#each refusals as message (message)}
+          <li>{message}</li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
+  {#if blockers.length > 0}
+    <!-- An active widget with blockers is live but not serving as configured
+         (an unpublished assistant, no allowed website, no AI disclosure). -->
+    <div
+      id="widget-status-blockers"
+      class="bg-warning-dimmer text-warning-stronger rounded-lg px-3 py-2 text-sm"
+    >
+      <p class="font-medium">
+        {widget.status === "active"
+          ? m.widget_admin_active_issues_title()
+          : m.widget_admin_blockers_title()}
+      </p>
       <ul class="mt-1 list-disc pl-5">
         {#each blockers as blocker (blocker)}
           <li>{blockerLabel(blocker)}</li>
         {/each}
       </ul>
     </div>
-  {:else if widget.status === "draft" && !isAdmin}
-    <p class="text-secondary text-sm">{m.widget_admin_ready_for_admin()}</p>
+  {:else if adminOnlyNote}
+    <p id="widget-status-admin-only" class="text-secondary text-sm">{adminOnlyNote}</p>
   {/if}
 </section>
 

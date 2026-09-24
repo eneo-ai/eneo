@@ -93,6 +93,12 @@ percent-encoded as UTF-8; the receiving server must decode them before display
 or matching. Headers are sent during connection checks, tool discovery, and
 tool calls.
 
+Web widget visitors are anonymous. When an assistant is published as a web
+widget, its MCP servers receive the visitors' tool calls without any `X-Eneo-*`
+headers, and no call waits for an approval. Check that each server's tools are
+acceptable for anyone on the public site before the widget is activated; see
+[What visitors can reach](/guides/embed-widget#what-visitors-can-reach).
+
 <Callout type="warning">
   Forwarded headers are identity claims from Eneo, not a replacement for a
   protected network path. The MCP server must accept them only from the trusted

@@ -12,7 +12,7 @@ export const load = async (event) => {
   const canReadSkills = currentSpace.skill_permissions?.includes("read") ?? false;
   const supportsDirectSkills =
     !currentSpace.personal || currentSpace.default_assistant?.id !== event.params.assistantId;
-  const [assistant, mcpServers, promptGuideAvailability, skills, skillConfiguration] =
+  const [assistant, mcpServers, promptGuideAvailability, skills, skillConfiguration, widgetStatus] =
     await Promise.all([
       eneo.assistants.get({ id: event.params.assistantId }),
       eneo.assistants.listMCPServers({ id: event.params.assistantId }),
@@ -35,7 +35,9 @@ export const load = async (event) => {
             spaceId: currentSpace.id,
             assistantId: event.params.assistantId
           })
-        : Promise.resolve({ bindings: [], runtime: null })
+        : Promise.resolve({ bindings: [], runtime: null }),
+      // Anyone who can read the assistant may ask, widget permission or not.
+      eneo.assistants.getWidgetStatus({ id: event.params.assistantId }).catch(() => null)
     ]);
 
   // Help assistants are edited in the admin UI, not in a space. If someone
@@ -51,6 +53,8 @@ export const load = async (event) => {
     skills,
     skillBindings: skillConfiguration.bindings,
     skillRuntime: skillConfiguration.runtime,
-    supportsDirectSkills
+    supportsDirectSkills,
+    // Visitors get the assistant as configured, tools included.
+    servesActiveWidget: widgetStatus?.serves_active_widget ?? false
   };
 };

@@ -8,7 +8,7 @@ from eneo.audit.infrastructure.rate_limiting import (
     RateLimitServiceUnavailableError,
 )
 from eneo.widgets.application import widget_limits
-from eneo.widgets.application.widget_limits import WidgetLimiter
+from eneo.widgets.application.widget_limits import WidgetLimiter, network_key
 from eneo.widgets.domain.exceptions import (
     WidgetProtectionUnavailableError,
     WidgetRateLimitedError,
@@ -95,3 +95,44 @@ async def test_challenge_limit_and_fail_closed(monkeypatch):
         redis_client=None, settings=_settings(widget_rate_limit_fail_open=True)
     )
     await open_limiter.check_mint(widget, None)
+
+
+@pytest.mark.parametrize(
+    ("client_ip", "key"),
+    [
+        ("203.0.113.5", "203.0.113.5"),
+        ("2001:db8:1:2:3:4:5:6", "2001:db8:1:2::/64"),
+        ("2001:db8:1:2:ffff:ffff:ffff:1", "2001:db8:1:2::/64"),
+        ("::ffff:203.0.113.5", "203.0.113.5"),
+        ("not-an-ip", "not-an-ip"),
+        (None, "unknown"),
+    ],
+)
+def test_network_key_counts_ipv6_per_64(client_ip, key):
+    assert network_key(client_ip) == key
+
+
+async def test_ip_limits_count_a_whole_ipv6_64(monkeypatch):
+    counter = CountingRateLimit()
+    monkeypatch.setattr(widget_limits, "check_rate_limit", counter)
+    limiter = WidgetLimiter(redis_client=None, settings=_settings())
+    widget = _widget(messages_per_ip_hour=2)
+
+    # Every request from a fresh address in the same /64.
+    for host in range(1, 3):
+        await limiter.check_message(widget, uuid4(), f"2001:db8:1:2::{host}")
+        await limiter.check_challenge(widget, f"2001:db8:1:2::{host}")
+        await limiter.check_mint(widget, f"2001:db8:1:2::{host}")
+    with pytest.raises(WidgetRateLimitedError) as exc:
+        await limiter.check_message(widget, uuid4(), "2001:db8:1:2::3")
+    assert exc.value.code == "rate_limited_ip"
+    await limiter.check_challenge(widget, "2001:db8:1:2::3")
+    with pytest.raises(WidgetRateLimitedError) as exc:
+        await limiter.check_challenge(widget, "2001:db8:1:2::4")
+    assert exc.value.code == "rate_limited_challenge"
+    await limiter.check_mint(widget, "2001:db8:1:2::3")
+    with pytest.raises(WidgetRateLimitedError) as exc:
+        await limiter.check_mint(widget, "2001:db8:1:2::4")
+    assert exc.value.code == "rate_limited_mint"
+    # The next /64 is another subscriber.
+    await limiter.check_message(widget, uuid4(), "2001:db8:1:3::1")

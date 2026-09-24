@@ -12,10 +12,12 @@ export const load: PageLoad = async (event) => {
   }
 
   const isAdmin = hasPermission(user)("admin");
+  // The policy is readable with the widgets permission, so every editor
+  // checks limits against the same bounds the server enforces.
   const [assistant, widgets, policy, templates] = await Promise.all([
     eneo.assistants.get({ id: assistantId }),
     eneo.widgets.list({ spaceId: currentSpace.id }),
-    isAdmin ? eneo.widgets.policy.get().catch(() => null) : Promise.resolve(null),
+    eneo.widgets.policy.get().catch(() => null),
     eneo.widgets.templates.list().catch(() => [])
   ]);
 

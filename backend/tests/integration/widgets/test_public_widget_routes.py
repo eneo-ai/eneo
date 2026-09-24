@@ -356,3 +356,92 @@ async def test_unpublished_assistant_takes_its_widget_offline(
     item = next(i for i in resp.json()["items"] if i["public_id"] == public_id)
     assert item["status"] == "active"
     assert item["activation_blockers"] == ["target_not_published"]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_forbidding_bot_protection_none_holds_widgets_already_on_it(
+    client, admin_token, active_widget
+):
+    public_id = active_widget["public_id"]
+    widget_url = f"/api/v1/widgets/{active_widget['id']}/"
+    resp = await client.patch(
+        "/api/v1/admin/widget-policy/",
+        json={"allow_bot_protection_none": True},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    revision = (await client.get(widget_url, headers=_auth(admin_token))).json()[
+        "revision"
+    ]
+    resp = await client.patch(
+        widget_url,
+        json={"revision": revision, "bot_protection": "none"},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(f"/api/v1/widgets/{public_id}/visitor-sessions/", json={})
+    assert resp.status_code == 200, resp.text
+    issued = resp.json()
+    config = (await client.get(f"/api/v1/widgets/{public_id}/config/")).json()
+    assert config["bot_protection"] == "none"
+
+    resp = await client.patch(
+        "/api/v1/admin/widget-policy/",
+        json={"allow_bot_protection_none": False},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+
+    # The widget keeps its setting; the visitor surface holds it to the policy.
+    stored = (await client.get(widget_url, headers=_auth(admin_token))).json()
+    assert stored["bot_protection"] == "none"
+    assert "bot_protection_none_not_allowed" in stored["activation_blockers"]
+    resp = await client.get(f"/api/v1/widgets/{public_id}/config/")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["bot_protection"] == "altcha"
+    assert resp.json()["token_generation"] > config["token_generation"]
+
+    resp = await client.post(f"/api/v1/widgets/{public_id}/visitor-sessions/", json={})
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["code"] == "challenge_required"
+    # A token minted without a challenge cannot renew itself past the change.
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/visitor-sessions/",
+        json={"previous_token": issued["token"]},
+    )
+    assert resp.status_code == 401, resp.text
+    assert resp.json()["detail"]["code"] == "visitor_token_stale"
+
+    challenge = (await client.get(f"/api/v1/widgets/{public_id}/challenge/")).json()
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/visitor-sessions/",
+        json={"altcha": _solve(challenge)},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_policy_change_reaches_a_cached_config(
+    client, admin_token, active_widget
+):
+    public_id = active_widget["public_id"]
+    resp = await client.get(f"/api/v1/widgets/{public_id}/config/")
+    assert resp.json()["single_turn"] is False
+    etag = resp.headers["etag"]
+
+    # Only the policy changes; the widget row keeps its 30 days.
+    resp = await client.patch(
+        "/api/v1/admin/widget-policy/",
+        json={"max_retention_days": 0},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.get(
+        f"/api/v1/widgets/{public_id}/config/", headers={"If-None-Match": etag}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["single_turn"] is True
+    assert resp.headers["etag"] != etag

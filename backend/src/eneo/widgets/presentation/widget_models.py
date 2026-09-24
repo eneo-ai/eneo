@@ -4,12 +4,14 @@
 
 
 from datetime import date, datetime
-from typing import Literal, Optional
+from typing import Annotated, Any, Literal, Optional, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from eneo.widgets.domain.widget import (
+    MAX_DAILY_TOKEN_BUDGET,
     BotProtection,
     WidgetLanguage,
     WidgetLimits,
@@ -84,21 +86,58 @@ class WidgetTemplateInUseResponse(BaseModel):
     detail: WidgetTemplateInUseDetail
 
 
+_WHOLE_GROUP = (
+    "Replaces the whole group: a field left out of it takes its default, so"
+    " send the current values along with the changed ones."
+)
+
+
 class WidgetUpdate(BaseModel):
+    """Only the fields sent are changed; a field left out keeps its value.
+    Null is refused: there is nothing to reset a field to."""
+
     model_config = ConfigDict(extra="forbid")
 
     revision: int = Field(ge=0)
 
-    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    texts: Optional[WidgetTexts] = None
-    theme: Optional[WidgetTheme] = None
-    limits: Optional[WidgetLimits] = None
-    privacy: Optional[WidgetPrivacy] = None
-    language: Optional[WidgetLanguage] = None
-    allowed_origins: Optional[list[str]] = Field(default=None, max_length=20)
-    bot_protection: Optional[BotProtection] = None
-    show_sources: Optional[bool] = None
-    show_tool_activity: Optional[bool] = None
+    # None only marks a field left out; _no_nulls refuses a sent null, so the
+    # schema does not offer one.
+    name: Annotated[str, Field(min_length=1, max_length=100)] | SkipJsonSchema[None] = (
+        None
+    )
+    texts: WidgetTexts | SkipJsonSchema[None] = Field(
+        default=None, description=_WHOLE_GROUP
+    )
+    theme: WidgetTheme | SkipJsonSchema[None] = Field(
+        default=None, description=_WHOLE_GROUP
+    )
+    limits: WidgetLimits | SkipJsonSchema[None] = Field(
+        default=None, description=_WHOLE_GROUP
+    )
+    privacy: WidgetPrivacy | SkipJsonSchema[None] = Field(
+        default=None, description=_WHOLE_GROUP
+    )
+    language: WidgetLanguage | SkipJsonSchema[None] = None
+    allowed_origins: (
+        Annotated[list[str], Field(max_length=20)] | SkipJsonSchema[None]
+    ) = None
+    bot_protection: BotProtection | SkipJsonSchema[None] = None
+    show_sources: bool | SkipJsonSchema[None] = None
+    show_tool_activity: bool | SkipJsonSchema[None] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_nulls(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        fields = cast(dict[object, object], data)
+        nulls = sorted(str(key) for key, value in fields.items() if value is None)
+        if nulls:
+            raise ValueError(
+                f"{', '.join(nulls)} cannot be null; leave a field out to"
+                " keep its value."
+            )
+        return fields
 
     @field_validator("allowed_origins")
     @classmethod
@@ -228,21 +267,24 @@ class WidgetOverviewItem(BaseModel):
     output_tokens_30d: int
     blocked_30d: int
     helpful_30d: int = Field(
-        description="Net thumbs up registered in the last 30 days."
+        description="Thumbs up on conversations started in the last 30 days."
     )
     unhelpful_30d: int = Field(
-        description="Net thumbs down registered in the last 30 days."
+        description="Thumbs down on conversations started in the last 30 days."
     )
     last_activity: Optional[date] = None
-    daily_token_budget: int
+    daily_token_budget: int = Field(
+        description="The budget in force: the widget's, capped by the tenant policy."
+    )
     budget_used_today: int = Field(
         description="Durable usage plus in-flight reservations for today's budget."
     )
     activation_blockers: list[str] = Field(
         default_factory=list,
         description=(
-            "Why the widget cannot be activated (or, for an active widget, why"
-            " it is not serving): empty when it can."
+            "Why the widget could not be activated as configured: empty when"
+            " it can. A policy violation does not stop an active widget: it is"
+            " served within the policy."
         ),
     )
 
@@ -278,8 +320,10 @@ class WidgetUsageDayPublic(BaseModel):
     output_tokens: int
     blocked_budget: int
     blocked_rate: int
-    helpful: int = Field(description="Net thumbs up registered on the day.")
-    unhelpful: int = Field(description="Net thumbs down registered on the day.")
+    helpful: int = Field(description="Thumbs up on conversations started on the day.")
+    unhelpful: int = Field(
+        description="Thumbs down on conversations started on the day."
+    )
 
 
 class WidgetUsagePublic(BaseModel):
@@ -287,7 +331,9 @@ class WidgetUsagePublic(BaseModel):
     budget_used_today: int = Field(
         description="Tokens charged against today's budget, including reservations in flight."
     )
-    daily_token_budget: int
+    daily_token_budget: int = Field(
+        description="The budget in force: the widget's, capped by the tenant policy."
+    )
 
 
 class WidgetPolicyPublic(BaseModel):
@@ -300,7 +346,9 @@ class WidgetPolicyPublic(BaseModel):
 class WidgetPolicyUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    max_daily_token_budget: Optional[int] = Field(default=None, ge=1_000)
+    max_daily_token_budget: Optional[int] = Field(
+        default=None, ge=1_000, le=MAX_DAILY_TOKEN_BUDGET
+    )
     allow_bot_protection_none: Optional[bool] = None
     min_retention_days: Optional[int] = Field(default=None, ge=0, le=3650)
     max_retention_days: Optional[int] = Field(default=None, ge=0, le=3650)

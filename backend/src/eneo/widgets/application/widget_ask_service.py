@@ -4,7 +4,7 @@
 
 
 from collections.abc import AsyncGenerator
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, AsyncIterator, Optional
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -12,10 +12,7 @@ from zoneinfo import ZoneInfo
 import sqlalchemy as sa
 from anyio import CancelScope
 
-from eneo.ai_models.completion_models.completion_model import (
-    Completion,
-    ResponseType,
-)
+from eneo.ai_models.completion_models.completion_model import Completion
 from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
@@ -26,6 +23,7 @@ from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.main.logging import get_logger
 from eneo.sessions.session import SessionFeedback, SessionInDB
+from eneo.widgets.application.visitor_view import VisitorView
 from eneo.widgets.application.widget_limits import (
     BudgetReservation,
     WidgetBudget,
@@ -103,6 +101,16 @@ class WidgetAskService:
     def _today(self) -> date:
         return datetime.now(ZoneInfo(self.settings.widget_budget_timezone)).date()
 
+    def _session_day(self, session: SessionInDB) -> date:
+        if session.created_at is None:
+            return self._today()
+        created_at = session.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        return created_at.astimezone(
+            ZoneInfo(self.settings.widget_budget_timezone)
+        ).date()
+
     async def _owned_session(self, widget: Widget, session_id: UUID) -> SessionInDB:
         try:
             return await self.session_service.get_session_by_uuid(
@@ -118,12 +126,7 @@ class WidgetAskService:
         self, principal: WidgetPrincipal, session_id: UUID
     ) -> SessionInDB:
         session = await self._owned_session(principal.widget, session_id)
-        for question in session.questions:
-            if not principal.widget.show_sources:
-                question.info_blobs = []
-            if not principal.widget.show_tool_activity:
-                question.tool_calls = None
-        return session
+        return VisitorView(principal.widget).session(session)
 
     async def leave_feedback(
         self, principal: WidgetPrincipal, session_id: UUID, feedback: SessionFeedback
@@ -136,19 +139,26 @@ class WidgetAskService:
         previous = await self.usage_repo.lock_feedback(session.id)
         if not widget.privacy.store_feedback_text:
             feedback = SessionFeedback(value=feedback.value, text=None)
+        # The embed page sends a changed vote without the comment it sent
+        # earlier; only a new comment replaces the stored one.
         updated = await self.session_service.leave_feedback(
-            session_id=session_id, assistant_id=widget.target_id, feedback=feedback
+            session_id=session_id,
+            assistant_id=widget.target_id,
+            feedback=feedback,
+            keep_existing_text=True,
         )
-        # Daily counters follow the vote: a changed vote moves between the
-        # columns on the day it changes, in the same transaction as the vote.
+        # Daily counters follow the vote, in the same transaction as the vote
+        # and always on the conversation's first day, so a vote changed on a
+        # later day moves between the columns of that one row instead of
+        # leaving a negative count on the day it changed.
         if previous != feedback.value:
             await self.usage_repo.record(
                 widget.id,
-                self._today(),
+                self._session_day(session),
                 helpful=(feedback.value == 1) - (previous == 1),
                 unhelpful=(feedback.value == -1) - (previous == -1),
             )
-        return updated
+        return VisitorView(widget).session(updated)
 
     # --- ask --------------------------------------------------------------
 
@@ -197,6 +207,9 @@ class WidgetAskService:
             raise
 
         try:
+            # The assistant as configured, MCP servers and capabilities
+            # included, less what a visitor cannot run (AssistantService,
+            # VISITOR_CAPABILITY_PURPOSES). Approval is never requested.
             response = await self.assistant_service.ask(
                 question=cleaned,
                 assistant_id=widget.target_id,
@@ -207,9 +220,6 @@ class WidgetAskService:
                 version=2,
                 num_chunks_override=self.settings.widget_retrieval_chunks,
                 prompt_addendum=WIDGET_STYLE_PROMPT,
-                # The assistant as configured: its MCP servers and capabilities
-                # serve visitors too. Approval is never requested for visitors.
-                allow_tools=True,
             )
         except BaseException:
             # No stream owns the reservation yet. Cleanup must also run on a
@@ -220,19 +230,17 @@ class WidgetAskService:
                 except Exception:
                     logger.exception("Widget budget release failed")
             raise
-        # Visitors never learn which model answers; the first chunk would
-        # otherwise carry the full model record.
-        response.completion_model = None  # type: ignore[assignment]
         answer = response.answer
         assert not isinstance(answer, str)
-        response.answer = self._settled(
+        visible = VisitorView(widget).response(response)
+        visible.answer = self._settled(
             answer.__aiter__(),
             widget=widget,
             session_id=response.session.id,
             question_id=response.question_id,
             reservation=reservation,
         )
-        return response
+        return visible
 
     async def _settled(
         self,
@@ -243,24 +251,12 @@ class WidgetAskService:
         question_id: UUID | None,
         reservation: BudgetReservation,
     ) -> AsyncIterator[Completion]:
+        view = VisitorView(widget)
         completed = False
         try:
             async for chunk in answer:
-                # Hidden sources never leave the server: the visitor gets
-                # neither citation targets nor document titles.
-                if not widget.show_sources:
-                    chunk.reference_chunks = None
-                # Hidden tool activity: the tools ran, but which ones stays
-                # internal. A tool event that only carried citations keeps
-                # them; one that carried nothing else is dropped.
-                if (
-                    not widget.show_tool_activity
-                    and chunk.response_type == ResponseType.TOOL_CALL
-                ):
-                    chunk.tool_calls_metadata = None
-                    if not chunk.mcp_tool_references:
-                        continue
-                yield chunk
+                for visible in view.events(chunk):
+                    yield visible
             completed = True
         finally:
             with CancelScope(shield=True):
@@ -330,13 +326,12 @@ class WidgetAskService:
         if row is None:
             raise RuntimeError("Widget answer usage is missing; reservation retained.")
         question_tokens, answer_tokens, prompt_tokens, completion_tokens = row
+        # The num_tokens_* columns add up every provider request of the turn,
+        # tool rounds included, which is what the provider bills. The context
+        # columns keep only the final request and serve headroom, not cost.
         return (
-            int(prompt_tokens if prompt_tokens is not None else question_tokens or 0),
-            int(
-                completion_tokens
-                if completion_tokens is not None
-                else answer_tokens or 0
-            ),
+            int(question_tokens if question_tokens is not None else prompt_tokens or 0),
+            int(answer_tokens if answer_tokens is not None else completion_tokens or 0),
         )
 
     async def _record_blocked(

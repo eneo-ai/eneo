@@ -10,17 +10,10 @@ describe("install snippets", () => {
     );
   });
 
-  it("falls back to v1 when the loader is not built and adds a fixed language", () => {
+  it("offers no snippet to paste when the loader is not built", () => {
     expect(
-      floatingSnippet({
-        origin: "https://eneo.kommun.se",
-        publicId: "wgt_x",
-        language: "en",
-        release: null
-      })
-    ).toBe(
-      '<script async src="https://eneo.kommun.se/widget/v1/eneo.js" data-widget-id="wgt_x" data-lang="en"></script>'
-    );
+      floatingSnippet({ origin: "https://eneo.kommun.se", publicId: "wgt_x", release: null })
+    ).toBeNull();
   });
 
   it("pins the exact version with integrity and crossorigin", () => {
@@ -32,19 +25,19 @@ describe("install snippets", () => {
     ).toBeNull();
   });
 
-  it("carries the saved launcher position in both snippets", () => {
+  it("leaves the language and position to the saved settings the loader reads live", () => {
+    // A snippet pasted once must follow later edits and template locks.
     const options = {
       origin: "https://eneo.kommun.se",
       publicId: "wgt_x",
-      position: "bottom-left" as const,
+      language: "en" as const,
+      position: "bottom-left",
       release
     };
-    expect(floatingSnippet(options)).toBe(
-      '<script async src="https://eneo.kommun.se/widget/v1/eneo.js" data-widget-id="wgt_x" data-position="bottom-left"></script>'
-    );
-    expect(pinnedSnippet(options)).toBe(
-      '<script async src="https://eneo.kommun.se/widget/1.4.2/eneo.js" integrity="sha384-abc" crossorigin="anonymous" data-widget-id="wgt_x" data-position="bottom-left"></script>'
-    );
+    for (const snippet of [floatingSnippet(options), pinnedSnippet(options)]) {
+      expect(snippet).not.toContain("data-lang");
+      expect(snippet).not.toContain("data-position");
+    }
   });
 
   it("escapes attribute values", () => {

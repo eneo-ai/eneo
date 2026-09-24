@@ -10,6 +10,9 @@
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
   import { blockerLabel } from "./blockers";
+  import { MAX_DAILY_TOKEN_BUDGET } from "./limits";
+  import { MAX_ALLOWED_ORIGINS, parseOrigins } from "./origins";
+  import { TextDraft } from "./textDraft.svelte";
   import type { WidgetAutosave } from "./widgetAutosave.svelte";
 
   type Props = {
@@ -53,13 +56,94 @@
     rangeErrors = rest;
     apply(value);
   }
-  const describedBy = (key: string, help: string) =>
-    rangeErrors[key] ? `${help} widget-${key}-error` : help;
-  const budgetMax = $derived(policy?.max_daily_token_budget ?? 100_000_000);
+  const blockers = $derived(widget.activation_blockers ?? []);
+  // What is wrong with a field: the value just typed, the value the server
+  // refused, or the saved value breaking the organisation's policy.
+  function problem(key: string, path: string, ...codes: string[]): string | undefined {
+    if (rangeErrors[key]) return rangeErrors[key];
+    if (autosave.refusals[path]) return autosave.refusals[path];
+    const code = codes.find((candidate) => blockers.includes(candidate));
+    return code ? blockerLabel(code) : undefined;
+  }
+  const budgetProblem = $derived(
+    problem("budget", "limits.daily_token_budget", "daily_token_budget_exceeds_policy")
+  );
+  const retentionProblem = $derived(
+    problem(
+      "retention",
+      "privacy.retention_days",
+      "retention_below_policy_minimum",
+      "retention_above_policy_maximum"
+    )
+  );
+  const protectionProblem = $derived(
+    problem("protection", "bot_protection", "bot_protection_none_not_allowed")
+  );
+  const describedBy = (key: string, help: string, error?: string) =>
+    rangeErrors[key] || error ? `${help} widget-${key}-error` : help;
+  const budgetMax = $derived(
+    Math.min(policy?.max_daily_token_budget ?? MAX_DAILY_TOKEN_BUDGET, MAX_DAILY_TOKEN_BUDGET)
+  );
 
-  // Local text so a trailing newline is not eaten while typing.
-  let originsText = $state(untrack(() => (autosave.widget.allowed_origins ?? []).join("\n")));
-  const originsInvalid = $derived((widget.allowed_origins ?? []).length === 0);
+  // The list is committed when the field is left, and only when every line
+  // is an origin the API accepts; the text stays as typed until then.
+  const origins = new TextDraft(
+    () => (autosave.widget.allowed_origins ?? []).join("\n"),
+    (text) => {
+      const parsed = parseOrigins(text);
+      return parsed.invalid.length === 0 && !parsed.tooMany ? parsed.origins.join("\n") : null;
+    }
+  );
+  const parsedOrigins = $derived(parseOrigins(origins.text));
+  // A live widget must keep serving: the API refuses an empty list for it.
+  const emptiedWhileActive = $derived(
+    widget.status === "active" &&
+      parsedOrigins.origins.length === 0 &&
+      parsedOrigins.invalid.length === 0
+  );
+  let originsTouched = $state(false);
+  const originsProblem = $derived.by(() => {
+    if (originsTouched && parsedOrigins.invalid.length > 0) {
+      return m.widget_admin_origins_invalid({ origins: parsedOrigins.invalid.join(", ") });
+    }
+    if (originsTouched && parsedOrigins.tooMany) {
+      return m.widget_admin_origins_too_many({ max: String(MAX_ALLOWED_ORIGINS) });
+    }
+    if (originsTouched && emptiedWhileActive) return blockerLabel("allowed_origins_empty");
+    if (autosave.refusals["allowed_origins"]) return autosave.refusals["allowed_origins"];
+    if ((widget.allowed_origins ?? []).length === 0) return blockerLabel("allowed_origins_empty");
+    return undefined;
+  });
+  // Lines that cannot be sent yet hold back the valid ones with them.
+  $effect(() => {
+    const held =
+      (parsedOrigins.invalid.length > 0 || parsedOrigins.tooMany || emptiedWhileActive) &&
+      origins.text.trim() !== (widget.allowed_origins ?? []).join("\n");
+    autosave.markDraft("allowed_origins", held);
+    return () => autosave.markDraft("allowed_origins", false);
+  });
+  $effect(() => {
+    autosave.markDraft("rule-numbers", Object.keys(rangeErrors).length > 0);
+    return () => autosave.markDraft("rule-numbers", false);
+  });
+
+  // An empty list held back only because the widget was live is sent once it
+  // no longer is, not left in the field until it is edited again.
+  let emptiedHeld = $state(false);
+  $effect(() => {
+    if (!emptiedHeld || widget.status === "active" || widget.status === "archived") return;
+    untrack(commitOrigins);
+  });
+
+  function commitOrigins() {
+    originsTouched = true;
+    emptiedHeld = emptiedWhileActive;
+    if (parsedOrigins.invalid.length > 0 || parsedOrigins.tooMany || emptiedWhileActive) return;
+    const saved = widget.allowed_origins ?? [];
+    if (parsedOrigins.origins.join("\n") !== saved.join("\n")) {
+      autosave.patch({ allowed_origins: parsedOrigins.origins });
+    }
+  }
 
   const protectionLabels = $derived({
     altcha: m.widget_admin_bot_protection_altcha(),
@@ -71,37 +155,31 @@
 <div class="grid gap-6">
   <Card.Root>
     <Card.Header>
-      <Card.Title>{m.widget_admin_placement()}</Card.Title>
+      <Card.Title><h2>{m.widget_admin_placement()}</h2></Card.Title>
       <Card.Description>{m.widget_admin_allowed_origins_description()}</Card.Description>
     </Card.Header>
     <Card.Content>
-      <Field.Field data-invalid={originsInvalid || undefined}>
+      <Field.Field data-invalid={!!originsProblem || undefined}>
         <Field.Label for="widget-origins">{m.widget_admin_allowed_origins()}</Field.Label>
         <Textarea
           id="widget-origins"
           rows={3}
           class="font-mono"
           placeholder={m.widget_admin_allowed_origins_placeholder()}
-          aria-invalid={originsInvalid}
-          aria-describedby={originsInvalid
+          aria-invalid={!!originsProblem}
+          aria-describedby={originsProblem
             ? "widget-origins-help widget-origins-error"
             : "widget-origins-help"}
-          bind:value={originsText}
-          onchange={() =>
-            autosave.patch({
-              allowed_origins: originsText
-                .split("\n")
-                .map((line) => line.trim())
-                .filter(Boolean)
-            })}
+          bind:value={origins.text}
+          onfocus={origins.focus}
+          onblur={origins.blur}
+          onchange={commitOrigins}
         />
         <Field.Description id="widget-origins-help"
           >{m.widget_admin_allowed_origins_help()}</Field.Description
         >
-        {#if originsInvalid}
-          <Field.Error id="widget-origins-error"
-            >{blockerLabel("allowed_origins_empty")}</Field.Error
-          >
+        {#if originsProblem}
+          <Field.Error id="widget-origins-error">{originsProblem}</Field.Error>
         {/if}
       </Field.Field>
     </Card.Content>
@@ -109,12 +187,12 @@
 
   <Card.Root>
     <Card.Header>
-      <Card.Title>{m.widget_admin_limits()}</Card.Title>
+      <Card.Title><h2>{m.widget_admin_limits()}</h2></Card.Title>
       <Card.Description>{m.widget_admin_limits_description()}</Card.Description>
     </Card.Header>
     <Card.Content>
       <Field.Group class="grid gap-6 sm:grid-cols-2">
-        <Field.Field data-invalid={rangeErrors.budget ? true : undefined}>
+        <Field.Field data-invalid={budgetProblem ? true : undefined}>
           <Field.Label for="widget-budget">{m.widget_admin_daily_budget()}</Field.Label>
           <Input
             id="widget-budget"
@@ -123,15 +201,15 @@
             step={1000}
             max={budgetMax}
             value={widget.limits.daily_token_budget}
-            aria-invalid={!!rangeErrors.budget}
-            aria-describedby={describedBy("budget", "widget-budget-help")}
+            aria-invalid={!!budgetProblem}
+            aria-describedby={describedBy("budget", "widget-budget-help", budgetProblem)}
             onchange={(event) =>
               commitNumber(event, "budget", 1000, budgetMax, (value) =>
                 limits({ daily_token_budget: value })
               )}
           />
-          {#if rangeErrors.budget}
-            <Field.Error id="widget-budget-error">{rangeErrors.budget}</Field.Error>
+          {#if budgetProblem}
+            <Field.Error id="widget-budget-error">{budgetProblem}</Field.Error>
           {/if}
           <Field.Description id="widget-budget-help">
             {policy
@@ -216,12 +294,12 @@
 
   <Card.Root>
     <Card.Header>
-      <Card.Title>{m.widget_admin_privacy()}</Card.Title>
+      <Card.Title><h2>{m.widget_admin_privacy()}</h2></Card.Title>
       <Card.Description>{m.widget_admin_privacy_description()}</Card.Description>
     </Card.Header>
     <Card.Content>
       <Field.Group class="grid gap-6">
-        <Field.Field data-invalid={rangeErrors.retention ? true : undefined}>
+        <Field.Field data-invalid={retentionProblem ? true : undefined}>
           <Field.Label for="widget-retention">{m.widget_admin_retention()}</Field.Label>
           <Input
             id="widget-retention"
@@ -230,8 +308,8 @@
             min={policy?.min_retention_days ?? 0}
             max={policy?.max_retention_days ?? 3650}
             value={widget.privacy.retention_days}
-            aria-invalid={!!rangeErrors.retention}
-            aria-describedby={describedBy("retention", "widget-retention-help")}
+            aria-invalid={!!retentionProblem}
+            aria-describedby={describedBy("retention", "widget-retention-help", retentionProblem)}
             onchange={(event) =>
               commitNumber(
                 event,
@@ -241,8 +319,8 @@
                 (value) => privacy({ retention_days: value })
               )}
           />
-          {#if rangeErrors.retention}
-            <Field.Error id="widget-retention-error">{rangeErrors.retention}</Field.Error>
+          {#if retentionProblem}
+            <Field.Error id="widget-retention-error">{retentionProblem}</Field.Error>
           {/if}
           <Field.Description id="widget-retention-help">
             {policy
@@ -258,11 +336,13 @@
             <Field.Label for="widget-feedback-text"
               >{m.widget_admin_store_feedback_text()}</Field.Label
             >
-            <Field.Description>{m.widget_admin_store_feedback_text_description()}</Field.Description
+            <Field.Description id="widget-feedback-text-help"
+              >{m.widget_admin_store_feedback_text_description()}</Field.Description
             >
           </Field.Content>
           <Switch
             id="widget-feedback-text"
+            aria-describedby="widget-feedback-text-help"
             checked={widget.privacy.store_feedback_text ?? false}
             onCheckedChange={(checked) => privacy({ store_feedback_text: checked })}
           />
@@ -273,11 +353,11 @@
 
   <Card.Root>
     <Card.Header>
-      <Card.Title>{m.widget_admin_protection()}</Card.Title>
+      <Card.Title><h2>{m.widget_admin_protection()}</h2></Card.Title>
       <Card.Description>{m.widget_admin_bot_protection_description()}</Card.Description>
     </Card.Header>
     <Card.Content>
-      <Field.Field>
+      <Field.Field data-invalid={protectionProblem ? true : undefined}>
         <Field.Label for="widget-protection">{m.widget_admin_bot_protection()}</Field.Label>
         <Select.Root
           type="single"
@@ -285,7 +365,17 @@
           onValueChange={(value) =>
             autosave.patch({ bot_protection: value as NonNullable<Widget["bot_protection"]> })}
         >
-          <Select.Trigger id="widget-protection" class="w-full sm:max-w-md">
+          <Select.Trigger
+            id="widget-protection"
+            class="w-full sm:max-w-md"
+            aria-invalid={!!protectionProblem}
+            aria-describedby={[
+              !noneAllowed && !protectionProblem && "widget-protection-help",
+              protectionProblem && "widget-protection-error"
+            ]
+              .filter(Boolean)
+              .join(" ") || undefined}
+          >
             <span data-slot="select-value"
               >{protectionLabels[widget.bot_protection ?? "altcha"]}</span
             >
@@ -299,8 +389,13 @@
             >
           </Select.Content>
         </Select.Root>
-        {#if !noneAllowed}
-          <Field.Description>{m.widget_admin_blocker_bot_protection()}</Field.Description>
+        {#if !noneAllowed && !protectionProblem}
+          <Field.Description id="widget-protection-help"
+            >{m.widget_admin_blocker_bot_protection()}</Field.Description
+          >
+        {/if}
+        {#if protectionProblem}
+          <Field.Error id="widget-protection-error">{protectionProblem}</Field.Error>
         {/if}
       </Field.Field>
     </Card.Content>

@@ -8,6 +8,7 @@ import pytest
 from eneo.widgets.application.visitor_token_service import (
     TOKEN_USE,
     VisitorTokenService,
+    visitor_token_key,
     widget_audience,
 )
 from eneo.widgets.domain.exceptions import (
@@ -22,7 +23,6 @@ SECRET = "unit-test-secret-with-at-least-thirty-two-bytes"
 def _settings(ttl: int = 900) -> SimpleNamespace:
     return SimpleNamespace(
         jwt_secret=SECRET,
-        jwt_algorithm="HS256",
         widget_visitor_token_ttl_seconds=ttl,
         widget_visitor_token_grace_seconds=3600,
         widget_preview_token_ttl_seconds=3600,
@@ -36,7 +36,7 @@ def _widget(**overrides) -> Widget:
     return widget.model_copy(update={"id": uuid4(), **overrides})
 
 
-def _encode(widget: Widget, **overrides) -> str:
+def _encode(widget: Widget, *, key: str | None = None, **overrides) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "token_use": TOKEN_USE,
@@ -50,7 +50,7 @@ def _encode(widget: Widget, **overrides) -> str:
         "jti": "x",
     }
     payload.update(overrides)
-    return jwt.encode(payload, SECRET, algorithm="HS256")
+    return jwt.encode(payload, key or visitor_token_key(_settings()), algorithm="HS256")
 
 
 def test_mint_and_verify_round_trip():
@@ -146,3 +146,20 @@ def test_tampered_and_foreign_tokens_are_invalid():
     )
     with pytest.raises(VisitorTokenInvalidError):
         service.verify(foreign, widget)
+
+
+def test_visitor_tokens_are_not_signed_with_the_user_session_secret():
+    widget = _widget()
+    service = VisitorTokenService(settings=_settings())
+    token, _ = service.mint(widget, uuid4())
+
+    with pytest.raises(jwt.InvalidSignatureError):
+        jwt.decode(
+            token,
+            key=SECRET,
+            audience=widget_audience(widget.id),
+            algorithms=["HS256"],
+        )
+    # Nor is a token signed with the user-session secret a visitor token.
+    with pytest.raises(VisitorTokenInvalidError):
+        service.verify(_encode(widget, key=SECRET), widget)

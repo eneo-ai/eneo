@@ -81,7 +81,10 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9051: () => m.eneo_error_9051(), // SKILL_STILL_ATTACHED
   9053: () => m.eneo_error_9053(), // SKILL_NOT_PUBLISHED_FOR_BINDING
   9054: () => m.eneo_error_9054(), // SKILL_BLOCKED_FOR_BINDING
-  9062: () => m.eneo_error_9062() // SKILL_REMOVAL_BUSY
+  9062: () => m.eneo_error_9062(), // SKILL_REMOVAL_BUSY
+
+  // --- Widgets ---
+  9063: () => m.eneo_error_9063() // ASSISTANT_PUBLISHED_AS_WIDGET
 };
 
 /**

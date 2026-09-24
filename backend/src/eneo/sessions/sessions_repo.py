@@ -158,10 +158,21 @@ class SessionRepository:
     async def update(self, session: SessionUpdate) -> SessionInDB | None:
         return await self._hydrate_optional(await self.delegate.update(session))
 
-    async def add_feedback(self, feedback: SessionFeedback, id: UUID) -> SessionInDB:
+    async def add_feedback(
+        self,
+        feedback: SessionFeedback,
+        id: UUID,
+        *,
+        keep_existing_text: bool = False,
+    ) -> SessionInDB:
+        """Store a vote. ``keep_existing_text`` leaves the stored comment in
+        place when the feedback carries none, instead of clearing it."""
+        values: dict[str, object] = {"feedback_value": feedback.value}
+        if feedback.text is not None or not keep_existing_text:
+            values["feedback_text"] = feedback.text
         stmt = (
             sa.Update(Sessions)
-            .values(feedback_value=feedback.value, feedback_text=feedback.text)
+            .values(values)
             .where(Sessions.id == id)
             .returning(Sessions)
         )

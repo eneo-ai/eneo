@@ -1,6 +1,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { IconSendArrow } from "@eneo/icons/send-arrow";
+  import { tick } from "svelte";
 
   type Props = {
     placeholder: string;
@@ -31,6 +32,14 @@
     textarea?.focus();
   }
 
+  /** Put back a question that never reached the server, unless something new was typed. */
+  export async function restore(question: string) {
+    if (value.trim()) return;
+    value = question;
+    await tick();
+    resize();
+  }
+
   const canSend = $derived(!disabled && !busy && value.trim().length > 0);
 
   function submit() {
@@ -39,6 +48,9 @@
     value = "";
     resize();
     onSend(question);
+    // The send arrow disables itself once the text is gone; a keyboard user
+    // who pressed it would otherwise be left on the page body.
+    textarea?.focus();
   }
 
   function resize() {
@@ -67,7 +79,7 @@
         <li>
           <button
             type="button"
-            class="widget-chip bg-primary text-primary hover:bg-secondary focus-visible:ring-default border px-3 py-1.5 text-sm focus-visible:ring-2 focus-visible:outline-none"
+            class="widget-chip bg-primary text-primary hover:bg-secondary border px-3 py-1.5 text-sm"
             disabled={disabled || busy}
             onclick={() => onSend(suggestion)}
           >
@@ -94,12 +106,12 @@
       maxlength={maxLength}
       {placeholder}
       {disabled}
-      class="text-primary placeholder:text-secondary max-h-40 min-h-[2.25rem] flex-1 resize-none bg-transparent py-1 text-base leading-6 focus:outline-none disabled:opacity-60"
+      class="text-primary placeholder:text-secondary max-h-40 min-h-[2.25rem] flex-1 resize-none bg-transparent py-1 text-base leading-6 disabled:opacity-60"
       oninput={resize}
       onkeydown={onKeydown}></textarea>
     <button
       type="submit"
-      class="widget-send focus-visible:ring-default flex h-9 w-9 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+      class="widget-send flex h-9 w-9 shrink-0 items-center justify-center rounded-full disabled:opacity-50"
       aria-label={m.widget_send()}
       disabled={!canSend}
     >
@@ -115,6 +127,14 @@
   }
   .widget-composer {
     border-radius: calc(var(--widget-radius) + 4px);
+  }
+  /* The field is the whole box, so the box carries the focus indicator. */
+  .widget-composer:has(textarea:focus-visible) {
+    outline: 2px solid var(--text-primary);
+    outline-offset: 2px;
+  }
+  .widget-composer textarea:focus-visible {
+    outline: none;
   }
   .widget-send {
     background: var(--widget-accent);

@@ -41,7 +41,9 @@ remain possible without introducing a release-notes package.
 - **Linking an app feature to its documentation:** use
   `https://docs.eneo.ai/v2.2/guides/<page>` for the 2.2 line. That address remains
   the same when 2.3 becomes stable. `/` follows the latest stable version;
-  `/dev/` deliberately follows unreleased work.
+  `/dev/` deliberately follows unreleased work. The web app's `docsUrl`
+  (`apps/web/src/lib/core/docs.ts`) builds these links itself: the release line
+  of the newest release in `releases.json` once it is dated, `/dev/` before.
 
 ## Before opening the PR
 

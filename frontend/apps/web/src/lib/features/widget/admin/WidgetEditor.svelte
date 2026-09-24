@@ -27,6 +27,7 @@
   import { urlTab } from "./tabState.svelte";
   import type { LoaderRelease } from "./snippet";
   import { isGroupLocked, lockedTextFields } from "./templateLocks";
+  import { collapseWhitespace, TextDraft } from "./textDraft.svelte";
   import TemplatePicker from "./TemplatePicker.svelte";
   import { WidgetAutosave } from "./widgetAutosave.svelte";
   import WidgetLiveTest from "./WidgetLiveTest.svelte";
@@ -46,6 +47,8 @@
     policy: WidgetPolicy | null;
     release: LoaderRelease | null;
     templates?: WidgetTemplate[];
+    /** An archived widget cannot be edited, so the page takes the editor away. */
+    onArchived?: () => void;
   };
 
   let {
@@ -55,7 +58,8 @@
     isAdmin,
     policy,
     release,
-    templates: allTemplates = []
+    templates: allTemplates = [],
+    onArchived
   }: Props = $props();
   // Widgets follow a template's published release, so drafts are not offered.
   const templates = $derived(allTemplates.filter((t) => t.published_at != null));
@@ -75,16 +79,33 @@
   // Leaving saves what is pending. When saving has already failed the edits
   // would be lost for good, so the editor is asked before they are discarded.
   beforeNavigate((navigation) => {
-    if (autosave.status === "error" || autosave.status === "conflict") {
-      if (autosave.hasPending && !confirm(m.widget_admin_unsaved_leave_confirm())) {
-        navigation.cancel();
-      }
+    if (autosave.stranded && !confirm(m.widget_admin_unsaved_leave_confirm())) {
+      navigation.cancel();
       return;
     }
     void autosave.flush();
   });
 
   const current = $derived(autosave.widget);
+
+  // A blank name is never sent: the API would refuse it and hold every
+  // later edit back with it.
+  const name = new TextDraft(() => autosave.widget.name);
+  const nameProblem = $derived(
+    !collapseWhitespace(name.text) ? m.widget_admin_name_required() : autosave.refusals["name"]
+  );
+  const refusalsIn = (group: string) =>
+    Object.fromEntries(
+      Object.entries(autosave.refusals)
+        .filter(([path]) => path.startsWith(`${group}.`))
+        .map(([path, message]) => [path.slice(group.length + 1), message])
+    );
+  const textErrors = $derived(refusalsIn("texts"));
+  // The theme fields check what they send, so a refusal here is rare and
+  // shown once for the whole appearance.
+  const appearanceErrors = $derived([
+    ...new Set([autosave.refusals["theme"], ...Object.values(refusalsIn("theme"))].filter(Boolean))
+  ]);
   const tab = urlTab(["content", "appearance", "rules", "publish"] as const, "content");
 
   // Pending edits are saved first so pause and archive never race the
@@ -121,15 +142,23 @@
     (link?.locked_groups ?? []).map((group) => groupLabels[group] ?? group).join(", ")
   );
 
+  // What linking copies from the template's release onto the widget.
+  const RELEASE_GROUPS = ["texts", "theme", "language"];
+
   async function withTemplate(
     action: () => Promise<Widget>,
-    failure: () => string
+    failure: () => string,
+    replaced: string[]
   ): Promise<boolean> {
     applying = true;
     try {
       await autosave.flush();
       if (autosave.hasPending) return false;
-      autosave.replace(await action());
+      const updated = await action();
+      // Refused edits of the groups the release replaced are moot; any other
+      // refused edit stays on screen, held with its reason.
+      autosave.discardRefused(replaced);
+      autosave.replace(updated);
       return true;
     } catch (error) {
       toastWidgetError(error, failure());
@@ -147,7 +176,8 @@
           templateId,
           revision: current.revision
         }),
-      () => m.widget_admin_template_could_not_apply()
+      () => m.widget_admin_template_could_not_apply(),
+      RELEASE_GROUPS
     );
   }
 
@@ -167,7 +197,8 @@
   async function detachTemplate() {
     const done = await withTemplate(
       () => eneo.widgets.detachTemplate({ widget: { id: widget.id }, revision: current.revision }),
-      () => m.widget_admin_template_could_not_detach()
+      () => m.widget_admin_template_could_not_detach(),
+      []
     );
     if (done) confirmDetach = false;
   }
@@ -179,16 +210,21 @@
   });
 
   const blockers = $derived(current.activation_blockers ?? []);
-  // What an active widget exposes besides knowledge: the assistant's general
-  // MCP servers and its enabled capabilities, named as the editor sees them.
-  const visitorTools = $derived([
-    ...(assistant.mcp_servers ?? [])
-      .filter((server) => server.purpose === "general" && server.is_enabled)
-      .map((server) => server.name),
-    ...(assistant.enabled_capabilities ?? []).map(
-      (purpose) => getCapability(purpose)?.label() ?? purpose
+  // What an active widget exposes besides knowledge, as the backend serves
+  // visitors: the assistant's general MCP servers as configured, and web
+  // search only through an external provider (VISITOR_CAPABILITY_PURPOSES in
+  // assistant_service.py). Image generation never.
+  const VISITOR_CAPABILITIES: ReadonlySet<string> = new Set(["web_search"]);
+  const visitorServers = $derived(
+    (assistant.mcp_servers ?? []).filter(
+      (server) => server.purpose === "general" && server.is_enabled
     )
-  ]);
+  );
+  const visitorCapabilities = $derived(
+    (assistant.enabled_capabilities ?? [])
+      .filter((purpose) => VISITOR_CAPABILITIES.has(purpose))
+      .map((purpose) => getCapability(purpose)?.label() ?? purpose)
+  );
   const showPreview = $derived(tab.value === "content" || tab.value === "appearance");
 </script>
 
@@ -205,7 +241,10 @@
     onReload={async () => autosave.reload(await eneo.widgets.get({ id: widget.id }))}
     onActivate={lifecycle(eneo.widgets.activate)}
     onPause={lifecycle(eneo.widgets.pause)}
-    onArchive={lifecycle(eneo.widgets.archive)}
+    onArchive={async () => {
+      await lifecycle(eneo.widgets.archive)();
+      onArchived?.();
+    }}
   />
 
   <Tabs.Root bind:value={tab.value} class="gap-6">
@@ -228,8 +267,14 @@
       <Tabs.Trigger value="publish" class="h-9 px-3">
         <Rocket aria-hidden="true" />
         {m.widget_admin_tab_publish()}
-        {#if blockers.length > 0 && current.status !== "active"}
-          <Badge variant="destructive" class="ml-1">{blockers.length}</Badge>
+        {#if blockers.length > 0}
+          <Badge variant="destructive" class="ml-1"
+            ><span aria-hidden="true">{blockers.length}</span><span class="sr-only"
+              >{blockers.length === 1
+                ? m.widget_admin_tab_issues_one()
+                : m.widget_admin_tab_issues({ count: String(blockers.length) })}</span
+            ></Badge
+          >
         {/if}
       </Tabs.Trigger>
     </Tabs.List>
@@ -239,23 +284,35 @@
         <Tabs.Content value="content" class="flex flex-col gap-6">
           <Card.Root>
             <Card.Header>
-              <Card.Title>{m.general()}</Card.Title>
+              <Card.Title><h2>{m.general()}</h2></Card.Title>
               <Card.Description>{m.widget_admin_content_description()}</Card.Description>
             </Card.Header>
             <Card.Content>
               <Field.Group class="grid gap-6 sm:grid-cols-2">
-                <Field.Field>
+                <Field.Field data-invalid={nameProblem ? true : undefined}>
                   <Field.Label for="widget-name">{m.name()}</Field.Label>
                   <Input
                     id="widget-name"
                     maxlength={100}
-                    value={current.name}
-                    aria-describedby="widget-name-help"
-                    oninput={(event) => autosave.patch({ name: event.currentTarget.value })}
+                    required
+                    value={name.text}
+                    aria-invalid={!!nameProblem}
+                    aria-describedby={nameProblem
+                      ? "widget-name-help widget-name-error"
+                      : "widget-name-help"}
+                    onfocus={name.focus}
+                    onblur={name.blur}
+                    oninput={(event) => {
+                      name.text = event.currentTarget.value;
+                      if (collapseWhitespace(name.text)) autosave.patch({ name: name.text });
+                    }}
                   />
                   <Field.Description id="widget-name-help"
                     >{m.widget_admin_name_description()}</Field.Description
                   >
+                  {#if nameProblem}
+                    <Field.Error id="widget-name-error">{nameProblem}</Field.Error>
+                  {/if}
                 </Field.Field>
                 <Field.Field>
                   <Field.Label for="widget-language">{m.widget_admin_language()}</Field.Label>
@@ -295,12 +352,13 @@
                     <Field.Label for="widget-show-sources"
                       >{m.widget_admin_show_sources()}</Field.Label
                     >
-                    <Field.Description
+                    <Field.Description id="widget-show-sources-help"
                       >{m.widget_admin_show_sources_description()}</Field.Description
                     >
                   </Field.Content>
                   <Switch
                     id="widget-show-sources"
+                    aria-describedby="widget-show-sources-help"
                     checked={current.show_sources ?? true}
                     onCheckedChange={(checked) => autosave.patch({ show_sources: checked })}
                   />
@@ -310,12 +368,13 @@
                     <Field.Label for="widget-show-tool-activity"
                       >{m.widget_admin_show_tool_activity()}</Field.Label
                     >
-                    <Field.Description
+                    <Field.Description id="widget-show-tool-activity-help"
                       >{m.widget_admin_show_tool_activity_description()}</Field.Description
                     >
                   </Field.Content>
                   <Switch
                     id="widget-show-tool-activity"
+                    aria-describedby="widget-show-tool-activity-help"
                     checked={current.show_tool_activity ?? true}
                     onCheckedChange={(checked) => autosave.patch({ show_tool_activity: checked })}
                   />
@@ -326,14 +385,23 @@
 
           <Card.Root>
             <Card.Header>
-              <Card.Title>{m.widget_admin_texts()}</Card.Title>
+              <Card.Title><h2>{m.widget_admin_texts()}</h2></Card.Title>
               <Card.Description>{m.widget_admin_texts_description()}</Card.Description>
             </Card.Header>
-            <Card.Content>
+            <Card.Content class="flex flex-col gap-4">
+              {#if autosave.refusals["texts"]}
+                <Field.Error id="widget-texts-error">{autosave.refusals["texts"]}</Field.Error>
+              {/if}
               <WidgetTextsFields
                 texts={current.texts}
                 lockedFields={lockedTexts}
                 {lockHint}
+                errors={textErrors}
+                subtitleRequired={current.status === "active"
+                  ? m.widget_admin_blocker_subtitle_empty()
+                  : undefined}
+                onQuestionsHeld={(held) => autosave.markDraft("texts.suggested_questions", held)}
+                groupErrorId={autosave.refusals["texts"] ? "widget-texts-error" : undefined}
                 onChange={(change) => autosave.patch({ texts: { ...current.texts, ...change } })}
               />
             </Card.Content>
@@ -344,14 +412,16 @@
           {#if link}
             <Card.Root>
               <Card.Header>
-                <Card.Title>{m.widget_admin_template_linked_title({ name: link.name })}</Card.Title>
+                <Card.Title
+                  ><h2>{m.widget_admin_template_linked_title({ name: link.name })}</h2></Card.Title
+                >
                 <Card.Description>{m.widget_admin_template_linked_description()}</Card.Description>
               </Card.Header>
               <Card.Content class="flex flex-col gap-4">
                 <p class="text-sm">
                   {lockedParts
                     ? m.widget_admin_template_locked_parts({ parts: lockedParts })
-                    : m.widget_admin_template_linked_none()}
+                    : m.widget_admin_template_locks_nothing()}
                 </p>
                 <div class="flex flex-wrap items-center gap-2">
                   {#if isAdmin}
@@ -380,7 +450,7 @@
           {:else if templates.length > 0 && current.status !== "archived"}
             <Card.Root>
               <Card.Header>
-                <Card.Title>{m.widget_admin_template_pick_title()}</Card.Title>
+                <Card.Title><h2>{m.widget_admin_template_pick_title()}</h2></Card.Title>
                 <Card.Description>{m.widget_admin_template_apply_description()}</Card.Description>
               </Card.Header>
               <Card.Content class="flex flex-col gap-4">
@@ -405,14 +475,22 @@
 
           <Card.Root>
             <Card.Header>
-              <Card.Title>{m.widget_admin_appearance()}</Card.Title>
+              <Card.Title><h2>{m.widget_admin_appearance()}</h2></Card.Title>
               <Card.Description>{m.widget_admin_appearance_description()}</Card.Description>
             </Card.Header>
-            <Card.Content>
+            <Card.Content class="flex flex-col gap-4">
+              {#if appearanceErrors.length > 0}
+                <div id="widget-appearance-error" class="flex flex-col gap-1">
+                  {#each appearanceErrors as message (message)}
+                    <Field.Error>{message}</Field.Error>
+                  {/each}
+                </div>
+              {/if}
               <WidgetThemeFields
                 theme={current.theme}
                 locked={appearanceLocked}
                 {lockHint}
+                errorId={appearanceErrors.length > 0 ? "widget-appearance-error" : undefined}
                 onChange={(change) => autosave.patch({ theme: { ...current.theme, ...change } })}
               />
             </Card.Content>
@@ -426,7 +504,7 @@
         <Tabs.Content value="publish" class="flex flex-col gap-6">
           <Card.Root>
             <Card.Header>
-              <Card.Title>{m.widget_admin_publish_checklist()}</Card.Title>
+              <Card.Title><h2>{m.widget_admin_publish_checklist()}</h2></Card.Title>
               <Card.Description>
                 {assistant.published
                   ? m.widget_admin_publish_checklist_description()
@@ -454,19 +532,23 @@
                 <p class="text-secondary text-sm">{m.widget_admin_visitor_access_description()}</p>
                 <ul class="mt-1 list-disc pl-5 text-sm">
                   <li>{m.widget_admin_visitor_access_knowledge()}</li>
-                  {#each visitorTools as tool (tool)}
-                    <li>{tool}</li>
+                  {#each visitorServers as server (server.id)}
+                    <li>{server.name}</li>
                   {/each}
-                  {#if visitorTools.length > 0 && !(current.show_tool_activity ?? true)}
+                  {#each visitorCapabilities as capability (capability)}
+                    <li>{m.widget_admin_visitor_access_capability({ name: capability })}</li>
+                  {/each}
+                  {#if visitorServers.length + visitorCapabilities.length > 0 && !(current.show_tool_activity ?? true)}
                     <li class="text-secondary">{m.widget_admin_visitor_access_hidden()}</li>
                   {/if}
                 </ul>
+                <p class="text-secondary text-sm">{m.widget_admin_visitor_access_never()}</p>
               </section>
             </Card.Content>
           </Card.Root>
           <WidgetSnippet widget={current} {release} origin={page.url.origin} />
           <WidgetLiveTest widget={current} {eneo} />
-          <WidgetUsage widget={current} {eneo} />
+          <WidgetUsage widget={current} {eneo} visible={tab.value === "publish"} />
         </Tabs.Content>
       </div>
 

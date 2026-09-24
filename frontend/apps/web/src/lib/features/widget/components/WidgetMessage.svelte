@@ -131,7 +131,7 @@
         <section aria-label={m.widget_references()} class="border-default mt-1 border-t pt-2">
           <button
             type="button"
-            class="text-secondary hover:text-primary focus-visible:ring-accent-default flex items-center gap-1.5 rounded-md text-sm focus-visible:ring-2 focus-visible:outline-none"
+            class="text-secondary hover:text-primary flex items-center gap-1.5 rounded-md text-sm"
             aria-expanded={expanded}
             aria-controls={listId}
             onclick={() => (expanded = !expanded)}
@@ -152,7 +152,7 @@
                 <li
                   id={anchorFor(sourceIndex)}
                   tabindex="-1"
-                  class="border-default focus-visible:ring-accent-default flex items-start gap-2.5 rounded-md border px-2.5 py-2 focus-visible:ring-2 focus-visible:outline-none"
+                  class="border-default flex items-start gap-2.5 rounded-md border px-2.5 py-2"
                 >
                   <span
                     class="border-default bg-secondary min-w-6 rounded-md border text-center font-mono text-xs leading-6 tabular-nums"
@@ -181,28 +181,32 @@
                         <span class="sr-only">{sourceIndex + 1}. </span>
                         <span class="min-w-0 break-words">{source.title}</span>
                       </span>
-                      <span class="text-secondary text-xs">{m.widget_source_document()}</span>
-                      <button
-                        type="button"
-                        class="text-accent-default focus-visible:ring-accent-default mt-1 inline-flex w-fit items-center gap-1 rounded-md text-xs underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                        aria-label={m.widget_copy_reference_for({ title: source.title })}
-                        onclick={() => copyReference(source)}
-                      >
-                        {#if copiedId === source.id}
-                          <Check class="size-3.5" aria-hidden="true" />
-                          {m.widget_reference_copied()}
-                        {:else}
-                          <Copy class="size-3.5" aria-hidden="true" />
-                          {m.widget_copy_reference()}
+                      {#if !source.document}
+                        <span class="text-secondary text-xs">{m.widget_source_tool()}</span>
+                      {:else}
+                        <span class="text-secondary text-xs">{m.widget_source_document()}</span>
+                        <button
+                          type="button"
+                          class="text-accent-default mt-1 inline-flex w-fit items-center gap-1 rounded-md text-xs underline-offset-2 hover:underline"
+                          aria-label={m.widget_copy_reference_for({ title: source.title })}
+                          onclick={() => copyReference(source)}
+                        >
+                          {#if copiedId === source.id}
+                            <Check class="size-3.5" aria-hidden="true" />
+                            {m.widget_reference_copied()}
+                          {:else}
+                            <Copy class="size-3.5" aria-hidden="true" />
+                            {m.widget_copy_reference()}
+                          {/if}
+                        </button>
+                        {#if copyFailedId === source.id}
+                          <p class="text-secondary text-xs">{m.widget_reference_copy_failed()}</p>
+                          <p class="text-primary text-xs break-all select-all">
+                            {sourceReferenceText(source, appOrigin())}
+                          </p>
                         {/if}
-                      </button>
-                      {#if copyFailedId === source.id}
-                        <p class="text-secondary text-xs">{m.widget_reference_copy_failed()}</p>
-                        <p class="text-primary text-xs break-all select-all">
-                          {sourceReferenceText(source, appOrigin())}
-                        </p>
+                        <p class="text-secondary text-xs">{m.widget_source_request_hint()}</p>
                       {/if}
-                      <p class="text-secondary text-xs">{m.widget_source_request_hint()}</p>
                     {/if}
                   </div>
                 </li>

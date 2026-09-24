@@ -18,9 +18,18 @@
     /** The whole appearance is governed by a template; `lockHint` says so. */
     locked?: boolean;
     lockHint?: string;
+    /** Id of an error about the whole appearance, which every control points to. */
+    errorId?: string;
   };
 
-  let { theme, onChange, idPrefix = "widget", locked = false, lockHint = "" }: Props = $props();
+  let {
+    theme,
+    onChange,
+    idPrefix = "widget",
+    locked = false,
+    lockHint = "",
+    errorId
+  }: Props = $props();
 
   const id = (name: string) => `${idPrefix}-${name}`;
 
@@ -47,6 +56,7 @@
       lastSavedLogo = saved;
       logoDraft = saved;
       logoInvalid = false;
+      logoBroken = false;
     }
   });
 
@@ -76,14 +86,20 @@
     if (!checked && hasDarkColors) onChange({ primary_color_dark: null, header_color_dark: null });
   }
 
-  function number(event: Event, apply: (value: number) => void) {
-    const value = Number((event.currentTarget as HTMLInputElement).value);
-    if (Number.isFinite(value)) apply(value);
+  // The API stores the radius as a whole number of pixels; a fraction stays
+  // in the field with an error instead of failing the save.
+  let radiusInvalid = $state(false);
+  function radius(event: Event) {
+    const raw = (event.currentTarget as HTMLInputElement).value;
+    const value = Number(raw);
+    radiusInvalid = raw !== "" && !Number.isInteger(value);
+    if (raw !== "" && Number.isInteger(value))
+      onChange({ radius: Math.min(24, Math.max(0, value)) });
   }
 
-  // The lock hint must reach every control; a describedby on the group's
-  // div is not exposed to assistive technology.
-  const lockRef = $derived(locked ? id("lock-hint") : "");
+  // The lock hint and an appearance-wide error must reach every control; a
+  // describedby on the group's div is not exposed to assistive technology.
+  const lockRef = $derived([locked && id("lock-hint"), errorId].filter(Boolean).join(" "));
   const describedBy = (help: string) => (lockRef ? `${id(help)} ${lockRef}` : id(help));
 </script>
 
@@ -130,7 +146,7 @@
           <Switch
             id={id("dark-mode-custom")}
             checked={customDark}
-            aria-describedby={id("dark-mode-help")}
+            aria-describedby={[id("dark-mode-help"), errorId].filter(Boolean).join(" ")}
             onCheckedChange={toggleDark}
           />
         </Field.Field>
@@ -271,7 +287,7 @@
         >
       </Field.Field>
 
-      <Field.Field>
+      <Field.Field data-invalid={radiusInvalid || undefined}>
         <Field.Label for={id("radius")}>{m.widget_admin_radius()}</Field.Label>
         <Input
           id={id("radius")}
@@ -281,13 +297,20 @@
           step={1}
           class="max-w-32"
           value={theme.radius ?? 12}
-          aria-describedby={describedBy("radius-help")}
-          oninput={(event) =>
-            number(event, (value) => onChange({ radius: Math.min(24, Math.max(0, value)) }))}
+          aria-invalid={radiusInvalid}
+          aria-describedby={radiusInvalid
+            ? `${describedBy("radius-help")} ${id("radius-error")}`
+            : describedBy("radius-help")}
+          oninput={radius}
         />
         <Field.Description id={id("radius-help")}
           >{m.widget_admin_radius_description()}</Field.Description
         >
+        {#if radiusInvalid}
+          <Field.Error id={id("radius-error")}
+            >{m.widget_admin_value_out_of_range({ min: "0", max: "24" })}</Field.Error
+          >
+        {/if}
       </Field.Field>
     </Field.Group>
   </Field.Group>

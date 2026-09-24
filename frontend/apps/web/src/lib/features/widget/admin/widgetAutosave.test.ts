@@ -114,6 +114,9 @@ describe("WidgetAutosave", () => {
     autosave.patch({ name: "A" });
     await vi.advanceTimersByTimeAsync(10);
     expect(autosave.status).toBe("saving");
+    // Nothing is queued, but closing the tab now would still lose "A".
+    expect(autosave.hasPending).toBe(false);
+    expect(autosave.unsaved).toBe(true);
     autosave.patch({ name: "B" });
     resolveFirst(widget({ name: "A" }));
     await vi.advanceTimersByTimeAsync(0);
@@ -122,6 +125,7 @@ describe("WidgetAutosave", () => {
     expect(save).toHaveBeenCalledTimes(2);
     expect(save).toHaveBeenLastCalledWith({ revision: 0, name: "B" });
     expect(autosave.widget.name).toBe("B");
+    expect(autosave.unsaved).toBe(false);
   });
 
   it("keeps pending changes on failure so they can be retried", async () => {
@@ -148,6 +152,191 @@ describe("WidgetAutosave", () => {
     autosave.replace(widget({ status: "active" }));
     expect(autosave.widget.status).toBe("active");
     expect(autosave.widget.name).toBe("Utkast");
+  });
+});
+
+function refused(status: number, detail: unknown) {
+  return new EneoError("refused", "RESPONSE", status, 0, { detail });
+}
+
+describe("WidgetAutosave refusals", () => {
+  it("holds a refused group back while every other edit keeps saving", async () => {
+    const save = vi
+      .fn()
+      .mockRejectedValueOnce(
+        refused(422, [
+          { loc: ["body", "allowed_origins"], type: "value_error", msg: "Invalid value" }
+        ])
+      )
+      .mockImplementation(async (update: Partial<Widget>) => widget(update));
+    const autosave = new WidgetAutosave(widget(), save, { delay: 10 });
+
+    autosave.patch({ allowed_origins: ["https://www.kommun.se/kontakt"] });
+    autosave.patch({ name: "Kontakt" });
+    await vi.runAllTimersAsync();
+
+    // The name is saved on its own right away; the refused list stays on
+    // screen with its message but is not sent again.
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save).toHaveBeenLastCalledWith({ name: "Kontakt", revision: 0 });
+    expect(autosave.widget.allowed_origins).toEqual(["https://www.kommun.se/kontakt"]);
+    expect(autosave.refusals).toHaveProperty("allowed_origins");
+    expect(autosave.status).toBe("refused");
+    expect(autosave.hasPending).toBe(false);
+    expect(autosave.stranded).toBe(true);
+
+    autosave.patch({ texts: { title: "Hej", welcome: "" } });
+    await vi.runAllTimersAsync();
+    expect(save).toHaveBeenLastCalledWith({ texts: { title: "Hej", welcome: "" }, revision: 0 });
+    expect(autosave.widget.allowed_origins).toEqual(["https://www.kommun.se/kontakt"]);
+
+    // Editing the refused field sends it again and clears its message.
+    autosave.patch({ allowed_origins: ["https://www.kommun.se"] });
+    expect(autosave.refusals).toEqual({});
+    await vi.runAllTimersAsync();
+    expect(save).toHaveBeenLastCalledWith({
+      allowed_origins: ["https://www.kommun.se"],
+      revision: 0
+    });
+    expect(autosave.status).toBe("saved");
+    expect(autosave.stranded).toBe(false);
+  });
+
+  it("pins a policy violation to its field and keeps an unrelated edit pending", async () => {
+    const save = vi
+      .fn()
+      .mockRejectedValueOnce(
+        refused(400, {
+          code: "widget_policy_violation",
+          message: "raw",
+          violations: ["daily_token_budget_exceeds_policy"]
+        })
+      )
+      .mockImplementation(async (update: Partial<Widget>) => widget(update));
+    const autosave = new WidgetAutosave(widget(), save, { delay: 10 });
+
+    // A tightened policy refuses even a title edit: the saved budget is the problem.
+    autosave.patch({ texts: { title: "Hej", welcome: "" } });
+    await vi.runAllTimersAsync();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(autosave.status).toBe("error");
+    expect(autosave.hasPending).toBe(true);
+    expect(Object.keys(autosave.refusals)).toEqual(["limits.daily_token_budget"]);
+
+    autosave.patch({ limits: { daily_token_budget: 900 } as Widget["limits"] });
+    expect(autosave.refusals).toEqual({});
+    await vi.runAllTimersAsync();
+    expect(save).toHaveBeenLastCalledWith({
+      texts: { title: "Hej", welcome: "" },
+      limits: { daily_token_budget: 900 },
+      revision: 0
+    });
+    expect(autosave.status).toBe("saved");
+  });
+
+  it("keeps refused values over a lifecycle response and drops them on reload", async () => {
+    const save = vi.fn().mockRejectedValue(
+      refused(400, {
+        code: "widget_serving_blocked",
+        message: "raw",
+        blockers: ["allowed_origins_empty"]
+      })
+    );
+    const autosave = new WidgetAutosave(
+      widget({ status: "active", allowed_origins: ["https://www.kommun.se"] }),
+      save,
+      { delay: 10 }
+    );
+    autosave.patch({ allowed_origins: [] });
+    await vi.runAllTimersAsync();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(autosave.refusals).toHaveProperty("allowed_origins");
+
+    autosave.replace(widget({ status: "paused", allowed_origins: ["https://www.kommun.se"] }));
+    expect(autosave.widget.status).toBe("paused");
+    expect(autosave.widget.allowed_origins).toEqual([]);
+
+    autosave.reload(widget({ allowed_origins: ["https://www.kommun.se"] }));
+    expect(autosave.widget.allowed_origins).toEqual(["https://www.kommun.se"]);
+    expect(autosave.refusals).toEqual({});
+    expect(autosave.hasRefused).toBe(false);
+    expect(autosave.stranded).toBe(false);
+  });
+
+  it("makes every flush wait for the save a refusal starts for the rest", async () => {
+    let rejectFirst!: (reason: unknown) => void;
+    let resolveSecond!: (value: Widget) => void;
+    const save = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise((_, reject) => (rejectFirst = reject)))
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveSecond = resolve)));
+    const autosave = new WidgetAutosave(widget(), save, { delay: 10 });
+    autosave.patch({ name: "Kontakt", allowed_origins: ["https://[abc.def]:80"] });
+
+    const owner = autosave.flush();
+    let secondDone = false;
+    // E.g. linking a template: it must not start while a save is in flight.
+    const second = autosave.flush().then(() => (secondDone = true));
+    rejectFirst(
+      refused(422, [{ loc: ["body", "allowed_origins"], type: "value_error", msg: "Invalid" }])
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save).toHaveBeenLastCalledWith({ name: "Kontakt", revision: 0 });
+    expect(secondDone).toBe(false);
+
+    resolveSecond(widget({ name: "Kontakt", revision: 1 }));
+    await Promise.all([owner, second]);
+    expect(secondDone).toBe(true);
+    expect(autosave.widget.revision).toBe(1);
+  });
+
+  it("drops only the refused groups an action replaces", async () => {
+    const save = vi.fn().mockRejectedValue(
+      refused(422, [
+        { loc: ["body", "texts", "subtitle"], type: "value_error", msg: "Invalid" },
+        { loc: ["body", "allowed_origins"], type: "value_error", msg: "Invalid" }
+      ])
+    );
+    const autosave = new WidgetAutosave(widget(), save, { delay: 10 });
+    autosave.patch({
+      texts: { title: "Ny", welcome: "", subtitle: "" },
+      allowed_origins: ["https://[abc.def]:80"]
+    });
+    await vi.runAllTimersAsync();
+    expect(Object.keys(autosave.refusals).sort()).toEqual(["allowed_origins", "texts.subtitle"]);
+
+    autosave.discardRefused(["texts", "theme", "language"]);
+
+    expect(autosave.widget.texts).toEqual({ title: "", welcome: "" });
+    expect(autosave.widget.allowed_origins).toEqual(["https://[abc.def]:80"]);
+    expect(Object.keys(autosave.refusals)).toEqual(["allowed_origins"]);
+    expect(autosave.status).toBe("refused");
+    expect(autosave.stranded).toBe(true);
+  });
+
+  it("counts a draft a field holds back as unsaved until it is released", () => {
+    const autosave = new WidgetAutosave(widget(), vi.fn(), { delay: 10 });
+    expect(autosave.unsaved).toBe(false);
+
+    autosave.markDraft("allowed_origins", true);
+    expect(autosave.unsaved).toBe(true);
+    expect(autosave.stranded).toBe(true);
+
+    autosave.markDraft("allowed_origins", false);
+    expect(autosave.unsaved).toBe(false);
+    expect(autosave.stranded).toBe(false);
+  });
+
+  it("a failure that names no field keeps everything pending, as before", async () => {
+    const save = vi.fn().mockRejectedValue(new EneoError("down", "RESPONSE", 503, 0));
+    const autosave = new WidgetAutosave(widget(), save, { delay: 10 });
+    autosave.patch({ name: "A" });
+    await vi.runAllTimersAsync();
+    expect(autosave.status).toBe("error");
+    expect(autosave.hasPending).toBe(true);
+    expect(autosave.hasRefused).toBe(false);
+    expect(autosave.stranded).toBe(true);
   });
 });
 

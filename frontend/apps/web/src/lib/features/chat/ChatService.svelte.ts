@@ -209,8 +209,13 @@ export class ChatService {
   #streamGen = 0;
   #producerFlushThreshold = 2048; // Safety flush for background tabs or fast streams
 
-  constructor(data: Parameters<typeof this.init>[0]) {
+  // Off for the widget, which reports a broken-off answer itself; the
+  // signed-in chat writes the failure into the answer.
+  #inlineStreamErrors = true;
+
+  constructor(data: Parameters<typeof this.init>[0] & { inlineStreamErrors?: boolean }) {
     this.#eneo = data.eneo;
+    this.#inlineStreamErrors = data.inlineStreamErrors ?? true;
     this.init(data);
   }
 
@@ -883,6 +888,10 @@ export class ChatService {
           // If streaming started but no content arrived yet, remove the empty message
           this.currentConversation.messages.pop();
           this.#clearDiagnosticsPending(ref.id);
+          console.error(error);
+          throw error;
+        } else if (!this.#inlineStreamErrors) {
+          // The partial answer stays as it arrived; the caller says it broke off.
           console.error(error);
           throw error;
         } else {

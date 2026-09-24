@@ -1295,6 +1295,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/assistants/{id}/widget-status/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Assistant Widget Status
+     * @description Whether an active web widget publishes the assistant, for anyone who can read it. Says nothing else about the widget. Requires a session token.
+     */
+    get: operations["get_assistant_widget_status_api_v1_assistants__id__widget_status__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/assistants/{id}/sessions/": {
     parameters: {
       query?: never;
@@ -1372,7 +1392,7 @@ export interface paths {
     put?: never;
     /**
      * Transfer Assistant To Space
-     * @description Transfer an assistant to another space.
+     * @description Transfer an assistant to another space. Refused with 400 while the assistant has Skill bindings or a web widget that is not archived.
      */
     post: operations["transfer_assistant_to_space_api_v1_assistants__id__transfer__post"];
     delete?: never;
@@ -3221,7 +3241,7 @@ export interface paths {
     put?: never;
     /**
      * Link Widget Template
-     * @description Make the widget follow a published template. Its texts, appearance and language are copied now; the release's locked groups are then written onto the widget with every publication and cannot be edited on the widget.
+     * @description Make the widget follow a published template. Its texts, appearance and language are copied now; the release's locked groups are then written onto the widget with every publication and cannot be edited on the widget. Refused with `widget_serving_blocked` when the release would leave an active widget unable to serve.
      */
     post: operations["link_widget_template_api_v1_widgets__id__link_template__post"];
     delete?: never;
@@ -3269,7 +3289,7 @@ export interface paths {
     head?: never;
     /**
      * Update Widget
-     * @description Update a widget's configuration. Changes to allowed origins, limits, privacy or bot protection invalidate outstanding visitor tokens.
+     * @description Update a widget's configuration. Changes to allowed origins, limits, privacy or bot protection invalidate outstanding visitor tokens. A value outside the tenant's widget policy is refused with `widget_policy_violation` (listing `violations`); an edit that would leave an active widget unable to serve is refused with `widget_serving_blocked` (listing `blockers`).
      */
     patch: operations["update_widget_api_v1_widgets__id___patch"];
     trace?: never;
@@ -3325,7 +3345,7 @@ export interface paths {
     put?: never;
     /**
      * Activate Widget
-     * @description Activate a widget so it serves visitors. Tenant admins only; fails with the list of blockers when the configuration is incomplete.
+     * @description Activate a widget so it serves visitors. Tenant admins only. Fails with `widget_policy_violation` (listing `violations`) when settings are outside the tenant's widget policy and with `widget_serving_blocked` (listing `blockers`) when the configuration is incomplete.
      */
     post: operations["activate_widget_api_v1_widgets__id__activate__post"];
     delete?: never;
@@ -3445,7 +3465,7 @@ export interface paths {
     put?: never;
     /**
      * Ask Widget
-     * @description Ask the widget's assistant as a visitor. Always streams Server-Sent Events. Pass `session_id` to continue one of the visitor's own sessions. Uses the assistant's configured knowledge and tools; file uploads are not available.
+     * @description Ask the widget's assistant as a visitor. Always streams Server-Sent Events. Pass `session_id` to continue one of the visitor's own sessions. The assistant answers as configured, with its knowledge, MCP servers and web search; image generation, images returned by tools and uploads are not available to visitors. The stream never carries the model, reasoning or tool results; references and tool calls follow the widget's `show_sources` and `show_tool_activity`.
      */
     post: operations["ask_widget_api_v1_widgets__public_id__ask__post"];
     delete?: never;
@@ -3463,7 +3483,7 @@ export interface paths {
     };
     /**
      * Get Widget Session
-     * @description Restore one of the visitor's own sessions after a reload.
+     * @description Restore one of the visitor's own sessions after a reload, filtered like the stream.
      */
     get: operations["get_widget_session_api_v1_widgets__public_id__sessions__session_id___get"];
     put?: never;
@@ -3485,7 +3505,7 @@ export interface paths {
     put?: never;
     /**
      * Leave Widget Feedback
-     * @description Leave feedback on one of the visitor's own sessions. Free text is dropped unless the widget stores feedback text.
+     * @description Leave feedback on one of the visitor's own sessions. Free text is dropped unless the widget stores feedback text; a vote without text keeps the comment stored earlier. Returns the session filtered like the stream.
      */
     post: operations["leave_widget_feedback_api_v1_widgets__public_id__sessions__session_id__feedback__post"];
     delete?: never;
@@ -3503,7 +3523,7 @@ export interface paths {
     };
     /**
      * Get Widget Policy
-     * @description Get the tenant's widget policy (defaults apply when unset).
+     * @description Get the tenant's widget policy (defaults apply when unset). Readable by everyone with the widgets permission, so editors can check their settings against it; only tenant admins change it.
      */
     get: operations["get_widget_policy_api_v1_admin_widget_policy__get"];
     put?: never;
@@ -10991,6 +11011,14 @@ export interface components {
      * @enum {string}
      */
     AssistantType: "assistant" | "default-assistant";
+    /** AssistantWidgetStatus */
+    AssistantWidgetStatus: {
+      /**
+       * Serves Active Widget
+       * @description Whether an active web widget publishes this assistant to visitors. Visitors get the assistant as configured, so changes to its MCP servers and capabilities reach them immediately.
+       */
+      serves_active_widget: boolean;
+    };
     /** AttachmentLimits */
     AttachmentLimits: {
       /** Formats */
@@ -13226,7 +13254,8 @@ export interface components {
       | 9059
       | 9060
       | 9061
-      | 9062;
+      | 9062
+      | 9063;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -22513,7 +22542,10 @@ export interface components {
        * @enum {integer}
        */
       value: -1 | 1;
-      /** Text */
+      /**
+       * Text
+       * @description A comment with the vote. Replaces the stored comment; leave it out (or blank) to change only the vote and keep the comment.
+       */
       text?: string | null;
     };
     /**
@@ -22616,17 +22648,20 @@ export interface components {
       blocked_30d: number;
       /**
        * Helpful 30D
-       * @description Net thumbs up registered in the last 30 days.
+       * @description Thumbs up on conversations started in the last 30 days.
        */
       helpful_30d: number;
       /**
        * Unhelpful 30D
-       * @description Net thumbs down registered in the last 30 days.
+       * @description Thumbs down on conversations started in the last 30 days.
        */
       unhelpful_30d: number;
       /** Last Activity */
       last_activity?: string | null;
-      /** Daily Token Budget */
+      /**
+       * Daily Token Budget
+       * @description The budget in force: the widget's, capped by the tenant policy.
+       */
       daily_token_budget: number;
       /**
        * Budget Used Today
@@ -22635,7 +22670,7 @@ export interface components {
       budget_used_today: number;
       /**
        * Activation Blockers
-       * @description Why the widget cannot be activated (or, for an active widget, why it is not serving): empty when it can.
+       * @description Why the widget could not be activated as configured: empty when it can. A policy violation does not stop an active widget: it is served within the policy.
        */
       activation_blockers?: string[];
     };
@@ -23031,24 +23066,46 @@ export interface components {
       /** Logo File Id */
       logo_file_id?: string | null;
     };
-    /** WidgetUpdate */
+    /**
+     * WidgetUpdate
+     * @description Only the fields sent are changed; a field left out keeps its value.
+     *     Null is refused: there is nothing to reset a field to.
+     */
     WidgetUpdate: {
       /** Revision */
       revision: number;
       /** Name */
-      name?: string | null;
-      texts?: components["schemas"]["WidgetTexts"] | null;
-      theme?: components["schemas"]["WidgetTheme"] | null;
-      limits?: components["schemas"]["WidgetLimits"] | null;
-      privacy?: components["schemas"]["WidgetPrivacy"] | null;
-      language?: components["schemas"]["WidgetLanguage"] | null;
+      name?: string;
+      /**
+       * Texts
+       * @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones.
+       */
+      texts?: components["schemas"]["WidgetTexts"];
+      /**
+       * Theme
+       * @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones.
+       */
+      theme?: components["schemas"]["WidgetTheme"];
+      /**
+       * Limits
+       * @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones.
+       */
+      limits?: components["schemas"]["WidgetLimits"];
+      /**
+       * Privacy
+       * @description Replaces the whole group: a field left out of it takes its default, so send the current values along with the changed ones.
+       */
+      privacy?: components["schemas"]["WidgetPrivacy"];
+      /** Language */
+      language?: components["schemas"]["WidgetLanguage"];
       /** Allowed Origins */
-      allowed_origins?: string[] | null;
-      bot_protection?: components["schemas"]["BotProtection"] | null;
+      allowed_origins?: string[];
+      /** Bot Protection */
+      bot_protection?: components["schemas"]["BotProtection"];
       /** Show Sources */
-      show_sources?: boolean | null;
+      show_sources?: boolean;
       /** Show Tool Activity */
-      show_tool_activity?: boolean | null;
+      show_tool_activity?: boolean;
     };
     /** WidgetUsageDayPublic */
     WidgetUsageDayPublic: {
@@ -23069,12 +23126,12 @@ export interface components {
       blocked_rate: number;
       /**
        * Helpful
-       * @description Net thumbs up registered on the day.
+       * @description Thumbs up on conversations started on the day.
        */
       helpful: number;
       /**
        * Unhelpful
-       * @description Net thumbs down registered on the day.
+       * @description Thumbs down on conversations started on the day.
        */
       unhelpful: number;
     };
@@ -23087,7 +23144,10 @@ export interface components {
        * @description Tokens charged against today's budget, including reservations in flight.
        */
       budget_used_today: number;
-      /** Daily Token Budget */
+      /**
+       * Daily Token Budget
+       * @description The budget in force: the widget's, capped by the tenant policy.
+       */
       daily_token_budget: number;
     };
     /**
@@ -28011,6 +28071,55 @@ export interface operations {
       };
     };
   };
+  get_assistant_widget_status_api_v1_assistants__id__widget_status__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AssistantWidgetStatus"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_assistant_sessions_api_v1_assistants__id__sessions__get: {
     parameters: {
       query?: {
@@ -28988,6 +29097,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Forbidden */
       403: {

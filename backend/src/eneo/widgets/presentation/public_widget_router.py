@@ -3,6 +3,7 @@
 # Licensed under the MIT License.
 
 
+import hashlib
 from uuid import UUID
 
 from fastapi import APIRouter, Request, Response
@@ -42,8 +43,11 @@ from eneo.widgets.presentation.public_widget_models import (
 router = APIRouter()
 
 
-def _etag(widget_id: str, updated_at: str, generation: int) -> str:
-    return f'W/"{widget_id}:{updated_at}:{generation}"'
+def _etag(config: WidgetPublicConfig) -> str:
+    # Over what is served, not the row: the tenant policy changes the served
+    # widget (e.g. single_turn) without touching it.
+    digest = hashlib.sha256(config.model_dump_json().encode()).hexdigest()
+    return f'W/"{digest[:32]}"'
 
 
 @router.get(
@@ -59,19 +63,7 @@ def _etag(widget_id: str, updated_at: str, generation: int) -> str:
     },
 )
 async def get_widget_config(request: Request, response: Response, widget: ActiveWidget):
-    assert widget.id is not None and widget.updated_at is not None
-    etag = _etag(str(widget.id), widget.updated_at.isoformat(), widget.token_generation)
-    response.headers["ETag"] = etag
-    # A draft or paused widget is only ever admitted by a preview token; its
-    # configuration must not land in a shared cache for anonymous callers.
-    response.headers["Cache-Control"] = (
-        "public, max-age=60"
-        if widget.status == WidgetStatus.ACTIVE
-        else "private, no-store"
-    )
-    if request.headers.get("if-none-match") == etag:
-        return Response(status_code=304, headers=dict(response.headers))
-    return WidgetPublicConfig(
+    config = WidgetPublicConfig(
         public_id=widget.public_id,
         name=widget.name,
         texts=widget.texts,
@@ -86,6 +78,18 @@ async def get_widget_config(request: Request, response: Response, widget: Active
         single_turn=widget.privacy.never_persists,
         frame_ancestors=frame_ancestor_sources(widget.allowed_origins),
     )
+    etag = _etag(config)
+    response.headers["ETag"] = etag
+    # A draft or paused widget is only ever admitted by a preview token; its
+    # configuration must not land in a shared cache for anonymous callers.
+    response.headers["Cache-Control"] = (
+        "public, max-age=60"
+        if widget.status == WidgetStatus.ACTIVE
+        else "private, no-store"
+    )
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=dict(response.headers))
+    return config
 
 
 @router.get(
@@ -105,7 +109,7 @@ async def get_widget_challenge(
 ):
     await container.widget_limiter().check_challenge(widget, client_ip(request))
     response.headers["Cache-Control"] = "no-store"
-    challenge = container.widget_altcha_service().create_challenge()
+    challenge = container.widget_altcha_service().create_challenge(widget)
     return WidgetChallenge.model_validate(challenge)
 
 
@@ -143,7 +147,7 @@ async def create_visitor_session(
             raise VisitorTokenInvalidError("Preview tokens cannot be rotated.")
         visitor_id = claims.visitor_id
     elif body.altcha is not None:
-        await container.widget_altcha_service().verify(body.altcha)
+        await container.widget_altcha_service().verify(body.altcha, widget)
         visitor_id = identity.resolve(widget, body.visitor_id, body.visitor_key)
     elif widget.bot_protection == BotProtection.NONE:
         visitor_id = identity.resolve(widget, body.visitor_id, body.visitor_key)
@@ -171,8 +175,11 @@ def _principal(request: Request) -> WidgetPrincipal:
     description=(
         "Ask the widget's assistant as a visitor. Always streams Server-Sent"
         " Events. Pass `session_id` to continue one of the visitor's own"
-        " sessions. Uses the assistant's configured knowledge and tools;"
-        " file uploads are not available."
+        " sessions. The assistant answers as configured, with its knowledge,"
+        " MCP servers and web search; image generation, images returned by"
+        " tools and uploads are not available to visitors. The stream never"
+        " carries the model, reasoning or tool results; references and tool"
+        " calls follow the widget's `show_sources` and `show_tool_activity`."
     ),
     responses=responses.streaming_response(AskChatResponse, [400, 401, 404, 429, 503]),
 )
@@ -193,7 +200,10 @@ async def ask_widget(request: Request, body: WidgetAsk, container: VisitorContai
 @router.get(
     "/{public_id}/sessions/{session_id}/",
     response_model=SessionPublic,
-    description="Restore one of the visitor's own sessions after a reload.",
+    description=(
+        "Restore one of the visitor's own sessions after a reload, filtered"
+        " like the stream."
+    ),
     responses=responses.get_responses([401, 404]),
 )
 async def get_widget_session(
@@ -210,7 +220,9 @@ async def get_widget_session(
     response_model=SessionPublic,
     description=(
         "Leave feedback on one of the visitor's own sessions. Free text is"
-        " dropped unless the widget stores feedback text."
+        " dropped unless the widget stores feedback text; a vote without text"
+        " keeps the comment stored earlier. Returns the session filtered like"
+        " the stream."
     ),
     responses=responses.get_responses([401, 404]),
 )

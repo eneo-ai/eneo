@@ -5,6 +5,7 @@
 
 import re
 import secrets
+from collections.abc import Callable
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
@@ -15,6 +16,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     ValidationError,
     ValidationInfo,
     field_validator,
@@ -33,6 +35,8 @@ _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 MAX_ALLOWED_ORIGINS = 20
 MAX_SUGGESTED_QUESTIONS = 4
 MAX_SUGGESTED_QUESTION_LENGTH = 160
+# The daily usage counters are int4 columns.
+MAX_DAILY_TOKEN_BUDGET = 2_000_000_000
 
 # AI Act article 50: visitors must be told they are talking to an AI system.
 # The text is editable per widget but never empty on an active widget.
@@ -55,6 +59,14 @@ TOKEN_GENERATION_FIELDS = frozenset(
 # The columns pause and archive write. They never touch configuration, so
 # they bypass the revision check: a kill switch must not lose to an autosave.
 LIFECYCLE_FIELDS = frozenset({"status", "paused_at", "token_generation"})
+
+
+# What each configuration blocker is about: the widget cannot serve while the
+# setting is empty.
+_SERVING_REQUIREMENTS: dict[str, Callable[["Widget"], Any]] = {
+    "allowed_origins_empty": lambda widget: widget.allowed_origins,
+    "subtitle_empty": lambda widget: widget.texts.subtitle,
+}
 
 
 def generate_public_id() -> str:
@@ -239,7 +251,9 @@ class WidgetLimits(BaseModel):
 
     messages_per_visitor_10min: int = Field(default=10, ge=1, le=100)
     messages_per_ip_hour: int = Field(default=60, ge=1, le=1000)
-    daily_token_budget: int = Field(default=500_000, ge=1_000)
+    daily_token_budget: int = Field(
+        default=500_000, ge=1_000, le=MAX_DAILY_TOKEN_BUDGET
+    )
     max_question_chars: int = Field(default=2_000, ge=100, le=8_000)
     max_session_turns: int = Field(default=30, ge=1, le=100)
 
@@ -313,6 +327,18 @@ class Widget(BaseModel):
     paused_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    _serving_view: bool = PrivateAttr(default=False)
+
+    @property
+    def is_serving_view(self) -> bool:
+        return self._serving_view
+
+    def serving_copy(self, update: dict[str, Any]) -> "Widget":
+        """A copy for the visitor surface (WidgetPolicy.serving); the
+        repository refuses to write it back."""
+        served = self.model_copy(update=update, deep=True)
+        served._serving_view = True
+        return served
 
     @field_validator("public_id")
     @classmethod
@@ -374,13 +400,29 @@ class Widget(BaseModel):
         blockers: list[str] = []
         if self.status == WidgetStatus.ARCHIVED:
             blockers.append("archived")
-        if not self.allowed_origins:
-            blockers.append("allowed_origins_empty")
-        if not self.texts.subtitle:
-            blockers.append("subtitle_empty")
+        blockers.extend(self.configuration_blockers())
         if not target_published:
             blockers.append("target_not_published")
         return blockers
+
+    def configuration_blockers(self) -> list[str]:
+        """The activation blockers that are the widget's own settings."""
+        return [
+            code for code, setting in _SERVING_REQUIREMENTS.items() if not setting(self)
+        ]
+
+    def blockers_introduced_since(self, before: "Widget") -> list[str]:
+        """Configuration blockers on settings that changed since ``before``.
+
+        A serving widget must never be edited into a state it could not be
+        activated in. One left standing on a setting the edit did not touch
+        does not block the edit.
+        """
+        return [
+            code
+            for code in self.configuration_blockers()
+            if _SERVING_REQUIREMENTS[code](self) != _SERVING_REQUIREMENTS[code](before)
+        ]
 
     def activate(self, *, by: UUID, now: Optional[datetime] = None) -> None:
         if self.status not in (WidgetStatus.DRAFT, WidgetStatus.PAUSED):

@@ -3,11 +3,11 @@
   opens the sources list below the message and jumps to the matching entry.
 -->
 <script lang="ts">
+  import type { EneoInrefCustomComponentProps } from "@eneo/ui/components/markdown";
   import { m } from "$lib/paraglide/messages";
   import { getWidgetMessageContext } from "../widgetMessageContext";
 
-  // Shape of the `<inref>` token the Markdown renderer hands custom components.
-  let { token }: { token: { id: string } } = $props();
+  let { token }: EneoInrefCustomComponentProps = $props();
 
   const message = getWidgetMessageContext();
   const index = $derived(message.referenceIndex(token.id));
@@ -43,8 +43,7 @@
     text-decoration: none;
     vertical-align: 0.2em;
   }
-  .widget-citation:hover,
-  .widget-citation:focus-visible {
+  .widget-citation:hover {
     outline: 2px solid var(--widget-accent);
     outline-offset: 1px;
   }

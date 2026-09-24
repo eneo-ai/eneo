@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { ConversationMessage } from "@eneo/eneo-js";
 import "../../../../app.css";
 import axe from "axe-core";
+import { contrastAgainst } from "./contrastProbe";
 import WidgetMessage from "./WidgetMessage.svelte";
 
 vi.mock("$lib/paraglide/messages", () => ({
@@ -92,6 +93,26 @@ describe("WidgetMessage sources", () => {
     await expect.element(page.getByText("widget_reference_copied").first()).toBeVisible();
   });
 
+  test("announces every copy, not only the first", async () => {
+    vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    renderMessage();
+    await page.getByRole("button", { name: /widget_sources_count_other/ }).click();
+    const copy = page.getByRole("button", { name: /widget_copy_reference_for/ });
+    await copy.click();
+    const region = document.querySelector("section [aria-live='polite']")!;
+    await vi.waitFor(() => expect(region.textContent).toContain("widget_reference_copied"));
+
+    // Identical text set twice leaves the DOM alone and a screen reader silent,
+    // so the region is emptied before it says the same thing again.
+    const changes: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => changes.push(...records));
+    observer.observe(region, { childList: true, subtree: true, characterData: true });
+    await copy.click();
+    await vi.waitFor(() => expect(changes.length).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(region.textContent).toContain("widget_reference_copied"));
+    observer.disconnect();
+  });
+
   test("shows the reference as text when the clipboard is unavailable", async () => {
     vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"));
     renderMessage();
@@ -140,6 +161,45 @@ describe("WidgetMessage sources", () => {
     await expect.element(page.getByText("Asia/Tokyo")).toBeVisible();
     await expect.element(page.getByText(/widget_activity_via/)).toHaveTextContent("TimeMCP");
   });
+
+  test.each(["light", "dark"] as const)(
+    "tells which service a step used in text that meets 4.5:1 (%s)",
+    async (scheme) => {
+      // The embed page always sets a scheme (the tokens only exist under
+      // one) and paints the panel with the primary background.
+      document.documentElement.dataset.theme = scheme;
+      document.body.classList.add("bg-primary");
+      const call = (id: string) => ({
+        server_name: "TimeMCP",
+        tool_name: "get_current_time",
+        arguments: { timezone: "UTC" },
+        tool_call_id: id,
+        result_status: "completed"
+      });
+      try {
+        // One step shows "via" beside it; several fold into a list that ends with it.
+        for (const calls of [[call("c1")], [call("c1"), call("c2")]]) {
+          const { unmount } = render(WidgetMessage, {
+            message: {
+              ...message("Klockan är 14:02."),
+              tool_calls: calls
+            } as unknown as ConversationMessage,
+            index: 0,
+            isLast: true,
+            isLoading: false
+          });
+          const summary = page.getByRole("button", { name: /Get current time/ });
+          if (summary.elements().length > 0) await summary.click();
+          const via = page.getByText(/widget_activity_via/).element();
+          expect(contrastAgainst(getComputedStyle(via).color, via)).toBeGreaterThanOrEqual(4.5);
+          unmount();
+        }
+      } finally {
+        delete document.documentElement.dataset.theme;
+        document.body.classList.remove("bg-primary");
+      }
+    }
+  );
 
   test("keeps tool activity out of view when the widget hides it", async () => {
     render(WidgetMessage, {
@@ -247,6 +307,74 @@ describe("WidgetMessage sources", () => {
         }))
       )
     ).toBe("[]");
+  });
+
+  test("numbers the tool results an answer cites as sources after the knowledge", async () => {
+    const tool = (
+      id: string,
+      uri: string,
+      meta: Record<string, unknown> | null,
+      content?: string
+    ) => ({
+      id,
+      uri,
+      meta,
+      content: content ?? null,
+      mime_type: "text/plain"
+    });
+    render(WidgetMessage, {
+      message: {
+        ...message(
+          'Skatten betalas i april <inref id="c0ffee01"/> <inref id="c0ffee02"/>. ' +
+            'Klockan är 14 <inref id="c0ffee03"/>. Källa <inref id="c0ffee05"/>.'
+        ),
+        mcp_tool_references: [
+          // Two passages of one page cited side by side: one source, one marker.
+          tool(
+            "c0ffee01-0000-4000-8000-000000000001",
+            "https://www.skatteverket.se/skatt#chunk-1",
+            {
+              title: "Skatteverket"
+            }
+          ),
+          tool(
+            "c0ffee02-0000-4000-8000-000000000002",
+            "https://www.skatteverket.se/skatt#chunk-2",
+            {
+              title: "Skatteverket"
+            }
+          ),
+          tool("c0ffee03-0000-4000-8000-000000000003", "time://now", { title: "Aktuell tid" }),
+          tool("c0ffee04-0000-4000-8000-000000000004", "https://ociterad.example", {
+            title: "Ociterad"
+          }),
+          // The older shape: raw passage, no metadata.
+          tool("c0ffee05-0000-4000-8000-000000000005", "https://example.org/sida", null, "Utdrag")
+        ]
+      } as unknown as ConversationMessage,
+      index: 0,
+      isLast: true,
+      isLoading: false
+    });
+
+    const citations = page.getByRole("link", { name: /widget_citation_label/ });
+    await expect.element(citations.first()).toBeVisible();
+    expect(citations.elements().map((citation) => citation.textContent)).toEqual(["3", "4", "5"]);
+
+    const toggle = page.getByRole("button", { name: /widget_sources_count_other/ });
+    await expect.element(toggle).toHaveTextContent('{"count":5}');
+    await toggle.click();
+    await expect
+      .element(page.getByRole("link", { name: /Skatteverket/ }))
+      .toHaveAttribute("href", "https://www.skatteverket.se/skatt#chunk-1");
+    await expect.element(page.getByRole("link", { name: /example\.org/ })).toBeVisible();
+    await expect.element(page.getByText("Aktuell tid")).toBeVisible();
+    await expect.element(page.getByText("widget_source_tool")).toBeVisible();
+    expect(page.getByText("Ociterad").elements()).toHaveLength(0);
+    // Only the knowledge document can be looked up in Eneo by its id.
+    expect(page.getByRole("button", { name: /widget_copy_reference_for/ }).elements()).toHaveLength(
+      1
+    );
   });
 
   test("an inline citation opens the list and focuses its source", async () => {

@@ -101,7 +101,17 @@ def normalize_origin_pattern(pattern: str) -> str:
         raise ValueError(
             f"Invalid origin '{pattern}': must include scheme (http:// or https://) and host."
         )
-    if parsed.path or parsed.query or parsed.fragment or parsed.username:
+    # urlparse reports an empty query, fragment or userinfo ("https://h?",
+    # "https://@h") as absent, so the delimiters are checked in the raw text.
+    if (
+        parsed.path
+        or parsed.query
+        or parsed.fragment
+        or parsed.username
+        or "@" in parsed.netloc
+        or "?" in value
+        or "#" in value
+    ):
         raise ValueError(
             f"Invalid origin '{pattern}': only scheme, host and optional port are allowed."
         )

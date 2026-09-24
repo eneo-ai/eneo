@@ -53,6 +53,7 @@
   let chatRoot = $state<HTMLElement | null>(null);
   let log = $state<HTMLElement | null>(null);
   let newQuestionButton = $state<HTMLButtonElement | null>(null);
+  let startOverButton = $state<HTMLButtonElement | null>(null);
 
   let status = $state<"idle" | "verifying" | "sending">("idle");
   const announcer = new Announcer();
@@ -63,6 +64,12 @@
   let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
   // Shown while the backend has not yet confirmed the question (first chunk).
   let pendingQuestion = $state<string | null>(null);
+  // How many messages there were when it was sent; the same text asked again
+  // must still show as pending, so the count tells when it has arrived.
+  let pendingFrom = $state(0);
+  // The conversation whose first answer is in. Its feedback stays mounted
+  // through follow-up questions, so a vote is not lost to the next one.
+  let rateableSession = $state<string | null>(null);
 
   // Props are fixed for the lifetime of the page; capture them once.
   const initial = untrack(() => ({ client, config, hostOrigin, onSession, onTheme, previewToken }));
@@ -93,9 +100,7 @@
   const messages = $derived(chat.currentConversation.messages ?? []);
   // The service appends the message once the backend confirms it; until then
   // show the question and a typing indicator so the visitor sees progress.
-  const showPending = $derived(
-    pendingQuestion !== null && !messages.some((message) => message.question === pendingQuestion)
-  );
+  const showPending = $derived(pendingQuestion !== null && messages.length <= pendingFrom);
   const busy = $derived(status !== "idle" || chat.askQuestion.isLoading);
   const subtitle = $derived(config.texts.subtitle);
   // Retention 0: the backend deletes the session when the answer ends, so
@@ -127,13 +132,20 @@
     if (answered) void tick().then(() => newQuestionButton?.focus());
   });
 
-  async function restore(sessionId: string) {
+  async function restore(sessionId: string, retried = false): Promise<void> {
     try {
       await session.ensureToken();
       // ChatService toasts and swallows load errors for the signed-in app;
       // here a gone session must be forgotten, not announced.
       await chat.loadConversation({ id: sessionId }, { rethrow: true });
+      rateableSession = chat.currentConversation.id;
     } catch (error) {
+      if (isTokenRejected(error) && !retried) {
+        // Stale after a pause or a settings change: a fresh token for the
+        // same visitor still owns the conversation.
+        session.invalidate();
+        return restore(sessionId, true);
+      }
       // A gone session (retention, a new visitor identity) is not worth showing.
       session.rememberSession(null);
       if (isWidgetUnavailable(error) && !isSessionError(error)) unavailable = true;
@@ -165,6 +177,7 @@
     status = "sending";
     errorMessage = null;
     pendingQuestion = question;
+    pendingFrom = messages.length;
     // The typing dots are silent; this tells a screen reader the question went off.
     announcer.announce(m.assistant_is_typing());
     try {
@@ -185,17 +198,23 @@
     }
   }
 
+  /** The turn exists on the server: remember it and tell the host page one began. */
+  function keepConversation(wasNew: boolean) {
+    const sessionId = chat.currentConversation.id;
+    if (!sessionId) return;
+    if (!singleTurn) session.rememberSession(sessionId);
+    // The host page only learns that a conversation began, never its id.
+    if (wasNew) bridge.conversationStarted();
+    rateableSession = sessionId;
+  }
+
   async function ask(question: string, retried: boolean): Promise<void> {
     const wasNew = !chat.currentConversation.id;
+    const turns = chat.currentConversation.messages?.length ?? 0;
     try {
       await session.ensureToken();
       await chat.askQuestion(question);
-      const sessionId = chat.currentConversation.id;
-      if (sessionId) {
-        if (!singleTurn) session.rememberSession(sessionId);
-        // The host page only learns that a conversation began, never its id.
-        if (wasNew) bridge.conversationStarted();
-      }
+      keepConversation(wasNew);
       // The finished answer is read once, as in any chat; the stream never
       // is (the log's own live region is off).
       const answer = answerText(chat.currentConversation.messages?.at(-1)?.answer ?? "");
@@ -203,6 +222,14 @@
         answer ? `${m.widget_assistant()}: ${answer}` : m.widget_answer_complete()
       );
     } catch (error) {
+      if ((chat.currentConversation.messages?.length ?? 0) > turns) {
+        // The answer broke off after it began: what arrived stays, the alert
+        // says it is incomplete and nothing announces it as done.
+        announcer.clear();
+        keepConversation(wasNew);
+        errorMessage = m.widget_error_incomplete();
+        return;
+      }
       if (isTokenRejected(error) && !retried) {
         // Stale after a pause/config change or simply expired: re-mint once.
         session.invalidate();
@@ -210,11 +237,24 @@
       }
       // The alert below speaks for itself; a pending "typing" must not follow it.
       announcer.clear();
-      if (widgetErrorCode(error) === "widget_not_active") unavailable = true;
+      // Nothing reached the server, so the question goes back into the field.
+      void composer?.restore(question);
+      const code = widgetErrorCode(error);
+      if (code === "widget_not_active") unavailable = true;
+      if (code === "session_not_owned") {
+        // Deleted by retention, or owned by an identity this browser lost:
+        // asking in it again can never succeed.
+        chat.newConversation();
+        session.rememberSession(null);
+        errorMessage = m.widget_error_session_gone();
+        return;
+      }
       const wait = retryAfterSeconds(error);
       if (wait !== null && wait <= MAX_COOLDOWN_SECONDS) coolDown(wait);
       // The alert below announces the error itself; no second live message.
       errorMessage = describeWidgetError(error);
+      // The conversation is full: the one way on is to start a new one.
+      if (code === "session_turns_exceeded") void tick().then(() => startOverButton?.focus());
     }
   }
 
@@ -294,6 +334,7 @@
         <button
           type="button"
           class="widget-header-button"
+          bind:this={startOverButton}
           onclick={() => (confirmStartOver = true)}
           aria-label={m.widget_new_conversation()}
           title={m.widget_new_conversation()}
@@ -349,11 +390,12 @@
           {/if}
         </ol>
       </div>
-      {#if !singleTurn && chat.currentConversation.id && !chat.askQuestion.isLoading}
+      {#if !singleTurn && chat.currentConversation.id && rateableSession === chat.currentConversation.id}
         <WidgetFeedback
           sessionId={chat.currentConversation.id}
           collectsText={config.collects_feedback_text}
           restored={chat.currentConversation.feedback ?? null}
+          disabled={status === "sending" || chat.askQuestion.isLoading}
           submit={submitFeedback}
         />
       {/if}
@@ -377,7 +419,7 @@
         <button
           type="button"
           bind:this={newQuestionButton}
-          class="widget-new-question bg-primary text-primary hover:bg-secondary focus-visible:ring-default flex items-center gap-1.5 border px-3 py-1.5 text-sm focus-visible:ring-2 focus-visible:outline-none"
+          class="widget-new-question bg-primary text-primary hover:bg-secondary flex items-center gap-1.5 border px-3 py-1.5 text-sm"
           onclick={startOver}
         >
           <MessageSquarePlus class="size-4" aria-hidden="true" />

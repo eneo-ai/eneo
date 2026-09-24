@@ -1,10 +1,12 @@
 import {
   envelope,
   parseFrameMessage,
+  parseWidgetSettings,
   type ColorScheme,
   type HostMessage,
   type LauncherColors,
-  type PageContext
+  type PageContext,
+  type WidgetSettings
 } from "./protocol";
 import { FULL_SCREEN_MEDIA, styles } from "./styles";
 
@@ -16,9 +18,14 @@ export const EVENT_PREFIX = "eneo-widget:";
 export const CONNECTED_EVENT = "eneo-widget:connected";
 
 const CLOSE_ANIMATION_MS = 180;
-// No `allow-forms`: the embed page submits nothing, its composer is a button
-// and fetch, and its CSP already pins form-action to itself.
-const SANDBOX = "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox";
+/** How long the launcher waits for the saved settings before it shows with its attributes. */
+const SETTINGS_TIMEOUT_MS = 3000;
+// `allow-forms`: the composer and the comment dialog are forms, and a sandbox
+// without it drops their submit event before any handler runs. Nothing is
+// ever really submitted: the handlers prevent it and the embed CSP pins
+// form-action to the Eneo origin.
+const SANDBOX =
+  "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
 
 type Labels = { open: string; close: string; title: string; unread: (count: number) => string };
 
@@ -85,6 +92,11 @@ export class EneoWidgetElement extends HTMLElement {
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
   /** Host elements made inert while the panel covers the page. */
   private inerted: Element[] = [];
+  private settings: WidgetSettings | null = null;
+  private settling = false;
+  private settled = false;
+  private openWhenSettled = false;
+  private prefetchWhenSettled = false;
 
   private readonly onMessage = (event: MessageEvent) => this.receive(event);
   private readonly onViewport = () => this.layout();
@@ -113,8 +125,10 @@ export class EneoWidgetElement extends HTMLElement {
     return httpUrl(this.baseUrl) ? new URL(this.baseUrl, location.href).origin : location.origin;
   }
 
+  /** A language fixed in the widget's settings, else the host's: `lang`, then `<html lang>`. */
   get lang(): string {
-    const raw = this.getAttribute("lang") || document.documentElement.lang || "sv";
+    const raw =
+      this.settings?.language || this.getAttribute("lang") || document.documentElement.lang || "sv";
     return raw.slice(0, 2).toLowerCase() === "en" ? "en" : "sv";
   }
 
@@ -169,6 +183,7 @@ export class EneoWidgetElement extends HTMLElement {
       this.schemeQuery.addEventListener("change", this.onSchemeChange);
     }
     document.dispatchEvent(new CustomEvent(CONNECTED_EVENT, { detail: this }));
+    this.loadSettings();
     if (this.isOpen) {
       // Moved within the page while open: listen and hold the page again.
       this.watch();
@@ -178,7 +193,58 @@ export class EneoWidgetElement extends HTMLElement {
     }
   }
 
+  /**
+   * The launcher stays hidden until the widget's saved settings are in (or
+   * have failed or timed out), so it never appears in one corner and moves
+   * to the other. Settings that arrive later still update the colours and
+   * labels, never the position. A preview shows what the editor passes in.
+   */
+  private loadSettings(): void {
+    if (this.settling) return;
+    this.settling = true;
+    if (this.getAttribute("preview")) return this.settle();
+    const timer = setTimeout(() => this.settle(), SETTINGS_TIMEOUT_MS);
+    this.fetchSettings(`${this.baseUrl}/widget/settings/${encodeURIComponent(this.widgetId)}`)
+      .then((raw) => {
+        this.settings = parseWidgetSettings(raw);
+        if (this.settings?.colors) {
+          this.colors = this.settings.colors;
+          this.paintLauncher();
+        }
+        this.syncLauncher();
+      })
+      .catch(() => {})
+      .then(() => {
+        clearTimeout(timer);
+        this.settle();
+      });
+  }
+
+  /** Seam for tests. A host CSP without the Eneo origin in connect-src rejects it. */
+  protected fetchSettings(url: string): Promise<unknown> {
+    return fetch(url, { credentials: "omit", referrerPolicy: "strict-origin" }).then((response) =>
+      response.ok ? response.json() : null
+    );
+  }
+
+  private settle(): void {
+    if (this.settled) return;
+    this.settled = true;
+    const position = this.settings?.position;
+    if (position) this.setAttribute("position", position);
+    this.syncLauncher();
+    if (this.prefetchWhenSettled) this.ensureFrame();
+    if (this.openWhenSettled) {
+      this.openWhenSettled = false;
+      this.openPanel();
+    }
+  }
+
   disconnectedCallback(): void {
+    // An open or prefetch waiting for the settings belongs to this page
+    // visit; run on a detached element it would leak viewport listeners.
+    this.openWhenSettled = false;
+    this.prefetchWhenSettled = false;
     window.removeEventListener("message", this.onMessage);
     this.schemeQuery?.removeEventListener("change", this.onSchemeChange);
     this.unwatch();
@@ -209,7 +275,6 @@ export class EneoWidgetElement extends HTMLElement {
     this.launcher = root.querySelector(".launcher") as HTMLButtonElement;
     this.panel = root.querySelector(".panel") as HTMLDivElement;
     this.badge = root.querySelector(".badge") as HTMLSpanElement;
-    this.panel.setAttribute("aria-label", this.labels.title);
     this.launcher.addEventListener("click", () => this.toggle());
     this.syncLauncher();
   }
@@ -238,7 +303,8 @@ export class EneoWidgetElement extends HTMLElement {
         : custom || this.labels.open;
     this.launcher.setAttribute("aria-label", label);
     this.launcher.title = label;
-    this.launcher.hidden = this.getAttribute("launcher") === "none";
+    this.panel.setAttribute("aria-label", this.labels.title);
+    this.launcher.hidden = !this.settled || this.getAttribute("launcher") === "none";
     this.badge.hidden = this.unread === 0 || this.isOpen;
     this.badge.textContent = this.unread > 99 ? "99+" : String(this.unread);
   }
@@ -258,7 +324,8 @@ export class EneoWidgetElement extends HTMLElement {
 
   /** Load the iframe ahead of the first open, e.g. from `prefetch="true"`. */
   prefetch(): void {
-    this.ensureFrame();
+    if (this.settled) this.ensureFrame();
+    else this.prefetchWhenSettled = true;
   }
 
   toggle(): void {
@@ -268,6 +335,10 @@ export class EneoWidgetElement extends HTMLElement {
 
   openPanel(): void {
     if (this.isOpen) return;
+    if (!this.settled) {
+      this.openWhenSettled = true;
+      return;
+    }
     if (this.closeTimer) {
       clearTimeout(this.closeTimer);
       this.closeTimer = null;
@@ -295,6 +366,7 @@ export class EneoWidgetElement extends HTMLElement {
 
   /** `restoreFocus = false` leaves focus where it is, e.g. on the host page the visitor moved to. */
   closePanel(restoreFocus = true): void {
+    this.openWhenSettled = false;
     if (!this.isOpen) return;
     this.isOpen = false;
     this.pendingOpen = false;

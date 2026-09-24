@@ -5,7 +5,7 @@
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, cast
+from typing import Any, Mapping, Optional, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -14,6 +14,7 @@ from sqlalchemy.engine import CursorResult
 
 from eneo.database.database import AsyncSession
 from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.widget_usage_table import (
     WidgetBudgetReservations,
     WidgetDailyUsage,
@@ -31,6 +32,14 @@ class WidgetUsageDay:
     blocked_rate: int
     helpful: int
     unhelpful: int
+
+
+@dataclass(frozen=True)
+class RetentionTarget:
+    widget_id: UUID
+    retention_days: int
+    # The raw ``tenants.widget_policy`` document.
+    tenant_policy: Optional[Mapping[str, Any]]
 
 
 class WidgetUsageRepoImpl:
@@ -190,8 +199,9 @@ class WidgetUsageRepoImpl:
         ]
 
     async def delete_sessions_before(self, widget_id: UUID, cutoff: datetime) -> int:
-        """Widget sessions never own generated files (tools are off), so a
-        plain delete cascades questions and references."""
+        """Widget sessions never own generated files (AssistantService drops
+        tool-generated images for visitors), so a plain delete cascades
+        questions and references."""
         result = await self.session.execute(
             sa.delete(Sessions).where(
                 Sessions.widget_id == widget_id, Sessions.created_at < cutoff
@@ -215,18 +225,27 @@ class WidgetUsageRepoImpl:
             .with_for_update()
         )
 
-    async def retention_targets(self) -> list[tuple[UUID, int]]:
-        """(widget_id, retention_days) for every widget that keeps sessions
-        for a bounded time; archived widgets are included so their history
-        still expires."""
+    async def retention_targets(self) -> list[RetentionTarget]:
+        """Every widget that has conversations, with its configured retention
+        and its tenant's widget policy; archived widgets are included so
+        their history still expires."""
         rows = await self.session.execute(
-            sa.select(Widgets.id, Widgets.privacy["retention_days"].as_integer())
+            sa.select(
+                Widgets.id,
+                Widgets.privacy["retention_days"].as_integer(),
+                Tenants.widget_policy,
+            )
+            .join(Tenants, Tenants.id == Widgets.tenant_id)
+            .where(sa.exists().where(Sessions.widget_id == Widgets.id))
         )
-        targets: list[tuple[UUID, int]] = []
-        for widget_id, retention in rows.all():
-            days = int(retention) if retention is not None else 30
-            targets.append((widget_id, days))
-        return targets
+        return [
+            RetentionTarget(
+                widget_id=widget_id,
+                retention_days=int(retention) if retention is not None else 30,
+                tenant_policy=policy,
+            )
+            for widget_id, retention, policy in rows.all()
+        ]
 
     @staticmethod
     def cutoff_for(retention_days: int, now: datetime | None = None) -> datetime:

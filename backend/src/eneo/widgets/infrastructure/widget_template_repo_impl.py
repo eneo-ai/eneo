@@ -119,6 +119,12 @@ class WidgetTemplateRepoImpl:
             sa.delete(WidgetTemplates).where(WidgetTemplates.id == template_id)
         )
 
+    async def lock_default(self, tenant_id: UUID) -> None:
+        await self.session.execute(
+            sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"widget-template-default:{tenant_id}"},
+        )
+
     async def clear_default(self, tenant_id: UUID) -> None:
         await self.session.execute(
             sa.update(WidgetTemplates)

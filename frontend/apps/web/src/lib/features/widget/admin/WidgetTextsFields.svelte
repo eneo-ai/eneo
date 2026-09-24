@@ -9,6 +9,7 @@
   import { isHttpUrl } from "../urls";
   import SuggestedQuestionsEditor from "./SuggestedQuestionsEditor.svelte";
   import type { LockedTextField } from "./templateLocks";
+  import { TextDraft } from "./textDraft.svelte";
 
   type Props = {
     texts: WidgetTexts;
@@ -19,6 +20,18 @@
     /** Fields a template governs: shown read-only with `lockHint` as their reason. */
     lockedFields?: ReadonlySet<LockedTextField>;
     lockHint?: string;
+    /** Why the server refused a text, by field name. */
+    errors?: Partial<Record<keyof WidgetTexts, string>>;
+    /**
+     * Why the subtitle may not be emptied here (a live widget, a template
+     * that locks it). A blank subtitle then stays in the field with this
+     * message instead of being sent to a server that refuses it.
+     */
+    subtitleRequired?: string;
+    /** Told whether the suggested questions hold edits that cannot be sent yet. */
+    onQuestionsHeld?: (held: boolean) => void;
+    /** Id of an error about the whole texts group, which every field points to. */
+    groupErrorId?: string;
   };
 
   let {
@@ -27,13 +40,65 @@
     showSuggestions = true,
     idPrefix = "widget",
     lockedFields = new Set<LockedTextField>(),
-    lockHint = ""
+    lockHint = "",
+    errors = {},
+    subtitleRequired,
+    onQuestionsHeld,
+    groupErrorId
   }: Props = $props();
 
   const id = (name: string) => `${idPrefix}-${name}`;
   const locked = (field: LockedTextField) => lockedFields.has(field);
   const describedBy = (field: LockedTextField, help: string) =>
-    locked(field) ? `${id(help)} ${id("lock-hint")}` : id(help);
+    [
+      id(help),
+      locked(field) && id("lock-hint"),
+      problems[field] && id(`${field}-error`),
+      groupErrorId
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+  // Typed texts stay as typed while the saved copy is only their normalised form.
+  const DRAFTED = [
+    "title",
+    "welcome",
+    "placeholder",
+    "subtitle",
+    "footer_text",
+    "footer_link_label"
+  ] as const;
+  type Drafted = (typeof DRAFTED)[number];
+  const drafts = Object.fromEntries(
+    DRAFTED.map((field) => [field, new TextDraft(() => texts[field] ?? "")])
+  ) as Record<Drafted, TextDraft>;
+  let subtitleBlankHeld = $state(false);
+  const typed = (field: Drafted) => (event: Event & { currentTarget: { value: string } }) => {
+    drafts[field].text = event.currentTarget.value;
+    if (field === "subtitle") {
+      subtitleBlankHeld = !!subtitleRequired && !event.currentTarget.value.trim();
+      if (subtitleBlankHeld) return;
+    }
+    const change: Partial<WidgetTexts> = { [field]: event.currentTarget.value };
+    onChange(change);
+  };
+  // A held blank subtitle is sent as soon as it may be (the widget is paused,
+  // the template unlocks it), not left in the field until it is edited again.
+  const subtitleHeld = $derived(subtitleBlankHeld && !drafts.subtitle.text.trim());
+  $effect(() => {
+    if (!subtitleHeld || subtitleRequired) return;
+    untrack(() => {
+      subtitleBlankHeld = false;
+      onChange({ subtitle: drafts.subtitle.text });
+    });
+  });
+  const problems = $derived<Partial<Record<keyof WidgetTexts, string>>>({
+    ...errors,
+    subtitle:
+      errors.subtitle ??
+      (subtitleRequired && !drafts.subtitle.text.trim() ? subtitleRequired : undefined)
+  });
+  const subtitleInvalid = $derived(!drafts.subtitle.text.trim() || !!problems.subtitle);
 
   // The footer link is committed when the field is left, never per keystroke.
   let linkDraft = $state(untrack(() => texts.footer_link_url ?? ""));
@@ -59,6 +124,12 @@
   }
 </script>
 
+{#snippet fieldError(field: keyof WidgetTexts)}
+  {#if problems[field]}
+    <Field.Error id={id(`${field}-error`)}>{problems[field]}</Field.Error>
+  {/if}
+{/snippet}
+
 <Field.Group class="grid gap-6">
   {#if lockedFields.size > 0}
     <p id={id("lock-hint")} class="text-secondary text-sm">{lockHint}</p>
@@ -68,14 +139,18 @@
     <Input
       id={id("title")}
       maxlength={80}
-      value={texts.title ?? ""}
+      value={drafts.title.text}
       disabled={locked("title")}
+      aria-invalid={!!errors.title}
       aria-describedby={describedBy("title", "title-help")}
-      oninput={(event) => onChange({ title: event.currentTarget.value })}
+      onfocus={drafts.title.focus}
+      onblur={drafts.title.blur}
+      oninput={typed("title")}
     />
     <Field.Description id={id("title-help")}
       >{m.widget_admin_text_title_description()}</Field.Description
     >
+    {@render fieldError("title")}
   </Field.Field>
 
   <Field.Field>
@@ -84,14 +159,18 @@
       id={id("welcome")}
       maxlength={500}
       rows={3}
-      value={texts.welcome ?? ""}
+      value={drafts.welcome.text}
       disabled={locked("welcome")}
+      aria-invalid={!!errors.welcome}
       aria-describedby={describedBy("welcome", "welcome-help")}
-      oninput={(event) => onChange({ welcome: event.currentTarget.value })}
+      onfocus={drafts.welcome.focus}
+      onblur={drafts.welcome.blur}
+      oninput={typed("welcome")}
     />
     <Field.Description id={id("welcome-help")}
       >{m.widget_admin_text_welcome_description()}</Field.Description
     >
+    {@render fieldError("welcome")}
   </Field.Field>
 
   {#if showSuggestions}
@@ -101,6 +180,9 @@
       <SuggestedQuestionsEditor
         id={id("questions")}
         questions={texts.suggested_questions ?? []}
+        error={errors.suggested_questions}
+        onHeld={onQuestionsHeld}
+        describedBy={groupErrorId}
         onChange={(questions) => onChange({ suggested_questions: questions })}
       />
     </Field.Field>
@@ -111,19 +193,23 @@
     <Input
       id={id("placeholder")}
       maxlength={120}
-      value={texts.placeholder ?? ""}
+      value={drafts.placeholder.text}
       disabled={locked("placeholder")}
+      aria-invalid={!!errors.placeholder}
       aria-describedby={describedBy("placeholder", "placeholder-help")}
-      oninput={(event) => onChange({ placeholder: event.currentTarget.value })}
+      onfocus={drafts.placeholder.focus}
+      onblur={drafts.placeholder.blur}
+      oninput={typed("placeholder")}
     />
     <Field.Description id={id("placeholder-help")}
       >{m.widget_admin_text_placeholder_description()}</Field.Description
     >
+    {@render fieldError("placeholder")}
   </Field.Field>
 
   <Field.Separator />
 
-  <Field.Field data-invalid={!(texts.subtitle ?? "").trim() || undefined}>
+  <Field.Field data-invalid={subtitleInvalid || undefined}>
     <Field.Label for={id("subtitle")}>{m.widget_admin_text_subtitle()}</Field.Label>
     <Textarea
       id={id("subtitle")}
@@ -131,15 +217,18 @@
       rows={2}
       required
       aria-required="true"
-      aria-invalid={!(texts.subtitle ?? "").trim()}
-      value={texts.subtitle ?? ""}
+      aria-invalid={subtitleInvalid}
+      value={drafts.subtitle.text}
       disabled={locked("subtitle")}
       aria-describedby={describedBy("subtitle", "subtitle-help")}
-      oninput={(event) => onChange({ subtitle: event.currentTarget.value })}
+      onfocus={drafts.subtitle.focus}
+      onblur={drafts.subtitle.blur}
+      oninput={typed("subtitle")}
     />
     <Field.Description id={id("subtitle-help")}
       >{m.widget_admin_text_subtitle_description()}</Field.Description
     >
+    {@render fieldError("subtitle")}
   </Field.Field>
 
   <Field.Field>
@@ -148,24 +237,28 @@
       id={id("footer")}
       maxlength={300}
       rows={2}
-      value={texts.footer_text ?? ""}
+      value={drafts.footer_text.text}
       disabled={locked("footer_text")}
+      aria-invalid={!!errors.footer_text}
       aria-describedby={describedBy("footer_text", "footer-help")}
-      oninput={(event) => onChange({ footer_text: event.currentTarget.value })}
+      onfocus={drafts.footer_text.focus}
+      onblur={drafts.footer_text.blur}
+      oninput={typed("footer_text")}
     />
     <Field.Description id={id("footer-help")}
       >{m.widget_admin_text_footer_description()}</Field.Description
     >
+    {@render fieldError("footer_text")}
   </Field.Field>
 
   <Field.Group class="grid gap-6 sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-    <Field.Field data-invalid={linkInvalid || undefined}>
+    <Field.Field data-invalid={linkInvalid || !!errors.footer_link_url || undefined}>
       <Field.Label for={id("footer-link")}>{m.widget_admin_text_footer_link_url()}</Field.Label>
       <Input
         id={id("footer-link")}
         type="url"
         maxlength={500}
-        aria-invalid={linkInvalid}
+        aria-invalid={linkInvalid || !!errors.footer_link_url}
         disabled={locked("footer_link_url")}
         aria-describedby={linkInvalid
           ? `${describedBy("footer_link_url", "footer-link-help")} ${id("footer-link-error")}`
@@ -184,6 +277,8 @@
       >
       {#if linkInvalid}
         <Field.Error id={id("footer-link-error")}>{m.widget_admin_url_invalid()}</Field.Error>
+      {:else}
+        {@render fieldError("footer_link_url")}
       {/if}
     </Field.Field>
 
@@ -194,14 +289,18 @@
       <Input
         id={id("footer-link-label")}
         maxlength={80}
-        value={texts.footer_link_label ?? ""}
+        value={drafts.footer_link_label.text}
         disabled={locked("footer_link_label")}
+        aria-invalid={!!errors.footer_link_label}
         aria-describedby={describedBy("footer_link_label", "footer-link-label-help")}
-        oninput={(event) => onChange({ footer_link_label: event.currentTarget.value })}
+        onfocus={drafts.footer_link_label.focus}
+        onblur={drafts.footer_link_label.blur}
+        oninput={typed("footer_link_label")}
       />
       <Field.Description id={id("footer-link-label-help")}
         >{m.widget_admin_text_footer_link_label_description()}</Field.Description
       >
+      {@render fieldError("footer_link_label")}
     </Field.Field>
   </Field.Group>
 </Field.Group>

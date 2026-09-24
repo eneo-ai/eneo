@@ -2,10 +2,11 @@
 import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { WidgetPublicConfig } from "@eneo/eneo-js";
+import { EneoError, type WidgetPublicConfig } from "@eneo/eneo-js";
 import "../../../../app.css";
 import axe, { type AxeResults } from "axe-core";
 import { virtual } from "@guidepup/virtual-screen-reader";
+import { backgroundOf, contrastAgainst } from "./contrastProbe";
 
 /** Rule ids and targets of every axe violation on the page, for a readable diff. */
 async function violations() {
@@ -53,7 +54,20 @@ const fake = vi.hoisted(() => ({
   // Rejects the next question when set, then clears itself.
   failNextAsk: false,
   // A stored conversation the fake returns on restore, when set.
-  restored: null as null | Record<string, unknown>
+  restored: null as null | Record<string, unknown>,
+  // Answer texts for the next asks, in order; the default after that.
+  answers: [] as string[],
+  // The next answer breaks off after its first words, then clears itself.
+  breakOffNext: false,
+  // Errors the next asks fail with before any chunk, in order.
+  askErrors: [] as unknown[],
+  // Errors the next restores fail with, in order.
+  getErrors: [] as unknown[],
+  // Visitor tokens minted so far.
+  mints: 0,
+  // Merged into every first chunk, and the references every answer cites.
+  chunkExtras: {} as Record<string, unknown>,
+  references: [] as unknown[]
 }));
 
 vi.mock("@eneo/eneo-js", async (importOriginal) => {
@@ -67,12 +81,15 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
       publicId: "wgt_test",
       challengeUrl: "http://localhost/api/v1/widgets/wgt_test/challenge/",
       config: unsupported,
-      createVisitorSession: async () => ({
-        token: "visitor-token",
-        expires_in: 3600,
-        visitor_id: "11111111-1111-4111-8111-111111111111",
-        visitor_key: "key"
-      }),
+      createVisitorSession: async () => {
+        fake.mints += 1;
+        return {
+          token: "visitor-token",
+          expires_in: 3600,
+          visitor_id: "11111111-1111-4111-8111-111111111111",
+          visitor_key: "key"
+        };
+      },
       conversations: {
         ask: async ({
           conversation,
@@ -91,26 +108,52 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
             fake.failNextAsk = false;
             throw new Error("boom");
           }
+          const failure = fake.askErrors.shift();
+          if (failure) throw failure;
           await new Promise<void>((resolve) => {
             fake.release = resolve;
           });
-          const session_id = `session-${++fake.sessions}`;
+          // A follow-up continues the conversation it was asked in.
+          const session_id = conversation?.id || `session-${++fake.sessions}`;
           callbacks?.onFirstChunk?.({
-            id: `message-${fake.sessions}`,
+            id: `message-${fake.asks.length}`,
             session_id,
             question,
             answer: "",
             references: [],
             files: [],
             generated_files: [],
-            tools: { assistants: [] }
+            tools: { assistants: [] },
+            ...fake.chunkExtras
           });
-          // Streamed in two pieces, like a model does.
-          callbacks?.onText?.({ answer: "Svaret ", session_id, references: [] });
-          callbacks?.onText?.({ answer: "från assistenten.", session_id, references: [] });
+          const answer = fake.answers.shift();
+          if (answer === undefined) {
+            // Streamed in two pieces, like a model does.
+            callbacks?.onText?.({ answer: "Svaret ", session_id, references: fake.references });
+            callbacks?.onText?.({
+              answer: "från assistenten.",
+              session_id,
+              references: fake.references
+            });
+          } else {
+            callbacks?.onText?.({ answer, session_id, references: fake.references });
+          }
+          if (fake.breakOffNext) {
+            fake.breakOffNext = false;
+            // Long enough for the streamed words to reach the page first.
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            throw new actual.EneoError(
+              "The AI response stream ended unexpectedly.",
+              "SERVER",
+              200,
+              0
+            );
+          }
           return {};
         },
         get: async () => {
+          const failure = fake.getErrors.shift();
+          if (failure) throw failure;
           if (!fake.restored) return unsupported();
           return fake.restored;
         },
@@ -166,13 +209,16 @@ function config(overrides: Partial<WidgetPublicConfig> = {}): WidgetPublicConfig
   } as WidgetPublicConfig;
 }
 
-function renderApp(overrides: Partial<WidgetPublicConfig> = {}) {
+function renderApp(
+  overrides: Partial<WidgetPublicConfig> = {},
+  hostScheme: "light" | "dark" | null = null
+) {
   return render(EmbedApp, {
     config: config(overrides),
     publicId: "wgt_test",
     baseUrl: "http://localhost",
     hostOrigin: null,
-    hostScheme: null
+    hostScheme
   });
 }
 
@@ -184,15 +230,63 @@ const announced = () =>
   document.querySelector("[data-widget-chat] [aria-live='polite'][aria-atomic='true']")
     ?.textContent ?? "";
 
-async function releaseAnswer() {
+async function releaseAnswer(text = "Svaret från assistenten.") {
   await vi.waitFor(() => expect(fake.release).not.toBeNull());
   const release = fake.release!;
   fake.release = null;
   release();
   // In the log: the live region repeats the answer for screen readers.
-  await expect
-    .element(page.getByRole("log").getByText("Svaret från assistenten.").last())
-    .toBeVisible();
+  await expect.element(page.getByRole("log").getByText(text).last()).toBeVisible();
+}
+
+/** Ask a follow-up through the composer and let its answer arrive. */
+async function askFollowUp(question: string, answer: string) {
+  fake.answers.push(answer);
+  await userEvent.fill(composer(), question);
+  await userEvent.keyboard("{Enter}");
+  await releaseAnswer(answer);
+  await expect.element(composer()).toBeEnabled();
+}
+
+function widgetError(status: number, code: string, headers?: Record<string, string>) {
+  return new EneoError(
+    "failed",
+    "SERVER",
+    status,
+    0,
+    { detail: { code } },
+    { endpoint: "/x" },
+    headers ? new Headers(headers) : undefined
+  );
+}
+
+/** A visitor who was here before, with a live token and a remembered conversation. */
+function rememberVisitor() {
+  localStorage.setItem(
+    "eneo-widget:wgt_test",
+    JSON.stringify({
+      visitor_id: "11111111-1111-4111-8111-111111111111",
+      visitor_key: "key",
+      token: "visitor-token",
+      expires_at: Date.now() + 600_000,
+      session_id: "session-9"
+    })
+  );
+  fake.restored = {
+    id: "session-9",
+    name: "Tidigare",
+    messages: [
+      {
+        id: "message-9",
+        question: "Hej?",
+        answer: "Hej där.",
+        references: [],
+        files: [],
+        tools: { assistants: [] }
+      }
+    ],
+    feedback: null
+  };
 }
 
 beforeEach(() => {
@@ -203,7 +297,15 @@ beforeEach(() => {
   fake.restored = null;
   fake.failNextFeedback = false;
   fake.failNextAsk = false;
+  fake.answers.length = 0;
+  fake.breakOffNext = false;
+  fake.askErrors.length = 0;
+  fake.getErrors.length = 0;
+  fake.mints = 0;
+  fake.chunkExtras = {};
+  fake.references = [];
   localStorage.clear();
+  delete document.documentElement.dataset.theme;
 });
 
 describe("WidgetChat", () => {
@@ -328,6 +430,317 @@ describe("WidgetChat", () => {
       .element(page.getByRole("button", { name: "widget_feedback_more_negative" }))
       .toBeVisible();
     expect(fake.feedback).toHaveLength(0);
+  });
+
+  test("a vote survives a follow-up question", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    const helpful = page.getByRole("button", { name: "widget_feedback_helpful" });
+    await userEvent.click(helpful);
+    await expect.element(helpful).toHaveAttribute("aria-pressed", "true");
+
+    await askFollowUp("Och på lördagar?", "Lördagar har biblioteket stängt.");
+
+    await expect.element(helpful).toHaveAttribute("aria-pressed", "true");
+    await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_thanks");
+    expect(fake.feedback).toHaveLength(1);
+  });
+
+  test("a restored vote the visitor changed stays changed after a follow-up", async () => {
+    localStorage.setItem(
+      "eneo-widget:wgt_test",
+      JSON.stringify({
+        visitor_id: "11111111-1111-4111-8111-111111111111",
+        visitor_key: "key",
+        token: "visitor-token",
+        expires_at: Date.now() + 600_000,
+        session_id: "session-9"
+      })
+    );
+    fake.restored = {
+      id: "session-9",
+      name: "Tidigare",
+      messages: [
+        {
+          id: "message-9",
+          question: "Hej?",
+          answer: "Hej där.",
+          references: [],
+          files: [],
+          tools: { assistants: [] }
+        }
+      ],
+      feedback: { value: -1, text: null }
+    };
+    renderApp();
+    const helpful = page.getByRole("button", { name: "widget_feedback_helpful" });
+    const unhelpful = page.getByRole("button", { name: "widget_feedback_unhelpful" });
+    await expect.element(unhelpful).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(helpful);
+    await expect.element(helpful).toHaveAttribute("aria-pressed", "true");
+
+    await askFollowUp("En fråga till", "Ett svar till.");
+
+    await expect.element(helpful).toHaveAttribute("aria-pressed", "true");
+    await expect.element(unhelpful).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("a sent comment stays acknowledged when the vote changes after a follow-up", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_unhelpful" }));
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_more_negative" }));
+    const dialog = page.getByRole("dialog");
+    await userEvent.fill(dialog.getByRole("textbox"), "Fel öppettider.");
+    await userEvent.click(dialog.getByRole("button", { name: "widget_feedback_send" }));
+    await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_received");
+    await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
+
+    await askFollowUp("Och på lördagar?", "Lördagar har biblioteket stängt.");
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
+
+    // The server keeps the stored comment for a vote without text, so the
+    // acknowledgement still holds and no second comment is offered.
+    expect(fake.feedback.at(-1)).toEqual({
+      conversation: { id: "session-1" },
+      feedback: { value: 1 }
+    });
+    await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_received");
+    expect(page.getByRole("button", { name: /widget_feedback_more/ }).elements()).toHaveLength(0);
+  });
+
+  test("the comment dialog closes in the widget's language and leaves focus on the vote", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    const helpful = page.getByRole("button", { name: "widget_feedback_helpful" });
+    await userEvent.click(helpful);
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_more" }));
+    const dialog = page.getByRole("dialog");
+    await expect.element(dialog.getByRole("button", { name: "close" })).toBeVisible();
+
+    await userEvent.fill(dialog.getByRole("textbox"), "Tydligt svar.");
+    await userEvent.keyboard("{Tab}{Tab}{Enter}");
+
+    await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
+    await vi.waitFor(() => expect(document.activeElement).toBe(helpful.element()));
+  });
+
+  test("an answer that breaks off keeps what arrived and says it is incomplete", async () => {
+    renderApp();
+    fake.breakOffNext = true;
+    fake.answers.push("Biblioteket har öppet ");
+    await userEvent.click(suggestion());
+    await releaseAnswer("Biblioteket har öppet");
+
+    await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_incomplete");
+    await expect.element(page.getByText("Biblioteket har öppet")).toBeVisible();
+    expect(document.querySelector("[data-widget-chat] [role='log']")!.textContent).not.toContain(
+      "chat_stream_error_inline"
+    );
+    // Nothing reads the broken-off answer out as if it were whole.
+    expect(announced()).toBe("");
+    // The turn exists on the server: it is remembered and can be rated.
+    expect(JSON.parse(localStorage.getItem("eneo-widget:wgt_test")!).session_id).toBe("session-1");
+    await expect.element(page.getByText("widget_feedback_prompt")).toBeVisible();
+  });
+
+  test("a remembered conversation is restored with a fresh token when the old one went stale", async () => {
+    rememberVisitor();
+    // A pause or a settings change since the last visit makes the stored token stale.
+    fake.getErrors.push(widgetError(401, "visitor_token_stale"));
+    renderApp();
+
+    await expect.element(page.getByText("Hej där.")).toBeVisible();
+    expect(fake.mints).toBe(1);
+    expect(JSON.parse(localStorage.getItem("eneo-widget:wgt_test")!).session_id).toBe("session-9");
+  });
+
+  test("a question that fails before it reaches the server goes back into the field", async () => {
+    renderApp();
+    fake.askErrors.push(widgetError(400, "challenge_invalid"));
+    await userEvent.fill(composer(), "Vad kostar bygglov?");
+    await userEvent.keyboard("{Enter}");
+
+    await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_verification");
+    await expect.element(composer()).toHaveValue("Vad kostar bygglov?");
+
+    // The same text can simply be sent again.
+    await userEvent.click(composer());
+    await userEvent.keyboard("{Enter}");
+    await releaseAnswer();
+    expect(fake.asks.map((ask) => ask.question)).toEqual([
+      "Vad kostar bygglov?",
+      "Vad kostar bygglov?"
+    ]);
+  });
+
+  test("a full conversation says to start a new one and moves focus there", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+
+    fake.askErrors.push(widgetError(400, "session_turns_exceeded"));
+    await userEvent.fill(composer(), "En fråga för mycket");
+    await userEvent.keyboard("{Enter}");
+
+    await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_session_limit");
+    await expect
+      .element(page.getByRole("button", { name: "widget_new_conversation" }))
+      .toHaveFocus();
+    await expect.element(composer()).toHaveValue("En fråga för mycket");
+  });
+
+  test("a conversation the server no longer has is replaced by a new one", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+
+    fake.askErrors.push(widgetError(404, "session_not_owned"));
+    await userEvent.fill(composer(), "Och på lördagar?");
+    await userEvent.keyboard("{Enter}");
+
+    await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_session_gone");
+    expect(answers()).toHaveLength(0);
+    expect(JSON.parse(localStorage.getItem("eneo-widget:wgt_test")!).session_id).toBeNull();
+    await expect.element(composer()).toHaveValue("Och på lördagar?");
+
+    await userEvent.click(composer());
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() => expect(fake.asks).toHaveLength(3));
+    // The gone conversation is never asked in again.
+    expect(fake.asks[2].conversationId).toBeFalsy();
+    await releaseAnswer();
+  });
+
+  test("asking the same question again shows it as pending until the answer starts", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    await expect.element(composer()).toBeEnabled();
+    expect(answers()).toHaveLength(1);
+
+    await userEvent.fill(composer(), "Vad har biblioteket för öppettider?");
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() => expect(fake.release).not.toBeNull());
+
+    // The first answer plus the pending question with its typing indicator.
+    await vi.waitFor(() => expect(answers()).toHaveLength(2));
+    expect(answers()[1].textContent).toContain("Vad har biblioteket för öppettider?");
+    await releaseAnswer();
+    expect(answers()).toHaveLength(2);
+  });
+
+  test.each([true, false])(
+    "shows the sources and the tool activity only when the widget does (%s)",
+    async (shown) => {
+      fake.chunkExtras = {
+        mcp_tool_calls: [
+          {
+            server_name: "TimeMCP",
+            tool_name: "get_current_time",
+            arguments: { timezone: "Europe/Stockholm" },
+            tool_call_id: "c1",
+            result_status: "completed"
+          }
+        ]
+      };
+      fake.references = [
+        {
+          id: "bbbbbbbb-0000-4000-8000-000000000002",
+          metadata: { title: "Öppettider.pdf", url: null, embedding_model_id: "em", size: 10 },
+          group_id: null,
+          website_id: null,
+          original_available: true
+        }
+      ];
+      renderApp({ show_sources: shown, show_tool_activity: shown });
+      await userEvent.click(suggestion());
+      await releaseAnswer();
+
+      const count = shown ? 1 : 0;
+      expect(page.getByRole("button", { name: /widget_sources_count/ }).elements()).toHaveLength(
+        count
+      );
+      expect(page.getByRole("group", { name: "widget_activity" }).elements()).toHaveLength(count);
+    }
+  );
+
+  test("the send arrow sends and hands focus back to the question field", async () => {
+    renderApp();
+    await userEvent.fill(composer(), "Vad kostar bygglov?");
+    await userEvent.click(page.getByRole("button", { name: "widget_send" }));
+
+    await vi.waitFor(() =>
+      expect(fake.asks.map((ask) => ask.question)).toEqual(["Vad kostar bygglov?"])
+    );
+    await expect.element(composer()).toHaveFocus();
+    await releaseAnswer();
+  });
+
+  describe.each(["light", "dark"] as const)("focus in the %s scheme", (scheme) => {
+    const FOCUSABLE =
+      "button:not([disabled]), a[href], textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
+    /** Focus every control from the keyboard and check the indicator it shows. */
+    async function checkEveryControl(scope: Element) {
+      const controls = Array.from(scope.querySelectorAll<HTMLElement>(FOCUSABLE));
+      for (const control of controls) {
+        // A key press first, so focus counts as keyboard focus.
+        await userEvent.keyboard("{Shift}");
+        control.focus();
+        const name = `${control.tagName} ${control.getAttribute("aria-label") ?? control.textContent?.trim()}`;
+        expect(control.matches(":focus-visible"), name).toBe(true);
+        // The question field's box carries its indicator.
+        const indicator = control.matches(".widget-composer textarea")
+          ? control.closest("form")!
+          : control;
+        // Buttons that transition every property reach their colour later.
+        await Promise.all(indicator.getAnimations().map((animation) => animation.finished));
+        const style = getComputedStyle(indicator);
+        expect(style.outlineStyle, name).not.toBe("none");
+        expect(parseFloat(style.outlineWidth), name).toBeGreaterThanOrEqual(2);
+        const ratio = contrastAgainst(style.outlineColor, indicator.parentElement);
+        expect(ratio, `${name}: ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
+      }
+      return controls.length;
+    }
+
+    test("every control shows an indicator of at least 3:1", async () => {
+      renderApp(
+        {
+          texts: {
+            title: "Fråga kommunen",
+            subtitle: "Du chattar med en AI-assistent.",
+            welcome: "Hej!",
+            suggested_questions: ["Vad har biblioteket för öppettider?"],
+            footer_text: "Läs mer",
+            footer_link_url: "https://www.kommun.se/integritet"
+          }
+        } as Partial<WidgetPublicConfig>,
+        scheme
+      );
+      const chat = document.querySelector("[data-widget-chat]")!;
+      expect(backgroundOf(chat)[0] < 128).toBe(scheme === "dark");
+      // Suggestion, question field and footer link.
+      expect(await checkEveryControl(chat)).toBeGreaterThanOrEqual(3);
+
+      await userEvent.click(suggestion());
+      await releaseAnswer();
+      await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
+      await userEvent.fill(composer(), "En till fråga");
+      // New conversation, thumbs, "tell us more", question field, send, footer link.
+      expect(await checkEveryControl(chat)).toBeGreaterThanOrEqual(7);
+
+      await userEvent.click(page.getByRole("button", { name: "widget_feedback_more" }));
+      const dialog = page.getByRole("dialog");
+      await expect.element(dialog).toBeVisible();
+      await userEvent.fill(dialog.getByRole("textbox"), "Bra.");
+      // Comment field, cancel, send and the close button.
+      expect(await checkEveryControl(dialog.element())).toBeGreaterThanOrEqual(4);
+    });
   });
 
   test("the chat, its acknowledgement and the comment dialog pass axe", async () => {

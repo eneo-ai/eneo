@@ -365,6 +365,16 @@ class AssistantSparse(ResourcePermissionsMixin, AssistantBase, InDB):
     )
 
 
+class AssistantWidgetStatus(BaseModel):
+    serves_active_widget: bool = Field(
+        description=(
+            "Whether an active web widget publishes this assistant to visitors. "
+            "Visitors get the assistant as configured, so changes to its MCP "
+            "servers and capabilities reach them immediately."
+        )
+    )
+
+
 class AssistantPublic(InDB, ResourcePermissionsMixin):
     enabled_capabilities: list[CapabilityPurpose] = Field(
         default_factory=list[CapabilityPurpose]

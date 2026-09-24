@@ -7,6 +7,7 @@ import * as m from "$lib/paraglide/messages";
 const generateOriginalSignedUrl = vi.hoisted(() => vi.fn());
 const getBlob = vi.hoisted(() => vi.fn());
 const toastError = vi.hoisted(() => vi.fn());
+const assignLocation = vi.hoisted(() => vi.fn());
 
 vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({
@@ -17,6 +18,9 @@ vi.mock("$lib/core/Eneo", () => ({
 vi.mock("$lib/components/toast", () => ({
   toast: { error: toastError }
 }));
+
+// A real navigation would unload the Vitest tester iframe and hang the run.
+vi.mock("$lib/core/navigation", () => ({ assignLocation }));
 
 import BlobPreview from "./BlobPreview.svelte";
 
@@ -33,6 +37,7 @@ describe("BlobPreview", () => {
     getBlob.mockReset();
     generateOriginalSignedUrl.mockReset();
     toastError.mockReset();
+    assignLocation.mockReset();
     getBlob.mockResolvedValue({ text: "Extracted text" });
     generateOriginalSignedUrl.mockResolvedValue({
       url: "https://eneo.example/api/v1/info-blobs/blob-1/original/download/?token=signed"
@@ -40,28 +45,22 @@ describe("BlobPreview", () => {
   });
 
   it("shows original download separately and opens its signed URL", async () => {
-    const initialUrl = window.location.href;
-    generateOriginalSignedUrl.mockResolvedValue({
-      url: `${window.location.origin}${window.location.pathname}#blob-1-original-download`
+    render(BlobPreview, { blob: blob(true) });
+
+    await page.getByRole("button", { name: /Source document/ }).click();
+    const download = page.getByRole("button", { name: m.download_original() });
+    await expect.element(download).toBeVisible();
+    await download.click();
+
+    await vi.waitFor(() =>
+      expect(assignLocation).toHaveBeenCalledExactlyOnceWith(
+        "https://eneo.example/api/v1/info-blobs/blob-1/original/download/?token=signed"
+      )
+    );
+    expect(generateOriginalSignedUrl).toHaveBeenCalledWith({
+      infoBlobId: "blob-1",
+      contentDisposition: "attachment"
     });
-
-    try {
-      render(BlobPreview, { blob: blob(true) });
-
-      await page.getByRole("button", { name: /Source document/ }).click();
-      const download = page.getByRole("button", { name: m.download_original() });
-      await expect.element(download).toBeVisible();
-      await download.click();
-
-      await vi.waitFor(() =>
-        expect(generateOriginalSignedUrl).toHaveBeenCalledWith({
-          infoBlobId: "blob-1",
-          contentDisposition: "attachment"
-        })
-      );
-    } finally {
-      history.replaceState(null, "", initialUrl);
-    }
   });
 
   it("does not offer an original download when no original is available", async () => {
@@ -93,5 +92,6 @@ describe("BlobPreview", () => {
 
     await vi.waitFor(() => expect(toastError).toHaveBeenCalledWith(m.error_downloading_original()));
     await expect.element(download).toBeEnabled();
+    expect(assignLocation).not.toHaveBeenCalled();
   });
 });

@@ -9,6 +9,7 @@
 
 type Manifest = {
   version: string;
+  channel: string;
   file: string;
   integrity: string;
   bytes: number;
@@ -17,7 +18,7 @@ type Manifest = {
 
 export type WidgetLoaderBundle = {
   version: string;
-  /** Floating alias hosts embed by default, e.g. `v1`. */
+  /** Floating alias hosts embed by default, e.g. `v1`; set by the package, not its version. */
   channel: string;
   integrity: string;
   source: string;
@@ -35,17 +36,19 @@ const manifests = import.meta.glob("../../../../../packages/widget-loader/dist/m
 
 let cached: Promise<WidgetLoaderBundle | null> | undefined;
 
+/** The release a built manifest describes; a build from before the channel was recorded counts as not built. */
+export function readManifest(raw: string): Omit<WidgetLoaderBundle, "source"> | null {
+  const parsed = JSON.parse(raw) as Partial<Manifest>;
+  if (!parsed.version || !parsed.channel || !parsed.integrity) return null;
+  return { version: parsed.version, channel: parsed.channel, integrity: parsed.integrity };
+}
+
 async function load(): Promise<WidgetLoaderBundle | null> {
   const [source] = Object.values(sources);
   const [manifest] = Object.values(manifests);
   if (!source || !manifest) return null;
-  const parsed = JSON.parse(await manifest()) as Manifest;
-  return {
-    version: parsed.version,
-    channel: `v${parsed.version.split(".")[0]}`,
-    integrity: parsed.integrity,
-    source: await source()
-  };
+  const release = readManifest(await manifest());
+  return release ? { ...release, source: await source() } : null;
 }
 
 export function getWidgetLoaderBundle(): Promise<WidgetLoaderBundle | null> {

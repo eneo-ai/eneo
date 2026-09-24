@@ -6,6 +6,7 @@
   import { IconDownload } from "@eneo/icons/download";
   import { Button, Dialog, Markdown } from "@eneo/ui";
   import { getEneo } from "$lib/core/Eneo";
+  import { assignLocation } from "$lib/core/navigation";
   import * as m from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   type BlobPreviewReference = {
@@ -83,7 +84,7 @@
         infoBlobId: blob.id,
         contentDisposition: "attachment"
       });
-      window.location.assign(response.url);
+      assignLocation(response.url);
     } catch (e) {
       console.error("Error generating original download URL:", e);
       toast.error(m.error_downloading_original());

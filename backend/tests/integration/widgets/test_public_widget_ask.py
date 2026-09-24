@@ -40,6 +40,12 @@ async def _mint(client, public_id: str) -> str:
     return resp.json()["token"]
 
 
+# Stored like a turn with tool rounds: the cumulative columns add up every
+# provider request, the context columns hold the final request only.
+PROMPT_TOKENS, ANSWER_TOKENS = 4_800, 300
+FINAL_PROMPT_TOKENS, FINAL_ANSWER_TOKENS = 1_800, 120
+
+
 @pytest.fixture
 def fake_assistant_ask(monkeypatch):
     """Replace the model call with a canned two-chunk stream.
@@ -68,8 +74,10 @@ def fake_assistant_ask(monkeypatch):
                 assistant_id=assistant_id,
                 question=question,
                 answer="Hej där!",
-                num_tokens_question=0,
-                num_tokens_answer=0,
+                num_tokens_question=PROMPT_TOKENS,
+                num_tokens_answer=ANSWER_TOKENS,
+                context_prompt_tokens=FINAL_PROMPT_TOKENS,
+                context_completion_tokens=FINAL_ANSWER_TOKENS,
             )
             .returning(Questions.id)
         )
@@ -158,7 +166,16 @@ async def test_visitor_ask_streams_and_owns_its_session(
     assert events[0][0] == "first_chunk"
     assert "".join(d["answer"] for e, d in events if e == "text") == "Hej där!"
     session_id = events[0][1]["session_id"]
-    assert fake_assistant_ask[-1]["allow_tools"] is False
+    # The assistant as configured: nothing narrows its MCP servers or
+    # capabilities and no approval is requested (tools-off was dropped).
+    assert set(fake_assistant_ask[-1]) == {
+        "question",
+        "session_id",
+        "stream",
+        "version",
+        "num_chunks_override",
+        "prompt_addendum",
+    }
     assert fake_assistant_ask[-1]["stream"] is True
 
     # The visitor can restore and continue its own session.
@@ -223,18 +240,22 @@ async def test_visitor_ask_streams_and_owns_its_session(
     assert str(row.widget_id) == active_widget["id"]
     assert row.visitor_id is not None
 
-    # Usage was settled after the streams finished.
+    # Usage was settled after the streams finished, on what every provider
+    # round of the two answers cost, not on their final requests.
     resp = await client.get(
         f"/api/v1/widgets/{active_widget['id']}/usage/", headers=_auth(admin_token)
     )
     assert resp.status_code == 200, resp.text
     usage = resp.json()
     assert usage["daily_token_budget"] == 500_000
-    assert usage["days"] and usage["days"][0]["questions"] == 2
-    assert (usage["days"][0]["helpful"], usage["days"][0]["unhelpful"]) == (0, 1)
-    assert (
-        usage["budget_used_today"] == 0
-    )  # reservations settled to the real (zero) usage
+    day = usage["days"][0]
+    assert day["questions"] == 2
+    assert (day["helpful"], day["unhelpful"]) == (0, 1)
+    assert (day["input_tokens"], day["output_tokens"]) == (
+        2 * PROMPT_TOKENS,
+        2 * ANSWER_TOKENS,
+    )
+    assert usage["budget_used_today"] == 2 * (PROMPT_TOKENS + ANSWER_TOKENS)
 
 
 @pytest.mark.integration
@@ -259,15 +280,23 @@ async def test_budget_exhaustion_blocks_and_is_counted(
     assert resp.status_code == 200, resp.text
     token = await _mint(client, public_id)
 
+    # A budget below the reservation estimate still answers once; what the
+    # answer used then exhausts the day.
     resp = await client.post(
         f"/api/v1/widgets/{public_id}/ask/",
         json={"question": "Hej"},
         headers=_auth(token),
     )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Och?"},
+        headers=_auth(token),
+    )
     assert resp.status_code == 429, resp.text
     assert resp.json()["detail"]["code"] == "budget_exhausted"
     assert "retry-after" in resp.headers
-    assert fake_assistant_ask == []
+    assert [call["question"] for call in fake_assistant_ask] == ["Hej"]
 
     resp = await client.get(
         f"/api/v1/widgets/{active_widget['id']}/usage/", headers=_auth(admin_token)
@@ -380,6 +409,18 @@ async def test_suspended_tenant_revokes_visitor_access(
 
     await _set_tenant_state(tenant_id, "suspended")
     try:
+        # The embed page shows its paused notice before anyone solves a
+        # challenge or gets a token.
+        for method, path, body in [
+            ("GET", "config/", None),
+            ("GET", "challenge/", None),
+            ("POST", "visitor-sessions/", {"previous_token": token}),
+        ]:
+            resp = await client.request(
+                method, f"/api/v1/widgets/{public_id}/{path}", json=body
+            )
+            assert resp.status_code == 404, (path, resp.text)
+            assert resp.json()["detail"]["code"] == "widget_not_active"
         resp = await client.get(
             f"/api/v1/widgets/{public_id}/sessions/{session_id}/",
             headers=_auth(token),
@@ -544,3 +585,58 @@ async def test_zero_retention_answer_leaves_no_session_behind(
             resp = await client.post(url, json=body, headers=_auth(token))
         assert resp.status_code == 404, resp.text
         assert resp.json()["detail"]["code"] == "session_not_owned"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_changing_the_vote_keeps_the_visitors_comment(
+    client, admin_token, active_widget, fake_assistant_ask
+):
+    await _patch_widget(
+        client,
+        admin_token,
+        active_widget["id"],
+        privacy={"retention_days": 30, "store_feedback_text": True},
+    )
+    public_id = active_widget["public_id"]
+    token = await _mint(client, public_id)
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Hej"},
+        headers=_auth(token),
+    )
+    session_id = _sse_events(resp.text)[0][1]["session_id"]
+    feedback_url = f"/api/v1/widgets/{public_id}/sessions/{session_id}/feedback/"
+
+    async def stored() -> tuple[int | None, str | None]:
+        async with sessionmanager.session() as db, db.begin():
+            row = (
+                await db.execute(
+                    sa.select(Sessions.feedback_value, Sessions.feedback_text).where(
+                        Sessions.id == UUID(session_id)
+                    )
+                )
+            ).one()
+        return row.feedback_value, row.feedback_text
+
+    resp = await client.post(
+        feedback_url,
+        json={"value": -1, "text": "Fel öppettider för biblioteket"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert await stored() == (-1, "Fel öppettider för biblioteket")
+
+    # The embed page sends a changed vote without the comment.
+    for body in ({"value": 1}, {"value": -1, "text": "  "}):
+        resp = await client.post(feedback_url, json=body, headers=_auth(token))
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["feedback"]["text"] == "Fel öppettider för biblioteket"
+    assert await stored() == (-1, "Fel öppettider för biblioteket")
+
+    # A new comment replaces the stored one.
+    resp = await client.post(
+        feedback_url, json={"value": 1, "text": "Nu stämmer det"}, headers=_auth(token)
+    )
+    assert resp.status_code == 200, resp.text
+    assert await stored() == (1, "Nu stämmer det")

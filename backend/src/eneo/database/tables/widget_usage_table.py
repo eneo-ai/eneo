@@ -19,7 +19,8 @@ class WidgetDailyUsage(BasePublic):
     blocked_budget: Mapped[int] = mapped_column(server_default="0")
     blocked_rate: Mapped[int] = mapped_column(server_default="0")
     reserved_tokens: Mapped[int] = mapped_column(server_default="0")
-    # Net votes registered on the day, so a changed vote moves between them.
+    # Votes on the conversations started that day; a changed vote moves
+    # between them.
     helpful: Mapped[int] = mapped_column(server_default="0")
     unhelpful: Mapped[int] = mapped_column(server_default="0")
 

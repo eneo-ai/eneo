@@ -29,6 +29,7 @@
   import { toastWidgetError } from "$lib/features/widget/admin/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import WidgetOverviewList from "$lib/features/widget/admin/WidgetOverviewList.svelte";
+  import { MAX_DAILY_TOKEN_BUDGET } from "$lib/features/widget/admin/limits";
   import { urlTab } from "$lib/features/widget/admin/tabState.svelte";
   import { Autosave } from "$lib/features/widget/admin/widgetAutosave.svelte";
   import { DEFAULT_PRIMARY_COLOR, isHexColor } from "$lib/features/widget/contrast";
@@ -57,10 +58,8 @@
   );
 
   beforeNavigate((navigation) => {
-    if (autosave.status === "error" || autosave.status === "conflict") {
-      if (autosave.hasPending && !confirm(m.widget_admin_unsaved_leave_confirm())) {
-        navigation.cancel();
-      }
+    if (autosave.stranded && !confirm(m.widget_admin_unsaved_leave_confirm())) {
+      navigation.cancel();
       return;
     }
     void autosave.flush();
@@ -98,6 +97,58 @@
     apply(value);
   }
 
+  // The API refuses a retention window whose minimum exceeds its maximum. Both
+  // bounds are kept as typed until the pair is valid, so fixing one bound
+  // also settles the other, and the pair is saved together.
+  let retentionTyped = $state<{ min: string | null; max: string | null }>({
+    min: null,
+    max: null
+  });
+  function commitRetention(event: Event, bound: "min" | "max") {
+    retentionTyped = {
+      ...retentionTyped,
+      [bound]: (event.currentTarget as HTMLInputElement).value
+    };
+    const value = (side: "min" | "max") => {
+      const typed = retentionTyped[side];
+      if (typed !== null) return typed.trim() === "" ? NaN : Number(typed);
+      return side === "min" ? policy.min_retention_days : policy.max_retention_days;
+    };
+    const errors: Partial<Record<"min" | "max", string>> = {};
+    for (const side of ["min", "max"] as const) {
+      const days = value(side);
+      if (retentionTyped[side] !== null && (!Number.isInteger(days) || days < 0 || days > 3650)) {
+        errors[side] = m.widget_admin_value_out_of_range({
+          min: "0",
+          max: (3650).toLocaleString()
+        });
+      }
+    }
+    if (!errors.min && !errors.max && value("min") > value("max")) {
+      errors[bound] =
+        bound === "min"
+          ? m.widget_admin_retention_window_min({ max: String(value("max")) })
+          : m.widget_admin_retention_window_max({ min: String(value("min")) });
+    }
+    const { "retention-min": _min, "retention-max": _max, ...others } = rangeErrors;
+    rangeErrors = {
+      ...others,
+      ...(errors.min ? { "retention-min": errors.min } : {}),
+      ...(errors.max ? { "retention-max": errors.max } : {})
+    };
+    if (errors.min || errors.max) return;
+    const update: WidgetPolicyUpdate = {};
+    if (value("min") !== policy.min_retention_days) update.min_retention_days = value("min");
+    if (value("max") !== policy.max_retention_days) update.max_retention_days = value("max");
+    retentionTyped = { min: null, max: null };
+    if (Object.keys(update).length > 0) patch(update);
+  }
+
+  // Out-of-range numbers stay in their fields; leaving the page asks first.
+  $effect(() => {
+    autosave.markDraft("policy-numbers", Object.keys(rangeErrors).length > 0);
+  });
+
   const statusLabel = $derived.by(() => {
     switch (autosave.status) {
       case "saving":
@@ -107,6 +158,8 @@
       case "error":
       case "conflict":
         return m.widget_admin_save_failed();
+      case "refused":
+        return m.widget_admin_save_refused();
       default:
         return "";
     }
@@ -229,7 +282,9 @@
                   <p class="text-2xl font-semibold tabular-nums">
                     {number.format(totals.widgets)}
                     <span class="text-secondary text-sm font-normal">
-                      {m.widget_admin_stat_active({ count: number.format(totals.active) })}
+                      {totals.active === 1
+                        ? m.widget_admin_stat_active_one()
+                        : m.widget_admin_stat_active({ count: number.format(totals.active) })}
                     </span>
                   </p>
                 </Card.Content>
@@ -277,7 +332,7 @@
         <Tabs.Content value="policy">
           <Card.Root>
             <Card.Header>
-              <Card.Title>{m.widget_admin_policy()}</Card.Title>
+              <Card.Title><h2>{m.widget_admin_policy()}</h2></Card.Title>
               <Card.Description>{m.widget_admin_policy_description()}</Card.Description>
             </Card.Header>
             <Card.Content>
@@ -291,13 +346,14 @@
                     type="number"
                     min={1000}
                     step={1000}
+                    max={MAX_DAILY_TOKEN_BUDGET}
                     value={policy.max_daily_token_budget}
                     aria-invalid={!!rangeErrors.budget}
                     aria-describedby={rangeErrors.budget
                       ? "policy-max-budget-help policy-max-budget-error"
                       : "policy-max-budget-help"}
                     onchange={(event) =>
-                      commitNumber(event, "budget", 1000, 100_000_000, (value) =>
+                      commitNumber(event, "budget", 1000, MAX_DAILY_TOKEN_BUDGET, (value) =>
                         patch({ max_daily_token_budget: value })
                       )}
                   />
@@ -322,10 +378,7 @@
                     aria-describedby={rangeErrors["retention-min"]
                       ? "policy-retention-help policy-retention-min-error"
                       : "policy-retention-help"}
-                    onchange={(event) =>
-                      commitNumber(event, "retention-min", 0, 3650, (value) =>
-                        patch({ min_retention_days: value })
-                      )}
+                    onchange={(event) => commitRetention(event, "min")}
                   />
                   <Field.Description id="policy-retention-help"
                     >{m.widget_admin_policy_retention_description()}</Field.Description
@@ -350,10 +403,7 @@
                     aria-describedby={rangeErrors["retention-max"]
                       ? "policy-retention-help policy-retention-max-error"
                       : "policy-retention-help"}
-                    onchange={(event) =>
-                      commitNumber(event, "retention-max", 0, 3650, (value) =>
-                        patch({ max_retention_days: value })
-                      )}
+                    onchange={(event) => commitRetention(event, "max")}
                   />
                   {#if rangeErrors["retention-max"]}
                     <Field.Error id="policy-retention-max-error"
@@ -367,12 +417,13 @@
                     <Field.Label for="policy-allow-none"
                       >{m.widget_admin_policy_allow_none()}</Field.Label
                     >
-                    <Field.Description
+                    <Field.Description id="policy-allow-none-help"
                       >{m.widget_admin_policy_allow_none_description()}</Field.Description
                     >
                   </Field.Content>
                   <Switch
                     id="policy-allow-none"
+                    aria-describedby="policy-allow-none-help"
                     checked={policy.allow_bot_protection_none}
                     onCheckedChange={(checked) => patch({ allow_bot_protection_none: checked })}
                   />
@@ -385,7 +436,7 @@
         <Tabs.Content value="templates">
           <Card.Root>
             <Card.Header class="border-b">
-              <Card.Title>{m.widget_admin_templates()}</Card.Title>
+              <Card.Title><h2>{m.widget_admin_templates()}</h2></Card.Title>
               <Card.Description>{m.widget_admin_templates_description()}</Card.Description>
               <Card.Action>
                 <Button onclick={createTemplate} disabled={createTemplate.isLoading}>

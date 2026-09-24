@@ -60,11 +60,11 @@
 {:else if data.unavailable}
   <WidgetUnavailable hostOrigin={data.hostOrigin} />
 {:else if previewFailed}
-  <div class="bg-primary text-secondary fixed inset-0 flex items-center justify-center p-6">
+  <main class="bg-primary text-secondary fixed inset-0 flex items-center justify-center p-6">
     <p class="text-center text-sm" role="alert">{m.widget_preview_unavailable()}</p>
-  </div>
+  </main>
 {:else}
-  <div class="bg-primary text-secondary fixed inset-0 flex items-center justify-center p-6">
+  <main class="bg-primary text-secondary fixed inset-0 flex items-center justify-center p-6">
     <p class="text-sm" aria-live="polite">{m.widget_preview_loading()}</p>
-  </div>
+  </main>
 {/if}

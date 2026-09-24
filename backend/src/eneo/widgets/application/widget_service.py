@@ -19,11 +19,14 @@ from eneo.users.user import UserInDB
 from eneo.widgets.application.visitor_token_service import VisitorTokenService
 from eneo.widgets.domain.exceptions import (
     WidgetFieldLockedError,
+    WidgetPolicyViolationError,
     WidgetRevisionConflictError,
+    WidgetServingBlockedError,
     WidgetTemplateNotPublishedError,
 )
 from eneo.widgets.domain.widget import (
     LIFECYCLE_FIELDS,
+    BotProtection,
     Widget,
     WidgetLanguage,
     WidgetStatus,
@@ -76,12 +79,14 @@ class WidgetService:
         return WidgetPolicy.from_tenant(self.user.tenant.widget_policy)
 
     def read_policy(self) -> WidgetPolicy:
-        """Admin-facing read; editors only ever see the policy through blockers."""
-        validate_permission(self.user, Permission.ADMIN)
+        """Read-only for everyone who manages widgets, so the editor can hold
+        its fields to the same limits the server does; only admins change it."""
+        self._require_reader()
         return self.get_policy()
 
     async def update_policy(self, updates: dict[str, Any]) -> WidgetPolicy:
         validate_permission(self.user, Permission.ADMIN)
+        before = self.get_policy()
         merged = dict(self.user.tenant.widget_policy or {})
         merged.update(updates)
         # Validate the merged document before persisting so a partial update
@@ -95,6 +100,12 @@ class WidgetService:
         tenant = await self.tenant_service.update_widget_policy(
             self.user.tenant_id, policy.model_dump(mode="json")
         )
+        if before.allow_bot_protection_none and not policy.allow_bot_protection_none:
+            # Visitors admitted without a challenge must solve one now: their
+            # tokens stop validating and the embed page's cached config with it.
+            await self.repo.revoke_tokens(
+                self.user.tenant_id, bot_protection=BotProtection.NONE
+            )
         return WidgetPolicy.from_tenant(tenant.widget_policy)
 
     # --- helpers ----------------------------------------------------------
@@ -203,6 +214,10 @@ class WidgetService:
         space = await self._space_for_edit(space_id)
         # Raises NotFound when the assistant is not part of this space.
         space.get_assistant(target_id)
+        # Held until commit: moving or deleting the assistant waits for the
+        # new widget, so it sees it and refuses the move or archives it.
+        if await self.repo.lock_target_space(target_id) != space_id:
+            raise NotFoundException("Assistant not found in this space.")
         template = (
             await self._template_to_follow(template_id)
             if template_id is not None
@@ -234,6 +249,18 @@ class WidgetService:
         widget.template_id = template.id
         template.published.project_onto(widget, ALL_LOCK_GROUPS)
 
+    def _hold_to_rules(self, before: Widget, after: Widget) -> None:
+        """Refuse an edit that sets a value outside the tenant policy, or that
+        would leave an active widget unable to serve (its AI disclosure or
+        its origins emptied)."""
+        violations = self.get_policy().violations_introduced(before, after)
+        if violations:
+            raise WidgetPolicyViolationError(violations)
+        if after.is_serving:
+            blockers = after.blockers_introduced_since(before)
+            if blockers:
+                raise WidgetServingBlockedError(blockers)
+
     async def _widget_for_change(
         self, widget_id: UUID, revision: int
     ) -> tuple[Widget, "Space"]:
@@ -251,7 +278,9 @@ class WidgetService:
         validate_permission(self.user, Permission.WIDGETS)
         widget, space = await self._widget_for_change(widget_id, revision)
         template = await self._template_to_follow(template_id)
+        before = widget.model_copy(deep=True)
         self._link(widget, template)
+        self._hold_to_rules(before, widget)
         widget = await self.repo.update(widget)
         return self._view(space, widget, template)
 
@@ -280,12 +309,9 @@ class WidgetService:
             locked = template.published.locked_changes(widget, changes)
             if locked:
                 raise WidgetFieldLockedError(locked)
+        before = widget.model_copy(deep=True)
         widget.apply_update(changes)
-        violations = self.get_policy().violations(widget)
-        if violations:
-            raise BadRequestException(
-                "Widget configuration violates tenant policy: " + ", ".join(violations)
-            )
+        self._hold_to_rules(before, widget)
         widget = await self.repo.update(widget)
         return self._view(space, widget, template)
 
@@ -293,12 +319,14 @@ class WidgetService:
         validate_permission(self.user, Permission.ADMIN)
         widget = await self._owned_widget(widget_id)
         space = await self._space_as_admin(widget.space_id)
-        view = self._view(space, widget)
-        blockers = list(view.activation_blockers)
+        violations = self.get_policy().violations(widget)
+        if violations:
+            raise WidgetPolicyViolationError(violations)
+        blockers = widget.activation_blockers(
+            target_published=self._target_published(space, widget)
+        )
         if blockers:
-            raise BadRequestException(
-                "Widget cannot be activated: " + ", ".join(blockers)
-            )
+            raise WidgetServingBlockedError(blockers)
         widget.activate(by=self.user.id)
         widget = await self.repo.update(widget)
         return await self._view_with_template(space, widget)

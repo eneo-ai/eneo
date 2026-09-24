@@ -1,8 +1,9 @@
 /* eslint-disable eneo/no-raw-color -- fixtures use literal widget colours */
-import { page } from "@vitest/browser/context";
+import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import type { WidgetTemplate } from "@eneo/eneo-js";
-import { describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import { beforeNavigate } from "$app/navigation";
 import "../../../../../../app.css";
 
 vi.mock("$app/navigation", () => ({
@@ -74,6 +75,26 @@ function renderPage(current: WidgetTemplate) {
 
 const click = (locator: { element: () => Element }) => (locator.element() as HTMLElement).click();
 
+// A dialog a test leaves open keeps bits-ui reading destroyed state in the
+// tests after it, which Svelte only warns about.
+const svelteWarnings: string[] = [];
+beforeAll(() => {
+  const warn = console.warn.bind(console);
+  vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+    if (String(args[0]).includes("[svelte]")) svelteWarnings.push(String(args[0]));
+    warn(...args);
+  });
+});
+afterAll(() => {
+  vi.mocked(console.warn).mockRestore();
+  expect(svelteWarnings).toEqual([]);
+});
+
+async function cancelDialog() {
+  click(page.getByRole("alertdialog").getByRole("button", { name: "cancel" }));
+  await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')).toBeNull());
+}
+
 describe("widget template page", () => {
   test("a lock toggle only edits the draft and marks it unpublished", async () => {
     const { update, publish } = renderPage(template());
@@ -130,6 +151,7 @@ describe("widget template page", () => {
       .element(changes.getByText("widget_admin_template_publish_unlocked_changes"))
       .toBeVisible();
     expect(changes.getByText("widget_admin_template_publish_no_widget_changes").query()).toBeNull();
+    await cancelDialog();
   });
 
   test("the publish dialog says when the followers do not change at all", async () => {
@@ -139,6 +161,7 @@ describe("widget template page", () => {
       .element(page.getByText("widget_admin_template_publish_no_widget_changes"))
       .toBeVisible();
     expect(page.getByText("widget_admin_template_publish_writes").query()).toBeNull();
+    await cancelDialog();
   });
 
   test("a template nobody follows publishes without a question", async () => {
@@ -149,5 +172,85 @@ describe("widget template page", () => {
     click(page.getByRole("button", { name: "widget_admin_template_publish" }));
     await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1), { timeout: 3000 });
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+});
+
+describe("widget template details", () => {
+  // The API collapses whitespace in names and descriptions, like it does in texts.
+  function renderNormalising(current: WidgetTemplate) {
+    const clean = (value: string) => value.split(/\s+/).filter(Boolean).join(" ");
+    const update = vi.fn(async ({ update: patch }: { update: Partial<WidgetTemplate> }) => ({
+      ...current,
+      ...patch,
+      ...(patch.name !== undefined ? { name: clean(patch.name) } : {}),
+      ...(patch.description !== undefined ? { description: clean(patch.description) } : {})
+    }));
+    render(TemplatePage, {
+      data: { template: current, eneo: { widgets: { templates: { update } } } } as never
+    });
+    return { update };
+  }
+
+  test("the trimmed echo of a name being typed leaves the typed space alone", async () => {
+    const { update } = renderNormalising(template());
+    const name = page.getByLabelText("name", { exact: true });
+    await userEvent.fill(name, "Kommun ");
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update).toHaveBeenLastCalledWith({
+      template: { id: "t1" },
+      update: { name: "Kommun " }
+    });
+    await expect.element(page.getByText("widget_admin_saved")).toBeVisible();
+
+    await expect.element(name).toHaveValue("Kommun ");
+    await expect.element(name).toHaveFocus();
+    const input = name.element() as HTMLInputElement;
+    input.setSelectionRange(input.value.length, input.value.length);
+    await userEvent.keyboard("blå");
+    await expect.element(name).toHaveValue("Kommun blå");
+  });
+
+  test("a blank name is flagged and never sent", async () => {
+    const { update } = renderNormalising(template());
+    const name = page.getByLabelText("name", { exact: true });
+    await userEvent.fill(name, "   ");
+    await expect.element(name).toHaveAttribute("aria-invalid", "true");
+    await expect.element(name).toHaveAccessibleDescription("widget_admin_name_required");
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  // Whether an emptied required text asks before leaving is an open product
+  // decision; whichever way it goes, the name and the disclosure agree.
+  test("leaving with the name or the locked disclosure emptied is handled alike", async () => {
+    renderNormalising(template({ locked_groups: ["legal_texts"] }));
+    const leavingAsks = () => {
+      const leave = vi.mocked(beforeNavigate).mock.lastCall![0];
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      try {
+        leave({ cancel: vi.fn() } as unknown as Parameters<typeof leave>[0]);
+        return confirm.mock.calls.length > 0;
+      } finally {
+        confirm.mockRestore();
+      }
+    };
+    const name = page.getByLabelText("name", { exact: true });
+    await userEvent.clear(name);
+    await expect.element(name).toHaveAttribute("aria-invalid", "true");
+    const askedWithoutName = leavingAsks();
+
+    await userEvent.fill(name, "Kommunblå");
+    await expect.element(name).toHaveAttribute("aria-invalid", "false");
+    const subtitle = page.getByLabelText("widget_admin_text_subtitle", { exact: true });
+    await userEvent.clear(subtitle);
+    await expect.element(subtitle).toHaveAttribute("aria-invalid", "true");
+    expect(leavingAsks()).toBe(askedWithoutName);
+  });
+
+  test("each card title is a section heading", async () => {
+    renderNormalising(template());
+    for (const name of ["widget_admin_template_details", "widget_admin_template_locks"]) {
+      await expect.element(page.getByRole("heading", { level: 2, name })).toBeVisible();
+    }
   });
 });

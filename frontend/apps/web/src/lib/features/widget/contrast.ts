@@ -100,10 +100,17 @@ export type LauncherColors = {
   dark: { accent: string; on_accent: string };
 };
 
-/** What the loader paints its launcher button with, per scheme. */
-export function launcherColors(theme: ThemeColors): LauncherColors {
-  const light = themeColors(theme, false).accent;
-  const dark = themeColors(theme, true).accent;
+/**
+ * What the loader paints its launcher button with, per scheme of the host
+ * page. A widget pinned to one scheme shows that scheme's colour whatever the
+ * host shows, like its panel does.
+ */
+export function launcherColors(
+  theme: ThemeColors & { color_scheme?: "auto" | "light" | "dark" | null }
+): LauncherColors {
+  const pinned = theme.color_scheme === "light" || theme.color_scheme === "dark";
+  const light = themeColors(theme, pinned && theme.color_scheme === "dark").accent;
+  const dark = themeColors(theme, !pinned || theme.color_scheme === "dark").accent;
   return {
     light: { accent: light, on_accent: readableOn(light) },
     dark: { accent: dark, on_accent: readableOn(dark) }

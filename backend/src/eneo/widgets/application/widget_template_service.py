@@ -12,7 +12,10 @@ from pydantic import ValidationError
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.users.user import UserInDB
-from eneo.widgets.domain.exceptions import WidgetTemplateInUseError
+from eneo.widgets.domain.exceptions import (
+    WidgetTemplateInUseError,
+    WidgetTemplateLocksUnenforceableError,
+)
 from eneo.widgets.domain.widget import (
     Widget,
     WidgetLanguage,
@@ -87,6 +90,7 @@ class WidgetTemplateService:
             created_by_user_id=self.user.id,
         )
         if is_default:
+            await self.repo.lock_default(self.user.tenant_id)
             await self.repo.clear_default(self.user.tenant_id)
             template.is_default = True
         return await self.repo.add(template)
@@ -96,6 +100,11 @@ class WidgetTemplateService:
     ) -> WidgetTemplate:
         """Edit the draft. Followers are untouched until the next publication."""
         validate_permission(self.user, Permission.ADMIN)
+        making_default = changes.get("is_default") is True
+        if making_default:
+            # Before the template row: the holder's clear_default may have to
+            # lock any template row, so a waiter must not hold one.
+            await self.repo.lock_default(self.user.tenant_id)
         # Locked: the write carries the release too, and a publication that
         # commits in between must not be written back over.
         template = await self._owned(template_id, for_update=True)
@@ -106,7 +115,7 @@ class WidgetTemplateService:
                 f"Invalid template: {validation_messages(exc)}"
             ) from exc
         self._assert_locks_enforceable(template)
-        if changes.get("is_default") is True:
+        if making_default:
             await self.repo.clear_default(self.user.tenant_id)
         return await self.repo.update(template)
 
@@ -134,9 +143,7 @@ class WidgetTemplateService:
     def _assert_locks_enforceable(template: WidgetTemplate) -> None:
         violations = template.lock_violations()
         if violations:
-            raise BadRequestException(
-                "Template locks cannot be enforced: " + ", ".join(violations)
-            )
+            raise WidgetTemplateLocksUnenforceableError(violations)
 
     async def _sync_followers(
         self, template: WidgetTemplate, *, force: bool = False

@@ -24,6 +24,7 @@ from eneo.widgets.domain.exceptions import (
     WidgetRevisionConflictError,
 )
 from eneo.widgets.domain.widget import Widget, WidgetStatus, generate_public_id
+from eneo.widgets.domain.widget_template import WidgetTemplate
 from eneo.widgets.infrastructure.widget_overview_repo_impl import WidgetOverviewRepoImpl
 from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
 from eneo.widgets.infrastructure.widget_usage_repo_impl import WidgetUsageRepoImpl
@@ -64,6 +65,48 @@ async def test_concurrent_budget_admission_and_exactly_once_completion(active_wi
         )
     assert days[0].questions == 1
     assert (days[0].input_tokens, days[0].output_tokens) == (2_000, 500)
+
+
+async def test_budget_admission_is_capped_by_the_tenant_policy_as_it_stands(
+    active_widget,
+):
+    widget = await _load_widget(active_widget["id"])
+    assert widget.limits.daily_token_budget == 500_000
+    # Tightened after the widget was saved; nobody re-saves the widget.
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.update(Tenants)
+            .where(Tenants.id == widget.tenant_id)
+            .values(widget_policy={"max_daily_token_budget": 10_000})
+        )
+
+    budget = WidgetBudget()
+    await budget.reserve(widget, 8_000)
+    with pytest.raises(WidgetBudgetExhaustedError):
+        await budget.reserve(widget, 8_000)
+
+    async with sessionmanager.session() as session, session.begin():
+        served = await WidgetRepoImpl(session).get_by_public_id(widget.public_id)
+        stored = await WidgetRepoImpl(session).get(widget.id)
+    assert served is not None and stored is not None
+    assert served.limits.daily_token_budget == 10_000
+    assert stored.limits.daily_token_budget == 500_000
+
+
+async def test_a_budget_below_the_reservation_still_admits_one_answer(active_widget):
+    widget = await _load_widget(active_widget["id"])
+    widget.limits.daily_token_budget = 5_000
+    budget = WidgetBudget()
+
+    receipt = await budget.reserve(widget, 8_000)
+    assert receipt.reserved_tokens == 5_000
+    with pytest.raises(WidgetBudgetExhaustedError):
+        await budget.reserve(widget, 8_000)
+    await budget.settle(receipt, 2_000, 400)
+    # The settled answer closes the day for a budget this small.
+    with pytest.raises(WidgetBudgetExhaustedError):
+        await budget.reserve(widget, 8_000)
+    assert await budget.used_today(widget) == 2_400
 
 
 async def test_release_is_idempotent_and_old_days_do_not_charge_today(active_widget):
@@ -116,6 +159,9 @@ async def _wait_until_blocked(session, racer: "asyncio.Task") -> None:
             raise AssertionError(
                 f"racer finished before the lock was released: {racer.exception()!r}"
             )
+        # pg_stat_activity is a per-transaction snapshot: without clearing
+        # it a racer that connected after the first poll is never seen.
+        await session.execute(sa.text("SELECT pg_stat_clear_snapshot()"))
         blocked = await session.scalar(
             sa.text(
                 "SELECT count(*) FROM pg_stat_activity"
@@ -214,6 +260,40 @@ async def test_draft_save_cannot_roll_back_a_concurrent_publication(db_container
         stored = await reader.widget_template_service().get_template(template.id)
     assert stored.published == published.published
     assert stored.description == saved.description
+
+
+@pytest.mark.parametrize("how", ["create", "update"])
+async def test_concurrent_default_templates_leave_exactly_one_default(
+    db_container, how
+):
+    async with db_container() as container:
+        templates = container.widget_template_service()
+        first = await templates.create_template(name="Kommunblå")
+        second = await templates.create_template(name="Kommungrön")
+    assert first.id is not None and second.id is not None
+    second_id = second.id
+
+    async def make_default() -> WidgetTemplate:
+        async with db_container() as container:
+            service = container.widget_template_service()
+            if how == "create":
+                return await service.create_template(name="Kommunröd", is_default=True)
+            return await service.update_template(second_id, {"is_default": True})
+
+    async with db_container() as holder:
+        await holder.widget_template_service().update_template(
+            first.id, {"is_default": True}
+        )
+        racer = asyncio.create_task(make_default())
+        await _wait_until_blocked(holder.session(), racer)
+        assert not racer.done()
+    # The later one wins instead of colliding with the default committed
+    # meanwhile on the one-default-per-tenant index.
+    winner = await racer
+    assert winner.is_default is True
+    async with db_container() as reader:
+        listed = await reader.widget_template_service().list_templates()
+    assert [t.id for t in listed if t.is_default] == [winner.id]
 
 
 @pytest.mark.parametrize("how", ["link", "create"])
@@ -343,6 +423,28 @@ async def test_retention_deletes_owned_logs_and_preserves_other_content(
             await session.scalar(sa.select(logs.c.id).where(logs.c.id == kept_log))
             == kept_log
         )
+
+
+async def test_retention_visits_only_widgets_that_have_conversations(active_widget):
+    widget = await _load_widget(active_widget["id"])
+    async with sessionmanager.session() as session, session.begin():
+        talked = widget.model_copy(deep=True)
+        talked.public_id = generate_public_id()
+        talked = await WidgetRepoImpl(session).add(talked)
+        await session.execute(
+            sa.insert(Sessions).values(
+                widget_id=talked.id,
+                visitor_id=uuid4(),
+                name="Conversation",
+                assistant_id=widget.target_id,
+            )
+        )
+
+    async with sessionmanager.session() as session, session.begin():
+        targets = await WidgetUsageRepoImpl(session).retention_targets()
+    assert [target.widget_id for target in targets] == [talked.id]
+    result = await purge_expired_widget_sessions()
+    assert result == {"widgets_processed": 1, "sessions_deleted": 0, "errors": 0}
 
 
 async def test_overview_includes_durable_inflight_budget_without_per_widget_reads(

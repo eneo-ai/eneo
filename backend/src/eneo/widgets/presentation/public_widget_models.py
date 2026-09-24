@@ -122,4 +122,11 @@ class WidgetFeedback(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     value: Literal[-1, 1]
-    text: Optional[str] = Field(default=None, max_length=2000)
+    text: Optional[str] = Field(
+        default=None,
+        max_length=2000,
+        description=(
+            "A comment with the vote. Replaces the stored comment; leave it out"
+            " (or blank) to change only the vote and keep the comment."
+        ),
+    )

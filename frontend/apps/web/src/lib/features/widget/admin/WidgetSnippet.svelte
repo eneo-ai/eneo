@@ -11,7 +11,13 @@
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { docsUrl } from "$lib/core/docs";
-  import { floatingSnippet, pinnedSnippet, standaloneUrl, type LoaderRelease } from "./snippet";
+  import {
+    floatingSnippet,
+    pinnedSnippet,
+    standaloneUrl,
+    type LoaderRelease,
+    type SnippetOptions
+  } from "./snippet";
 
   type Props = {
     widget: Widget;
@@ -28,9 +34,8 @@
     origin,
     publicId: widget.public_id,
     language: widget.language,
-    position: widget.theme.position ?? undefined,
     release
-  });
+  } satisfies SnippetOptions);
   const snippet = $derived(pinned ? pinnedSnippet(options) : floatingSnippet(options));
   const standalone = $derived(standaloneUrl(options));
 
@@ -69,11 +74,15 @@
     </p>
   {/if}
 
-  <pre
-    class="bg-secondary text-primary rounded-lg p-3 text-xs break-all whitespace-pre-wrap"
-    aria-label={m.widget_admin_snippet()}><code
-      >{snippet ?? m.widget_admin_snippet_not_built()}</code
-    ></pre>
+  {#if snippet}
+    <pre
+      class="bg-secondary text-primary rounded-lg p-3 text-xs break-all whitespace-pre-wrap"
+      aria-label={m.widget_admin_snippet()}><code>{snippet}</code></pre>
+  {:else}
+    <p class="bg-warning-dimmer text-warning-stronger rounded-lg px-3 py-2 text-sm">
+      {m.widget_admin_snippet_not_built()}
+    </p>
+  {/if}
   <div class="flex flex-wrap items-center justify-between gap-2">
     <Input.Switch value={pinned} sideEffect={({ next }) => (pinned = next)} disabled={!release}>
       {m.widget_admin_snippet_pinned()}

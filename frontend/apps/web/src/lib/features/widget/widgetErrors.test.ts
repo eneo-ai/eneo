@@ -51,9 +51,16 @@ describe("widget errors", () => {
     expect(describeWidgetError(error(429, "rate_limited_ip", { "retry-after": "3600" }))).toBe(
       "widget_error_rate_limited"
     );
-    expect(describeWidgetError(error(402, "budget_exhausted"))).toBe("widget_error_budget");
+    // The server sends the budget as a 429 with Retry-After; the code wins over the wait.
+    expect(describeWidgetError(error(429, "budget_exhausted", { "retry-after": "120" }))).toBe(
+      "widget_error_budget"
+    );
     expect(describeWidgetError(error(404, "widget_not_active"))).toBe("widget_error_unavailable");
     expect(describeWidgetError(error(400, "challenge_expired"))).toBe("widget_error_verification");
+    // Retrying the same conversation can never succeed; the visitor must start a new one.
+    expect(describeWidgetError(error(400, "session_turns_exceeded"))).toBe(
+      "widget_error_session_limit"
+    );
     expect(describeWidgetError(new Error("boom"))).toBe("widget_error_generic");
   });
 });

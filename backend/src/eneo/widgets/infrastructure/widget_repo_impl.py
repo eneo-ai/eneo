@@ -11,8 +11,10 @@ import sqlalchemy as sa
 
 from eneo.database.database import AsyncSession
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.widgets_table import Widgets
 from eneo.main.exceptions import NotFoundException
+from eneo.tenants.tenant import TenantState
 from eneo.widgets.domain.exceptions import WidgetRevisionConflictError
 from eneo.widgets.domain.widget import (
     BotProtection,
@@ -25,6 +27,7 @@ from eneo.widgets.domain.widget import (
     WidgetTexts,
     WidgetTheme,
 )
+from eneo.widgets.domain.widget_policy import WidgetPolicy
 
 
 def to_entity(row: Widgets) -> Widget:
@@ -106,10 +109,81 @@ class WidgetRepoImpl:
         return to_entity(row) if row is not None else None
 
     async def get_by_public_id(self, public_id: str) -> Widget | None:
-        row = await self.session.scalar(
-            sa.select(Widgets).where(Widgets.public_id == public_id)
+        result = await self.session.execute(
+            sa.select(Widgets, Tenants.widget_policy)
+            .join(Tenants, Tenants.id == Widgets.tenant_id)
+            .where(
+                Widgets.public_id == public_id,
+                Tenants.state != TenantState.SUSPENDED.value,
+            )
         )
-        return to_entity(row) if row is not None else None
+        found = result.first()
+        if found is None:
+            return None
+        row, policy = found
+        return WidgetPolicy.from_tenant(policy).serving(to_entity(row))
+
+    async def policy_for(self, tenant_id: UUID) -> WidgetPolicy:
+        return WidgetPolicy.from_tenant(
+            await self.session.scalar(
+                sa.select(Tenants.widget_policy).where(Tenants.id == tenant_id)
+            )
+        )
+
+    async def lock_target_space(self, target_id: UUID) -> UUID | None:
+        return await self.session.scalar(
+            sa.select(Assistants.space_id)
+            .where(Assistants.id == target_id)
+            .with_for_update(read=True, key_share=True)
+        )
+
+    async def list_by_target(self, target_id: UUID) -> list[Widget]:
+        rows = await self.session.scalars(
+            sa.select(Widgets)
+            .where(
+                Widgets.target_type == WidgetTargetType.ASSISTANT.value,
+                Widgets.target_id == target_id,
+                Widgets.status != WidgetStatus.ARCHIVED.value,
+            )
+            .order_by(Widgets.created_at.asc())
+            .with_for_update()
+        )
+        return [to_entity(row) for row in rows]
+
+    async def serves_target(self, tenant_id: UUID, target_id: UUID) -> bool:
+        return bool(
+            await self.session.scalar(
+                sa.select(
+                    sa.exists().where(
+                        Widgets.tenant_id == tenant_id,
+                        Widgets.target_type == WidgetTargetType.ASSISTANT.value,
+                        Widgets.target_id == target_id,
+                        Widgets.status == WidgetStatus.ACTIVE.value,
+                    )
+                )
+            )
+        )
+
+    async def revoke_tokens(
+        self, tenant_id: UUID, *, bot_protection: BotProtection
+    ) -> int:
+        # The revision moves too: an editor holding the old one must reload
+        # before a save could write the old generation back.
+        result = await self.session.execute(
+            sa.update(Widgets)
+            .where(
+                Widgets.tenant_id == tenant_id,
+                Widgets.bot_protection == bot_protection.value,
+                Widgets.status != WidgetStatus.ARCHIVED.value,
+            )
+            .values(
+                token_generation=Widgets.token_generation + 1,
+                revision=Widgets.revision + 1,
+                updated_at=sa.func.now(),
+            )
+            .returning(Widgets.id)
+        )
+        return len(result.all())
 
     async def list_by_space(self, space_id: UUID) -> list[Widget]:
         rows = await self.session.scalars(
@@ -175,6 +249,9 @@ class WidgetRepoImpl:
         """
         if widget.id is None:
             raise NotFoundException("Widget has not been persisted.")
+        if widget.is_serving_view:
+            # Its values are the policy's caps, not the widget's settings.
+            raise ValueError("The serving view of a widget is never written back.")
         values = _to_values(widget)
         if only is not None:
             wanted = set(only)

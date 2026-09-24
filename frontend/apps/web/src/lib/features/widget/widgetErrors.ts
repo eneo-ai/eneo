@@ -40,6 +40,8 @@ export function describeWidgetError(error: unknown): string {
     case "widget_not_active":
     case "rate_limit_unavailable":
       return m.widget_error_unavailable();
+    case "session_turns_exceeded":
+      return m.widget_error_session_limit();
     case "challenge_invalid":
     case "challenge_expired":
     case "challenge_replayed":
