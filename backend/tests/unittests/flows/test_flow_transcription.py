@@ -693,6 +693,96 @@ async def test_audio_resolve_lets_the_runs_speaker_choice_replace_the_flow_defau
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored", "bound"),
+    [
+        ({"max_speakers": 3}, b"3"),
+        ({"max_speakers": None}, None),
+        ({}, None),
+    ],
+)
+async def test_vemsa_receives_the_speaker_bound_the_run_settled(
+    spool_contract, user, stored, bound
+):
+    import httpx
+
+    from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
+    from eneo.flows.runtime.remote_transcription import build_remote_flow_transcriber
+    from eneo.main.config import Settings
+    from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+        TranscriptSegment,
+    )
+    from tests.unit.flows.runtime.test_remote_transcription import (
+        RESULT_BODY,
+        ScriptedService,
+        accepted,
+        status,
+    )
+
+    executor, flow_run_repo, space_repo, file_service, _ = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    vemsa = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("completed")],
+        # A diarize job echoes the flow's own model.
+        result_responses=[
+            httpx.Response(200, json={**RESULT_BODY, "model": "whisper-1"})
+        ],
+    )
+    remote = build_remote_flow_transcriber(
+        Settings.model_construct(
+            flow_transcription_service_url="http://vemsa.test",
+            flow_transcription_service_api_key="devtoken",
+            flow_transcription_service_poll_interval_seconds=0.001,
+        )
+    )
+    remote.client._transport = httpx.MockTransport(vemsa.handler)
+    registry = AsyncMock()
+    registry.transcribe_from_filepath = AsyncMock(
+        return_value=TranscribedAudio(
+            text="Hej och välkomna.",
+            duration_seconds=5.2,
+            segments=(TranscriptSegment(text="Hej och välkomna.", start=0.0, end=5.2),),
+        )
+    )
+    executor.transcriber = DiarizingFlowTranscriber(registry, remote)
+    file = _audio_file(name="meeting.wav")
+    file_service.get_files_by_ids.return_value = [file]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.get_space_by_assistant = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    run = _run(user=user, payload=stored)
+    _patch_run_input_payload(flow_run_repo, run)
+
+    await executor._resolve_step_input(
+        step=_runtime_step(),
+        context=executor.variable_resolver.build_context(run.input_payload_json, []),
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_diarization": True,
+            }
+        },
+        requested_file_ids=[file.id],
+    )
+
+    submitted = vemsa.requests[0].read()
+    assert b'name="task"\r\n\r\ndiarize' in submitted
+    if bound is None:
+        assert b'name="max_speakers"' not in submitted
+    else:
+        assert b'name="max_speakers"\r\n\r\n' + bound in submitted
+
+
+@pytest.mark.asyncio
 async def test_audio_resolve_ignores_shared_file_transcription_cache(
     spool_contract, user
 ):

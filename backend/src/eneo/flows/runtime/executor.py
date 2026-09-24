@@ -181,7 +181,6 @@ from eneo.flows.runtime.output_runtime import (
 from eneo.flows.runtime.protocols import RuntimeAssistantProtocol
 from eneo.flows.runtime.rag_retrieval import RagRetrievalDeps, retrieve_rag_chunks
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
-from eneo.flows.runtime.speaker_mapping_runtime import resolve_max_speakers
 from eneo.flows.runtime.step_attempt_runtime import (
     build_generic_failure_plan,
     build_step_gate_decision,
@@ -614,8 +613,6 @@ class FlowRunExecutor:
         self.audit_service = audit_service
         self.references_service = references_service
         self.transcriber = transcriber
-        # Per-run diarization bound, derived from the run input once steps are known.
-        self.max_speakers_hint: int | None = None
         # Per-run document names, derived from the pinned definition with the steps.
         self.generated_file_names: GeneratedFileNames | None = None
         self.variable_resolver = FlowVariableResolver()
@@ -754,7 +751,6 @@ class FlowRunExecutor:
                 flow_version=version.version,
             )
             steps = published_definition.runtime_steps()
-            self.max_speakers_hint = resolve_max_speakers(steps, run.input_payload_json)
             self.generated_file_names = GeneratedFileNames.for_run(
                 flow_name=published_definition.name,
                 steps=steps,
@@ -2542,7 +2538,6 @@ class FlowRunExecutor:
             max_inline_text_bytes=self.max_inline_text_bytes,
             logger=logger,
             transcription_call_observer=transcription_call_observer,
-            max_speakers_hint=self.max_speakers_hint,
             stage_transcript_source=self._stage_transcript_source,
             transcript_source_preparation=transcript_source_preparation,
         )

@@ -504,6 +504,19 @@ class FlowSpeakerLabelsOptionPublic(BaseModel):
     )
 
 
+class FlowMaxSpeakersOptionPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    form_field: str | None = Field(
+        description=(
+            "The form field that already asks for the speaker count (a "
+            "speaker-mapping step's count field), or null. When set, a client "
+            "should not offer a second count control; a run's `max_speakers` "
+            "still overrides the field."
+        )
+    )
+
+
 class FlowTranscriptionContractPublic(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -511,6 +524,15 @@ class FlowTranscriptionContractPublic(BaseModel):
         description="Whether the audio step can show a live transcript preview while recording."
     )
     speaker_labels: FlowSpeakerLabelsOptionPublic
+    max_speakers: FlowMaxSpeakersOptionPublic | None = Field(
+        default=None,
+        description=(
+            "Whether a run may bound the speaker count with `max_speakers`: "
+            "present whenever a transcription service labels speakers, including "
+            "when a speaker-mapping step requires labels. Null when no service "
+            "labels speakers."
+        ),
+    )
 
 
 class FlowSecurityClassificationPublic(BaseModel):

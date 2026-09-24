@@ -14,9 +14,6 @@ from eneo.flows.domain.one_line_text import (
     one_line,
 )
 from eneo.flows.domain.speaker_labels import SPEAKER_LABEL_RE, parse_participants
-from eneo.flows.domain.speaker_mapping_config import (
-    speaker_mapping_speaker_count_field,
-)
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
 
 _SPEAKER_MAPPING_RESPONSE_FORMAT = (
@@ -259,40 +256,6 @@ def ground_speaker_mapping_proposal(
 
 def _normalize_name_evidence(text: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
-
-
-def resolve_max_speakers(
-    steps: Sequence[Any],
-    run_input_payload: Mapping[str, Any] | None,
-) -> int | None:
-    """Upper bound on speakers for diarization, from the first speaker-mapping
-    step's optional speaker-count number field. The participant list is
-    deliberately not used: it is "who I know was there", not a complete roster,
-    and a cap below the real speaker count would merge unlisted voices into
-    the wrong person. None when no count is given, so the diarizer chooses."""
-    for step in steps:
-        if getattr(step, "output_mode", None) != "speaker_mapping":
-            continue
-        count_field = speaker_mapping_speaker_count_field(
-            getattr(step, "output_config", None)
-        )
-        if count_field is None:
-            return None
-        semantic = read_semantic_flow_input_payload(dict(run_input_payload or {}))
-        return _positive_int(semantic.get(count_field))
-    return None
-
-
-def _positive_int(value: object) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        count = int(value)
-    elif isinstance(value, str) and value.strip().isdigit():
-        count = int(value.strip())
-    else:
-        return None
-    return count if count >= 1 else None
 
 
 def mapping_to_names(structured: Mapping[str, Any]) -> dict[str, str]:

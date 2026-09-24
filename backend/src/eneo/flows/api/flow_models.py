@@ -12,6 +12,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    StrictInt,
     WithJsonSchema,
     computed_field,
     field_validator,
@@ -918,6 +919,20 @@ class FlowRunCreateRequest(BaseModel):
             "otherwise the request is refused with 422 "
             "`flow_run_speaker_labels_not_selectable`. Null or omitted uses the "
             "flow's default. Labelling speakers makes the run take longer."
+        ),
+    )
+    max_speakers: Annotated[StrictInt, Field(ge=1)] | None = Field(
+        default=None,
+        description=(
+            "An upper bound on how many speakers the transcription may find, for a "
+            "run that labels speakers. Send it only when "
+            "`transcription.max_speakers` in the run contract is present; for a run "
+            "that labels no speakers the request is refused with 422 "
+            "`flow_run_max_speakers_not_available`. It is an upper bound, not an "
+            "exact count, because a recording part may hold fewer people. Null "
+            "means automatic, even when the flow's form asks for the count; "
+            "omitted uses the form's count field, else automatic. Whole numbers "
+            "from 1 only."
         ),
     )
 

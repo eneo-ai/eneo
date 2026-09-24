@@ -140,6 +140,7 @@ async def _published_flow(
     input_required: bool = True,
     wizard: Mapping[str, object] | None = None,
     summarize: bool = False,
+    speaker_mapping: bool = False,
 ) -> LiveFlow:
     space_id = await _create_space(client, headers)
     model = await _create_transcription_model(
@@ -189,11 +190,36 @@ async def _published_flow(
             },
         }
     steps = [step]
-    if summarize:
+    form_fields: list[dict[str, object]] = []
+    if speaker_mapping:
+        # A "Vem är vem?" step whose form asks for the participants and a count.
+        form_fields = [
+            {"name": "deltagare", "type": "list", "label": "Deltagare"},
+            {"name": "antal_talare", "type": "number", "label": "Antal talare"},
+        ]
         steps.append(
             {
                 "assistant_id": assistant.json()["id"],
                 "step_order": 2,
+                "user_description": "Vem är vem?",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_mode": "speaker_mapping",
+                "output_type": "json",
+                "output_config": {
+                    "speaker_mapping": {
+                        "participants_field": "deltagare",
+                        "speaker_count_field": "antal_talare",
+                    }
+                },
+                "review_policy": {"mode": "edit"},
+            }
+        )
+    if summarize:
+        steps.append(
+            {
+                "assistant_id": assistant.json()["id"],
+                "step_order": len(steps) + 1,
                 "user_description": "Sammanfatta mötet",
                 "input_source": "previous_step",
                 "input_type": "text",
@@ -213,7 +239,8 @@ async def _published_flow(
                     "transcription_model": {"id": model["id"]},
                     "transcription_language": "sv",
                     **(wizard or {}),
-                }
+                },
+                **({"form_schema": {"fields": form_fields}} if form_fields else {}),
             },
         },
         headers=headers,

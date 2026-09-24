@@ -151,14 +151,17 @@ _FLOW_RUN_CREATE_DESCRIPTION = (
     3. Submit the returned uploaded files through `step_inputs[step_id].file_ids`,
        together with any structured `input_payload_json` fields in this run request.
        When the run contract's `transcription.speaker_labels.selectable` is true, the
-       request may also choose `speaker_labels`.
+       request may also choose `speaker_labels`; when `transcription.max_speakers` is
+       present, it may bound the speaker count with `max_speakers`.
     4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/status/` until the run is terminal.
        Then retrieve this run's audited detail or use `.../steps/` for evidence.
 
     Request bodies reject unknown JSON fields. The removed top-level `file_ids` field returns
     `400` with code `flow_run_top_level_file_ids_not_supported`; use
     `step_inputs[step_id].file_ids` instead. A `speaker_labels` choice the run contract does
-    not offer returns `422` with code `flow_run_speaker_labels_not_selectable`.
+    not offer returns `422` with code `flow_run_speaker_labels_not_selectable`, and a
+    `max_speakers` for a run that labels no speakers returns `422` with code
+    `flow_run_max_speakers_not_available`.
 
     `Idempotency-Key` is optional but recommended for retried writes. Reusing the same key with
     the same request payload returns the existing run payload. Reusing the same key with a
@@ -450,7 +453,8 @@ async def create_flow_run(
                 ),
                 idempotency_key=idempotency_key,
                 **run_in.model_dump(
-                    include={"run_label", "speaker_labels"}, exclude_unset=True
+                    include={"run_label", "speaker_labels", "max_speakers"},
+                    exclude_unset=True,
                 ),
             )
             run = create_result.run

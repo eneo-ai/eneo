@@ -1,8 +1,9 @@
-"""What the run contract says about transcription, and a run's speaker choice.
+"""What the run contract says about transcription, and a run's speaker choices.
 
 Before recording, a client reads `transcription` from the run contract: whether
-the flow's model can show a live preview, and whether the run may turn speaker
-labels on or off. The choice is sent with the run and stays with it.
+the flow's model can show a live preview, whether the run may turn speaker
+labels on or off, and whether it may bound the speaker count. The choices are
+sent with the run and stay with it.
 """
 
 from __future__ import annotations
@@ -123,6 +124,7 @@ async def test_without_a_service_the_contract_offers_live_preview_but_no_speaker
     assert contract["transcription"] == {
         "live": {"available": True, "reason": None},
         "speaker_labels": {"selectable": False, "required": False, "default": True},
+        "max_speakers": None,
     }
 
 
@@ -166,6 +168,7 @@ async def test_with_a_service_a_run_may_choose_and_the_flow_sets_the_default(
     assert contract["transcription"] == {
         "live": {"available": True, "reason": None},
         "speaker_labels": {"selectable": True, "required": False, "default": False},
+        "max_speakers": {"form_field": None},
     }
 
 
@@ -235,8 +238,139 @@ async def test_a_speaker_choice_the_contract_does_not_offer_creates_no_run(
     assert dispatched == []
 
 
+async def test_a_flow_that_asks_for_the_count_advertises_its_form_field(
+    client, flow_process_auth_headers, db_container
+):
+    headers = dict(flow_process_auth_headers)
+    flow = await _published_flow(client, headers, db_container, speaker_mapping=True)
+
+    with _deployment(service_mode="diarize"):
+        contract = await _contract(client, headers, flow.flow_id)
+
+    assert contract["transcription"]["speaker_labels"] == {
+        "selectable": False,
+        "required": True,
+        "default": True,
+    }
+    assert contract["transcription"]["max_speakers"] == {"form_field": "antal_talare"}
+
+
+@pytest.mark.parametrize(
+    ("speaker_mapping", "body", "stored_bound"),
+    [
+        (False, {"max_speakers": 3}, 3),
+        (False, {}, None),
+        (False, {"max_speakers": None}, None),
+        (True, {"input_payload_json": {"antal_talare": 4}}, 4),
+        (True, {"input_payload_json": {"antal_talare": 4}, "max_speakers": 2}, 2),
+        (True, {"input_payload_json": {"antal_talare": 4}, "max_speakers": None}, None),
+        (True, {"input_payload_json": {"deltagare": ["Anna", "Bo", "Cid"]}}, None),
+    ],
+)
+async def test_a_runs_speaker_count_is_settled_once_and_kept_with_the_run(
+    client,
+    flow_process_auth_headers,
+    db_container,
+    dispatched: list[UUID],
+    speaker_mapping: bool,
+    body: dict[str, object],
+    stored_bound: int | None,
+):
+    headers = dict(flow_process_auth_headers)
+    flow = await _published_flow(
+        client,
+        headers,
+        db_container,
+        input_required=False,
+        speaker_mapping=speaker_mapping,
+    )
+
+    with _deployment(service_mode="diarize"):
+        created = await _create_run(client, headers, flow.flow_id, body)
+
+    assert created.status_code == 201, created.text
+    stored = await _stored_inputs(db_container, flow.flow_id)
+    assert "max_speakers" in stored[created.json()["id"]]
+    assert stored[created.json()["id"]]["max_speakers"] == stored_bound
+    assert "max_speakers" not in created.json()["input_payload_json"]
+
+
+@pytest.mark.parametrize(
+    ("service_mode", "speaker_mapping", "body", "status", "code"),
+    [
+        (None, False, {"max_speakers": 3}, 422, "flow_run_max_speakers_not_available"),
+        (
+            "diarize",
+            False,
+            {"speaker_labels": False, "max_speakers": 3},
+            422,
+            "flow_run_max_speakers_not_available",
+        ),
+        ("diarize", False, {"max_speakers": True}, 422, "request_validation_error"),
+        ("diarize", False, {"max_speakers": 2.5}, 422, "request_validation_error"),
+        ("diarize", False, {"max_speakers": 0}, 422, "request_validation_error"),
+        (
+            "diarize",
+            False,
+            {"input_payload_json": {"max_speakers": 3}},
+            400,
+            "flow_run_reserved_input_payload_key",
+        ),
+        (
+            "diarize",
+            True,
+            {"input_payload_json": {"antal_talare": 2.5}},
+            400,
+            "flow_input_invalid_number",
+        ),
+        (
+            "diarize",
+            True,
+            {"input_payload_json": {"antal_talare": 0}},
+            400,
+            "flow_input_invalid_number",
+        ),
+    ],
+)
+async def test_a_speaker_count_the_run_cannot_use_creates_no_run(
+    client,
+    flow_process_auth_headers,
+    db_container,
+    dispatched: list[UUID],
+    service_mode: str | None,
+    speaker_mapping: bool,
+    body: dict[str, object],
+    status: int,
+    code: str,
+):
+    headers = dict(flow_process_auth_headers)
+    flow = await _published_flow(
+        client,
+        headers,
+        db_container,
+        input_required=False,
+        speaker_mapping=speaker_mapping,
+    )
+
+    with _deployment(service_mode=service_mode):
+        refused = await _create_run(client, headers, flow.flow_id, body)
+
+    assert refused.status_code == status, refused.text
+    assert refused.json()["code"] == code
+    assert await _stored_inputs(db_container, flow.flow_id) == {}
+    assert dispatched == []
+
+
+@pytest.mark.parametrize(
+    "choice", [{"speaker_labels": False}, {"max_speakers": 3}, {"max_speakers": None}]
+)
 async def test_retry_and_regeneration_keep_an_accepted_choice_after_the_service_is_gone(
-    client, flow_process_auth_headers, db_container, admin_user, dispatched: list[UUID]
+    client,
+    flow_process_auth_headers,
+    db_container,
+    admin_user,
+    dispatched: list[UUID],
+    choice: dict[str, object],
 ):
     headers = dict(flow_process_auth_headers)
     flow = await _published_flow(
@@ -244,8 +378,7 @@ async def test_retry_and_regeneration_keep_an_accepted_choice_after_the_service_
     )
     with _deployment(service_mode="diarize"):
         created = [
-            await _create_run(client, headers, flow.flow_id, {"speaker_labels": False})
-            for _ in range(2)
+            await _create_run(client, headers, flow.flow_id, choice) for _ in range(2)
         ]
     failed_id, completed_id = (UUID(run.json()["id"]) for run in created)
     async with db_container() as container:
@@ -307,8 +440,10 @@ async def test_retry_and_regeneration_keep_an_accepted_choice_after_the_service_
         regenerated.text,
     )
     stored = await _stored_inputs(db_container, flow.flow_id)
+    ((key, value),) = choice.items()
     for child in (retried.json()["run"], regenerated.json()["run"]):
-        assert stored[child["id"]]["speaker_labels"] is False
+        assert key in stored[child["id"]]
+        assert stored[child["id"]][key] == value
 
 
 async def test_the_contract_and_the_live_route_read_no_attachment_content(

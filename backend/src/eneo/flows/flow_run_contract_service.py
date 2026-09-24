@@ -12,6 +12,7 @@ from eneo.flows.api.flow_live_transcription_models import (
 )
 from eneo.flows.api.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
+    FlowMaxSpeakersOptionPublic,
     FlowOutputDelivery,
     FlowReviewStepContractPublic,
     FlowRunContractPublic,
@@ -27,6 +28,9 @@ from eneo.flows.api.flow_run_contract_models import (
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowTemplateAsset
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_input import build_runtime_input_config
+from eneo.flows.domain.speaker_mapping_config import (
+    speaker_mapping_speaker_count_field,
+)
 from eneo.flows.domain.step_mapped_execution import single_mapped_array_key
 from eneo.flows.domain.text_processing import text_processing_config
 from eneo.flows.enums import (
@@ -37,6 +41,7 @@ from eneo.flows.enums import (
     final_step_output_type,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowValidationException
 from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from eneo.flows.flow_run_step_inputs import (
     RuntimeStepInputSpec,
@@ -58,7 +63,8 @@ from eneo.flows.transcription_config import (
     FlowTranscriptionConfigError,
     parse_transcription_config,
 )
-from eneo.main.exceptions import NotFoundException
+from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.models import NOT_PROVIDED, NotProvided
 
 if TYPE_CHECKING:
     from eneo.main.config import Settings
@@ -142,6 +148,11 @@ class FlowRunContractService:
                 available=live.available, reason=live.reason
             ),
             speaker_labels=speaker_labels,
+            max_speakers=max_speakers_option(
+                runtime_inputs.steps,
+                speaker_labels=speaker_labels,
+                service_configured=self.settings.flow_transcription_service_configured,
+            ),
         )
 
     async def _template_readiness(
@@ -278,6 +289,78 @@ def speaker_labels_option(
         required=required,
         default=config.diarization,
     )
+
+
+def max_speakers_option(
+    steps: Sequence[RuntimeStep],
+    *,
+    speaker_labels: FlowSpeakerLabelsOptionPublic | None,
+    service_configured: bool,
+) -> FlowMaxSpeakersOptionPublic | None:
+    """Whether a run may bound the speaker count: whenever a transcription
+    service labels speakers for the flow, whether the run chooses the labels or
+    a speaker-mapping step requires them."""
+    if speaker_labels is None or not service_configured:
+        return None
+    return FlowMaxSpeakersOptionPublic(form_field=_speaker_count_field(steps))
+
+
+def settle_max_speakers(
+    choice: int | None | NotProvided,
+    *,
+    steps: Sequence[RuntimeStep],
+    wizard_metadata: FlowPersistedJsonObject | None,
+    speaker_labels: bool | None,
+    service_configured: bool,
+    form_input: FlowPersistedJsonObject | None,
+) -> int | None | NotProvided:
+    """The run's upper bound on speakers, settled once at admission.
+
+    The run's own choice wins, null meaning automatic; else the value of the
+    form's speaker-count field; else automatic (None). NOT_PROVIDED when the
+    run labels no speakers. Never derived from the participant names: a bound
+    below the real count would merge unlisted voices into one person.
+    """
+    option = speaker_labels_option(
+        steps, wizard_metadata=wizard_metadata, service_configured=service_configured
+    )
+    labels = (
+        option is not None
+        and service_configured
+        and (
+            option.required
+            or (option.default if speaker_labels is None else speaker_labels)
+        )
+    )
+    if not labels:
+        if isinstance(choice, int):
+            raise FlowValidationException(
+                "This run labels no speakers, so it cannot bound their count. "
+                "Read transcription.max_speakers in the run contract.",
+                code=FlowApiErrorCode.RUN_MAX_SPEAKERS_NOT_AVAILABLE,
+            )
+        return NOT_PROVIDED
+    if not isinstance(choice, NotProvided):
+        return choice
+    field = _speaker_count_field(steps)
+    value = (form_input or {}).get(field) if field is not None else None
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise BadRequestException(
+            f"Field '{field}' must be a whole number of at least 1.",
+            code=FlowApiErrorCode.INPUT_INVALID_NUMBER.value,
+            context={"field_name": field, "field_type": "number"},
+        )
+    return value
+
+
+def _speaker_count_field(steps: Sequence[RuntimeStep]) -> str | None:
+    """The first speaker-mapping step's speaker-count form field, if any."""
+    for step in sorted(steps, key=lambda item: item.step_order):
+        if step.output_mode == FlowOutputMode.SPEAKER_MAPPING.value:
+            return speaker_mapping_speaker_count_field(step.output_config)
+    return None
 
 
 def _audio_input_step(steps: Sequence[RuntimeStep]) -> RuntimeStep | None:

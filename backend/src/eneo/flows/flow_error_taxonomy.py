@@ -292,6 +292,16 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Send speaker_labels only when the run contract marks speaker labels as selectable.",
         user_action="Reload the flow and start the run again.",
     ),
+    FlowApiErrorCode.RUN_MAX_SPEAKERS_NOT_AVAILABLE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The run bounded the speaker count, but it does not label speakers.",
+        consumer_action=(
+            "Send max_speakers only when the run contract offers a speaker count "
+            "and the run labels speakers."
+        ),
+        user_action="Reload the flow and start the run again.",
+    ),
     FlowApiErrorCode.RUN_INPUT_PAYLOAD_TOO_LARGE: _entry(
         category="Run input",
         surfaced_through="API error response",

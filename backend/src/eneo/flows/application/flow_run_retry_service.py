@@ -31,6 +31,7 @@ from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE,
     TRANSCRIPT_REGENERATION_KEY,
+    read_max_speakers_decision,
     read_semantic_flow_input_payload,
     read_speaker_labels_choice,
 )
@@ -334,6 +335,7 @@ class FlowRunRetryService:
                 review_established_step_ids=frozenset(review_established_step_ids),
                 transcript=inline,
                 speaker_labels=read_speaker_labels_choice(source.input_payload_json),
+                max_speakers=read_max_speakers_decision(source.input_payload_json),
             ),
         )
         if created.created:

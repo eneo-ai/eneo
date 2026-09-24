@@ -60,11 +60,13 @@ from eneo.flows.flow_input_limits import (
 )
 from eneo.flows.flow_run_contract_service import (
     build_final_output_contract,
+    settle_max_speakers,
     speaker_labels_option,
 )
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
+    MAX_SPEAKERS_KEY,
     SPEAKER_LABELS_KEY,
     TRANSCRIPT_REGENERATION_KEY,
     build_initial_run_input_envelope,
@@ -110,6 +112,7 @@ from eneo.flows.published_definition import (
 from eneo.flows.published_runtime import load_published_definition
 from eneo.main.config import get_settings
 from eneo.main.exceptions import NotFoundException, ValidationException
+from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.settings.setting_service import SettingService
 from eneo.users.user import UserInDB
 
@@ -351,6 +354,7 @@ class FlowRunService:
         prefix_seed: FlowRunPrefixSeed | None = None,
         purpose: FlowRunPurpose = FlowRunPurpose.PRODUCTION,
         speaker_labels: bool | None = None,
+        max_speakers: int | None | NotProvided = NOT_PROVIDED,
     ) -> CreateRunResult:
         idempotency_key = self._validate_idempotency_key(idempotency_key)
         if run_label is not None:
@@ -381,6 +385,7 @@ class FlowRunService:
             step_inputs=step_inputs,
             purpose=purpose,
             speaker_labels=speaker_labels,
+            max_speakers=max_speakers,
         )
         if prefix_seed is not None:
             payload = {
@@ -400,6 +405,8 @@ class FlowRunService:
                 )
             if prefix_seed.speaker_labels is not None:
                 payload[SPEAKER_LABELS_KEY] = prefix_seed.speaker_labels
+            if not isinstance(prefix_seed.max_speakers, NotProvided):
+                payload[MAX_SPEAKERS_KEY] = prefix_seed.max_speakers
             ensure_inline_payload_size_allowed(
                 flow_id=flow_id, input_payload_json=payload
             )
@@ -494,6 +501,7 @@ class FlowRunService:
         step_inputs: FlowRunStepInputs | None,
         purpose: FlowRunPurpose,
         speaker_labels: bool | None,
+        max_speakers: int | None | NotProvided,
     ) -> _PreparedRunCreation:
         normalized_inline_payload = normalize_and_validate_flow_run_payload(
             metadata=definition.metadata(),
@@ -512,6 +520,14 @@ class FlowRunService:
                     "transcription.speaker_labels in the run contract.",
                     code=FlowApiErrorCode.RUN_SPEAKER_LABELS_NOT_SELECTABLE,
                 )
+        settled_max_speakers = settle_max_speakers(
+            max_speakers,
+            steps=definition.runtime_steps(),
+            wizard_metadata=definition.metadata().wizard,
+            speaker_labels=speaker_labels,
+            service_configured=get_settings().flow_transcription_service_configured,
+            form_input=normalized_inline_payload,
+        )
         normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
         preseed_steps: list[PreseedStep] = [
             {
@@ -561,6 +577,7 @@ class FlowRunService:
             normalized_inline_payload=normalized_inline_payload,
             flow_version=flow_version,
             speaker_labels=speaker_labels,
+            max_speakers=settled_max_speakers,
         )
         request_fingerprint = self._build_idempotency_fingerprint(
             tenant_id=self.user.tenant_id,

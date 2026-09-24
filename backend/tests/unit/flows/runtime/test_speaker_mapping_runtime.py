@@ -44,65 +44,6 @@ def test_resolve_participants_reads_the_semantic_run_input() -> None:
     assert resolve_participants({"deltagare": ["x" * 121]}, "deltagare") == ([], True)
 
 
-def test_max_speakers_comes_from_the_first_mapping_step() -> None:
-    from types import SimpleNamespace
-
-    from eneo.flows.runtime.speaker_mapping_runtime import resolve_max_speakers
-
-    steps = [
-        SimpleNamespace(output_mode="transcribe_only", output_config=None),
-        SimpleNamespace(
-            output_mode="speaker_mapping",
-            output_config={"speaker_mapping": {"speaker_count_field": "antal"}},
-        ),
-    ]
-    assert resolve_max_speakers(steps, {"antal": 3}) == 3
-    assert resolve_max_speakers(steps, {"antal": ""}) is None
-    assert resolve_max_speakers(steps[:1], {"antal": 3}) is None
-
-
-def test_only_the_speaker_count_field_bounds_diarization() -> None:
-    from types import SimpleNamespace
-
-    from eneo.flows.runtime.speaker_mapping_runtime import resolve_max_speakers
-
-    steps = [
-        SimpleNamespace(
-            output_mode="speaker_mapping",
-            output_config={
-                "speaker_mapping": {
-                    "participants_field": "deltagare",
-                    "speaker_count_field": "antal",
-                }
-            },
-        )
-    ]
-    # Names are not a cap: an incomplete list must not merge unlisted voices.
-    assert resolve_max_speakers(steps, {"deltagare": "Anna, Bo", "antal": 4}) == 4
-    assert (
-        resolve_max_speakers(steps, {"deltagare": ["Anna", "Bo"], "antal": ""}) is None
-    )
-    assert resolve_max_speakers(steps, {"deltagare": "Anna, Bo"}) is None
-    assert resolve_max_speakers(steps, {"antal": "3"}) == 3
-    assert resolve_max_speakers(steps, {"antal": 0}) is None
-    assert resolve_max_speakers(steps, {"antal": True}) is None
-    assert resolve_max_speakers(steps, {}) is None
-
-
-def test_no_speaker_count_field_means_no_bound() -> None:
-    from types import SimpleNamespace
-
-    from eneo.flows.runtime.speaker_mapping_runtime import resolve_max_speakers
-
-    steps = [
-        SimpleNamespace(
-            output_mode="speaker_mapping",
-            output_config={"speaker_mapping": {"participants_field": "deltagare"}},
-        )
-    ]
-    assert resolve_max_speakers(steps, {"deltagare": "Anna, Bo, Cid"}) is None
-
-
 def test_validate_normalizes_and_orders_by_inventory() -> None:
     mapping = validate_speaker_mapping(
         {

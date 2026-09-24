@@ -4713,14 +4713,17 @@ export interface paths {
      *         3. Submit the returned uploaded files through `step_inputs[step_id].file_ids`,
      *            together with any structured `input_payload_json` fields in this run request.
      *            When the run contract's `transcription.speaker_labels.selectable` is true, the
-     *            request may also choose `speaker_labels`.
+     *            request may also choose `speaker_labels`; when `transcription.max_speakers` is
+     *            present, it may bound the speaker count with `max_speakers`.
      *         4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/status/` until the run is terminal.
      *            Then retrieve this run's audited detail or use `.../steps/` for evidence.
      *
      *         Request bodies reject unknown JSON fields. The removed top-level `file_ids` field returns
      *         `400` with code `flow_run_top_level_file_ids_not_supported`; use
      *         `step_inputs[step_id].file_ids` instead. A `speaker_labels` choice the run contract does
-     *         not offer returns `422` with code `flow_run_speaker_labels_not_selectable`.
+     *         not offer returns `422` with code `flow_run_speaker_labels_not_selectable`, and a
+     *         `max_speakers` for a run that labels no speakers returns `422` with code
+     *         `flow_run_max_speakers_not_available`.
      *
      *         `Idempotency-Key` is optional but recommended for retried writes. Reusing the same key with
      *         the same request payload returns the existing run payload. Reusing the same key with a
@@ -16872,6 +16875,7 @@ export interface components {
       | "flow_run_aggregate_max_files_exceeded"
       | "flow_run_reserved_input_payload_key"
       | "flow_run_speaker_labels_not_selectable"
+      | "flow_run_max_speakers_not_available"
       | "flow_run_input_payload_too_large"
       | "flow_run_input_exceeds_limit"
       | "flow_input_required_field_missing"
@@ -17858,6 +17862,14 @@ export interface components {
        * @default false
        */
       restore_max_provider_calls_default?: boolean;
+    };
+    /** FlowMaxSpeakersOptionPublic */
+    FlowMaxSpeakersOptionPublic: {
+      /**
+       * Form Field
+       * @description The form field that already asks for the speaker count (a speaker-mapping step's count field), or null. When set, a client should not offer a second count control; a run's `max_speakers` still overrides the field.
+       */
+      form_field: string | null;
     };
     /**
      * FlowOutputDelivery
@@ -19419,6 +19431,11 @@ export interface components {
       input_payload_json?: {
         [key: string]: unknown;
       } | null;
+      /**
+       * Max Speakers
+       * @description An upper bound on how many speakers the transcription may find, for a run that labels speakers. Send it only when `transcription.max_speakers` in the run contract is present; for a run that labels no speakers the request is refused with 422 `flow_run_max_speakers_not_available`. It is an upper bound, not an exact count, because a recording part may hold fewer people. Null means automatic, even when the flow's form asks for the count; omitted uses the form's count field, else automatic. Whole numbers from 1 only.
+       */
+      max_speakers?: number | null;
       /**
        * Run Label
        * @description Caller-supplied run label. Normalized to Unicode NFC and trimmed on creation; must contain 1–120 characters and no line breaks or control characters. Omitted or null labels are stored as null.
@@ -25239,6 +25256,8 @@ export interface components {
     FlowTranscriptionContractPublic: {
       /** @description Whether the audio step can show a live transcript preview while recording. */
       live: components["schemas"]["FlowLiveTranscriptionAvailabilityPublic"];
+      /** @description Whether a run may bound the speaker count with `max_speakers`: present whenever a transcription service labels speakers, including when a speaker-mapping step requires labels. Null when no service labels speakers. */
+      max_speakers?: components["schemas"]["FlowMaxSpeakersOptionPublic"] | null;
       speaker_labels: components["schemas"]["FlowSpeakerLabelsOptionPublic"];
     };
     /** FormFieldChange */

@@ -1928,10 +1928,20 @@ def test_openapi_documents_transcription_options_and_the_run_speaker_choice(
     )
     live = schemas["FlowLiveTranscriptionAvailabilityPublic"]["properties"]
     speaker_choice = schemas["FlowRunCreateRequest"]["properties"]["speaker_labels"]
+    speaker_bound = schemas["FlowRunCreateRequest"]["properties"]["max_speakers"]
     operation = _get_operation(openapi_spec, "/api/v1/flows/{id}/runs/", "post")
     unprocessable = operation["responses"]["422"]["content"]["application/json"]
 
-    assert set(transcription["properties"]) == {"live", "speaker_labels"}
+    assert set(transcription["properties"]) == {
+        "live",
+        "speaker_labels",
+        "max_speakers",
+    }
+    assert set(schemas["FlowMaxSpeakersOptionPublic"]["properties"]) == {"form_field"}
+    assert {
+        (option.get("type"), option.get("minimum")) for option in speaker_bound["anyOf"]
+    } == {("integer", 1), ("null", None)}
+    assert "upper bound" in speaker_bound["description"]
     assert set(live) == {"available", "reason"}
     assert _extract_enum_values(openapi_spec, _non_null_schema(live["reason"])) == {
         "transcription_disabled",
@@ -1950,6 +1960,7 @@ def test_openapi_documents_transcription_options_and_the_run_speaker_choice(
     }
     assert "run contract" in speaker_choice["description"]
     assert "flow_run_speaker_labels_not_selectable" in operation["description"]
+    assert "flow_run_max_speakers_not_available" in operation["description"]
     assert unprocessable["schema"] == {"$ref": "#/components/schemas/GeneralError"}
 
 

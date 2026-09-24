@@ -24,6 +24,7 @@ from eneo.flows.domain.transcript_source import (
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
+    read_max_speakers,
     read_speaker_labels_choice,
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
@@ -76,8 +77,6 @@ class AudioRuntimeRequest:
     max_audio_files: int
     max_inline_text_bytes: int
     attempt_no: int = 1
-    # Diarization bound from the participants form field, when known.
-    max_speakers: int | None = None
     source_preparation: TranscriptSourcePreparation | None = None
 
 
@@ -239,7 +238,7 @@ async def resolve_transcribe_and_attach_audio_input(
         max_inline_text_bytes=request.max_inline_text_bytes,
         open_audio_download=deps.open_audio_download,
         transcription_call_observer=deps.transcription_call_observer,
-        max_speakers=request.max_speakers,
+        max_speakers=read_max_speakers(request.run.input_payload_json),
         speaker_labels=read_speaker_labels_choice(request.run.input_payload_json),
         source_preparation=request.source_preparation,
     )

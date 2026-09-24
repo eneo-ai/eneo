@@ -43,6 +43,7 @@ def test_reserved_input_payload_keys_are_sorted_for_sdk_output() -> None:
     assert tuple(sorted(FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS)) == (
         "expected_flow_version",
         "file_ids",
+        "max_speakers",
         "speaker_labels",
         "step_inputs",
         "transcript_regeneration",
