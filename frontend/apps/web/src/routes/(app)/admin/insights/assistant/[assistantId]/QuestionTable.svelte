@@ -5,9 +5,9 @@
 -->
 
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import * as Table from "$lib/components/resource-table/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import dayjs from "dayjs";
   import { m } from "$lib/paraglide/messages";
   import QuestionDetails from "./QuestionDetails.svelte";
   import type { CalendarDate } from "@internationalized/date";
@@ -71,7 +71,7 @@
       accessor: (item) => item.created_at,
       cell: (item) => {
         return Table.renderComponent(Table.FormattedCell, {
-          value: dayjs(item.value).format("YYYY-MM-DD HH:mm"),
+          value: formatDateTime(item.value),
           monospaced: true
         });
       }

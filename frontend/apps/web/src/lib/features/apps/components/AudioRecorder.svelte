@@ -4,7 +4,6 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { onDestroy, onMount } from "svelte";
 
-  import dayjs from "dayjs";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
@@ -19,7 +18,7 @@
   export let maxBytes: number | null = null;
 
   let isRecording: boolean = false;
-  let startedRecordingAt = dayjs();
+  let startedRecordingAt = Date.now();
   let elapsedTime = "";
   let recordingError: string | null = null;
   let recordingErrorHint: string | null = null;
@@ -201,7 +200,7 @@
       isRecording = true;
       stopReason = "manual";
       onRecordingStateChange(true);
-      startedRecordingAt = dayjs();
+      startedRecordingAt = Date.now();
 
       // Reset stats
       recordingStats = {
@@ -385,7 +384,7 @@
       stopReason = "stall";
       stopRecording();
     }
-    elapsedTime = formatElapsed(dayjs().diff(startedRecordingAt, "seconds"));
+    elapsedTime = formatElapsed(Math.floor((Date.now() - startedRecordingAt) / 1000));
     window.requestAnimationFrame(onAnimationFrame);
   };
 

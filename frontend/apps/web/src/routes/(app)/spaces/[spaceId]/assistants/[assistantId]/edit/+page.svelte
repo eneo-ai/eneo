@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { Page, Settings } from "$lib/components/layout";
   import EditorPageHeader from "$lib/components/settings/EditorPageHeader.svelte";
   import { guardUnsavedChanges } from "$lib/core/editing/guardUnsavedChanges";
@@ -26,7 +27,6 @@
   import { CAPABILITIES, getCapability } from "$lib/features/mcp/capabilities";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import PromptGuideModal from "$lib/features/prompt-guide/components/PromptGuideModal.svelte";
-  import dayjs from "dayjs";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
   import {
@@ -284,7 +284,7 @@
                   return data.eneo.assistants.listPrompts({ id: data.assistant.id });
                 }}
                 onPromptSelected={(prompt) => {
-                  const restoredDate = dayjs(prompt.created_at).format("YYYY-MM-DD HH:mm");
+                  const restoredDate = formatDateTime(prompt.created_at);
                   $update.prompt.text = prompt.text;
                   $update.prompt.description = `Restored prompt from ${restoredDate}`;
                 }}
@@ -305,7 +305,7 @@
                 // apply-and-save path here.
                 $update.prompt.text = text;
                 $update.prompt.description = m.prompt_guide_apply_description({
-                  date: dayjs().format("YYYY-MM-DD HH:mm")
+                  date: formatDateTime(new Date())
                 });
                 isModalOpen = false;
                 // Mark the Q&A run completed — best-effort, must not block Apply.

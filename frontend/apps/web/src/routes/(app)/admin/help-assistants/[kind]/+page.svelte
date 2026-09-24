@@ -10,6 +10,7 @@
 -->
 
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { Page, Settings } from "$lib/components/layout";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -19,7 +20,6 @@
   import { resolve } from "$app/paths";
   import { fade } from "svelte/transition";
   import { untrack } from "svelte";
-  import dayjs from "dayjs";
 
   import { initAssistantEditor } from "$lib/features/assistants/AssistantEditor.js";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
@@ -211,7 +211,7 @@
                 return data.eneo.assistants.listPrompts({ id: data.assistant.id });
               }}
               onPromptSelected={(prompt) => {
-                const restoredDate = dayjs(prompt.created_at).format("YYYY-MM-DD HH:mm");
+                const restoredDate = formatDateTime(prompt.created_at);
                 $update.prompt.text = prompt.text;
                 $update.prompt.description = `Restored prompt from ${restoredDate}`;
               }}
@@ -227,7 +227,7 @@
                 onApply={(text) => {
                   $update.prompt.text = text;
                   $update.prompt.description = m.prompt_guide_apply_description({
-                    date: dayjs().format("YYYY-MM-DD HH:mm")
+                    date: formatDateTime(new Date())
                   });
                   isModalOpen = false;
                   if (promptGuideRunId) {

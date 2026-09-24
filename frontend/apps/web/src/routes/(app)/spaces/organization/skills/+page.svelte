@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import type { OrganizationSkillSummaryPublic, SkillRemovalResult } from "@eneo/eneo-js";
   import { invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
@@ -13,7 +14,6 @@
   import { formatSkillUsage, removalAnnouncement } from "$lib/features/skills/skillUsage";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import {
     Info,
     LoaderCircle,
@@ -62,7 +62,7 @@
   });
 
   function formatDate(value: string): string {
-    return new Date(value).toLocaleString(getLocale() === "sv" ? "sv-SE" : "en-US", {
+    return new Date(value).toLocaleString(intlLocale(), {
       dateStyle: "short",
       timeStyle: "short"
     });

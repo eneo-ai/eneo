@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import {
     type AppFleetAdvancePublic,
     type AssistantFleetAdvancePublic,
@@ -28,7 +29,6 @@
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
   import { getErrorMessage, SKILL_EXECUTION_BLOCK_CONFLICT } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import SkillAdoptionProjection, {
     type SkillAdoptionQuery,
     type SkillAdoptionRun,
@@ -637,7 +637,7 @@
   }
 
   function formatExecutionDate(value: string): string {
-    return new Date(value).toLocaleString(getLocale() === "sv" ? "sv-SE" : "en-US", {
+    return new Date(value).toLocaleString(intlLocale(), {
       dateStyle: "medium",
       timeStyle: "short"
     });

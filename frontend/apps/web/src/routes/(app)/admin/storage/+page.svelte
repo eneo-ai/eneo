@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import { onMount, tick } from "svelte";
   import { invalidate } from "$app/navigation";
   import {
@@ -49,7 +50,6 @@
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
   import { hasPermission } from "$lib/core/hasPermission.js";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import { toast } from "svelte-sonner";
   import ByteLimitField from "./ByteLimitField.svelte";
   import StorageConnectionSection from "./StorageConnectionSection.svelte";
@@ -514,12 +514,8 @@
     return labels[actor]();
   }
 
-  function storageLocale(): string {
-    return getLocale() === "sv" ? "sv-SE" : "en-US";
-  }
-
   function storageCount(value: number): string {
-    return new Intl.NumberFormat(storageLocale()).format(value);
+    return new Intl.NumberFormat(intlLocale()).format(value);
   }
 
   function policyBytes(value: number): string {
@@ -542,7 +538,7 @@
       { bytes: 1, label: m.storage_unit_b }
     ];
     const unit = units.find((candidate) => value >= candidate.bytes) ?? units[units.length - 1];
-    return `${new Intl.NumberFormat(storageLocale(), { maximumFractionDigits }).format(
+    return `${new Intl.NumberFormat(intlLocale(), { maximumFractionDigits }).format(
       value / unit.bytes
     )} ${unit.label()}`;
   }
@@ -551,7 +547,7 @@
     if (value === null) return m.storage_inventory_not_available();
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return m.storage_inventory_not_available();
-    return new Intl.DateTimeFormat(storageLocale(), {
+    return new Intl.DateTimeFormat(intlLocale(), {
       dateStyle: "medium"
     }).format(date);
   }
@@ -559,7 +555,7 @@
   function storageDateTime(value: string): string {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return m.storage_inventory_not_available();
-    return new Intl.DateTimeFormat(storageLocale(), {
+    return new Intl.DateTimeFormat(intlLocale(), {
       dateStyle: "long",
       timeStyle: "short"
     }).format(date);

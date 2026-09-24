@@ -1,21 +1,16 @@
 <script lang="ts">
+  import {
+    formatDateTime,
+    formatRelativeTime,
+    formatDuration
+  } from "$lib/core/formatting/dateTime";
   import type { CrawlRun } from "@eneo/eneo-js";
   import * as Table from "$lib/components/resource-table/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
 
-  import dayjs from "dayjs";
-  import relativeTime from "dayjs/plugin/relativeTime";
-  import utc from "dayjs/plugin/utc";
-  import "dayjs/locale/sv";
-  import "dayjs/locale/en";
   import CrawlResultCell from "./CrawlResultCell.svelte";
-  dayjs.extend(relativeTime);
-  dayjs.extend(utc);
 
-  // Set dayjs locale based on paraglide locale
   // eslint-disable-next-line svelte/no-immutable-reactive-statements
-  $: dayjs.locale(getLocale());
 
   const SKIPPED_PREFIX = "skipped";
 
@@ -65,7 +60,7 @@
       header: m.started(),
       cell: (item) => {
         return Table.renderComponent(Table.FormattedCell, {
-          value: dayjs(item.value).format("YYYY-MM-DD HH:mm"),
+          value: formatDateTime(item.value),
           monospaced: true
         });
       }
@@ -112,12 +107,14 @@
         }
       },
       cell: (item) => {
-        const started = dayjs(item.value.created_at);
-        let value: string = m.started_time_ago({ timeAgo: dayjs().to(started) });
+        let value: string = m.started_time_ago({
+          timeAgo: formatRelativeTime(item.value.created_at)
+        });
 
         if (item.value.finished_at) {
-          const finished = dayjs(item.value.finished_at);
-          value = started.to(finished, true);
+          value = formatDuration(
+            new Date(item.value.finished_at).getTime() - new Date(item.value.created_at).getTime()
+          );
         }
 
         return Table.renderComponent(Table.FormattedCell, {

@@ -1,9 +1,9 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import type { ApiKeyV2 } from "@eneo/eneo-js";
   import { CircleAlert, Calendar, Infinity as InfinityIcon } from "@lucide/svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import { toast } from "svelte-sonner";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -58,8 +58,7 @@
 
   function formatDate(value: string | null): string {
     if (!value) return m.api_keys_extend_summary_no_expiration();
-    const locale = getLocale();
-    return new Date(value).toLocaleDateString(locale === "sv" ? "sv-SE" : "en-US", {
+    return new Date(value).toLocaleDateString(intlLocale(), {
       year: "numeric",
       month: "short",
       day: "numeric",

@@ -5,19 +5,14 @@
 -->
 
 <script lang="ts">
+  import { formatDateTime, formatDateMedium } from "$lib/core/formatting/dateTime";
   import * as Table from "$lib/components/resource-table/index.js";
   import PromptActions from "./PromptActions.svelte";
   import { getPromptManager } from "../PromptManager";
-  import dayjs from "dayjs";
-  import relativeTime from "dayjs/plugin/relativeTime";
-  import utc from "dayjs/plugin/utc";
   import { onMount } from "svelte";
   import PromptTimestamp from "./PromptTimestamp.svelte";
   import PromptCreator from "./PromptCreator.svelte";
   import { m } from "$lib/paraglide/messages";
-
-  dayjs.extend(relativeTime);
-  dayjs.extend(utc);
 
   const {
     state: { allPrompts },
@@ -43,12 +38,12 @@
       plugins: {
         tableFilter: {
           getFilterValue(item) {
-            return dayjs(item.created_at).format("YYYY-MM-DD HH:mm");
+            return formatDateTime(item.created_at);
           }
         },
         sort: {
           getSortValue(item) {
-            return dayjs(item.created_at).format("YYYY-MM-DD HH:mm");
+            return formatDateTime(item.created_at);
           }
         }
       }
@@ -76,7 +71,7 @@
   let allUniqueDates = new Set($allPrompts.map((prompt) => getUniqueDate(prompt.created_at)));
 
   function getUniqueDate(date: string | undefined | null) {
-    return date ? dayjs(date).format("MMM D, YYYY") : m.prompts_without_date();
+    return date ? formatDateMedium(date) : m.prompts_without_date();
   }
 
   function createDateFilter(date: string) {

@@ -1,11 +1,7 @@
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import * as Table from "$lib/components/resource-table/index.js";
   import HistoryActions from "./HistoryActions.svelte";
-  import dayjs from "dayjs";
-  import relativeTime from "dayjs/plugin/relativeTime";
-  import utc from "dayjs/plugin/utc";
-  dayjs.extend(relativeTime);
-  dayjs.extend(utc);
 
   import type { Conversation, ConversationSparse } from "@eneo/eneo-js";
   import { getChatService } from "../../ChatService.svelte";
@@ -44,7 +40,7 @@
       accessor: "created_at",
       cell: (item) => {
         return Table.renderComponent(Table.FormattedCell, {
-          value: dayjs(item.value).format("YYYY-MM-DD HH:mm"),
+          value: formatDateTime(item.value),
           monospaced: true
         });
       }

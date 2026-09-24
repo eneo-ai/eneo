@@ -5,6 +5,7 @@
 -->
 
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { untrack } from "svelte";
   import type { components } from "@eneo/eneo-js";
   import * as Table from "$lib/components/resource-table/index.js";
@@ -12,7 +13,6 @@
   import TemplateDeletedActions from "./TemplateDeletedActions.svelte";
   import TemplateNameCell from "./TemplateNameCell.svelte";
   import TemplateCategoryBadge from "./TemplateCategoryBadge.svelte";
-  import dayjs from "dayjs";
 
   type AssistantTemplate = components["schemas"]["AssistantTemplateAdminPublic"];
   type AppTemplate = components["schemas"]["AppTemplateAdminPublic"];
@@ -99,7 +99,7 @@
       header: m.deleted_date(),
       cell: (item) => {
         if (!item.value) return "-";
-        return dayjs(item.value).format("YYYY-MM-DD HH:mm");
+        return formatDateTime(item.value);
       },
       plugins: {
         sort: {

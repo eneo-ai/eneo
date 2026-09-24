@@ -1,11 +1,10 @@
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { Page } from "$lib/components/layout";
   import { IconDownload } from "@eneo/icons/download";
   import { Markdown } from "$lib/components/markdown/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import dayjs from "dayjs";
-  import utc from "dayjs/plugin/utc";
   import AppResultStatus from "$lib/features/apps/components/AppResultStatus.svelte";
   import AppResultToolbar from "$lib/features/apps/components/AppResultToolbar.svelte";
   import { createAppRunResult } from "$lib/features/apps/createAppRunResult.svelte";
@@ -18,7 +17,6 @@
   import { browser } from "$app/environment";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  dayjs.extend(utc);
 
   const { data } = $props();
 
@@ -180,13 +178,13 @@
         <div class="flex flex-col gap-3 pt-2">
           <div class="border-dimmer flex items-center justify-between border-b">
             <span>{m.started()}</span><span class="font-mono text-sm"
-              >{dayjs(run.result.created_at).format("YYYY-MM-DD HH:mm")}</span
+              >{formatDateTime(run.result.created_at)}</span
             >
           </div>
           {#if run.isComplete}
             <div class="border-dimmer flex items-center justify-between border-b">
               <span>{m.finished()}</span><span class="font-mono text-sm"
-                >{dayjs(run.result.finished_at).format("YYYY-MM-DD HH:mm")}</span
+                >{formatDateTime(run.result.finished_at)}</span
               >
             </div>
           {/if}

@@ -1,17 +1,12 @@
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import * as Table from "$lib/components/resource-table/index.js";
   import type { App, AppRunSparse } from "@eneo/eneo-js";
-  import dayjs from "dayjs";
-  import relativeTime from "dayjs/plugin/relativeTime";
-  import utc from "dayjs/plugin/utc";
   import { getResultTitle } from "$lib/features/apps/getResultTitle";
   import { m } from "$lib/paraglide/messages";
   import ResultPrimaryCell from "./ResultPrimaryCell.svelte";
   import AppResultStatus from "$lib/features/apps/components/AppResultStatus.svelte";
   import ResultAction from "./ResultAction.svelte";
-
-  dayjs.extend(relativeTime);
-  dayjs.extend(utc);
 
   export let results: AppRunSparse[];
   export let app: App;
@@ -47,7 +42,7 @@
       accessor: "created_at",
       cell: (item) => {
         return Table.renderComponent(Table.FormattedCell, {
-          value: dayjs(item.value).format("YYYY-MM-DD HH:mm"),
+          value: formatDateTime(item.value),
           monospaced: true
         });
       }
