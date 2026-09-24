@@ -41,8 +41,10 @@ describe("BlobPreview", () => {
 
   it("shows original download separately and opens its signed URL", async () => {
     const initialUrl = window.location.href;
+    // Only the hash may change: the test frame's URL carries Vitest's session
+    // query, and losing it navigates the frame away before the test reports.
     generateOriginalSignedUrl.mockResolvedValue({
-      url: `${window.location.origin}${window.location.pathname}#blob-1-original-download`
+      url: `${initialUrl.split("#")[0]}#blob-1-original-download`
     });
 
     try {
