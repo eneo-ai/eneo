@@ -929,7 +929,10 @@ async def replace_flow_run_retention_policy(
     summary="Preview or purge due Organization Flow run history",
     description=(
         "Administrators can preview or explicitly purge one bounded batch of due "
-        "terminal runs under the effective preserve policy. Dry runs delete nothing "
+        "terminal runs under the effective preserve policy, plus expired unbound "
+        "live transcripts in the authenticated tenant. The limit applies separately "
+        "to runs and transcripts, with separate candidate and deletion counts. "
+        "Dry runs select candidates but delete nothing "
         "and emit no audit event. Real purges require an audit row in the same "
         "transaction. Review-required runs and unresolved deliveries are excluded."
     ),
@@ -951,8 +954,10 @@ async def purge_organization_flow_run_history(
     summary="Preview or purge due Space Flow run history",
     description=(
         "Apply the administrator purge to one Space in the authenticated tenant. "
-        "Dry-run is the default. Each real bounded batch deletes only due terminal "
-        "runs under the effective preserve policy and requires a transaction audit. "
+        "Dry-run is the default and reports candidates without deleting anything. "
+        "Real batches delete due terminal runs under the effective preserve policy "
+        "and expired unbound live transcripts in this Space, with a transaction audit. "
+        "The limit applies separately to runs and transcripts, with separate counts. "
         "Review-required runs and unresolved deliveries remain stored."
     ),
     responses={
@@ -977,8 +982,10 @@ async def purge_space_flow_run_history(
     summary="Preview or purge due Flow run history",
     description=(
         "Apply the administrator purge to one Flow in the authenticated tenant. "
-        "Dry-run is the default. Each real bounded batch deletes only due terminal "
-        "runs under the effective preserve policy and requires a transaction audit. "
+        "Dry-run is the default and reports candidates without deleting anything. "
+        "Real batches delete due terminal runs under the effective preserve policy "
+        "and expired unbound live transcripts in this Flow, with a transaction audit. "
+        "The limit applies separately to runs and transcripts, with separate counts. "
         "Review-required runs and unresolved deliveries remain stored."
     ),
     responses={

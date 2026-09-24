@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.flow_tables import (
+    FlowLiveTranscripts,
     FlowRunAuditOutbox,
     FlowRuns,
     FlowRunWebhookDeliveries,
@@ -20,6 +21,98 @@ from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
+
+@pytest.mark.parametrize("scope", ["organization", "space", "flow"])
+async def test_transcript_only_purge_reports_preview_and_audited_deletions(
+    client, admin_token, admin_user, published_flow_ids, db_container, scope
+) -> None:
+    space_id, flow_id = published_flow_ids
+    now = datetime.now(timezone.utc)
+    ids = []
+    async with db_container() as container:
+        session = container.session()
+        for days in (-4, -3, -2, 1):
+            row = FlowLiveTranscripts(
+                tenant_id=admin_user.tenant_id,
+                user_id=admin_user.id,
+                flow_id=flow_id,
+                flow_version=1,
+                step_id=uuid4(),
+                model_id=uuid4(),
+                recording_id="recording_123",
+                text="Private transcript text",
+                segments=None,
+                received_audio_seconds=1,
+                expires_at=now + timedelta(days=days),
+            )
+            session.add(row)
+            await session.flush()
+            ids.append(row.id)
+
+    suffix = {
+        "organization": "",
+        "space": f"/spaces/{space_id}",
+        "flow": f"/flows/{flow_id}",
+    }[scope]
+    path = f"/api/v1/settings/flow-run-retention-policy{suffix}/purge"
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    preview = await client.post(path, json={"limit": 2}, headers=headers)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["candidate_count"] == preview.json()["purged_count"] == 0
+    assert preview.json()["transcript_candidate_count"] == 2
+    assert preview.json()["transcript_purged_count"] == 0
+    async with db_container() as container:
+        session = container.session()
+        assert set(await session.scalars(sa.select(FlowLiveTranscripts.id))) == set(ids)
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count(AuditLog.id)).where(
+                    AuditLog.action == "flow_run_history_purged"
+                )
+            )
+            == 0
+        )
+
+    response = await client.post(
+        path, json={"dry_run": False, "limit": 2}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        **preview.json(),
+        "dry_run": False,
+        "transcript_purged_count": 2,
+    }
+    async with db_container() as container:
+        session = container.session()
+        assert set(await session.scalars(sa.select(FlowLiveTranscripts.id))) == set(
+            ids[2:]
+        )
+        audit = (
+            await session.scalars(
+                sa.select(AuditLog).where(AuditLog.action == "flow_run_history_purged")
+            )
+        ).one()
+        assert audit.tenant_id == admin_user.tenant_id
+        assert audit.log_metadata == {
+            "scope": scope,
+            "scope_id": str(
+                {
+                    "organization": admin_user.tenant_id,
+                    "space": space_id,
+                    "flow": flow_id,
+                }[scope]
+            ),
+            "tenant_id": str(admin_user.tenant_id),
+            "space_id": str(space_id) if scope == "space" else None,
+            "flow_id": str(flow_id) if scope == "flow" else None,
+            "limit": 2,
+            "purged_count": 0,
+            "purged_run_ids": [],
+            "transcript_candidate_count": 2,
+            "transcript_purged_count": 2,
+            "blocked": preview.json()["blocked"],
+        }
 
 
 async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
@@ -64,6 +157,8 @@ async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
         "candidate_count": 1,
         "purged_count": 0,
         "purged_run_ids": [],
+        "transcript_candidate_count": 0,
+        "transcript_purged_count": 0,
         "blocked": {
             "undelivered_audit": 0,
             "unresolved_webhook": 0,
@@ -108,6 +203,8 @@ async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
             "limit": 100,
             "purged_count": 1,
             "purged_run_ids": [str(run_id)],
+            "transcript_candidate_count": 0,
+            "transcript_purged_count": 0,
             "blocked": preview.json()["blocked"],
         }
 

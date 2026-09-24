@@ -748,6 +748,29 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         ),
     ),
     _owner(
+        "flow_live_transcripts",
+        "segments",
+        owner_module="eneo.flows.runtime.live_transcription.segments",
+        envelope_name="TimedPieces",
+        owner_symbols=("TimedPieces.append", "TimedPieces.passages"),
+        storage_category=FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT,
+        schema_version_policy=(
+            "An unversioned list of start/end seconds and text passages generated "
+            "from live deltas; there is no persisted schema version."
+        ),
+        corruption_behavior=(
+            "Missing or inconsistent timing, final-text mismatch, or collection "
+            "overflow produces null segments before persistence. Persisted JSON "
+            "has no dedicated read validator."
+        ),
+        rationale=(
+            "Timed passages accompany the authoritative final live transcript. "
+            "The relay caps collected UTF-8 delta text plus per-piece overhead at "
+            "UPSTREAM_MAX_MESSAGE_BYTES before grouping passages at sentence "
+            "endings or around 30 seconds."
+        ),
+    ),
+    _owner(
         "flow_step_transcript_sources",
         "segments_json",
         owner_module="eneo.flows.runtime.transcription",

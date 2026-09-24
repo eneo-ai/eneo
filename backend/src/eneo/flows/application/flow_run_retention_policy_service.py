@@ -223,6 +223,8 @@ class FlowRunRetentionPolicyService:
             candidate_count=result.candidate_count,
             purged_count=len(result.purged_run_ids),
             purged_run_ids=list(result.purged_run_ids),
+            transcript_candidate_count=result.transcript_candidate_count,
+            transcript_purged_count=result.transcript_purged_count,
             blocked=FlowRunHistoryPurgeBlockedPublic(
                 undelivered_audit=result.blocked.skipped_undelivered_audit,
                 unresolved_webhook=result.blocked.skipped_unresolved_webhook,
@@ -238,7 +240,7 @@ class FlowRunRetentionPolicyService:
                 action=ActionType.FLOW_RUN_HISTORY_PURGED,
                 entity_type=self._entity_type(settings.scope),
                 entity_id=settings.scope_id,
-                description="Purged due Flow run history.",
+                description="Purged due Flow run history and expired unbound live transcripts.",
                 metadata={
                     "scope": settings.scope.value,
                     "scope_id": str(settings.scope_id),
@@ -248,6 +250,8 @@ class FlowRunRetentionPolicyService:
                     "limit": limit,
                     "purged_count": response.purged_count,
                     "purged_run_ids": [str(run_id) for run_id in result.purged_run_ids],
+                    "transcript_candidate_count": response.transcript_candidate_count,
+                    "transcript_purged_count": response.transcript_purged_count,
                     "blocked": response.blocked.model_dump(),
                 },
                 required=True,

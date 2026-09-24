@@ -832,6 +832,8 @@ class FlowRunHistoryPurgePublic(BaseModel):
                 "candidate_count": 2,
                 "purged_count": 0,
                 "purged_run_ids": [],
+                "transcript_candidate_count": 3,
+                "transcript_purged_count": 0,
                 "blocked": {
                     "undelivered_audit": 0,
                     "unresolved_webhook": 0,
@@ -848,6 +850,21 @@ class FlowRunHistoryPurgePublic(BaseModel):
     candidate_count: int
     purged_count: int
     purged_run_ids: list[UUID]
+    transcript_candidate_count: int = Field(
+        ge=0,
+        description=(
+            "Expired, unbound live transcripts selected in scope, capped at the "
+            "requested limit independently of run candidates. Available in dry runs "
+            "and real purges; real purges skip rows locked by another transaction."
+        ),
+    )
+    transcript_purged_count: int = Field(
+        ge=0,
+        description=(
+            "Live transcripts actually deleted in this batch, capped at the "
+            "requested limit independently of run deletions. Always zero in a dry run."
+        ),
+    )
     blocked: FlowRunHistoryPurgeBlockedPublic
 
 

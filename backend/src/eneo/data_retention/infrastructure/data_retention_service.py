@@ -77,6 +77,8 @@ class FlowRunHistoryPurgeBlockedCounts:
 class TenantFlowRunHistoryPurgeResult:
     candidate_count: int
     purged_run_ids: tuple[UUID, ...]
+    transcript_candidate_count: int
+    transcript_purged_count: int
     blocked: FlowRunHistoryPurgeBlockedCounts
 
 
@@ -556,16 +558,22 @@ class DataRetentionService:
             purged_run_ids = tuple(
                 run_id for run_id in run_ids if run_id not in remaining
             )
-        if not dry_run:
-            await LiveTranscriptRepository(self.session).delete_expired_unbound(
-                tenant_id=tenant_id,
-                now=now,
-                limit=limit,
-                space_id=space_id,
-                flow_id=flow_id,
-            )
+        transcripts = await LiveTranscriptRepository(
+            self.session
+        ).delete_expired_unbound(
+            tenant_id=tenant_id,
+            now=now,
+            limit=limit,
+            dry_run=dry_run,
+            space_id=space_id,
+            flow_id=flow_id,
+        )
         return TenantFlowRunHistoryPurgeResult(
-            candidate_count=len(run_ids), purged_run_ids=purged_run_ids, blocked=blocked
+            candidate_count=len(run_ids),
+            purged_run_ids=purged_run_ids,
+            transcript_candidate_count=transcripts.candidate_count,
+            transcript_purged_count=transcripts.purged_count,
+            blocked=blocked,
         )
 
     async def _select_flow_run_history_purge_batch(

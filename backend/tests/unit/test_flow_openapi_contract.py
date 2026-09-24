@@ -4395,6 +4395,8 @@ def test_openapi_admin_history_purge_defaults_to_preview_and_is_bounded(
         "candidate_count",
         "purged_count",
         "purged_run_ids",
+        "transcript_candidate_count",
+        "transcript_purged_count",
         "blocked",
     }
     assert set(schemas["FlowRunHistoryPurgeBlockedPublic"]["properties"]) == {

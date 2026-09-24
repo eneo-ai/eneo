@@ -255,6 +255,8 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
                 "limit",
                 "purged_count",
                 "purged_run_ids",
+                "transcript_candidate_count",
+                "transcript_purged_count",
                 "blocked",
             ),
             idempotency="one event per real bounded purge; dry runs emit no event",
@@ -738,6 +740,8 @@ def test_explicit_history_purge_requires_a_transaction_and_preview_emits_no_audi
             "limit",
             "purged_count",
             "purged_run_ids",
+            "transcript_candidate_count",
+            "transcript_purged_count",
             "blocked",
         } <= set(contract.metadata_keys)
         assert "dry runs emit no event" in contract.idempotency

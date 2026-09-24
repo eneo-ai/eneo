@@ -1,5 +1,6 @@
 """Durable live transcripts; each socket write owns one short transaction."""
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -10,6 +11,12 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import FlowLiveTranscripts, Flows
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionGrant
+
+
+@dataclass(frozen=True, slots=True)
+class LiveTranscriptPurgeCounts:
+    candidate_count: int
+    purged_count: int
 
 
 class LiveTranscriptRepository:
@@ -70,9 +77,10 @@ class LiveTranscriptRepository:
         tenant_id: UUID,
         now: datetime,
         limit: int,
+        dry_run: bool,
         space_id: UUID | None = None,
         flow_id: UUID | None = None,
-    ) -> None:
+    ) -> LiveTranscriptPurgeCounts:
         candidates = (
             sa.select(FlowLiveTranscripts.id)
             .join(
@@ -89,21 +97,31 @@ class LiveTranscriptRepository:
             )
             .order_by(FlowLiveTranscripts.expires_at, FlowLiveTranscripts.id)
             .limit(limit)
-            .with_for_update(of=FlowLiveTranscripts, skip_locked=True)
         )
         if space_id is not None:
             candidates = candidates.where(Flows.space_id == space_id)
         if flow_id is not None:
             candidates = candidates.where(FlowLiveTranscripts.flow_id == flow_id)
+        if not dry_run:
+            candidates = candidates.with_for_update(
+                of=FlowLiveTranscripts, skip_locked=True
+            )
         ids = list(await self.session.scalars(candidates))
-        if ids:
-            await self.session.execute(
-                sa.delete(FlowLiveTranscripts).where(
+        purged_count = 0
+        if ids and not dry_run:
+            purged_ids = await self.session.scalars(
+                sa.delete(FlowLiveTranscripts)
+                .where(
                     FlowLiveTranscripts.id.in_(ids),
                     FlowLiveTranscripts.tenant_id == tenant_id,
                     FlowLiveTranscripts.bound_file_id.is_(None),
                 )
+                .returning(FlowLiveTranscripts.id)
             )
+            purged_count = len(purged_ids.all())
+        return LiveTranscriptPurgeCounts(
+            candidate_count=len(ids), purged_count=purged_count
+        )
 
 
 async def persist_live_transcript(

@@ -5558,6 +5558,16 @@ export interface paths {
      *     `transcript.done` (the full preview text) and `error` (`code`, `message`,
      *     `retryable`) events.
      *
+     *     The optional body `recording_id` is an opaque client string matching
+     *     `^[A-Za-z0-9_-]{8,64}$`. To store a clean session, also send `produced_samples`
+     *     in the stop message: a non-negative integer counting captured 16 kHz samples
+     *     before client queueing or discarding. Missing or invalid counts disable storage
+     *     without changing the preview. Storage also requires a successfully sent final
+     *     commit and upstream `audio_seconds` whose rounded 16 kHz sample count matches
+     *     Eneo's received count exactly. The `transcript_id` in `transcript.done` is sent
+     *     only after the row commits. Storage failures or a five-second write timeout
+     *     leave the preview usable without an id.
+     *
      *     The preview is not the run's transcript. Upload the recording as a runtime file
      *     and create the run as usual; the flow's transcription model then produces the
      *     transcript the run uses. Live preview is only available when the flow's own
@@ -7617,7 +7627,7 @@ export interface paths {
     put?: never;
     /**
      * Preview or purge due Flow run history
-     * @description Apply the administrator purge to one Flow in the authenticated tenant. Dry-run is the default. Each real bounded batch deletes only due terminal runs under the effective preserve policy and requires a transaction audit. Review-required runs and unresolved deliveries remain stored.
+     * @description Apply the administrator purge to one Flow in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches delete due terminal runs under the effective preserve policy and expired unbound live transcripts in this Flow, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Review-required runs and unresolved deliveries remain stored.
      */
     post: operations["purge_flow_run_history"];
     delete?: never;
@@ -7657,7 +7667,7 @@ export interface paths {
     put?: never;
     /**
      * Preview or purge due Organization Flow run history
-     * @description Administrators can preview or explicitly purge one bounded batch of due terminal runs under the effective preserve policy. Dry runs delete nothing and emit no audit event. Real purges require an audit row in the same transaction. Review-required runs and unresolved deliveries are excluded.
+     * @description Administrators can preview or explicitly purge one bounded batch of due terminal runs under the effective preserve policy, plus expired unbound live transcripts in the authenticated tenant. The limit applies separately to runs and transcripts, with separate candidate and deletion counts. Dry runs select candidates but delete nothing and emit no audit event. Real purges require an audit row in the same transaction. Review-required runs and unresolved deliveries are excluded.
      */
     post: operations["purge_organization_flow_run_history"];
     delete?: never;
@@ -7721,7 +7731,7 @@ export interface paths {
     put?: never;
     /**
      * Preview or purge due Space Flow run history
-     * @description Apply the administrator purge to one Space in the authenticated tenant. Dry-run is the default. Each real bounded batch deletes only due terminal runs under the effective preserve policy and requires a transaction audit. Review-required runs and unresolved deliveries remain stored.
+     * @description Apply the administrator purge to one Space in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches delete due terminal runs under the effective preserve policy and expired unbound live transcripts in this Space, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Review-required runs and unresolved deliveries remain stored.
      */
     post: operations["purge_space_flow_run_history"];
     delete?: never;
@@ -17735,6 +17745,19 @@ export interface components {
        */
       websocket_path: string;
     };
+    /**
+     * FlowLiveTranscriptionSessionRequest
+     * @example {
+     *       "recording_id": "recording_123"
+     *     }
+     */
+    FlowLiveTranscriptionSessionRequest: {
+      /**
+       * Recording Id
+       * @description Opaque client recording identity for a durable live transcript.
+       */
+      recording_id?: string | null;
+    };
     /** FlowLiveTranscriptionUnavailableContext */
     FlowLiveTranscriptionUnavailableContext: {
       /**
@@ -21459,7 +21482,9 @@ export interface components {
      *       "dry_run": true,
      *       "purged_count": 0,
      *       "purged_run_ids": [],
-     *       "scope": "organization"
+     *       "scope": "organization",
+     *       "transcript_candidate_count": 3,
+     *       "transcript_purged_count": 0
      *     }
      */
     FlowRunHistoryPurgePublic: {
@@ -21473,6 +21498,16 @@ export interface components {
       /** Purged Run Ids */
       purged_run_ids: string[];
       scope: components["schemas"]["FlowRunRetentionScope"];
+      /**
+       * Transcript Candidate Count
+       * @description Expired, unbound live transcripts selected in scope, capped at the requested limit independently of run candidates. Available in dry runs and real purges; real purges skip rows locked by another transaction.
+       */
+      transcript_candidate_count: number;
+      /**
+       * Transcript Purged Count
+       * @description Live transcripts actually deleted in this batch, capped at the requested limit independently of run deletions. Always zero in a dry run.
+       */
+      transcript_purged_count: number;
     };
     /**
      * FlowRunHistoryPurgeRequest
@@ -57580,7 +57615,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["FlowLiveTranscriptionSessionRequest"] | null;
+      };
+    };
     responses: {
       /** @description Successful Response */
       201: {
