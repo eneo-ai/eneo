@@ -13,7 +13,7 @@ export function docsVersionPath(release: Pick<Release, "version" | "date"> | und
 
 /** Public docs keep English at existing URLs; Swedish is a sibling route. */
 export function docsUrl(
-  page: "guides/object-content-storage" | "guides/embed-widget",
+  page: "guides/object-content-storage" | "guides/embed-widget" | "guides/space-oversight",
   locale: string,
   anchor?: string
 ): string {
