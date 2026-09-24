@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { defineConfig, type Plugin } from "vitest/config";
+import { playwright } from "@vitest/browser-playwright";
 import { minifyCss } from "./scripts/minify-css.mjs";
 
 const pkg = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8")) as {
@@ -52,7 +53,7 @@ export default defineConfig(({ command }) => ({
     include: ["src/**/*.test.ts"],
     browser: {
       enabled: true,
-      provider: "playwright",
+      provider: playwright(),
       headless: true,
       instances: [{ browser: "chromium" }]
     }

@@ -2,7 +2,7 @@ import { page } from "@vitest/browser/context";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EneoWidgetElement } from "./element";
 import { BRIDGE_NAMESPACE } from "./protocol";
-import { flushSettings, stubSettings } from "./testing";
+import { flushSettings, spyOnSeam, stubSettings } from "./testing";
 
 const WIDGET_ID = "wgt_test123";
 
@@ -122,9 +122,9 @@ describe("saved settings", () => {
   /** A settings request the test answers (or never answers) itself. */
   function heldSettings() {
     let answer: (settings: unknown) => void = () => {};
-    const request = vi
-      .spyOn(EneoWidgetElement.prototype as never, "fetchSettings" as never)
-      .mockImplementation((() => new Promise((resolve) => (answer = resolve))) as never);
+    const request = spyOnSeam(EneoWidgetElement.prototype, "fetchSettings").mockImplementation(
+      () => new Promise((resolve) => (answer = resolve))
+    );
     return { request, answer: (settings: unknown) => answer(settings) };
   }
 
@@ -186,8 +186,8 @@ describe("saved settings", () => {
   });
 
   it("shows the launcher at once when the settings request fails", async () => {
-    vi.spyOn(EneoWidgetElement.prototype as never, "fetchSettings" as never).mockImplementation(
-      (() => Promise.reject(new TypeError("blocked by CSP"))) as never
+    spyOnSeam(EneoWidgetElement.prototype, "fetchSettings").mockImplementation(() =>
+      Promise.reject(new TypeError("blocked by CSP"))
     );
     const element = await mount({ position: "bottom-left" });
     expect(launcherOf(element).hidden).toBe(false);
@@ -195,7 +195,7 @@ describe("saved settings", () => {
   });
 
   it("does not show a launcher or open a panel for an inactive widget", async () => {
-    vi.spyOn(EneoWidgetElement.prototype as never, "fetchSettings" as never).mockRestore();
+    spyOnSeam(EneoWidgetElement.prototype, "fetchSettings").mockRestore();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 404 }));
     const element = attach();
     element.openPanel();
@@ -330,7 +330,7 @@ describe("opening", () => {
 
   it("does not talk to the iframe before it reports ready, then sends theme and open", async () => {
     const element = await mount({ "color-scheme": "dark" });
-    const post = vi.spyOn(element as never, "post" as never);
+    const post = spyOnSeam(element, "post");
     element.openPanel();
     expect(post).not.toHaveBeenCalled();
 
@@ -344,7 +344,7 @@ describe("opening", () => {
 
   it("tells the embed page which scheme the host page actually shows", async () => {
     const element = await mount();
-    const post = vi.spyOn(element as never, "post" as never);
+    const post = spyOnSeam(element, "post");
     element.openPanel();
     deliver(element, frameMessage("ready"));
     const theme = (post.mock.calls[0] as unknown[])[1] as { payload: { scheme: string } };
@@ -648,7 +648,7 @@ describe("launcher colours", () => {
 describe("host controls", () => {
   it("forwards colour scheme changes and page context once the frame is ready", async () => {
     const element = await mount();
-    const post = vi.spyOn(element as never, "post" as never);
+    const post = spyOnSeam(element, "post");
     element.setContext({ page_url: "https://host.example/page", page_title: "Sida" });
     expect(post).not.toHaveBeenCalled();
 
