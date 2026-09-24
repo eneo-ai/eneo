@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout";
+  import CopyButton from "$lib/components/CopyButton.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -89,12 +90,13 @@
             {runningService ? m.loading() : playgroundOutput}
           </div>
 
-          <Button
+          <CopyButton
+            text={playgroundOutput}
+            label={m.copy_response()}
+            showLabel
+            variant="default"
             class="mt-3"
-            onclick={() => {
-              navigator.clipboard.writeText(playgroundOutput);
-            }}>{m.copy_response()}</Button
-          >
+          />
         </div>
       </div>
     </Page.Tab>

@@ -12,6 +12,8 @@
   import { eneoMarkdownLexer } from "./index.js";
   import RenderToken from "./renderers/RenderToken.svelte";
   import { initReferenceContext } from "./ReferenceContext.js";
+  import { setDefaultCodeLanguage } from "./CodeLanguageContext.js";
+  import { cn } from "$lib/utils.js";
   import type { CustomRenderers } from "./CustomComponents.js";
   import type { InfoBlob } from "@eneo/eneo-js";
   import type { ClassValue } from "svelte/elements";
@@ -21,6 +23,8 @@
     references?: InfoBlob[];
     customRenderers?: CustomRenderers;
     showTokenOutput?: boolean;
+    /** Language for fenced code without a tag, e.g. "plaintext"; unset auto-detects. */
+    defaultCodeLanguage?: string;
     class?: ClassValue;
   };
 
@@ -29,6 +33,7 @@
     customRenderers = {},
     showTokenOutput = false,
     references = [],
+    defaultCodeLanguage,
     class: cls
   }: Props = $props();
 
@@ -38,11 +43,12 @@
     references: () => references,
     renderer: () => customRenderers.inref
   });
+  setDefaultCodeLanguage(() => defaultCodeLanguage);
 
   const tokens = $derived(lexer.lex(source));
 </script>
 
-<div class={["prose text-lg break-words", cls]}>
+<div class={cn("prose text-lg break-words", cls)}>
   {#each tokens as token, i (i)}
     <RenderToken {token}></RenderToken>
   {/each}

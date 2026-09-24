@@ -1,10 +1,9 @@
 <script lang="ts">
   import { browser } from "$app/environment";
   import type { UploadedFile } from "@eneo/eneo-js";
-  import { IconCheck } from "@eneo/icons/check";
-  import { IconCopy } from "@eneo/icons/copy";
   import { IconDocument } from "@eneo/icons/document";
   import { IconDownload } from "@eneo/icons/download";
+  import CopyButton from "$lib/components/CopyButton.svelte";
   import { Markdown } from "$lib/components/markdown/index.js";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
@@ -33,7 +32,6 @@
   let signedUrl = $state<string | undefined>(undefined);
   let loadingFile = $state(false);
   let loadError = $state(false);
-  let copied = $state(false);
   let isOpen = $state(false);
 
   // Text files include plain text, PDFs, DOCX, PPTX, etc. (all are returned as text from backend)
@@ -98,17 +96,6 @@
     } catch (e) {
       console.error("Error generating download URL:", e);
       toast.error(m.error_downloading_file());
-    }
-  }
-
-  async function copyText() {
-    await loadFile();
-    if (loadedContent && browser) {
-      navigator.clipboard.writeText(loadedContent);
-      copied = true;
-      setTimeout(() => {
-        copied = false;
-      }, 2000);
     }
   }
 
@@ -185,15 +172,7 @@
       </Button>
 
       {#if isTextFile && loadedContent}
-        <Button variant="ghost" onclick={copyText}>
-          {#if copied}
-            <IconCheck />
-            {m.copied()}
-          {:else}
-            <IconCopy />
-            {m.copy_to_clipboard()}
-          {/if}
-        </Button>
+        <CopyButton text={loadedContent} showLabel />
       {/if}
 
       <div class="flex-grow"></div>

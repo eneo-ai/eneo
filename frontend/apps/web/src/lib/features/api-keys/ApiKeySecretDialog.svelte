@@ -5,6 +5,7 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
 
   let {
     open = $bindable(false),
@@ -16,22 +17,10 @@
     source?: "created" | "rotated";
   }>();
 
-  let copied = $state(false);
-  let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+  const clipboard = createCopyState();
 
   async function copyToClipboard() {
-    if (!secret) return;
-    try {
-      await navigator.clipboard.writeText(secret);
-      copied = true;
-      toast.success(m.api_keys_copied_message());
-      if (copyResetTimer) clearTimeout(copyResetTimer);
-      copyResetTimer = setTimeout(() => {
-        copied = false;
-      }, 2000);
-    } catch {
-      toast.error(m.something_went_wrong());
-    }
+    if (secret && (await clipboard.copy(secret))) toast.success(m.api_keys_copied_message());
   }
 </script>
 
@@ -73,11 +62,11 @@
 
         <div class="mt-4 flex items-center gap-3">
           <Button
-            variant={copied ? "outline" : "default"}
+            variant={clipboard.copied ? "outline" : "default"}
             onclick={copyToClipboard}
             aria-label={m.api_keys_copy_to_clipboard()}
           >
-            {#if copied}
+            {#if clipboard.copied}
               <Check class="text-positive-stronger" />
               {m.api_keys_copied()}
             {:else}

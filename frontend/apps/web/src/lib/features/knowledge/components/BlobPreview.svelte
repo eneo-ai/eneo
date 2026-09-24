@@ -1,9 +1,9 @@
 <script lang="ts">
   import { browser } from "$app/environment";
   import type { InfoBlob } from "@eneo/eneo-js";
-  import { IconCopy } from "@eneo/icons/copy";
   import { IconDocument } from "@eneo/icons/document";
   import { IconDownload } from "@eneo/icons/download";
+  import CopyButton from "$lib/components/CopyButton.svelte";
   import { Markdown } from "$lib/components/markdown/index.js";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
@@ -95,18 +95,6 @@
     }
   }
 
-  let copyButtonText = m.copy_to_clipboard();
-  async function copyText() {
-    await loadBlob();
-    if (loadedBlobText && browser) {
-      navigator.clipboard.writeText(loadedBlobText);
-      copyButtonText = m.copied_to_clipboard();
-      setTimeout(() => {
-        copyButtonText = m.copy_to_clipboard();
-      }, 2000);
-    }
-  }
-
   const showBlob = () => {
     isOpen = true;
     loadBlob();
@@ -165,10 +153,7 @@
           {m.download_extracted_text()}
         </Button>
 
-        <Button variant="ghost" onclick={copyText}>
-          <IconCopy />
-          {copyButtonText}</Button
-        >
+        <CopyButton text={loadedBlobText} showLabel />
         <div class="flex-grow"></div>
       {/if}
       {#if originalAvailable}

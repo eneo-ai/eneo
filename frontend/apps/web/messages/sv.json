@@ -672,6 +672,7 @@
   "copy_message": "Kopiera meddelande",
   "could_not_add_new_member": "Kunde inte lägga till ny medlem.",
   "could_not_copy_link": "Kunde inte kopiera länk.",
+  "could_not_copy": "Kunde inte kopiera till urklipp",
   "could_not_delete_assistant": "Kunde inte radera assistent.",
   "could_not_delete_result": "Kunde inte ta bort resultat.",
   "could_not_delete_user": "Kunde inte radera användare.",

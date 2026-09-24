@@ -21,6 +21,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { getAppContext } from "$lib/core/AppContext";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
+  import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
   import { m } from "$lib/paraglide/messages";
   import {
     Key,
@@ -119,7 +120,7 @@
   let errorMessage = $state<string | null>(null);
   let createdSecret = $state<string | null>(null);
   let createdResponse = $state<ApiKeyCreatedResponse | null>(null);
-  let secretCopied = $state(false);
+  const clipboard = createCopyState();
 
   // Wizard step state
   let currentStep = $state(1);
@@ -739,7 +740,6 @@
       const response = await eneo.apiKeys.create(request);
       createdSecret = response.secret;
       createdResponse = response;
-      secretCopied = false;
       currentStep = 4;
     } catch (error: unknown) {
       console.error(error);
@@ -828,14 +828,8 @@
   }
 
   async function copySecret() {
-    if (!createdSecret) return;
-    try {
-      await navigator.clipboard.writeText(createdSecret);
-      secretCopied = true;
+    if (createdSecret && (await clipboard.copy(createdSecret))) {
       toast.success(m.api_keys_copied_message());
-      setTimeout(() => (secretCopied = false), 2000);
-    } catch {
-      toast.error(m.something_went_wrong());
     }
   }
 
@@ -867,7 +861,6 @@
     rateLimit = "";
     createdSecret = null;
     createdResponse = null;
-    secretCopied = false;
     errorMessage = null;
   }
 
@@ -2228,11 +2221,11 @@
 
             <div class="mt-3 flex items-center gap-3">
               <Button
-                variant={secretCopied ? "outline" : "default"}
+                variant={clipboard.copied ? "outline" : "default"}
                 onclick={copySecret}
                 aria-label={m.api_keys_copy_to_clipboard()}
               >
-                {#if secretCopied}
+                {#if clipboard.copied}
                   <Check class="text-positive-stronger" />
                   {m.api_keys_copied()}
                 {:else}

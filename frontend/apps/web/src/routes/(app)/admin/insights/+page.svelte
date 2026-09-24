@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { IconAssistants } from "@eneo/icons/assistants";
-  import { IconSession } from "@eneo/icons/session";
+  import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
   import { Page, Settings } from "$lib/components/layout";
   import DateRangePicker from "$lib/components/DateRangePicker.svelte";
@@ -712,7 +712,7 @@
                           style="--delay: 50ms"
                         >
                           <div class="relative mb-2 flex items-center gap-2.5">
-                            <IconSession
+                            <IconSpeechBubble
                               class="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 transition-all duration-200 group-hover:text-[var(--accent-default)] group-hover:opacity-100"
                             />
                             <span

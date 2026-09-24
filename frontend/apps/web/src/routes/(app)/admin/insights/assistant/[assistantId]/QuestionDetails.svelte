@@ -7,6 +7,7 @@
 <script lang="ts">
   import { getEneo } from "$lib/core/Eneo";
   import CodeBlock from "$lib/components/CodeBlock.svelte";
+  import CopyButton from "$lib/components/CopyButton.svelte";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
@@ -27,7 +28,6 @@
   const eneo = getEneo();
 
   let loggingDetails = "";
-  let copied = false;
 
   let loadingLog = false;
   async function loadLog() {
@@ -42,15 +42,6 @@
       loadingLog = false;
     }
     return true;
-  }
-
-  async function copyLog() {
-    if (!loggingDetails || !navigator?.clipboard) return;
-    await navigator.clipboard.writeText(loggingDetails);
-    copied = true;
-    setTimeout(() => {
-      copied = false;
-    }, 1200);
   }
 
   let isOpen = false;
@@ -91,9 +82,7 @@
           {/if}
         </div>
         <div class="mb-3 flex justify-end">
-          <Button variant="outline" onclick={copyLog}>
-            {copied ? m.copied() : m.copy()}
-          </Button>
+          <CopyButton text={loggingDetails} label={m.copy()} showLabel variant="outline" />
         </div>
         <CodeBlock source={loggingDetails} class="max-h-[60vh]" />
       {/if}

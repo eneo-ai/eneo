@@ -610,6 +610,7 @@
   "copy_message": "Copy message",
   "could_not_add_new_member": "Could not add new member.",
   "could_not_copy_link": "Could not copy link.",
+  "could_not_copy": "Could not copy to the clipboard",
   "could_not_delete_assistant": "Could not delete assistant.",
   "discard_all_changes": "Discard all changes",
   "done": "Done",
