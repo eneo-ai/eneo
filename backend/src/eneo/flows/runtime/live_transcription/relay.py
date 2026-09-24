@@ -36,9 +36,10 @@ UPSTREAM_CLOSE_TIMEOUT_SECONDS: Final = 2
 # transcription.done repeats the whole session's text; five hours of speech is
 # about 0.5 MB.
 UPSTREAM_MAX_MESSAGE_BYTES: Final = 8 * 2**20
-# Transient refusals: the server is full, behind, or still loading its model.
+# Transient refusals: the server is full, behind, still loading its model, or
+# too slow to send the final text in its grace.
 _RETRYABLE_UPSTREAM_CODES: Final = frozenset(
-    {"capacity_exceeded", "falling_behind", "model_loading"}
+    {"capacity_exceeded", "falling_behind", "finalize_timeout", "model_loading"}
 )
 
 

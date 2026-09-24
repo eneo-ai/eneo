@@ -118,7 +118,12 @@ async def test_the_preview_streams_committed_text_and_ends_with_the_full_transcr
 
 
 @pytest.mark.parametrize(
-    ("code", "retryable"), [("capacity_exceeded", True), ("model_error", False)]
+    ("code", "retryable"),
+    [
+        ("capacity_exceeded", True),
+        ("finalize_timeout", True),
+        ("model_error", False),
+    ],
 )
 async def test_a_model_server_error_reaches_the_browser_with_its_retry_hint(
     code: str, retryable: bool
