@@ -177,3 +177,13 @@ class ActionType(str, Enum):
     WIDGET_TEMPLATE_UPDATED = "widget_template_updated"
     WIDGET_TEMPLATE_DELETED = "widget_template_deleted"
     WIDGET_TEMPLATE_PUBLISHED = "widget_template_published"
+    WIDGET_ACTIVATION_REQUESTED = "widget_activation_requested"
+    WIDGET_ACTIVATION_REQUEST_WITHDRAWN = "widget_activation_request_withdrawn"
+    WIDGET_ACTIVATION_REQUEST_DECLINED = "widget_activation_request_declined"
+
+    # Space Oversight Actions (tenant administrators, see /admin/spaces)
+    SPACE_OVERSIGHT_JOINED = "space_oversight_joined"
+    SPACE_OVERSIGHT_LEFT = "space_oversight_left"
+    SPACE_OVERSIGHT_MEMBER_ADDED = "space_oversight_member_added"
+    SPACE_OVERSIGHT_MEMBER_ROLE_CHANGED = "space_oversight_member_role_changed"
+    SPACE_OVERSIGHT_MEMBER_REMOVED = "space_oversight_member_removed"

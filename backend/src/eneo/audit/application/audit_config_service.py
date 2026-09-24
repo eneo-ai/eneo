@@ -9,6 +9,7 @@ from eneo.audit.domain.category_mappings import (
     get_category_for_action,
 )
 from eneo.audit.domain.category_types import CategoryType
+from eneo.audit.domain.mandatory_actions import MANDATORY_AUDIT_ACTIONS
 from eneo.audit.domain.repositories.audit_config_repository import (
     ActionOverrides,
     AuditConfigRepository,
@@ -21,6 +22,7 @@ from eneo.audit.schemas.audit_config_schemas import (
     CategoryConfig,
     CategoryUpdate,
 )
+from eneo.main.exceptions import BadRequestException
 from eneo.worker.redis import get_redis
 
 logger = logging.getLogger(__name__)
@@ -309,8 +311,11 @@ class AuditConfigService:
         action_configs: list[ActionConfig] = []
 
         for action_value, category in CATEGORY_MAPPINGS.items():
+            mandatory = action_value in MANDATORY_AUDIT_ACTIONS
             # Determine if action is enabled using local dict (avoids 65 async calls)
-            if category not in config_dict:
+            if mandatory:
+                enabled = True
+            elif category not in config_dict:
                 # No config = default enabled
                 enabled = True
             else:
@@ -328,6 +333,7 @@ class AuditConfigService:
                     action=ActionType(action_value),
                     enabled=enabled,
                     category=CategoryType(category),
+                    mandatory=mandatory,
                 )
             )
 
@@ -351,7 +357,17 @@ class AuditConfigService:
 
         Returns:
             Updated ActionConfigResponse
+
+        Raises:
+            BadRequestException: If an update turns off a mandatory action.
+                Nothing is written then.
         """
+        for update in updates:
+            if not update.enabled and update.action in MANDATORY_AUDIT_ACTIONS:
+                raise BadRequestException(
+                    f"'{update.action}' is always logged and cannot be turned off."
+                )
+
         # Group updates by category (since we update JSONB per category)
         updates_by_category: dict[str, ActionOverrides] = {}
 

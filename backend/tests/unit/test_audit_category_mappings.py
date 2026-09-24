@@ -90,6 +90,14 @@ class TestCategoryMappings:
             ActionType.MODULE_ADDED_TO_TENANT,
             ActionType.MODULE_REMOVED_FROM_TENANT,
             ActionType.MODULE_CLIENT_CONFIG_UPDATED,
+            ActionType.WIDGET_ACTIVATION_REQUESTED,
+            ActionType.WIDGET_ACTIVATION_REQUEST_WITHDRAWN,
+            ActionType.WIDGET_ACTIVATION_REQUEST_DECLINED,
+            ActionType.SPACE_OVERSIGHT_JOINED,
+            ActionType.SPACE_OVERSIGHT_LEFT,
+            ActionType.SPACE_OVERSIGHT_MEMBER_ADDED,
+            ActionType.SPACE_OVERSIGHT_MEMBER_ROLE_CHANGED,
+            ActionType.SPACE_OVERSIGHT_MEMBER_REMOVED,
         ]
 
         for action_type in admin_action_types:

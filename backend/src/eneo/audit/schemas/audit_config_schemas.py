@@ -147,6 +147,13 @@ class ActionConfig(BaseModel):
     )
     enabled: bool = Field(..., description="Whether this action is currently enabled")
     category: CategoryType = Field(..., description="Category this action belongs to")
+    mandatory: bool = Field(
+        default=False,
+        description=(
+            "Always logged, whatever the category, action and global settings;"
+            " cannot be turned off"
+        ),
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -154,6 +161,7 @@ class ActionConfig(BaseModel):
                 "action": "user_created",
                 "enabled": True,
                 "category": "admin_actions",
+                "mandatory": False,
             }
         }
     )
