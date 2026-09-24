@@ -68,6 +68,11 @@ from eneo.skills.domain.skill import (
     SkillRuntimePolicyChangedError,
     SkillSlugConflictError,
 )
+from eneo.spaces.oversight.exceptions import (
+    SpaceAlreadyMemberError,
+    SpaceLastAdminError,
+    SpaceSelfAccessError,
+)
 from eneo.users.password import (
     CurrentPasswordIncorrectError,
     LocalPasswordChangeUnavailableError,
@@ -333,6 +338,24 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "This Assistant is published as a web widget. An administrator must "
         "archive the widget before the Assistant can move to another Space.",
         ErrorCodes.ASSISTANT_PUBLISHED_AS_WIDGET,
+    ),
+    # --- Space oversight by tenant administrators ---
+    SpaceLastAdminError: (
+        409,
+        "This change would leave the space without an administrator. "
+        "Appoint another administrator first.",
+        ErrorCodes.SPACE_LAST_ADMIN,
+    ),
+    SpaceAlreadyMemberError: (
+        409,
+        "Already a member of this space.",
+        ErrorCodes.SPACE_ALREADY_MEMBER,
+    ),
+    SpaceSelfAccessError: (
+        400,
+        "You can't change your own access here. Join or leave the space "
+        "instead, so the change is recorded with a reason.",
+        ErrorCodes.SPACE_SELF_ACCESS_REQUIRES_JOIN,
     ),
 }
 

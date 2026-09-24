@@ -91,6 +91,10 @@ class ErrorCodes(int, Enum):
     CURRENT_PASSWORD_INCORRECT = 9061
     SKILL_REMOVAL_BUSY = 9062
     ASSISTANT_PUBLISHED_AS_WIDGET = 9063
+    # Space oversight by tenant administrators
+    SPACE_LAST_ADMIN = 9064
+    SPACE_ALREADY_MEMBER = 9065
+    SPACE_SELF_ACCESS_REQUIRES_JOIN = 9066
 
 
 class NotFoundException(Exception):

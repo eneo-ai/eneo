@@ -33,6 +33,22 @@ from eneo.users.user import (
 logger = get_logger(__name__)
 
 
+def tenant_admin_user_ids_select(tenant_id: UUID) -> sa.Select[tuple[UUID]]:
+    """Ids of the tenant's administrators: live users in an active or invited
+    state holding the 'admin' permission through one of their roles. The one
+    definition of "tenant admin" for queries."""
+    return (
+        sa.select(Users.id)
+        .join(Users.roles)
+        .where(
+            Users.deleted_at.is_(None),
+            Users.state.in_(["active", "invited"]),
+            Users.tenant_id == tenant_id,
+            Roles.permissions.contains(["admin"]),
+        )
+    )
+
+
 class UsersRepository:
     def __init__(self, session: AsyncSession) -> None:
         super().__init__()
@@ -455,14 +471,7 @@ class UsersRepository:
         Returns active, loginable users in tenant that have the 'admin' permission
         via any of their roles. Excludes inactive and deleted users.
         """
-        q = (
-            sa.select(Users)
-            .join(Users.roles)
-            .where(
-                Users.deleted_at.is_(None),
-                Users.state.in_(["active", "invited"]),
-                Users.tenant_id == tenant_id,
-                Roles.permissions.contains(["admin"]),
-            )
+        q = sa.select(Users).where(
+            Users.id.in_(tenant_admin_user_ids_select(tenant_id))
         )
         return await self._get_models_from_query(q, with_deleted=False)
