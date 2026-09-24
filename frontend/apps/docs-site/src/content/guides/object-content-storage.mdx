@@ -11,11 +11,10 @@ import { Callout, Steps, Tabs } from "nextra/components";
   writes in **Admin > File storage** without restarting backend or worker.
 - A policy change affects new writes only. Existing content never moves
   implicitly.
-- The one-time [File and Icon storage
-  upgrade](/guides/file-icon-storage-upgrade) consolidates legacy bytes and their
-  storage rules in the shared module. It applies to PostgreSQL-only installations
-  too. Follow its numbered preparation, maintenance-window upgrade, online
-  adoption, and verification steps before optional S3 moves.
+- Upgrading from Eneo 2.1 or earlier? Follow [Upgrade File and Icon
+  Storage](/guides/file-icon-storage-upgrade) first. The one-time migration moves
+  old files and icons into the shared content store, applies to PostgreSQL-only
+  installations too, and must be complete before optional S3 moves.
 - You can change to another S3-compatible service later: copy the bucket with
   your own tooling, then switch destination in **Admin > File storage**. The previous
   destination stays available so you can switch back.
@@ -32,7 +31,7 @@ import { Callout, Steps, Tabs } from "nextra/components";
 | Understand ownership and RAG                      | [How content flows](#how-content-flows)                      |
 | Download processed content or recover an original | [Download or recover](#download-or-recover-content)          |
 | Upgrade and clean up legacy File/Icon storage     | [One-time upgrade guide](/guides/file-icon-storage-upgrade)  |
-| Move to another S3-compatible service             | [Change destination](#move-to-another-s3-compatible-service) |
+| Move to another S3-compatible service             | [Change storage location](#move-to-another-s3-compatible-service) |
 | Plan backup, recovery, and failure handling       | [Operate it safely](#operate-it-safely)                      |
 | Review lifecycle and integrity implementation     | [Architecture](/docs/object-content-architecture)            |
 
@@ -182,8 +181,10 @@ flowchart LR
 
 Preview is advisory. Eneo repeats the same check while holding database locks
 before deletion, so a concurrent attachment cannot be silently removed.
-Removing a File from a chat or Assistant only removes that use; the reusable
-File remains until its owner deletes it. Organization or user offboarding keeps
+Removing a File from an Assistant or App only removes that use; the reusable
+File remains until its owner deletes it. A File attached to a sent chat message
+stays in use until the conversation is deleted (see [the
+FAQ](#why-can-i-not-delete-an-uploaded-file)). Organization or user offboarding keeps
 its existing database-cascade behavior.
 
 ## Choose the right deployment
@@ -205,9 +206,10 @@ mean “more services.”
 | Administrator | Connect a destination, change or roll back it, rotate its access keys, and set the new-write target and business upload limits in **Admin > File storage** |
 | Operator      | Run PostgreSQL and any optional compatible endpoint; own TLS, certificates, capacity, backups, network reachability, and process safety tuning        |
 
-Administrators with the Storage permission can review policy, effective
-limits, and capability status. Deployment-wide content inventory spans tenants
-and is part of that same administrative view. **Admin > File storage** shows the
+Any administrator can review the policy, effective limits, and capability
+status read-only. Administrators with the **File storage** permission also see
+the deployment-wide content inventory, which spans tenants, and can change the
+target, limits, moves, and connection. **Admin > File storage** shows the
 current target, connection health, file-content distribution, and migration
 state first. Target changes, upload limits, and existing-content moves remain
 separate actions, while detailed limits and PostgreSQL allocation are available
@@ -275,7 +277,7 @@ deployment ceiling. Admin policy may exceed this value, but inline session
 writes use the lower effective limit and report the ceiling as the constraining
 source.
 
-In **Admin > File storage**, keep the new-write target set to **PostgreSQL inline**
+In **Admin > File storage**, keep the target for new files set to **PostgreSQL**
 and set the four business limits. The update applies to backend and worker
 operations without restarting either process. It also controls the original
 bytes of newly accepted knowledge file and audio jobs; searchable text and
@@ -342,7 +344,7 @@ curl -fsS https://eneo.example.eu/api/readyz \
   | jq -e '.detail.object_content.code == "ready"'
 ```
 
-After readiness reports `ready`, an administrator can select **Object store**
+After readiness reports `ready`, an administrator can select **Object storage**
 in **Admin > File storage**. Selection fails clearly if the endpoint is unavailable
 or incompatible. No backend or worker restart is required for the policy
 change.
@@ -375,11 +377,16 @@ Create a non-admin application identity with bucket-scoped permissions for:
 MinIO policy files use `arn:aws:s3` syntax locally; those strings do not connect
 Eneo or MinIO to AWS.
 
-Set the root encryption key in the deployment environment so Eneo can store
-credentials encrypted:
+Set the root encryption key in `env_backend.env` so Eneo can store credentials
+encrypted, and restart backend and worker so they read it. Do **not** enable
+the bundled profile:
 
 ```dotenv
 ENCRYPTION_KEY=<44-character Fernet key>
+```
+
+```bash
+docker compose up -d
 ```
 
 Then open **Admin > File storage**, add the endpoint, signing region, bucket, and
@@ -395,15 +402,15 @@ remain supported for upgrades. Eneo adopts them when encrypted persistence is
 available; otherwise they remain read-only in the admin interface. Do not
 configure the same destination through both paths.
 
-Do **not** enable the bundled profile. Start the normal stack and verify:
+After you have saved the connection, verify readiness. Until then it reports
+`object_store_not_configured`:
 
 ```bash
-docker compose up -d
 curl -fsS https://eneo.example.eu/api/readyz \
   | jq -e '.detail.object_content.code == "ready"'
 ```
 
-After the connection reports **Ready**, an administrator can select **Object
+When the connection shows **Ready to use**, an administrator can select **Object
 storage** in **Admin > File storage**. Connection tests and policy changes fail
 clearly if the endpoint is unavailable or incompatible. Neither action needs a
 backend or worker restart.
@@ -425,13 +432,13 @@ entire object; a range verifies only the chunks that cover that response.
 
 ## Upgrade legacy File and Icon storage
 
-Older installations run a one-time, online adoption after schema expansion.
-PostgreSQL-only installations need it too; S3-compatible storage is optional.
+Installations upgrading from Eneo 2.1 or earlier run a one-time migration that
+moves old files and icons into the content store. PostgreSQL-only installations
+need it too; S3-compatible storage is optional.
 
-Use [Upgrade Legacy File and Icon
-Storage](/guides/file-icon-storage-upgrade) for the short operator workflow,
-disk and duration estimates, low-disk response, rollback, verification, and
-physical cleanup. The detailed engineering contract remains in the
+Follow [Upgrade File and Icon Storage](/guides/file-icon-storage-upgrade) for
+the checklist, the maintenance window, disk and duration estimates,
+verification, cleanup, and rollback. The detailed engineering contract remains in the
 [deployment runbook](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#upgrade-and-rollback).
 
 ## Operate it safely
@@ -439,15 +446,16 @@ physical cleanup. The detailed engineering contract remains in the
 ### Move existing content
 
 PostgreSQL inline remains the complete default; compatible object storage is
-optional. When the endpoint reports **Ready**, an administrator can
+optional. When the connection shows **Ready to use**, an administrator can
 open **Admin > File storage** and move existing content in either direction:
 
-1. Choose the destination and a page of 1–100 items.
-2. Select **Queue moves**. Run another command when you want to queue the next
-   bounded page.
+1. Choose the destination in **Move to**. Under **Advanced settings**, **Items
+   per batch** sets how many items one batch moves (1–100).
+2. Select **Start move** and confirm. Start another batch when this one is
+   complete.
 3. Follow item and byte counts by destination, state, and failure reason.
-4. Select **Pause moves** to stop new work claims. One item already being
-   verified may finish before the pause takes effect.
+4. Select **Pause** to stop new work claims, and **Continue** to resume. One
+   item already being verified may finish before the pause takes effect.
 
 Eneo verifies every item at the destination before it starts using that copy.
 It never moves the full installation automatically, falls back during an
@@ -501,7 +509,7 @@ for a first connection, and back up the current bucket.
 ### Stop new writes to object storage
 
 In **Admin > File storage**, select PostgreSQL as the target for new writes, wait
-until no moves are queued, then select **Pause moves**. Nothing can then appear
+until no moves are queued, then select **Pause** for moves. Nothing can then appear
 on the old destination while you copy — the switch requires both and is refused
 otherwise.
 
@@ -562,21 +570,22 @@ also report no differences.
 
 ### Switch destination
 
-Select **Change destination**, enter the new endpoint, bucket, signing region,
-addressing style, and access keys, then confirm. Eneo tests the destination,
+Select **Change storage location**, enter the new endpoint, bucket, signing
+region, addressing style, and access keys, then select **Test and switch**. Eneo tests the destination,
 refuses a bucket belonging to another Eneo installation, **compares the new
 bucket against every file it is responsible for**, and switches in one step
 without a restart.
 
 That comparison checks each file's presence, size, and media type — the
 metadata every read verifies first. A copy that ran against the wrong prefix,
-stopped early, or lost object metadata is refused with the number of affected
-files rather than activated. Byte equality is what your `rclone check
+stopped early, or lost object metadata is refused rather than activated; the
+API error states how many files are missing or mismatched. Byte equality is what your `rclone check
 --download` step proves; Eneo additionally verifies the SHA-256 of every file
 it reads, so even a corrupt copy can never serve wrong bytes. The switch is
 also refused while any write could still reach a destination — if new files
-still target object storage or moves are not paused, change that first; if an
-upload is in flight, wait a moment and retry.
+still target object storage, moves are not paused, or moves are still queued
+or running, change that first; if an upload is in flight, wait a moment and
+retry.
 
 The comparison contacts the new destination once per stored file, sixteen at
 a time, so on a large deployment the switch request runs for a while — plan
@@ -592,19 +601,22 @@ overwrite it.
 
 ### Confirm and finish
 
-Select object storage for new writes again and resume moves. Open a few
-existing files, let one reconciliation inventory cycle complete, and check that
-storage health reports no missing objects. Eneo verifies the SHA-256 of every
-file it reads, so a bad copy cannot pass unnoticed.
+Select **Object storage** for new files again and select **Continue** for
+moves. Open a few existing files, let one reconciliation inventory cycle
+complete, and check that the **Failed** count under **Show storage usage
+details** does not grow: content that the inventory cannot find is marked
+failed. Eneo verifies the SHA-256 of every file it reads, so a bad copy cannot
+pass unnoticed.
 
 </Steps>
 
-The previous destination stays listed so you can **Switch back**; nothing is
-deleted on either bucket. Switch back only works while the buckets are still
-identical — once new files have been stored in object storage after the
-switch, Eneo refuses it, and the way back is a fresh copy in the other
-direction followed by **Change destination**. When you are satisfied, select
-**Forget** and decommission the old bucket at your provider.
+The old destination stays listed under **Previous storage location**, so you
+can select **Restore as storage location**; nothing is deleted on either
+bucket. Restoring only works while the buckets are still identical — once new
+files have been stored in object storage after the switch, Eneo refuses it, and
+the way back is a fresh copy in the other direction followed by **Change
+storage location**. When you are satisfied, select **Remove configuration** and
+decommission the old bucket at your provider.
 
 If anything looks wrong, switch back, correct the copy, and switch again.
 
@@ -621,8 +633,8 @@ traffic. Never combine a newer database with an older bucket or the reverse.
 The File/Icon schema expansion needs this pre-upgrade recovery point, but its
 online worker does not require a new full backup for every batch. Keep the
 pre-upgrade backup until adoption is complete and the release has passed its
-verification period. See [Adopt legacy File and Icon
-content](/guides/file-icon-storage-upgrade#pause-low-disk-or-rollback) for pause
+verification period. See [Upgrade File and Icon
+Storage](/guides/file-icon-storage-upgrade#troubleshooting-and-recovery) for pause
 and recovery behavior.
 
 The later range-verification revision uses the same maintenance window. It
@@ -649,67 +661,13 @@ multipart uploads. Keep endpoint APIs and consoles private.
 
 ### Upgrade, restore, and rollback
 
-The release that first retains knowledge originals and expands File/Icon legacy
-adoption requires one coordinated maintenance window. Its durable job envelope
-is not executable by an older worker, and old workers still write the legacy
-payload columns:
-
-1. Stop all `backend` API replicas so no new writes or knowledge jobs can be
-   accepted. In the reference Compose deployment, `docker compose stop backend`
-   leaves `worker`, `db`, `redis`, and optional `object-content` running.
-2. Keep the old worker running and read its live ARQ health value plus TTL from
-   Redis:
-
-   ```bash
-   docker compose exec -T redis redis-cli --raw GET arq:queue:health-check
-   docker compose exec -T redis redis-cli --raw TTL arq:queue:health-check
-   ```
-
-   The health value must contain `queued=0`, and the TTL must be greater than
-   zero. In the single-worker reference deployment, also require
-   `j_ongoing=0`. If the old release has multiple worker replicas, keep all of
-   them running until the shared Redis value first reports `queued=0` with a
-   positive TTL. Then use the deployment orchestrator to verify that every
-   replica has zero active jobs, scale down to one idle old worker, and repeat
-   both Redis commands. Proceed only when the repeated value contains both
-   `queued=0` and `j_ongoing=0` and its TTL is positive. Then inspect the
-   matching database jobs:
-
-   ```bash
-   docker compose exec -T db sh -lc \
-     'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
-     -c "SELECT task, status,
-                to_jsonb(jobs) ->> '\''dispatch_envelope'\'' IS NULL AS pre_durable,
-                count(*)
-         FROM jobs
-         WHERE task IN ('\''upload_info_blob'\'', '\''transcription'\'')
-           AND status IN ('\''queued'\'', '\''in progress'\'')
-         GROUP BY task, status, pre_durable;"'
-   ```
-
-   No rows is the normal result. Once the live Redis health value reports an
-   empty queue and its TTL is positive, a deployment may still contain
-   historical `queued` rows with
-   `pre_durable = true` that have no executable queue entry. `db-init` records
-   only those rows as failed and continues; no manual SQL repair is needed. An
-   `in progress` row or any row with `pre_durable = false` still blocks the
-   migration.
-   An old worker marks an in-progress knowledge job failed after five minutes
-   without a heartbeat. If a worker process stopped mid-job, keep one old worker
-   running until that automatic recovery has completed; do not edit the job row
-   by hand.
-
-3. Stop every old worker. Run the database query again and proceed only when it
-   shows no `in progress` row and no row with `pre_durable = false`. Historical
-   `queued` rows with `pre_durable = true` are the only permitted exception.
-4. Take one recovery point containing PostgreSQL and, when configured, the
-   object store. Preserve Redis and the shared staging volume until the release
-   has been verified.
-5. Deploy the new image and run `docker compose run --rm db-init`. The migration
-   refuses to continue if an executable knowledge job remains.
-6. Start the new backend and worker from the same release. Verify readiness,
-   then process one knowledge file and one audio upload. Confirm exact-original
-   inventory and a deliberate storage-failure message before reopening Eneo.
+The upgrade to Eneo 2.2 first retains knowledge originals and moves File/Icon
+content into the content store. It needs one coordinated maintenance window:
+jobs queued by an old worker cannot run on the new version, and old workers
+still write the legacy payload columns. Follow [Upgrade File and Icon
+Storage](/guides/file-icon-storage-upgrade#upgrade-step-by-step): stop the API,
+let the old worker finish its knowledge jobs, stop it, take the backup, run
+`db-init`, and start the new release.
 
 Do not start `db-init` through a normal `docker compose up` while the old worker
 is still draining: `backend` depends on `db-init`, but the existing `worker`
@@ -725,7 +683,7 @@ migration, keep traffic closed and either recover forward or restore the whole
 pre-upgrade recovery point. Never combine a post-upgrade database with an old
 object-store backup or run old workers against the new schema.
 
-The policy migration creates revision 1 with **PostgreSQL inline** selected. It
+The policy migration creates revision 1 with **PostgreSQL** (`postgres_inline`) selected. It
 reads the four former upload-limit environment values once as migration seeds.
 A present integer from 1 through 9,007,199,254,740,991 is preserved exactly; an
 absent value uses the fresh-install default (10 MiB for session File, session
@@ -742,7 +700,7 @@ runs Alembic `upgrade head`. The runtime does not create or repair the missing
 policy table.
 
 Policy rollback does not move bytes. To stop placing new content remotely,
-select **PostgreSQL inline** in **Admin > File storage**. The change affects eligible
+select **PostgreSQL** in **Admin > File storage**. The change affects eligible
 new writes only. Existing remote content still needs the configured endpoint,
 credentials, certificates, and paired backup. Eneo does not migrate it back
 implicitly.
@@ -767,7 +725,7 @@ PostgreSQL inline is a complete destination and the current adoption worker
 never contacts S3.
 
 Without adoption, the new code would have to keep a second legacy File/Icon
-read and lifecycle path indefinitely. See [Upgrade Legacy File and Icon
+read and lifecycle path indefinitely. See [Upgrade File and Icon
 Storage](/guides/file-icon-storage-upgrade) for the reason, disk and time
 planning, rollback, and cleanup.
 
@@ -824,8 +782,8 @@ content item live either inline or in the configured endpoint.
 
 ### Will enabling the endpoint move existing files?
 
-No. An administrator must queue bounded, verified moves from **Admin >
-Storage**. Changing the target for new writes never starts a fleet migration.
+No. An administrator must start bounded, verified moves from **Admin > File
+storage**. Changing the target for new writes never starts a fleet migration.
 
 ### Why can I not delete an uploaded File?
 
@@ -886,8 +844,8 @@ text and vectors. Both remain necessary for RAG.
 - **File content total** is the combined content size recorded by Eneo, excluding
   content whose deletion has completed (`tombstoned`). The PostgreSQL and
   object-storage figures are parts of this total.
-- **File content in PostgreSQL** counts the content bytes stored inline in the
-  database. **File content in object storage** counts the content bytes recorded
+- **PostgreSQL**, under **File content total**, counts the content bytes stored
+  inline in the database. **Object storage** counts the content bytes recorded
   for the connected endpoint. Neither figure includes searchable RAG data.
 - **PostgreSQL on disk** is the size of the entire database. It includes inline
   file content, searchable knowledge text, pgvector embeddings, tables, indexes,
@@ -929,10 +887,10 @@ Complete the copy and try again.
 
 Should a file go missing later for another reason, storage health reports it
 after the next complete inventory, and reading it fails clearly instead of
-returning wrong bytes. Switch back to the previous destination, complete the
+returning wrong bytes. Restore the previous storage location, complete the
 copy, and switch again. If files have already been stored in object storage
 since the switch, Eneo refuses the one-click switch back; copy the current
-bucket back first and use **Change destination**.
+bucket back first and use **Change storage location**.
 
 ### Can we move between PostgreSQL and object storage instead?
 

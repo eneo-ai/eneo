@@ -945,13 +945,13 @@ frontend:
 
 # Production (pin to specific version)
 frontend:
-  image: ghcr.io/eneo-ai/eneo-frontend:v1.2.3
+  image: ghcr.io/eneo-ai/eneo-frontend:2.2.0
 backend:
-  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
+  image: ghcr.io/eneo-ai/eneo-backend:2.2.0
 worker:
-  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
+  image: ghcr.io/eneo-ai/eneo-backend:2.2.0
 db-init:
-  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
+  image: ghcr.io/eneo-ai/eneo-backend:2.2.0
 ```
 
 **Find available versions:**
@@ -1008,7 +1008,7 @@ checksum and skew-recovery checks.
 <Steps>
 ### Update version tags (if pinned)
 
-Edit `docker-compose.yml` and update version tags (e.g., `v1.2.3` → `v1.2.4`).
+Edit `docker-compose.yml` and update the image tags, for example `ghcr.io/eneo-ai/eneo-backend:2.1.1` → `ghcr.io/eneo-ai/eneo-backend:2.2.0`. Eneo image tags have no `v` prefix.
 
 ### Review network changes
 
@@ -1033,7 +1033,7 @@ old workers before starting `db-init`. The schema expansion installs a database
 write fence because old File/Icon code still changes legacy payload columns.
 
 Follow the [File and Icon storage upgrade
-checklist](/guides/file-icon-storage-upgrade#before-you-upgrade). Keep the API
+checklist](/guides/file-icon-storage-upgrade#before-you-start). Keep the API
 closed until the new migration and same-release worker are ready.
 
 ### Take the stopped-writer recovery point
