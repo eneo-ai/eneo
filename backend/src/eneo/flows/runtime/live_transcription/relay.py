@@ -1,8 +1,7 @@
 """One live session: browser PCM in, committed transcript text out.
 
-The preview never becomes the run's transcript; the recording is uploaded and
-transcribed by the normal batch path. So the relay keeps no audio and no text,
-only the running sample count that enforces the session's duration ceiling.
+Clean sessions may store their text for later binding to a recording. Audio is
+never retained by the relay; sample counts reconcile the client's capture.
 """
 
 from __future__ import annotations
@@ -16,6 +15,9 @@ from fastapi import WebSocket, WebSocketDisconnect
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
 
+from eneo.flows.runtime.live_transcription.repository import persist_live_transcript
+from eneo.flows.runtime.live_transcription.segments import TimedPieces
+from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionGrant
 from eneo.flows.runtime.live_transcription.upstream import (
     SAMPLE_RATE,
     append,
@@ -23,6 +25,7 @@ from eneo.flows.runtime.live_transcription.upstream import (
     parse_event,
     session_update,
 )
+from eneo.main.logging import get_logger
 
 # Wire and health bounds; the session's own limits (duration, idle, final text)
 # are deployment settings and arrive as arguments.
@@ -41,6 +44,7 @@ UPSTREAM_MAX_MESSAGE_BYTES: Final = 8 * 2**20
 _RETRYABLE_UPSTREAM_CODES: Final = frozenset(
     {"capacity_exceeded", "falling_behind", "finalize_timeout", "model_loading"}
 )
+logger = get_logger(__name__)
 
 
 class LiveSessionEnded(Exception):
@@ -74,6 +78,18 @@ class LiveSessionStats:
         return self.received_samples / SAMPLE_RATE
 
 
+@dataclass
+class _Capture:
+    produced_samples: int | None = None
+    final_commit_sent: bool = False
+
+
+@dataclass(frozen=True)
+class _Completed:
+    text: str
+    after_final_commit: bool
+
+
 async def relay_live_session(
     client: WebSocket,
     *,
@@ -84,6 +100,7 @@ async def relay_live_session(
     idle_timeout_seconds: float,
     final_text_timeout_seconds: float,
     stats: LiveSessionStats,
+    grant: LiveTranscriptionGrant | None = None,
 ) -> str:
     """Run the session to its end and return the outcome for the log line."""
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
@@ -125,6 +142,7 @@ async def relay_live_session(
                 idle_timeout_seconds=idle_timeout_seconds,
                 final_text_timeout_seconds=final_text_timeout_seconds,
                 stats=stats,
+                grant=grant,
             )
         except _ClientGone:
             return "client_closed"
@@ -160,7 +178,10 @@ async def _run(
     idle_timeout_seconds: float,
     final_text_timeout_seconds: float,
     stats: LiveSessionStats,
+    grant: LiveTranscriptionGrant | None,
 ) -> str:
+    capture = _Capture()
+    pieces = TimedPieces(UPSTREAM_MAX_MESSAGE_BYTES)
     to_upstream = asyncio.create_task(
         _pump_client(
             client,
@@ -168,28 +189,57 @@ async def _run(
             max_samples=max_samples,
             idle_timeout_seconds=idle_timeout_seconds,
             stats=stats,
+            capture=capture,
         )
     )
-    to_client = asyncio.create_task(_pump_upstream(client, upstream))
+    to_client = asyncio.create_task(_pump_upstream(client, upstream, capture, pieces))
     try:
         done, _ = await asyncio.wait(
             {to_upstream, to_client}, return_when=asyncio.FIRST_COMPLETED
         )
         if to_client in done:
-            return to_client.result()
-        to_upstream.result()  # the client asked to stop; wait for the final text
-        try:
-            return await asyncio.wait_for(to_client, final_text_timeout_seconds)
-        except TimeoutError as exc:
-            raise LiveSessionEnded(
-                "upstream_timeout",
-                "The transcription server did not finish the session in time.",
-                retryable=True,
-            ) from exc
+            completed = to_client.result()
+        else:
+            to_upstream.result()  # the client asked to stop; wait for the final text
+            try:
+                completed = await asyncio.wait_for(
+                    to_client, final_text_timeout_seconds
+                )
+            except TimeoutError as exc:
+                raise LiveSessionEnded(
+                    "upstream_timeout",
+                    "The transcription server did not finish the session in time.",
+                    retryable=True,
+                ) from exc
     finally:
         for task in (to_upstream, to_client):
             task.cancel()
         await asyncio.gather(to_upstream, to_client, return_exceptions=True)
+
+    event: dict[str, object] = {"type": "transcript.done", "text": completed.text}
+    if (
+        grant is not None
+        and grant.recording_id is not None
+        and completed.after_final_commit
+        and capture.produced_samples == stats.received_samples
+        and not to_upstream.cancelled()
+        and to_upstream.exception() is None
+    ):
+        try:
+            transcript_id = await persist_live_transcript(
+                grant,
+                text=completed.text,
+                segments=pieces.passages(completed.text),
+                received_audio_seconds=stats.audio_seconds,
+            )
+            event["transcript_id"] = str(transcript_id)
+        except Exception:
+            # Database exceptions can contain bound parameters, including text.
+            logger.warning(
+                "Could not store live transcript", extra={"flow_id": str(grant.flow_id)}
+            )
+    await _send_client(client, event)
+    return "completed"
 
 
 async def _pump_client(
@@ -199,6 +249,7 @@ async def _pump_client(
     max_samples: int,
     idle_timeout_seconds: float,
     stats: LiveSessionStats,
+    capture: _Capture,
 ) -> None:
     while True:
         try:
@@ -230,22 +281,30 @@ async def _pump_client(
                 'Send audio as binary frames and end with {"type": "stop"}.',
             )
         await _send_upstream(upstream, commit(final=True))
+        evidence = json.loads(message["text"]).get("produced_samples")
+        if type(evidence) is int and evidence >= 0:
+            capture.produced_samples = evidence
+        capture.final_commit_sent = True
         return
 
 
-async def _pump_upstream(client: WebSocket, upstream: ClientConnection) -> str:
+async def _pump_upstream(
+    client: WebSocket,
+    upstream: ClientConnection,
+    capture: _Capture,
+    pieces: TimedPieces,
+) -> _Completed:
     try:
         async for raw in upstream:
             event = parse_event(raw)
-            if event.kind == "delta" and event.text:
-                await _send_client(
-                    client, {"type": "transcript.delta", "text": event.text}
-                )
+            if event.kind == "delta":
+                pieces.append(event)
+                if event.text:
+                    await _send_client(
+                        client, {"type": "transcript.delta", "text": event.text}
+                    )
             elif event.kind == "done":
-                await _send_client(
-                    client, {"type": "transcript.done", "text": event.text}
-                )
-                return "completed"
+                return _Completed(event.text, capture.final_commit_sent)
             elif event.kind == "error":
                 raise LiveSessionEnded(
                     event.code or "upstream_error",

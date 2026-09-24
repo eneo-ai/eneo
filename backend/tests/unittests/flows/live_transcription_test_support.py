@@ -36,6 +36,10 @@ async def fake_realtime_server(
     hang_up: bool = False,
     close_at_once: bool = False,
     stop_reading: bool = False,
+    spans: Sequence[tuple[float, float] | None] = (),
+    done_text: str | None = None,
+    early_done: bool = False,
+    finish: bool = True,
 ) -> AsyncIterator[FakeRealtimeServer]:
     """`close_at_once` closes right after the handshake; `stop_reading` never reads,
     so a client's sends back up once the socket buffers are full."""
@@ -54,6 +58,10 @@ async def fake_realtime_server(
             await connection.send(
                 json.dumps({"type": "session.created", "id": "sess-test", "created": 0})
             )
+            if early_done:
+                await connection.send(
+                    json.dumps({"type": "transcription.done", "text": "Early"})
+                )
             async for raw in connection:
                 message = json.loads(raw)
                 state.received.append(message)
@@ -72,19 +80,32 @@ async def fake_realtime_server(
                         )
                     elif pending:
                         sent.append(pending.pop(0))
+                        span = spans[len(sent) - 1] if len(spans) >= len(sent) else None
                         await connection.send(
                             json.dumps(
-                                {"type": "transcription.delta", "delta": sent[-1]}
+                                {
+                                    "type": "transcription.delta",
+                                    "delta": sent[-1],
+                                    **(
+                                        {"audio_start": span[0], "audio_end": span[1]}
+                                        if span
+                                        else {}
+                                    ),
+                                }
                             )
                         )
                 elif (
-                    message["type"] == "input_audio_buffer.commit" and message["final"]
+                    message["type"] == "input_audio_buffer.commit"
+                    and message["final"]
+                    and finish
                 ):
                     await connection.send(
                         json.dumps(
                             {
                                 "type": "transcription.done",
-                                "text": "".join(sent),
+                                "text": "".join(sent)
+                                if done_text is None
+                                else done_text,
                                 "usage": None,
                             }
                         )

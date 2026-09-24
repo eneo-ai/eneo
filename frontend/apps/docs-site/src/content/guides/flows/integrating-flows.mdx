@@ -1228,7 +1228,7 @@ When `selectable` is `false`, do not send `true` or `false`: Eneo refuses the re
 
 ### Show live text while recording
 
-Live text is a preview. It never becomes the run's transcript, and Eneo keeps no audio or text from the session. Record the audio in your app as usual. When the recording ends, upload it and create the run; the flow's transcription model then transcribes the uploaded file.
+Live text is a preview. Eneo can store the final text of a clean session and return its identity; it keeps no audio from the session. Record the audio in your app as usual. When the recording ends, upload it and create the run; the flow's transcription model still transcribes the uploaded file. A stored live transcript does not yet change run execution.
 
 Before you start, read `transcription.live.available` from the run contract. When it is `false`, record without live text. Requesting a ticket needs the same access as creating a run, and a service key can request one for a published flow.
 
@@ -1238,7 +1238,7 @@ Before you start, read `transcription.live.available` from the run contract. Whe
    POST /api/v1/flows/{id}/steps/{step_id}/live-transcription-sessions/
    ```
 
-   `{step_id}` is the audio step from `steps_requiring_input`. The request has no body. The response is `201 Created`:
+   `{step_id}` is the audio step from `steps_requiring_input`. The body is optional. To identify the recording for a stored transcript, send `{"recording_id": "recording_123"}`. This opaque client string must match `^[A-Za-z0-9_-]{8,64}$`; invalid values receive the usual `422` request validation response. Omit it or send `null` for preview only. The response is `201 Created`:
 
    ```json
    {
@@ -1258,7 +1258,7 @@ Before you start, read `transcription.live.available` from the run contract. Whe
 2. **Open the WebSocket within 30 seconds.** Connect to `websocket_path` on the API host, with `wss://` when the API uses HTTPS, and offer two subprotocols: `eneo-live.v1` and `ticket.<ticket>`. A ticket opens one socket only.
 3. **Wait for `ready`.** Then send the recording as binary frames of mono 16-bit little-endian PCM at 16 kHz. Each frame holds 2 bytes to 64 KiB, an even number of bytes. Keep sending for as long as the recording runs, silence included.
 4. **Show the text.** Append the `text` of each `transcript.delta` event to the preview.
-5. **Stop.** When the recording ends, send the text frame `{"type": "stop"}`. Eneo answers with `transcript.done`, which carries the full preview text of this session, and closes the socket.
+5. **Stop.** When the recording ends, send `{"type": "stop", "produced_samples": 3200}`. Count every 16 kHz sample captured for this session **before** client-side queueing or discarding. The count must be a non-negative integer, not a boolean. The plain `{"type": "stop"}` remains valid. Missing or invalid counts leave the session ineligible for storage; unrelated extra fields remain ignored. Eneo answers with `transcript.done`, which carries the full preview text of this session, and closes the socket.
 6. **Upload and run.** Upload the recording to the audio step and create the run, as in the [worked example](#worked-end-to-end-example).
 
 The session works when the socket sends `ready` after it opens. If the socket sends `error` instead, its `code` says why.
@@ -1268,13 +1268,17 @@ The session works when the socket sends `ready` after it opens. If the socket se
 | Direction   | Frame                                                                           | Meaning                                                                                                     |
 | ----------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | App to Eneo | Binary                                                                          | Audio: mono 16-bit little-endian PCM at 16 kHz, 2 bytes to 64 KiB per frame                                 |
-| App to Eneo | `{"type": "stop"}`                                                              | The recording has ended. Any other text frame ends the session with `invalid_message`                      |
+| App to Eneo | `{"type": "stop", "produced_samples": 3200}`                                    | The recording has ended; the sample count is optional. Text frames without `"type": "stop"` end the session with `invalid_message` |
 | Eneo to app | `{"type": "ready", "sample_rate": 16000, "max_seconds": 18000}`                 | Eneo has connected to the model server. Start sending audio                                                 |
 | Eneo to app | `{"type": "transcript.delta", "text": " världen"}`                              | Text to append to the preview                                                                               |
 | Eneo to app | `{"type": "transcript.done", "text": "Hej världen"}`                            | The full preview text of this session after `stop`. The socket then closes                                  |
 | Eneo to app | `{"type": "error", "code": "idle_timeout", "message": "...", "retryable": false}` | The session has ended. The socket then closes                                                               |
 
 `message` is for people; branch on `code`. Every code is listed in [Live transcription socket codes](/guides/flows/reference/errors#live-transcription-socket-codes).
+
+For a clean session, `transcript.done` also includes `"transcript_id": "<uuid>"`. Eneo commits that transcript before sending the event. This requires a `recording_id`, a valid `produced_samples` count exactly equal to the samples Eneo received, and normal upstream completion after the final commit for the client's stop. Refused, errored, interrupted, or mismatched sessions receive no transcript ID; a storage failure also leaves the preview usable without an ID. A done event received before stop is never stored.
+
+The stored text is the authoritative done text. Timed passages are kept only when every delta supplies valid timing and the delta text matches the done text exactly; otherwise the text is stored without passages. Unbound transcripts use the tenant's runtime-upload abandonment retention period at creation. Once expired, they are removed with abandoned runtime uploads by the existing administrator-triggered purge. If that period is disabled, they have no expiry. Bound transcripts are excluded from this purge.
 
 #### When a session ends with an error
 

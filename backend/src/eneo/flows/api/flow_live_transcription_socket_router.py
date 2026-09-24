@@ -109,6 +109,7 @@ async def live_transcription_socket(websocket: WebSocket) -> None:
                 settings.flow_live_transcription_final_text_timeout_seconds
             ),
             stats=stats,
+            grant=grant,
         )
     except LiveSessionEnded as ended:
         outcome = ended.code

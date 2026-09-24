@@ -180,6 +180,25 @@ def test_live_transcription_refusal_types_its_reason(openapi_spec):
     }
 
 
+def test_live_transcription_recording_identity_is_an_optional_validated_body(
+    openapi_spec,
+):
+    path = _path_for_operation_id(
+        openapi_spec, "create_flow_live_transcription_session"
+    )
+    operation = _get_operation(openapi_spec, path, "post")
+    request = operation["requestBody"]
+    assert not request.get("required", False)
+    body_schema = request["content"]["application/json"]["schema"]
+    body = _resolve_component_ref(openapi_spec, body_schema["anyOf"][0])
+    recording = body["properties"]["recording_id"]
+    assert recording["anyOf"][0] == {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{8,64}$",
+    }
+    assert "recording_id" not in body.get("required", [])
+
+
 def _is_non_ai_builder_flow_related_path(path: str) -> bool:
     if path.startswith("/api/v1/flows/ai-builder"):
         return False

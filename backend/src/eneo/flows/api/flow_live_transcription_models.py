@@ -20,6 +20,19 @@ LIVE_TRANSCRIPTION_TICKET_PREFIX: Final = "ticket."
 LIVE_TRANSCRIPTION_SOCKET_PATH: Final = "/live-transcription"
 
 
+class FlowLiveTranscriptionSessionRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": {"recording_id": "recording_123"}},
+    )
+
+    recording_id: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9_-]{8,64}$",
+        description="Opaque client recording identity for a durable live transcript.",
+    )
+
+
 class FlowLiveTranscriptionModelPublic(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

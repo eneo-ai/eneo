@@ -8,6 +8,7 @@ import json
 import os
 import socket
 from typing import cast
+from uuid import uuid4
 
 import pytest
 from fastapi import WebSocket, WebSocketDisconnect
@@ -17,6 +18,7 @@ from eneo.flows.runtime.live_transcription.relay import (
     LiveSessionStats,
     relay_live_session,
 )
+from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionGrant
 from eneo.flows.runtime.live_transcription.upstream import realtime_websocket_url
 from tests.unittests.flows.live_transcription_test_support import (
     FakeRealtimeServer,
@@ -64,6 +66,8 @@ async def run_relay(
     *,
     max_seconds: int = 60,
     idle_timeout_seconds: float = 300,
+    final_text_timeout_seconds: float = 30,
+    grant: LiveTranscriptionGrant | None = None,
 ) -> tuple[str, LiveSessionStats]:
     stats = LiveSessionStats()
     outcome = await relay_live_session(
@@ -73,8 +77,9 @@ async def run_relay(
         model_name=MODEL,
         max_seconds=max_seconds,
         idle_timeout_seconds=idle_timeout_seconds,
-        final_text_timeout_seconds=30,
+        final_text_timeout_seconds=final_text_timeout_seconds,
         stats=stats,
+        grant=grant,
     )
     return outcome, stats
 
@@ -293,3 +298,227 @@ def test_the_realtime_url_follows_the_provider_endpoint(endpoint: str, expected:
 def test_a_provider_endpoint_that_is_not_http_is_refused():
     with pytest.raises(ValueError):
         realtime_websocket_url("ftp://asr.example.se")
+
+
+@pytest.mark.parametrize(
+    ("evidence", "recording_id", "stored"),
+    [
+        ({"produced_samples": 1600}, "recording_123", True),
+        ({"produced_samples": 0}, "recording_123", True),
+        ({"produced_samples": 1599}, "recording_123", False),
+        ({}, "recording_123", False),
+        ({"produced_samples": True}, "recording_123", False),
+        ({"produced_samples": -1}, "recording_123", False),
+        ({"produced_samples": 1600.0}, "recording_123", False),
+        ({"produced_samples": "1600"}, "recording_123", False),
+        ({"produced_samples": None}, "recording_123", False),
+        ({"produced_samples": 1600}, None, False),
+        ({"produced_samples": False}, "recording_123", False),
+    ],
+)
+async def test_only_reconciled_sessions_are_stored(
+    monkeypatch, evidence, recording_id, stored
+):
+    grant = LiveTranscriptionGrant(
+        tenant_id=uuid4(),
+        user_id=uuid4(),
+        flow_id=uuid4(),
+        flow_version=1,
+        step_id=uuid4(),
+        model_id=uuid4(),
+        max_seconds=60,
+        recording_id=recording_id,
+    )
+    writes = []
+    transcript_id = uuid4()
+
+    async def persist(grant, *, text, segments, received_audio_seconds):
+        writes.append((grant, text, segments, received_audio_seconds))
+        return transcript_id
+
+    monkeypatch.setattr(relay, "persist_live_transcript", persist)
+    sample_count = (
+        1
+        if evidence.get("produced_samples") is True
+        else 0
+        if evidence.get("produced_samples") == 0
+        else 1600
+    )
+    frames = [audio(b"\x01\x00" * sample_count)] if sample_count else []
+    browser = FakeBrowser(
+        *frames,
+        {
+            "type": "websocket.receive",
+            "text": json.dumps({"type": "stop", "ignored": 42, **evidence}),
+        },
+    )
+    async with fake_realtime_server(deltas=["Hej"]) as server:
+        outcome = await relay_live_session(
+            cast(WebSocket, browser),
+            upstream_url=server.url,
+            api_key=None,
+            model_name=MODEL,
+            max_seconds=60,
+            idle_timeout_seconds=1,
+            final_text_timeout_seconds=1,
+            stats=LiveSessionStats(),
+            grant=grant,
+        )
+    assert outcome == "completed"
+    assert writes == (
+        [(grant, "Hej" if sample_count else "", None, sample_count / 16000)]
+        if stored
+        else []
+    )
+    assert browser.events[-1] == {
+        "type": "transcript.done",
+        "text": "Hej" if sample_count else "",
+        **({"transcript_id": str(transcript_id)} if stored else {}),
+    }
+
+
+def recording_grant() -> LiveTranscriptionGrant:
+    return LiveTranscriptionGrant(
+        tenant_id=uuid4(),
+        user_id=uuid4(),
+        flow_id=uuid4(),
+        flow_version=1,
+        step_id=uuid4(),
+        model_id=uuid4(),
+        max_seconds=60,
+        recording_id="recording_123",
+    )
+
+
+def counted_stop(samples: int) -> dict[str, object]:
+    return {
+        "type": "websocket.receive",
+        "text": json.dumps({"type": "stop", "produced_samples": samples}),
+    }
+
+
+@pytest.mark.parametrize(
+    "missing_span,mismatch", [(False, False), (True, False), (False, True)]
+)
+async def test_stored_passages_require_complete_matching_timed_deltas(
+    monkeypatch, missing_span, mismatch
+):
+    writes = []
+
+    async def persist(grant, **values):
+        writes.append(values)
+        return uuid4()
+
+    monkeypatch.setattr(relay, "persist_live_transcript", persist)
+    spans = [(0.0, 12.0), (12.0, 20.0), (20.0, 35.0), (35.0, 45.0)]
+    if missing_span:
+        spans[1] = None
+    browser = FakeBrowser(
+        *(audio(TENTH_OF_A_SECOND) for _ in spans), counted_stop(6400)
+    )
+    async with fake_realtime_server(
+        deltas=["Hej", " världen.", " Nästa", " mening"],
+        spans=spans,
+        done_text="Authoritative" if mismatch else None,
+    ) as server:
+        outcome, _ = await run_relay(browser, server.url, grant=recording_grant())
+    assert outcome == "completed"
+    [stored] = writes
+    assert stored["text"] == (
+        "Authoritative" if mismatch else "Hej världen. Nästa mening"
+    )
+    assert stored["segments"] == (
+        None
+        if missing_span or mismatch
+        else [
+            {"start": 0.0, "end": 20.0, "text": "Hej världen."},
+            {"start": 20.0, "end": 45.0, "text": " Nästa mening"},
+        ]
+    )
+
+
+async def test_a_failed_write_preserves_preview_without_logging_text(
+    monkeypatch, caplog
+):
+    async def persist(grant, **values):
+        raise RuntimeError(values["text"])
+
+    monkeypatch.setattr(relay, "persist_live_transcript", persist)
+    browser = FakeBrowser(audio(TENTH_OF_A_SECOND), counted_stop(1600))
+    async with fake_realtime_server(deltas=["Private words"]) as server:
+        outcome, _ = await run_relay(browser, server.url, grant=recording_grant())
+    assert outcome == "completed"
+    assert browser.events[-1] == {"type": "transcript.done", "text": "Private words"}
+    assert "Private words" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "ending",
+    ["capacity_exceeded", "unexpected_error", "disconnect", "timeout", "early_done"],
+)
+async def test_unclean_sessions_never_write(monkeypatch, ending):
+    writes = []
+
+    async def persist(grant, **values):
+        writes.append(values)
+        return uuid4()
+
+    monkeypatch.setattr(relay, "persist_live_transcript", persist)
+    messages = [audio(TENTH_OF_A_SECOND), counted_stop(1600)]
+    if ending == "disconnect":
+        messages[-1] = leave()
+    elif ending == "early_done":
+        messages = []
+    browser = FakeBrowser(*messages)
+    async with fake_realtime_server(
+        fail_with=ending
+        if ending in {"capacity_exceeded", "unexpected_error"}
+        else None,
+        early_done=ending == "early_done",
+        finish=ending != "timeout",
+    ) as server:
+        outcome, _ = await run_relay(
+            browser,
+            server.url,
+            grant=recording_grant(),
+            final_text_timeout_seconds=0.05,
+        )
+    assert outcome == {
+        "disconnect": "client_closed",
+        "timeout": "upstream_timeout",
+        "early_done": "completed",
+    }.get(ending, ending)
+    assert writes == []
+    assert all("transcript_id" not in event for event in browser.events)
+
+
+@pytest.mark.parametrize("bounded", [False, True])
+async def test_passages_split_at_thirty_seconds_and_drop_on_buffer_limit(
+    monkeypatch, bounded
+):
+    writes = []
+
+    async def persist(grant, **values):
+        writes.append(values)
+        return uuid4()
+
+    monkeypatch.setattr(relay, "persist_live_transcript", persist)
+    if bounded:
+        monkeypatch.setattr(relay, "UPSTREAM_MAX_MESSAGE_BYTES", 256)
+    browser = FakeBrowser(
+        *(audio(TENTH_OF_A_SECOND) for _ in range(4)), counted_stop(6400)
+    )
+    async with fake_realtime_server(
+        deltas=["x" * 30] * 4, spans=[(0, 10), (10, 20), (20, 30), (30, 40)]
+    ) as server:
+        outcome, _ = await run_relay(browser, server.url, grant=recording_grant())
+    assert outcome == "completed"
+    [stored] = writes
+    assert stored["segments"] == (
+        None
+        if bounded
+        else [
+            {"start": 0.0, "end": 30.0, "text": "x" * 90},
+            {"start": 30.0, "end": 40.0, "text": "x" * 30},
+        ]
+    )

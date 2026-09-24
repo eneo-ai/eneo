@@ -344,6 +344,73 @@ async def test_a_ticket_opens_one_socket_only(live_stack: LiveStack):
     assert refused.value.response.status_code == 403
 
 
+async def test_clean_session_commits_its_transcript_before_done(
+    live_stack: LiveStack, db_container
+):
+    response = await live_stack.client.post(
+        live_stack.flow.sessions_path,
+        headers=live_stack.headers,
+        json={"recording_id": "recording_123"},
+    )
+    assert response.status_code == 201, response.text
+    session = response.json()
+    async with connect(
+        live_stack.socket_url(session), subprotocols=_subprotocols(session["ticket"])
+    ) as socket:
+        assert json.loads(await socket.recv())["type"] == "ready"
+        await socket.send(TENTH_OF_A_SECOND)
+        await socket.send(TENTH_OF_A_SECOND)
+        await socket.send(json.dumps({"type": "stop", "produced_samples": 3200}))
+        while True:
+            event = json.loads(await socket.recv())
+            if event["type"] == "transcript.done":
+                break
+        assert "transcript_id" in event
+        from eneo.database.tables.flow_tables import FlowLiveTranscripts
+        from eneo.flows.runtime.live_transcription.repository import (
+            LiveTranscriptRepository,
+        )
+
+        async with db_container() as container:
+            rows = list(
+                await container.session().scalars(
+                    sa.select(FlowLiveTranscripts).where(
+                        FlowLiveTranscripts.flow_id == UUID(live_stack.flow.flow_id)
+                    )
+                )
+            )
+            assert len(rows) == 1
+            row = rows[0]
+            assert str(row.id) == event["transcript_id"]
+            assert row.text == event["text"] == "Hej världen"
+            assert row.recording_id == "recording_123"
+            assert row.step_id == UUID(live_stack.flow.step_id)
+            assert row.model_id == UUID(live_stack.flow.model_id)
+            assert row.flow_version == 1
+            assert row.user_id == container.user().id
+            assert row.tenant_id == container.user().tenant_id
+            assert row.received_audio_seconds == 0.2
+            assert row.segments is None
+            assert row.bound_file_id is None
+            repo = LiveTranscriptRepository(container.session())
+            assert await repo.get(row.id, tenant_id=row.tenant_id) is row
+            assert await repo.get(row.id, tenant_id=uuid4()) is None
+
+
+@pytest.mark.parametrize("recording_id", ["short", "has spaces", "x" * 65, 123])
+async def test_invalid_recording_id_uses_request_validation(
+    live_stack: LiveStack, recording_id: object
+):
+    response = await live_stack.client.post(
+        live_stack.flow.sessions_path,
+        headers=live_stack.headers,
+        json={"recording_id": recording_id},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["code"] == "request_validation_error"
+    assert "recording_id" in response.text
+
+
 async def test_an_expired_ticket_is_refused(
     live_stack: LiveStack, monkeypatch: pytest.MonkeyPatch
 ):

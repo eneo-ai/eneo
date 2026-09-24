@@ -18,6 +18,7 @@ from eneo.database.tables.assistant_table import AssistantsFiles
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     BuilderSessionFiles,
+    FlowLiveTranscripts,
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
@@ -36,6 +37,7 @@ from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.infrastructure.flow_version_repo import (
     scan_flow_version_template_references,
 )
+from eneo.flows.runtime.live_transcription.repository import LiveTranscriptRepository
 
 # Bound aggregate metadata and row locks independently from the run-page size.
 # One already-oversized run still proceeds alone so cleanup cannot strand it.
@@ -297,6 +299,9 @@ class FlowRunHistoryPurgeRepository:
         Candidate row locks serialize with binding, and the delete-time run-reference
         check closes the READ COMMITTED window between candidate selection and deletion.
         """
+        await LiveTranscriptRepository(self.session).delete_expired_unbound(
+            now=now, limit=limit
+        )
         candidate_file_ids = await self._abandoned_runtime_upload_candidate_file_ids(
             now=now,
             limit=limit,
@@ -770,6 +775,15 @@ def _flow_runtime_upload_file_exists() -> sa.Exists:
     )
 
 
+def _flow_live_transcript_file_exists() -> sa.Exists:
+    return (
+        sa.select(sa.literal(1))
+        .select_from(FlowLiveTranscripts)
+        .where(FlowLiveTranscripts.bound_file_id == Files.id)
+        .exists()
+    )
+
+
 def _flow_run_step_input_file_exists() -> sa.Exists:
     return (
         sa.select(sa.literal(1))
@@ -860,6 +874,7 @@ _FILE_REFERENCE_EXISTS_BY_TABLE: Mapping[str, Callable[[], sa.Exists]] = (
             FlowTemplateAssets.__tablename__: _flow_template_asset_file_exists,
             FlowVersionFileReferences.__tablename__: _flow_version_file_exists,
             FlowRuntimeUploadedFiles.__tablename__: _flow_runtime_upload_file_exists,
+            FlowLiveTranscripts.__tablename__: _flow_live_transcript_file_exists,
             FlowRunStepInputFiles.__tablename__: _flow_run_step_input_file_exists,
             FlowRunStepResultFiles.__tablename__: _flow_run_step_result_file_exists,
             AppsFiles.__tablename__: _app_file_exists,

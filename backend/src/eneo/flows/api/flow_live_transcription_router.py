@@ -15,6 +15,7 @@ from eneo.flows.api.flow_live_transcription_models import (
     LIVE_TRANSCRIPTION_SOCKET_PATH,
     FlowLiveTranscriptionModelPublic,
     FlowLiveTranscriptionSessionPublic,
+    FlowLiveTranscriptionSessionRequest,
     FlowLiveTranscriptionUnavailableError,
 )
 from eneo.flows.api.flow_runtime_paths import FLOW_LIVE_TRANSCRIPTION_SESSIONS_PATH
@@ -38,6 +39,14 @@ little-endian PCM at 16 kHz and a text frame `{"type": "stop"}` when it ends.
 The socket answers `ready`, `transcript.delta` (text to append),
 `transcript.done` (the full preview text) and `error` (`code`, `message`,
 `retryable`) events.
+
+The optional body `recording_id` is an opaque client string matching
+`^[A-Za-z0-9_-]{8,64}$`. To store a clean session, also send `produced_samples`
+in the stop message: a non-negative integer counting captured 16 kHz samples
+before client queueing or discarding. Missing or invalid counts disable storage
+without changing the preview. A reconciled session that completes after its final
+commit receives a `transcript_id` in `transcript.done`, only after the row commits.
+Storage failures leave the preview usable without an id.
 
 The preview is not the run's transcript. Upload the recording as a runtime file
 and create the run as usual; the flow's transcription model then produces the
@@ -94,6 +103,7 @@ async def create_flow_live_transcription_session(
         UUID, Path(description="Identifier of the published step that takes audio.")
     ],
     request: Request,
+    body: FlowLiveTranscriptionSessionRequest | None = None,
     container: Container = Depends(
         get_container_for_explicit_transaction(
             with_user=True, with_module_user=True, with_upload_admission=True
@@ -111,7 +121,10 @@ async def create_flow_live_transcription_session(
             require_published_for_service_key=True,
         )
         live = await container.flow_live_transcription_session_service().open_session(
-            flow_id=id, step_id=step_id, space=space
+            flow_id=id,
+            step_id=step_id,
+            space=space,
+            recording_id=body.recording_id if body else None,
         )
         user = container.user()
         await container.audit_service().log(

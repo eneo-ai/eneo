@@ -54,7 +54,12 @@ class LiveTranscriptionSessionService:
     settings: Settings
 
     async def open_session(
-        self, *, flow_id: UUID, step_id: UUID, space: Space
+        self,
+        *,
+        flow_id: UUID,
+        step_id: UUID,
+        space: Space,
+        recording_id: str | None = None,
     ) -> LiveTranscriptionSession:
         """``space`` is the flow's space the caller was authorized in."""
         runtime_inputs = await load_published_runtime_inputs(
@@ -99,6 +104,7 @@ class LiveTranscriptionSessionService:
                 step_id=step_id,
                 model_id=availability.model.id,
                 max_seconds=max_seconds,
+                recording_id=recording_id,
             )
         )
         return LiveTranscriptionSession(

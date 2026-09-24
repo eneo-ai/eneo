@@ -33,6 +33,7 @@ class LiveTranscriptionGrant:
     step_id: UUID
     model_id: UUID
     max_seconds: int
+    recording_id: str | None = None
 
     def to_json(self) -> str:
         return json.dumps(
@@ -53,6 +54,7 @@ class LiveTranscriptionGrant:
             step_id=UUID(data["step_id"]),
             model_id=UUID(data["model_id"]),
             max_seconds=int(data["max_seconds"]),
+            recording_id=data.get("recording_id"),
         )
 
 

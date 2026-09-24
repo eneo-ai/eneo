@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 from dataclasses import dataclass
 from typing import Final, Literal, cast
 
@@ -48,6 +49,8 @@ class UpstreamEvent:
     kind: Literal["delta", "done", "error", "other"]
     text: str = ""
     code: str | None = None
+    audio_start: float | None = None
+    audio_end: float | None = None
 
 
 def parse_event(raw: str | bytes) -> UpstreamEvent:
@@ -60,7 +63,12 @@ def parse_event(raw: str | bytes) -> UpstreamEvent:
     event = cast(dict[str, object], data)
     match event.get("type"):
         case "transcription.delta":
-            return UpstreamEvent("delta", text=str(event.get("delta") or ""))
+            return UpstreamEvent(
+                "delta",
+                text=str(event.get("delta") or ""),
+                audio_start=_seconds(event.get("audio_start")),
+                audio_end=_seconds(event.get("audio_end")),
+            )
         case "transcription.done":
             return UpstreamEvent("done", text=str(event.get("text") or ""))
         case "error":
@@ -72,3 +80,13 @@ def parse_event(raw: str | bytes) -> UpstreamEvent:
             )
         case _:
             return UpstreamEvent("other")
+
+
+def _seconds(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        seconds = float(value)
+    except (OverflowError, ValueError):
+        return None
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None

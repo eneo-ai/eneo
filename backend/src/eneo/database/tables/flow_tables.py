@@ -564,6 +564,54 @@ class FlowResourceBindings(BasePublic):
     )
 
 
+class FlowLiveTranscripts(BasePublic):
+    """Clean live-session text, owned by the admitting tenant and user."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Users.id, ondelete="CASCADE"), index=True
+    )
+    flow_id: Mapped[UUID] = mapped_column(index=True)
+    flow_version: Mapped[int]
+    step_id: Mapped[UUID]
+    model_id: Mapped[UUID]
+    recording_id: Mapped[str] = mapped_column(sa.String(64))
+    text: Mapped[str] = mapped_column(sa.Text)
+    segments: Mapped[list[dict[str, str | float]] | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
+    received_audio_seconds: Mapped[float] = mapped_column(sa.Double)
+    expires_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True))
+    bound_file_id: Mapped[UUID | None] = mapped_column(index=True)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_live_transcripts_flow_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["bound_file_id", "tenant_id"],
+            ["files.id", "files.tenant_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_live_transcripts_file_tenant",
+        ),
+        CheckConstraint(
+            "received_audio_seconds >= 0 AND flow_version >= 1",
+            name="ck_flow_live_transcripts_bounds",
+        ),
+        Index(
+            "ix_flow_live_transcripts_unbound_expiry",
+            "expires_at",
+            "id",
+            postgresql_where=sa.text("bound_file_id IS NULL"),
+        ),
+    )
+
+
 class FlowRuntimeUploadedFiles(BaseCrossReference):
     """Stores reusable runtime upload files. Writer: FlowRuntimeUploadRepository. Purpose: bind pre-run uploads to a Flow, step, tenant, and principal."""
 

@@ -662,6 +662,71 @@ async def _create_unbound_runtime_upload_fixture(
     return AbandonedRuntimeUploadFixture(flow=flow, file=file, upload=upload)
 
 
+async def test_live_transcript_cleanup_obeys_expiry_and_preserves_bound_rows(
+    async_session, test_tenant, admin_user, flow_retention_space, flow_retention_service
+):
+    from eneo.database.tables.flow_tables import FlowLiveTranscripts
+    from eneo.flows.runtime.live_transcription.repository import (
+        LiveTranscriptRepository,
+    )
+    from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionGrant
+
+    now = datetime.now(timezone.utc)
+    fixture = await _create_unbound_runtime_upload_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        uploaded_at=now,
+        size=8,
+    )
+    await async_session.execute(
+        update(Tenants)
+        .where(Tenants.id == test_tenant.id)
+        .values(flow_runtime_upload_abandonment_days=2)
+    )
+    grant = LiveTranscriptionGrant(
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        flow_id=fixture.flow.id,
+        flow_version=1,
+        step_id=uuid4(),
+        model_id=uuid4(),
+        max_seconds=60,
+        recording_id="recording_123",
+    )
+    repo = LiveTranscriptRepository(async_session)
+    transcript_id = await repo.create(
+        grant, text="Text", segments=None, received_audio_seconds=0.1
+    )
+    row = await repo.get(transcript_id, tenant_id=test_tenant.id)
+    assert row is not None
+    assert row.expires_at == row.created_at + timedelta(days=2)
+    row.expires_at = now - timedelta(microseconds=1)
+    ids = [transcript_id]
+    for expiry, bound in [
+        (now, False),
+        (now + timedelta(microseconds=1), False),
+        (now, True),
+        (None, False),
+    ]:
+        row_id = await repo.create(
+            grant, text="Text", segments=None, received_audio_seconds=0.1
+        )
+        row = await repo.get(row_id, tenant_id=test_tenant.id)
+        assert row is not None
+        row.expires_at = expiry
+        row.bound_file_id = fixture.file.id if bound else None
+        ids.append(row_id)
+    await async_session.flush()
+    await flow_retention_service.purge_abandoned_flow_runtime_uploads(now=now, limit=1)
+    assert await repo.get(ids[0], tenant_id=test_tenant.id) is None
+    assert await repo.get(ids[1], tenant_id=test_tenant.id) is not None
+    await flow_retention_service.purge_abandoned_flow_runtime_uploads(now=now, limit=10)
+    remaining = set(await async_session.scalars(select(FlowLiveTranscripts.id)))
+    assert remaining == set(ids[2:])
+
+
 async def _add_flow_version_definition(
     async_session: AsyncSession,
     *,
