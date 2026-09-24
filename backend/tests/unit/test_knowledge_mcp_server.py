@@ -44,7 +44,7 @@ from eneo.internal_mcp.knowledge import (
     read_source,
     search_knowledge,
 )
-from eneo.main.exceptions import NotFoundException
+from eneo.main.exceptions import AuthenticationException, NotFoundException
 
 
 def _chunk(**overrides):
@@ -183,7 +183,7 @@ class TestTokenScoping:
     def test_unscoped_access_token_is_rejected(self):
         token = AuthService().create_access_token_for_user(self._user())
 
-        with pytest.raises(ValueError):
+        with pytest.raises(AuthenticationException):
             assistant_id_from_token(token)
 
 

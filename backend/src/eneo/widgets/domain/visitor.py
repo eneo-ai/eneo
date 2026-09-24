@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.widgets.domain.widget import Widget
 
@@ -26,6 +26,8 @@ class WidgetVisitorContext(BaseModel):
     tenant_id: UUID
     space_id: UUID
     target_id: UUID
+    token_generation: int = Field(ge=0, strict=True)
+    preview: bool = Field(default=False, strict=True)
     # Retention 0: conversation content must never be committed, so the
     # session service keeps placeholders inside the request transaction.
     never_persist: bool = False

@@ -11,7 +11,7 @@ This guide covers the editor's side (creating and publishing a widget), the oper
 - Your site includes one small script (the _loader_, about 4 kB) from your Eneo installation. It renders a launcher button and, when opened, an `iframe` with Eneo's chat page.
 - The chat runs entirely on the Eneo origin. The host site never sees the conversation, and the browser only allows the widget on the sites you have listed (`Content-Security-Policy: frame-ancestors`).
 - Before the first message the visitor's browser solves an invisible proof of work (ALTCHA, self-hosted, no third party) and receives a short-lived visitor token. Rate limits per visitor and per IP address, a maximum question length and a daily token budget per widget limit usage.
-- Tools, MCP servers and file uploads are always off for visitors. The assistant answers from its instructions and knowledge only.
+- Visitors use the assistant’s configured knowledge and tools, including its MCP servers and capabilities. Tool-mode knowledge search retains the visitor’s restricted widget identity; it does not require an Eneo account. File uploads are not available. Only publish knowledge and tools that are appropriate for anonymous visitors.
 
 ## For editors: publish a widget
 

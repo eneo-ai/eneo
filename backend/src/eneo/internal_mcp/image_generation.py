@@ -28,12 +28,13 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, cast
 
 import httpx
 from litellm.exceptions import BadRequestError
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, ImageContent, TextContent
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.files.file_models import FileType
 from eneo.image_models.domain.image_model import (
@@ -364,7 +365,7 @@ async def generate_image(
         if model is None or not model.is_org_enabled or model.provider_id is None:
             raise ValueError(NOT_CONFIGURED_MESSAGE)
         provider = await load_active_litellm_provider(
-            session=container.session(),
+            session=cast(AsyncSession, container.session()),
             provider_id=model.provider_id,
             tenant_id=tool_ctx.user.tenant_id,
         )

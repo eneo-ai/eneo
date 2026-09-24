@@ -3445,7 +3445,7 @@ export interface paths {
     put?: never;
     /**
      * Ask Widget
-     * @description Ask the widget's assistant as a visitor. Always streams Server-Sent Events. Pass `session_id` to continue one of the visitor's own sessions; tools, uploads and MCP servers are never available here.
+     * @description Ask the widget's assistant as a visitor. Always streams Server-Sent Events. Pass `session_id` to continue one of the visitor's own sessions. Uses the assistant's configured knowledge and tools; file uploads are not available.
      */
     post: operations["ask_widget_api_v1_widgets__public_id__ask__post"];
     delete?: never;
@@ -23123,6 +23123,13 @@ export interface components {
        * Format: uuid
        */
       target_id: string;
+      /** Token Generation */
+      token_generation: number;
+      /**
+       * Preview
+       * @default false
+       */
+      preview?: boolean;
       /**
        * Never Persist
        * @default false

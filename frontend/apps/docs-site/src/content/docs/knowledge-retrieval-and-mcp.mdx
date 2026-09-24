@@ -308,6 +308,16 @@ argument. Instead, it reads the fixed claim, authenticates the user, builds the
 normal dependency-injection graph for that user, and loads the assistant through
 the ordinary authorization services.
 
+Widget visitors have no user account to look up. Their internal token uses a
+separate audience and carries the widget and visitor identity, target assistant,
+space, tenant, token generation and preview status. Before each tool call, Eneo
+checks that scope against the current widget, its publication state and the
+live tenant state, then reconstructs the permissionless visitor. A pause,
+archive or token-generation change invalidates the delegation. Public visitor
+tokens cannot be used directly on internal tools, and the internal visitor
+token cannot authenticate to the normal user API. The internal token remains
+on the backend.
+
 This design prevents a model from changing an argument to search another
 assistant. Knowledge queries remain limited to the sources attached to the
 token's assistant. Missing and inaccessible documents return the same response

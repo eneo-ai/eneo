@@ -171,7 +171,8 @@ def _principal(request: Request) -> WidgetPrincipal:
     description=(
         "Ask the widget's assistant as a visitor. Always streams Server-Sent"
         " Events. Pass `session_id` to continue one of the visitor's own"
-        " sessions; tools, uploads and MCP servers are never available here."
+        " sessions. Uses the assistant's configured knowledge and tools;"
+        " file uploads are not available."
     ),
     responses=responses.streaming_response(AskChatResponse, [400, 401, 404, 429, 503]),
 )

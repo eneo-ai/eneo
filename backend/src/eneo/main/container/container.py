@@ -402,6 +402,9 @@ from eneo.widgets.application.altcha_service import AltchaService
 from eneo.widgets.application.visitor_identity import VisitorIdentity
 from eneo.widgets.application.visitor_token_service import VisitorTokenService
 from eneo.widgets.application.widget_ask_service import WidgetAskService
+from eneo.widgets.application.widget_authentication_service import (
+    WidgetAuthenticationService,
+)
 from eneo.widgets.application.widget_limits import WidgetBudget, WidgetLimiter
 from eneo.widgets.application.widget_service import WidgetService
 from eneo.widgets.application.widget_template_service import WidgetTemplateService
@@ -1409,6 +1412,13 @@ class Container(containers.DeclarativeContainer):
         api_key_rate_limiter=api_key_rate_limiter,
         feature_flag_service=feature_flag_service,
         session=session,
+    )
+    widget_authentication_service = providers.Factory(
+        WidgetAuthenticationService,
+        widget_repo=widget_repo,
+        tenant_repo=tenant_repo,
+        user_service=user_service,
+        visitor_tokens=widget_visitor_token_service,
     )
     module_auth_broker = providers.Factory(
         ModuleAuthBroker,

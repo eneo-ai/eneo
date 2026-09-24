@@ -13,7 +13,7 @@ from eneo.widgets.domain.widget import Widget
 
 
 def build_visitor_user(
-    widget: Widget, visitor_id: UUID, tenant: TenantInDB
+    widget: Widget, visitor_id: UUID, tenant: TenantInDB, *, preview: bool = False
 ) -> UserInDB:
     """Synthetic ``UserInDB`` for an anonymous widget visitor.
 
@@ -42,6 +42,8 @@ def build_visitor_user(
             tenant_id=widget.tenant_id,
             space_id=widget.space_id,
             target_id=widget.target_id,
+            token_generation=widget.token_generation,
+            preview=preview,
             never_persist=widget.privacy.never_persists,
         ),
         roles=[role],
