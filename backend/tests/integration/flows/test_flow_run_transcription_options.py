@@ -183,31 +183,44 @@ async def test_a_flow_that_transcribes_no_audio_has_no_transcription_options(
     assert contract["transcription"] is None
 
 
+@pytest.mark.parametrize(
+    ("choice", "different_choice"),
+    [
+        ({"speaker_labels": False}, {"speaker_labels": True}),
+        ({"max_speakers": 3}, {"max_speakers": 4}),
+        ({"max_speakers": None}, {"max_speakers": 3}),
+    ],
+)
 async def test_a_runs_speaker_choice_is_kept_with_the_run_and_its_idempotency_key(
-    client, flow_process_auth_headers, db_container, dispatched: list[UUID]
+    client,
+    flow_process_auth_headers,
+    db_container,
+    dispatched: list[UUID],
+    choice: dict[str, object],
+    different_choice: dict[str, object],
 ):
     headers = dict(flow_process_auth_headers)
-    keyed = {**headers, "Idempotency-Key": "meeting-with-speakers-off"}
+    keyed = {**headers, "Idempotency-Key": "meeting-speaker-choice"}
     flow = await _published_flow(client, headers, db_container, input_required=False)
 
     with _deployment(service_mode="diarize"):
-        chosen = await _create_run(
-            client, keyed, flow.flow_id, {"speaker_labels": False}
-        )
-        changed = await _create_run(
-            client, keyed, flow.flow_id, {"speaker_labels": True}
-        )
+        chosen = await _create_run(client, keyed, flow.flow_id, choice)
+        repeated = await _create_run(client, keyed, flow.flow_id, choice)
+        changed = await _create_run(client, keyed, flow.flow_id, different_choice)
         default = await _create_run(
             client, headers, flow.flow_id, {"speaker_labels": None}
         )
 
     assert chosen.status_code == 201, chosen.text
     assert chosen.json()["input_payload_json"] == {}
+    assert repeated.status_code == 201, repeated.text
+    assert repeated.json()["id"] == chosen.json()["id"]
     assert changed.status_code == 400, changed.text
     assert changed.json()["code"] == "flow_run_idempotency_conflict"
     assert default.status_code == 201, default.text
     stored = await _stored_inputs(db_container, flow.flow_id)
-    assert stored[chosen.json()["id"]]["speaker_labels"] is False
+    ((key, value),) = choice.items()
+    assert stored[chosen.json()["id"]][key] == value
     assert "speaker_labels" not in stored[default.json()["id"]]
     assert len(dispatched) == 2
 

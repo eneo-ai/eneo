@@ -251,7 +251,8 @@ Response:
   ],
   "transcription": {
     "live": { "available": true, "reason": null },
-    "speaker_labels": { "selectable": true, "required": false, "default": true }
+    "speaker_labels": { "selectable": true, "required": false, "default": true },
+    "max_speakers": { "form_field": null }
   },
   "security_classification": {
     "name": "Open information",
@@ -1191,7 +1192,7 @@ Use the [Flow error reference](/guides/flows/reference/errors) for the complete 
 
 ## Live text and speaker labels
 
-A flow that transcribes recorded audio reports two options in the run contract's `transcription` object: whether your app can show live text while someone records, and whether a run may choose speaker labels. For any other flow, `transcription` is `null`.
+A flow that transcribes recorded audio reports live text availability, speaker-label options, and an optional speaker-count limit in the run contract's `transcription` object. For any other flow, `transcription` is `null`.
 
 | Field                       | Meaning                                                                                                                                                                                                                                                                           |
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1225,6 +1226,30 @@ When `transcription.speaker_labels.selectable` is `true`, your app can let the u
 3. Check the run: `GET /api/v1/flows/{id}/graph/?run_id={run_id}` marks the audio step's node with `"speaker_identification": true` only when the run labels speakers.
 
 When `selectable` is `false`, do not send `true` or `false`: Eneo refuses the request with `422` and code `flow_run_speaker_labels_not_selectable`. Labelling speakers makes the run take longer. A retry of a failed run and a transcript regeneration keep the run's choice. `speaker_labels` belongs at the top level of the request; inside `input_payload_json` it is a reserved key.
+
+### Set a speaker-count limit
+
+When `transcription.max_speakers` is present and the run labels speakers, you
+may send `max_speakers` at the top level of the create-run request. It accepts
+an integer of at least 1 as an upper bound on the number of speakers. Leave
+it automatic when the count is uncertain; participant names do not determine
+the limit.
+
+If `transcription.max_speakers.form_field` names a field, use the flow's
+existing count field instead of showing a second control. The request is
+resolved in this order:
+
+- An explicit `max_speakers` value overrides the form field. Explicit `null`
+  selects automatic speaker detection, even if the form contains a count.
+- When `max_speakers` is omitted, Eneo uses the form's count field if supplied.
+- Otherwise, detection is automatic.
+
+Eneo stores this decision with the run and preserves it through retry and
+transcript regeneration. Reusing an idempotency key with a different limit
+returns `flow_run_idempotency_conflict`. A positive limit on a run that labels
+no speakers returns `422 flow_run_max_speakers_not_available`.
+`max_speakers` is reserved inside `input_payload_json`; send it at the top
+level of the request.
 
 ### Show live text while recording
 
