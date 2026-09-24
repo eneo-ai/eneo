@@ -1,5 +1,6 @@
 import type { WidgetClient, WidgetPublicConfig } from "@eneo/eneo-js";
 import { EneoError } from "@eneo/eneo-js";
+import { widgetErrorCode } from "./widgetErrors";
 
 /**
  * What the embed page remembers about a visitor, in the iframe's own
@@ -155,7 +156,14 @@ export class VisitorSession {
         ? { visitorId: previous.visitor_id, visitorKey: previous.visitor_key }
         : {};
     if (this.#config.bot_protection === "none") {
-      return this.#store(await this.#client.createVisitorSession(identity));
+      try {
+        return this.#store(await this.#client.createVisitorSession(identity));
+      } catch (error) {
+        if (widgetErrorCode(error) !== "challenge_required") throw error;
+        // A tenant policy can require ALTCHA while this iframe still has the
+        // earlier public config. The server's response is authoritative.
+        this.#config = { ...this.#config, bot_protection: "altcha" };
+      }
     }
     const altcha = await this.#solve();
     return this.#store(await this.#client.createVisitorSession({ altcha, ...identity }));

@@ -194,6 +194,21 @@ describe("saved settings", () => {
     expect(element.getAttribute("position")).toBe("bottom-left");
   });
 
+  it("does not show a launcher or open a panel for an inactive widget", async () => {
+    vi.spyOn(EneoWidgetElement.prototype as never, "fetchSettings" as never).mockRestore();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 404 }));
+    const element = attach();
+    element.openPanel();
+    await flushSettings();
+    expect(launcherOf(element).hidden).toBe(true);
+    expect(element.open).toBe(false);
+    expect(frameOf(element)).toBeNull();
+
+    element.openPanel();
+    element.prefetch();
+    expect(frameOf(element)).toBeNull();
+  });
+
   it("opens only once the settings are in, so the panel appears in the saved corner", async () => {
     const held = heldSettings();
     const element = attach();

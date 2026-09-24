@@ -49,6 +49,7 @@
   const chat = getChatService();
 
   let altchaElement = $state<AltchaWidgetElement | null>(null);
+  let challengeReady = $state(untrack(() => config.bot_protection === "altcha"));
   let composer = $state<WidgetComposer | null>(null);
   let chatRoot = $state<HTMLElement | null>(null);
   let log = $state<HTMLElement | null>(null);
@@ -56,6 +57,7 @@
   let startOverButton = $state<HTMLButtonElement | null>(null);
 
   let status = $state<"idle" | "verifying" | "sending">("idle");
+  let restoring = $state(false);
   const announcer = new Announcer();
   let errorMessage = $state<string | null>(null);
   let unavailable = $state(false);
@@ -78,10 +80,12 @@
     client: initial.client,
     config: initial.config,
     fixedToken: initial.previewToken,
-    solve: () => {
+    solve: async () => {
       // Restore what was in progress (a send stays "sending" until it ends).
       const before = status;
       status = "verifying";
+      challengeReady = true;
+      await tick();
       return solveWithAltcha(altchaElement).finally(() => {
         if (status === "verifying") status = before;
       });
@@ -101,7 +105,7 @@
   // The service appends the message once the backend confirms it; until then
   // show the question and a typing indicator so the visitor sees progress.
   const showPending = $derived(pendingQuestion !== null && messages.length <= pendingFrom);
-  const busy = $derived(status !== "idle" || chat.askQuestion.isLoading);
+  const busy = $derived(restoring || status !== "idle" || chat.askQuestion.isLoading);
   const subtitle = $derived(config.texts.subtitle);
   // Retention 0: the backend deletes the session when the answer ends, so
   // there is nothing to continue, rate or restore. Each question stands alone.
@@ -117,7 +121,8 @@
       session.rememberSession(null);
     } else if (session.sessionId && session.hasIdentity) {
       // Restore the visitor's last conversation on this site, if any.
-      void restore(session.sessionId);
+      restoring = true;
+      void restore(session.sessionId).finally(() => (restoring = false));
     }
     return () => {
       if (cooldownTimer) clearTimeout(cooldownTimer);
@@ -173,7 +178,7 @@
   async function send(question: string): Promise<void> {
     // One request at a time. The guard is synchronous, so a second click while
     // the token is minted or before the first chunk never starts another ask.
-    if (status !== "idle" || chat.askQuestion.isLoading) return;
+    if (restoring || status !== "idle" || chat.askQuestion.isLoading) return;
     status = "sending";
     errorMessage = null;
     pendingQuestion = question;
@@ -470,8 +475,8 @@
     </AlertDialog.Content>
   </AlertDialog.Root>
 
-  {#if config.bot_protection === "altcha"}
-    <!-- Invisible proof of work: solved on first send, never part of the accessible UI. -->
+  {#if challengeReady}
+    <!-- The server may require a challenge after this iframe was opened. -->
     <div hidden aria-hidden="true">
       <altcha-widget
         bind:this={altchaElement}

@@ -93,6 +93,7 @@ export class EneoWidgetElement extends HTMLElement {
   /** Host elements made inert while the panel covers the page. */
   private inerted: Element[] = [];
   private settings: WidgetSettings | null = null;
+  private unavailable = false;
   private settling = false;
   private settled = false;
   private openWhenSettled = false;
@@ -206,6 +207,16 @@ export class EneoWidgetElement extends HTMLElement {
     const timer = setTimeout(() => this.settle(), SETTINGS_TIMEOUT_MS);
     this.fetchSettings(`${this.baseUrl}/widget/settings/${encodeURIComponent(this.widgetId)}`)
       .then((raw) => {
+        if (raw === null) {
+          // A definitive 404 means the widget is still a draft or is paused.
+          // Network and CSP failures still use the launcher fallback below.
+          this.unavailable = true;
+          this.openWhenSettled = false;
+          this.prefetchWhenSettled = false;
+          if (this.isOpen) this.closePanel(false);
+          this.syncLauncher();
+          return;
+        }
         this.settings = parseWidgetSettings(raw);
         if (this.settings?.colors) {
           this.colors = this.settings.colors;
@@ -220,11 +231,13 @@ export class EneoWidgetElement extends HTMLElement {
       });
   }
 
-  /** Seam for tests. A host CSP without the Eneo origin in connect-src rejects it. */
+  /** Null is reserved for a definitive inactive widget (404). */
   protected fetchSettings(url: string): Promise<unknown> {
-    return fetch(url, { credentials: "omit", referrerPolicy: "strict-origin" }).then((response) =>
-      response.ok ? response.json() : null
-    );
+    return fetch(url, { credentials: "omit", referrerPolicy: "strict-origin" }).then((response) => {
+      if (response.status === 404) return null;
+      if (!response.ok) throw new Error(`Widget settings returned ${response.status}`);
+      return response.json();
+    });
   }
 
   private settle(): void {
@@ -233,10 +246,10 @@ export class EneoWidgetElement extends HTMLElement {
     const position = this.settings?.position;
     if (position) this.setAttribute("position", position);
     this.syncLauncher();
-    if (this.prefetchWhenSettled) this.ensureFrame();
+    if (this.prefetchWhenSettled && !this.unavailable) this.ensureFrame();
     if (this.openWhenSettled) {
       this.openWhenSettled = false;
-      this.openPanel();
+      if (!this.unavailable) this.openPanel();
     }
   }
 
@@ -304,7 +317,8 @@ export class EneoWidgetElement extends HTMLElement {
     this.launcher.setAttribute("aria-label", label);
     this.launcher.title = label;
     this.panel.setAttribute("aria-label", this.labels.title);
-    this.launcher.hidden = !this.settled || this.getAttribute("launcher") === "none";
+    this.launcher.hidden =
+      !this.settled || this.unavailable || this.getAttribute("launcher") === "none";
     this.badge.hidden = this.unread === 0 || this.isOpen;
     this.badge.textContent = this.unread > 99 ? "99+" : String(this.unread);
   }
@@ -324,6 +338,7 @@ export class EneoWidgetElement extends HTMLElement {
 
   /** Load the iframe ahead of the first open, e.g. from `prefetch="true"`. */
   prefetch(): void {
+    if (this.unavailable) return;
     if (this.settled) this.ensureFrame();
     else this.prefetchWhenSettled = true;
   }
@@ -334,6 +349,7 @@ export class EneoWidgetElement extends HTMLElement {
   }
 
   openPanel(): void {
+    if (this.unavailable) return;
     if (this.isOpen) return;
     if (!this.settled) {
       this.openWhenSettled = true;

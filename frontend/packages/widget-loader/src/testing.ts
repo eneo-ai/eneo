@@ -1,8 +1,8 @@
 import { vi } from "vitest";
 import { EneoWidgetElement } from "./element";
 
-/** Answers every element's settings request with `settings`; null is a widget without any. */
-export function stubSettings(settings: unknown = null) {
+/** Answers every element's settings request with `settings`; undefined means no settings. */
+export function stubSettings(settings: unknown = undefined) {
   return vi
     .spyOn(EneoWidgetElement.prototype as never, "fetchSettings" as never)
     .mockImplementation((() => Promise.resolve(settings)) as never);

@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@43376e74c418
+translationSource: guides/embed-widget.mdx@514b623d063a
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -148,8 +148,9 @@ tömd lista över tillåtna webbplatser räknas också som en osparad ändring, 
 får en fråga om du lämnar sidan. Om en aktiv widget slutar fungera som den är
 konfigurerad, till exempel för att assistenten inte längre är publicerad, visar
 statusraden, fliken **Publicera** och organisationens översikt vad som behöver
-åtgärdas. Till dess ser besökare ett kort meddelande om att chatten inte är
-tillgänglig.
+åtgärdas. På nyligen inlästa sidor döljs chattknappen. Besökare med en redan
+öppen chatt ser ett kort meddelande om att den inte är tillgänglig när de försöker
+använda den.
 
 Om någon annan ändrar widgeten medan du redigerar stannar det automatiska
 sparandet, och dina osparade värden ligger kvar. Kopiera det du vill behålla
@@ -378,11 +379,13 @@ att ladda om när mallen har ändrat deras widget.
 
 - **Vem som får rama in chatten** avgörs av besökarens webbläsare utifrån
   widgetens tillåtna origins. En webbplats som inte är listad får en tom ram.
-  En pausad widget visar i stället ett kort meddelande om att chatten inte är
-  tillgänglig, på alla webbplatser, så att knappen aldrig öppnar en tom panel.
+  En pausad widget visar ingen chattknapp på nyligen inlästa sidor. En chatt
+  som öppnades före pausen visar ett kort meddelande om att den inte är
+  tillgänglig vid nästa anrop.
 - **Widgetar i en avstängd organisation** behandlas som pausade i hela den
-  publika ytan: chatten visar meddelandet om att den inte är tillgänglig, och
-  inga utmaningar eller besökartoken lämnas ut.
+  publika ytan: nyligen inlästa sidor döljer chattknappen, en redan öppen chatt
+  visar meddelandet om att den inte är tillgänglig vid nästa anrop, och inga
+  utmaningar eller besökartoken lämnas ut.
 - **Svar kan inte föra data vidare.** Chattsidans Content Security Policy
   tillåter bara bilder från Eneo och logotypens adress samt anslutningar till
   Eneos API, så en bildlänk som hamnar i ett svar kan inte skicka besökarens

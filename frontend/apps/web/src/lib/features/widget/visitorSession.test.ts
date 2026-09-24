@@ -124,6 +124,20 @@ describe("VisitorSession", () => {
     expect(createVisitorSession).toHaveBeenCalledWith({ visitorId: undefined });
   });
 
+  it("solves a newly required challenge without reloading an open widget", async () => {
+    const { session, createVisitorSession, solve } = setup({ botProtection: "none" });
+    createVisitorSession.mockRejectedValueOnce(
+      new EneoError("required", "RESPONSE", 400, 0, {
+        detail: { code: "challenge_required" }
+      })
+    );
+
+    await session.ensureToken();
+    expect(createVisitorSession).toHaveBeenNthCalledWith(1, {});
+    expect(createVisitorSession).toHaveBeenNthCalledWith(2, { altcha: "payload" });
+    expect(solve).toHaveBeenCalledOnce();
+  });
+
   it("restores a remembered session from storage and can be invalidated", async () => {
     const storage = new MemoryStorage();
     const first = setup({ storage });

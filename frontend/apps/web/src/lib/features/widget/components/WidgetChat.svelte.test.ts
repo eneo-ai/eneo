@@ -55,6 +55,8 @@ const fake = vi.hoisted(() => ({
   failNextAsk: false,
   // A stored conversation the fake returns on restore, when set.
   restored: null as null | Record<string, unknown>,
+  holdNextRestore: false,
+  releaseRestore: null as null | (() => void),
   // Answer texts for the next asks, in order; the default after that.
   answers: [] as string[],
   // The next answer breaks off after its first words, then clears itself.
@@ -154,6 +156,10 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
         get: async () => {
           const failure = fake.getErrors.shift();
           if (failure) throw failure;
+          if (fake.holdNextRestore) {
+            fake.holdNextRestore = false;
+            await new Promise<void>((resolve) => (fake.releaseRestore = resolve));
+          }
           if (!fake.restored) return unsupported();
           return fake.restored;
         },
@@ -295,6 +301,8 @@ beforeEach(() => {
   fake.release = null;
   fake.sessions = 0;
   fake.restored = null;
+  fake.holdNextRestore = false;
+  fake.releaseRestore = null;
   fake.failNextFeedback = false;
   fake.failNextAsk = false;
   fake.answers.length = 0;
@@ -556,6 +564,24 @@ describe("WidgetChat", () => {
     await expect.element(page.getByText("Hej där.")).toBeVisible();
     expect(fake.mints).toBe(1);
     expect(JSON.parse(localStorage.getItem("eneo-widget:wgt_test")!).session_id).toBe("session-9");
+  });
+
+  test("waits for a remembered conversation before sending a follow-up", async () => {
+    rememberVisitor();
+    fake.holdNextRestore = true;
+    renderApp();
+    await vi.waitFor(() => expect(fake.releaseRestore).not.toBeNull());
+
+    await userEvent.fill(composer(), "Följdfråga?");
+    await userEvent.keyboard("{Enter}");
+    expect(fake.asks).toHaveLength(0);
+
+    fake.releaseRestore?.();
+    await expect.element(page.getByText("Hej där.")).toBeVisible();
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() => expect(fake.asks).toHaveLength(1));
+    expect(fake.asks[0].conversationId).toBe("session-9");
+    await releaseAnswer();
   });
 
   test("a question that fails before it reaches the server goes back into the field", async () => {

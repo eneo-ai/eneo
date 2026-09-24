@@ -6,7 +6,6 @@
 -->
 <script lang="ts">
   import type { Assistant, Eneo, Widget, WidgetPolicy, WidgetTemplate } from "@eneo/eneo-js";
-  import { beforeNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -30,6 +29,7 @@
   import { collapseWhitespace, TextDraft } from "./textDraft.svelte";
   import TemplatePicker from "./TemplatePicker.svelte";
   import { WidgetAutosave } from "./widgetAutosave.svelte";
+  import { guardAutosaveNavigation } from "./guardAutosaveNavigation";
   import WidgetLiveTest from "./WidgetLiveTest.svelte";
   import WidgetPreview from "./WidgetPreview.svelte";
   import WidgetRulesFields from "./WidgetRulesFields.svelte";
@@ -76,15 +76,7 @@
       })
   );
 
-  // Leaving saves what is pending. When saving has already failed the edits
-  // would be lost for good, so the editor is asked before they are discarded.
-  beforeNavigate((navigation) => {
-    if (autosave.stranded && !confirm(m.widget_admin_unsaved_leave_confirm())) {
-      navigation.cancel();
-      return;
-    }
-    void autosave.flush();
-  });
+  guardAutosaveNavigation(autosave);
 
   const current = $derived(autosave.widget);
 

@@ -3,7 +3,6 @@
   Autosaved like the widget page; a static preview shows the result.
 -->
 <script lang="ts">
-  import { beforeNavigate } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { Page } from "$lib/components/layout";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
@@ -18,6 +17,7 @@
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { toastWidgetError } from "$lib/features/widget/admin/errors";
   import { WidgetTemplateAutosave } from "$lib/features/widget/admin/widgetAutosave.svelte";
+  import { guardAutosaveNavigation } from "$lib/features/widget/admin/guardAutosaveNavigation";
   import WidgetMockPreview from "$lib/features/widget/admin/WidgetMockPreview.svelte";
   import WidgetTextsFields from "$lib/features/widget/admin/WidgetTextsFields.svelte";
   import WidgetThemeFields from "$lib/features/widget/admin/WidgetThemeFields.svelte";
@@ -56,13 +56,7 @@
     }
   });
 
-  beforeNavigate((navigation) => {
-    if (autosave.stranded && !confirm(m.widget_admin_unsaved_leave_confirm())) {
-      navigation.cancel();
-      return;
-    }
-    void autosave.flush();
-  });
+  guardAutosaveNavigation(autosave);
 
   const template = $derived(autosave.widget);
 

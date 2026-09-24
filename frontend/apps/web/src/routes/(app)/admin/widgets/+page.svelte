@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
   import type { WidgetPolicy, WidgetPolicyUpdate, WidgetTemplate } from "@eneo/eneo-js";
-  import { beforeNavigate, goto } from "$app/navigation";
+  import { goto } from "$app/navigation";
   import {
     LayoutGrid,
     Pencil,
@@ -32,6 +32,7 @@
   import { MAX_DAILY_TOKEN_BUDGET } from "$lib/features/widget/admin/limits";
   import { urlTab } from "$lib/features/widget/admin/tabState.svelte";
   import { Autosave } from "$lib/features/widget/admin/widgetAutosave.svelte";
+  import { guardAutosaveNavigation } from "$lib/features/widget/admin/guardAutosaveNavigation";
   import { DEFAULT_PRIMARY_COLOR, isHexColor } from "$lib/features/widget/contrast";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -58,13 +59,7 @@
       })
   );
 
-  beforeNavigate((navigation) => {
-    if (autosave.stranded && !confirm(m.widget_admin_unsaved_leave_confirm())) {
-      navigation.cancel();
-      return;
-    }
-    void autosave.flush();
-  });
+  guardAutosaveNavigation(autosave);
 
   const policy = $derived(autosave.widget);
 

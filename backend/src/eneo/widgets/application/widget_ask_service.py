@@ -3,9 +3,9 @@
 # Licensed under the MIT License.
 
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import date, datetime, timezone
-from typing import TYPE_CHECKING, AsyncIterator, Optional
+from typing import TYPE_CHECKING, AsyncIterator, Optional, Protocol, runtime_checkable
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -53,6 +53,61 @@ class SessionNotOwnedError(WidgetPublicError):
 
     def __init__(self) -> None:
         super().__init__("Session not found.")
+
+
+@runtime_checkable
+class _AsyncClosable(Protocol):
+    def aclose(self) -> Awaitable[None]: ...
+
+
+class WidgetAnswer(AsyncIterator[Completion]):
+    """Visitor stream whose settlement also works before its first read."""
+
+    def __init__(
+        self,
+        answer: AsyncIterator[Completion],
+        view: VisitorView,
+        finish: Callable[[bool], Awaitable[None]],
+    ) -> None:
+        self._answer = answer
+        self._view = view
+        self._finish = finish
+        self._stream = self._visible()
+        self._closed = False
+
+    def __aiter__(self) -> "WidgetAnswer":
+        return self
+
+    async def __anext__(self) -> Completion:
+        return await anext(self._stream)
+
+    async def _visible(self) -> AsyncGenerator[Completion]:
+        completed = False
+        try:
+            async for chunk in self._answer:
+                for visible in self._view.events(chunk):
+                    yield visible
+            completed = True
+        finally:
+            await self._settle(completed)
+
+    async def aclose(self) -> None:
+        # Closing an unstarted async generator does not enter its finally.
+        try:
+            await self._stream.aclose()
+        finally:
+            await self._settle(False)
+
+    async def _settle(self, completed: bool) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        with CancelScope(shield=True):
+            try:
+                if isinstance(self._answer, _AsyncClosable):
+                    await self._answer.aclose()
+            finally:
+                await self._finish(completed)
 
 
 # Appended to the assistant's prompt for widget turns only: the answer lands
@@ -233,44 +288,18 @@ class WidgetAskService:
         answer = response.answer
         assert not isinstance(answer, str)
         visible = VisitorView(widget).response(response)
-        visible.answer = self._settled(
+        visible.answer = WidgetAnswer(
             answer.__aiter__(),
-            widget=widget,
-            session_id=response.session.id,
-            question_id=response.question_id,
-            reservation=reservation,
+            VisitorView(widget),
+            lambda completed: self._finish(
+                widget,
+                response.session.id,
+                response.question_id,
+                reservation,
+                completed=completed,
+            ),
         )
         return visible
-
-    async def _settled(
-        self,
-        answer: AsyncIterator[Completion],
-        *,
-        widget: Widget,
-        session_id: UUID,
-        question_id: UUID | None,
-        reservation: BudgetReservation,
-    ) -> AsyncIterator[Completion]:
-        view = VisitorView(widget)
-        completed = False
-        try:
-            async for chunk in answer:
-                for visible in view.events(chunk):
-                    yield visible
-            completed = True
-        finally:
-            with CancelScope(shield=True):
-                try:
-                    if isinstance(answer, AsyncGenerator):
-                        await answer.aclose()
-                finally:
-                    await self._finish(
-                        widget,
-                        session_id,
-                        question_id,
-                        reservation,
-                        completed=completed,
-                    )
 
     async def _finish(
         self,

@@ -503,6 +503,32 @@ async def test_retention_zero_deletes_the_session_after_streaming():
     deps.usage.delete_session.assert_awaited_once_with(deps.session.id)
 
 
+async def test_retention_zero_deletes_when_client_leaves_after_first_sse_event():
+    service, deps = _service()
+    response = await service.ask(
+        _principal(_widget(privacy=WidgetPrivacy(retention_days=0))),
+        question="q",
+        session_id=None,
+        client_ip=None,
+    )
+    answer = response.answer
+    assert not isinstance(answer, str)
+    stream = await assistant_protocol.to_conversation_response(
+        response, stream=True, on_close=answer.aclose
+    )
+    await anext(stream.body_iterator)
+    deps.usage.delete_session.assert_not_awaited()
+
+    assert stream.background is not None
+    await stream.background()
+    deps.usage.delete_session.assert_awaited_once_with(deps.session.id)
+    deps.budget.settle.assert_not_awaited()
+
+    # A response finalizer can also close the SSE generator; settlement is once.
+    await stream.body_iterator.aclose()
+    deps.usage.delete_session.assert_awaited_once()
+
+
 async def test_start_failure_releases_reservation_and_preserves_original_error():
     service, deps = _service()
     error = NotFoundException("Assistant deleted")
