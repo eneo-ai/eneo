@@ -1,6 +1,6 @@
 {
   "name": "@eneo/widget-loader",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "eneoWidgetChannel": "v1",
   "private": true,
   "type": "module",

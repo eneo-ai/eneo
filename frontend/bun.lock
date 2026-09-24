@@ -157,7 +157,7 @@
     },
     "packages/widget-loader": {
       "name": "@eneo/widget-loader",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "devDependencies": {
         "@eslint/js": "^9.39.4",
         "@vitest/browser": "4.1.11",
