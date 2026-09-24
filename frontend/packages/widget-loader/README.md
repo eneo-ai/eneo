@@ -30,15 +30,16 @@ Optional `data-*` attributes (also usable as attributes on a hand-written
 | `auto-open`    | `true`                                            | closed                      |
 | `launcher`     | `none` (host renders its own)                     | built-in button             |
 | `label`        | accessible name of the button                     | "Öppna chatt" / "Open chat" |
-| `frame-title`  | accessible name of the iframe                     | "Chatt" / "Chat"            |
+| `frame-title`  | accessible name of the iframe                     | the widget's title          |
 | `prefetch`     | `true` (load before first open)                   | lazy                        |
 | `preview`      | preview token from the admin page (draft widgets) | none                        |
 
 The launcher takes the widget's primary colour (and its dark-mode colour when
-the page is dark) as soon as the embed page reports ready. On screens
-narrower than 640px the panel fills the viewport; the launcher then stays on
-top of it as the close button until the embed page has reported ready and
-the chat's own header can close the panel. CSS custom
+the page is dark) as soon as the embed page reports ready. On viewports up to
+40em wide or 31.25em high (a phone, a laptop zoomed to 200 %) the panel fills
+the viewport; the launcher then stays on top of it as the close button until
+the embed page has reported ready and the chat's own header can close the
+panel. CSS custom
 properties on the element or `:root` override it: `--eneo-widget-color`,
 `--eneo-widget-on-color`, `--eneo-widget-radius`, `--eneo-widget-z`,
 `--eneo-widget-offset-x`, `--eneo-widget-offset-y`. Parts: `launcher`, `panel`.
@@ -72,11 +73,24 @@ embed page but not used by the chat yet, so no page context reaches Eneo.
 ## Accessibility
 
 The launcher is a `<button aria-haspopup="dialog" aria-expanded aria-controls>`
-with a visible focus ring; the iframe has a title. Opening moves focus into the
-iframe, `Escape` inside it closes the panel and focus returns to the launcher
-(or to the element that was focused when the launcher is hidden). Below 640 px
-the panel is full-screen and follows the visual viewport so the on-screen
-keyboard never covers the composer. Transitions respect `prefers-reduced-motion`.
+with a visible focus ring. The panel is a `role="dialog"` named "Chatt" /
+"Chat", and the iframe is named after the widget's title, which the embed page
+reports with `ready` (`frame-title` overrides it). Opening moves focus into the
+iframe; `Escape` inside it closes the panel and focus returns to the launcher
+(or to the element that was focused when the launcher is hidden). `Escape` on
+the host page closes the panel too and leaves focus where it is, so an open
+panel never keeps covering what the visitor moved on to (WCAG 2.4.11).
+
+Beside the page the panel is a non-modal dialog. Full screen it is modal:
+`aria-modal="true"`, and every host element around `<eneo-widget>` up to
+`<body>` is made `inert` until the panel closes or the element is removed;
+elements the page made inert itself are left alone. It also follows the visual
+viewport so the on-screen keyboard never covers the composer. Transitions
+respect `prefers-reduced-motion`.
+
+Hosts should also offer a visible "Chat with us" link early on the page that
+calls `Eneo('open')`: the launcher is appended to `<body>`, so keyboard and
+screen reader users otherwise reach it last.
 
 ## Development
 

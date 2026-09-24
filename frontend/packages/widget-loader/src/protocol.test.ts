@@ -13,6 +13,14 @@ describe("parseFrameMessage", () => {
     expect(
       parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "ready", payload: { colors } })
     ).toEqual({ type: "ready", payload: { colors } });
+    expect(
+      parseFrameMessage({
+        ns: BRIDGE_NAMESPACE,
+        v: 1,
+        type: "ready",
+        payload: { colors, title: "  Fråga kommunen " }
+      })
+    ).toEqual({ type: "ready", payload: { colors, title: "Fråga kommunen" } });
     expect(parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "close" })).toEqual({
       type: "close"
     });
@@ -41,6 +49,21 @@ describe("parseFrameMessage", () => {
         payload: { colors: { light: { accent: "red", on_accent: "#fff" } } }
       })
     ).toEqual({ type: "ready" });
+    // A title must be text; a blank one is no title, a long one is cut.
+    expect(
+      parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "ready", payload: { title: 42 } })
+    ).toEqual({ type: "ready" });
+    expect(
+      parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "ready", payload: { title: "  " } })
+    ).toEqual({ type: "ready" });
+    expect(
+      parseFrameMessage({
+        ns: BRIDGE_NAMESPACE,
+        v: 1,
+        type: "ready",
+        payload: { title: "x".repeat(300) }
+      })
+    ).toEqual({ type: "ready", payload: { title: "x".repeat(200) } });
     expect(parseFrameMessage({ ns: "other", v: 1, type: "ready" })).toBeNull();
     expect(
       parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: BRIDGE_VERSION + 1, type: "ready" })

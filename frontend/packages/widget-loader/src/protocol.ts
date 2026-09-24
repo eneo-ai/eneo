@@ -40,9 +40,12 @@ export function parseLauncherColors(raw: unknown): LauncherColors | null {
   return light && dark ? { light, dark } : null;
 }
 
+/** What the embed page reports once it is up; either part may be missing. */
+export type ReadyPayload = { colors?: LauncherColors; title?: string };
+
 /** Messages the embed page sends to the loader. */
 export type FrameMessage =
-  | { type: "ready"; payload?: { colors: LauncherColors } }
+  | { type: "ready"; payload?: ReadyPayload }
   | { type: "close" }
   | { type: "conversation_started" }
   | { type: "unread"; payload: { count: number } };
@@ -66,8 +69,13 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
   const payload = (raw.payload ?? {}) as Record<string, unknown>;
   switch (raw.type) {
     case "ready": {
+      const ready: ReadyPayload = {};
       const colors = parseLauncherColors(payload.colors);
-      return colors ? { type: "ready", payload: { colors } } : { type: "ready" };
+      if (colors) ready.colors = colors;
+      // The widget's title names the frame for screen readers; plain text only.
+      const title = typeof payload.title === "string" ? payload.title.trim().slice(0, 200) : "";
+      if (title) ready.title = title;
+      return colors || title ? { type: "ready", payload: ready } : { type: "ready" };
     }
     case "close":
       return { type: "close" };

@@ -1,4 +1,11 @@
 /**
+ * Where the panel fills the screen as a modal dialog: a phone, or a viewport
+ * too short for the floating panel, such as a laptop zoomed to 200 %. In `em`
+ * so a larger default font size switches earlier.
+ */
+export const FULL_SCREEN_MEDIA = "(max-width: 40em), (max-height: 31.25em)";
+
+/**
  * Styles for the launcher and panel inside the shadow root. Host pages tune
  * them through the `--eneo-widget-*` custom properties documented in the
  * README; nothing here leaks into or depends on the host's stylesheet.
@@ -87,7 +94,7 @@ export const styles = `
 @media (prefers-color-scheme: dark) {
   :host(:not([color-scheme="light"])) .panel { background: #111111; }
 }
-@media (max-width: 639px) {
+@media ${FULL_SCREEN_MEDIA} {
   .panel {
     position: fixed;
     inset: 0;

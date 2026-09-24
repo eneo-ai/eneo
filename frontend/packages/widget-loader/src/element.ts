@@ -6,7 +6,7 @@ import {
   type LauncherColors,
   type PageContext
 } from "./protocol";
-import { styles } from "./styles";
+import { FULL_SCREEN_MEDIA, styles } from "./styles";
 
 export type WidgetEventName = "ready" | "open" | "close" | "conversation_started" | "unread";
 
@@ -15,7 +15,6 @@ export const EVENT_PREFIX = "eneo-widget:";
 /** Dispatched on the document when an element connects; the API replays queued commands on it. */
 export const CONNECTED_EVENT = "eneo-widget:connected";
 
-const MOBILE_BREAKPOINT = 640;
 const CLOSE_ANIMATION_MS = 180;
 // No `allow-forms`: the embed page submits nothing, its composer is a button
 // and fetch, and its CSP already pins form-action to itself.
@@ -81,11 +80,15 @@ export class EneoWidgetElement extends HTMLElement {
   private unread = 0;
   private context: PageContext | null = null;
   private colors: LauncherColors | null = null;
+  private widgetTitle: string | null = null;
   private lastFocus: Element | null = null;
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Host elements made inert while the panel covers the page. */
+  private inerted: Element[] = [];
 
   private readonly onMessage = (event: MessageEvent) => this.receive(event);
-  private readonly onViewport = () => this.fitViewport();
+  private readonly onViewport = () => this.layout();
+  private readonly onHostKeydown = (event: KeyboardEvent) => this.hostKeydown(event);
   private readonly onSchemeChange = () => {
     this.paintLauncher();
     this.sendTheme();
@@ -133,6 +136,16 @@ export class EneoWidgetElement extends HTMLElement {
     return this.isOpen;
   }
 
+  /** Whether an open panel fills the screen; see `FULL_SCREEN_MEDIA`. */
+  get fullScreen(): boolean {
+    return typeof matchMedia === "function" && matchMedia(FULL_SCREEN_MEDIA).matches;
+  }
+
+  /** The frame's accessible name: the host's `frame-title`, else the widget's own title. */
+  get frameTitle(): string {
+    return this.getAttribute("frame-title") || this.widgetTitle || this.labels.title;
+  }
+
   get frameUrl(): string {
     const prefix = this.lang === "en" ? "/en" : "";
     const origin = encodeURIComponent(location.origin);
@@ -156,13 +169,21 @@ export class EneoWidgetElement extends HTMLElement {
       this.schemeQuery.addEventListener("change", this.onSchemeChange);
     }
     document.dispatchEvent(new CustomEvent(CONNECTED_EVENT, { detail: this }));
-    if (this.getAttribute("auto-open") === "true") this.openPanel();
+    if (this.isOpen) {
+      // Moved within the page while open: listen and hold the page again.
+      this.watch();
+      this.layout();
+    } else if (this.getAttribute("auto-open") === "true") {
+      this.openPanel();
+    }
   }
 
   disconnectedCallback(): void {
     window.removeEventListener("message", this.onMessage);
     this.schemeQuery?.removeEventListener("change", this.onSchemeChange);
-    this.unwatchViewport();
+    this.unwatch();
+    // Never leave the host page inert behind a panel that is gone.
+    this.releasePage();
   }
 
   private sendTheme(): void {
@@ -184,10 +205,11 @@ export class EneoWidgetElement extends HTMLElement {
     root.innerHTML =
       `<style>${styles}</style>` +
       `<button type="button" part="launcher" class="launcher" aria-haspopup="dialog" aria-expanded="false" aria-controls="eneo-panel">${CHAT_ICON}${CLOSE_ICON}<span class="badge" aria-hidden="true" hidden></span></button>` +
-      `<div id="eneo-panel" part="panel" class="panel" hidden></div>`;
+      `<div id="eneo-panel" part="panel" class="panel" role="dialog" hidden></div>`;
     this.launcher = root.querySelector(".launcher") as HTMLButtonElement;
     this.panel = root.querySelector(".panel") as HTMLDivElement;
     this.badge = root.querySelector(".badge") as HTMLSpanElement;
+    this.panel.setAttribute("aria-label", this.labels.title);
     this.launcher.addEventListener("click", () => this.toggle());
     this.syncLauncher();
   }
@@ -224,7 +246,7 @@ export class EneoWidgetElement extends HTMLElement {
   private ensureFrame(): HTMLIFrameElement {
     if (this.frame) return this.frame;
     const frame = document.createElement("iframe");
-    frame.title = this.getAttribute("frame-title") || this.labels.title;
+    frame.title = this.frameTitle;
     frame.setAttribute("sandbox", SANDBOX);
     frame.setAttribute("referrerpolicy", "strict-origin");
     frame.setAttribute("allow", "clipboard-write");
@@ -260,8 +282,8 @@ export class EneoWidgetElement extends HTMLElement {
     this.panel.hidden = false;
     if (reducedMotion()) this.panel.classList.add("open");
     else requestAnimationFrame(() => this.panel.classList.add("open"));
-    this.watchViewport();
-    this.fitViewport();
+    this.watch();
+    this.layout();
     if (this.frameReady) {
       this.send({ type: "open" });
       frame.focus();
@@ -271,7 +293,8 @@ export class EneoWidgetElement extends HTMLElement {
     this.emit("open");
   }
 
-  closePanel(): void {
+  /** `restoreFocus = false` leaves focus where it is, e.g. on the host page the visitor moved to. */
+  closePanel(restoreFocus = true): void {
     if (!this.isOpen) return;
     this.isOpen = false;
     this.pendingOpen = false;
@@ -285,9 +308,23 @@ export class EneoWidgetElement extends HTMLElement {
     };
     if (reducedMotion()) hide();
     else this.closeTimer = setTimeout(hide, CLOSE_ANIMATION_MS);
-    this.unwatchViewport();
-    this.restoreFocus();
+    this.unwatch();
+    // Releases the page before focus goes back to it.
+    this.layout();
+    if (restoreFocus) this.restoreFocus();
+    else this.lastFocus = null;
     this.emit("close");
+  }
+
+  /**
+   * Escape on the host page closes the panel too, so an open panel never
+   * keeps covering what the visitor moved on to (WCAG 2.4.11); focus stays
+   * there. Inside the chat the embed page handles Escape itself.
+   */
+  private hostKeydown(event: KeyboardEvent): void {
+    if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+    const active = document.activeElement;
+    this.closePanel(!active || active === document.body || active === this);
   }
 
   private restoreFocus(): void {
@@ -317,6 +354,8 @@ export class EneoWidgetElement extends HTMLElement {
         // of the full-screen panel as the close control until the chat is up.
         this.setAttribute("ready", "");
         this.colors = message.payload?.colors ?? null;
+        this.widgetTitle = message.payload?.title ?? null;
+        this.frame.title = this.frameTitle;
         this.paintLauncher();
         this.sendTheme();
         if (this.context) this.send({ type: "context", payload: this.context });
@@ -359,29 +398,56 @@ export class EneoWidgetElement extends HTMLElement {
     );
   }
 
-  private watchViewport(): void {
+  /** Listeners that only matter while the panel is open. */
+  private watch(): void {
+    window.addEventListener("keydown", this.onHostKeydown);
     window.addEventListener("resize", this.onViewport);
     window.visualViewport?.addEventListener("resize", this.onViewport);
     window.visualViewport?.addEventListener("scroll", this.onViewport);
   }
 
-  private unwatchViewport(): void {
+  private unwatch(): void {
+    window.removeEventListener("keydown", this.onHostKeydown);
     window.removeEventListener("resize", this.onViewport);
     window.visualViewport?.removeEventListener("resize", this.onViewport);
     window.visualViewport?.removeEventListener("scroll", this.onViewport);
-    this.panel.style.height = "";
-    this.panel.style.top = "";
   }
 
-  /** Full-screen mode follows the visual viewport so the on-screen keyboard never covers the composer. */
-  private fitViewport(): void {
+  /**
+   * Full screen, the panel follows the visual viewport so the on-screen
+   * keyboard never covers the composer, and it is a modal dialog: the rest of
+   * the page is inert, so neither Tab nor a screen reader's cursor can reach
+   * content hidden behind it. Beside the page it stays a non-modal dialog.
+   */
+  private layout(): void {
     const viewport = window.visualViewport;
-    if (!this.isOpen || !viewport || window.innerWidth >= MOBILE_BREAKPOINT) {
-      this.panel.style.height = "";
-      this.panel.style.top = "";
-      return;
+    const full = this.isOpen && this.fullScreen;
+    this.panel.style.height = full && viewport ? `${viewport.height}px` : "";
+    this.panel.style.top = full && viewport ? `${viewport.offsetTop}px` : "";
+    if (full) {
+      this.panel.setAttribute("aria-modal", "true");
+      this.inertAround(this);
+    } else {
+      this.panel.removeAttribute("aria-modal");
+      this.releasePage();
     }
-    this.panel.style.height = `${viewport.height}px`;
-    this.panel.style.top = `${viewport.offsetTop}px`;
+  }
+
+  /** Everything around `node` up to `<body>`; elements the page made inert stay its own. */
+  private inertAround(node: Element): void {
+    const parent = node.parentElement;
+    if (!parent || node === document.body) return;
+    for (const sibling of Array.from(parent.children)) {
+      if (sibling !== node && !sibling.hasAttribute("inert")) {
+        sibling.setAttribute("inert", "");
+        this.inerted.push(sibling);
+      }
+    }
+    this.inertAround(parent);
+  }
+
+  private releasePage(): void {
+    for (const element of this.inerted) element.removeAttribute("inert");
+    this.inerted = [];
   }
 }

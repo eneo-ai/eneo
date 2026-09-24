@@ -50,6 +50,21 @@ function deliver(
   );
 }
 
+/** Run `body` at the given viewport and put the test page back afterwards. */
+async function atViewport(
+  width: number,
+  height: number,
+  body: () => void | Promise<void>
+): Promise<void> {
+  const before = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(width, height);
+  try {
+    await body();
+  } finally {
+    await page.viewport(before.width, before.height);
+  }
+}
+
 const frameMessage = (type: string, payload?: unknown) => ({
   ns: BRIDGE_NAMESPACE,
   v: 1,
@@ -64,7 +79,9 @@ describe("launcher", () => {
     expect(launcher.getAttribute("aria-haspopup")).toBe("dialog");
     expect(launcher.getAttribute("aria-expanded")).toBe("false");
     expect(launcher.getAttribute("aria-controls")).toBe("eneo-panel");
-    expect(element.shadowRoot!.getElementById("eneo-panel")).not.toBeNull();
+    const panel = element.shadowRoot!.getElementById("eneo-panel")!;
+    expect(panel.getAttribute("role")).toBe("dialog");
+    expect(panel.getAttribute("aria-label")).toBe("Chatt");
     expect(launcher.getAttribute("aria-label")).toBe("Öppna chatt");
     expect(frameOf(element)).toBeNull();
   });
@@ -168,19 +185,152 @@ describe("opening", () => {
     expect(element.open).toBe(true);
     expect(frameOf(element)).not.toBeNull();
   });
+
+  it("names the frame after the widget once the embed page reports its title", () => {
+    const element = mount();
+    element.openPanel();
+    expect(frameOf(element)!.title).toBe("Chatt");
+    deliver(element, frameMessage("ready", { title: "Fråga kommunen" }));
+    expect(frameOf(element)!.title).toBe("Fråga kommunen");
+
+    const named = mount({ "frame-title": "Chatta med oss" });
+    named.openPanel();
+    deliver(named, frameMessage("ready", { title: "Fråga kommunen" }));
+    expect(frameOf(named)!.title).toBe("Chatta med oss");
+  });
+});
+
+describe("Escape on the host page", () => {
+  // Composed like a real key press, so it leaves the launcher's shadow root.
+  const escape = (target: EventTarget) =>
+    target.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+        composed: true
+      })
+    );
+
+  it("closes the panel and leaves focus where the visitor moved to", async () => {
+    // A floating panel: the page beside it stays reachable.
+    await atViewport(1024, 768, () => {
+      const link = document.createElement("a");
+      link.href = "#kontakt";
+      link.textContent = "Kontakt";
+      document.body.appendChild(link);
+      const element = mount();
+      element.openPanel();
+      link.focus();
+
+      escape(link);
+      expect(element.open).toBe(false);
+      expect(launcherOf(element).getAttribute("aria-expanded")).toBe("false");
+      expect(document.activeElement).toBe(link);
+    });
+  });
+
+  it("closes from the launcher and keeps focus on it", () => {
+    const element = mount();
+    launcherOf(element).focus();
+    launcherOf(element).click();
+    escape(launcherOf(element));
+    expect(element.open).toBe(false);
+    expect(element.shadowRoot!.activeElement).toBe(launcherOf(element));
+  });
+
+  it("leaves an Escape the page handled itself alone", async () => {
+    await atViewport(1024, 768, () => {
+      const menu = document.createElement("button");
+      menu.addEventListener("keydown", (event) => event.preventDefault());
+      document.body.appendChild(menu);
+      const element = mount();
+      element.openPanel();
+      menu.focus();
+      escape(menu);
+      expect(element.open).toBe(true);
+    });
+  });
+
+  it("only listens while the panel is open", () => {
+    const element = mount();
+    const close = vi.spyOn(element, "closePanel");
+    escape(document.body);
+    expect(close).not.toHaveBeenCalled();
+    element.openPanel();
+    element.closePanel();
+    close.mockClear();
+    escape(document.body);
+    expect(close).not.toHaveBeenCalled();
+  });
 });
 
 describe("small screens", () => {
-  /** Run `body` at the given viewport and put the test page back afterwards. */
-  async function atViewport(width: number, height: number, body: () => void): Promise<void> {
-    const before = { width: window.innerWidth, height: window.innerHeight };
-    await page.viewport(width, height);
-    try {
-      body();
-    } finally {
-      await page.viewport(before.width, before.height);
-    }
+  /** Host content around the widget, plus an element the page itself made inert. */
+  function hostPage(): { main: HTMLElement; aside: HTMLElement } {
+    const main = document.createElement("main");
+    main.innerHTML = "<button>Sök</button>";
+    const aside = document.createElement("aside");
+    aside.setAttribute("inert", "");
+    document.body.append(main, aside);
+    return { main, aside };
   }
+
+  function panelOf(element: EneoWidgetElement): HTMLElement {
+    return element.shadowRoot!.getElementById("eneo-panel")!;
+  }
+
+  it("is a modal dialog with the page behind it inert, until it closes", async () => {
+    await atViewport(375, 812, () => {
+      const { main, aside } = hostPage();
+      const element = mount();
+      element.openPanel();
+      expect(panelOf(element).getAttribute("aria-modal")).toBe("true");
+      expect(main.hasAttribute("inert")).toBe(true);
+
+      element.closePanel();
+      expect(panelOf(element).hasAttribute("aria-modal")).toBe(false);
+      expect(main.hasAttribute("inert")).toBe(false);
+      // What the page made inert itself stays that way.
+      expect(aside.hasAttribute("inert")).toBe(true);
+    });
+  });
+
+  it("fills a short viewport too, such as a laptop zoomed to 200 %", async () => {
+    await atViewport(1280, 360, () => {
+      const { main } = hostPage();
+      const element = mount();
+      element.openPanel();
+      expect(element.fullScreen).toBe(true);
+      expect(panelOf(element).getAttribute("aria-modal")).toBe("true");
+      expect(main.hasAttribute("inert")).toBe(true);
+      expect(getComputedStyle(panelOf(element)).position).toBe("fixed");
+    });
+  });
+
+  it("becomes modal when the viewport shrinks while open", async () => {
+    const { main } = hostPage();
+    const element = mount();
+    await atViewport(1024, 768, async () => {
+      element.openPanel();
+      expect(panelOf(element).hasAttribute("aria-modal")).toBe(false);
+      expect(main.hasAttribute("inert")).toBe(false);
+      await page.viewport(375, 812);
+      await vi.waitFor(() => expect(main.hasAttribute("inert")).toBe(true));
+      expect(panelOf(element).getAttribute("aria-modal")).toBe("true");
+    });
+  });
+
+  it("never leaves the page inert when the widget is removed while open", async () => {
+    await atViewport(375, 812, () => {
+      const { main } = hostPage();
+      const element = mount();
+      element.openPanel();
+      expect(main.hasAttribute("inert")).toBe(true);
+      element.remove();
+      expect(main.hasAttribute("inert")).toBe(false);
+    });
+  });
 
   function hitAtCenter(element: EneoWidgetElement, target: Element): Element | null {
     const box = target.getBoundingClientRect();
@@ -192,7 +342,7 @@ describe("small screens", () => {
       const element = mount();
       element.openPanel();
       const launcher = launcherOf(element);
-      // A paused notice or a page that never loads sends no ready message:
+      // A page that is still loading, or never loads, sends no ready message:
       // the launcher is visible, labelled as the close control and is what
       // a tap on it reaches, not the panel covering the page.
       expect(getComputedStyle(launcher).display).not.toBe("none");
@@ -209,14 +359,18 @@ describe("small screens", () => {
     });
   });
 
-  it("leaves the launcher beside the panel on wide screens whatever the frame reports", async () => {
+  it("leaves the launcher beside a non-modal panel on wide screens whatever the frame reports", async () => {
     await atViewport(1024, 768, () => {
+      const { main } = hostPage();
       const element = mount();
       element.openPanel();
       const launcher = launcherOf(element);
       expect(getComputedStyle(launcher).display).not.toBe("none");
       deliver(element, frameMessage("ready"));
       expect(getComputedStyle(launcher).display).not.toBe("none");
+      // The page stays usable beside the chat.
+      expect(panelOf(element).hasAttribute("aria-modal")).toBe(false);
+      expect(main.hasAttribute("inert")).toBe(false);
     });
   });
 });
