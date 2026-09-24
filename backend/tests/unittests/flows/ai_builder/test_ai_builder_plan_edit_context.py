@@ -30,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
     _validate_target_step_model,
     build_plan_revision_prompt_block,
+    names_same_edit_target,
     resolve_plan_edit_context,
     validate_scoped_plan_revision,
 )
@@ -1214,6 +1215,73 @@ def test_a_named_part_of_the_step_reaches_the_revision_directive(
     free_text = directive(None)
     assert "The user chose" not in free_text
     assert "wins over that choice" not in free_text
+
+
+def test_an_edit_target_is_the_same_step_by_identity_not_by_representation() -> None:
+    """A context restored after a reload drops the presentation fields and may
+    name both refs; it is still the step the original named. Another step,
+    another plan, or a context that names no ref is not."""
+    plan_id = UUID("00000000-0000-0000-0000-000000000001")
+    resolved = ResolvedAIBuilderEditContext(
+        request=AIBuilderPlanEditContext(
+            scope="step",
+            plan_id=plan_id,
+            target_plan_step_ref="step_a",
+            target_existing_step_ref="existing_step_1",
+        ),
+        scope="step",
+        target_plan_step_ref="step_a",
+        target_existing_step_ref="existing_step_1",
+        plan_id=plan_id,
+    )
+
+    def plan_context(**refs: object) -> AIBuilderPlanEditContext:
+        return AIBuilderPlanEditContext.model_validate(
+            {"scope": "step", "plan_id": str(plan_id), **refs}
+        )
+
+    # The original as the user sent it, with presentation fields.
+    assert names_same_edit_target(
+        plan_context(
+            target_plan_step_ref="step_a",
+            target_step_name="Sammanfatta",
+            target_step_number=1,
+        ),
+        resolved,
+    )
+    # Restored: no presentation fields, or the existing-step ref alone.
+    assert names_same_edit_target(plan_context(target_plan_step_ref="step_a"), resolved)
+    assert names_same_edit_target(
+        plan_context(target_existing_step_ref="existing_step_1"), resolved
+    )
+    # Another step, or refs that disagree, or another plan: not the same target.
+    assert not names_same_edit_target(
+        plan_context(target_plan_step_ref="step_b"), resolved
+    )
+    assert not names_same_edit_target(
+        plan_context(
+            target_plan_step_ref="step_a", target_existing_step_ref="existing_step_2"
+        ),
+        resolved,
+    )
+    assert not names_same_edit_target(
+        AIBuilderPlanEditContext(
+            scope="step",
+            plan_id=UUID("00000000-0000-0000-0000-000000000002"),
+            target_plan_step_ref="step_a",
+        ),
+        resolved,
+    )
+    # A saved step is the same target only as the same saved step.
+    saved = AIBuilderSavedFlowStepEditContext(flow_step_id=uuid4())
+    as_saved = ResolvedAIBuilderEditContext(request=saved, scope="step")
+    assert names_same_edit_target(
+        AIBuilderSavedFlowStepEditContext(flow_step_id=saved.flow_step_id), as_saved
+    )
+    assert not names_same_edit_target(
+        AIBuilderSavedFlowStepEditContext(flow_step_id=uuid4()), as_saved
+    )
+    assert not names_same_edit_target(saved, resolved)
 
 
 def test_revision_prompt_names_the_target_step_and_prior_refs() -> None:

@@ -151,6 +151,36 @@ class ResolvedAIBuilderEditContext:
 ScopedEditContext: TypeAlias = AIBuilderPlanEditContext | ResolvedAIBuilderEditContext
 
 
+def names_same_edit_target(
+    recorded: AIBuilderEditContext, current: ResolvedAIBuilderEditContext
+) -> bool:
+    """Whether a recorded turn's edit context names the step this turn resolved.
+
+    Identity, not representation: a context restored after a reload drops the
+    presentation fields and may carry both the plan ref and the existing-step
+    ref where the original named one. Every ref the recorded context names must
+    match the resolved step; it must name at least one, and the same plan.
+    """
+
+    request = current.request
+    if isinstance(recorded, AIBuilderSavedFlowStepEditContext):
+        return (
+            isinstance(request, AIBuilderSavedFlowStepEditContext)
+            and recorded.flow_step_id == request.flow_step_id
+        )
+    if recorded.scope != "step" or recorded.plan_id != current.plan_id:
+        return False
+    named = [
+        (ref, resolved)
+        for ref, resolved in (
+            (recorded.target_plan_step_ref, current.target_plan_step_ref),
+            (recorded.target_existing_step_ref, current.target_existing_step_ref),
+        )
+        if ref is not None
+    ]
+    return bool(named) and all(ref == resolved for ref, resolved in named)
+
+
 class EditOperationPermissions(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 

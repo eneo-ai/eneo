@@ -58,6 +58,7 @@ from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
     AIBuilderStepEditIntent,
+    names_same_edit_target,
     resolve_plan_edit_context,
 )
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
@@ -384,7 +385,8 @@ class AIBuilderPlanner:
             if (
                 edit_intent is None
                 and prepared_metadata.answers_builder
-                and latest_user_edit_context(conversation) == plan_edit_context.request
+                and (recorded := latest_user_edit_context(conversation)) is not None
+                and names_same_edit_target(recorded, plan_edit_context)
             ):
                 edit_intent = latest_user_edit_intent(conversation)
             plan_edit_context = replace(plan_edit_context, edit_intent=edit_intent)
