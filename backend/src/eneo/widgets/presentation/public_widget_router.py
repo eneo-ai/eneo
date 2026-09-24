@@ -27,7 +27,6 @@ from eneo.widgets.domain.exceptions import (
 from eneo.widgets.domain.visitor import WidgetPrincipal
 from eneo.widgets.domain.widget import (
     BotProtection,
-    WidgetStatus,
     frame_ancestor_sources,
 )
 from eneo.widgets.presentation.public_widget_models import (
@@ -55,7 +54,8 @@ def _etag(config: WidgetPublicConfig) -> str:
     "/{public_id}/config/",
     response_model=WidgetPublicConfig,
     description=(
-        "Display configuration for an active widget. Cacheable for a minute;"
+        "Display configuration for an active widget. Not cacheable so a pause"
+        " or unpublish reaches new page views immediately;"
         " never includes origins, internal ids or model names."
     ),
     responses={
@@ -81,13 +81,9 @@ async def get_widget_config(request: Request, response: Response, widget: Active
     )
     etag = _etag(config)
     response.headers["ETag"] = etag
-    # A draft or paused widget is only ever admitted by a preview token; its
-    # configuration must not land in a shared cache for anonymous callers.
-    response.headers["Cache-Control"] = (
-        "public, max-age=60"
-        if widget.status == WidgetStatus.ACTIVE
-        else "private, no-store"
-    )
+    # Every page view must see a pause or unpublish immediately. Preview
+    # configuration must not land in a shared cache either.
+    response.headers["Cache-Control"] = "no-store"
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=dict(response.headers))
     return config

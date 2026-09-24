@@ -34,7 +34,6 @@ function config(theme: Partial<WidgetPublicConfig["theme"]>, language = "en"): W
   return { public_id: "wgt_x", name: "Chatten", theme, language } as WidgetPublicConfig;
 }
 
-// Answers are cached per widget, so every test asks for its own.
 const request = (publicId: string, fetch: typeof globalThis.fetch = globalThis.fetch) =>
   GET({ params: { publicId }, fetch } as never);
 
@@ -47,18 +46,6 @@ const hangingFetch: typeof globalThis.fetch = (_input, init) =>
       reject(new DOMException("aborted", "AbortError"))
     );
   });
-
-/** A backend that answers after `ms`, unless the request is aborted first. */
-const slowFetch =
-  (ms: number): typeof globalThis.fetch =>
-  (_input, init) =>
-    new Promise((resolve, reject) => {
-      const timer = setTimeout(() => resolve(new Response()), ms);
-      init?.signal?.addEventListener("abort", () => {
-        clearTimeout(timer);
-        reject(new DOMException("aborted", "AbortError"));
-      });
-    });
 
 afterEach(() => {
   vi.useRealTimers();
@@ -73,7 +60,7 @@ describe("GET /widget/settings/[publicId]", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
-    expect(response.headers.get("cache-control")).toBe("public, max-age=60");
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(backend.publicIds.at(-1)).toBe("wgt_saved");
     const body = await response.json();
     expect(body).toEqual({
@@ -110,38 +97,20 @@ describe("GET /widget/settings/[publicId]", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
-  test("asks the backend once a minute per widget, however many pages load it", async () => {
-    vi.useFakeTimers();
+  test("a new page view sees a pause and a resume without stale settings", async () => {
     backend.config = async () => config({ primary_color: "#1F4E79" });
+    expect((await request("wgt_lifecycle")).status).toBe(200);
 
-    const first = await Promise.all([request("wgt_busy"), request("wgt_busy")]);
-    vi.advanceTimersByTime(20_000);
-    const later = await request("wgt_busy");
-
-    expect(asked("wgt_busy")).toBe(1);
-    expect(first.map((response) => response.status)).toEqual([200, 200]);
-    expect(await later.json()).toEqual(await first[0].json());
-    // A browser never keeps it longer than the server still does.
-    expect(later.headers.get("cache-control")).toBe("public, max-age=40");
-
-    vi.advanceTimersByTime(41_000);
-    await request("wgt_busy");
-    expect(asked("wgt_busy")).toBe(2);
-  });
-
-  test("remembers an unknown widget only for a few seconds", async () => {
-    vi.useFakeTimers();
     backend.config = async () => {
       throw new EneoError("Not found", "SERVER", 404, 0);
     };
+    expect((await request("wgt_lifecycle")).status).toBe(404);
 
-    expect((await request("wgt_gone")).status).toBe(404);
-    expect((await request("wgt_gone")).status).toBe(404);
-    expect(asked("wgt_gone")).toBe(1);
-
-    vi.advanceTimersByTime(6_000);
-    await request("wgt_gone");
-    expect(asked("wgt_gone")).toBe(2);
+    backend.config = async () => config({ position: "bottom-left" });
+    const resumed = await request("wgt_lifecycle");
+    expect(resumed.status).toBe(200);
+    expect((await resumed.json()).position).toBe("bottom-left");
+    expect(asked("wgt_lifecycle")).toBe(3);
   });
 
   test("answers a slow backend before the loader stops waiting after 3 s", async () => {
@@ -149,41 +118,16 @@ describe("GET /widget/settings/[publicId]", () => {
     backend.config = (fetch) => fetch("http://backend/api/v1/widgets/wgt_slow/config/");
 
     const pending = request("wgt_slow", hangingFetch);
-    await vi.advanceTimersByTimeAsync(2_999);
+    await vi.advanceTimersByTimeAsync(2_500);
     const response = await pending;
 
     expect(response.status).toBe(503);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("cache-control")).toBe("no-store");
 
-    // A backend that never answers is given up on, and the next page view asks again.
-    await vi.advanceTimersByTimeAsync(10_000);
+    // A backend that never answers is aborted, and the next page view asks again.
     backend.config = async () => config({});
     expect((await request("wgt_slow")).status).toBe(200);
     expect(asked("wgt_slow")).toBe(2);
-  });
-
-  test("keeps a slow answer that came too late for one page view for the next ones", async () => {
-    vi.useFakeTimers();
-    backend.config = async (fetch) => {
-      await fetch("http://backend/api/v1/widgets/wgt_late/config/");
-      return config({ position: "bottom-left" });
-    };
-
-    const first = request("wgt_late", slowFetch(2_700));
-    await vi.advanceTimersByTimeAsync(2_400);
-    // A page view that joins the request in flight still gets its own time.
-    const joined = request("wgt_late");
-    await vi.advanceTimersByTimeAsync(100);
-    expect((await first).status).toBe(503);
-
-    await vi.advanceTimersByTimeAsync(200);
-    const answered = await joined;
-    expect(answered.status).toBe(200);
-    expect((await answered.json()).position).toBe("bottom-left");
-
-    const later = await request("wgt_late");
-    expect(later.status).toBe(200);
-    expect(asked("wgt_late")).toBe(1);
   });
 });

@@ -15,23 +15,8 @@ const HEADERS = {
   "x-content-type-options": "nosniff"
 };
 
-// The loader stops waiting after three seconds; answer before it does. The
-// backend request itself runs on, so a slow answer still fills the cache.
+// The loader stops waiting after three seconds; answer before it does.
 const RESPONSE_DEADLINE_MS = 2500;
-const BACKEND_TIMEOUT_MS = 10_000;
-const FOUND_TTL_MS = 60_000;
-const MISSING_TTL_MS = 5_000;
-const MAX_CACHED = 1000;
-
-type Cached = {
-  /** Infinity while the backend answers, so requests that arrive meanwhile share it. */
-  expires: number;
-  settings: Promise<WidgetLauncherSettings | null>;
-};
-
-// Every page view on every host site asks, so one backend request per
-// widget and minute serves them all.
-const cache = new Map<string, Cached>();
 
 class BackendTimeout extends Error {}
 
@@ -40,7 +25,7 @@ async function fetchSettings(
   fetch: typeof globalThis.fetch
 ): Promise<WidgetLauncherSettings | null> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), RESPONSE_DEADLINE_MS);
   const client = createWidgetClient({
     baseUrl: getBackendUrl() ?? "",
     publicId,
@@ -57,50 +42,22 @@ async function fetchSettings(
   }
 }
 
-function cachedSettings(publicId: string, fetch: typeof globalThis.fetch): Cached {
-  const hit = cache.get(publicId);
-  if (hit && hit.expires > Date.now()) return hit;
-  cache.delete(publicId);
-  if (cache.size >= MAX_CACHED) cache.delete(cache.keys().next().value!);
-  const entry: Cached = { expires: Infinity, settings: fetchSettings(publicId, fetch) };
-  cache.set(publicId, entry);
-  entry.settings.then(
-    (settings) => {
-      entry.expires = Date.now() + (settings ? FOUND_TTL_MS : MISSING_TTL_MS);
-    },
-    () => {
-      if (cache.get(publicId) === entry) cache.delete(publicId);
-    }
-  );
-  return entry;
-}
-
 /**
  * `GET /widget/settings/wgt_…` — the language, position and colours the
- * loader needs before it shows the launcher. Cached as briefly as the
- * widget's configuration; a paused, draft or unknown widget answers 404 and
- * the loader hides the launcher. A slow or failed request still falls back to
- * the element's attributes.
+ * loader needs before it shows the launcher. Every new page view checks the
+ * current state, so a pause or unpublish hides the launcher immediately.
+ * A slow or failed request still falls back to the element's attributes.
  */
 export const GET: RequestHandler = async ({ params, fetch }) => {
-  const entry = cachedSettings(params.publicId, fetch);
   let settings: WidgetLauncherSettings | null;
-  let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
-    settings = await Promise.race([
-      entry.settings,
-      new Promise<never>((_resolve, reject) => {
-        deadline = setTimeout(() => reject(new BackendTimeout()), RESPONSE_DEADLINE_MS);
-      })
-    ]);
+    settings = await fetchSettings(params.publicId, fetch);
   } catch (error) {
     if (!(error instanceof BackendTimeout)) throw error;
     return new Response(null, {
       status: 503,
       headers: { ...HEADERS, "cache-control": "no-store", "retry-after": "5" }
     });
-  } finally {
-    clearTimeout(deadline);
   }
   if (!settings) {
     return new Response(null, {
@@ -108,13 +65,7 @@ export const GET: RequestHandler = async ({ params, fetch }) => {
       headers: { ...HEADERS, "cache-control": "no-store" }
     });
   }
-  // A browser keeps it only as long as the server still does, so an edit
-  // reaches sites within a minute.
-  const left = Math.min(entry.expires - Date.now(), FOUND_TTL_MS);
   return json(settings, {
-    headers: {
-      ...HEADERS,
-      "cache-control": `public, max-age=${Math.max(0, Math.ceil(left / 1000))}`
-    }
+    headers: { ...HEADERS, "cache-control": "no-store" }
   });
 };

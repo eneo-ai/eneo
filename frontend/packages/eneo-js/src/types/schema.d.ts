@@ -3403,7 +3403,7 @@ export interface paths {
     };
     /**
      * Get Widget Config
-     * @description Display configuration for an active widget. Cacheable for a minute; never includes origins, internal ids or model names.
+     * @description Display configuration for an active widget. Not cacheable so a pause or unpublish reaches new page views immediately; never includes origins, internal ids or model names.
      */
     get: operations["get_widget_config_api_v1_widgets__public_id__config__get"];
     put?: never;

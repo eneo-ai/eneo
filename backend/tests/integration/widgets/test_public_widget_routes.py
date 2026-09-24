@@ -87,7 +87,7 @@ async def test_public_config_only_for_active_widgets(
     assert "allowed_origins" not in body
     assert body["frame_ancestors"] == ["https://www.kommun.se"]
     assert body["single_turn"] is False
-    assert resp.headers["cache-control"] == "public, max-age=60"
+    assert resp.headers["cache-control"] == "no-store"
     etag = resp.headers["etag"]
 
     resp = await client.get(
@@ -149,7 +149,7 @@ async def test_preview_token_admits_draft_widgets(client, admin_token):
     assert resp.status_code == 200, resp.text
     assert resp.json()["public_id"] == public_id
     # A draft's configuration must never be stored by a shared cache.
-    assert resp.headers["cache-control"] == "private, no-store"
+    assert resp.headers["cache-control"] == "no-store"
 
     # Preview tokens are minted for one sitting and never rotate: a leaked
     # one cannot renew itself.
@@ -337,7 +337,7 @@ async def test_unpublished_assistant_takes_its_widget_offline(
     public_id = active_widget["public_id"]
     resp = await client.get(f"/api/v1/widgets/{public_id}/config/")
     assert resp.status_code == 200
-    assert resp.headers["cache-control"] == "public, max-age=60"
+    assert resp.headers["cache-control"] == "no-store"
 
     resp = await client.post(
         f"/api/v1/assistants/{active_widget['target_id']}/publish/",
