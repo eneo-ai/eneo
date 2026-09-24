@@ -111,7 +111,8 @@ function pageData(items: ReturnType<typeof source>[]) {
     eneo: api,
     mcpSettings: { items },
     securityClassifications: { security_classifications: [] },
-    providers: []
+    providers: [],
+    bundled: { items: [] }
   } as never;
 }
 function show(items: ReturnType<typeof source>[] = []) {

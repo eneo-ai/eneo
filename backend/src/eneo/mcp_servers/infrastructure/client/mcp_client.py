@@ -25,7 +25,11 @@ from mcp.types import (
 from eneo.main.config import get_settings
 from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
 from eneo.main.logging import get_logger
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, is_builtin_provider
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCPServer,
+    is_builtin_provider,
+    is_bundled_server,
+)
 
 logger = get_logger(__name__)
 
@@ -701,6 +705,13 @@ class MCPClient:
             # the token is a per-request scoped access token minted by the
             # ask path, never a stored credential.
             token = self.auth_credentials.get("token")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+        elif is_bundled_server(self.mcp_server.http_auth_type):
+            # The bundled tool runtime shares one deployment secret with the
+            # backend; it is read from settings on every connect so rotating
+            # it needs only a redeploy of both sides.
+            token = get_settings().tool_runtime_token
             if token:
                 headers["Authorization"] = f"Bearer {token}"
         elif self.mcp_server.http_auth_type == "api_key_header":

@@ -6166,6 +6166,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/mcp-servers/bundled/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Bundled Tools
+     * @description List the bundled tool runtime's servers and whether they are added.
+     */
+    get: operations["get_bundled_tools_api_v1_mcp_servers_bundled__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/bundled/{tool}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Bundled Mcp Server
+     * @description Add a server of the bundled tool runtime to this tenant (admin only). Its URL and credential come from the deployment; its tools are then reviewed and enabled like any other server's.
+     */
+    post: operations["create_bundled_mcp_server_api_v1_mcp_servers_bundled__tool___post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/mcp-servers/{id}/": {
     parameters: {
       query?: never;
@@ -11195,6 +11235,25 @@ export interface components {
       failed: number;
       /** Errors */
       errors: components["schemas"]["WebsiteBulkActionError"][];
+    };
+    /** BundledToolList */
+    BundledToolList: {
+      /** Items */
+      items: components["schemas"]["BundledToolPublic"][];
+      /** Count */
+      readonly count: number;
+    };
+    /**
+     * BundledToolPublic
+     * @description A server the bundled tool runtime offers to this tenant.
+     */
+    BundledToolPublic: {
+      /** Tool */
+      tool: string;
+      /** Available */
+      available: boolean;
+      /** Mcp Server Id */
+      mcp_server_id?: string | null;
     };
     /**
      * CallbackRequest
@@ -43448,6 +43507,102 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_bundled_tools_api_v1_mcp_servers_bundled__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BundledToolList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_bundled_mcp_server_api_v1_mcp_servers_bundled__tool___post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tool: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServerCreateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

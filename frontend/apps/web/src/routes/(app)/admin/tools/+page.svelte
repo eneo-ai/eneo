@@ -9,6 +9,7 @@
   import { writable } from "svelte/store";
   import { untrack } from "svelte";
   import {
+    Calculator,
     Plus,
     Wrench,
     CircleCheck,
@@ -48,6 +49,11 @@
   let notice = $state("");
   let reviewing = $state<string | null>(null);
   const servers = $derived(data.mcpSettings.items ?? []);
+  // Bundled runtime servers the deployment offers and this tenant has not added yet.
+  const bundledToAdd = $derived(
+    (data.bundled.items ?? []).filter((tool) => tool.available && !tool.mcp_server_id)
+  );
+  let addingBundled = $state(false);
   let showFunctionServers = $state(false);
   const external = $derived(
     servers.filter(
@@ -82,6 +88,21 @@
       if (payload.purpose !== undefined && !payload.activate) notice = m.tools_saved_inactive();
     }
     await refresh();
+  }
+
+  async function addBundled(tool: string) {
+    addingBundled = true;
+    error = "";
+    notice = "";
+    try {
+      await data.eneo.mcpServers.createBundled({ tool });
+      notice = m.tools_bundled_added();
+      await refresh();
+    } catch (e) {
+      error = getErrorMessage(e) || m.tools_bundled_add_failed();
+    } finally {
+      addingBundled = false;
+    }
   }
 
   async function remove(id: string) {
@@ -299,6 +320,8 @@
     <Page.Tab id="mcp-servers">
       <div class="py-6 pr-6">
         <p class="text-secondary mb-4 max-w-[72ch] text-sm">{m.tools_connections_description()}</p>
+        {#if error}<p class="text-negative-default mb-4" role="alert">{error}</p>{/if}
+        {#if notice}<p class="text-secondary mb-4 text-sm" role="status">{notice}</p>{/if}
         <MCPServersTable mcpServers={external}>
           {#snippet filters()}
             <Field.Field orientation="horizontal" class="w-auto gap-4">
@@ -309,6 +332,15 @@
             </Field.Field>
           {/snippet}
           {#snippet actions()}
+            {#each bundledToAdd as bundled (bundled.tool)}
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={addingBundled}
+                onclick={() => addBundled(bundled.tool)}
+                ><Calculator class="size-4" />{m.tools_add_bundled_compute()}</Button
+              >
+            {/each}
             <Button size="sm" onclick={() => configure("general")}
               ><Wrench class="size-4" />{m.add_mcp_server()}</Button
             >

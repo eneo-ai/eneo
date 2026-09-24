@@ -58,6 +58,20 @@ def is_builtin_provider(http_auth_type: str | None) -> bool:
     return http_auth_type == INTERNAL_AUTH_TYPE
 
 
+# A bundled server runs in the optional tool runtime shipped with Eneo (an
+# isolated container, never the backend process). It is an ordinary general
+# server otherwise: its URL is derived from ``tool_runtime_url`` when an admin
+# adds it, and the bearer comes from ``tool_runtime_token`` at connect time,
+# so no credential is ever stored on the row. Only the bundled-server preset
+# creates such rows; the generic create and update API cannot.
+BUNDLED_AUTH_TYPE = "bundled"
+BUNDLED_TOOLS: tuple[str, ...] = ("compute",)
+
+
+def is_bundled_server(http_auth_type: str | None) -> bool:
+    return http_auth_type == BUNDLED_AUTH_TYPE
+
+
 @dataclass(frozen=True)
 class MCPServerBackingModel:
     """Read-only projection of the catalog model a built-in provider runs on."""

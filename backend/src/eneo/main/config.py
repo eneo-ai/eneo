@@ -491,6 +491,13 @@ class Settings(BaseSettings):
     # backend process/container. Dev default is the local server.
     internal_mcp_base_url: str = "http://localhost:8123"
 
+    # Optional bundled tool runtime (tool-runtime/ in this repository): an
+    # isolated container that serves Eneo-maintained MCP tools. When the URL
+    # is set, Admin > Tools offers to add its servers; the token is the shared
+    # bearer both sides are configured with and is never stored in the DB.
+    tool_runtime_url: Optional[str] = None
+    tool_runtime_token: Optional[str] = None
+
     # Relevance floor (cosine similarity, -1..1) for inject-mode knowledge
     # retrieval: chunks scoring below it are dropped instead of injected.
     # Off by default because useful values depend on the embedding model in

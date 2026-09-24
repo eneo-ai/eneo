@@ -26,6 +26,8 @@ from eneo.main.exceptions import BadRequestException
 from eneo.main.models import NOT_PROVIDED, NotProvided, PaginatedResponse
 from eneo.mcp_servers.application.mcp_server_service import ToolChange
 from eneo.mcp_servers.presentation.models import (
+    BundledToolList,
+    BundledToolPublic,
     CapabilityActivationResponse,
     MCPConnectionStatus,
     MCPServerCreate,
@@ -278,6 +280,81 @@ async def update_tenant_tool_enabled(
     )
 
     return assembler.from_domain_to_model(tool)
+
+
+# ============================================================================
+# Bundled tool runtime (MUST come before /{id}/ routes)
+# ============================================================================
+
+
+@router.get(
+    "/bundled/",
+    response_model=BundledToolList,
+    responses=responses.get_responses([403]),
+)
+async def get_bundled_tools(container: Container = _WITH_USER):
+    """List the bundled tool runtime's servers and whether they are added."""
+    service = container.mcp_server_service()
+    tools = await service.list_bundled_tools()
+    return BundledToolList(
+        items=[
+            BundledToolPublic(
+                tool=tool.tool,
+                available=tool.available,
+                mcp_server_id=tool.mcp_server_id,
+            )
+            for tool in tools
+        ]
+    )
+
+
+@router.post(
+    "/bundled/{tool}/",
+    description=(
+        "Add a server of the bundled tool runtime to this tenant (admin only). "
+        "Its URL and credential come from the deployment; its tools are then "
+        "reviewed and enabled like any other server's."
+    ),
+    response_model=MCPServerCreateResponse,
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+async def create_bundled_mcp_server(
+    tool: str,
+    container: Container = _WITH_USER,
+    _user_for_creation: None = Depends(require_user_for_creation),
+):
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_assembler()
+
+    result = await service.create_bundled_mcp_server(tool)
+    if not result.connection.success:
+        raise BadRequestException(
+            result.connection.error_message
+            or "Failed to connect to the bundled tool runtime"
+        )
+
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SERVER_CREATED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=result.server.id,
+        description=f"Added bundled MCP server '{result.server.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user, target=result.server, extra={"bundled_tool": tool}
+        ),
+    )
+
+    return MCPServerCreateResponse(
+        server=assembler.from_domain_to_model(result.server),
+        connection=MCPConnectionStatus(
+            success=result.connection.success,
+            tools_discovered=result.connection.tools_discovered,
+            error_message=result.connection.error_message,
+        ),
+    )
 
 
 # ============================================================================

@@ -119,7 +119,9 @@
   let name = $state("");
   let description = $state("");
   let http_url = $state("");
-  let http_auth_type = $state<"none" | "bearer" | "api_key_header" | "internal">("none");
+  let http_auth_type = $state<"none" | "bearer" | "api_key_header" | "internal" | "bundled">(
+    "none"
+  );
   let documentation_url = $state("");
   let security_classification = $state<SecurityClassification | null>(null);
   let forward_identity = $state(false);
@@ -179,6 +181,8 @@
 
   const builtinAvailable = $derived(hasBuiltinProvider(selectedPurpose));
   const isBuiltin = $derived(builtinAvailable && http_auth_type === "internal");
+  // A bundled tool runtime server: its connection comes from the deployment.
+  const isBundled = $derived(http_auth_type === "bundled");
   const submitLabel = $derived(
     !isEditMode && isBuiltin && activateOnSave
       ? m.tools_save_activate()
@@ -271,7 +275,8 @@
       description = mcpServer.description || "";
       http_url = mcpServer.http_url || "";
       http_auth_type =
-        (mcpServer.http_auth_type as "none" | "bearer" | "api_key_header" | "internal") || "none";
+        (mcpServer.http_auth_type as
+          "none" | "bearer" | "api_key_header" | "internal" | "bundled") || "none";
       source = mcpServer.http_auth_type === "internal" ? "builtin" : "external";
       imageModelId = mcpServer.image_model_id ?? "";
       documentation_url = mcpServer.documentation_url || "";
@@ -799,7 +804,9 @@
               </fieldset>
             {/if}
 
-            {#if !isBuiltin}
+            {#if isBundled}
+              <p class="text-muted text-xs leading-relaxed">{m.mcp_bundled_hint()}</p>
+            {:else if !isBuiltin}
               <fieldset class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3">
                 <legend
                   class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
@@ -1000,8 +1007,8 @@
                 />
               </div>
 
-              <!-- The backend forces identity forwarding off for built-in providers. -->
-              {#if !isBuiltin}
+              <!-- The backend forces identity forwarding off for built-in and bundled servers. -->
+              {#if !isBuiltin && !isBundled}
                 <div class="mt-4">
                   <label for="mcp-forward_identity" class="flex items-start gap-2.5">
                     <input

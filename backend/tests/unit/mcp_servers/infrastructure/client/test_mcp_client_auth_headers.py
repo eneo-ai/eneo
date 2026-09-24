@@ -1,8 +1,10 @@
-"""Auth header construction for MCPClient (bearer and api_key_header)."""
+"""Auth header construction for MCPClient (bearer, api_key_header, bundled)."""
 
 from uuid import uuid4
 
+from eneo.main.config import get_settings
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+from eneo.mcp_servers.infrastructure.client import mcp_client as client_module
 from eneo.mcp_servers.infrastructure.client.mcp_client import MCPClient
 
 
@@ -42,3 +44,17 @@ class TestAuthHeaderConstruction:
         headers = await client._build_auth_headers()
 
         assert headers == {}
+
+    async def test_bundled_server_uses_the_deployment_token(self, monkeypatch):
+        settings = get_settings().model_copy(
+            update={"tool_runtime_token": "runtime-secret"}
+        )
+        monkeypatch.setattr(client_module, "get_settings", lambda: settings)
+        server = _make_server()
+        server.http_auth_type = "bundled"
+        # Stored credentials are ignored: the row never carries one.
+        client = MCPClient(server, {"token": "stored"})
+
+        headers = await client._build_auth_headers()
+
+        assert headers == {"Authorization": "Bearer runtime-secret"}

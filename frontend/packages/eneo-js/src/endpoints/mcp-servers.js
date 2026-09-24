@@ -250,6 +250,34 @@ export function initMCPServers(client) {
     },
 
     /**
+     * List the bundled tool runtime's servers and whether this tenant added them (admin only).
+     * @throws {EneoError}
+     * */
+    listBundled: async () => {
+      const res = await client.fetch("/api/v1/mcp-servers/bundled/", {
+        method: "get"
+      });
+      return res;
+    },
+
+    /**
+     * Add a server of the bundled tool runtime to this tenant (admin only). Its URL and
+     * credential come from the deployment.
+     * @param {Object} params
+     * @param {string} params.tool The bundled tool, e.g. "compute"
+     * @throws {EneoError}
+     * */
+    createBundled: async ({ tool }) => {
+      const res = await client.fetch("/api/v1/mcp-servers/bundled/{tool}/", {
+        method: "post",
+        params: {
+          path: { tool }
+        }
+      });
+      return res;
+    },
+
+    /**
      * Deactivate a capability provider (admin only).
      * @param {Object} params
      * @param {string} params.id The MCP server ID

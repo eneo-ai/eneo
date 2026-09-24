@@ -6,7 +6,15 @@
 
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Globe, KeyRound, Shield, ShieldCheck, Sparkles, UsersRound } from "@lucide/svelte";
+  import {
+    Globe,
+    KeyRound,
+    Package,
+    Shield,
+    ShieldCheck,
+    Sparkles,
+    UsersRound
+  } from "@lucide/svelte";
   import { getCapability } from "$lib/features/mcp/capabilities";
 
   type Props = {
@@ -49,6 +57,13 @@
         return {
           label: "API key",
           icon: KeyRound,
+          classes: "bg-accent-dimmer text-accent-stronger"
+        };
+      case "bundled":
+        // Bundled tool runtime: shipped with Eneo, credential from the deployment.
+        return {
+          label: m.mcp_auth_bundled(),
+          icon: Package,
           classes: "bg-accent-dimmer text-accent-stronger"
         };
       case "internal":

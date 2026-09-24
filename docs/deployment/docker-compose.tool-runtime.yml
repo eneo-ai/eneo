@@ -1,0 +1,47 @@
+# Optional bundled tool runtime: isolated MCP tools (restricted JavaScript
+# compute) that Eneo registers through Admin -> Tools.
+#
+# Compose this file with docker-compose.yml and enable the tool-runtime profile
+# after setting ENEO_TOOL_RUNTIME_IMAGE (an immutable digest) and
+# TOOL_RUNTIME_TOKEN in .env, plus TOOL_RUNTIME_URL/TOOL_RUNTIME_TOKEN in
+# env_backend.env. See TOOL_RUNTIME.md.
+
+services:
+  backend:
+    networks:
+      - tool_runtime_net
+
+  worker:
+    networks:
+      - tool_runtime_net
+
+  tool-runtime:
+    profiles:
+      - tool-runtime
+    image: ${ENEO_TOOL_RUNTIME_IMAGE:?Set the verified ghcr.io/eneo-ai/eneo-tool-runtime digest in .env}
+    restart: unless-stopped
+    environment:
+      TOOL_RUNTIME_TOKEN: ${TOOL_RUNTIME_TOKEN:?Set TOOL_RUNTIME_TOKEN in .env (openssl rand -hex 32)}
+      MAX_CONCURRENCY: ${TOOL_RUNTIME_MAX_CONCURRENCY:-16}
+    # Only the backend can reach the runtime, and the runtime can reach nothing:
+    # the network is internal, so guest code has no route out even if it
+    # escaped the WebAssembly engine and the sandbox child.
+    networks:
+      - tool_runtime_net
+    expose:
+      - "3010"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 2
+
+networks:
+  tool_runtime_net:
+    driver: bridge
+    internal: true

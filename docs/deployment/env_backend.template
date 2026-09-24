@@ -435,6 +435,13 @@ EXPORT_MAX_AGE_HOURS=24
 # runs on a different port or behind an internal service URL.
 # INTERNAL_MCP_BASE_URL=http://localhost:8000
 
+# Optional bundled tool runtime (docker-compose.tool-runtime.yml, see
+# TOOL_RUNTIME.md). When both are set, Admin > Tools offers to add its
+# servers (restricted JavaScript compute). The token must equal
+# TOOL_RUNTIME_TOKEN in .env; it is never stored in the database.
+# TOOL_RUNTIME_URL=http://tool-runtime:3010
+# TOOL_RUNTIME_TOKEN=
+
 # ============================================================================
 # FEATURE FLAGS
 # ============================================================================

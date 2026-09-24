@@ -62,6 +62,10 @@ cd /workspace/frontend
 rm -rf node_modules packages/*/node_modules apps/*/node_modules
 bun run setup
 
+# Bundled tool runtime (separate Bun project, own lockfile)
+cd /workspace/tool-runtime
+bun install --frozen-lockfile
+
 # Vitest browser mode needs Chromium and its Linux libraries.
 cd /workspace/frontend/apps/web
 bun x playwright install --with-deps chromium chromium-headless-shell

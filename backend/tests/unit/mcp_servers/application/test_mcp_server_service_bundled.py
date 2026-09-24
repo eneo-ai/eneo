@@ -1,0 +1,192 @@
+"""Unit tests for bundled tool runtime servers in MCPServerService.
+
+A bundled server is an ordinary general server whose URL and credential come
+from the deployment (tool_runtime_url / tool_runtime_token). Only the preset
+creates one, at most once per tenant and tool, and its connection cannot be
+edited afterwards.
+"""
+
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
+
+import pytest
+
+from eneo.main.config import get_settings
+from eneo.main.exceptions import (
+    BadRequestException,
+    NameCollisionException,
+    NotFoundException,
+)
+from eneo.mcp_servers.application import mcp_server_service as service_module
+from eneo.mcp_servers.application.mcp_server_service import (
+    ConnectionResult,
+    MCPServerService,
+)
+from eneo.mcp_servers.domain.entities.mcp_server import BUNDLED_AUTH_TYPE, MCPServer
+
+RUNTIME_URL = "http://tool-runtime:3010"
+
+
+@pytest.fixture
+def runtime_configured(monkeypatch):
+    settings = get_settings().model_copy(
+        update={"tool_runtime_url": RUNTIME_URL, "tool_runtime_token": "t" * 40}
+    )
+    monkeypatch.setattr(service_module, "get_settings", lambda: settings)
+
+
+def _make_service(monkeypatch):
+    repo = AsyncMock()
+    repo.query.return_value = []
+    repo.add.side_effect = lambda server: server
+    user = MagicMock()
+    user.tenant_id = uuid4()
+    user.permissions = ["admin"]
+    service = MCPServerService(
+        mcp_server_repo=repo, mcp_server_tool_repo=AsyncMock(), user=user
+    )
+    monkeypatch.setattr(
+        service,
+        "_test_connection_and_discover_tools",
+        AsyncMock(return_value=([], ConnectionResult(success=True))),
+    )
+    return service, repo, user
+
+
+def _bundled_server(tenant_id, tool="compute"):
+    return MCPServer(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        name="Compute",
+        http_url=f"{RUNTIME_URL}/mcp/{tool}",
+        http_auth_type=BUNDLED_AUTH_TYPE,
+    )
+
+
+class TestCreateBundled:
+    async def test_creates_a_general_server_without_credentials(
+        self, monkeypatch, runtime_configured
+    ):
+        service, _, _ = _make_service(monkeypatch)
+
+        result = await service.create_bundled_mcp_server("compute")
+
+        server = result.server
+        assert server.http_url == f"{RUNTIME_URL}/mcp/compute"
+        assert server.http_auth_type == BUNDLED_AUTH_TYPE
+        assert server.http_auth_config_schema is None
+        assert server.purpose == "general"
+        assert server.is_enabled is True
+        assert server.forward_identity is False
+
+    async def test_requires_a_configured_runtime(self, monkeypatch):
+        settings = get_settings().model_copy(
+            update={"tool_runtime_url": RUNTIME_URL, "tool_runtime_token": None}
+        )
+        monkeypatch.setattr(service_module, "get_settings", lambda: settings)
+        service, repo, _ = _make_service(monkeypatch)
+
+        with pytest.raises(BadRequestException):
+            await service.create_bundled_mcp_server("compute")
+        repo.add.assert_not_called()
+
+    async def test_rejects_unknown_tools(self, monkeypatch, runtime_configured):
+        service, _, _ = _make_service(monkeypatch)
+
+        with pytest.raises(NotFoundException):
+            await service.create_bundled_mcp_server("shell")
+
+    async def test_is_added_at_most_once_per_tenant(
+        self, monkeypatch, runtime_configured
+    ):
+        service, repo, user = _make_service(monkeypatch)
+        repo.query.return_value = [_bundled_server(user.tenant_id)]
+
+        with pytest.raises(NameCollisionException):
+            await service.create_bundled_mcp_server("compute")
+        repo.add.assert_not_called()
+
+    async def test_generic_create_cannot_attach_credentials(
+        self, monkeypatch, runtime_configured
+    ):
+        service, _, _ = _make_service(monkeypatch)
+
+        with pytest.raises(BadRequestException):
+            await service.create_mcp_server(
+                name="Compute",
+                http_url=f"{RUNTIME_URL}/mcp/compute",
+                http_auth_type=BUNDLED_AUTH_TYPE,
+                http_auth_config_schema={"token": "stolen"},
+            )
+
+
+class TestListBundled:
+    async def test_reports_availability_and_the_added_server(
+        self, monkeypatch, runtime_configured
+    ):
+        service, repo, user = _make_service(monkeypatch)
+        added = _bundled_server(user.tenant_id)
+        repo.query.return_value = [added]
+
+        [compute] = await service.list_bundled_tools()
+
+        assert compute.tool == "compute"
+        assert compute.available is True
+        assert compute.mcp_server_id == added.id
+
+    async def test_unconfigured_runtime_is_unavailable(self, monkeypatch):
+        settings = get_settings().model_copy(update={"tool_runtime_url": None})
+        monkeypatch.setattr(service_module, "get_settings", lambda: settings)
+        service, _, _ = _make_service(monkeypatch)
+
+        [compute] = await service.list_bundled_tools()
+
+        assert compute.available is False
+        assert compute.mcp_server_id is None
+
+
+class TestUpdateBundled:
+    @pytest.mark.parametrize(
+        "change",
+        [
+            {"http_url": "http://elsewhere.example/mcp"},
+            {"http_auth_type": "bearer", "http_auth_config_schema": {"token": "x"}},
+            {"http_auth_config_schema": {"token": "x"}},
+            {"forward_identity": True},
+            {"purpose": "web_search"},
+        ],
+    )
+    async def test_connection_is_managed_by_the_deployment(
+        self, monkeypatch, runtime_configured, change
+    ):
+        service, repo, user = _make_service(monkeypatch)
+        repo.one.return_value = _bundled_server(user.tenant_id)
+
+        with pytest.raises(BadRequestException):
+            await service.update_mcp_server(repo.one.return_value.id, **change)
+
+    async def test_name_and_description_stay_editable(
+        self, monkeypatch, runtime_configured
+    ):
+        service, repo, user = _make_service(monkeypatch)
+        server = _bundled_server(user.tenant_id)
+        repo.one.return_value = server
+        repo.update.side_effect = lambda s: s
+
+        result = await service.update_mcp_server(
+            server.id, name="Beräkning", description="Exakta beräkningar"
+        )
+
+        assert result.server.name == "Beräkning"
+        assert result.server.http_auth_type == BUNDLED_AUTH_TYPE
+
+    async def test_an_external_server_cannot_become_bundled(
+        self, monkeypatch, runtime_configured
+    ):
+        service, repo, user = _make_service(monkeypatch)
+        server = _bundled_server(user.tenant_id)
+        server.http_auth_type = "none"
+        repo.one.return_value = server
+
+        with pytest.raises(BadRequestException):
+            await service.update_mcp_server(server.id, http_auth_type=BUNDLED_AUTH_TYPE)

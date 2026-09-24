@@ -34,6 +34,8 @@ class MCPServerAudienceGroupPublic(BaseModel):
 # "internal" marks a built-in provider: the endpoint is one of Eneo's own
 # loopback MCP servers, authenticated with a per-request scoped token, and
 # ``image_model_id`` names the catalog image model it calls.
+# A fifth, read-only type, "bundled", marks a server of the bundled tool
+# runtime; only POST /mcp-servers/bundled/{tool}/ creates it.
 MCPServerAuthType = Literal["none", "bearer", "api_key_header", "internal"]
 
 
@@ -62,7 +64,7 @@ class MCPServerPublic(BaseModel):
     name: str
     description: Optional[str]
     http_url: str
-    http_auth_type: str  # "none", "bearer", "api_key_header", "internal"
+    http_auth_type: str  # "none", "bearer", "api_key_header", "internal", "bundled"
     purpose: MCPServerPurpose = "general"
     # Built-in providers only: the image model the loopback tool calls.
     image_model_id: Optional[UUID] = None
@@ -90,6 +92,20 @@ class MCPServerPublic(BaseModel):
 
 
 class MCPServerList(BaseListModel[MCPServerPublic]):
+    pass
+
+
+class BundledToolPublic(BaseModel):
+    """A server the bundled tool runtime offers to this tenant."""
+
+    tool: str
+    # False when the deployment has no tool runtime configured.
+    available: bool
+    # Set once an admin has added it; the server is then managed like any other.
+    mcp_server_id: Optional[UUID] = None
+
+
+class BundledToolList(BaseListModel[BundledToolPublic]):
     pass
 
 

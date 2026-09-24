@@ -20,6 +20,8 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     AUDIENCE_GROUPS,
     AUDIENCES,
     BUILTIN_PROVIDER_PURPOSES,
+    BUNDLED_AUTH_TYPE,
+    BUNDLED_TOOLS,
     DEFAULT_AUDIENCE_PRIORITY,
     GENERAL_PURPOSE,
     INTERNAL_AUTH_TYPE,
@@ -30,6 +32,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCPServerAudienceGroup,
     MCPServerTool,
     is_builtin_provider,
+    is_bundled_server,
     is_capability_purpose,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
@@ -140,6 +143,28 @@ class MCPServerCreateResult:
     server: MCPServer
     connection: ConnectionResult
     deactivated_server_ids: list[UUID] | None = None
+
+
+@dataclass
+class BundledTool:
+    """A server the bundled tool runtime offers, as seen by one tenant."""
+
+    tool: str
+    # The deployment configures the runtime (URL and token are both set).
+    available: bool
+    # The tenant's row for it, once an admin has added it.
+    mcp_server_id: UUID | None = None
+
+
+# Initial name and description of a bundled server when an admin adds it;
+# both are ordinary editable fields afterwards.
+BUNDLED_TOOL_NAMES: dict[str, str] = {"compute": "Compute"}
+BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
+    "compute": (
+        "Runs JavaScript over JSON in an isolated sandbox for exact "
+        "calculations. No network, files or state between calls."
+    ),
+}
 
 
 @dataclass
@@ -273,6 +298,13 @@ class MCPServerService:
                     "authenticates it with a scoped token."
                 )
             return
+        if is_bundled_server(http_auth_type):
+            if config:
+                raise BadRequestException(
+                    "A bundled server carries no credentials; Eneo authenticates "
+                    "it with the deployment's tool runtime token."
+                )
+            return
 
         token = (config or {}).get("token")
         if token is not None:
@@ -313,6 +345,21 @@ class MCPServerService:
         ``INTERNAL_MCP_BASE_URL`` takes effect without saving the provider.
         """
         return loopback_endpoint(purpose)
+
+    @staticmethod
+    def bundled_tool_url(tool: str) -> str | None:
+        """Endpoint of ``tool`` in the bundled tool runtime, if one is configured."""
+        settings = get_settings()
+        if not settings.tool_runtime_url or not settings.tool_runtime_token:
+            return None
+        return f"{settings.tool_runtime_url.rstrip('/')}/mcp/{tool}"
+
+    @staticmethod
+    def _bundled_tool_of(server: MCPServer) -> str | None:
+        if not is_bundled_server(server.http_auth_type):
+            return None
+        tool = server.http_url.rstrip("/").rsplit("/", 1)[-1]
+        return tool if tool in BUNDLED_TOOLS else None
 
     async def _resolve_builtin_image_model(
         self, purpose: str, image_model_id: UUID | None
@@ -469,6 +516,12 @@ class MCPServerService:
             )
         elif not http_url:
             raise BadRequestException("http_url is required")
+        if is_bundled_server(http_auth_type):
+            # Compute and its successors need no identity; capability
+            # purposes for bundled servers are a later, explicit decision.
+            if purpose != GENERAL_PURPOSE:
+                raise BadRequestException("A bundled server is a general server")
+            forward_identity = False
         http_url = str(http_url)
         user_groups = await self._resolve_audience(
             purpose, audience, list(user_group_ids or [])
@@ -552,6 +605,55 @@ class MCPServerService:
         )
 
     @validate_permissions(Permission.ADMIN)
+    async def list_bundled_tools(self) -> list[BundledTool]:
+        """The bundled runtime's tools and whether this tenant has added them."""
+        added = {
+            tool: server
+            for server in await self.repo.query(
+                tenant_id=self.user.tenant_id, http_auth_type=BUNDLED_AUTH_TYPE
+            )
+            if (tool := self._bundled_tool_of(server)) is not None
+        }
+        return [
+            BundledTool(
+                tool=tool,
+                available=self.bundled_tool_url(tool) is not None,
+                mcp_server_id=added[tool].id if tool in added else None,
+            )
+            for tool in BUNDLED_TOOLS
+        ]
+
+    @validate_permissions(Permission.ADMIN)
+    async def create_bundled_mcp_server(self, tool: str) -> MCPServerCreateResult:
+        """Add one of the bundled tool runtime's servers to this tenant.
+
+        The row is an ordinary general server: it goes through the same
+        connection test, tool discovery and approval as any other, and spaces
+        enable it like any other. Only its URL and credential come from the
+        deployment instead of the admin.
+        """
+        if tool not in BUNDLED_TOOLS:
+            raise NotFoundException(f"Unknown bundled tool '{tool}'")
+        url = self.bundled_tool_url(tool)
+        if url is None:
+            raise BadRequestException(
+                "The bundled tool runtime is not configured for this deployment"
+            )
+        if any(
+            self._bundled_tool_of(server) == tool
+            for server in await self.repo.query(
+                tenant_id=self.user.tenant_id, http_auth_type=BUNDLED_AUTH_TYPE
+            )
+        ):
+            raise NameCollisionException(f"The bundled '{tool}' server already exists")
+        return await self.create_mcp_server(
+            name=BUNDLED_TOOL_NAMES[tool],
+            http_url=url,
+            http_auth_type=BUNDLED_AUTH_TYPE,
+            description=BUNDLED_TOOL_DESCRIPTIONS[tool],
+        )
+
+    @validate_permissions(Permission.ADMIN)
     async def update_mcp_server(
         self,
         mcp_server_id: UUID,
@@ -595,6 +697,26 @@ class MCPServerService:
         active is rejected by the activation index.
         """
         mcp_server = await self._get_server_for_tenant(mcp_server_id)
+        if is_bundled_server(http_auth_type) and not is_bundled_server(
+            mcp_server.http_auth_type
+        ):
+            raise BadRequestException(
+                "Bundled servers are added from the bundled tool runtime"
+            )
+        if is_bundled_server(mcp_server.http_auth_type) and (
+            (http_url is not None and str(http_url) != mcp_server.http_url)
+            or (
+                http_auth_type is not None
+                and http_auth_type != mcp_server.http_auth_type
+            )
+            or http_auth_config_schema is not None
+            or bool(forward_identity)
+            or (purpose is not None and purpose != mcp_server.purpose)
+        ):
+            raise BadRequestException(
+                "A bundled server's connection is managed by the deployment; "
+                "only its name, description, limits and tools can change"
+            )
         # Track whether connection-affecting fields are actually changing
         url_changed = http_url is not None and str(http_url) != mcp_server.http_url
         auth_type_changed = (
@@ -756,7 +878,11 @@ class MCPServerService:
             or credentials_changed
             or identity_mode_changed
         ):
-            if mcp_server.http_auth_type in ("none", INTERNAL_AUTH_TYPE):
+            if mcp_server.http_auth_type in (
+                "none",
+                INTERNAL_AUTH_TYPE,
+                BUNDLED_AUTH_TYPE,
+            ):
                 test_credentials = None
             elif http_auth_config_schema is not None:
                 # New credentials provided — use plaintext for test
