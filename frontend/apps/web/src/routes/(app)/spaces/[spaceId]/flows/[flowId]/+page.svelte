@@ -168,10 +168,10 @@
   // What the part the menu asks about is now, in the words the step list and
   // the Builder use, so the Builder can ask about that part.
   function stepPartNow(step: FlowStep, intent?: AIBuilderStepIntent): string | null {
-    if (intent === "underlag") {
+    if (intent === "input") {
       return stepReads[$update.steps.findIndex((candidate) => candidate.id === step.id)] ?? null;
     }
-    if (intent === "format") {
+    if (intent === "answer") {
       const answer = answerLabel(step.output_type, contractFieldCount(step.output_contract));
       return m.ai_builder_task_current_answers({ answer: inSentence(answer, getLocale()) });
     }

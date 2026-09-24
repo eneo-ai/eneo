@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
@@ -1166,6 +1167,53 @@ def test_a_revision_that_can_decline_is_told_when_to_use_it() -> None:
     assert "decline_flow_change" in declining
     assert "model is chosen in the picker" in declining
     assert "decline_flow_change" not in proposing
+
+
+@pytest.mark.parametrize("saved_step_revision", [True, False])
+def test_a_named_part_of_the_step_reaches_the_revision_directive(
+    saved_step_revision: bool,
+) -> None:
+    """The menu's choice is planning context, stated once, with the message's
+    precedence; a free-text request adds nothing."""
+    base = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=uuid4()),
+        scope="step",
+        target_existing_step_ref="existing_step_1",
+        target_step_name="Sammanfatta",
+        target_step_number=1,
+    )
+    prior = _edit_spec(
+        [
+            _edit_step(
+                "step_a",
+                "Sammanfatta",
+                output_type=OutputType.TEXT,
+                existing_step_ref="existing_step_1",
+            )
+        ]
+    )
+
+    def directive(intent: str | None) -> str:
+        block = build_plan_revision_prompt_block(
+            context=replace(base, edit_intent=intent),
+            prior_spec=prior,
+            saved_step_revision=saved_step_revision,
+        )
+        assert block is not None
+        return block
+
+    about_input = directive("input")
+    assert "what the target step reads" in about_input
+    # The reason this slice exists: prose delivers nothing, a reference does.
+    assert "{{step_1.output.text}}" in about_input
+    assert "Naming a step in the instruction's prose delivers nothing" in about_input
+    assert "The user's message wins over that choice" in about_input
+    assert "what the target step is told to do" in directive("instruction")
+    assert "the content of its answer" in directive("answer")
+
+    free_text = directive(None)
+    assert "The user chose" not in free_text
+    assert "wins over that choice" not in free_text
 
 
 def test_revision_prompt_names_the_target_step_and_prior_refs() -> None:

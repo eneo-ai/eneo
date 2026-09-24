@@ -29,6 +29,10 @@ if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
 
 PlanEditScope = Literal["whole_plan", "step"]
+# The part of one step a request is about, as the step editor's "Ändra med
+# AI" menu names it: what the step is told to do, what it reads, what it
+# answers with. A free-text request names no part.
+AIBuilderStepEditIntent = Literal["instruction", "input", "answer"]
 
 
 ScopedRevisionRejectionReason = Literal[
@@ -137,6 +141,8 @@ class ResolvedAIBuilderEditContext:
     target_step_number: int | None = None
     plan_id: UUID | None = None
     preserve_output_contract: bool = False
+    # Turn-local, like preserve_output_contract: the part this turn is about.
+    edit_intent: AIBuilderStepEditIntent | None = None
 
     def to_metadata(self) -> dict[str, object]:
         return self.request.to_metadata()
@@ -471,6 +477,34 @@ def validate_scoped_edit_proposal(
     return None
 
 
+# What the step editor's menu choice asks of the revision. The runtime hands
+# a step its underlag and resolves the references in its instruction; it does
+# not read the prose, so "reads" is answered by what the step receives.
+_STEP_EDIT_INTENT_RULES: dict[AIBuilderStepEditIntent, str] = {
+    "instruction": (
+        "- The user chose to change what the target step is told to do: its "
+        "instruction. Keep what it reads and what it answers with unless the "
+        "message asks for that too."
+    ),
+    "input": (
+        "- The user chose to change what the target step reads: its underlag. "
+        "Make the step receive the material they name - bind it through the "
+        "step's input, or reference it in the instruction with a template such "
+        "as {{step_1.output.text}}. Naming a step in the instruction's prose "
+        "delivers nothing to the model."
+    ),
+    "answer": (
+        "- The user chose to change what the target step answers with: the "
+        "content of its answer. Change the instruction, and the output fields "
+        "when the step answers in fields."
+    ),
+}
+_STEP_EDIT_INTENT_PRECEDENCE = (
+    "- The user's message wins over that choice: when it asks for a different "
+    "part of the step, do what the message asks."
+)
+
+
 def build_plan_revision_prompt_block(
     *,
     context: ScopedEditContext | None,
@@ -560,6 +594,15 @@ def build_plan_revision_prompt_block(
                 else "- Do not change runtime form fields. You may update the plan title or description only when needed to reflect the selected step change.",
             ]
         )
+        intent = (
+            context.edit_intent
+            if isinstance(context, ResolvedAIBuilderEditContext)
+            else None
+        )
+        if intent is not None:
+            lines.extend(
+                [_STEP_EDIT_INTENT_RULES[intent], _STEP_EDIT_INTENT_PRECEDENCE]
+            )
 
     if saved_step_revision:
         return "\n".join(lines)

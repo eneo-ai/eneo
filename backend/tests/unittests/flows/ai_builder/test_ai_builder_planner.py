@@ -1229,6 +1229,105 @@ async def test_requirements_confirmation_reuses_latest_saved_step_scope(
     assert resolve_context.await_args.kwargs["context"] == scoped_context
 
 
+@pytest.mark.parametrize(
+    ("sent_intent", "question_answer", "recorded_before", "expected"),
+    [
+        # The request names the part: it reaches the planner and the turn.
+        ("input", None, None, "input"),
+        # An answer to the Builder's question carries the part the turn that
+        # led to the question named.
+        (
+            None,
+            {
+                "kind": "structured_question_answer",
+                "question_id": "primary_runtime_input",
+                "selected_values": ["documents"],
+            },
+            "input",
+            "input",
+        ),
+        # A later free-text turn has moved on: it names no part.
+        (None, None, "input", None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_the_part_of_the_step_a_turn_is_about_reaches_the_planner(
+    monkeypatch: pytest.MonkeyPatch,
+    sent_intent: str | None,
+    question_answer: dict[str, object] | None,
+    recorded_before: str | None,
+    expected: str | None,
+) -> None:
+    planner = _make_planner()
+    step_id = uuid4()
+    scoped_context = AIBuilderSavedFlowStepEditContext(flow_step_id=step_id)
+    earlier: list[ConversationMessage] = (
+        [
+            ConversationMessage(
+                role="user",
+                content="Ändra underlaget för det här steget",
+                metadata={
+                    "edit_context": scoped_context.to_metadata(),
+                    "edit_intent": recorded_before,
+                },
+            ),
+            ConversationMessage(role="assistant", content="Vilket steg ska det läsa?"),
+        ]
+        if recorded_before is not None
+        else []
+    )
+    planner.repo.get_session.return_value = SimpleNamespace(
+        conversation=earlier,
+        status=SessionStatus.CHATTING,
+        planning_state_version=1,
+        latest_plan_id=None,
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        AsyncMock(
+            return_value=(
+                ResolvedAIBuilderEditContext(
+                    request=scoped_context,
+                    scope="step",
+                    target_existing_step_ref="existing_step_4",
+                    target_step_name="Sammanfatta",
+                    target_step_number=4,
+                ),
+                None,
+            )
+        ),
+    )
+    prepare = AsyncMock(side_effect=RuntimeError("accepted"))
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.prepare_planner_request",
+        prepare,
+    )
+
+    stream = planner.send_message(
+        session_id=uuid4(),
+        client_turn_id=_TEST_CLIENT_TURN_ID,
+        request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+        request_snapshot=_test_request_snapshot("Steg 1"),
+        message="Steg 1",
+        question_answer=question_answer,
+        edit_context=scoped_context,
+        edit_intent=sent_intent,
+        completion_model_route=_route(),
+        flow=cast(Any, SimpleNamespace(id=uuid4())),
+        capacity=ModelCapacity(4096, 1024),
+        budget_policy=_budget_policy(),
+    )
+    with pytest.raises(RuntimeError, match="accepted"):
+        async for _ in stream:
+            pass
+
+    prepared = prepare.await_args.args[0]
+    assert prepared.plan_edit_context.edit_intent == expected
+    accepted = planner.repo.get_session.return_value.conversation[-1]
+    assert accepted.role == "user"
+    assert (accepted.metadata or {}).get("edit_intent") == expected
+
+
 @pytest.mark.asyncio
 async def test_accepted_turn_persists_the_evidence_floor_it_was_held_to(
     monkeypatch: pytest.MonkeyPatch,

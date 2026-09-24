@@ -19,6 +19,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerInput,
     latest_user_edit_context,
+    latest_user_edit_intent,
     metadata_for_user_message,
     metadata_with_slot_classification,
     requirements_confirmation_from_question_answer,
@@ -56,6 +57,7 @@ from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
+    AIBuilderStepEditIntent,
     resolve_plan_edit_context,
 )
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
@@ -279,6 +281,7 @@ class AIBuilderPlanner:
         file_ids: list[UUID] | None = None,
         question_answer: AIBuilderQuestionAnswerInput | None = None,
         edit_context: AIBuilderEditContext | None = None,
+        edit_intent: AIBuilderStepEditIntent | None = None,
         review_context: AIBuilderReviewReference | None = None,
         review_evidence: FlowReviewEvidence | None = None,
         evidence_floor: int = 0,
@@ -367,6 +370,14 @@ class AIBuilderPlanner:
         except ValidationError as exc:
             raise_persisted_flow_mcp_plan_error(exc)
             raise
+        # The part of the step this turn is about: what the request named, or,
+        # for an answer to the Builder's question, what the turn that led to
+        # the question named. It only means something for one step, and a later
+        # free-text turn names none.
+        if edit_intent is None and question_answer is not None:
+            edit_intent = latest_user_edit_intent(conversation)
+        if plan_edit_context is not None and plan_edit_context.scope == "step":
+            plan_edit_context = replace(plan_edit_context, edit_intent=edit_intent)
         prepared_metadata = prepare_user_question_metadata(
             conversation=conversation,
             message=message,
@@ -377,7 +388,13 @@ class AIBuilderPlanner:
         if plan_edit_context is not None:
             initial_metadata = {
                 **(initial_metadata or {}),
-                **(metadata_for_user_message(edit_context=plan_edit_context) or {}),
+                **(
+                    metadata_for_user_message(
+                        edit_context=plan_edit_context,
+                        edit_intent=plan_edit_context.edit_intent,
+                    )
+                    or {}
+                ),
             }
         review_metadata = metadata_for_user_message(
             review_context=review_context,
@@ -491,7 +508,13 @@ class AIBuilderPlanner:
             if plan_edit_context is not None:
                 metadata = {
                     **(metadata or {}),
-                    **(metadata_for_user_message(edit_context=plan_edit_context) or {}),
+                    **(
+                        metadata_for_user_message(
+                            edit_context=plan_edit_context,
+                            edit_intent=plan_edit_context.edit_intent,
+                        )
+                        or {}
+                    ),
                 }
             if review_metadata:
                 # The accepted turn's metadata is what later turns read; the

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from uuid import uuid4
 
 import pytest
@@ -134,6 +136,79 @@ class TestApiModels:
     def test_send_message_request_accepts_message_at_limit(self) -> None:
         request = SendMessageRequest(client_turn_id=uuid4(), message="x" * 50_000)
         assert len(request.message) == 50_000
+
+    def test_a_request_without_an_intent_keeps_its_retained_fingerprint(self) -> None:
+        # A turn retained before edit_intent existed is replayed from its
+        # snapshot; if the new field changed its fingerprint, the replay would
+        # be refused as a different request and a session whose last turn's
+        # outcome is unknown could neither retry nor start a new turn.
+        step_id = uuid4()
+        request = SendMessageRequest(
+            client_turn_id=uuid4(),
+            message="Ändra underlaget för det här steget",
+            edit_context={"kind": "saved_flow_step", "flow_step_id": str(step_id)},
+        )
+        legacy = request.model_dump(
+            mode="json",
+            exclude={"client_turn_id", "acknowledge_duplicate_provider_spend"},
+        )
+        legacy.pop("edit_intent")
+        legacy["request_fingerprint_algorithm_version"] = 1
+        legacy["file_ids"] = []
+        legacy_fingerprint = hashlib.sha256(
+            json.dumps(
+                legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        ).hexdigest()
+
+        assert request.request_fingerprint() == legacy_fingerprint
+        replayed = SendMessageRequest.model_validate(request.retry_snapshot())
+        assert replayed.request_fingerprint() == legacy_fingerprint
+        assert "edit_intent" not in request.retry_snapshot()
+
+        # A named part is part of the request: the same text about another
+        # part is a different request, and replaying it is a conflict.
+        about_input = request.model_copy(update={"edit_intent": "input"})
+        about_answer = request.model_copy(update={"edit_intent": "answer"})
+        assert about_input.request_fingerprint() != legacy_fingerprint
+        assert about_input.request_fingerprint() != about_answer.request_fingerprint()
+        assert (
+            SendMessageRequest.model_validate(
+                about_input.retry_snapshot()
+            ).request_fingerprint()
+            == about_input.request_fingerprint()
+        )
+
+    @pytest.mark.parametrize(
+        "edit_context",
+        [
+            None,
+            {
+                "kind": "proposed_plan",
+                "scope": "whole_plan",
+                "plan_id": "00000000-0000-0000-0000-000000000702",
+            },
+        ],
+    )
+    def test_an_intent_needs_one_step_to_be_about(
+        self, edit_context: dict[str, object] | None
+    ) -> None:
+        with pytest.raises(ValidationError):
+            SendMessageRequest(
+                client_turn_id=uuid4(),
+                message="Ändra underlaget",
+                edit_context=edit_context,
+                edit_intent="input",
+            )
+
+    def test_an_intent_is_one_of_the_menu_parts(self) -> None:
+        with pytest.raises(ValidationError):
+            SendMessageRequest(
+                client_turn_id=uuid4(),
+                message="Ändra underlaget",
+                edit_context={"kind": "saved_flow_step", "flow_step_id": str(uuid4())},
+                edit_intent="underlag",
+            )
 
     def test_send_message_request_rejects_message_above_limit(self) -> None:
         with pytest.raises(ValidationError):

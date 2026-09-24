@@ -112,8 +112,9 @@ export interface AIBuilderSuggestChangeIntent {
   editContext?: AIBuilderPlanEditContext | null;
 }
 
-/** The part of a saved step the editor's "Ändra med AI" menu asked to change. */
-export type AIBuilderStepIntent = "instruction" | "underlag" | "format";
+/** The part of a saved step the editor's "Ändra med AI" menu asked to change:
+ *  the server's own vocabulary, sent with the turn it launched. */
+export type AIBuilderStepIntent = NonNullable<AIBuilderSendMessageRequest["edit_intent"]>;
 
 export interface AIBuilderSavedFlowStepScope {
   editContext: AIBuilderSavedFlowStepEditContext;

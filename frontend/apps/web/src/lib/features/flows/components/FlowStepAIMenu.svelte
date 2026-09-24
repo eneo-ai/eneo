@@ -36,13 +36,13 @@
           : m.flow_step_ai_request_write_instruction()
       },
       {
-        key: "underlag" as const,
+        key: "input" as const,
         label: m.flow_step_ai_menu_underlag(),
         description: m.flow_step_ai_menu_underlag_desc(),
         request: m.flow_step_ai_request_underlag()
       },
       usesAI && {
-        key: "format" as const,
+        key: "answer" as const,
         label: m.flow_step_ai_menu_format(),
         description: m.flow_step_ai_menu_format_desc(),
         request: m.flow_step_ai_request_format()

@@ -92,6 +92,7 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
     AIBuilderPlanEditContext,
     AIBuilderSavedFlowStepEditContext,
+    AIBuilderStepEditIntent,
 )
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
     AIBuilderPlanLifecycle,
@@ -742,6 +743,7 @@ class AIBuilderService:
         file_ids: list[UUID] | None = None,
         question_answer: AIBuilderQuestionAnswerInput | None = None,
         edit_context: AIBuilderEditContext | None = None,
+        edit_intent: AIBuilderStepEditIntent | None = None,
         review_context: AIBuilderReviewReference | None = None,
         review_evidence: FlowReviewEvidence | None = None,
         evidence_floor: int = 0,
@@ -782,6 +784,7 @@ class AIBuilderService:
             message=message,
             question_answer=question_answer,
             edit_context=edit_context,
+            edit_intent=edit_intent,
             review_context=review_context,
             review_evidence=review_evidence,
             evidence_floor=evidence_floor,

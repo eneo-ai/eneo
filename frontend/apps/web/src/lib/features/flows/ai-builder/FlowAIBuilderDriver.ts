@@ -29,6 +29,7 @@ import type {
   AIBuilderPhase,
   AIBuilderSendOutcome,
   AIBuilderEditContext,
+  AIBuilderStepIntent,
   AIBuilderSendMessageRequest,
   AIBuilderSession,
   AIBuilderStatus,
@@ -928,7 +929,8 @@ export class FlowAIBuilderDriver {
     questionAnswer?: StructuredQuestionAnswerMetadata,
     fileIds?: string[],
     editContext?: AIBuilderEditContext | null,
-    reviewContext?: AIBuilderReviewReference | null
+    reviewContext?: AIBuilderReviewReference | null,
+    editIntent?: AIBuilderStepIntent | null
   ): Promise<AIBuilderSendOutcome> {
     if (
       !this.#state.session ||
@@ -976,6 +978,8 @@ export class FlowAIBuilderDriver {
     }
     if (editContext) {
       requestBody.edit_context = editContext;
+      // The part of the step only means something for a scoped turn.
+      if (editIntent) requestBody.edit_intent = editIntent;
     }
     if (reviewContext) {
       requestBody.review_context = reviewContext;

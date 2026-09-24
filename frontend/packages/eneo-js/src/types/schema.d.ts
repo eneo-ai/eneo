@@ -31691,6 +31691,11 @@ export interface components {
             | components["schemas"]["AIBuilderSavedFlowStepEditContext"]
           )
         | null;
+      /**
+       * Edit Intent
+       * @description The part of the scoped step the request is about, as the step editor's menu names it: `instruction` (what the step is told to do), `input` (what it reads) or `answer` (what its answer contains). Only with an edit_context that targets one step; omit it for a free-text request. The message wins where the two disagree.
+       */
+      edit_intent?: ("instruction" | "input" | "answer") | null;
       /** File Ids */
       file_ids?: string[] | null;
       /** Message */

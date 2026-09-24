@@ -4100,7 +4100,7 @@ describe("FlowAIBuilder edit host contract", () => {
     await builder().focusSavedFlowStep({
       ...SAVED_STEP_SCOPE,
       request: m.flow_step_ai_request_underlag(),
-      intent: "underlag",
+      intent: "input",
       current: "Läser föregående steg"
     });
 
@@ -4191,6 +4191,65 @@ describe("FlowAIBuilder edit host contract", () => {
     await fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]!.body).toMatchObject({ edit_context: SAVED_STEP_SCOPE.editContext });
+  });
+
+  it.each([
+    ["input", "input"],
+    [undefined, undefined]
+  ] as const)(
+    "sends the menu's part of the step with the turn it launched (%s)",
+    async (intent, sent) => {
+      // The planner is told which part the user chose; a scope opened without
+      // one (the free-text entry) names no part rather than a guessed one.
+      const { fetch } = makeFetch({ created: editSession() });
+      const { stream, calls } = makeStream();
+      const { service, builder } = renderShell({
+        fetch,
+        stream,
+        targetKind: "edit",
+        flowId: "flow-1"
+      });
+
+      await waitFor(() => expect(service().hasSession).toBe(true));
+      await waitFor(() => expect(builder()).toBeDefined());
+      await builder().focusSavedFlowStep({ ...SAVED_STEP_SCOPE, ...(intent ? { intent } : {}) });
+      const input = (await screen.findByRole("textbox", {
+        name: m.ai_builder_saved_step_prompt_placeholder()
+      })) as HTMLTextAreaElement;
+      await fireEvent.input(input, { target: { value: "Läs steg 1" } });
+      await fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0]!.body).toMatchObject({ edit_context: SAVED_STEP_SCOPE.editContext });
+      if (sent) expect(calls[0]!.body.edit_intent).toBe(sent);
+      else expect(calls[0]!.body).not.toHaveProperty("edit_intent");
+    }
+  );
+
+  it("names the menu's part only for the step the menu launched", async () => {
+    // A turn about another step (or no step) is not the one the user chose a
+    // part for; it names none rather than borrowing the launch's choice.
+    const { fetch } = makeFetch({ created: editSession() });
+    const { stream, calls } = makeStream();
+    const { service, builder } = renderShell({
+      fetch,
+      stream,
+      targetKind: "edit",
+      flowId: "flow-1"
+    });
+
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    await waitFor(() => expect(builder()).toBeDefined());
+    await builder().focusSavedFlowStep({ ...SAVED_STEP_SCOPE, intent: "input" });
+    const otherStep = {
+      kind: "saved_flow_step" as const,
+      flow_step_id: "33333333-3333-4333-8333-333333333333"
+    };
+    void service().sendMessage("Läs steg 1", undefined, undefined, otherStep);
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({ edit_context: otherStep });
+    expect(calls[0]!.body).not.toHaveProperty("edit_intent");
   });
 
   it("opens the run review from a cold launch once the session exists", async () => {

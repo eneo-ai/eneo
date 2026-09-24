@@ -52,9 +52,9 @@
   // The menu asked about one part of the step: the heading asks about that part
   // in the words of the review's strip (Läser, Gör, Svarar med).
   const INTENT_TITLE: Record<AIBuilderStepIntent, (inputs: { step: string }) => string> = {
-    underlag: m.ai_builder_task_title_step_reads,
+    input: m.ai_builder_task_title_step_reads,
     instruction: m.ai_builder_task_title_step_does,
-    format: m.ai_builder_task_title_step_answers
+    answer: m.ai_builder_task_title_step_answers
   };
   const intentTitle = $derived(
     stepIntent && stepNumber ? INTENT_TITLE[stepIntent]({ step: String(stepNumber) }) : null
@@ -64,14 +64,14 @@
   // names an older step in their own words.
   const NEAREST_PICKS = 4;
   const earlierSteps = $derived(
-    stepIntent === "underlag" && stepNumber
+    stepIntent === "input" && stepNumber
       ? (flowSteps ?? [])
           .filter((step) => step.order < stepNumber)
           .sort((a, b) => a.order - b.order)
       : []
   );
   const picks = $derived.by(() => {
-    if (stepIntent !== "underlag" || !stepNumber) return [];
+    if (stepIntent !== "input" || !stepNumber) return [];
     const earlier = earlierSteps.slice(-NEAREST_PICKS);
     return [
       {

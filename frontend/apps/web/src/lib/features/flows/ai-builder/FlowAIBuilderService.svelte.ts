@@ -601,12 +601,21 @@ export class FlowAIBuilderService {
     editContext?: AIBuilderEditContext | null,
     reviewContext?: AIBuilderReviewReference | null
   ): Promise<AIBuilderSendOutcome> {
+    // The menu's part of the step belongs to the turn the menu launched: the
+    // launch scope that carries it expires with the first accepted turn, and
+    // only the server carries it further (to an answer to its own question).
+    const launch = this.savedFlowStepScope;
+    const editIntent =
+      launch?.intent && editContext && scopeKey(editContext) === scopeKey(launch.editContext)
+        ? launch.intent
+        : null;
     const outcome = await this.#driver.sendMessage(
       message,
       questionAnswer,
       fileIds,
       editContext,
-      reviewContext
+      reviewContext,
+      editIntent
     );
     if (outcome !== "not_started" && reviewContext) {
       if (reviewContext.kind === "run_failure") {

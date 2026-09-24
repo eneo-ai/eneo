@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Literal, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from eneo.completion_models.domain import CompletionModel
 from eneo.completion_models.domain.model_kwargs_capabilities import (
@@ -55,6 +55,8 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
+    AIBuilderPlanEditContext,
+    AIBuilderStepEditIntent,
 )
 from eneo.flows.ai_builder.ai_builder_telemetry import ProviderCallKind
 from eneo.flows.ai_builder.ai_builder_telemetry_models import (
@@ -621,6 +623,17 @@ class SendMessageRequest(BaseModel):
     )
     question_answer: AIBuilderQuestionAnswerRequest | None = None
     edit_context: AIBuilderEditContext | None = None
+    edit_intent: AIBuilderStepEditIntent | None = Field(
+        default=None,
+        description=(
+            "The part of the scoped step the request is about, as the step "
+            "editor's menu names it: `instruction` (what the step is told to "
+            "do), `input` (what it reads) or `answer` (what its answer "
+            "contains). Only with an edit_context that targets one step; omit "
+            "it for a free-text request. The message wins where the two "
+            "disagree."
+        ),
+    )
     review_context: AIBuilderReviewReference | None = Field(
         default=None,
         description=(
@@ -642,6 +655,20 @@ class SendMessageRequest(BaseModel):
             "can repeat provider work and cost."
         ),
     )
+
+    @model_validator(mode="after")
+    def validate_edit_intent_scope(self) -> "SendMessageRequest":
+        if self.edit_intent is None:
+            return self
+        scoped_to_one_step = self.edit_context is not None and not (
+            isinstance(self.edit_context, AIBuilderPlanEditContext)
+            and self.edit_context.scope != "step"
+        )
+        if not scoped_to_one_step:
+            raise ValueError(
+                "edit_intent requires an edit_context that targets one step."
+            )
+        return self
 
     def canonical(self) -> "SendMessageRequest":
         """The request as the server retains it.
@@ -685,6 +712,11 @@ class SendMessageRequest(BaseModel):
                 "acknowledge_duplicate_provider_spend",
             },
         )
+        # A field added after turns were retained is hashed only when sent:
+        # a retained request that predates it must keep its fingerprint, or
+        # its replay is refused as a different request.
+        if normalized.get("edit_intent") is None:
+            normalized.pop("edit_intent", None)
         normalized["request_fingerprint_algorithm_version"] = 1
         normalized["file_ids"] = sorted(
             str(file_id) for file_id in (self.file_ids or [])

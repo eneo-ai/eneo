@@ -53,6 +53,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
+    AIBuilderStepEditIntent,
     ResolvedAIBuilderEditContext,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
@@ -125,6 +126,7 @@ REQUIREMENTS_VERSION_METADATA_KEY = "requirements_version"
 UI_LANGUAGE_METADATA_KEY = "ui_language"
 FILE_IDS_METADATA_KEY = "file_ids"
 EDIT_CONTEXT_METADATA_KEY = "edit_context"
+EDIT_INTENT_METADATA_KEY = "edit_intent"
 REVIEW_CONTEXT_METADATA_KEY = "review_context"
 _REVIEW_REFERENCE_KINDS = ("flow_review", "flow_review_suggestion", "run_failure")
 EVIDENCE_FLOOR_METADATA_KEY = "evidence_floor"
@@ -2303,6 +2305,25 @@ def latest_user_edit_context(
     return None
 
 
+def latest_user_edit_intent(
+    conversation: Sequence[_ConversationMetadataMessage],
+) -> AIBuilderStepEditIntent | None:
+    """The part of the step the latest user turn was about, if it named one.
+
+    Only the latest user turn counts, as for edit scope: the intent belongs to
+    the turn, and a later turn that named none has moved on. A value this
+    build does not know degrades to none rather than guessing a part.
+    """
+
+    for message in reversed(conversation):
+        if message.role != "user":
+            continue
+        metadata_map = _metadata_mapping(message.metadata)
+        raw = metadata_map.get(EDIT_INTENT_METADATA_KEY) if metadata_map else None
+        return raw if raw in get_args(AIBuilderStepEditIntent) else None
+    return None
+
+
 def review_reference_kind(metadata: object) -> str | None:
     """Which kind of review a message names, read without its payload.
 
@@ -2509,6 +2530,7 @@ def metadata_for_user_message(
     ui_language: str | None = None,
     file_ids: Sequence[UUID] | None = None,
     edit_context: AIBuilderEditContext | ResolvedAIBuilderEditContext | None = None,
+    edit_intent: AIBuilderStepEditIntent | None = None,
     review_context: AIBuilderReviewReference | None = None,
     review_evidence_level: int | None = None,
     evidence_floor: int | None = None,
@@ -2535,6 +2557,8 @@ def metadata_for_user_message(
         metadata[FILE_IDS_METADATA_KEY] = [str(file_id) for file_id in file_ids]
     if edit_context is not None:
         metadata[EDIT_CONTEXT_METADATA_KEY] = edit_context.to_metadata()
+    if edit_intent is not None:
+        metadata[EDIT_INTENT_METADATA_KEY] = edit_intent
     if review_context is not None:
         persisted = _REVIEW_CONTEXT_ADAPTER.validate_python(
             {

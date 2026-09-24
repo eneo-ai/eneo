@@ -1512,6 +1512,7 @@ async def send_message(
                     file_ids=body.file_ids,
                     question_answer=body.question_answer,
                     edit_context=body.edit_context,
+                    edit_intent=body.edit_intent,
                     review_context=prepared_context.review_context,
                     review_evidence=prepared_context.review_evidence,
                     evidence_floor=prepared_context.evidence_floor,
