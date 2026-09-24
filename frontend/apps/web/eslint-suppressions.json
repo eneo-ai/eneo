@@ -274,19 +274,14 @@
       "count": 1
     }
   },
-  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/run/AudioRecorder.svelte": {
+  "src/lib/features/apps/components/AudioRecorder.svelte": {
     "eneo/no-raw-color": {
       "count": 18
     }
   },
-  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/run/InputAudioRecording.svelte": {
+  "src/lib/features/apps/components/InputAudioRecording.svelte": {
     "eneo/no-raw-color": {
       "count": 10
-    }
-  },
-  "src/routes/(app)/spaces/[spaceId]/assistants/AssistantTile.svelte": {
-    "eneo/no-raw-color": {
-      "count": 3
     }
   },
   "src/routes/(app)/spaces/[spaceId]/chat/insights/InsightsPage.svelte": {

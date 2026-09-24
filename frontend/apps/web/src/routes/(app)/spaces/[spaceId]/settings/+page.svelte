@@ -28,6 +28,7 @@
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import { createIconEditor } from "$lib/features/icons/createIconEditor.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import { fade } from "svelte/transition";
   import { untrack } from "svelte";
@@ -102,47 +103,11 @@
   let deletionMessageTimeout: ReturnType<typeof setTimeout>;
   let isOrgSpace = $currentSpace.organization;
 
-  // Icon state - uses editor for icon_id but handles upload separately
-  let iconUploading = $state(false);
-  let iconError = $state<string | null>(null);
-
-  function getIconUrl(id: string | null | undefined): string | null {
-    return id ? eneo.icons.url({ id }) : null;
-  }
-
-  // Use the update store's icon_id for displaying current icon
-  let iconUrl = $derived(getIconUrl($update.icon_id));
-
-  async function handleIconUpload(event: CustomEvent<File>) {
-    const file = event.detail;
-    iconUploading = true;
-    iconError = null;
-    try {
-      const newIcon = await eneo.icons.upload({ file });
-      // Update the editor's update store - will be saved with other changes
-      $update.icon_id = newIcon.id;
-    } catch (error) {
-      console.error("Failed to upload icon:", error);
-      iconError = m.avatar_upload_failed();
-    } finally {
-      iconUploading = false;
-    }
-  }
-
-  async function handleIconDelete() {
-    iconError = null;
-    try {
-      // Delete the icon file from server
-      if ($update.icon_id) {
-        await eneo.icons.delete({ id: $update.icon_id });
-      }
-      // Update the editor's update store - will be saved with other changes
-      $update.icon_id = null;
-    } catch (error) {
-      console.error("Failed to delete icon:", error);
-      iconError = m.avatar_delete_failed();
-    }
-  }
+  // The icon id is staged in the editor and saved or discarded with the other changes.
+  const icon = createIconEditor({
+    iconId: () => $update.icon_id,
+    setIconId: (id) => ($update.icon_id = id)
+  });
 
   async function deleteSpace() {
     if (deleteConfirmation === "") return;
@@ -204,11 +169,11 @@
             revertFn={() => discardChanges("icon_id")}
           >
             <IconUpload
-              {iconUrl}
-              uploading={iconUploading}
-              error={iconError}
-              on:upload={handleIconUpload}
-              on:delete={handleIconDelete}
+              iconUrl={icon.url}
+              uploading={icon.uploading}
+              error={icon.error}
+              on:upload={(event) => icon.upload(event.detail)}
+              on:delete={icon.remove}
             />
           </Settings.Row>
           <SpaceStorageOverview></SpaceStorageOverview>

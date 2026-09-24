@@ -1,5 +1,7 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
+  import EditorPageHeader from "$lib/components/settings/EditorPageHeader.svelte";
+  import { guardUnsavedChanges } from "$lib/core/editing/guardUnsavedChanges";
   import OpenFilesHelp from "$lib/features/assistants/components/OpenFilesHelp.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
 
@@ -8,10 +10,9 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { IconSparkles } from "@eneo/icons/sparkles";
-  import { afterNavigate, beforeNavigate, invalidate } from "$app/navigation";
+  import { invalidate } from "$app/navigation";
 
   import { initAssistantEditor } from "$lib/features/assistants/AssistantEditor.js";
-  import { fade } from "svelte/transition";
 
   import AttachmentsEditor from "$lib/features/attachments/components/AttachmentsEditor.svelte";
   import ConfigContextMeter from "$lib/features/assistants/components/ConfigContextMeter.svelte";
@@ -27,7 +28,6 @@
   import PromptGuideModal from "$lib/features/prompt-guide/components/PromptGuideModal.svelte";
   import dayjs from "dayjs";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
-  import { page } from "$app/state";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
   import {
     filterSupportedModelKwargs,
@@ -36,6 +36,7 @@
   import { m } from "$lib/paraglide/messages";
   import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import { createIconEditor } from "$lib/features/icons/createIconEditor.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
   import {
@@ -61,11 +62,7 @@
     refreshCurrentSpace
   } = getSpacesManager();
 
-  const {
-    state: { resource, update, currentChanges, isSaving },
-    saveChanges,
-    discardChanges
-  } = untrack(() =>
+  const editor = untrack(() =>
     initAssistantEditor({
       assistant: data.assistant,
       skillBindings: data.skillBindings.map((binding) => ({
@@ -84,6 +81,10 @@
       }
     })
   );
+  const {
+    state: { resource, update, currentChanges }
+  } = editor;
+  guardUnsavedChanges(editor);
 
   let cancelUploadsAndClearQueue = $state<() => void>(() => {});
 
@@ -120,54 +121,18 @@
     mcpEnforced ? (effectiveConfig?.available_mcp_servers ?? []) : undefined
   );
 
-  // Icon state
-  let currentIconId = $state<string | null>($resource.icon_id ?? null);
-  let iconUploading = $state(false);
-  let iconError = $state<string | null>(null);
-
-  function getIconUrl(id: string | null): string | null {
-    return id ? data.eneo.icons.url({ id }) : null;
-  }
-
-  let iconUrl = $derived(getIconUrl(currentIconId));
-
-  async function handleIconUpload(event: CustomEvent<File>) {
-    const file = event.detail;
-    iconUploading = true;
-    iconError = null;
-    try {
-      const newIcon = await data.eneo.icons.upload({ file });
+  let iconId = $state<string | null>($resource.icon_id ?? null);
+  const icon = createIconEditor({
+    iconId: () => iconId,
+    async setIconId(id) {
       await data.eneo.assistants.update({
         assistant: { id: $resource.id },
-        update: { icon_id: newIcon.id }
+        update: { icon_id: id }
       });
-      currentIconId = newIcon.id;
+      iconId = id;
       await refreshCurrentSpace("applications");
-    } catch (error) {
-      console.error("Failed to upload icon:", error);
-      iconError = m.avatar_upload_failed();
-    } finally {
-      iconUploading = false;
     }
-  }
-
-  async function handleIconDelete() {
-    iconError = null;
-    try {
-      if (currentIconId) {
-        await data.eneo.icons.delete({ id: currentIconId });
-      }
-      await data.eneo.assistants.update({
-        assistant: { id: $resource.id },
-        update: { icon_id: null }
-      });
-      currentIconId = null;
-      await refreshCurrentSpace("applications");
-    } catch (error) {
-      console.error("Failed to delete icon:", error);
-      iconError = m.avatar_delete_failed();
-    }
-  }
+  });
 
   let hasBehaviorChanges = $derived.by(() => {
     if (!$currentChanges.diff.completion_model_kwargs) return false;
@@ -211,29 +176,6 @@
         return m.prompt_guide_disabled_no_assignment();
     }
   }
-
-  beforeNavigate((navigate) => {
-    if ($currentChanges.hasUnsavedChanges && !confirm(m.unsaved_changes_warning())) {
-      navigate.cancel();
-      return;
-    }
-    // Discard changes that have been made, this is only important so we delete uploaded
-    // files that have not been saved to the assistant
-    discardChanges();
-  });
-
-  let showSavesChangedNotice = $state(false);
-
-  let previousRoute = $state(
-    untrack(
-      () =>
-        `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.assistant, tab: "chat" })}`
-    )
-  );
-  afterNavigate(({ from }) => {
-    if (page.url.searchParams.get("next") === "default") return;
-    if (from) previousRoute = from.url.toString();
-  });
 </script>
 
 <svelte:head>
@@ -243,51 +185,19 @@
 </svelte:head>
 
 <Page.Root>
-  <Page.Header>
-    <Page.Title
-      parent={{
-        title: $resource.name,
-        href: `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.assistant, tab: "chat" })}`
-      }}
-      title={m.edit()}
-    ></Page.Title>
-
-    <Page.Flex>
-      {#if $currentChanges.hasUnsavedChanges}
-        <Button
-          variant="destructive"
-          disabled={$isSaving}
-          onclick={() => {
-            cancelUploadsAndClearQueue();
-            discardChanges();
-          }}>{m.discard_all_changes()}</Button
-        >
-
-        <Button
-          class="bg-positive-default hover:bg-positive-stronger w-32"
-          onclick={async () => {
-            cancelUploadsAndClearQueue();
-
-            $update.completion_model_kwargs = filterSupportedModelKwargs(
-              $update.completion_model_kwargs,
-              $update.completion_model
-            );
-
-            if (!(await saveChanges())) return;
-            showSavesChangedNotice = true;
-            setTimeout(() => {
-              showSavesChangedNotice = false;
-            }, 5000);
-          }}>{$isSaving ? m.loading() : m.save_changes()}</Button
-        >
-      {:else}
-        {#if showSavesChangedNotice}
-          <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
-        {/if}
-        <Button class="w-32" href={previousRoute}>{m.done()}</Button>
-      {/if}
-    </Page.Flex>
-  </Page.Header>
+  <EditorPageHeader
+    {editor}
+    resourceName={$resource.name}
+    backHref={`/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.assistant, tab: "chat" })}`}
+    beforeDiscard={cancelUploadsAndClearQueue}
+    beforeSave={() => {
+      cancelUploadsAndClearQueue();
+      $update.completion_model_kwargs = filterSupportedModelKwargs(
+        $update.completion_model_kwargs,
+        $update.completion_model
+      );
+    }}
+  />
 
   <Page.Main>
     <Settings.Page>
@@ -322,11 +232,11 @@
 
         <Settings.Row title={m.avatar()} description={m.avatar_description()}>
           <IconUpload
-            {iconUrl}
-            uploading={iconUploading}
-            error={iconError}
-            on:upload={handleIconUpload}
-            on:delete={handleIconDelete}
+            iconUrl={icon.url}
+            uploading={icon.uploading}
+            error={icon.error}
+            on:upload={(event) => icon.upload(event.detail)}
+            on:delete={icon.remove}
           />
         </Settings.Row>
       </Settings.Group>

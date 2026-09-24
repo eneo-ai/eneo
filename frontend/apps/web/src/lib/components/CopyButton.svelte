@@ -17,6 +17,8 @@
     class?: string;
     /** Runs after a successful copy, e.g. to show a toast. */
     onCopied?: () => void;
+    /** Called before copying; lets a Tooltip trigger keep its own click handling. */
+    onclick?: (event: MouseEvent) => void;
     /** Other attributes, e.g. the props a Tooltip trigger passes to its child. */
     [attribute: string]: unknown;
   };
@@ -30,6 +32,7 @@
     disabled = false,
     class: className,
     onCopied,
+    onclick,
     ...restProps
   }: Props = $props();
 
@@ -44,7 +47,8 @@
   class={className}
   aria-label={showLabel ? undefined : label}
   {...restProps}
-  onclick={async () => {
+  onclick={async (event: MouseEvent) => {
+    onclick?.(event);
     if (await clipboard.copy(typeof text === "function" ? text() : text)) onCopied?.();
   }}
 >

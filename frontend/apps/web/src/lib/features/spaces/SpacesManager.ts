@@ -94,18 +94,6 @@ function SpacesManager(data: SpacesManagerParams) {
   }
 
   /** Will create a new space and return it on success. Will return null on failure and show an alert */
-  async function createSpace(space: { name: string }) {
-    try {
-      const newSpace = await eneo.spaces.create({ name: space.name });
-      refreshSpaces();
-      return newSpace;
-    } catch (e) {
-      toastError(e);
-      console.error(e);
-    }
-    return null;
-  }
-
   /** Will update a given space. If no space is specified will update the current space. */
   async function updateSpace(
     update: Parameters<typeof eneo.spaces.update>[0]["update"],
@@ -223,7 +211,6 @@ function SpacesManager(data: SpacesManagerParams) {
     },
     refreshSpaces,
     refreshCurrentSpace,
-    createSpace,
     updateSpace,
     deleteSpace,
     watchPageData,

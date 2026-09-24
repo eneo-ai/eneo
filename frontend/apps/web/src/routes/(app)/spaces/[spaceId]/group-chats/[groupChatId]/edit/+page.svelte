@@ -1,21 +1,21 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
+  import EditorPageHeader from "$lib/components/settings/EditorPageHeader.svelte";
+  import { guardUnsavedChanges } from "$lib/core/editing/guardUnsavedChanges";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
-  import { Button } from "$lib/components/ui/button/index.js";
   import { useId } from "bits-ui";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
-  import { afterNavigate, beforeNavigate } from "$app/navigation";
-  import { fade } from "svelte/transition";
-  import { page } from "$app/state";
   import { initGroupChatEditor } from "$lib/features/group-chats/GroupChatEditor.js";
   import GroupChatAssistantList from "$lib/features/group-chats/components/GroupChatAssistantList.svelte";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
   import { m } from "$lib/paraglide/messages";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import { createIconEditor } from "$lib/features/icons/createIconEditor.svelte";
+  import { untrack } from "svelte";
 
-  export let data;
+  let { data } = $props();
 
   const mentionsId = useId();
   const responseLabelsId = useId();
@@ -26,84 +26,32 @@
     refreshCurrentSpace
   } = getSpacesManager();
 
-  const {
-    state: { resource, update, currentChanges, isSaving },
-    saveChanges,
-    discardChanges
-  } = initGroupChatEditor({
-    groupChat: data.groupChat,
-    eneo: data.eneo,
-    onUpdateDone() {
-      refreshCurrentSpace("applications");
-    }
-  });
-
-  // Icon state
-  let currentIconId = data.groupChat.icon_id ?? null;
-  let iconUploading = false;
-  let iconError: string | null = null;
-
-  function getIconUrl(id: string | null) {
-    return id ? data.eneo.icons.url({ id }) : null;
-  }
-
-  $: iconUrl = getIconUrl(currentIconId);
-
-  async function handleIconUpload(event: CustomEvent<File>) {
-    const file = event.detail;
-    iconUploading = true;
-    iconError = null;
-    try {
-      const newIcon = await data.eneo.icons.upload({ file });
-      await data.eneo.groupChats.update({
-        groupChat: { id: $resource.id },
-        update: { icon_id: newIcon.id }
-      });
-      currentIconId = newIcon.id;
-      await refreshCurrentSpace("applications");
-    } catch (error) {
-      console.error("Failed to upload icon:", error);
-      iconError = m.avatar_upload_failed();
-    } finally {
-      iconUploading = false;
-    }
-  }
-
-  async function handleIconDelete() {
-    iconError = null;
-    try {
-      if (currentIconId) {
-        await data.eneo.icons.delete({ id: currentIconId });
+  const editor = untrack(() =>
+    initGroupChatEditor({
+      groupChat: data.groupChat,
+      eneo: data.eneo,
+      onUpdateDone() {
+        refreshCurrentSpace("applications");
       }
+    })
+  );
+  const {
+    state: { resource, update, currentChanges },
+    discardChanges
+  } = editor;
+  guardUnsavedChanges(editor);
+
+  let iconId = $state<string | null>($resource.icon_id ?? null);
+  const icon = createIconEditor({
+    iconId: () => iconId,
+    async setIconId(id) {
       await data.eneo.groupChats.update({
         groupChat: { id: $resource.id },
-        update: { icon_id: null }
+        update: { icon_id: id }
       });
-      currentIconId = null;
+      iconId = id;
       await refreshCurrentSpace("applications");
-    } catch (error) {
-      console.error("Failed to delete icon:", error);
-      iconError = m.avatar_delete_failed();
     }
-  }
-
-  beforeNavigate((navigate) => {
-    if ($currentChanges.hasUnsavedChanges && !confirm(m.unsaved_changes_warning())) {
-      navigate.cancel();
-      return;
-    }
-    // Discard changes that have been made, this is only important so we delete uploaded
-    // files that have not been saved to the assistant
-    discardChanges();
-  });
-
-  let showSavesChangedNotice = false;
-
-  // TODO
-  let previousRoute = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.groupChat, tab: "chat" })}`;
-  afterNavigate(({ from }) => {
-    if (page.url.searchParams.get("next") === "default") return;
-    if (from) previousRoute = from.url.toString();
   });
 </script>
 
@@ -114,43 +62,11 @@
 </svelte:head>
 
 <Page.Root>
-  <Page.Header>
-    <Page.Title
-      parent={{
-        title: $resource.name,
-        href: `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.groupChat, tab: "chat" })}`
-      }}
-      title={m.edit()}
-    ></Page.Title>
-
-    <Page.Flex>
-      {#if $currentChanges.hasUnsavedChanges}
-        <Button
-          variant="destructive"
-          disabled={$isSaving}
-          onclick={() => {
-            discardChanges();
-          }}>{m.discard_all_changes()}</Button
-        >
-
-        <Button
-          class="bg-positive-default hover:bg-positive-stronger w-32"
-          onclick={async () => {
-            if (!(await saveChanges())) return;
-            showSavesChangedNotice = true;
-            setTimeout(() => {
-              showSavesChangedNotice = false;
-            }, 5000);
-          }}>{$isSaving ? m.saving() : m.save_changes()}</Button
-        >
-      {:else}
-        {#if showSavesChangedNotice}
-          <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
-        {/if}
-        <Button class="w-32" href={previousRoute}>{m.done()}</Button>
-      {/if}
-    </Page.Flex>
-  </Page.Header>
+  <EditorPageHeader
+    {editor}
+    resourceName={$resource.name}
+    backHref={`/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.groupChat, tab: "chat" })}`}
+  />
 
   <Page.Main>
     <Settings.Page>
@@ -174,11 +90,11 @@
 
         <Settings.Row title={m.avatar()} description={m.avatar_description()}>
           <IconUpload
-            {iconUrl}
-            uploading={iconUploading}
-            error={iconError}
-            on:upload={handleIconUpload}
-            on:delete={handleIconDelete}
+            iconUrl={icon.url}
+            uploading={icon.uploading}
+            error={icon.error}
+            on:upload={(event) => icon.upload(event.detail)}
+            on:delete={icon.remove}
           />
         </Settings.Row>
       </Settings.Group>
