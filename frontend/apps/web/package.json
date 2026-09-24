@@ -40,6 +40,8 @@
     "@sveltejs/adapter-node": "^5.5.7",
     "@sveltejs/kit": "^2.68.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tailwindcss/node": "^4.3.2",
+    "@tailwindcss/oxide": "^4.3.2",
     "@tailwindcss/vite": "^4.3.2",
     "@tanstack/table-core": "^8.21.3",
     "@types/node": "^22.20.0",
@@ -52,6 +54,7 @@
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.2",
     "eslint-plugin-svelte": "^3.20.0",
+    "driver.js": "^1.8.0",
     "echarts": "^5.6.0",
     "globals": "^16.5.0",
     "highlight.js": "^11.11.1",
@@ -76,7 +79,6 @@
     "@eneo/ui": "workspace:*",
     "@eneo/whats-new": "workspace:*",
     "@inlang/paraglide-js": "^2.20.2",
-    "driver.js": "^1.8.0",
     "paneforge": "^1.0.2"
   }
 }

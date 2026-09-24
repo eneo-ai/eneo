@@ -41,7 +41,9 @@ describe("ConfirmDialog", () => {
 
     const confirm = page.getByRole("button", { name: "Delete" });
     await confirm.click();
-    await expect.element(page.getByRole("button", { name: "Deleting…" })).toBeDisabled();
+    await expect
+      .element(page.getByRole("button", { name: "Deleting…" }))
+      .toHaveAttribute("aria-disabled", "true");
     await expect
       .element(page.getByRole("button", { name: m.cancel() }))
       .toHaveAttribute("aria-disabled", "true");
@@ -64,6 +66,8 @@ describe("ConfirmDialog", () => {
     );
     await expect.element(page.getByRole("alertdialog")).toBeVisible();
     await expect.element(page.getByRole("button", { name: "Delete" })).toBeEnabled();
+    // Focus stays in the dialog, so a keyboard user can retry or cancel.
+    expect(page.getByRole("alertdialog").element().contains(document.activeElement)).toBe(true);
   });
 
   it("cannot be dismissed while the action runs", async () => {

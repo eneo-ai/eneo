@@ -52,7 +52,7 @@
   let assistantOptions = $state<ResourceOption[]>([]);
   let appOptions = $state<ResourceOption[]>([]);
 
-  // Funnel states
+  // Filter states
   let scopeType = $state("");
   let stateFilter = $state<ApiKeyStateFilterValue>("active");
   let keyType = $state("");
@@ -632,9 +632,9 @@
   <Page.Main>
     <Settings.Page>
       <div class="space-y-6">
-        <!-- Funnel Section -->
+        <!-- Filter Section -->
         <div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
-          <!-- Funnel Header -->
+          <!-- Filter Header -->
           <button
             type="button"
             onclick={() => (showFilters = !showFilters)}
@@ -675,7 +675,7 @@
             />
           </button>
 
-          <!-- Funnel Content -->
+          <!-- Filter Content -->
           {#if showFilters}
             <div
               id="admin-api-key-filters-panel"
@@ -1021,7 +1021,7 @@
                 </Select.Root>
               </Field.Field>
 
-              <!-- Funnel Actions -->
+              <!-- Filter Actions -->
               <div class="border-default flex items-center justify-between border-t pt-2">
                 <p class="text-muted text-xs">
                   {totalCount !== null

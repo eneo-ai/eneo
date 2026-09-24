@@ -10,8 +10,6 @@
 
   import CrawlResultCell from "./CrawlResultCell.svelte";
 
-  // eslint-disable-next-line svelte/no-immutable-reactive-statements
-
   const SKIPPED_PREFIX = "skipped";
 
   function isSkipped(crawl: CrawlRun): boolean {

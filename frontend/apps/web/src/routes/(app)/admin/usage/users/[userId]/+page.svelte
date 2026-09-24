@@ -243,10 +243,10 @@
 
   function getUsageIntensity(tokens: number) {
     if (tokens > thresholds.high)
-      return { label: m.usage_level_high(), class: "bg-secondary text-negative-default" };
+      return { label: m.usage_level_high(), class: "bg-secondary text-negative-stronger" };
     if (tokens > thresholds.medium)
-      return { label: m.usage_level_medium(), class: "bg-secondary text-warning-default" };
-    return { label: m.usage_level_low(), class: "bg-secondary text-positive-default" };
+      return { label: m.usage_level_medium(), class: "bg-secondary text-warning-stronger" };
+    return { label: m.usage_level_low(), class: "bg-secondary text-positive-stronger" };
   }
 
   // Get top 5 models by token usage
@@ -334,7 +334,7 @@
                 <div class="text-muted text-sm">{m.usage_total_tokens()}</div>
               </div>
               <div class="text-center">
-                <div class="text-positive-default text-2xl font-bold">
+                <div class="text-positive-stronger text-2xl font-bold">
                   {formatNumber(user.total_input_tokens, "compact", 1)}
                 </div>
                 <div class="text-muted text-sm">{m.usage_input_tokens()}</div>
@@ -344,7 +344,7 @@
                 </div>
               </div>
               <div class="text-center">
-                <div class="text-warning-default text-2xl font-bold">
+                <div class="text-warning-stronger text-2xl font-bold">
                   {formatNumber(user.total_output_tokens, "compact", 1)}
                 </div>
                 <div class="text-muted text-sm">{m.usage_output_tokens()}</div>
@@ -354,7 +354,7 @@
                 </div>
               </div>
               <div class="text-center">
-                <div class="text-accent-default text-2xl font-bold">
+                <div class="text-accent-stronger text-2xl font-bold">
                   {formatNumber(user.total_requests)}
                 </div>
                 <div class="text-muted text-sm">{m.usage_total_requests()}</div>

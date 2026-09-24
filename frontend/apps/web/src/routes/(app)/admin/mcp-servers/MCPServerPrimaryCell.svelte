@@ -43,7 +43,7 @@
         return {
           label: "Bearer",
           icon: Shield,
-          classes: "label-blue bg-label-dimmer text-label-stronger"
+          classes: "label-pine bg-label-dimmer text-label-stronger"
         };
       case "api_key_header":
         return {

@@ -1026,11 +1026,13 @@
                 <p class="text-muted mt-2 text-xs leading-relaxed">
                   {m.mcp_catalog_safety_hint()}
                 </p>
-                <div class="mt-4 grid gap-4 sm:grid-cols-3">
-                  <div>
+                <div
+                  class="mt-4 grid gap-x-4 gap-y-6 sm:grid-cols-3 sm:grid-rows-[auto_auto_auto] sm:gap-y-1.5"
+                >
+                  <div class="grid gap-1.5 sm:row-span-3 sm:grid-rows-subgrid">
                     <label
                       for="mcp-tool-catalog-max-count"
-                      class="text-default mb-1.5 block text-sm font-medium"
+                      class="text-default block self-end text-sm font-medium"
                     >
                       {m.mcp_catalog_max_count()}
                     </label>
@@ -1045,14 +1047,14 @@
                       aria-describedby="mcp-tool-catalog-max-count-hint"
                       class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
                     />
-                    <p id="mcp-tool-catalog-max-count-hint" class="text-muted mt-1.5 text-xs">
+                    <p id="mcp-tool-catalog-max-count-hint" class="text-muted text-xs">
                       {m.mcp_catalog_max_count_hint()}
                     </p>
                   </div>
-                  <div>
+                  <div class="grid gap-1.5 sm:row-span-3 sm:grid-rows-subgrid">
                     <label
                       for="mcp-tool-catalog-max-mib"
-                      class="text-default mb-1.5 block text-sm font-medium"
+                      class="text-default block self-end text-sm font-medium"
                     >
                       {m.mcp_catalog_max_mib()}
                     </label>
@@ -1067,14 +1069,14 @@
                       aria-describedby="mcp-tool-catalog-max-mib-hint"
                       class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
                     />
-                    <p id="mcp-tool-catalog-max-mib-hint" class="text-muted mt-1.5 text-xs">
+                    <p id="mcp-tool-catalog-max-mib-hint" class="text-muted text-xs">
                       {m.mcp_catalog_max_mib_hint()}
                     </p>
                   </div>
-                  <div>
+                  <div class="grid gap-1.5 sm:row-span-3 sm:grid-rows-subgrid">
                     <label
                       for="mcp-tool-definition-max-kib"
-                      class="text-default mb-1.5 block text-sm font-medium"
+                      class="text-default block self-end text-sm font-medium"
                     >
                       {m.mcp_tool_definition_max_kib()}
                     </label>
@@ -1089,7 +1091,7 @@
                       aria-describedby="mcp-tool-definition-max-kib-hint"
                       class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
                     />
-                    <p id="mcp-tool-definition-max-kib-hint" class="text-muted mt-1.5 text-xs">
+                    <p id="mcp-tool-definition-max-kib-hint" class="text-muted text-xs">
                       {m.mcp_tool_definition_max_kib_hint()}
                     </p>
                   </div>

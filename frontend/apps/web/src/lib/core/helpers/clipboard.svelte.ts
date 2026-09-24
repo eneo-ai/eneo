@@ -1,4 +1,4 @@
-import { toastError } from "$lib/core/errors";
+import { toast } from "$lib/components/toast";
 import { m } from "$lib/paraglide/messages";
 
 /**
@@ -16,8 +16,9 @@ export function createCopyState(resetAfterMs = 2000) {
     async copy(text: string): Promise<boolean> {
       try {
         await navigator.clipboard.writeText(text);
-      } catch (error) {
-        toastError(error, m.could_not_copy());
+      } catch {
+        // Denied permission or an insecure page: the browser's reason would not help the user.
+        toast.error(m.could_not_copy());
         return false;
       }
       copied = true;

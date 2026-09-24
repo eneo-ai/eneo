@@ -43,7 +43,9 @@ describe("NameDialog", () => {
     await nameField().fill("  Reports  ");
     await userEvent.keyboard("{Enter}");
 
-    await expect.element(page.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    await expect
+      .element(page.getByRole("button", { name: "Saving…" }))
+      .toHaveAttribute("aria-disabled", "true");
     await expect.element(page.getByRole("button", { name: m.cancel() })).toBeDisabled();
     await userEvent.keyboard("{Enter}");
     await page.getByRole("button", { name: "Saving…" }).click({ force: true });

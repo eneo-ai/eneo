@@ -133,7 +133,13 @@
             pending && "pointer-events-none opacity-50"
           )}>{m.cancel()}</Dialog.Close
         >
-        <Button type="submit" variant="destructive" disabled={pending} aria-busy={pending}>
+        <Button
+          type="submit"
+          variant="destructive"
+          aria-disabled={pending}
+          aria-busy={pending}
+          class={pending ? "pointer-events-none opacity-50" : undefined}
+        >
           {pending ? m.moving() : submitLabel}
         </Button>
       </Dialog.Footer>

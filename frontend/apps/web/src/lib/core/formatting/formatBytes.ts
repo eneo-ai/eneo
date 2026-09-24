@@ -15,7 +15,10 @@ const UNITS = [
  */
 export function formatBytes(bytes: number, decimals = 0) {
   if (!(bytes > 0)) return `${bytes < 0 ? "-" : "0"} ${m.storage_unit_b()}`;
-  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), UNITS.length - 1);
+  const exponent = Math.min(
+    Math.max(0, Math.floor(Math.log(bytes) / Math.log(1024))),
+    UNITS.length - 1
+  );
   const digits = Math.max(0, decimals);
   const value = new Intl.NumberFormat(intlLocale(), {
     minimumFractionDigits: digits,

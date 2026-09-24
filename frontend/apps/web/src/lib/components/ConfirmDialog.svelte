@@ -121,7 +121,16 @@
         class={pending ? "pointer-events-none opacity-50" : undefined}
         >{cancelLabel ?? m.cancel()}</AlertDialog.Cancel
       >
-      <Button {variant} disabled={pending || confirmDisabled} aria-busy={pending} onclick={confirm}>
+      <!-- aria-disabled, not disabled, while pending: a focused button that becomes disabled drops
+           focus out of the dialog, and the dialog stays open when the action fails. -->
+      <Button
+        {variant}
+        disabled={confirmDisabled}
+        aria-disabled={pending}
+        aria-busy={pending}
+        class={pending ? "pointer-events-none opacity-50" : undefined}
+        onclick={confirm}
+      >
         {pending && pendingLabel ? pendingLabel : confirmLabel}
       </Button>
     </AlertDialog.Footer>

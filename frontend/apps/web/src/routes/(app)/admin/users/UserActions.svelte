@@ -64,7 +64,7 @@
   </DropdownMenu.Trigger>
 
   <DropdownMenu.Content align="end">
-    <!-- SquarePen action - always available -->
+    <!-- Edit action - always available -->
     <DropdownMenu.Item
       onSelect={() => {
         showEditDialog = true;
@@ -104,7 +104,7 @@
   </DropdownMenu.Content>
 </DropdownMenu.Root>
 
-<!-- SquarePen Dialog - hide built-in trigger since we control it from dropdown -->
+<!-- Edit Dialog - hide built-in trigger since we control it from dropdown -->
 <UserEditor {user} mode="update" hideTrigger={true} bind:open={showEditDialog}></UserEditor>
 
 <!-- Delete Confirmation Dialog -->

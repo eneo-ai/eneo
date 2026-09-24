@@ -57,9 +57,13 @@ describe("dateTime", () => {
     expect(formatDuration(5 * 60 * 1000)).toBe("5 minuter");
   });
 
-  it("returns an empty string for unset values", () => {
+  it("returns an empty string for unset, empty and invalid values", () => {
     expect(formatDate(null)).toBe("");
     expect(formatDateTime(undefined)).toBe("");
     expect(formatRelativeTime(null)).toBe("");
+    expect(formatDateTime("")).toBe("");
+    expect(formatDateTime("not a date")).toBe("");
+    expect(formatDateMedium("not a date")).toBe("");
+    expect(formatRelativeTime("not a date")).toBe("");
   });
 });

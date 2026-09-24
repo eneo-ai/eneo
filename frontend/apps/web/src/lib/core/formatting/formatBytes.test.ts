@@ -19,6 +19,7 @@ test("zero and negative sizes", () => {
 
 test("picks the largest base-1024 unit", () => {
   expect(formatBytes(1)).toEqual("1 B");
+  expect(formatBytes(0.5)).toEqual("1 B");
   expect(formatBytes(1024)).toEqual("1 KB");
   expect(formatBytes(1536)).toEqual("2 KB");
   expect(formatBytes(1024 * 1024)).toEqual("1 MB");

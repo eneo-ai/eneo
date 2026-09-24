@@ -1,18 +1,15 @@
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { toastError } from "$lib/core/errors";
+import { toast } from "$lib/components/toast";
 import { m } from "$lib/paraglide/messages";
 import CopyButton from "./CopyButton.svelte";
 
-vi.mock("$lib/core/errors", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("$lib/core/errors")>()),
-  toastError: vi.fn()
-}));
+vi.mock("$lib/components/toast", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.mocked(toastError).mockReset();
+  vi.mocked(toast.error).mockReset();
 });
 
 describe("CopyButton", () => {
@@ -29,13 +26,12 @@ describe("CopyButton", () => {
   });
 
   it("reports a failed copy instead of claiming success", async () => {
-    const error = new Error("denied");
-    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(error);
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"));
     render(CopyButton, { text: "secret", showLabel: true, label: "Copy" });
 
     await page.getByRole("button", { name: "Copy" }).click();
 
-    await vi.waitFor(() => expect(toastError).toHaveBeenCalledWith(error, m.could_not_copy()));
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith(m.could_not_copy()));
     expect(page.getByText(m.copied()).elements()).toHaveLength(0);
   });
 });

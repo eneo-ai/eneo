@@ -94,6 +94,7 @@
   description={m.confirm_full_sync({ knowledgeName: knowledgeItem.name })}
   confirmLabel={m.start_full_sync()}
   pendingLabel={m.syncing()}
+  errorContext={m.sync_failed()}
   variant="default"
   onConfirm={triggerFullSync}
 />

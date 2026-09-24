@@ -9,35 +9,43 @@ export function intlLocale(): string {
   return getLocale() === "sv" ? "sv-SE" : "en-US";
 }
 
+/** The date for a value, or null when it is unset, empty or not a valid date. */
+function toDate(value: DateInput): Date | null {
+  if (value == null || value === "") return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
 
 /** `YYYY-MM-DD` in local time, the date format used in tables and lists. Empty when unset. */
 export function formatDate(value: DateInput): string {
-  if (value == null) return "";
-  const date = new Date(value);
+  const date = toDate(value);
+  if (!date) return "";
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 /** `HH:mm` (or `HH:mm:ss`) in local time. */
 export function formatTime(value: DateInput, { seconds = false } = {}): string {
-  if (value == null) return "";
-  const date = new Date(value);
+  const date = toDate(value);
+  if (!date) return "";
   const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
   return seconds ? `${time}:${pad(date.getSeconds())}` : time;
 }
 
 /** `YYYY-MM-DD HH:mm` (or with `:ss`) in local time. */
 export function formatDateTime(value: DateInput, options: { seconds?: boolean } = {}): string {
-  if (value == null) return "";
+  if (!toDate(value)) return "";
   return `${formatDate(value)} ${formatTime(value, options)}`;
 }
 
 /** A date written out for the UI language, e.g. "Sep 23, 2026" / "23 sep. 2026". */
 export function formatDateMedium(value: DateInput): string {
-  if (value == null) return "";
-  return new Intl.DateTimeFormat(intlLocale(), { dateStyle: "medium" }).format(new Date(value));
+  const date = toDate(value);
+  if (!date) return "";
+  return new Intl.DateTimeFormat(intlLocale(), { dateStyle: "medium" }).format(date);
 }
 
 const RELATIVE_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
@@ -55,8 +63,9 @@ export function formatRelativeTime(
   value: DateInput,
   now: string | number | Date = Date.now()
 ): string {
-  if (value == null) return "";
-  const seconds = (new Date(value).getTime() - new Date(now).getTime()) / 1000;
+  const date = toDate(value);
+  if (!date) return "";
+  const seconds = (date.getTime() - new Date(now).getTime()) / 1000;
   const formatter = new Intl.RelativeTimeFormat(intlLocale(), { numeric: "auto" });
   for (const [unit, size] of RELATIVE_UNITS) {
     if (Math.abs(seconds) >= size || unit === "second") {
