@@ -94,6 +94,9 @@ def _model(
         name=name,
         provider_id=provider_id,
         provider_type="openai",
+        # A catalogue model with no maker or provider name recorded.
+        org=None,
+        provider_name=None,
         litellm_model_name=f"openai/{name}",
         max_input_tokens=32_000,
         max_output_tokens=4_000,

@@ -775,6 +775,50 @@ describe("FlowAIBuilder planner controls", () => {
     ).toBeTruthy();
   });
 
+  it("groups the models by who made them, not by how they are served", async () => {
+    // A self-hosted model served over an OpenAI-compatible API reports the
+    // provider type "openai"; its maker comes from the catalogue, and a model
+    // the catalogue records no maker for falls back to its provider's name.
+    const { fetch: base } = makeFetch();
+    const listing = vi.fn(async (path: string, init?: Record<string, unknown>) =>
+      path.endsWith("/models")
+        ? {
+            models: [
+              {
+                id: DEFAULT_MODEL_ID,
+                name: "Test model",
+                provider: "openai",
+                org: "Google",
+                provider_name: "Egen GPU-server",
+                reasoning_effort_options: [],
+                availability: { state: "ready" }
+              },
+              {
+                id: SECOND_MODEL_ID,
+                name: "Second model",
+                provider: "openai",
+                org: null,
+                provider_name: "Egen GPU-server",
+                reasoning_effort_options: [],
+                availability: { state: "ready" }
+              }
+            ],
+            default_model_id: DEFAULT_MODEL_ID
+          }
+        : base(path as string, init as never)
+    );
+    renderShell({ fetch: listing, stream: makeStream().stream });
+
+    await fireEvent.click(
+      await screen.findByRole("button", { name: `${m.ai_builder_model_label()}: Test model` })
+    );
+    await screen.findByRole("option", { name: /Second model/ });
+    const headings = [...document.querySelectorAll("[data-command-group-heading]")].map((heading) =>
+      heading.textContent?.trim()
+    );
+    expect(headings).toEqual(["Egen GPU-server", "Google"]);
+  });
+
   it("stays out of the composer when the space has a single model", async () => {
     const { fetch } = makeFetch();
     const { service } = renderShell({ fetch, stream: makeStream().stream });

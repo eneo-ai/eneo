@@ -1756,6 +1756,8 @@ class TestGetSessionModelsEndpoint:
         service.get_session.return_value = session
 
         model = MagicMock()
+        model.org = None
+        model.provider_name = None
         model.id = uuid4()
         model.capacity = ModelCapacity(32_000, 4_000)
         model.name = "GPT-4"
@@ -1808,6 +1810,8 @@ class TestGetSessionModelsEndpoint:
 
         def _model(name: str, *, level: int, org_default: bool) -> MagicMock:
             model = MagicMock()
+            model.org = None
+            model.provider_name = None
             model.id = uuid4()
             model.capacity = ModelCapacity(32_000, 4_000)
             model.name = name
@@ -1867,6 +1871,8 @@ class TestGetSessionModelsEndpoint:
         container.ai_builder_service.return_value.get_session.return_value = session
 
         model = MagicMock()
+        model.org = None
+        model.provider_name = None
         model.id = uuid4()
         model.capacity = ModelCapacity(32_000, 4_000)
         model.name = "GPT without configurable reasoning"
@@ -1924,6 +1930,8 @@ class TestGetSessionModelsEndpoint:
         session = _make_session_domain(actor_user_id=container.user.return_value.id)
         container.ai_builder_service.return_value.get_session.return_value = session
         model = MagicMock()
+        model.org = None
+        model.provider_name = None
         model.id = uuid4()
         model.capacity = ModelCapacity(32_000, 4_000)
         model.provider_id = uuid4()
@@ -1958,6 +1966,8 @@ class TestGetSessionModelsEndpoint:
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
         model = MagicMock()
+        model.org = None
+        model.provider_name = None
         model.id = uuid4()
         model.capacity = ModelCapacity(32_000, 4_000)
         model.name = "Reasoning model"
@@ -2402,6 +2412,8 @@ class TestSendMessageEndpoint:
 
         # Set up space with models and KBs
         model = MagicMock()
+        model.org = None
+        model.provider_name = None
         model.id = uuid4()
         model.name = "GPT-4"
         model.provider_type = "openai"
@@ -2860,6 +2872,8 @@ class TestSendMessageEndpoint:
         service.get_session.return_value = session
 
         model = MagicMock()
+        model.org = None
+        model.provider_name = None
         model.id = uuid4()
         model.name = "GPT-4"
         model.provider_type = "azure"
@@ -4166,6 +4180,28 @@ async def test_listing_disables_capacity_but_excludes_security_ineligible(
         "missing_dimensions": ["max_input_tokens"],
     }
     assert response.models[1].model_dump()["availability"] == {"state": "ready"}
+
+
+@pytest.mark.anyio
+async def test_listing_names_who_made_each_model_as_the_catalogue_records_it(
+    capacity_listing,
+):
+    # The picker groups by maker; without it a self-hosted model served over
+    # an OpenAI-compatible API sits under "Openai". Nothing is inferred from a
+    # model's name: a model the catalogue records no maker for says none.
+    container, session, (unready, ready, lower) = capacity_listing
+    unready.org = "Google"
+    unready.provider_name = "Egen GPU-server"
+    ready.org = None
+    ready.provider_name = None
+    response = await get_session_models(
+        request=_make_request(), session_id=session.id, container=container
+    )
+    by_id = {model.id: model.model_dump() for model in response.models}
+    assert by_id[unready.id]["org"] == "Google"
+    assert by_id[unready.id]["provider_name"] == "Egen GPU-server"
+    assert by_id[ready.id]["org"] is None
+    assert by_id[ready.id]["provider_name"] is None
 
 
 @pytest.mark.anyio

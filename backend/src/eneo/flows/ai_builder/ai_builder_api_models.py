@@ -149,6 +149,8 @@ AI_BUILDER_SESSION_MODELS_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
             "id": "00000000-0000-0000-0000-000000000710",
             "name": "gpt-5.4",
             "provider": "openai",
+            "org": "OpenAI",
+            "provider_name": "OpenAI",
             "availability": {"state": "ready"},
         }
     ],
@@ -853,6 +855,18 @@ class SessionModelOption(BaseModel):
         description="Human-readable model nickname, falling back to its name."
     )
     provider: str
+    org: str | None = Field(
+        default=None,
+        description=(
+            "Who made the model, as the model catalogue records it, or null when "
+            "it records no maker. Lets a picker group by maker rather than by "
+            "the protocol the model is served over."
+        ),
+    )
+    provider_name: str | None = Field(
+        default=None,
+        description="The name the admin gave the provider that serves the model, or null.",
+    )
     reasoning_effort_options: list[str] = Field(
         default_factory=list,
         description=(
@@ -882,6 +896,8 @@ class SessionModelOption(BaseModel):
             id=model.id,
             name=model.nickname or model.name,
             provider=model.provider_type or "unknown",
+            org=model.org,
+            provider_name=model.provider_name,
             availability=availability,
             reasoning_effort_options=options,
         )

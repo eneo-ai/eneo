@@ -32008,8 +32008,18 @@ export interface components {
        * @description Human-readable model nickname, falling back to its name.
        */
       name: string;
+      /**
+       * Org
+       * @description Who made the model, as the model catalogue records it, or null when it records no maker. Lets a picker group by maker rather than by the protocol the model is served over.
+       */
+      org?: string | null;
       /** Provider */
       provider: string;
+      /**
+       * Provider Name
+       * @description The name the admin gave the provider that serves the model, or null.
+       */
+      provider_name?: string | null;
       /**
        * Reasoning Effort Options
        * @description Reasoning efforts accepted for this model. An empty list means the builder must not offer a reasoning control.
@@ -32027,7 +32037,9 @@ export interface components {
      *           },
      *           "id": "00000000-0000-0000-0000-000000000710",
      *           "name": "gpt-5.4",
-     *           "provider": "openai"
+     *           "org": "OpenAI",
+     *           "provider": "openai",
+     *           "provider_name": "OpenAI"
      *         }
      *       ]
      *     }
