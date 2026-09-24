@@ -2,6 +2,7 @@
   import { createWidgetClient, EneoError, type WidgetPublicConfig } from "@eneo/eneo-js";
   import { onMount } from "svelte";
   import EmbedApp from "$lib/features/widget/components/EmbedApp.svelte";
+  import WidgetUnavailable from "$lib/features/widget/components/WidgetUnavailable.svelte";
   import { readPreviewToken } from "$lib/features/widget/preview";
   import { m } from "$lib/paraglide/messages";
 
@@ -57,12 +58,7 @@
     {previewToken}
   />
 {:else if data.unavailable}
-  <div
-    class="bg-primary text-primary fixed inset-0 flex flex-col items-center justify-center gap-2 p-6"
-  >
-    <h1 class="text-base font-semibold">{m.widget_not_available_title()}</h1>
-    <p class="text-secondary text-center text-sm">{m.widget_not_available_body()}</p>
-  </div>
+  <WidgetUnavailable hostOrigin={data.hostOrigin} />
 {:else if previewFailed}
   <div class="bg-primary text-secondary fixed inset-0 flex items-center justify-center p-6">
     <p class="text-center text-sm" role="alert">{m.widget_preview_unavailable()}</p>

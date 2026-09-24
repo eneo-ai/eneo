@@ -62,6 +62,8 @@ describe("createEmbedBridge", () => {
     bridge.ready();
     bridge.ready(colors);
     bridge.conversationStarted();
+    bridge.ready(colors, "Fråga kommunen");
+    bridge.ready(undefined, "Fråga kommunen");
     expect(target.postMessage).toHaveBeenNthCalledWith(
       1,
       { ns: BRIDGE_NAMESPACE, v: 1, type: "ready" },
@@ -75,6 +77,17 @@ describe("createEmbedBridge", () => {
     expect(target.postMessage).toHaveBeenNthCalledWith(
       3,
       { ns: BRIDGE_NAMESPACE, v: 1, type: "conversation_started" },
+      "https://www.kommun.se"
+    );
+    // The title names the loader's frame for screen readers.
+    expect(target.postMessage).toHaveBeenNthCalledWith(
+      4,
+      { ns: BRIDGE_NAMESPACE, v: 1, type: "ready", payload: { colors, title: "Fråga kommunen" } },
+      "https://www.kommun.se"
+    );
+    expect(target.postMessage).toHaveBeenNthCalledWith(
+      5,
+      { ns: BRIDGE_NAMESPACE, v: 1, type: "ready", payload: { title: "Fråga kommunen" } },
       "https://www.kommun.se"
     );
   });

@@ -104,7 +104,7 @@ function hostPage(loaderOrigin: string, publicId: string): string {
 </script>
 <script async src="${loaderOrigin}/widget/v1/eneo.js" data-widget-id="${publicId}"></script>
 </head>
-<body><main><h1>Testkommun</h1><p>En vanlig kommunsida.</p></main></body>
+<body><main><h1>Testkommun</h1><p>En vanlig kommunsida. <a href="#kontakt">Kontakt</a></p></main></body>
 </html>`;
 }
 
@@ -205,6 +205,14 @@ test.describe("embeddable widget", () => {
     // Focus moved into the iframe's composer on open.
     await expect(composer).toBeFocused();
 
+    // Beside the page the panel is a named, non-modal dialog, and the frame
+    // is named after the widget for screen readers.
+    const dialog = page.getByRole("dialog", { name: "Chatt" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).not.toHaveAttribute("aria-modal", "true");
+    await expect(page.locator("main")).not.toHaveAttribute("inert", "");
+    await expect(page.locator("eneo-widget iframe")).toHaveAttribute("title", "Fråga kommunen");
+
     // A forged message from the host page itself is ignored (only the iframe
     // window on the Eneo origin may close the panel).
     await page.evaluate(() => window.postMessage({ ns: "eneo-widget", v: 1, type: "close" }, "*"));
@@ -231,7 +239,9 @@ test.describe("embeddable widget", () => {
     const askedAt = Date.now();
     await page.keyboard.press("Enter");
     try {
-      await expect(frame.getByText(MOCK_REPLY)).toBeVisible({ timeout: 45_000 });
+      await expect(frame.getByRole("log").getByText(MOCK_REPLY)).toBeVisible({
+        timeout: 45_000
+      });
     } finally {
       consoleLines.push(`[probe] answer wait ${Date.now() - askedAt} ms`);
       await attachConsole();
@@ -240,14 +250,29 @@ test.describe("embeddable widget", () => {
       .poll(() => page.evaluate(() => (window as never as { __events: string[] }).__events))
       .toContain("conversation_started");
 
+    // A screen reader hears the finished answer once, never the stream.
+    await expect(frame.locator("[aria-live='polite'][aria-atomic='true']")).toHaveText(
+      `Assistent: ${MOCK_REPLY}`
+    );
+
     // WCAG check of the open panel (host page + iframe).
     const results = await new AxeBuilder({ page })
-      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"])
       .analyze();
     const serious = results.violations.filter(
       (v) => v.impact === "serious" || v.impact === "critical"
     );
     expect(serious, JSON.stringify(serious, null, 2)).toEqual([]);
+
+    // Escape on the host page closes the panel too, so it never keeps covering
+    // what the visitor moved on to, and focus stays there (WCAG 2.4.11).
+    const hostLink = page.getByRole("link", { name: "Kontakt" });
+    await hostLink.focus();
+    await page.keyboard.press("Escape");
+    await expect(launcher).toHaveAttribute("aria-expanded", "false");
+    await expect(hostLink).toBeFocused();
+    await launcher.click();
+    await expect(composer).toBeFocused();
 
     // Escape inside the iframe closes the panel and returns focus to the launcher.
     await composer.focus();
@@ -272,7 +297,7 @@ test.describe("embeddable widget", () => {
     expect(config.status()).toBe(404);
   });
 
-  test("on a phone a paused widget can still be dismissed from the launcher", async ({
+  test("on a phone a paused widget is a modal notice that closes itself", async ({
     page,
     request,
     baseURL
@@ -294,12 +319,19 @@ test.describe("embeddable widget", () => {
     const frame = page.frameLocator("eneo-widget iframe");
     await expect(frame.getByText("Chatten är pausad")).toBeVisible({ timeout: 20_000 });
 
-    // The notice has no chat and so no close button of its own; the launcher
-    // stays on top of the full-screen panel as the way out.
-    await expect(launcher).toBeVisible();
-    await expect(launcher).toHaveAccessibleName("Stäng chatt");
-    await launcher.click();
+    // Full screen the panel is a modal dialog: the page behind it is inert,
+    // so neither Tab nor a screen reader reaches content hidden behind it.
+    await expect(page.getByRole("dialog", { name: "Chatt" })).toHaveAttribute("aria-modal", "true");
+    await expect(page.locator("main")).toHaveAttribute("inert", "");
+
+    // The notice takes part like the chat: focus moves to it, so a screen
+    // reader reads it, and its own close button replaces the launcher.
+    await expect(frame.getByRole("heading", { name: "Chatten är inte tillgänglig" })).toBeFocused();
+    await expect(launcher).toBeHidden();
+    await frame.getByRole("button", { name: "Stäng chatten" }).click();
     await expect(launcher).toHaveAttribute("aria-expanded", "false");
+    await expect(launcher).toBeFocused();
+    await expect(page.locator("main")).not.toHaveAttribute("inert", "");
     await expect(launcher).toHaveAccessibleName("Öppna chatt");
     await expect(page.locator("eneo-widget .panel")).toBeHidden();
     // The host page is usable again: a click reaches its own content.

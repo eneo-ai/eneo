@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@f64f6a91ef5a
+translationSource: guides/embed-widget.mdx@fc90541f301f
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -124,17 +124,24 @@ in i webbplatsen:
    tillåtas i `script-src` för skriptet och `frame-src` för panelen. Exempel:
    `script-src 'self' https://eneo.kommun.se; frame-src https://eneo.kommun.se`.
    Chattens egna nätverksanrop sker inne i ramen från Eneos origin.
-4. **Information till besökare.** Widgeten sätter inga kakor på värdwebbplatsen.
+4. **Gör chatten lätt att hitta.** Skriptet lägger knappen sist på sidan, så
+   den som använder tangentbord eller skärmläsare når den sist. Lägg en synlig
+   länk som "Chatta med oss" tidigt på sidan, till exempel vid
+   kontaktuppgifterna, som anropar `Eneo('open')` (se
+   [Attribut och API](#optional-attributes-and-api)). Med
+   `data-launcher="none"` ersätter länken den flytande knappen.
+5. **Information till besökare.** Widgeten sätter inga kakor på värdwebbplatsen.
    Chattramen sparar en pseudonym besökaridentitet och aktuell konversation i
    sin egen webbläsarlagring. Beskriv användningen i webbplatsens
    integritetsinformation; se [Personuppgifter och lagring](#personal-data-and-cookies).
-5. **Låst version med SRI.** Om er policy kräver SRI, använd installationskoden
+6. **Låst version med SRI.** Om er policy kräver SRI, använd installationskoden
    med `integrity`. Den behöver uppdateras efter nästa Eneo-utgåva. Annars kan
    den flytande adressen `v1` användas.
-6. **Test före publicering.** Testmiljöns origin måste också vara tillåten.
+7. **Test före publicering.** Testmiljöns origin måste också vara tillåten.
    Öppna chatten, skicka en fråga, stäng med Escape och kontrollera att fokus
-   återgår till knappen. Prova med tangentbord och skärmläsare samt på mobil.
-7. **Om skript inte tillåts.** Länka till den fristående chattsidan:
+   återgår till knappen. Prova med enbart tangentbord, med skärmläsare, på
+   mobil och med webbläsaren förstorad till 200 %.
+8. **Om skript inte tillåts.** Länka till den fristående chattsidan:
    `https://<eneo>/embed/<widget-id>?mode=full`. Samma chatt visas som en hel sida.
 
 ## För administratörer: policy, mallar och säkerhet [#for-operators-policy-templates-and-security]
@@ -242,22 +249,40 @@ saknades") som öppnar en dialog med en kommentarsruta
 
 ## Tillgänglighet [#accessibility]
 
-Widgeten har en tangentbordsstyrd knapp med synlig fokusmarkering, en namngiven
-chattram och stöd för skärmläsare. Escape stänger panelen och återför fokus till
-knappen. Svar annonseras när de är klara. Panelen anpassas till små skärmar och
-inställningar för färgschema och minskad rörelse. Kontrollera helheten på den
-webbplats där den installeras, inklusive era egna texter, färger och länkar.
+Widgeten är byggd för WCAG 2.2 AA:
+
+- Knappen är en riktig knapp med tillgängligt namn och synlig fokusmarkering.
+  Panelen är en namngiven dialogruta, och chattramen har widgetens namn.
+- När chatten öppnas flyttas fokus in i den. Escape stänger den, även när
+  fokus har flyttats vidare till sidan. Fokus återgår då till knappen eller
+  stannar där besökaren befinner sig.
+- Skärmläsare meddelar att en fråga har skickats och läser sedan upp det
+  färdiga svaret en gång. Svaret läses aldrig upp ord för ord medan det skrivs.
+- Bredvid sidan är panelen en icke-modal dialogruta, så sidan går att använda
+  under tiden. På små skärmar och i låga fönster, till exempel en bärbar dator
+  med 200 % förstoring, fyller den skärmen som en modal dialogruta: resten av
+  sidan döljs för skärmläsare och tangentbord tills chatten stängs.
+- Texten går att förstora: när panelen är låg rullar hela chatten i stället
+  för att konversationen trycks ihop.
+- Allt fungerar med tangentbord, färgerna uppfyller kontrastkraven och chatten
+  följer webbläsarens inställningar för färgschema och minskad rörelse.
+  Redaktörer får en kontrastkontroll av färgen de väljer.
+
+Kontrollera helheten på den webbplats där den installeras, inklusive era egna
+texter, färger och länkar.
 
 ### Exempel för tillgänglighetsredogörelsen [#accessibility-statement-template]
 
 **Chattassistent**
 
 Webbplatsen innehåller en chattassistent som drivs av [organisationens namn]s
-AI-plattform. Chatten öppnas med en knapp som går att nå med tangentbord och
-skärmläsare. Den kan stängas med Escape-tangenten, och fokus återvänder då till
-knappen. Svaren läses upp av skärmläsare när de är klara. Chatten följer
-webbläsarens inställningar för ljust och mörkt läge och för minskad rörelse,
-och den fyller hela skärmen på små skärmar.
+AI-plattform. Chatten öppnas som en dialogruta med en knapp som går att nå med
+tangentbord och skärmläsare. Den kan stängas med Escape-tangenten, och fokus
+återvänder då till knappen. Skärmläsare meddelar när en fråga har skickats och
+läser upp varje svar när det är klart. Chatten följer webbläsarens
+inställningar för ljust och mörkt läge och för minskad rörelse. På små skärmar,
+och när sidan förstoras så mycket att panelen inte får plats, fyller chatten
+hela skärmen, och resten av sidan döljs för skärmläsare tills chatten stängs.
 
 Kända begränsningar: svaren skapas av en AI-modell och kan vara felaktiga. Svar
 kan innehålla länkar till källor som öppnas i en ny flik.

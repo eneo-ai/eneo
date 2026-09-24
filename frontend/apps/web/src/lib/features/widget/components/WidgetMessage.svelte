@@ -5,6 +5,7 @@
   import { tick } from "svelte";
   import { Check, ChevronRight, Copy, ExternalLink, FileText } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
+  import { Announcer } from "../announcer.svelte";
   import {
     messageSources,
     referenceIndexer,
@@ -49,7 +50,7 @@
   let expanded = $state(false);
   let copiedId = $state<string | null>(null);
   let copyFailedId = $state<string | null>(null);
-  let announcement = $state("");
+  const announcer = new Announcer();
   let copiedTimer: ReturnType<typeof setTimeout> | null = null;
 
   async function revealSource(sourceIndex: number) {
@@ -80,14 +81,14 @@
       await navigator.clipboard.writeText(text);
       copiedId = source.id;
       copyFailedId = null;
-      announcement = m.widget_reference_copied();
+      announcer.announce(m.widget_reference_copied());
       if (copiedTimer) clearTimeout(copiedTimer);
       copiedTimer = setTimeout(() => (copiedId = null), 2000);
     } catch {
       // Clipboard access is denied in some embedding contexts; leave the
       // text on screen so the visitor can select it instead.
       copyFailedId = source.id;
-      announcement = m.widget_reference_copy_failed();
+      announcer.announce(m.widget_reference_copy_failed());
     }
   }
 
@@ -115,7 +116,8 @@
       </div>
     {/if}
     {#if waiting && steps.length === 0}
-      <TypingIndicator />
+      <!-- The chat announces the wait once; the dots stay silent. -->
+      <div aria-hidden="true"><TypingIndicator /></div>
     {:else if !waiting}
       <span class="sr-only">{m.widget_assistant()}: </span>
       <div class="widget-answer">
@@ -207,7 +209,7 @@
               {/each}
             </ol>
           {/if}
-          <span class="sr-only" aria-live="polite">{announcement}</span>
+          <span class="sr-only" aria-live="polite">{announcer.text}</span>
         </section>
       {/if}
     {/if}

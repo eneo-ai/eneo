@@ -16,7 +16,7 @@ export const BRIDGE_VERSION = 1;
 import type { LauncherColors } from "./contrast";
 
 export type OutboundMessage =
-  | { type: "ready"; payload?: { colors: LauncherColors } }
+  | { type: "ready"; payload?: { colors?: LauncherColors; title?: string } }
   | { type: "close" }
   | { type: "conversation_started" }
   | { type: "unread"; payload: { count: number } };
@@ -116,9 +116,19 @@ export function createEmbedBridge(options: {
   return {
     embedded,
     post,
-    /** The loader paints its launcher with the widget's colours once the page is up. */
-    ready: (colors?: LauncherColors) =>
-      post(colors ? { type: "ready", payload: { colors } } : { type: "ready" }),
+    /**
+     * The loader paints its launcher with the widget's colours and names the
+     * frame after the widget's title for screen readers once the page is up.
+     */
+    ready: (colors?: LauncherColors, title?: string) =>
+      post(
+        colors || title
+          ? {
+              type: "ready",
+              payload: { ...(colors ? { colors } : {}), ...(title ? { title } : {}) }
+            }
+          : { type: "ready" }
+      ),
     close: () => post({ type: "close" }),
     /** The host only learns that a conversation began; the session id stays inside the frame. */
     conversationStarted: () => post({ type: "conversation_started" }),

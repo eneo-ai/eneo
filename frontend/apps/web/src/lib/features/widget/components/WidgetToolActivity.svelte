@@ -29,8 +29,8 @@
 <div class="text-secondary flex flex-col gap-1 text-[13px] leading-tight">
   {#if working && latest}
     <div class="flex items-center gap-2">
-      <TypingIndicator />
-      <span class="truncate" aria-live="polite">
+      <div aria-hidden="true"><TypingIndicator /></div>
+      <span class="min-w-0 break-words" aria-live="polite">
         {latest.label}{latest.detail ? `: ${latest.detail}` : ""}…
       </span>
     </div>
@@ -52,7 +52,7 @@
         <Check class="text-positive-default size-3.5 shrink-0" aria-hidden="true" />
         <span class="sr-only">{m.widget_activity_done()}: </span>
       {/if}
-      <span class="truncate">{summary}</span>
+      <span class="min-w-0 break-words">{summary}</span>
     </button>
     {#if open}
       <ol class="border-default ml-[7px] flex flex-col gap-1.5 border-l pl-3.5 pt-1">
@@ -84,7 +84,7 @@
       {:else}
         <Check class="text-positive-default size-3.5 shrink-0" aria-hidden="true" />
       {/if}
-      <span class="truncate">{latest.label}</span>
+      <span class="min-w-0 break-words">{latest.label}</span>
       <span class="text-muted text-xs">{m.widget_activity_via({ server: latest.serverName })}</span>
     </div>
   {/if}

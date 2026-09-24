@@ -155,13 +155,20 @@ function renderApp(overrides: Partial<WidgetPublicConfig> = {}) {
 const suggestion = () => page.getByRole("button", { name: "Vad har biblioteket för öppettider?" });
 const composer = () => page.getByRole("textbox", { name: "widget_input_label" });
 const answers = () => document.querySelectorAll("[data-widget-chat] [role='log'] li");
+/** What the chat's polite live region currently hands a screen reader. */
+const announced = () =>
+  document.querySelector("[data-widget-chat] [aria-live='polite'][aria-atomic='true']")
+    ?.textContent ?? "";
 
 async function releaseAnswer() {
   await vi.waitFor(() => expect(fake.release).not.toBeNull());
   const release = fake.release!;
   fake.release = null;
   release();
-  await expect.element(page.getByText("Svaret från assistenten.")).toBeVisible();
+  // In the log: the live region repeats the answer for screen readers.
+  await expect
+    .element(page.getByRole("log").getByText("Svaret från assistenten.").last())
+    .toBeVisible();
 }
 
 beforeEach(() => {
@@ -310,6 +317,55 @@ describe("WidgetChat", () => {
     await userEvent.click(page.getByRole("button", { name: "widget_feedback_more_negative" }));
     await expect.element(page.getByRole("dialog")).toBeVisible();
     expect(JSON.stringify(await violations())).toBe("[]");
+  });
+
+  test("a screen reader hears that the question went off and then every answer", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await vi.waitFor(() => expect(announced()).toBe("assistant_is_typing"));
+    // The typing dots themselves stay silent.
+    expect(page.getByRole("status", { name: "assistant_is_typing" }).elements()).toHaveLength(0);
+    await releaseAnswer();
+    await vi.waitFor(() => expect(announced()).toBe("widget_assistant: Svaret från assistenten."));
+
+    // The same answer again is read again: the region is emptied in between.
+    await userEvent.fill(composer(), "En följdfråga");
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() => expect(announced()).toBe("assistant_is_typing"));
+    await releaseAnswer();
+    await vi.waitFor(() => expect(announced()).toBe("widget_assistant: Svaret från assistenten."));
+  });
+
+  test("a short panel scrolls as one page so the composer stays reachable", async () => {
+    // A 400 x 220 frame is what the panel gets on a laptop zoomed to 200 %;
+    // with a full set of texts the header and composer alone need more.
+    const before = { width: window.innerWidth, height: window.innerHeight };
+    await page.viewport(400, 220);
+    try {
+      renderApp({
+        texts: {
+          title: "Fråga kommunen",
+          subtitle:
+            "Du chattar med en AI-assistent. Svaren kan innehålla fel – kontrollera viktig information.",
+          welcome: "Hej! Vad kan jag hjälpa dig med?",
+          suggested_questions: [
+            "Vad har biblioteket för öppettider?",
+            "Hur ansöker jag om bygglov?",
+            "När töms mitt sopkärl?",
+            "Var kan jag parkera i centrum?"
+          ],
+          footer_text: "Läs om hur vi hanterar personuppgifter."
+        }
+      });
+      await expect.element(composer()).toBeVisible();
+      const textarea = composer().element() as HTMLElement;
+      textarea.scrollIntoView();
+      const box = textarea.getBoundingClientRect();
+      expect(box.top).toBeGreaterThanOrEqual(0);
+      expect(box.bottom).toBeLessThanOrEqual(window.innerHeight);
+    } finally {
+      await page.viewport(before.width, before.height);
+    }
   });
 
   test("a single-turn widget offers a new question instead of follow-up or feedback", async () => {

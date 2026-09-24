@@ -8,7 +8,7 @@ This guide covers the editor's side (creating and publishing a widget), the oper
 
 ## How it works
 
-- Your site includes one small script (the _loader_, about 4 kB) from your Eneo installation. It renders a launcher button and, when opened, an `iframe` with Eneo's chat page.
+- Your site includes one small script (the _loader_, about 5 kB) from your Eneo installation. It renders a launcher button and, when opened, an `iframe` with Eneo's chat page.
 - The chat runs entirely on the Eneo origin. The host site never sees the conversation, and the browser only allows the widget on the sites you have listed (`Content-Security-Policy: frame-ancestors`).
 - Before the first message the visitor's browser solves an invisible proof of work (ALTCHA, self-hosted, no third party) and receives a short-lived visitor token. Rate limits per visitor and per IP address, a maximum question length and a daily token budget per widget limit usage.
 - Visitors use the assistant’s configured knowledge and tools, including its MCP servers and capabilities. Tool-mode knowledge search retains the visitor’s restricted widget identity; it does not require an Eneo account. File uploads are not available. Only publish knowledge and tools that are appropriate for anonymous visitors.
@@ -79,10 +79,11 @@ The editor in Eneo hands you the install snippet; this is what you need to know 
 1. **Where to paste it.** Once per page template, ideally just before `</body>`. In SiteVision and Optimizely (Episerver) that is the site template's script slot; in WordPress a footer script block or a theme's `footer.php`; through Google Tag Manager a Custom HTML tag fired on all pages. The script is `async`, so it never blocks rendering.
 2. **The address must match exactly.** The editor lists the sites that may show the widget under _Rules → Allowed websites_. Each entry is a full origin: scheme and host, for example `https://www.kommun.se`. `https://kommun.se` and `https://www.kommun.se` are two different origins, and `http` is not `https`. A wildcard covers subdomains: `https://*.kommun.se`. If the origin is missing, the button appears but the panel stays empty, because the browser refuses to frame the chat.
 3. **Content Security Policy.** If the site sends a CSP, allow the Eneo origin in `script-src` (the loader) and `frame-src` (the chat panel), for example `script-src 'self' https://eneo.kommun.se; frame-src https://eneo.kommun.se`. Nothing else is needed: the chat itself runs inside the frame on Eneo's origin.
-4. **Cookies and consent.** The widget sets no cookies on your site. The chat panel keeps a pseudonymous visitor id and the current conversation in its own frame storage, which browsers keep separate per site. It does not need to be gated behind a cookie banner, but mention it in the site's privacy information; the _Personal data and cookies_ section below has the wording.
-5. **Locked version (SRI).** If your policy requires Subresource Integrity, copy the pinned snippet with the `integrity` attribute instead of the floating one. It stops loading after the next Eneo release until you paste the new snippet, so prefer the floating `v1` address unless SRI is mandatory.
-6. **Test before go-live.** Open a page with the snippet on a staging host that is on the allowed list, click the launcher, send a question, close with Escape and check that focus returns to the button. The editor can also use _Test in Eneo_ to try the real widget before your site has it.
-7. **No JavaScript on the page?** Link to the stand-alone chat instead: `https://<eneo>/embed/<widget id>?mode=full`. It is the same chat as a full page and works from intranets and content that cannot run scripts.
+4. **Make the chat easy to find.** The loader adds its button at the end of the page, so keyboard and screen reader users reach it last. Add a visible link such as "Chat with us" early on the page, for example next to the contact details, that calls `Eneo('open')` (see _Optional attributes and API_ above). With `data-launcher="none"` that link replaces the floating button.
+5. **Cookies and consent.** The widget sets no cookies on your site. The chat panel keeps a pseudonymous visitor id and the current conversation in its own frame storage, which browsers keep separate per site. It does not need to be gated behind a cookie banner, but mention it in the site's privacy information; the _Personal data and cookies_ section below has the wording.
+6. **Locked version (SRI).** If your policy requires Subresource Integrity, copy the pinned snippet with the `integrity` attribute instead of the floating one. It stops loading after the next Eneo release until you paste the new snippet, so prefer the floating `v1` address unless SRI is mandatory.
+7. **Test before go-live.** Open a page with the snippet on a staging host that is on the allowed list, click the launcher, send a question, close with Escape and check that focus returns to the button. Also try it with the keyboard only, with a screen reader, on a phone and with the browser zoomed to 200 %. The editor can also use _Test in Eneo_ to try the real widget before your site has it.
+8. **No JavaScript on the page?** Link to the stand-alone chat instead: `https://<eneo>/embed/<widget id>?mode=full`. It is the same chat as a full page and works from intranets and content that cannot run scripts.
 
 ## For operators: policy, templates and security
 
@@ -140,7 +141,16 @@ Before activating a widget on a public site, confirm that:
 
 ## Accessibility
 
-The widget is built for WCAG 2.1 AA: the launcher is a real button with an accessible name and a visible focus ring, the panel is a labelled `iframe`, opening moves focus into the chat, `Escape` closes it and returns focus, answers are announced to screen readers, everything works with the keyboard, colours meet contrast requirements and the panel becomes full-screen on small screens. Editors get a contrast check on the colour they choose.
+The widget is built for WCAG 2.2 AA:
+
+- The launcher is a real button with an accessible name and a visible focus ring. The panel is a labelled dialog, and the chat frame is named after the widget.
+- Opening moves focus into the chat. `Escape` closes it, also when focus has moved on to the page; focus then returns to the button, or stays where the visitor moved to.
+- Screen readers hear that a question was sent and then the finished answer, once. The answer is never read word by word while it is written.
+- Beside the page the panel is a non-modal dialog, so the page stays usable while the visitor chats. On small screens, and on short windows such as a laptop screen zoomed to 200 %, it fills the screen as a modal dialog: the rest of the page is hidden from screen readers and the keyboard until the chat is closed.
+- Text can be enlarged: when the panel is short, the whole chat scrolls instead of squeezing the conversation.
+- Everything works with the keyboard, colours meet contrast requirements and the chat follows the browser's settings for colour scheme and reduced motion. Editors get a contrast check on the colour they choose.
+
+Check the whole on the site where it is installed, including your own texts, colours and links.
 
 ### Accessibility statement template
 
@@ -151,7 +161,7 @@ Add a section like this to the website's accessibility statement (the template i
 
 **Chattassistent**
 
-Webbplatsen innehåller en chattassistent som drivs av [organisationens namn]s AI-plattform. Chatten öppnas med en knapp som går att nå med tangentbord och skärmläsare. Den kan stängas med Escape-tangenten, och fokus återvänder då till knappen. Svaren läses upp av skärmläsare när de är klara. Chatten följer webbläsarens inställningar för ljust och mörkt läge och för minskad rörelse, och den fyller hela skärmen på små skärmar.
+Webbplatsen innehåller en chattassistent som drivs av [organisationens namn]s AI-plattform. Chatten öppnas som en dialogruta med en knapp som går att nå med tangentbord och skärmläsare. Den kan stängas med Escape-tangenten, och fokus återvänder då till knappen. Skärmläsare meddelar när en fråga har skickats och läser upp varje svar när det är klart. Chatten följer webbläsarens inställningar för ljust och mörkt läge och för minskad rörelse. På små skärmar, och när sidan förstoras så mycket att panelen inte får plats, fyller chatten hela skärmen, och resten av sidan döljs för skärmläsare tills chatten stängs.
 
 Kända begränsningar: svaren skapas av en AI-modell och kan vara felaktiga. Svar kan innehålla länkar till källor som öppnas i en ny flik.
 
@@ -164,7 +174,7 @@ Om du inte kan använda chatten kan du kontakta oss på [alternativ kontaktväg]
 
 **Chat assistant**
 
-This website includes a chat assistant powered by [organisation]'s AI platform. The chat opens from a button that can be reached with a keyboard and screen readers. It can be closed with the Escape key, after which focus returns to the button. Answers are announced by screen readers when complete. The chat follows the browser's settings for light and dark mode and for reduced motion, and it fills the whole screen on small displays.
+This website includes a chat assistant powered by [organisation]'s AI platform. The chat opens as a dialog from a button that can be reached with a keyboard and screen readers. It can be closed with the Escape key, after which focus returns to the button. Screen readers announce when a question has been sent and read out each answer when it is complete. The chat follows the browser's settings for light and dark mode and for reduced motion. On small screens, and when the page is zoomed in so far that the panel does not fit, it fills the whole screen, and the rest of the page is hidden from screen readers until the chat is closed.
 
 Known limitations: answers are generated by an AI model and may be incorrect. Answers may contain links to sources that open in a new tab.
 

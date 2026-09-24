@@ -16,6 +16,8 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { MessageSquarePlus, X } from "lucide-svelte";
   import { solveWithAltcha } from "../altcha";
+  import { Announcer } from "../announcer.svelte";
+  import { answerText } from "../answerText";
   import { createEmbedBridge } from "../embedBridge";
   import { VisitorSession, isTokenRejected, isWidgetUnavailable } from "../visitorSession";
   import {
@@ -48,11 +50,12 @@
 
   let altchaElement = $state<AltchaWidgetElement | null>(null);
   let composer = $state<WidgetComposer | null>(null);
+  let chatRoot = $state<HTMLElement | null>(null);
   let log = $state<HTMLElement | null>(null);
   let newQuestionButton = $state<HTMLButtonElement | null>(null);
 
   let status = $state<"idle" | "verifying" | "sending">("idle");
-  let announcement = $state("");
+  const announcer = new Announcer();
   let errorMessage = $state<string | null>(null);
   let unavailable = $state(false);
   // A 429 with Retry-After: the composer stays closed until the window passes.
@@ -101,7 +104,10 @@
   const answered = $derived(singleTurn && messages.length > 0 && !busy);
 
   onMount(() => {
-    bridge.ready(launcherColors(initial.config.theme));
+    bridge.ready(
+      launcherColors(initial.config.theme),
+      initial.config.texts.title || initial.config.name
+    );
     if (initial.config.single_turn) {
       session.rememberSession(null);
     } else if (session.sessionId && session.hasIdentity) {
@@ -110,6 +116,7 @@
     }
     return () => {
       if (cooldownTimer) clearTimeout(cooldownTimer);
+      announcer.clear();
       bridge.destroy();
     };
   });
@@ -158,13 +165,23 @@
     status = "sending";
     errorMessage = null;
     pendingQuestion = question;
+    // The typing dots are silent; this tells a screen reader the question went off.
+    announcer.announce(m.assistant_is_typing());
     try {
       await ask(question, false);
     } finally {
       status = "idle";
       pendingQuestion = null;
       await tick();
-      log?.scrollTo({ top: log.scrollHeight, behavior: "smooth" });
+      scrollToEnd();
+    }
+  }
+
+  /** The conversation scrolls, or on a short panel the whole chat does. */
+  function scrollToEnd() {
+    const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    for (const scroller of [log, chatRoot]) {
+      scroller?.scrollTo({ top: scroller.scrollHeight, behavior });
     }
   }
 
@@ -179,13 +196,20 @@
         // The host page only learns that a conversation began, never its id.
         if (wasNew) bridge.conversationStarted();
       }
-      announcement = m.widget_answer_complete();
+      // The finished answer is read once, as in any chat; the stream never
+      // is (the log's own live region is off).
+      const answer = answerText(chat.currentConversation.messages?.at(-1)?.answer ?? "");
+      announcer.announce(
+        answer ? `${m.widget_assistant()}: ${answer}` : m.widget_answer_complete()
+      );
     } catch (error) {
       if (isTokenRejected(error) && !retried) {
         // Stale after a pause/config change or simply expired: re-mint once.
         session.invalidate();
         return ask(question, true);
       }
+      // The alert below speaks for itself; a pending "typing" must not follow it.
+      announcer.clear();
       if (widgetErrorCode(error) === "widget_not_active") unavailable = true;
       const wait = retryAfterSeconds(error);
       if (wait !== null && wait <= MAX_COOLDOWN_SECONDS) coolDown(wait);
@@ -234,7 +258,11 @@
 
 <svelte:window onkeydown={onWindowKeydown} />
 
-<div class="bg-primary text-primary flex h-full min-h-0 flex-col" data-widget-chat>
+<div
+  class="widget-chat bg-primary text-primary flex h-full min-h-0 flex-col"
+  data-widget-chat
+  bind:this={chatRoot}
+>
   <header
     class={[
       "border-default flex items-center justify-between gap-2 border-b px-4 py-3",
@@ -257,7 +285,7 @@
         </span>
       {/if}
       <div class="min-w-0">
-        <h1 class="truncate text-base font-semibold">{config.texts.title || config.name}</h1>
+        <h1 class="text-base font-semibold break-words">{config.texts.title || config.name}</h1>
         <p class="widget-header-muted text-xs">{subtitle}</p>
       </div>
     </div>
@@ -288,7 +316,7 @@
   </header>
 
   <!-- The conversation is the page's main landmark; header and footer frame it. -->
-  <main class="min-h-0 flex-1 overflow-y-auto px-4 py-4" bind:this={log}>
+  <main class="widget-log min-h-0 flex-1 overflow-y-auto px-4 py-4" bind:this={log}>
     {#if unavailable}
       <p class="text-secondary text-center text-sm">{m.widget_not_available_body()}</p>
     {:else if messages.length === 0 && !showPending}
@@ -315,7 +343,8 @@
           {#if showPending && pendingQuestion !== null}
             <li class="flex flex-col gap-3">
               <WidgetQuestionBubble text={pendingQuestion} />
-              <TypingIndicator />
+              <!-- Announced once when the question is sent, not by the dots. -->
+              <div aria-hidden="true"><TypingIndicator /></div>
             </li>
           {/if}
         </ol>
@@ -331,7 +360,7 @@
     {/if}
   </main>
 
-  <div class="sr-only" aria-live="polite" aria-atomic="true">{announcement}</div>
+  <div class="sr-only" aria-live="polite" aria-atomic="true">{announcer.text}</div>
 
   <footer class="border-default flex flex-col gap-2 border-t px-4 py-3">
     {#if errorMessage}
@@ -415,6 +444,18 @@
 </div>
 
 <style>
+  /* A short panel (a phone on its side, a zoomed page): header, conversation
+     and composer scroll as one page instead of squeezing the conversation
+     away (WCAG 1.4.4, 1.4.10). In em so larger text switches earlier. */
+  @media (max-height: 26em) {
+    .widget-chat {
+      overflow-y: auto;
+    }
+    .widget-log {
+      flex: none;
+      overflow-y: visible;
+    }
+  }
   /* A tinted header uses the widget's own colours; text is derived for contrast. */
   .widget-header-tinted {
     background: var(--widget-header);
