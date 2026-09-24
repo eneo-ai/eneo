@@ -817,6 +817,10 @@ describe("FlowAIBuilder planner controls", () => {
       heading.textContent?.trim()
     );
     expect(headings).toEqual(["Egen GPU-server", "Google"]);
+    // The list is named in the reader's language, not by the library's own
+    // English fallback, in every model picker that shares it.
+    expect(screen.getByRole("listbox", { name: m.models() })).toBeTruthy();
+    expect(screen.queryByRole("listbox", { name: "Suggestions..." })).toBeNull();
   });
 
   it("stays out of the composer when the space has a single model", async () => {
