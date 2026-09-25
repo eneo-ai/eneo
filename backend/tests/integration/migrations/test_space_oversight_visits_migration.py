@@ -1,4 +1,4 @@
-"""Revision 202609251000: oversight visits members keep seeing. A new, empty
+"""Revision 202609251200: oversight visits members keep seeing. A new, empty
 table whose rows follow their space and outlive their user; a downgrade
 restores the oversight head exactly and leaves every other row alone."""
 
@@ -26,7 +26,7 @@ seed_default_models = expand.seed_default_models
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 PARENT = oversight.OVERSIGHT
-VISITS = "202609251000"
+VISITS = "202609251200"
 TABLE = "space_oversight_visits"
 REASON = oversight.REASON
 

@@ -12,9 +12,9 @@ Two small additions for tenant-admin oversight:
 Every column is nullable without a default, so adding it only changes the
 catalog. The CHECK constraints scan two small tables once.
 
-Revision ID: 202609241000
+Revision ID: 202609251100
 Revises: 202609231701
-Create Date: 2026-09-24 10:00:00.000000
+Create Date: 2026-09-25 11:00:00.000000
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "202609241000"
+revision: str = "202609251100"
 down_revision: str | None = "202609231701"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

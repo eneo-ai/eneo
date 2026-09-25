@@ -11,9 +11,9 @@ The table is new and empty. Its foreign keys lock `tenants`, `spaces` and
 `users` briefly, so the revision gives up rather than queue behind a long
 transaction.
 
-Revision ID: 202609251000
-Revises: 202609241000
-Create Date: 2026-09-25 10:00:00.000000
+Revision ID: 202609251200
+Revises: 202609251100
+Create Date: 2026-09-25 12:00:00.000000
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "202609251000"
-down_revision: str | None = "202609241000"
+revision: str = "202609251200"
+down_revision: str | None = "202609251100"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
