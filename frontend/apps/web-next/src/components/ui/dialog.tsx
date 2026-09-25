@@ -172,8 +172,9 @@ export function DialogSurface({ className, children, role, closeButton }: Dialog
         // Escape closes; a click on the backdrop never throws away input.
         purpose="form"
         role={role === "alertdialog" ? "alertdialog" : undefined}
-        aria-labelledby={titleId}
-        aria-describedby={hasDescription ? descriptionId : undefined}
+        // Only while open: a closed dialog has no title or description to point at.
+        aria-labelledby={open ? titleId : undefined}
+        aria-describedby={open && hasDescription ? descriptionId : undefined}
         width="100%"
         maxHeight="calc(100dvh - 2rem)"
         padding={0}
