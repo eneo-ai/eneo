@@ -861,8 +861,10 @@ class FlowRunHistoryPurgePublic(BaseModel):
     transcript_purged_count: int = Field(
         ge=0,
         description=(
-            "Live transcripts actually deleted in this batch, capped at the "
-            "requested limit independently of run deletions. Always zero in a dry run."
+            "Expired, unbound live transcripts actually deleted in this batch, capped "
+            "at the requested limit independently of run deletions. Always zero in a "
+            "dry run. A bound transcript is deleted with its file's last run and is "
+            "not counted here."
         ),
     )
     blocked: FlowRunHistoryPurgeBlockedPublic

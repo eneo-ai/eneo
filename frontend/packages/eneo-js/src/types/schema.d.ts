@@ -21525,7 +21525,7 @@ export interface components {
       transcript_candidate_count: number;
       /**
        * Transcript Purged Count
-       * @description Live transcripts actually deleted in this batch, capped at the requested limit independently of run deletions. Always zero in a dry run.
+       * @description Expired, unbound live transcripts actually deleted in this batch, capped at the requested limit independently of run deletions. Always zero in a dry run. A bound transcript is deleted with its file's last run and is not counted here.
        */
       transcript_purged_count: number;
     };
