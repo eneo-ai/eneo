@@ -575,6 +575,26 @@ describe("widget review page", () => {
     await expect.element(page.getByRole("button", { name: "widget_review_resume" })).toBeVisible();
   });
 
+  test("a failed pause stays open and says what failed and why", async () => {
+    const live = widget({
+      status: "active",
+      activated_at: "2026-09-01T08:00:00Z",
+      activation_requested_at: null
+    });
+    renderPage({ review: review({ widget: live }) });
+    api.pause.mockRejectedValue(new EneoError("Server down", "SERVER", 503, 0, {}));
+
+    await userEvent.click(page.getByRole("button", { name: "widget_review_pause" }));
+    const pause = dialog().getByRole("button", { name: "widget_admin_pause" });
+    await userEvent.click(pause);
+    await expect
+      .element(dialog().getByRole("alert"))
+      .toHaveTextContent(/^widget_admin_could_not_pause: \S/);
+    await expect.element(pause).toHaveAttribute("aria-disabled", "false");
+    expect(navigation.invalidate).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
   test("archiving says so while it runs", async () => {
     renderPage({ review: review() });
     api.archive.mockImplementation(() => new Promise(() => {}));

@@ -7,18 +7,15 @@
   import type { Widget } from "@eneo/eneo-js";
   import { tick } from "svelte";
   import { invalidate } from "$app/navigation";
-  import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
-  import { settleDialog } from "$lib/components/settleDialog";
   import { toast } from "$lib/components/toast";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import { getErrorMessageWithContext } from "$lib/core/errors";
   import { formatList } from "$lib/core/formatting/formatList";
   import { widgetErrorCode, widgetErrorMessage } from "$lib/features/widget/admin/errors";
   import { m } from "$lib/paraglide/messages";
-  import { cn } from "$lib/utils.js";
 
   type Props = {
     open?: boolean;
@@ -34,23 +31,14 @@
 
   const eneo = getEneo();
 
-  let pending = $state(false);
   let stale = $state(false);
   let failure = $state<string | null>(null);
   let showLatestButton = $state<HTMLElement | null>(null);
-  let content = $state<HTMLElement | null>(null);
-
-  const settler = settleDialog({
-    close: () => (open = false),
-    reload: () => invalidate("admin:widget-review"),
-    focusAfter: () => focusAfter()
-  });
 
   $effect.pre(() => {
     if (!open) return;
     stale = false;
     failure = null;
-    settler.reset();
   });
 
   const resume = $derived(widget.status === "paused");
@@ -92,8 +80,6 @@
   });
 
   async function confirm() {
-    if (pending || stale) return;
-    pending = true;
     failure = null;
     try {
       if (action === "activate") {
@@ -111,79 +97,43 @@
       } else {
         failure = widgetErrorMessage(error) ?? getErrorMessageWithContext(error, copy.failed);
       }
-      return;
-    } finally {
-      pending = false;
+      throw error;
     }
     toast.success(copy.done);
-    await settler.settle();
   }
 </script>
 
-<AlertDialog.Root
-  bind:open={
-    () => open,
-    (value) => {
-      if (!pending) open = value;
-    }
-  }
->
-  <AlertDialog.Content
-    bind:ref={content}
-    class={dialogLayout.content("small")}
-    onOpenAutoFocus={(event) => {
-      // Starts on the safe choice, as every confirmation of a consequential action does.
-      const cancel = content?.querySelector<HTMLElement>('[data-slot="alert-dialog-cancel"]');
-      if (!cancel) return;
-      event.preventDefault();
-      cancel.focus();
-    }}
-    onCloseAutoFocus={settler.onCloseAutoFocus}
-  >
-    <AlertDialog.Header class={dialogLayout.header}>
-      <AlertDialog.Title class="leading-snug">{copy.title}</AlertDialog.Title>
-      <AlertDialog.Description class="text-primary flex flex-col gap-2">
-        <span>{copy.description}</span>
-        {#if action === "activate" && !requested}
-          <span>{m.widget_review_not_requested()}</span>
-        {/if}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-
-    {#if stale || failure}
-      <div class={dialogLayout.body}>
-        <InlineError>
-          <p>{stale ? m.widget_review_stale() : failure}</p>
-          {#if stale}
-            <Button
-              variant="outline"
-              class="max-md:min-h-11"
-              bind:ref={showLatestButton}
-              onclick={settler.settle}>{m.widget_review_show_latest()}</Button
-            >
-          {/if}
-        </InlineError>
-      </div>
+{#snippet body()}
+  <span class="text-primary flex flex-col gap-2">
+    <span>{copy.description}</span>
+    {#if action === "activate" && !requested}
+      <span>{m.widget_review_not_requested()}</span>
     {/if}
+  </span>
+{/snippet}
 
-    <AlertDialog.Footer class={dialogLayout.footer}>
-      <!-- bits' Cancel ignores `disabled`; the open setter above refuses to close while pending. -->
-      <AlertDialog.Cancel
-        class={cn("max-md:min-h-11", pending && "pointer-events-none opacity-50")}
-        aria-disabled={pending}>{m.cancel()}</AlertDialog.Cancel
+{#snippet problem({ settle }: { settle: () => Promise<void> })}
+  <InlineError>
+    <p>{stale ? m.widget_review_stale() : failure}</p>
+    {#if stale}
+      <Button variant="outline" class="max-md:min-h-11" bind:ref={showLatestButton} onclick={settle}
+        >{m.widget_review_show_latest()}</Button
       >
-      {#if !stale}
-        <!-- aria-disabled, not disabled, while pending: a focused button that becomes disabled drops focus. -->
-        <Button
-          variant={action === "archive" ? "destructive" : "default"}
-          class={cn("max-md:min-h-11", pending && "pointer-events-none opacity-50")}
-          aria-disabled={pending}
-          aria-busy={pending}
-          onclick={confirm}
-        >
-          {pending ? copy.pending : copy.confirm}
-        </Button>
-      {/if}
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+    {/if}
+  </InlineError>
+{/snippet}
+
+<ConfirmDialog
+  bind:open
+  title={copy.title}
+  description={body}
+  confirmLabel={copy.confirm}
+  pendingLabel={copy.pending}
+  variant={action === "archive" ? "destructive" : "default"}
+  errorDisplay="none"
+  confirmHidden={stale}
+  alert={stale || failure ? problem : undefined}
+  onConfirm={confirm}
+  reload={() => invalidate("admin:widget-review")}
+  {focusAfter}
+/>

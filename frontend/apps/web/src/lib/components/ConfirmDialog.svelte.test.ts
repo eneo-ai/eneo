@@ -139,6 +139,71 @@ describe("ConfirmDialog", () => {
     expect(page.getByRole("alert").elements()).toHaveLength(0);
   });
 
+  it("hands focus to where the action leads once the page has reloaded", async () => {
+    const after = document.createElement("h2");
+    after.tabIndex = -1;
+    after.textContent = "New state";
+    document.body.append(after);
+    const reloaded = held();
+    const reload = vi.fn(() => reloaded.promise);
+    render(ConfirmDialog, { ...baseProps, onConfirm: vi.fn(), reload, focusAfter: () => after });
+
+    await page.getByRole("button", { name: "Delete" }).click();
+    await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).not.toBe(after);
+
+    reloaded.resolve();
+    await expect.element(after).toHaveFocus();
+    after.remove();
+  });
+
+  it("can leave only Cancel and offer the way forward in its alert", async () => {
+    const after = document.createElement("h2");
+    after.tabIndex = -1;
+    document.body.append(after);
+    const onConfirm = vi.fn();
+    const reload = vi.fn(() => Promise.resolve());
+    render(ConfirmDialog, {
+      ...baseProps,
+      confirmHidden: true,
+      onConfirm,
+      reload,
+      focusAfter: () => after,
+      alert: createRawSnippet((args: () => { settle: () => Promise<void> }) => ({
+        render: () => `<button type="button">Show the latest version</button>`,
+        setup: (button) => {
+          button.addEventListener("click", () => args().settle());
+        }
+      }))
+    });
+
+    await expect.element(page.getByRole("alertdialog")).toBeVisible();
+    expect(page.getByRole("button", { name: "Delete" }).query()).toBeNull();
+    await page.getByRole("button", { name: "Show the latest version" }).click();
+    await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+    await expect.element(after).toHaveFocus();
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(onConfirm).not.toHaveBeenCalled();
+    after.remove();
+  });
+
+  it("leaves a failure to the caller when it reports it itself", async () => {
+    render(ConfirmDialog, {
+      ...baseProps,
+      errorDisplay: "none",
+      onConfirm: () => Promise.reject(new Error("conflict"))
+    });
+
+    await page.getByRole("button", { name: "Delete" }).click();
+    await expect
+      .element(page.getByRole("button", { name: "Delete" }))
+      .toHaveAttribute("aria-disabled", "false");
+    await expect.element(page.getByRole("alertdialog")).toBeVisible();
+    expect(page.getByRole("alert").elements()).toHaveLength(0);
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
   it.each(["light", "dark"] as const)(
     "keeps the dialog and an inline failure readable (%s)",
     async (scheme) => {
