@@ -7,6 +7,7 @@ import type {
 } from "@eneo/eneo-js";
 import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { contrastAgainst } from "$lib/features/widget/components/contrastProbe";
 import sv from "../../../../../../messages/sv.json";
 import "../../../../../app.css";
 
@@ -679,15 +680,23 @@ describe("a space in Admin → Ytor", () => {
     }
   );
 
-  test("a tab panel shows where keyboard focus is", async () => {
-    renderPage();
-    (tabTrigger(/^settings/).element() as HTMLElement).focus();
-    await userEvent.keyboard("{Tab}");
+  test.each(["light", "dark"] as const)(
+    "a tab panel shows where keyboard focus is at 3:1 against the page (%s)",
+    async (scheme) => {
+      document.documentElement.dataset.theme = scheme;
+      renderPage();
+      (tabTrigger(/^settings/).element() as HTMLElement).focus();
+      await userEvent.keyboard("{Tab}");
 
-    const panel = page.getByRole("tabpanel").element();
-    expect(document.activeElement).toBe(panel);
-    expect(getComputedStyle(panel).boxShadow).not.toBe("none");
-  });
+      const panel = page.getByRole("tabpanel").element();
+      expect(document.activeElement).toBe(panel);
+      const style = getComputedStyle(panel);
+      expect(style.outlineStyle).toBe("solid");
+      expect(parseFloat(style.outlineWidth)).toBeGreaterThanOrEqual(2);
+      // WCAG 1.4.11: the indicator needs 3:1 against the page around the panel.
+      expect(contrastAgainst(style.outlineColor, panel.parentElement)).toBeGreaterThanOrEqual(3);
+    }
+  );
 
   test("every tab panel starts with its own heading", async () => {
     renderPage();
