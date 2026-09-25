@@ -13,7 +13,6 @@ from eneo.assistants.assistant_service import VISITOR_CAPABILITY_PURPOSES
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.audit.domain.mandatory_actions import MANDATORY_AUDIT_ACTIONS
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 from eneo.main.models import PaginatedResponse
@@ -91,18 +90,12 @@ async def _audit(
     changes: dict[str, Any] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> None:
-    """Mandatory actions are written in the request's transaction and fail
-    it when they cannot be; the rest are queued."""
+    """Queued, except mandatory actions: AuditService writes those in the
+    request's transaction and fails it when they cannot be written."""
     user = container.user()
     widget = view.widget
     assert widget.id is not None
-    audit_service = container.audit_service()
-    log = (
-        audit_service.log_required
-        if action in MANDATORY_AUDIT_ACTIONS
-        else audit_service.log_async
-    )
-    await log(
+    await container.audit_service().log_async(
         tenant_id=user.tenant_id,
         user=user,
         action=action,

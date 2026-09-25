@@ -352,6 +352,10 @@ class AuditService:
         returning immediately (<10ms latency). The ARQ worker will persist
         the log to PostgreSQL in the background.
 
+        A mandatory action (MANDATORY_AUDIT_ACTIONS) is never queued: it is
+        written like ``log_required``, on the caller's session and failing
+        closed, and the id of the written entry is returned.
+
         NOTE: If audit logging is globally disabled or the action is disabled
         (by category or action override), returns None and skips logging.
 
@@ -376,6 +380,25 @@ class AuditService:
         Raises:
             ValueError: If outcome is failure but no error_message provided
         """
+        if action in MANDATORY_AUDIT_ACTIONS:
+            written = await self.log_required(
+                tenant_id=tenant_id,
+                action=action,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                description=description,
+                metadata=metadata,
+                user=user,
+                actor_id=actor_id,
+                actor_type=actor_type,
+                outcome=outcome,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                request_id=request_id,
+                error_message=error_message,
+            )
+            return written.id
+
         # Check if action should be logged based on configuration
         should_log = await self._should_log_action(tenant_id, action)
         if not should_log:

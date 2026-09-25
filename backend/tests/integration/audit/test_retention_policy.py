@@ -1,15 +1,21 @@
 """Integration tests for audit log retention policy."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.application.retention_service import RetentionService
 from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
+from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.mandatory_actions import MANDATORY_AUDIT_MIN_RETENTION_DAYS
+from eneo.audit.domain.outcome import Outcome
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 
 pytestmark = pytest.mark.integration
 
@@ -169,3 +175,63 @@ async def test_retention_policy_service_methods(db_session, test_tenant):
         retention_service = RetentionService(session)
         policy = await retention_service.get_policy(test_tenant.id)
         assert policy.retention_days == 180
+
+
+@pytest.mark.asyncio
+async def test_purge_keeps_mandatory_entries_for_a_year_whatever_the_retention(
+    db_session, test_tenant, test_user
+):
+    """An administrator who lowers the retention to a day cannot purge the
+    record of their own oversight actions: mandatory entries stay for
+    MANDATORY_AUDIT_MIN_RETENTION_DAYS."""
+    now = datetime.now(timezone.utc)
+    floor = MANDATORY_AUDIT_MIN_RETENTION_DAYS
+    entries = {
+        "joined_recently": (ActionType.SPACE_OVERSIGHT_JOINED, 2),
+        "joined_within_the_floor": (ActionType.SPACE_OVERSIGHT_JOINED, floor - 1),
+        "joined_before_the_floor": (ActionType.SPACE_OVERSIGHT_JOINED, floor + 1),
+        "archived_within_the_floor": (ActionType.WIDGET_ARCHIVED, floor - 1),
+        "ordinary_recent": (ActionType.USER_CREATED, 0),
+        "ordinary_old": (ActionType.USER_CREATED, 2),
+    }
+    ids = {}
+    async with db_session() as session:
+        repository = AuditLogRepositoryImpl(session)
+        for name, (action, age_days) in entries.items():
+            written = await repository.create(
+                AuditLog(
+                    id=uuid4(),
+                    tenant_id=test_tenant.id,
+                    actor_id=test_user,
+                    actor_type=ActorType.USER,
+                    action=action,
+                    entity_type=EntityType.SPACE,
+                    entity_id=uuid4(),
+                    timestamp=now - timedelta(days=age_days, hours=1),
+                    description=name,
+                    metadata={},
+                    outcome=Outcome.SUCCESS,
+                )
+            )
+            ids[written.id] = name
+
+    async with db_session() as session:
+        await RetentionService(session).update_policy(test_tenant.id, 1)
+    async with db_session() as session:
+        purged = await RetentionService(session).purge_old_logs(test_tenant.id)
+
+    async with db_session() as session:
+        kept = set(
+            (
+                await session.execute(
+                    select(AuditLogTable.id).where(AuditLogTable.id.in_(list(ids)))
+                )
+            ).scalars()
+        )
+    assert sorted(ids[entry_id] for entry_id in kept) == [
+        "archived_within_the_floor",
+        "joined_recently",
+        "joined_within_the_floor",
+        "ordinary_recent",
+    ]
+    assert purged >= 2

@@ -611,6 +611,7 @@ async def test_leave_needs_a_direct_row_revokes_own_keys_and_audits():
         app_ids=h.repo.app_ids,
         reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
         reason_text="Left the space",
+        audit_in_transaction=True,
     )
     (entry,) = h.audited()
     assert entry["action"] == ActionType.SPACE_OVERSIGHT_LEFT
@@ -676,6 +677,7 @@ async def test_removing_a_member_revokes_their_space_keys():
         app_ids=h.repo.app_ids,
         reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
         reason_text="Removed from space by an organisation administrator",
+        audit_in_transaction=True,
     )
     assert h.audited()[0]["metadata"]["extra"]["api_keys_revoked"] == 2
 

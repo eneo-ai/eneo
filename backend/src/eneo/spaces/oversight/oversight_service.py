@@ -245,6 +245,8 @@ class SpaceOversightService:
 
     async def _revoke_keys(self, space_id: UUID, user_id: UUID, reason: str) -> int:
         assistant_ids, app_ids = await self.repo.resource_ids(self._tenant_id, space_id)
+        # Revocation entries go in this transaction too: queued, they would
+        # outlive a change the mandatory audit write rolls back.
         return await self.api_key_scope_revoker.revoke_member_keys(
             tenant_id=self._tenant_id,
             owner_user_id=user_id,
@@ -253,6 +255,7 @@ class SpaceOversightService:
             app_ids=app_ids,
             reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
             reason_text=reason,
+            audit_in_transaction=True,
         )
 
     def _oversight(self, snapshot: MembershipSnapshot) -> dict[str, Any]:

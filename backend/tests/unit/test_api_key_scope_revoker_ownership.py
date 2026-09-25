@@ -80,3 +80,39 @@ async def test_revoke_member_keys_filters_user_ownership():
         assert call.kwargs["ownership"] == "user", (
             f"Expected ownership='user' in call kwargs: {call.kwargs}"
         )
+
+
+@pytest.mark.parametrize("in_transaction", [True, False])
+@pytest.mark.asyncio
+async def test_member_key_revocations_are_audited_in_the_transaction_on_request(
+    in_transaction: bool,
+):
+    """In a transaction, the revocation entries roll back with a change that
+    fails later; queued, they would be written anyway."""
+    tenant_id = uuid4()
+    owner_id = uuid4()
+    key = _make_key(tenant_id=tenant_id, owner_user_id=owner_id)
+
+    repo = AsyncMock()
+    repo.list_filtered.return_value = [key]
+    repo.update.return_value = key
+    audit = AsyncMock()
+    user = SimpleNamespace(id=owner_id, tenant_id=tenant_id)
+
+    revoker = ApiKeyScopeRevoker(repo, audit, user)
+    revoked = await revoker.revoke_member_keys(
+        tenant_id=tenant_id,
+        owner_user_id=owner_id,
+        space_id=uuid4(),
+        reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
+        reason_text="Removed from space by an organisation administrator",
+        audit_in_transaction=in_transaction,
+    )
+
+    assert revoked == 1
+    written, queued = (
+        (audit.log, audit.log_async) if in_transaction else (audit.log_async, audit.log)
+    )
+    written.assert_awaited_once()
+    assert written.await_args.kwargs["entity_id"] == key.id
+    queued.assert_not_awaited()

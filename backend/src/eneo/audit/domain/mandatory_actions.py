@@ -4,8 +4,10 @@ These record access and changes a tenant administrator makes without space
 membership, and publishing a widget to the open web. The same administrators
 can change the audit configuration, so letting them silence these would
 defeat the control. They bypass the global switch, category toggles and
-action overrides. Request handlers write them with
-``AuditService.log_required`` in the transaction that makes the change.
+action overrides. ``AuditService`` never queues them: ``log_async`` writes
+them like ``log_required``, on the caller's session, so an entry commits or
+rolls back with the change it records. Retention never purges them before
+MANDATORY_AUDIT_MIN_RETENTION_DAYS, whatever the tenant's retention.
 
 ActionType is a ``str`` enum, so membership also works for raw values.
 """
@@ -25,3 +27,5 @@ MANDATORY_AUDIT_ACTIONS: frozenset[ActionType] = frozenset(
         ActionType.WIDGET_ARCHIVED,
     }
 )
+
+MANDATORY_AUDIT_MIN_RETENTION_DAYS = 365

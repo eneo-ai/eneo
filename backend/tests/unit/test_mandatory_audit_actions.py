@@ -126,6 +126,52 @@ async def test_log_required_fails_when_nothing_was_written():
         await service.log_required(**_required_kwargs(ActionType.WIDGET_PAUSED))
 
 
+@pytest.mark.parametrize("action", MANDATORY)
+async def test_log_async_writes_a_mandatory_action_on_the_session_and_never_queues(
+    action,
+):
+    repository = AsyncMock()
+    written = MagicMock(spec=AuditLog)
+    written.id = uuid4()
+    repository.create.return_value = written
+    service = _silenced_audit_service(repository)
+
+    with patch("eneo.audit.application.audit_service.job_manager") as job_manager:
+        result = await service.log_async(**_required_kwargs(action))
+
+    assert result == written.id
+    repository.create.assert_awaited_once()
+    job_manager.enqueue.assert_not_called()
+
+
+async def test_log_async_lets_a_failed_mandatory_insert_abort_the_change():
+    repository = AsyncMock()
+    repository.create.side_effect = ConnectionError("database went away")
+    service = _silenced_audit_service(repository)
+
+    with patch("eneo.audit.application.audit_service.job_manager") as job_manager:
+        with pytest.raises(ConnectionError):
+            await service.log_async(**_required_kwargs(ActionType.WIDGET_ARCHIVED))
+
+    job_manager.enqueue.assert_not_called()
+
+
+async def test_log_async_still_queues_a_configurable_action():
+    repository = AsyncMock()
+    service = AuditService(repository)
+
+    with patch(
+        "eneo.audit.application.audit_service.job_manager",
+        new=MagicMock(enqueue=AsyncMock()),
+    ) as job_manager:
+        await service.log_async(
+            **_required_kwargs(ActionType.WIDGET_ACTIVATION_REQUESTED)
+        )
+
+    job_manager.enqueue.assert_awaited_once()
+    repository.create.assert_not_called()
+
+
 async def test_log_required_lets_a_failed_insert_abort_the_change():
     repository = AsyncMock()
     repository.create.side_effect = ConnectionError("database went away")

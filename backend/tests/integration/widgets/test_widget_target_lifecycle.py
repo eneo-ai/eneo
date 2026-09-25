@@ -1,11 +1,12 @@
 """Widgets follow their assistant through a move or a deletion."""
 
+from typing import Any
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 
-from eneo.audit.application.audit_service import AuditService
-from eneo.audit.domain.action_types import ActionType
+from eneo.database.database import sessionmanager
 from eneo.main.exceptions import ErrorCodes
 
 
@@ -27,6 +28,19 @@ async def _widget(client, token, widget_id) -> dict:
     resp = await client.get(f"/api/v1/widgets/{widget_id}/", headers=_auth(token))
     assert resp.status_code == 200, resp.text
     return resp.json()
+
+
+async def _archive_entries() -> list[tuple[str, dict[str, Any]]]:
+    """WIDGET_ARCHIVED rows in the audit log: mandatory, so written in the
+    request's transaction rather than queued for the worker."""
+    async with sessionmanager.session() as session, session.begin():
+        rows = await session.execute(
+            sa.text(
+                "SELECT entity_id, metadata FROM audit_logs"
+                " WHERE action = 'widget_archived' ORDER BY timestamp, id"
+            )
+        )
+        return [(str(entity_id), metadata) for entity_id, metadata in rows]
 
 
 @pytest.mark.integration
@@ -65,17 +79,7 @@ async def test_an_assistant_with_a_live_widget_stays_in_its_space(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_moving_an_assistant_archives_its_draft_widgets(
-    client, admin_token, monkeypatch
-):
-    audited: list[dict] = []
-    log_async = AuditService.log_async
-
-    async def record(self, **kwargs):
-        audited.append(kwargs)
-        return await log_async(self, **kwargs)
-
-    monkeypatch.setattr(AuditService, "log_async", record)
+async def test_moving_an_assistant_archives_its_draft_widgets(client, admin_token):
     source_space = await _space(client, admin_token)
     resp = await client.post(
         f"/api/v1/spaces/{source_space}/applications/assistants/",
@@ -92,7 +96,6 @@ async def test_moving_an_assistant_archives_its_draft_widgets(
     draft = resp.json()
     target_space = await _space(client, admin_token)
 
-    audited.clear()
     resp = await client.post(
         f"/api/v1/assistants/{assistant_id}/transfer/",
         json={"target_space_id": target_space},
@@ -105,27 +108,16 @@ async def test_moving_an_assistant_archives_its_draft_widgets(
     )
     assert resp.json()["space_id"] == target_space
     assert (await _widget(client, admin_token, draft["id"]))["status"] == "archived"
-    [entry] = [
-        entry for entry in audited if entry["action"] == ActionType.WIDGET_ARCHIVED
-    ]
-    assert str(entry["entity_id"]) == draft["id"]
-    assert entry["metadata"]["extra"]["reason"] == "assistant_moved"
+    [(entity_id, metadata)] = await _archive_entries()
+    assert entity_id == draft["id"]
+    assert metadata["extra"]["reason"] == "assistant_moved"
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_deleting_an_assistant_archives_its_widgets_and_frees_their_template(
-    client, admin_token, active_widget, monkeypatch
+    client, admin_token, active_widget
 ):
-    audited: list[dict] = []
-    log_async = AuditService.log_async
-
-    async def record(self, **kwargs):
-        audited.append(kwargs)
-        return await log_async(self, **kwargs)
-
-    monkeypatch.setattr(AuditService, "log_async", record)
-
     resp = await client.post(
         "/api/v1/admin/widget-templates/",
         json={"name": f"Kommunblå {uuid4().hex[:6]}"},
@@ -166,7 +158,7 @@ async def test_deleting_an_assistant_archives_its_widgets_and_frees_their_templa
     )
     neighbour = resp.json()
 
-    audited.clear()
+    archived_before = await _archive_entries()
     resp = await client.delete(
         f"/api/v1/assistants/{active_widget['target_id']}/", headers=_auth(admin_token)
     )
@@ -179,11 +171,9 @@ async def test_deleting_an_assistant_archives_its_widgets_and_frees_their_templa
     assert resp.status_code == 404
     assert (await _widget(client, admin_token, neighbour["id"]))["status"] == "draft"
 
-    entries = [
-        entry for entry in audited if entry["action"] == ActionType.WIDGET_ARCHIVED
-    ]
-    assert [str(entry["entity_id"]) for entry in entries] == [widget_id]
-    assert entries[0]["metadata"]["extra"]["reason"] == "assistant_deleted"
+    entries = (await _archive_entries())[len(archived_before) :]
+    assert [entity_id for entity_id, _ in entries] == [widget_id]
+    assert entries[0][1]["extra"]["reason"] == "assistant_deleted"
 
     resp = await client.delete(
         f"/api/v1/admin/widget-templates/{template_id}/", headers=_auth(admin_token)

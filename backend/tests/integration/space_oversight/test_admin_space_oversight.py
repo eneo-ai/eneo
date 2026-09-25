@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
@@ -1341,6 +1342,48 @@ async def test_audit_failure_rolls_back_the_change(
     assert resp.status_code == 500, resp.text
     assert (await member_row(space_id, member)).role == "viewer"
     assert await audit_rows() == []
+
+
+async def test_a_rolled_back_removal_leaves_no_key_revocation_entry(
+    raw_client, admin, overseer, make_person, monkeypatch
+):
+    member = await make_person([Permission.API_KEYS], label="kollega")
+    space_id = await create_space(raw_client, admin.token)
+    resp = await raw_client.post(
+        f"/api/v1/spaces/{space_id}/members/",
+        json={"id": str(member.id), "role": "admin"},
+        headers=admin.headers,
+    )
+    assert resp.status_code == 200, resp.text
+    member_key = await create_user_key(
+        raw_client, member.token, scope_type="space", scope_id=space_id
+    )
+
+    queued: list[ActionType] = []
+    log_async = AuditService.log_async
+
+    async def record(self: AuditService, **kwargs: Any) -> Any:
+        queued.append(kwargs["action"])
+        return await log_async(self, **kwargs)
+
+    async def unavailable(self: object, **kwargs: object) -> None:
+        raise RuntimeError("audit store unavailable")
+
+    monkeypatch.setattr(AuditService, "log_async", record)
+    monkeypatch.setattr(AuditService, "log_required", unavailable)
+
+    resp = await raw_client.delete(
+        f"/api/v1/admin/spaces/{space_id}/members/{member.id}/",
+        headers=overseer.headers,
+    )
+    assert resp.status_code == 500, resp.text
+    assert await key_state(member_key["id"]) == "active"
+    assert (await member_row(space_id, member.id)).role == "admin"
+    assert ActionType.API_KEY_REVOKED not in queued
+    assert (
+        await scalar("SELECT count(*) FROM audit_logs WHERE action = 'api_key_revoked'")
+        == 0
+    )
 
 
 async def test_reason_is_normalised_in_audit_and_column(client, admin, overseer):
