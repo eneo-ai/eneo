@@ -406,6 +406,41 @@ async def test_a_run_keeps_the_flow_default_it_took_after_a_republish(
     assert stored[created.json()["id"]]["speaker_labels"] is default
 
 
+async def test_a_run_started_again_from_its_speaker_options_survives_a_republish(
+    client, flow_process_auth_headers, db_container, dispatched: list[UUID]
+):
+    headers = dict(flow_process_auth_headers)
+    flow = await _published_flow(client, headers, db_container, input_required=False)
+
+    with _deployment(service_mode="diarize"):
+        original = await _create_run(client, headers, flow.flow_id, {"max_speakers": 3})
+        await _republish(
+            client, headers, flow.flow_id, {"transcription_diarization": False}
+        )
+        contract = await _contract(client, headers, flow.flow_id)
+        read = await client.get(
+            f"/api/v1/flows/{flow.flow_id}/runs/{original.json()['id']}/",
+            headers=headers,
+        )
+        again = await _create_run(
+            client,
+            headers,
+            flow.flow_id,
+            {key: read.json()[key] for key in ("speaker_labels", "max_speakers")},
+        )
+
+    assert original.status_code == 201, original.text
+    assert contract["transcription"]["speaker_labels"] == {
+        "selectable": True,
+        "required": False,
+        "default": False,
+    }
+    assert (read.json()["speaker_labels"], read.json()["max_speakers"]) == (True, 3)
+    assert again.status_code == 201, again.text
+    stored = (await _stored_inputs(db_container, flow.flow_id))[again.json()["id"]]
+    assert (stored["speaker_labels"], stored["max_speakers"]) == (True, 3)
+
+
 async def test_a_flow_that_asks_for_the_count_advertises_its_form_field(
     client, flow_process_auth_headers, db_container
 ):
