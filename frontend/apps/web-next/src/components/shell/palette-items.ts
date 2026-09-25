@@ -1,3 +1,4 @@
+import { createStaticSource } from "@astryxdesign/core/Typeahead";
 import type { Schema } from "@/lib/api/models";
 import type { AdminNavGroup } from "./admin-nav-items";
 import { conversationHref, NEW_CONVERSATION_HREF } from "./routes";
@@ -191,18 +192,6 @@ export function buildPaletteEntries(
   return entries;
 }
 
-export function normalizeQuery(text: string): string {
-  return text.toLocaleLowerCase("sv").trim();
-}
-
-export function entryMatches(entry: PaletteEntry, query: string): boolean {
-  const needle = normalizeQuery(query);
-  if (!needle) return true;
-  return [entry.label, entry.subtitle ?? "", ...(entry.keywords ?? [])].some((text) =>
-    text.toLocaleLowerCase("sv").includes(needle)
-  );
-}
-
 /** Caps each group so one long list cannot push the others out of view. */
 function limitPerGroup(entries: PaletteEntry[], perGroup: number): PaletteEntry[] {
   const counts = new Map<PaletteGroup, number>();
@@ -221,25 +210,20 @@ export function bootstrapEntries(entries: PaletteEntry[], perGroup = 5): Palette
   );
 }
 
-/** Matches for a query; label matches that start with it come first in each group. */
-export function searchEntries(
+/**
+ * Matches for a query, in group order: Astryx's static source matches the
+ * label, and the subtitle and keywords as extra search terms.
+ */
+export async function searchEntries(
   entries: PaletteEntry[],
   query: string,
   perGroup = 6
-): PaletteEntry[] {
-  const needle = normalizeQuery(query);
-  if (!needle) return bootstrapEntries(entries);
-  const matches = entries.filter((entry) => entryMatches(entry, needle));
-  const rank = (entry: PaletteEntry) =>
-    entry.label.toLocaleLowerCase("sv").startsWith(needle) ? 0 : 1;
-  const ordered = PALETTE_GROUPS.flatMap((group) =>
-    matches
-      .filter((entry) => entry.group === group)
-      .map((entry, index) => ({ entry, index }))
-      .sort((a, b) => rank(a.entry) - rank(b.entry) || a.index - b.index)
-      .map(({ entry }) => entry)
-  );
-  return limitPerGroup(ordered, perGroup);
+): Promise<PaletteEntry[]> {
+  if (!query.trim()) return bootstrapEntries(entries);
+  const source = createStaticSource(entries, {
+    keywords: (entry) => [entry.subtitle ?? "", ...(entry.keywords ?? [])]
+  });
+  return limitPerGroup(await source.search(query), perGroup);
 }
 
 /** Splits text around the first occurrence of the query, for match highlighting. */
@@ -247,9 +231,9 @@ export function splitMatch(
   text: string,
   query: string
 ): { before: string; match: string; after: string } | null {
-  const needle = normalizeQuery(query);
+  const needle = query.toLowerCase().trim();
   if (!needle) return null;
-  const index = text.toLocaleLowerCase("sv").indexOf(needle);
+  const index = text.toLowerCase().indexOf(needle);
   if (index < 0) return null;
   return {
     before: text.slice(0, index),

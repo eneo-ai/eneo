@@ -6,7 +6,8 @@ import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
 import { recentConversationsQueryOptions } from "./nav-data";
 import { resetSideNavCollapsedForTest, SIDE_NAV_COLLAPSED_KEY } from "./shell-state";
-import { DesktopSideNav, type NavVariant } from "./side-nav";
+import type { NavVariant } from "./routes";
+import { DesktopSideNav } from "./side-nav";
 import {
   appContext,
   installBrowserMocks,

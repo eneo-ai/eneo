@@ -50,7 +50,7 @@ function subscribeCollapsed(listener: () => void) {
   };
 }
 
-export function setSideNavCollapsed(collapsed: boolean) {
+function setSideNavCollapsed(collapsed: boolean) {
   collapsedOverride = safeStorage.set(SIDE_NAV_COLLAPSED_KEY, collapsed ? "1" : "0")
     ? null
     : collapsed;
@@ -66,29 +66,13 @@ export function resetSideNavCollapsedForTest() {
  * Whether the desktop SideNav is collapsed to its icon rail. The server (and
  * the hydration render) always sees the expanded nav; a stored preference
  * applies right after hydration.
+ *
+ * Not SideNav's own `resizable.autoSaveId` persistence: that also adds a
+ * drag-to-resize handle the design does not have, and a width that can only
+ * be set by dragging would need a single-pointer alternative (WCAG 2.5.7).
  */
 export function useSideNavCollapsed(): [boolean, (collapsed: boolean) => void] {
   const collapsed = useSyncExternalStore(subscribeCollapsed, readCollapsed, () => false);
   const set = useCallback((next: boolean) => setSideNavCollapsed(next), []);
   return [collapsed, set];
-}
-
-/** Below Tailwind's `md` breakpoint: the SideNav becomes a drawer. */
-export const MOBILE_QUERY = "(width < 48rem)";
-
-function subscribeMobile(listener: () => void) {
-  if (typeof window.matchMedia !== "function") return () => {};
-  const query = window.matchMedia(MOBILE_QUERY);
-  query.addEventListener?.("change", listener);
-  return () => query.removeEventListener?.("change", listener);
-}
-
-/** Whether the viewport is phone-width right now (browser only). */
-export function isMobileViewport(): boolean {
-  return typeof window.matchMedia === "function" && window.matchMedia(MOBILE_QUERY).matches;
-}
-
-/** True on phone-width layouts; false on the server and during hydration. */
-export function useIsMobile(): boolean {
-  return useSyncExternalStore(subscribeMobile, isMobileViewport, () => false);
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
@@ -109,13 +109,17 @@ describe("DashboardList", () => {
     await expectNoAxeViolations(container);
   });
 
-  it("filters as you type and announces the number of results", () => {
+  it("filters as you type and announces the number of results", async () => {
     renderList();
     fireEvent.change(screen.getByRole("textbox", { name: "Sök assistenter och appar" }), {
       target: { value: "avtal" }
     });
-    // Written into a status region that was already in the page (WCAG 4.1.3).
-    expect(screen.getByText("1 träff").getAttribute("role")).toBe("status");
+    // Announced through Astryx's persistent polite live region (WCAG 4.1.3).
+    await waitFor(() =>
+      expect(document.querySelector("[data-astryx-live-region='polite']")?.textContent).toBe(
+        "1 träff"
+      )
+    );
     expect(screen.getByRole("link", { name: "Avtalsanalys, App i Upphandling" })).toBeTruthy();
     expect(screen.queryByRole("link", { name: /Upphandlingsassistenten/ })).toBeNull();
 

@@ -1,11 +1,13 @@
 "use client";
 
-import Link from "next/link";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { cn } from "@/lib/utils";
 
-/** Account sub-pages as pills; a second `nav` on the page, so it is named. */
+/**
+ * Account sub-pages as Astryx tabs in their navigation pattern: a named `nav`
+ * landmark of links with the current page marked `aria-current`.
+ */
 export function AccountNav() {
   const t = useTranslations();
   const pathname = usePathname();
@@ -15,28 +17,19 @@ export function AccountNav() {
     { href: "/account/api-keys", label: t("api_keys") },
     { href: "/account/integrations", label: t("integrations") }
   ];
+  const current = items.find((item) => item.href === pathname)?.href ?? "";
 
   return (
-    <nav aria-label={t("shell_account_nav_label")}>
-      <ul className="flex flex-wrap gap-1">
-        {items.map((item) => {
-          const active = pathname === item.href;
-          return (
-            <li key={item.href}>
-              <Link
-                href={item.href}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text focus-visible:outline-ring rounded-ax-element flex h-9 items-center px-3 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:h-11",
-                  active && "bg-ax-selected text-ax-text hover:bg-ax-selected font-semibold"
-                )}
-              >
-                {item.label}
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
-    </nav>
+    <TabList
+      value={current}
+      // The tabs are links; navigating to them is what selects them.
+      onChange={() => {}}
+      hasDivider
+      aria-label={t("shell_account_nav_label")}
+    >
+      {items.map((item) => (
+        <Tab key={item.href} value={item.href} label={item.label} href={item.href} />
+      ))}
+    </TabList>
   );
 }

@@ -37,6 +37,9 @@ export function isChatRoute(pathname: string): boolean {
   return false;
 }
 
+/** Which navigation the SideNav shows. */
+export type NavVariant = "main" | "admin";
+
 /** `/admin` and everything below it: the SideNav switches to admin mode. */
 export function isAdminRoute(pathname: string): boolean {
   return segmentsOf(pathname)[0] === "admin";

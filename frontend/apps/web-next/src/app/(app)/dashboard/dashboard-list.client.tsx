@@ -1,6 +1,7 @@
 "use client";
 
 import { ClickableCard } from "@astryxdesign/core/ClickableCard";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { AppWindow, Bot, Search, User } from "lucide-react";
@@ -117,13 +118,23 @@ export function DashboardList() {
   const headingId = useId();
   const { data } = useSuspenseQuery(dashboardQueryOptions(browserApi));
   const [query, setQuery] = useState("");
+  const announce = useAnnounce();
 
   const groups = catalogGroups(data, {
     personal: t("personal"),
     personalAssistant: t("personal_assistant")
   });
   const visible = filterCatalog(groups, query);
-  const resultCount = visible.reduce((sum, group) => sum + group.entries.length, 0);
+
+  // The result count is announced politely as the user types (WCAG 4.1.3).
+  function search(value: string) {
+    setQuery(value);
+    const count = filterCatalog(groups, value).reduce(
+      (sum, group) => sum + group.entries.length,
+      0
+    );
+    announce(value.trim() ? t("shell_catalog_result_count", { count }) : "");
+  }
 
   if (groups.length === 0) {
     return (
@@ -144,15 +155,11 @@ export function DashboardList() {
           startIcon={Search}
           hasClear
           value={query}
-          onChange={setQuery}
+          onChange={search}
           placeholder={t("shell_catalog_search_placeholder")}
           width="100%"
         />
       </div>
-      {/* Present before any result is written into it (WCAG 4.1.3). */}
-      <p role="status" className="sr-only">
-        {query.trim() ? t("shell_catalog_result_count", { count: resultCount }) : ""}
-      </p>
       {visible.length === 0 ? (
         <EmptyState
           icon={<Search />}

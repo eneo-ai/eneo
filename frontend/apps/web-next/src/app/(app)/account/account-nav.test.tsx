@@ -10,7 +10,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/account/api-keys" }));
 
 afterEach(cleanup);
 
-it("is a named list of account pages with the current one marked", async () => {
+it("is a named navigation of account pages with the current one marked", async () => {
   const { container } = render(
     <NextIntlClientProvider locale="sv" messages={messages}>
       <AccountNav />
@@ -23,8 +23,9 @@ it("is a named list of account pages with the current one marked", async () => {
     "/account/api-keys",
     "/account/integrations"
   ]);
+  // Astryx tabs mark the current item with aria-current="true".
   expect(within(nav).getByRole("link", { name: "API-nycklar" }).getAttribute("aria-current")).toBe(
-    "page"
+    "true"
   );
   await expectNoAxeViolations(container);
 });

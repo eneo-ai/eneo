@@ -137,9 +137,9 @@ describe("bootstrapEntries / searchEntries", () => {
     expect(shown.some((entry) => entry.group === "knowledge")).toBe(false);
   });
 
-  it("matches labels, subtitles and keywords case-insensitively", () => {
+  it("matches labels, subtitles and keywords case-insensitively, in group order", async () => {
     const entries = buildPaletteEntries(data, admin, t);
-    const ids = searchEntries(entries, "UPPH").map((entry) => entry.id);
+    const ids = (await searchEntries(entries, "UPPH")).map((entry) => entry.id);
     // a2 and the website match through the space name in their subtitle.
     expect(ids).toEqual([
       "assistant:a1",
@@ -149,18 +149,21 @@ describe("bootstrapEntries / searchEntries", () => {
       "collection:col1",
       "website:w1"
     ]);
-    expect(searchEntries(entries, "modeller").map((entry) => entry.id)).toEqual([]);
-    expect(searchEntries(entries, "models").map((entry) => entry.id)).toEqual([
+    expect(await searchEntries(entries, "modeller")).toEqual([]);
+    expect((await searchEntries(entries, "models")).map((entry) => entry.id)).toEqual([
       "admin:/admin/models"
     ]);
   });
 
-  it("ranks labels that start with the query first within a group", () => {
-    const entries = buildPaletteEntries(data, admin, t);
-    const assistants = searchEntries(entries, "avtal").filter(
-      (entry) => entry.group === "assistants"
-    );
-    expect(assistants.map((entry) => entry.id)).toEqual(["assistant:a2"]);
+  it("caps each group and shows the bootstrap set for an empty query", async () => {
+    const many = Array.from({ length: 10 }, (_, index) => ({
+      id: `conversation:${index}`,
+      name: `Samtal ${index}`
+    }));
+    const entries = buildPaletteEntries({ ...data, conversations: many }, member, t);
+    const found = await searchEntries(entries, "samtal");
+    expect(found).toHaveLength(6);
+    expect(await searchEntries(entries, "  ")).toEqual(bootstrapEntries(entries));
   });
 });
 

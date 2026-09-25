@@ -223,7 +223,7 @@ export default function ShellCommandPalette({
       buildPaletteEntries(await loadPaletteData(queryClient, currentSpaceRouteId), permissions, t);
     return {
       bootstrap: async () => toItems(bootstrapEntries(await load())),
-      search: async (query: string) => toItems(searchEntries(await load(), query))
+      search: async (query: string) => toItems(await searchEntries(await load(), query))
     };
     // groupLabels/permissions/t are derived from the listed inputs.
     // eslint-disable-next-line react-hooks/exhaustive-deps

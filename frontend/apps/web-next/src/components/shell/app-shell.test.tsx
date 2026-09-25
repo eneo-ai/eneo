@@ -25,16 +25,15 @@ vi.mock("@/features/whats-new/whats-new-provider", () => ({
 }));
 vi.mock("@/lib/i18n/actions", () => ({ setLocale: vi.fn() }));
 
-function renderShell() {
+function renderShellWith(page: React.ReactNode) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(["spaces"], []);
   queryClient.setQueryData(["dashboard"], { spaces: { items: [] } });
-  return renderWithProviders(
-    <AppShellFrame>
-      <h1>Sidinnehåll</h1>
-    </AppShellFrame>,
-    { queryClient }
-  );
+  return renderWithProviders(<AppShellFrame>{page}</AppShellFrame>, { queryClient });
+}
+
+function renderShell() {
+  return renderShellWith(<h1>Sidinnehåll</h1>);
 }
 
 beforeEach(() => {
@@ -75,16 +74,6 @@ describe("AppShellFrame", () => {
     expect(screen.queryByRole("navigation", { name: "Huvudmeny" })).toBeNull();
   });
 
-  it("renders the mobile top bar except on chat routes, which have their own header", () => {
-    renderShell();
-    expect(screen.getByRole("button", { name: "Öppna menyn" })).toBeTruthy();
-    cleanup();
-
-    nav.pathname = "/spaces/personal/chat";
-    renderShell();
-    expect(screen.queryByRole("button", { name: "Öppna menyn" })).toBeNull();
-  });
-
   it("opens the command palette with Ctrl+K", async () => {
     renderShell();
     act(() => {
@@ -96,11 +85,53 @@ describe("AppShellFrame", () => {
         name: "Sök bland assistenter, ytor, konversationer, kunskap och åtgärder"
       })
     ).toBeTruthy();
+
+    // Ctrl+K from the palette's own search field closes it again.
+    fireEvent.keyDown(within(dialog).getByRole("combobox"), { key: "k", ctrlKey: true });
+    await waitFor(() => expect(dialog.hasAttribute("open")).toBe(false));
+  });
+
+  it("leaves Ctrl+K alone while the user types in a field", () => {
+    renderShellWith(<textarea aria-label="Meddelande" />);
+    const field = screen.getByRole("textbox", { name: "Meddelande" });
+    const event = new KeyboardEvent("keydown", {
+      key: "k",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true
+    });
+    act(() => {
+      field.dispatchEvent(event);
+    });
+    expect(event.defaultPrevented).toBe(false);
+    expect(screen.queryByRole("dialog", { name: "Sök i Eneo" })).toBeNull();
+  });
+
+  it("does not open the palette over another dialog", () => {
+    renderShellWith(
+      <div role="dialog" aria-label="Bekräfta" data-state="open">
+        …
+      </div>
+    );
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
+    });
+    expect(screen.queryByRole("dialog", { name: "Sök i Eneo" })).toBeNull();
   });
 });
 
 describe("AppShellFrame on a phone", () => {
   beforeEach(() => installBrowserMocks({ mobile: true }));
+
+  it("renders the mobile top bar except on chat routes, which have their own header", () => {
+    renderShell();
+    expect(screen.getByRole("button", { name: "Öppna menyn" })).toBeTruthy();
+    cleanup();
+
+    nav.pathname = "/spaces/personal/chat";
+    renderShell();
+    expect(screen.queryByRole("button", { name: "Öppna menyn" })).toBeNull();
+  });
 
   it("opens the drawer from the top bar and closes it with Escape", async () => {
     renderShell();
