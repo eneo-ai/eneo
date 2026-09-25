@@ -15,7 +15,8 @@ import {
   Plug,
   ShieldCheck,
   Sparkles,
-  Users
+  Users,
+  Wrench
 } from "lucide-react";
 import { LayoutTemplate, MessageSquare } from "lucide-react";
 import Link from "next/link";
@@ -49,6 +50,7 @@ export function AdminNav() {
       : []),
     { href: "/admin/help-assistants", icon: Sparkles, label: t("admin_help_assistants_nav_label") },
     { href: "/admin/mcp-servers", icon: Plug, label: t("mcp_servers") },
+    { href: "/admin/tools", icon: Wrench, label: t("tools") },
     ...(can("modules")
       ? [{ href: "/admin/modules", icon: Blocks, label: t("module_admin_title") }]
       : []),

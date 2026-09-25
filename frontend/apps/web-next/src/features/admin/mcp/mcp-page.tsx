@@ -274,7 +274,11 @@ const FILTERS: Filter[] = ["all", "attention", "enabled", "disabled"];
 
 export function McpServersPage() {
   const t = useTranslations();
-  const { data: servers } = useSuspenseQuery(mcpServersQueryOptions(browserApi));
+  const { data: allServers } = useSuspenseQuery(mcpServersQueryOptions(browserApi));
+  const servers = useMemo(
+    () => allServers.filter((server) => !server.purpose || server.purpose === "general"),
+    [allServers]
+  );
   const { data: security } = useSuspenseQuery(securityClassificationsQueryOptions(browserApi));
   const securityEnabled = security.security_enabled;
   const [showAdd, setShowAdd] = useState(false);

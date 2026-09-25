@@ -52,6 +52,13 @@ export function updateMcpServer(api: EneoClient, id: string, body: McpServerUpda
   return unwrap(api.POST("/api/v1/mcp-servers/{id}/", { params: { path: { id } }, body }));
 }
 
+/** Capability activation replaces the tenant's active source for the same purpose. */
+export function setCapabilityProviderActive(api: EneoClient, id: string, active: boolean) {
+  return active
+    ? unwrap(api.POST("/api/v1/mcp-servers/{id}/activate/", { params: { path: { id } } }))
+    : unwrap(api.POST("/api/v1/mcp-servers/{id}/deactivate/", { params: { path: { id } } }));
+}
+
 /** Toggle tenant-wide enablement: enable creates settings, disable removes them. */
 export function setMcpOrgEnabled(api: EneoClient, serverId: string, enabled: boolean) {
   return enabled

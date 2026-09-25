@@ -80,12 +80,16 @@ export function McpServerDetail({
     mutationFn: () => deleteMcpServer(browserApi, serverId),
     onSuccess: () => {
       invalidate();
-      router.push("/admin/mcp-servers");
+      router.push(
+        server?.purpose && server.purpose !== "general" ? "/admin/tools" : "/admin/mcp-servers"
+      );
     },
     onError: (error) => toastApiError(error, t)
   });
 
   if (!server) return null;
+  const listHref =
+    server.purpose && server.purpose !== "general" ? "/admin/tools" : "/admin/mcp-servers";
 
   const securityEnabled = security.security_enabled;
   const quarantined = isQuarantined(server, securityEnabled);
@@ -105,11 +109,11 @@ export function McpServerDetail({
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
         <div className="flex flex-col gap-1">
           <Link
-            href="/admin/mcp-servers"
+            href={listHref}
             className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
           >
             <ChevronLeft className="size-4" />
-            {t("mcp_servers")}
+            {t(listHref === "/admin/tools" ? "tools" : "mcp_servers")}
           </Link>
           <PageHeader title={server.name}>
             <SaveStatusIndicator />
