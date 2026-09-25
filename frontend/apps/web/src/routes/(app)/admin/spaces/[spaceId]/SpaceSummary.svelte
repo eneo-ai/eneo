@@ -26,6 +26,13 @@
   const days = $derived(usage.window_days ?? 30);
   const admins = $derived(adminNames(space.members.admins, 3));
   const threshold = $derived(format(usage.threshold ?? 5));
+  const showsAppRuns = $derived(space.apps.length > 0);
+  // Not `usage.suppressed`: that also counts app runs, which a space without apps does not show.
+  const withheld = $derived(
+    usage.questions == null ||
+      usage.active_users == null ||
+      (showsAppRuns && usage.app_runs == null)
+  );
 </script>
 
 <!-- A missing count says why it is missing: too few people, or no widget has been public. -->
@@ -99,7 +106,7 @@
         {@render count(usage.active_users, m.admin_spaces_suppressed({ threshold }))}
       </dd>
     </div>
-    {#if space.apps.length > 0}
+    {#if showsAppRuns}
       <div class="flex min-w-0 flex-col gap-1">
         <dt class="text-secondary text-xs">{m.admin_spaces_fact_app_runs({ days })}</dt>
         <dd class="font-medium">
@@ -128,7 +135,7 @@
       </dd>
     </div>
   </dl>
-  {#if usage.suppressed}
+  {#if withheld}
     <p class="text-secondary text-sm">{m.admin_spaces_suppressed_help({ threshold })}</p>
   {/if}
 </section>

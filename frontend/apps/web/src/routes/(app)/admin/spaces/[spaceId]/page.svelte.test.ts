@@ -576,6 +576,33 @@ describe("a space in Admin → Ytor", () => {
     expect(fact("admin_spaces_fact_active_users")).toBe("5");
   });
 
+  test("a space without apps says nothing about held-back figures when it shows every one", async () => {
+    // The API holds back app runs, which this space has no apps to show.
+    renderPage(
+      detail({
+        apps: [],
+        usage: { ...detail().usage, suppressed: true, app_runs: null }
+      })
+    );
+
+    expect(fact("admin_spaces_fact_questions")).toBe("1 234");
+    expect(fact("admin_spaces_fact_active_users")).toBe("42");
+    expect(fact("admin_spaces_fact_app_runs")).toBeUndefined();
+    expect(page.getByText("admin_spaces_suppressed_help(5)").query()).toBeNull();
+  });
+
+  test("a space without apps still explains a figure it holds back", async () => {
+    renderPage(
+      detail({
+        apps: [],
+        usage: { ...detail().usage, suppressed: true, active_users: null, app_runs: null }
+      })
+    );
+
+    await expect.element(page.getByText("admin_spaces_suppressed_help(5)")).toBeVisible();
+    expect(fact("admin_spaces_fact_active_users")).toBe("admin_spaces_suppressed(5)");
+  });
+
   test("widget questions wait until a widget has been public, and say so", async () => {
     renderPage(detail({ usage: { ...detail().usage, widget_questions: null } }));
 
