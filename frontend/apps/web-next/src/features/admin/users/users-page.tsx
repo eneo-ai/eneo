@@ -79,7 +79,7 @@ export function AdminUsersPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <PageHeader title={t("users")}>
+      <PageHeader title={t("users")} tour="admin-users">
         <Button onClick={() => setShowCreate(true)}>{t("create_user")}</Button>
       </PageHeader>
 

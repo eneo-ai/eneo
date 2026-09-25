@@ -29,7 +29,7 @@ export function ModelsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <PageHeader title={t("models")} />
+      <PageHeader title={t("models")} tour="admin-models" />
 
       <ProviderOverview
         models={models}

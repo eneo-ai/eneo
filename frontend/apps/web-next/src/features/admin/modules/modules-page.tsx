@@ -124,7 +124,7 @@ export function ModulesPage({ title }: { title: string }) {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-      <PageHeader title={title} />
+      <PageHeader title={title} tour="admin-modules" />
       <section className="space-y-4" aria-labelledby="installed-modules-title">
         <div>
           <h2 id="installed-modules-title" className="text-lg font-semibold">

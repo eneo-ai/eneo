@@ -116,6 +116,7 @@ export function AccountProfile() {
         </Select>
       </SettingsRow>
       <SettingsRow
+        tour="account-copy-format"
         title={t("preferred_copy_format")}
         description={t("preferred_copy_format_description")}
       >

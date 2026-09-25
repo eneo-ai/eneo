@@ -1,5 +1,47 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "driver.js/dist/driver.css";
+
+.driver-popover.eneo-spotlight {
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  max-width: 22rem;
+  padding: 1rem;
+}
+.driver-popover.eneo-spotlight .eneo-spotlight-version {
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--accent);
+}
+.driver-popover.eneo-spotlight .driver-popover-title {
+  color: var(--foreground);
+}
+.driver-popover.eneo-spotlight .driver-popover-description,
+.driver-popover.eneo-spotlight .driver-popover-progress-text {
+  color: var(--muted-foreground);
+}
+.driver-popover.eneo-spotlight .driver-popover-footer button {
+  border-radius: 0.5rem;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  text-shadow: none;
+}
+.driver-popover.eneo-spotlight .driver-popover-footer .driver-popover-prev-btn {
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+}
+.driver-popover.eneo-spotlight .driver-popover-footer button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
 
 /* Streamdown (MessageResponse markdown rendering) styles its output with
  * Tailwind utility classes; Tailwind must scan the package output or the

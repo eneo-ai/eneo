@@ -10,13 +10,14 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 
-type ToggleKey = "templates" | "audit-logging" | "provisioning";
+type ToggleKey = "templates" | "audit-logging" | "provisioning" | "whats-new";
 
 /** openapi-fetch needs literal paths, so dispatch per toggle (same body/response shape). */
 function patchSetting(key: ToggleKey, enabled: boolean) {
   const body = { enabled };
   if (key === "templates") return browserApi.PATCH("/api/v1/settings/templates", { body });
   if (key === "audit-logging") return browserApi.PATCH("/api/v1/settings/audit-logging", { body });
+  if (key === "whats-new") return browserApi.PATCH("/api/v1/settings/whats-new", { body });
   return browserApi.PATCH("/api/v1/settings/provisioning", { body });
 }
 
@@ -33,6 +34,7 @@ export function FeatureToggles() {
   const [templates, setTemplates] = useState(settings.using_templates ?? false);
   const [auditLogging, setAuditLogging] = useState(settings.audit_logging_enabled ?? false);
   const [provisioning, setProvisioning] = useState(settings.provisioning ?? false);
+  const [whatsNew, setWhatsNew] = useState(settings.whats_new_enabled !== false);
   const [pending, setPending] = useState(false);
 
   async function toggle(
@@ -90,6 +92,18 @@ export function FeatureToggles() {
           checked={provisioning}
           disabled={pending}
           onCheckedChange={(next) => toggle("provisioning", next, setProvisioning, provisioning)}
+        />
+      </SettingsRow>
+      <SettingsRow
+        title={t("enable_whats_new")}
+        description={t("enable_whats_new_description")}
+        htmlFor="feature-toggle-whats-new"
+      >
+        <Switch
+          id="feature-toggle-whats-new"
+          checked={whatsNew}
+          disabled={pending}
+          onCheckedChange={(next) => toggle("whats-new", next, setWhatsNew, whatsNew)}
         />
       </SettingsRow>
     </SettingsGroup>

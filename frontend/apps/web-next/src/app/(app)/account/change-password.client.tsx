@@ -47,7 +47,7 @@ export function ChangePasswordCard() {
   });
 
   return (
-    <SettingsGroup title={t("change_password")}>
+    <SettingsGroup title={t("change_password")} tour="account-password">
       <SettingsRow title={t("change_password")} description={t("change_password_description")}>
         <form
           className="flex max-w-sm flex-col gap-3"

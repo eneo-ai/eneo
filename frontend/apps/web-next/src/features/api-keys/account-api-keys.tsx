@@ -415,7 +415,7 @@ export function ApiKeys() {
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div data-tour="account-api-keys" className="flex flex-col gap-4">
       <NotificationPreferencesPanel />
       <div className="flex items-center justify-between gap-4">
         <Tabs value={stateFilter} onValueChange={(value) => setStateFilter(value as ApiKeyState)}>

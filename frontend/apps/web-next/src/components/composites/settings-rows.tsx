@@ -8,19 +8,21 @@ import { useId } from "react";
  */
 export function SettingsGroup({
   id,
+  tour,
   title,
   description,
   headerEnd,
   children
 }: {
   id?: string;
+  tour?: string;
   title: string;
   description?: string;
   headerEnd?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <section id={id} className="bg-card scroll-mt-32 rounded-xl border">
+    <section id={id} data-tour={tour} className="bg-card scroll-mt-32 rounded-xl border">
       <div className="border-b px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -49,12 +51,14 @@ export function SettingsGroup({
  */
 export function SettingsRow({
   title,
+  tour,
   description,
   htmlFor,
   inline,
   children
 }: {
   title?: string;
+  tour?: string;
   description?: string;
   htmlFor?: string;
   inline?: boolean;
@@ -93,7 +97,7 @@ export function SettingsRow({
 
   if (inline && hasLabel) {
     return (
-      <div className="flex items-center justify-between gap-4">
+      <div data-tour={tour} className="flex items-center justify-between gap-4">
         {label}
         <div className="flex min-w-0 shrink-0 flex-col items-end gap-2" {...groupAttrs}>
           {children}
@@ -103,7 +107,7 @@ export function SettingsRow({
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div data-tour={tour} className="flex flex-col gap-2">
       {label}
       <div className="flex w-full min-w-0 flex-col gap-2" {...groupAttrs}>
         {children}

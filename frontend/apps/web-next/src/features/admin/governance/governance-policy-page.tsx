@@ -42,7 +42,7 @@ export function GovernancePolicyPage() {
   return (
     <>
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 pb-32">
-        <PageHeader title={t("governance_title")} />
+        <PageHeader title={t("governance_title")} tour="admin-personal-assistant" />
         <ModelRestrictionSection draft={draft} />
         <McpRestrictionSection draft={draft} />
         <PromptEnforcementSection draft={draft} />

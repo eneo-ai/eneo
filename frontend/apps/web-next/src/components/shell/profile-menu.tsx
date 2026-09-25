@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, Globe, KeyRound, LogOut, User } from "lucide-react";
+import { Building2, Globe, KeyRound, LogOut, Sparkles, User } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
@@ -22,12 +22,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { setLocale } from "@/lib/i18n/actions";
 import { locales } from "@/lib/i18n/locales";
+import { useWhatsNew } from "@/features/whats-new/whats-new-provider";
 
 const LOCALE_LABELS: Record<string, string> = { sv: "Svenska", en: "English" };
 
 export function ProfileMenu() {
   const t = useTranslations();
   const { user, federationStatus } = useAppContext();
+  const { enabled: whatsNewEnabled, hasUnseen } = useWhatsNew();
   const locale = useLocale();
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -63,6 +65,19 @@ export function ProfileMenu() {
             <KeyRound /> {t("my_api_keys")}
           </Link>
         </DropdownMenuItem>
+        {whatsNewEnabled && (
+          <DropdownMenuItem asChild>
+            <Link href="/whats-new">
+              <Sparkles /> {t("whats_new")}
+              {hasUnseen && (
+                <>
+                  <span aria-hidden="true" className="bg-success ml-auto size-2 rounded-full" />
+                  <span className="sr-only">{t("whats_new_unseen")}</span>
+                </>
+              )}
+            </Link>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem asChild>
           <Link href="/account/integrations">
             <Building2 /> {t("integrations")}
