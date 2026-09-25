@@ -44,7 +44,7 @@ Changes apply immediately for new events. Historical logs remain unchanged.
 Some actions are always logged and cannot be turned off:
 
 - **Space oversight**: Space Joined (Oversight), Space Left (Oversight), Space Member Added (Oversight), Space Member Role Changed (Oversight) and Space Member Removed (Oversight).
-- **User groups**: User Group Member Added and User Group Member Removed. A user group's role in a space gives its members that space's content, so each entry lists the spaces where the group has a role.
+- **User groups**: User Group Member Added and User Group Member Removed. A user group's role in a space gives its members that space's content, so each entry lists the spaces where the group has a role. Changes that your identity provider makes to groups through SCIM are logged as SCIM Group Updated, which follows the audit configuration.
 - **Web widget publishing**: Widget Activation Request Sent Back, Widget Activated, Widget Paused and Widget Archived.
 
 These actions are recorded even when audit logging is turned off, whatever the category and action toggles say. In the configuration their checkboxes stay checked, cannot be changed and are marked **Always logged**, each category shows how many of its actions are always logged, and switching a whole category off leaves them on. The admin overview page says so under the **Enable Audit Logging** toggle. Each entry is saved together with the change it records: if the entry cannot be saved, the change is not made. These entries are kept for at least 365 days, even when the retention period is shorter; a longer retention period applies to them as to other entries. Exports include them.
