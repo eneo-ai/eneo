@@ -169,7 +169,7 @@ async def test_with_a_service_a_run_may_choose_and_the_flow_sets_the_default(
     assert contract["transcription"] == {
         "live": {"available": True, "reason": None},
         "speaker_labels": {"selectable": True, "required": False, "default": False},
-        "max_speakers": {"form_field": None},
+        "max_speakers": {"form_field": None, "participants_field": None},
     }
 
 
@@ -328,7 +328,10 @@ async def test_a_flow_that_asks_for_the_count_advertises_its_form_field(
         "required": True,
         "default": True,
     }
-    assert contract["transcription"]["max_speakers"] == {"form_field": "antal_talare"}
+    assert contract["transcription"]["max_speakers"] == {
+        "form_field": "antal_talare",
+        "participants_field": "deltagare",
+    }
 
 
 @pytest.mark.parametrize(

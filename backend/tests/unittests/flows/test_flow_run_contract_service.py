@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -8,6 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from eneo.flows.api.flow_models import FlowOutputDelivery
+from eneo.flows.api.flow_run_contract_models import FlowSpeakerLabelsOptionPublic
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
 from eneo.flows.domain.runtime import RuntimeStep
@@ -23,6 +25,7 @@ from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECO
 from eneo.flows.flow_run_contract_service import (
     FlowRunContractService,
     build_final_output_contract,
+    max_speakers_option,
 )
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
@@ -1217,3 +1220,36 @@ def test_build_final_output_contract_output_type_matches_final_step_output_type(
 def test_build_final_output_contract_returns_none_for_no_steps() -> None:
     assert build_final_output_contract([]) is None
     assert final_step_output_type([]) is None
+
+
+@pytest.mark.parametrize(
+    ("output_config", "participants_field"),
+    [
+        (None, None),
+        ({"speaker_mapping": {"infer_names": True}}, None),
+        ({"speaker_mapping": {"participants_field": "deltagare"}}, "deltagare"),
+    ],
+)
+def test_the_speaker_count_option_names_the_participants_field(
+    output_config: dict[str, object] | None, participants_field: str | None
+) -> None:
+    steps = [_runtime_step(step_order=1, output_type="text")]
+    if output_config is not None:
+        steps.append(
+            replace(
+                _runtime_step(step_order=2, output_type="json"),
+                output_mode="speaker_mapping",
+                output_config=output_config,
+            )
+        )
+
+    option = max_speakers_option(
+        steps,
+        speaker_labels=FlowSpeakerLabelsOptionPublic(
+            selectable=True, required=False, default=True
+        ),
+        service_configured=True,
+    )
+
+    assert option is not None
+    assert option.participants_field == participants_field

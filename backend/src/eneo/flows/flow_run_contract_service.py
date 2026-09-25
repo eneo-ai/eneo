@@ -29,6 +29,7 @@ from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowTemplateAs
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.speaker_mapping_config import (
+    speaker_mapping_participants_field,
     speaker_mapping_speaker_count_field,
 )
 from eneo.flows.domain.step_mapped_execution import single_mapped_array_key
@@ -302,7 +303,11 @@ def max_speakers_option(
     a speaker-mapping step requires them."""
     if speaker_labels is None or not service_configured:
         return None
-    return FlowMaxSpeakersOptionPublic(form_field=_speaker_count_field(steps))
+    mapping_config = _speaker_mapping_config(steps)
+    return FlowMaxSpeakersOptionPublic(
+        form_field=speaker_mapping_speaker_count_field(mapping_config),
+        participants_field=speaker_mapping_participants_field(mapping_config),
+    )
 
 
 def settle_max_speakers(
@@ -342,7 +347,7 @@ def settle_max_speakers(
         return NOT_PROVIDED
     if not isinstance(choice, NotProvided):
         return choice
-    field = _speaker_count_field(steps)
+    field = speaker_mapping_speaker_count_field(_speaker_mapping_config(steps))
     value = (form_input or {}).get(field) if field is not None else None
     if value is None:
         return None
@@ -355,11 +360,11 @@ def settle_max_speakers(
     return value
 
 
-def _speaker_count_field(steps: Sequence[RuntimeStep]) -> str | None:
-    """The first speaker-mapping step's speaker-count form field, if any."""
+def _speaker_mapping_config(steps: Sequence[RuntimeStep]) -> object:
+    """The first speaker-mapping step's output config, if any."""
     for step in sorted(steps, key=lambda item: item.step_order):
         if step.output_mode == FlowOutputMode.SPEAKER_MAPPING.value:
-            return speaker_mapping_speaker_count_field(step.output_config)
+            return step.output_config
     return None
 
 

@@ -515,6 +515,16 @@ class FlowMaxSpeakersOptionPublic(BaseModel):
             "still overrides the field."
         )
     )
+    participants_field: str | None = Field(
+        description=(
+            "The form field that lists the people expected to speak (a "
+            "speaker-mapping step's participants field), or null. A client may "
+            "offer the number of names as a visible, editable prefill for "
+            "`max_speakers`. Eneo itself never derives the bound from the names: "
+            "a bound below the real count would merge unlisted voices into one "
+            "person."
+        )
+    )
 
 
 class FlowTranscriptionContractPublic(BaseModel):
