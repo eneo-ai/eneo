@@ -10,7 +10,7 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import { intlLocale } from "$lib/core/formatting/dateTime";
   import AssistantConfigCard from "$lib/features/spaces/oversight/AssistantConfigCard.svelte";
-  import { formatList } from "$lib/features/spaces/oversight/format";
+  import { formatList } from "$lib/core/formatting/formatList";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {

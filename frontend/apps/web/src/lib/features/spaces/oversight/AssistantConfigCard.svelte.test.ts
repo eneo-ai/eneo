@@ -51,7 +51,22 @@ function assistant(patch: Partial<AdminSpaceAssistant> = {}): AdminSpaceAssistan
     knowledge: [
       { id: "k1", name: "Rutiner", kind: "collection", from_organization: false },
       { id: "k2", name: "Kommunens webbplats", kind: "website", from_organization: true },
-      { id: "k3", name: null, kind: "integration", from_organization: false }
+      {
+        id: "k3",
+        name: null,
+        kind: "integration",
+        integration_type: "onedrive",
+        integration_item: "folder",
+        from_organization: false
+      },
+      {
+        id: "k4",
+        name: null,
+        kind: "integration",
+        integration_type: "sharepoint",
+        integration_item: "file",
+        from_organization: false
+      }
     ],
     attachment_count: 3,
     mcp_servers: [{ id: "s1", name: "Kalender" }],
@@ -59,17 +74,28 @@ function assistant(patch: Partial<AdminSpaceAssistant> = {}): AdminSpaceAssistan
     insight_enabled: true,
     logging_enabled: false,
     data_retention_days: 30,
-    widget: { id: "w1", name: "Kundtjänst", status: "draft" },
+    widgets: [{ id: "w1", name: "Kundtjänst", status: "draft", activation_requested_at: null }],
     ...patch
   };
 }
 
 /** The `dd` next to the `dt` with the given text. */
-function value(term: string): string {
+function definition(term: string): Element | null {
   const dt = [...document.querySelectorAll("dt")].find(
     (element) => element.textContent?.trim() === term
   );
-  return dt?.nextElementSibling?.textContent?.replace(/\s+/g, " ").trim() ?? "(missing)";
+  return dt?.nextElementSibling ?? null;
+}
+
+function value(term: string): string {
+  return definition(term)?.textContent?.replace(/\s+/g, " ").trim() ?? "(missing)";
+}
+
+/** The items listed in the `dd` next to the `dt` with the given text. */
+function listed(term: string): string[] {
+  return [...(definition(term)?.querySelectorAll("li") ?? [])].map(
+    (item) => item.textContent?.replace(/\s+/g, " ").trim() ?? ""
+  );
 }
 
 async function axeViolations() {
@@ -122,17 +148,14 @@ describe("AssistantConfigCard", () => {
     expect(value("admin_spaces_logging")).toBe("admin_spaces_off");
   });
 
-  test("names knowledge by kind, marks inherited sources and never names a OneDrive folder", async () => {
+  test("names knowledge by kind, marks inherited sources and never names a file or folder", async () => {
     render(AssistantConfigCard, { assistant: assistant() });
 
-    const items = page
-      .getByRole("listitem")
-      .elements()
-      .map((item) => item.textContent?.replace(/\s+/g, " ").trim());
-    expect(items).toEqual([
+    expect(listed("knowledge")).toEqual([
       "Rutiner admin_spaces_kind_collection",
       "Kommunens webbplats admin_spaces_kind_website · admin_spaces_from_org",
-      "admin_spaces_onedrive_name"
+      "admin_spaces_onedrive_name",
+      "admin_spaces_sharepoint_file"
     ]);
   });
 
@@ -162,11 +185,7 @@ describe("AssistantConfigCard", () => {
     ];
     render(AssistantConfigCard, { assistant: assistant(), knowledge });
 
-    const items = page
-      .getByRole("listitem")
-      .elements()
-      .map((item) => item.textContent?.replace(/\s+/g, " ").trim());
-    expect(items).toEqual([
+    expect(listed("knowledge")).toEqual([
       "Rutiner admin_spaces_kind_collection · admin_spaces_knowledge_documents_one",
       "Intranätet admin_spaces_kind_sharepoint · admin_spaces_knowledge_documents(1 200)"
     ]);
@@ -181,7 +200,7 @@ describe("AssistantConfigCard", () => {
         mcp_servers: [],
         capabilities: [],
         data_retention_days: null,
-        widget: null,
+        widgets: [],
         instructions: "   "
       })
     });
@@ -205,9 +224,40 @@ describe("AssistantConfigCard", () => {
     expect(value("admin_spaces_widget")).toBe("Kundtjänst · widget_admin_status_draft");
   });
 
-  test("leaves the widget out when the page is that widget's review", async () => {
+  test("lists every widget of the assistant in the order the API gives, active first", async () => {
+    const widget = (id: string, name: string, status: "active" | "paused" | "draft") => ({
+      id,
+      name,
+      status,
+      activation_requested_at: null
+    });
+    render(AssistantConfigCard, {
+      assistant: assistant({
+        widgets: [
+          widget("w2", "Öppen", "active"),
+          widget("w3", "Vilande", "paused"),
+          widget("w1", "Alfa", "draft")
+        ]
+      })
+    });
+
+    expect(listed("widget_admin_nav")).toEqual([
+      "Öppen · widget_admin_status_active",
+      "Vilande · widget_admin_status_paused",
+      "Alfa · widget_admin_status_draft"
+    ]);
+    const links = page.getByRole("link", { name: /^admin_spaces_widget_review_named/ }).elements();
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "/admin/widgets/w2",
+      "/admin/widgets/w3",
+      "/admin/widgets/w1"
+    ]);
+  });
+
+  test("leaves the widgets out when the page is one widget's review", async () => {
     render(AssistantConfigCard, { assistant: assistant(), showWidget: false });
     expect(value("admin_spaces_widget")).toBe("(missing)");
+    expect(value("widget_admin_nav")).toBe("(missing)");
   });
 
   test("keeps the instructions collapsed until asked, then shows them as written", async () => {

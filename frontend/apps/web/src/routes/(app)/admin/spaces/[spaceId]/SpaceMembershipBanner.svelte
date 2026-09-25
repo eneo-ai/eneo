@@ -8,7 +8,7 @@
   import { Eye, UserCheck, UsersRound } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { formatDateMedium } from "$lib/core/formatting/dateTime";
-  import { formatList } from "$lib/features/spaces/oversight/format";
+  import { formatList } from "$lib/core/formatting/formatList";
   import JoinSpaceDialog from "$lib/features/spaces/oversight/JoinSpaceDialog.svelte";
   import { spaceRoleLabel } from "$lib/features/spaces/roles";
   import { m } from "$lib/paraglide/messages";

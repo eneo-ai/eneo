@@ -5,20 +5,16 @@
 <script lang="ts">
   import type { AdminSpaceSettings } from "@eneo/eneo-js";
   import { CAPABILITIES } from "$lib/features/mcp/capabilities";
+  import { modelLabel, retentionLabel } from "$lib/features/spaces/oversight/labels";
   import { m } from "$lib/paraglide/messages";
-  import { modelLabel } from "../labels";
 
   type Props = { settings: AdminSpaceSettings };
 
   let { settings }: Props = $props();
 
-  const retention = $derived.by(() => {
-    const days = settings.data_retention_days;
-    if (days == null) return m.admin_spaces_retention_org();
-    return days === 1
-      ? m.admin_spaces_retention_days_one()
-      : m.admin_spaces_retention_days({ days });
-  });
+  const retention = $derived(
+    retentionLabel(settings.data_retention_days, m.admin_spaces_retention_org())
+  );
 
   const enabled = $derived<readonly string[]>(settings.capabilities);
 

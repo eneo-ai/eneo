@@ -14,7 +14,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import { getErrorMessage } from "$lib/core/errors";
-  import { formatList } from "$lib/features/spaces/oversight/format";
+  import { formatList } from "$lib/core/formatting/formatList";
   import { widgetErrorCode, widgetErrorMessage } from "$lib/features/widget/admin/errors";
   import { m } from "$lib/paraglide/messages";
   import { cn } from "$lib/utils.js";

@@ -6,7 +6,7 @@
   import type { AdminSpaceWidgetRef } from "@eneo/eneo-js";
   import * as Table from "$lib/components/ui/table/index.js";
   import { formatDateMedium } from "$lib/core/formatting/dateTime";
-  import { widgetStatusLabel } from "$lib/features/widget/admin/status";
+  import { activationRequestState, widgetStatusLabel } from "$lib/features/widget/admin/status";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
 
@@ -15,9 +15,14 @@
   let { widgets }: Props = $props();
 </script>
 
+<!-- Only a draft or paused widget can be requested; for the others there is nothing to say. -->
 {#snippet activation(widget: AdminSpaceWidgetRef)}
-  {#if widget.activation_requested_at}
-    {m.admin_spaces_widget_requested({ date: formatDateMedium(widget.activation_requested_at) })}
+  {@const request = activationRequestState(widget)}
+  {#if request.kind === "requested"}
+    {m.admin_spaces_widget_requested({ date: formatDateMedium(request.at) })}
+  {:else if request.kind === "not_applicable"}
+    <span aria-hidden="true">–</span>
+    <span class="sr-only">{m.admin_spaces_activation_not_applicable()}</span>
   {:else}
     {m.admin_spaces_widget_not_requested()}
   {/if}
@@ -54,9 +59,10 @@
                 >
                 <!-- eslint-enable svelte/no-navigation-without-resolve -->
                 <span class="text-secondary block text-xs wrap-anywhere @2xl:hidden">
-                  {widget.assistant?.name ?? m.admin_spaces_assistant_missing()} · {@render activation(
-                    widget
-                  )}
+                  {widget.assistant?.name ?? m.admin_spaces_assistant_missing()}
+                  {#if activationRequestState(widget).kind !== "not_applicable"}
+                    · {@render activation(widget)}
+                  {/if}
                 </span>
               </th>
               <Table.Cell class="hidden wrap-anywhere @2xl:table-cell">

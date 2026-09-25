@@ -8,8 +8,9 @@ export const load: PageLoad = async (event) => {
   const { eneo } = await event.parent();
   const [space, security] = await Promise.all([
     eneo.spaces.admin.get({ id: event.params.spaceId }).catch((reason: unknown) => {
-      if (reason instanceof EneoError && reason.status === 404) {
-        // Deleted, personal, the organisation space or another tenant's: the page says so.
+      // Deleted, personal, the organisation space or another tenant's (404), or a
+      // mistyped id that is not a UUID (422): the page says the space is not there.
+      if (reason instanceof EneoError && (reason.status === 404 || reason.status === 422)) {
         return null;
       }
       if (reason instanceof EneoError && reason.status === 403) {

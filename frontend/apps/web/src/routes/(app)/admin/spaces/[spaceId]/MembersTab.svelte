@@ -24,7 +24,7 @@
   import { formatDateMedium, intlLocale } from "$lib/core/formatting/dateTime";
   import AddSpaceMemberDialog from "$lib/features/spaces/components/AddSpaceMemberDialog.svelte";
   import SpaceMemberRole from "$lib/features/spaces/components/SpaceMemberRole.svelte";
-  import { SPACE_ROLES, spaceRoleLabel } from "$lib/features/spaces/roles";
+  import { ROLE_RANK, SPACE_ROLES, spaceRoleLabel } from "$lib/features/spaces/roles";
   import { UserList } from "$lib/features/users/user-list.svelte";
   import { m } from "$lib/paraglide/messages";
   import { groupCount, peopleCount } from "../labels";
@@ -42,8 +42,8 @@
   const format = (value: number) => number.format(value);
 
   // A change's response shows at once; the page's data takes over again when it reloads.
+  // Each change is announced once, by its toast.
   let members = $derived(space.members);
-  let announcement = $state("");
   let peopleHeading = $state<HTMLHeadingElement | null>(null);
   let groupsHeading = $state<HTMLHeadingElement | null>(null);
 
@@ -57,27 +57,38 @@
   const personName = (user: Pick<AdminSpaceUserMember, "username" | "email">) =>
     user.username || user.email;
 
-  const summary = $derived(
-    m.admin_spaces_members_summary({
-      people: peopleCount(members.users.length, format),
-      groups: groupCount(members.groups.length, format),
-      total:
-        members.member_count === 1
-          ? m.admin_spaces_count_members_one()
-          : m.admin_spaces_count_members({ count: format(members.member_count) })
-    })
-  );
+  // "Personer" is always the distinct people with access, as in the summary above the tabs.
+  const summary = $derived.by(() => {
+    const people = peopleCount(members.member_count, format);
+    if (members.member_count === 0) return m.admin_spaces_members_summary_none();
+    if (members.groups.length === 0 || members.member_count <= members.users.length) {
+      return m.admin_spaces_members_summary_direct({ people });
+    }
+    return m.admin_spaces_members_summary({
+      people,
+      direct: format(members.users.length),
+      groups: groupCount(members.groups.length, format)
+    });
+  });
+
+  /**
+   * Another organisation administrator reaches content only by joining with a
+   * reason, so their direct role can be lowered here but not raised.
+   */
+  function offeredRoles(user: AdminSpaceUserMember) {
+    if (!user.is_tenant_admin) return SPACE_ROLES;
+    return SPACE_ROLES.filter((role) => ROLE_RANK[role] <= ROLE_RANK[user.role]);
+  }
 
   function saved(response: AdminSpaceMembers, message: string) {
     members = response;
-    announcement = message;
+    toast.success(message);
     void invalidate("admin:space");
   }
 
   /** Someone else changed the members first: say so and show the current list. */
   function listChanged() {
     toast.info(m.admin_spaces_members_changed());
-    announcement = m.admin_spaces_members_changed();
     return invalidate("admin:space");
   }
 
@@ -106,9 +117,7 @@
       else toast.error(getErrorMessage(error));
       throw error;
     }
-    const message = m.admin_spaces_role_changed({ name, role: spaceRoleLabel(role) });
-    toast.success(message);
-    saved(response, message);
+    saved(response, m.admin_spaces_role_changed({ name, role: spaceRoleLabel(role) }));
   }
 
   async function remove(kind: "user" | "group", id: string, name: string) {
@@ -162,12 +171,10 @@
       userId: user.id,
       role
     });
-    const message = m.admin_spaces_member_added({
-      name: user.username || user.email,
-      role: spaceRoleLabel(role)
-    });
-    toast.success(message);
-    saved(response, message);
+    saved(
+      response,
+      m.admin_spaces_member_added({ name: user.username || user.email, role: spaceRoleLabel(role) })
+    );
   }
 
   async function addGroup(group: UserGroup, role: SpaceRoleValue) {
@@ -176,9 +183,7 @@
       groupId: group.id,
       role
     });
-    const message = m.admin_spaces_member_added({ name: group.name, role: spaceRoleLabel(role) });
-    toast.success(message);
-    saved(response, message);
+    saved(response, m.admin_spaces_member_added({ name: group.name, role: spaceRoleLabel(role) }));
   }
 </script>
 
@@ -283,8 +288,6 @@
     {m.admin_spaces_members_note()}
   </p>
 
-  <p role="status" class="sr-only">{announcement}</p>
-
   <section aria-labelledby={`${uid}-people`} class="flex flex-col gap-3">
     <h3
       id={`${uid}-people`}
@@ -319,7 +322,7 @@
                   {/if}
                   {#if user.oversight_join}
                     <Badge variant="outline" class="h-auto whitespace-normal">
-                      {m.space_oversight_member_badge({
+                      {m.admin_spaces_badge_joined({
                         date: formatDateMedium(user.oversight_join.joined_at)
                       })}
                     </Badge>
@@ -340,6 +343,10 @@
                 <p class="text-secondary text-sm">{m.admin_spaces_own_row_note()}</p>
               {:else if only}
                 {@render onlyAdminNote(`${uid}-only-user-${user.id}`)}
+              {:else if user.is_tenant_admin}
+                <p id={`${uid}-tenant-admin-${user.id}`} class="text-secondary text-sm">
+                  {m.admin_spaces_tenant_admin_role_note()}
+                </p>
               {/if}
             </div>
             {#if self}
@@ -349,7 +356,10 @@
                 class="@2xl:shrink-0"
                 {name}
                 role={user.role}
-                roles={SPACE_ROLES}
+                roles={offeredRoles(user)}
+                roleDescriptionId={user.is_tenant_admin && !only
+                  ? `${uid}-tenant-admin-${user.id}`
+                  : undefined}
                 disabled={only}
                 disabledReasonId={only ? `${uid}-only-user-${user.id}` : undefined}
                 onChangeRole={(role) => changeRole("user", user.id, name, role)}

@@ -32,6 +32,13 @@ describe("loading a space in Admin → Ytor", () => {
     await expect(load(missing as never)).resolves.toEqual({ space: null, securityEnabled: true });
   });
 
+  test("a truncated or mistyped id is not found either, not an error page", async () => {
+    const malformed = event(() =>
+      Promise.reject(new EneoError("Validation error", "RESPONSE", 422, 9012, {}))
+    );
+    await expect(load(malformed as never)).resolves.toEqual({ space: null, securityEnabled: true });
+  });
+
   test("a refusal becomes the forbidden page, and other failures the error page", async () => {
     const refused = event(() => Promise.reject(new EneoError("Forbidden", "RESPONSE", 403, 0, {})));
     await expect(load(refused as never)).rejects.toMatchObject({ status: 403 });

@@ -118,7 +118,7 @@ function assistant(name: string, patch: Partial<AdminSpaceAssistant> = {}): Admi
     insight_enabled: true,
     logging_enabled: false,
     data_retention_days: null,
-    widget: null,
+    widgets: [],
     ...patch
   };
 }
@@ -153,7 +153,9 @@ function detail(patch: Partial<AdminSpaceDetail> = {}): AdminSpaceDetail {
     },
     assistants: [
       assistant("Budgetassistenten", {
-        widget: { id: "w1", name: "Fråga ekonomi", status: "draft", activation_requested_at: null }
+        widgets: [
+          { id: "w1", name: "Fråga ekonomi", status: "draft", activation_requested_at: null }
+        ]
       }),
       assistant("Ekonomi", { is_default: true, instructions: null, description: null })
     ],
@@ -186,7 +188,7 @@ function detail(patch: Partial<AdminSpaceDetail> = {}): AdminSpaceDetail {
         integration_type: null,
         item_count: 48,
         size_bytes: 12_582_912,
-        updated_at: "2026-09-10T08:00:00Z",
+        updated_at: "2026-09-10",
         website_url: null,
         update_interval: null,
         requires_login: false,
@@ -214,7 +216,22 @@ function detail(patch: Partial<AdminSpaceDetail> = {}): AdminSpaceDetail {
         integration_type: "onedrive",
         item_count: 7,
         size_bytes: 1_048_576,
-        updated_at: "2026-08-01T08:00:00Z",
+        updated_at: "2026-08-01",
+        website_url: null,
+        update_interval: null,
+        requires_login: false,
+        auto_disabled: false,
+        used_by: []
+      },
+      {
+        id: "k4",
+        name: null,
+        kind: "integration",
+        integration_type: "sharepoint",
+        integration_item: "file",
+        item_count: 1,
+        size_bytes: 20_480,
+        updated_at: "2026-09-24",
         website_url: null,
         update_interval: null,
         requires_login: false,
@@ -230,6 +247,13 @@ function detail(patch: Partial<AdminSpaceDetail> = {}): AdminSpaceDetail {
         status: "draft",
         assistant: { id: "a-Budgetassistenten", name: "Budgetassistenten" },
         activation_requested_at: "2026-09-21T08:00:00Z"
+      },
+      {
+        id: "w2",
+        name: "Fråga om taxor",
+        status: "active",
+        assistant: { id: "a-Budgetassistenten", name: "Budgetassistenten" },
+        activation_requested_at: null
       }
     ],
     members: {
@@ -433,12 +457,30 @@ describe("a space in Admin → Ytor", () => {
 
     const leave = page.getByRole("button", { name: "admin_spaces_leave_open" });
     await expect.element(leave).toHaveAttribute("aria-disabled", "true");
+    // It looks blocked too, like the other refused controls.
+    expect(getComputedStyle(leave.element()).opacity).toBe("0.6");
     expect(description(leave.element())).toBe("admin_spaces_leave_last_admin");
     await expect.element(page.getByText("admin_spaces_leave_last_admin")).toBeVisible();
 
     (leave.element() as HTMLElement).click();
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(page.getByRole("alertdialog").elements()).toHaveLength(0);
+  });
+
+  test("leaving with a role through a group says the access stays", async () => {
+    renderPage(
+      withMembership({
+        ...joined,
+        role: "editor",
+        group_role: "editor",
+        via_groups: [{ id: "g-stod", name: "Ekonomistöd" }]
+      })
+    );
+
+    await page.getByRole("button", { name: "admin_spaces_leave_open" }).click();
+    await expect
+      .element(page.getByRole("alertdialog"))
+      .toHaveAccessibleDescription("admin_spaces_leave_body_group(space_role_editor|Ekonomistöd)");
   });
 
   test("leaving asks first, then reloads, confirms and puts focus on the banner", async () => {
@@ -481,7 +523,16 @@ describe("a space in Admin → Ytor", () => {
     await expect.element(page.getByRole("heading", { level: 2, name: "members" })).toHaveFocus();
   });
 
-  test("the summary holds back small numbers and says why", async () => {
+  /** The summary's `dd` for the `dt` whose text starts with `term`. */
+  function fact(term: string) {
+    const summary = page.getByRole("region", { name: "admin_spaces_summary_title" }).element();
+    const dt = [...summary.querySelectorAll("dt")].find((element) =>
+      element.textContent?.trim().startsWith(term)
+    );
+    return dt?.nextElementSibling?.textContent?.replace(/\s+/g, " ").trim();
+  }
+
+  test("the summary holds back each small number and says why", async () => {
     renderPage(
       detail({
         usage: {
@@ -494,18 +545,50 @@ describe("a space in Admin → Ytor", () => {
       })
     );
 
-    const summary = page.getByRole("region", { name: "admin_spaces_summary_title" });
-    const facts = summary.element().querySelectorAll("dd");
-    const suppressed = [...facts].filter((fact) =>
-      fact.textContent?.includes("admin_spaces_suppressed(5)")
-    );
-    expect(suppressed).toHaveLength(3);
-    await expect.element(page.getByText("admin_spaces_suppressed_help")).toBeVisible();
-    // Widget questions come from anonymous visitors and are never held back.
-    await expect.element(summary).toHaveTextContent("310");
+    await expect.element(page.getByText("admin_spaces_suppressed_help(5)")).toBeVisible();
+    expect(fact("admin_spaces_fact_questions")).toBe("admin_spaces_suppressed_questions(5)");
+    expect(fact("admin_spaces_fact_active_users")).toBe("admin_spaces_suppressed(5)");
+    expect(fact("admin_spaces_fact_app_runs")).toBe("admin_spaces_suppressed_app_runs(5)");
+    // Widget questions are not a count of people; they are shown once a widget has been public.
+    expect(fact("admin_spaces_fact_widget_questions")).toBe("310");
     // One dd per dt, each pair in its own div.
-    const groups = summary.element().querySelectorAll("dl > div");
+    const summary = page.getByRole("region", { name: "admin_spaces_summary_title" }).element();
+    const groups = summary.querySelectorAll("dl > div");
     expect([...groups].every((group) => group.querySelectorAll("dt, dd").length === 2)).toBe(true);
+  });
+
+  test("one person's count is hidden while the others are shown", async () => {
+    // Four people ran apps and one asked every question.
+    renderPage(
+      detail({
+        usage: {
+          ...detail().usage,
+          suppressed: true,
+          questions: null,
+          app_runs: 4,
+          active_users: 5
+        }
+      })
+    );
+
+    expect(fact("admin_spaces_fact_questions")).toBe("admin_spaces_suppressed_questions(5)");
+    expect(fact("admin_spaces_fact_app_runs")).toBe("4");
+    expect(fact("admin_spaces_fact_active_users")).toBe("5");
+  });
+
+  test("widget questions wait until a widget has been public, and say so", async () => {
+    renderPage(detail({ usage: { ...detail().usage, widget_questions: null } }));
+
+    expect(fact("admin_spaces_fact_widget_questions")).toBe("admin_spaces_widget_questions_hidden");
+    expect(fact("admin_spaces_fact_questions")).toBe("1 234");
+  });
+
+  test("no recorded activity says it counts what retention has left", async () => {
+    renderPage(detail({ usage: { ...detail().usage, last_activity: "none" } }));
+
+    expect(fact("admin_spaces_col_last_active")).toBe(
+      "admin_spaces_activity_none admin_spaces_activity_none_help"
+    );
   });
 
   test("the tabs are named by the space, carry counts and follow ?tab=", async () => {
@@ -514,7 +597,8 @@ describe("a space in Admin → Ytor", () => {
 
     await expect.element(page.getByRole("tablist")).toHaveAccessibleName("Ekonomi");
     await expect.element(tabTrigger(/^knowledge/)).toHaveAttribute("aria-selected", "true");
-    await expect.element(tabTrigger(/^members/)).toHaveAccessibleName("members 3");
+    // The people with access, as in the summary: not the number of rows.
+    await expect.element(tabTrigger(/^members/)).toHaveAccessibleName("members 14");
     await expect
       .element(page.getByRole("heading", { level: 2, name: "admin_spaces_knowledge_title" }))
       .toBeVisible();
@@ -617,7 +701,7 @@ describe("a space in Admin → Ytor", () => {
       .toBeVisible();
   });
 
-  test("the knowledge tab names a OneDrive folder without its owner's name", async () => {
+  test("the knowledge tab names neither a OneDrive folder nor a SharePoint file", async () => {
     renderPage();
     await openTab(/^knowledge/);
 
@@ -626,6 +710,19 @@ describe("a space in Admin → Ytor", () => {
     await expect
       .element(page.getByRole("rowheader", { name: /admin_spaces_onedrive_name/ }))
       .toBeVisible();
+    await expect
+      .element(page.getByRole("rowheader", { name: /admin_spaces_sharepoint_file/ }))
+      .toBeVisible();
+    // Updates are days: no time of day, and never moved by the viewer's time zone.
+    const updated = table.element().querySelector('time[datetime="2026-09-24"]');
+    expect(updated?.textContent).toBe(
+      new Intl.DateTimeFormat("sv-SE", { dateStyle: "medium", timeZone: "UTC" }).format(
+        Date.UTC(2026, 8, 24)
+      )
+    );
+    await expect
+      .element(page.getByRole("rowheader", { name: /sundsvall\.se\/ekonomi/ }))
+      .toHaveTextContent("admin_spaces_meta_never_updated");
     await expect.element(table).toHaveTextContent("admin_spaces_requires_login");
     await expect.element(table).toHaveTextContent("admin_spaces_auto_disabled");
     await expect.element(page.getByText("admin_spaces_inherited(2)")).toBeVisible();
@@ -641,6 +738,10 @@ describe("a space in Admin → Ytor", () => {
     await expect
       .element(page.getByRole("table", { name: "admin_spaces_widgets_caption" }))
       .toHaveTextContent("widget_admin_status_draft");
+    // A live widget has no request to speak of.
+    const live = page.getByRole("row", { name: /^Fråga om taxor/ }).element();
+    expect(live.textContent).toContain("admin_spaces_activation_not_applicable");
+    expect(live.textContent).not.toContain("admin_spaces_widget_not_requested");
   });
 
   test("a space that is gone, personal or the organisation space gets its own page", async () => {

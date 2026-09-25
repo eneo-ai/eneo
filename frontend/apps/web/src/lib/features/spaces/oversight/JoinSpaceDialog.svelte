@@ -33,7 +33,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import { cn } from "$lib/utils.js";
   import { sortRolesAscending, spaceRoleDescription, spaceRoleLabel } from "../roles";
-  import { formatList } from "./format";
+  import { formatList } from "$lib/core/formatting/formatList";
   import { reasonError } from "./reason";
   import ReasonField from "./ReasonField.svelte";
 

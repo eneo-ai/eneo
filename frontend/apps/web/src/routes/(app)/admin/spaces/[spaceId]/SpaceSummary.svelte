@@ -1,6 +1,6 @@
 <!--
-  The space at a glance. Usage counts people's questions only above the
-  anonymity threshold; below it the page says why a number is missing.
+  The space at a glance. Each usage count shows only when enough different
+  people are behind it; otherwise the page says why that number is missing.
 -->
 <script lang="ts">
   import type { AdminSpaceDetail } from "@eneo/eneo-js";
@@ -25,14 +25,13 @@
   const usage = $derived(space.usage);
   const days = $derived(usage.window_days ?? 30);
   const admins = $derived(adminNames(space.members.admins, 3));
-  const suppressedText = $derived(
-    m.admin_spaces_suppressed({ threshold: format(usage.threshold ?? 5) })
-  );
+  const threshold = $derived(format(usage.threshold ?? 5));
 </script>
 
-{#snippet count(value: number | null | undefined)}
-  {#if usage.suppressed || value == null}
-    <span class="text-secondary text-sm font-normal">{suppressedText}</span>
+<!-- A missing count says why it is missing: too few people, or no widget has been public. -->
+{#snippet count(value: number | null | undefined, hidden: string)}
+  {#if value == null}
+    <span class="text-secondary text-sm font-normal">{hidden}</span>
   {:else}
     <span class="tabular-nums">{format(value)}</span>
   {/if}
@@ -79,27 +78,43 @@
     </div>
     <div class="flex min-w-0 flex-col gap-1">
       <dt class="text-secondary text-xs">{m.admin_spaces_col_last_active()}</dt>
-      <dd class="font-medium">{activityLabel(usage.last_activity)}</dd>
+      <dd class="font-medium">
+        {activityLabel(usage.last_activity)}
+        {#if usage.last_activity === "none"}
+          <span class="text-secondary block text-sm font-normal">
+            {m.admin_spaces_activity_none_help()}
+          </span>
+        {/if}
+      </dd>
     </div>
     <div class="flex min-w-0 flex-col gap-1">
       <dt class="text-secondary text-xs">{m.admin_spaces_fact_questions({ days })}</dt>
-      <dd class="font-medium">{@render count(usage.questions)}</dd>
+      <dd class="font-medium">
+        {@render count(usage.questions, m.admin_spaces_suppressed_questions({ threshold }))}
+      </dd>
     </div>
     <div class="flex min-w-0 flex-col gap-1">
       <dt class="text-secondary text-xs">{m.admin_spaces_fact_active_users({ days })}</dt>
-      <dd class="font-medium">{@render count(usage.active_users)}</dd>
+      <dd class="font-medium">
+        {@render count(usage.active_users, m.admin_spaces_suppressed({ threshold }))}
+      </dd>
     </div>
     {#if space.apps.length > 0}
       <div class="flex min-w-0 flex-col gap-1">
         <dt class="text-secondary text-xs">{m.admin_spaces_fact_app_runs({ days })}</dt>
-        <dd class="font-medium">{@render count(usage.app_runs)}</dd>
+        <dd class="font-medium">
+          {@render count(usage.app_runs, m.admin_spaces_suppressed_app_runs({ threshold }))}
+        </dd>
       </div>
     {/if}
     {#if space.widgets.length > 0}
-      <!-- Visitors are anonymous, so these are never held back. -->
+      <!-- Test questions from editors and administrators count too, so none are shown
+           until a widget has been public. -->
       <div class="flex min-w-0 flex-col gap-1">
         <dt class="text-secondary text-xs">{m.admin_spaces_fact_widget_questions({ days })}</dt>
-        <dd class="font-medium tabular-nums">{format(usage.widget_questions)}</dd>
+        <dd class="font-medium">
+          {@render count(usage.widget_questions, m.admin_spaces_widget_questions_hidden())}
+        </dd>
       </div>
     {/if}
     <div class="flex min-w-0 flex-col gap-1">
@@ -114,6 +129,6 @@
     </div>
   </dl>
   {#if usage.suppressed}
-    <p class="text-secondary text-sm">{m.admin_spaces_suppressed_help()}</p>
+    <p class="text-secondary text-sm">{m.admin_spaces_suppressed_help({ threshold })}</p>
   {/if}
 </section>

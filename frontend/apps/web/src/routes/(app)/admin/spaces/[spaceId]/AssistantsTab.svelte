@@ -10,8 +10,8 @@
   import { intlLocale } from "$lib/core/formatting/dateTime";
   import AssistantConfigCard from "$lib/features/spaces/oversight/AssistantConfigCard.svelte";
   import InstructionsDisclosure from "$lib/features/spaces/oversight/InstructionsDisclosure.svelte";
+  import { modelLabel, retentionLabel } from "$lib/features/spaces/oversight/labels";
   import { m } from "$lib/paraglide/messages";
-  import { modelLabel } from "../labels";
 
   type Props = {
     assistants: readonly AdminSpaceAssistant[];
@@ -23,14 +23,6 @@
 
   const uid = $props.id();
   const number = new Intl.NumberFormat(intlLocale());
-
-  function runRetention(app: AdminSpaceApp) {
-    const days = app.data_retention_days;
-    if (days == null) return m.admin_spaces_retention_space();
-    return days === 1
-      ? m.admin_spaces_retention_days_one()
-      : m.admin_spaces_retention_days({ days });
-  }
 
   function assistantCount(chat: AdminSpaceGroupChat) {
     return chat.assistant_count === 1
@@ -99,7 +91,9 @@
                 </div>
                 <div class="min-w-0">
                   <dt class="text-secondary text-xs">{m.admin_spaces_retention_runs()}</dt>
-                  <dd>{runRetention(app)}</dd>
+                  <dd>
+                    {retentionLabel(app.data_retention_days, m.admin_spaces_retention_space())}
+                  </dd>
                 </div>
               </dl>
               <InstructionsDisclosure name={app.name} instructions={app.instructions} />

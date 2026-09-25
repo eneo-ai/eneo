@@ -119,7 +119,8 @@ const role = (name: string) =>
   page.getByRole("button", { name: new RegExp(`^admin_spaces_role_for\\(${name}\\) `) });
 const remove = (name: string) =>
   page.getByRole("button", { name: `admin_spaces_remove_named(${name})`, exact: true });
-const status = () => page.getByRole("status");
+/** Toasts are live regions; a second announcement of the same change would repeat it. */
+const liveRegions = () => page.getByRole("status").elements();
 
 /** Resolves the ids in `aria-describedby` to the text they point at. */
 function description(element: Element): string {
@@ -213,14 +214,14 @@ describe("MembersTab", () => {
     expect(own.element().querySelectorAll("button")).toHaveLength(0);
     // Who joined through oversight, and why, is visible to the administrator.
     await expect.element(own).toHaveTextContent("admin_spaces_badge_tenant_admin");
-    await expect.element(own).toHaveTextContent(/space_oversight_member_badge\(/);
+    await expect.element(own).toHaveTextContent(/admin_spaces_badge_joined\(/);
     await expect.element(own).toHaveTextContent("space_oversight_notice_reason(Ärende 2026-114)");
     await expect
       .element(page.getByRole("listitem").filter({ hasText: "bo.ek@example.org" }))
       .toHaveTextContent("admin_spaces_badge_inactive");
   });
 
-  test("a role change shows at once, is confirmed and announced, and the page reloads", async () => {
+  test("a role change shows at once, is confirmed and announced once, and the page reloads", async () => {
     const saved = members();
     saved.users[2] = { ...saved.users[2], role: "admin" };
     api.members.update.mockResolvedValue(saved);
@@ -237,12 +238,10 @@ describe("MembersTab", () => {
     await expect
       .element(role("bo.ek@example.org"))
       .toHaveAccessibleName("admin_spaces_role_for(bo.ek@example.org) space_role_admin");
-    await expect
-      .element(status())
-      .toHaveTextContent("admin_spaces_role_changed(bo.ek@example.org|space_role_admin)");
-    expect(toast.success).toHaveBeenCalledWith(
+    expect(toast.success).toHaveBeenCalledExactlyOnceWith(
       "admin_spaces_role_changed(bo.ek@example.org|space_role_admin)"
     );
+    expect(liveRegions()).toHaveLength(0);
     expect(navigation.invalidate).toHaveBeenCalledWith("admin:space");
   });
 
@@ -259,7 +258,7 @@ describe("MembersTab", () => {
     await expect
       .element(role("Ekonomistöd"))
       .toHaveAccessibleName("admin_spaces_role_for(Ekonomistöd) space_role_viewer");
-    expect(status().element().textContent).toBe("");
+    expect(toast.success).not.toHaveBeenCalled();
     expect(navigation.invalidate).not.toHaveBeenCalled();
   });
 
@@ -301,9 +300,79 @@ describe("MembersTab", () => {
     await expect
       .element(page.getByRole("heading", { level: 3, name: "admin_spaces_people" }))
       .toHaveFocus();
+    expect(toast.success).toHaveBeenCalledExactlyOnceWith(
+      "admin_spaces_member_removed(bo.ek@example.org)"
+    );
+    expect(liveRegions()).toHaveLength(0);
+  });
+
+  test("counts people with access the same way as the rest of the page", async () => {
+    const summary = () =>
+      page.getByRole("heading", { level: 2, name: "members" }).element().nextElementSibling
+        ?.textContent;
+    const { rerender } = renderTab();
+    await expect.element(page.getByRole("heading", { level: 2 })).toBeVisible();
+    expect(summary()).toBe(
+      "admin_spaces_members_summary(admin_spaces_count_people(15)|3|admin_spaces_count_groups_one)"
+    );
+
+    await rerender({
+      space: { id: "space-1", name: "Ekonomi", members: members({ groups: [], member_count: 3 }) },
+      currentUserId: "me"
+    });
+    expect(summary()).toBe("admin_spaces_members_summary_direct(admin_spaces_count_people(3))");
+
+    await rerender({
+      space: {
+        id: "space-1",
+        name: "Ekonomi",
+        members: members({ users: [], member_count: 0 })
+      },
+      currentUserId: "me"
+    });
+    expect(summary()).toBe("admin_spaces_members_summary_none");
+  });
+
+  test("another organisation administrator can be lowered here but must join to go higher", async () => {
+    const value = members();
+    value.users.push({
+      id: "u-tina",
+      username: "Tina Ek",
+      email: "tina.ek@example.org",
+      role: "editor",
+      state: "active",
+      is_tenant_admin: true,
+      oversight_join: null
+    });
+    renderTab(value);
+
+    const picker = role("Tina Ek");
+    expect(description(picker.element())).toBe("admin_spaces_tenant_admin_role_note");
+    await picker.click();
+    const offered = page
+      .getByRole("option")
+      .elements()
+      .map((option) => option.textContent?.trim());
+    expect(offered).toEqual(["space_role_viewer", "space_role_editor"]);
+    await userEvent.keyboard("{Escape}");
+    // Everyone else can still be given any role.
+    await role("bo.ek@example.org").click();
+    expect(page.getByRole("option").elements()).toHaveLength(3);
+  });
+
+  test("adding an organisation administrator explains that they join themselves", async () => {
+    api.members.add.mockRejectedValue(new EneoError("Must join", "RESPONSE", 400, 9067, {}));
+    renderTab();
+
+    await page.getByRole("button", { name: "admin_spaces_add_person" }).click();
+    await page.getByRole("button", { name: /^admin_spaces_person / }).click();
+    await page.getByRole("option").filter({ hasText: "cai.berg@example.org" }).click();
+    await page.getByRole("button", { name: "add", exact: true }).click();
+
     await expect
-      .element(status())
-      .toHaveTextContent("admin_spaces_member_removed(bo.ek@example.org)");
+      .element(page.getByRole("alert"))
+      .toHaveTextContent("admin_spaces_add_person_failed eneo_error_9067");
+    await expect.element(page.getByRole("dialog")).toBeVisible();
   });
 
   test("a group's removal says how many people it affects", async () => {
@@ -364,10 +433,10 @@ describe("MembersTab", () => {
       userId: "u-cai",
       role: "viewer"
     });
-    expect(toast.success).toHaveBeenCalledWith(
+    expect(toast.success).toHaveBeenCalledExactlyOnceWith(
       "admin_spaces_member_added(Cai Berg|space_role_viewer)"
     );
-    await expect.element(status()).toHaveTextContent("admin_spaces_member_added(Cai Berg|");
+    expect(liveRegions()).toHaveLength(0);
     await expect
       .element(page.getByRole("button", { name: "admin_spaces_add_person" }))
       .toHaveFocus();
@@ -420,6 +489,13 @@ describe("MembersTab", () => {
       await page.getByRole("button", { name: "admin_spaces_add_person" }).click();
       await expect.element(page.getByRole("dialog")).toBeVisible();
       expect(await axeViolations(page.getByRole("dialog").element())).toEqual([]);
+      await userEvent.keyboard("{Escape}");
+      await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+
+      // The removal's confirm button is the destructive variant.
+      await remove("bo.ek@example.org").click();
+      await expect.element(page.getByRole("alertdialog")).toBeVisible();
+      expect(await axeViolations(page.getByRole("alertdialog").element())).toEqual([]);
     }
   );
 });

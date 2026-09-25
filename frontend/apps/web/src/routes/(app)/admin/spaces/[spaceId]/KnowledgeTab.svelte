@@ -8,8 +8,8 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
-  import { formatDateMedium, intlLocale } from "$lib/core/formatting/dateTime";
-  import { formatList } from "$lib/features/spaces/oversight/format";
+  import { formatDayMedium, intlLocale } from "$lib/core/formatting/dateTime";
+  import { formatList } from "$lib/core/formatting/formatList";
   import {
     knowledgeItemCount,
     knowledgeKindLabel,
@@ -57,9 +57,10 @@
   }
 </script>
 
+<!-- The API gives the day only, so an upload's time of day is never shown. -->
 {#snippet updated(source: AdminSpaceKnowledgeSource)}
   {#if source.updated_at}
-    <time datetime={source.updated_at}>{formatDateMedium(source.updated_at)}</time>
+    <time datetime={source.updated_at}>{formatDayMedium(source.updated_at)}</time>
   {:else}
     {m.never()}
   {/if}
@@ -119,8 +120,13 @@
                   <!-- What the hidden columns hold, while they are hidden. -->
                   <div class="text-secondary flex flex-col gap-0.5 text-xs @5xl:hidden">
                     <span class="@3xl:hidden">
-                      {knowledgeKindLabel(source)} · {m.admin_spaces_meta_updated()}
-                      {@render updated(source)}
+                      {knowledgeKindLabel(source)} ·
+                      {#if source.updated_at}
+                        {m.admin_spaces_meta_updated()}
+                        {@render updated(source)}
+                      {:else}
+                        {m.admin_spaces_meta_never_updated()}
+                      {/if}
                     </span>
                     <span class="wrap-anywhere">
                       {m.admin_spaces_meta_used_by({ names: usedBy(source) })}

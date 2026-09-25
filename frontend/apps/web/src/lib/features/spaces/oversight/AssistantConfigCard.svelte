@@ -5,15 +5,15 @@
 <script lang="ts">
   import type { AdminSpaceAssistant } from "@eneo/eneo-js";
   import { Badge } from "$lib/components/ui/badge/index.js";
-  import { findHostingLabel } from "$lib/features/ai-models/hosting/hostingOptions";
+  import { formatList } from "$lib/core/formatting/formatList";
   import { getCapability } from "$lib/features/mcp/capabilities";
   import { widgetStatusLabel } from "$lib/features/widget/admin/status";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import { formatList } from "./format";
   import InstructionsDisclosure from "./InstructionsDisclosure.svelte";
   import type { OversightKnowledge } from "./knowledge";
   import KnowledgeRefList from "./KnowledgeRefList.svelte";
+  import { modelLabel, retentionLabel } from "./labels";
 
   type Props = {
     assistant: AdminSpaceAssistant;
@@ -24,7 +24,7 @@
      * which carry document counts.
      */
     knowledge?: readonly OversightKnowledge[];
-    /** Hide the web widget row, e.g. on the review of that same widget. */
+    /** Hide the web widgets row, e.g. on the review of one of those widgets. */
     showWidget?: boolean;
   };
 
@@ -33,25 +33,18 @@
   const uid = $props.id();
   const headingId = `${uid}-name`;
 
-  const model = $derived.by(() => {
-    const ref = assistant.completion_model;
-    if (!ref) return m.none();
-    const hosting = ref.hosting ? findHostingLabel(ref.hosting) || ref.hosting.toUpperCase() : "";
-    return hosting ? `${ref.name} · ${hosting}` : ref.name;
-  });
+  const model = $derived(
+    assistant.completion_model ? modelLabel(assistant.completion_model) : m.none()
+  );
 
   const tools = $derived([
     ...assistant.mcp_servers.map((server) => server.name),
     ...assistant.capabilities.map((purpose) => getCapability(purpose)?.label() ?? purpose)
   ]);
 
-  const retention = $derived.by(() => {
-    const days = assistant.data_retention_days;
-    if (days == null) return m.admin_spaces_retention_space();
-    return days === 1
-      ? m.admin_spaces_retention_days_one()
-      : m.admin_spaces_retention_days({ days });
-  });
+  const retention = $derived(
+    retentionLabel(assistant.data_retention_days, m.admin_spaces_retention_space())
+  );
 
   const attachments = $derived(
     assistant.attachment_count === 0
@@ -118,18 +111,27 @@
     </div>
     {#if showWidget}
       <div class="min-w-0 sm:col-span-2">
-        <dt class="text-secondary text-xs">{m.admin_spaces_widget()}</dt>
+        <dt class="text-secondary text-xs">
+          {assistant.widgets.length > 1 ? m.widget_admin_nav() : m.admin_spaces_widget()}
+        </dt>
         <dd class="break-words">
-          {#if assistant.widget}
-            <!-- eslint-disable svelte/no-navigation-without-resolve -- localized href built from a typed id -->
-            <a
-              class="text-accent-stronger underline underline-offset-2"
-              href={localizeHref(`/admin/widgets/${assistant.widget.id}`)}
-              aria-label={m.admin_spaces_widget_review_named({ name: assistant.widget.name })}
-              >{assistant.widget.name}</a
-            >
-            <!-- eslint-enable svelte/no-navigation-without-resolve -->
-            <span class="text-secondary">· {widgetStatusLabel(assistant.widget.status)}</span>
+          <!-- Every widget, active ones first: a live widget never hides behind a draft. -->
+          {#if assistant.widgets.length > 0}
+            <ul class="flex flex-col gap-1">
+              {#each assistant.widgets as widget (widget.id)}
+                <li>
+                  <!-- eslint-disable svelte/no-navigation-without-resolve -- localized href built from a typed id -->
+                  <a
+                    class="text-accent-stronger underline underline-offset-2"
+                    href={localizeHref(`/admin/widgets/${widget.id}`)}
+                    aria-label={m.admin_spaces_widget_review_named({ name: widget.name })}
+                    >{widget.name}</a
+                  >
+                  <!-- eslint-enable svelte/no-navigation-without-resolve -->
+                  <span class="text-secondary">· {widgetStatusLabel(widget.status)}</span>
+                </li>
+              {/each}
+            </ul>
           {:else}
             {m.none()}
           {/if}

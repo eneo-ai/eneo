@@ -1,4 +1,4 @@
-import { intlLocale } from "$lib/core/formatting/dateTime";
+import { intlLocale } from "./dateTime";
 
 /** "A, B och C" in the UI language. */
 export function formatList(items: readonly string[]): string {

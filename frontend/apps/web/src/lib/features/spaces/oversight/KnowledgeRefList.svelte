@@ -25,7 +25,7 @@
 
   function details(source: OversightKnowledge): string[] {
     const parts: string[] = [];
-    // A nameless source is a OneDrive folder, and its name already says so.
+    // A nameless source is labelled by its product, so the kind would repeat it.
     if (source.name) parts.push(knowledgeKindLabel(source));
     if ("item_count" in source) parts.push(knowledgeItemCount(source, number.format));
     if ("from_organization" in source && source.from_organization) {

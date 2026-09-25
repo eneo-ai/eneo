@@ -7,6 +7,7 @@ import {
   formatDate,
   formatDateMedium,
   formatDateTime,
+  formatDayMedium,
   formatDuration,
   formatRelativeTime,
   formatTime,
@@ -15,6 +16,21 @@ import {
 
 afterEach(() => {
   locale.current = "en";
+});
+
+describe("formatDayMedium", () => {
+  it("writes out a calendar day without moving it by the time zone", () => {
+    locale.current = "sv";
+    // Midnight UTC is the day before west of Greenwich; the day must not follow.
+    const expected = new Intl.DateTimeFormat("sv-SE", {
+      dateStyle: "medium",
+      timeZone: "UTC"
+    }).format(Date.UTC(2026, 8, 24));
+    expect(formatDayMedium("2026-09-24")).toBe(expected);
+    expect(formatDayMedium("2026-09-24")).toContain("24");
+    expect(formatDayMedium(null)).toBe("");
+    expect(formatDayMedium("2026-09-24T10:00:00Z")).toBe("");
+  });
 });
 
 describe("dateTime", () => {

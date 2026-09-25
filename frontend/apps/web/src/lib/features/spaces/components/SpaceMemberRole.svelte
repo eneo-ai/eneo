@@ -33,6 +33,8 @@
     disabled?: boolean;
     /** The id of the visible text that says why the controls are disabled. */
     disabledReasonId?: string;
+    /** The id of visible text about the roles on offer, read with the role picker. */
+    roleDescriptionId?: string;
     /** Saves the role. A rejection puts the previous role back, so report the error first. */
     onChangeRole: (role: SpaceRoleValue) => Promise<unknown>;
     /** Removes the member; the confirmation stays open and shows the error if it rejects. */
@@ -50,6 +52,7 @@
     roles,
     disabled = false,
     disabledReasonId,
+    roleDescriptionId,
     onChangeRole,
     onRemove,
     removeTitle,
@@ -92,7 +95,7 @@
     <Select.Trigger
       aria-labelledby={`${uid}-label ${uid}-value`}
       aria-disabled={disabled || undefined}
-      aria-describedby={disabled ? disabledReasonId : undefined}
+      aria-describedby={disabled ? disabledReasonId : roleDescriptionId}
       aria-busy={changing || undefined}
       class={cn(
         "min-w-36 justify-between max-md:min-h-12 max-md:flex-1",

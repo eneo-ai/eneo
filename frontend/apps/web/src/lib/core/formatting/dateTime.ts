@@ -48,6 +48,17 @@ export function formatDateMedium(value: DateInput): string {
   return new Intl.DateTimeFormat(intlLocale(), { dateStyle: "medium" }).format(date);
 }
 
+/**
+ * A calendar day (`YYYY-MM-DD`) written out like `formatDateMedium`. The day
+ * is not an instant, so it is never moved by the viewer's time zone.
+ */
+export function formatDayMedium(day: string | null | undefined): string {
+  if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return "";
+  return new Intl.DateTimeFormat(intlLocale(), { dateStyle: "medium", timeZone: "UTC" }).format(
+    new Date(`${day}T00:00:00Z`)
+  );
+}
+
 const RELATIVE_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ["year", 365 * 24 * 60 * 60],
   ["month", 30 * 24 * 60 * 60],

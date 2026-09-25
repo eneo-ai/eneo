@@ -134,7 +134,8 @@
             <Tabs.Trigger value="members" class="h-9 px-3 max-md:min-h-12">
               <UsersRound aria-hidden="true" />
               {m.members()}
-              {@render count(space.members.users.length + space.members.groups.length)}
+              <!-- People with access, the same count as the summary and the tab's own. -->
+              {@render count(space.members.member_count)}
             </Tabs.Trigger>
             <Tabs.Trigger value="widgets" class="h-9 px-3 max-md:min-h-12">
               <MessageSquareCode aria-hidden="true" />

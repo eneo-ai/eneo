@@ -10,7 +10,7 @@
   import { toast } from "$lib/components/toast";
   import { Button } from "$lib/components/ui/button/index.js";
   import { getEneo } from "$lib/core/Eneo";
-  import { formatList } from "$lib/features/spaces/oversight/format";
+  import { formatList } from "$lib/core/formatting/formatList";
   import { spaceRoleLabel } from "$lib/features/spaces/roles";
   import { m } from "$lib/paraglide/messages";
 
@@ -29,12 +29,13 @@
   let open = $state(false);
   const blocked = $derived(!membership.can_leave);
 
+  // With a role through a group the administrator keeps access, so that case has its own text.
   const description = $derived(
     membership.group_role
-      ? `${m.admin_spaces_leave_body()} ${m.admin_spaces_leave_body_group({
+      ? m.admin_spaces_leave_body_group({
           role: spaceRoleLabel(membership.group_role),
           groups: formatList(membership.via_groups.map((group) => group.name))
-        })}`
+        })
       : m.admin_spaces_leave_body()
   );
 
@@ -61,7 +62,7 @@
     <Button
       {...props}
       variant="outline"
-      class={["max-md:min-h-12", blocked && "cursor-not-allowed"]}
+      class={["max-md:min-h-12", blocked && "cursor-not-allowed opacity-60"]}
       aria-disabled={blocked || undefined}
       aria-describedby={blocked ? disabledReasonId : undefined}
     >

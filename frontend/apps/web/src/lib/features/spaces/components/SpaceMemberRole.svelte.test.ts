@@ -162,6 +162,43 @@ describe("SpaceMemberRole", () => {
     expect(onRemove).toHaveBeenCalledTimes(2);
   });
 
+  test("reads a note about the roles on offer with the role picker", async () => {
+    const { container } = render(
+      SpaceMemberRole,
+      props({ roles: ["viewer", "editor"], roleDescriptionId: "offered" })
+    );
+    container.insertAdjacentHTML("beforeend", '<p id="offered">Only lower roles</p>');
+
+    expect(description(role().element())).toBe("Only lower roles");
+    expect(description(remove().element())).toBe("");
+  });
+
+  test.each(["light", "dark"] as const)(
+    "keeps the open removal confirmation readable (%s)",
+    async (scheme) => {
+      document.documentElement.dataset.theme = scheme;
+      render(SpaceMemberRole, props());
+      await remove().click();
+      const dialog = page.getByRole("alertdialog");
+      await expect.element(dialog).toBeVisible();
+      await userEvent.unhover(document.body);
+      await vi.waitFor(() => expect(document.getAnimations()).toHaveLength(0));
+
+      // The confirm button is the shared destructive variant.
+      const result = await axe.run(dialog.element(), {
+        runOnly: {
+          type: "tag",
+          values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"]
+        }
+      });
+      expect(
+        result.violations.flatMap((violation) =>
+          violation.nodes.map((node) => `${violation.id}: ${node.html}`)
+        )
+      ).toEqual([]);
+    }
+  );
+
   test("gives both controls a 44 px target on a phone", async () => {
     await page.viewport(375, 700);
     try {

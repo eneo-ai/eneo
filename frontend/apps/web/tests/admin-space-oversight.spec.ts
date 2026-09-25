@@ -196,7 +196,7 @@ test("an organisation administrator oversees a space, joins it with a reason and
   await expect(memberTitle).toBeFocused();
   await expect(page.getByText(/^Din roll: Visare\. Du gick med via tillsyn /)).toBeVisible();
   await expect(
-    page.getByText(`Du är nu Visare i ${spaceName}. Ytan finns i din ytväljare.`)
+    page.getByText(`Du har gått med i ${spaceName} med rollen Visare. Ytan finns i din ytväljare.`)
   ).toBeVisible();
 
   // The space is now in the admin's space selector.
