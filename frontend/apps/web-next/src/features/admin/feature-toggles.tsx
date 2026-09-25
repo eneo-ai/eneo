@@ -1,11 +1,11 @@
 "use client";
 
+import { Heading } from "@astryxdesign/core/Heading";
+import { Switch } from "@astryxdesign/core/Switch";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useAppContext } from "@/components/providers/app-context";
-import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import { Switch } from "@/components/ui/switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -22,90 +22,90 @@ function patchSetting(key: ToggleKey, enabled: boolean) {
 }
 
 /**
- * Tenant feature toggles. Optimistic update with revert-on-error; a successful
+ * Tenant feature toggles as settings rows: label and description on the left,
+ * the switch on the right. Optimistic update with revert-on-error; a successful
  * write refreshes the server layout so the new settings propagate app-wide
- * (e.g. the templates toggle changes the space creation flows).
+ * (e.g. the templates toggle changes the space creation flows). A switch stays
+ * enabled (and focused) while its write is in flight; toggling it again waits
+ * for that write.
  */
 export function FeatureToggles() {
   const t = useTranslations();
   const router = useRouter();
   const { settings } = useAppContext();
+  const headingId = useId();
 
-  const [templates, setTemplates] = useState(settings.using_templates ?? false);
-  const [auditLogging, setAuditLogging] = useState(settings.audit_logging_enabled ?? false);
-  const [provisioning, setProvisioning] = useState(settings.provisioning ?? false);
-  const [whatsNew, setWhatsNew] = useState(settings.whats_new_enabled !== false);
-  const [pending, setPending] = useState(false);
+  const [values, setValues] = useState<Record<ToggleKey, boolean>>({
+    templates: settings.using_templates ?? false,
+    "audit-logging": settings.audit_logging_enabled ?? false,
+    provisioning: settings.provisioning ?? false,
+    "whats-new": settings.whats_new_enabled !== false
+  });
+  const inFlight = useRef(new Set<ToggleKey>());
 
-  async function toggle(
-    key: ToggleKey,
-    next: boolean,
-    apply: (value: boolean) => void,
-    previous: boolean
-  ) {
-    apply(next); // optimistic
-    setPending(true);
+  async function toggle(key: ToggleKey, next: boolean) {
+    if (inFlight.current.has(key)) return;
+    inFlight.current.add(key);
+    const previous = values[key];
+    setValues((current) => ({ ...current, [key]: next })); // optimistic
     try {
       await unwrap(patchSetting(key, next));
       router.refresh();
     } catch (error) {
-      apply(previous); // revert
+      setValues((current) => ({ ...current, [key]: previous })); // revert
       toastApiError(error, t);
     } finally {
-      setPending(false);
+      inFlight.current.delete(key);
     }
   }
 
+  const rows: { key: ToggleKey; label: string; description: string }[] = [
+    {
+      key: "templates",
+      label: t("enable_templates"),
+      description: t("enable_templates_description")
+    },
+    {
+      key: "audit-logging",
+      label: t("enable_audit_logging"),
+      description: t("enable_audit_logging_description")
+    },
+    {
+      key: "provisioning",
+      label: t("enable_provisioning"),
+      description: t("enable_provisioning_description")
+    },
+    {
+      key: "whats-new",
+      label: t("enable_whats_new"),
+      description: t("enable_whats_new_description")
+    }
+  ];
+
   return (
-    <SettingsGroup title={t("features")}>
-      <SettingsRow
-        title={t("enable_templates")}
-        description={t("enable_templates_description")}
-        htmlFor="feature-toggle-templates"
-      >
-        <Switch
-          id="feature-toggle-templates"
-          checked={templates}
-          disabled={pending}
-          onCheckedChange={(next) => toggle("templates", next, setTemplates, templates)}
-        />
-      </SettingsRow>
-      <SettingsRow
-        title={t("enable_audit_logging")}
-        description={t("enable_audit_logging_description")}
-        htmlFor="feature-toggle-audit-logging"
-      >
-        <Switch
-          id="feature-toggle-audit-logging"
-          checked={auditLogging}
-          disabled={pending}
-          onCheckedChange={(next) => toggle("audit-logging", next, setAuditLogging, auditLogging)}
-        />
-      </SettingsRow>
-      <SettingsRow
-        title={t("enable_provisioning")}
-        description={t("enable_provisioning_description")}
-        htmlFor="feature-toggle-provisioning"
-      >
-        <Switch
-          id="feature-toggle-provisioning"
-          checked={provisioning}
-          disabled={pending}
-          onCheckedChange={(next) => toggle("provisioning", next, setProvisioning, provisioning)}
-        />
-      </SettingsRow>
-      <SettingsRow
-        title={t("enable_whats_new")}
-        description={t("enable_whats_new_description")}
-        htmlFor="feature-toggle-whats-new"
-      >
-        <Switch
-          id="feature-toggle-whats-new"
-          checked={whatsNew}
-          disabled={pending}
-          onCheckedChange={(next) => toggle("whats-new", next, setWhatsNew, whatsNew)}
-        />
-      </SettingsRow>
-    </SettingsGroup>
+    <section
+      aria-labelledby={headingId}
+      className="bg-ax-card border-ax-border rounded-ax-container border"
+    >
+      <div className="border-ax-border border-b px-5 py-4">
+        <Heading level={2} id={headingId} className="text-base">
+          {t("features")}
+        </Heading>
+      </div>
+      <ul className="divide-ax-border divide-y">
+        {rows.map((row) => (
+          <li key={row.key} className="px-5 py-4">
+            <Switch
+              label={row.label}
+              description={row.description}
+              labelPosition="start"
+              labelSpacing="spread"
+              value={values[row.key]}
+              onChange={(next) => void toggle(row.key, next)}
+            />
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

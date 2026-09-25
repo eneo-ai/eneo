@@ -380,7 +380,7 @@ export function ModelCatalogStep({
                       key={model.name}
                       className={cn(
                         "flex cursor-pointer items-center gap-3 border-b px-3 py-2.5 last:border-b-0",
-                        isSelected ? "bg-accent/50" : "hover:bg-muted/50"
+                        isSelected ? "bg-ax-selected" : "hover:bg-ax-hover"
                       )}
                     >
                       <Checkbox

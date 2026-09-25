@@ -138,9 +138,13 @@ export function AddModelWizard({
     setModelKind(defaultModelKind(caps?.providers[provider?.provider_type ?? ""]?.modes));
   }
 
-  function handleOpenChange(next: boolean) {
-    if (next) reset();
-    onOpenChange(next);
+  // The dialog is opened from outside (no Radix trigger), so Radix never
+  // reports the opening: start a fresh session whenever `open` turns true,
+  // adjusting state during render instead of in an effect.
+  const [sessionOpen, setSessionOpen] = useState(false);
+  if (open !== sessionOpen) {
+    setSessionOpen(open);
+    if (open) reset();
   }
 
   const fields = caps ? providerFields(caps, providerType) : [];
@@ -210,7 +214,7 @@ export function AddModelWizard({
     : (targetProviderModes[0] ?? "completion");
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn(
           "max-h-[90vh] overflow-y-auto",

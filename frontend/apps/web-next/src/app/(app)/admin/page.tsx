@@ -6,7 +6,7 @@ export default async function AdminOverviewPage() {
   const t = await getTranslations();
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-      <PageHeader title={t("organisation")} />
+      <PageHeader title={t("organisation")} description={t("admin_organisation_description")} />
       <FeatureToggles />
     </div>
   );

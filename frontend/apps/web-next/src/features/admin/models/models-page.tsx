@@ -1,51 +1,118 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useSuspenseQuery } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useId, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger
-} from "@/components/ui/accordion";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
+import { AddModelWizard } from "./add-model-wizard";
 import { MigrationHistoryPanel } from "./migration-history-panel";
 import { adminModelsQueryOptions } from "./models";
 import { PricingVisibilityToggle } from "./pricing-visibility-toggle";
 import { ProviderOverview } from "./provider-overview";
 
+type ModelsTab = "models" | "history" | "settings";
+const TABS: ModelsTab[] = ["models", "history", "settings"];
+
 /**
- * Admin model management, grouped by provider. Each provider card surfaces its
- * API-key status alongside its models (enable/disable, set-default, security
- * classification, edit). Custom providers add models via the auto-fetch wizard.
- * Pricing visibility + migration history live under "Advanced".
+ * Admin model management. "Modeller" groups the models by provider (API-key
+ * status, enable/disable, default, security classification, edit, migrate);
+ * "Migreringshistorik" lists past migrations; "Inställningar" holds the
+ * org-wide pricing visibility. "Lägg till leverantör" and each provider's
+ * "Lägg till modell" open the same add-model wizard.
  */
 export function ModelsPage() {
   const t = useTranslations();
   const { data: models } = useSuspenseQuery(adminModelsQueryOptions(browserApi));
   const { data: security } = useSuspenseQuery(securityClassificationsQueryOptions(browserApi));
 
-  return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <PageHeader title={t("models")} tour="admin-models" />
+  const [tab, setTab] = useState<ModelsTab>("models");
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardProviderId, setWizardProviderId] = useState<string | undefined>(undefined);
 
-      <ProviderOverview
-        models={models}
-        classifications={security.security_classifications}
-        securityEnabled={security.security_enabled}
+  const baseId = useId();
+  const panelId = `${baseId}-panel`;
+  const tabId = (value: ModelsTab) => `${baseId}-tab-${value}`;
+  const tabLabel = (value: ModelsTab) =>
+    value === "models"
+      ? t("models")
+      : value === "history"
+        ? t("migration_history_title")
+        : t("settings");
+
+  function openAddProvider() {
+    setWizardProviderId(undefined);
+    setWizardOpen(true);
+  }
+
+  function openAddModel(providerId: string) {
+    setWizardProviderId(providerId);
+    setWizardOpen(true);
+  }
+
+  return (
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">
+      <PageHeader
+        title={t("models")}
+        description={t("admin_models_description")}
+        breadcrumbs={[
+          { label: t("admin_breadcrumb_root"), href: "/admin" },
+          { label: t("admin_section_configuration") }
+        ]}
+        tour="admin-models"
+        actions={
+          <Button
+            variant="primary"
+            label={t("add_provider")}
+            icon={<Plus className="size-4" aria-hidden="true" />}
+            onClick={openAddProvider}
+          />
+        }
       />
 
-      <Accordion type="single" collapsible className="w-full">
-        <AccordionItem value="advanced">
-          <AccordionTrigger>{t("advanced")}</AccordionTrigger>
-          <AccordionContent className="flex flex-col gap-6 pt-2">
-            <PricingVisibilityToggle />
-            <MigrationHistoryPanel />
-          </AccordionContent>
-        </AccordionItem>
-      </Accordion>
+      <TabList
+        role="tablist"
+        aria-label={t("admin_models_tabs_label")}
+        value={tab}
+        onChange={(value) => setTab(value as ModelsTab)}
+        hasDivider
+      >
+        {TABS.map((value) => (
+          <Tab
+            key={value}
+            id={tabId(value)}
+            value={value}
+            label={tabLabel(value)}
+            panelId={panelId}
+          />
+        ))}
+      </TabList>
+
+      {/* One panel whose content follows the selected tab, so every tab's
+          aria-controls points at an element that exists. */}
+      <div role="tabpanel" id={panelId} aria-labelledby={tabId(tab)}>
+        {tab === "models" && (
+          <ProviderOverview
+            models={models}
+            classifications={security.security_classifications}
+            securityEnabled={security.security_enabled}
+            onAddModel={openAddModel}
+            onAddProvider={openAddProvider}
+          />
+        )}
+        {tab === "history" && <MigrationHistoryPanel />}
+        {tab === "settings" && <PricingVisibilityToggle />}
+      </div>
+
+      <AddModelWizard
+        open={wizardOpen}
+        onOpenChange={setWizardOpen}
+        initialProviderId={wizardProviderId}
+      />
     </div>
   );
 }

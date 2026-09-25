@@ -1,41 +1,32 @@
 "use client";
 
+import { Badge } from "@astryxdesign/core/Badge";
+import {
+  DropdownMenu,
+  DropdownMenuDivider,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSubMenu
+} from "@astryxdesign/core/DropdownMenu";
+import { Switch } from "@astryxdesign/core/Switch";
+import { TableCell, TableRow } from "@astryxdesign/core/Table";
+import { Text } from "@astryxdesign/core/Text";
+import { Token } from "@astryxdesign/core/Token";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeftRight,
-  Brain,
-  Check,
-  Clock,
-  Eye,
+  Info,
   MoreHorizontal,
   Pencil,
+  ShieldCheck,
   Star,
-  TriangleAlert,
-  Trash2,
-  Wrench
+  Trash2
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
-import { Switch } from "@/components/ui/switch";
-import { TableCell, TableRow } from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  formatCostPerMillionTokens,
-  formatCostPerMinute,
-  getDeprecationStatus
-} from "@/features/ai-models/format-model-stats";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
@@ -52,12 +43,16 @@ import {
   modelLabel,
   type ModelKind
 } from "./models";
+import { modelLifecycle, modelPrice } from "./provider-sections";
 
 type ModelFlags = {
   is_org_enabled?: boolean | null;
   is_org_default?: boolean | null;
   security_classification?: { id: string } | null;
 };
+
+/** Radio value for "no classification" in the row menu. */
+const NO_CLASSIFICATION = "__none__";
 
 async function updateModelFlags(kind: ModelKind, id: string, flags: ModelFlags): Promise<void> {
   if (kind === "completion") {
@@ -87,145 +82,86 @@ async function updateModelFlags(kind: ModelKind, id: string, flags: ModelFlags):
 function hasDefault(model: AdminModel): model is AdminModel & { is_org_default?: boolean } {
   return "is_org_default" in model;
 }
-function hasClassification(model: AdminModel): boolean {
-  return "security_classification" in model;
+
+/** Translated model type ("Chatt", "Inbäddning", "Transkription"). */
+export function useModelTypeLabel() {
+  const t = useTranslations();
+  return (kind: ModelKind) =>
+    kind === "completion"
+      ? t("admin_model_type_completion")
+      : kind === "embedding"
+        ? t("admin_model_type_embedding")
+        : t("admin_model_type_transcription");
 }
 
-/**
- * Indicative price chip — per 1M tokens (completion / embedding) or per audio
- * minute (transcription). Shows "–" with a tooltip when unpriced so admins spot
- * models without a cost on record. Mirrors the Svelte `ModelCostBadge`.
- */
-function ModelCostChip({ model, kind }: { model: AdminModel; kind: ModelKind }) {
+/** Vision / reasoning / tools as small tokens; "–" where the type has none. */
+function Capabilities({ model }: { model: AdminModel }) {
   const t = useTranslations();
+  const labels = [
+    "vision" in model && model.vision ? t("admin_models_capability_vision") : null,
+    "reasoning" in model && model.reasoning ? t("model_label_reasoning") : null,
+    "supports_tool_calling" in model && model.supports_tool_calling
+      ? t("model_label_tool_calling")
+      : null
+  ].filter((label): label is string => label !== null);
 
-  let text: string;
-  let hasData: boolean;
-  let tooltip: string;
-
-  if (kind === "transcription") {
-    const value = formatCostPerMinute(
-      (model as { cost_per_minute?: string | null }).cost_per_minute
+  if (labels.length === 0) {
+    return (
+      <>
+        <span aria-hidden="true" className="text-ax-text-secondary">
+          –
+        </span>
+        <span className="sr-only">{t("none")}</span>
+      </>
     );
-    hasData = value !== null;
-    text = value ? t("model_cost_per_minute", { cost: value }) : "–";
-    tooltip = hasData ? t("model_cost_tooltip_per_minute") : t("model_cost_unknown");
-  } else {
-    const m = model as {
-      input_cost_per_token?: string | null;
-      output_cost_per_token?: string | null;
-    };
-    const input = formatCostPerMillionTokens(m.input_cost_per_token);
-    const output = formatCostPerMillionTokens(m.output_cost_per_token);
-    hasData = input !== null || output !== null;
-    // Embeddings usually have no output price; collapse to one value unless they differ.
-    if (!input && !output) text = "–";
-    else if (input && output && input !== output) text = `${input} / ${output}`;
-    else text = input ?? output ?? "–";
-    tooltip = hasData ? t("model_cost_tooltip_per_million") : t("model_cost_unknown");
   }
-
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className="bg-muted text-muted-foreground inline-flex items-center rounded-md border px-1.5 py-0.5 font-mono text-[11px] tabular-nums"
-          aria-label={`${tooltip}: ${text}`}
-        >
-          {text}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{tooltip}</TooltipContent>
-    </Tooltip>
+    <ul className="flex flex-wrap gap-1">
+      {labels.map((label) => (
+        <li key={label} className="flex">
+          <Token label={label} size="sm" />
+        </li>
+      ))}
+    </ul>
   );
 }
 
-/**
- * Compact capability + lifecycle icons (vision / reasoning / tools, plus a
- * deprecation or retirement warning) with tooltips, followed by an indicative
- * cost chip — the dense badge text is replaced by glyphs so the table scans at
- * a glance, matching the Svelte admin.
- */
-function ModelStatusIcons({ model, kind }: { model: AdminModel; kind: ModelKind }) {
+/** Mono price, right-aligned by the cell; screen readers get "Indata $5, utdata $25". */
+function Price({ model, kind }: { model: AdminModel; kind: ModelKind }) {
   const t = useTranslations();
-  const dep = getDeprecationStatus(model);
+  const price = modelPrice(model, kind);
 
-  const icons: {
-    key: string;
-    Icon: typeof Eye;
-    className: string;
-    label: string;
-    tooltip: string;
-  }[] = [];
-
-  if (dep.kind === "deprecated") {
-    icons.push({
-      key: "deprecated",
-      Icon: TriangleAlert,
-      className: "text-destructive",
-      label: t("model_label_deprecated"),
-      tooltip: t("model_tooltip_deprecated", { date: dep.date ?? "" })
-    });
-  } else if (dep.kind === "retiring") {
-    icons.push({
-      key: "retiring",
-      Icon: Clock,
-      className: "text-warning",
-      label: t("model_label_retiring", { date: dep.date ?? "" }),
-      tooltip: t("model_tooltip_retiring", { date: dep.date ?? "" })
-    });
-  }
-  if ("reasoning" in model && model.reasoning) {
-    icons.push({
-      key: "reasoning",
-      Icon: Brain,
-      className: "text-muted-foreground",
-      label: t("model_label_reasoning"),
-      tooltip: t("model_tooltip_reasoning")
-    });
-  }
-  if ("vision" in model && model.vision) {
-    icons.push({
-      key: "vision",
-      Icon: Eye,
-      className: "text-muted-foreground",
-      label: t("model_label_vision"),
-      tooltip: t("model_tooltip_vision")
-    });
-  }
-  if ("supports_tool_calling" in model && model.supports_tool_calling) {
-    icons.push({
-      key: "tools",
-      Icon: Wrench,
-      className: "text-muted-foreground",
-      label: t("model_label_tool_calling"),
-      tooltip: t("model_tooltip_tool_calling")
-    });
-  }
-
-  return (
-    <span className="flex items-center gap-2">
-      {icons.length > 0 && (
-        <span
-          role="list"
-          aria-label={t("model_capabilities_label")}
-          className="flex items-center gap-2"
-        >
-          {icons.map(({ key, Icon, className, label, tooltip }) => (
-            <Tooltip key={key}>
-              <TooltipTrigger asChild>
-                <span role="listitem" aria-label={label} className={cn("inline-flex", className)}>
-                  <Icon className="size-4" aria-hidden="true" />
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{tooltip}</TooltipContent>
-            </Tooltip>
-          ))}
+  if (price.kind === "unknown") {
+    return (
+      <>
+        <span aria-hidden="true" className="text-ax-text-secondary">
+          –
         </span>
-      )}
-      <ModelCostChip model={model} kind={kind} />
-    </span>
-  );
+        <span className="sr-only">{t("model_cost_unknown")}</span>
+      </>
+    );
+  }
+  if (price.kind === "minute") {
+    return (
+      <span className="font-mono text-xs tabular-nums">
+        {t("model_cost_per_minute", { cost: price.value })}
+      </span>
+    );
+  }
+  // Embeddings usually have no output price; collapse to one value unless they differ.
+  if (price.input && price.output && price.input !== price.output) {
+    return (
+      <>
+        <span aria-hidden="true" className="font-mono text-xs whitespace-nowrap tabular-nums">
+          {price.input} / {price.output}
+        </span>
+        <span className="sr-only">
+          {t("admin_models_price_in_out", { input: price.input, output: price.output })}
+        </span>
+      </>
+    );
+  }
+  return <span className="font-mono text-xs tabular-nums">{price.input ?? price.output}</span>;
 }
 
 export function ModelRow({
@@ -242,6 +178,7 @@ export function ModelRow({
   showKind?: boolean;
 }) {
   const t = useTranslations();
+  const typeLabel = useModelTypeLabel();
   const queryClient = useQueryClient();
   const [showEdit, setShowEdit] = useState(false);
   const [showMigrate, setShowMigrate] = useState(false);
@@ -251,17 +188,20 @@ export function ModelRow({
 
   const flags = useMutation({
     mutationFn: (next: ModelFlags) => updateModelFlags(kind, model.id, next),
+    // Returned so the mutation stays pending until the list has refetched.
     onSuccess: () => queryClient.invalidateQueries({ queryKey: MODELS_KEY }),
     onError: (error) => toastApiError(error, t)
   });
 
+  const label = modelLabel(model);
+  // The technical id under the display name, unless the name already is the id.
+  const technicalId = model.name !== label ? model.name : null;
   const locked = model.is_locked ?? false;
   const readonly = "readonly" in model && model.readonly === true;
-  const isDefault = hasDefault(model) && model.is_org_default;
-  const currentClassification = hasClassification(model)
-    ? ((model as { security_classification?: SecurityClassification | null })
-        .security_classification ?? null)
-    : null;
+  const isDefault = hasDefault(model) && model.is_org_default === true;
+  const currentClassification =
+    (model as { security_classification?: SecurityClassification | null })
+      .security_classification ?? null;
   const supportsDefault = kind !== "embedding";
   const supportsClassification = securityEnabled;
   const canEdit = !readonly;
@@ -269,9 +209,21 @@ export function ModelRow({
     (kind === "completion" || kind === "transcription") &&
     !("migrated_to_model_id" in model && model.migrated_to_model_id);
   const canDelete = !readonly;
-  const showActions =
-    supportsDefault || supportsClassification || canEdit || canMigrate || canDelete;
-  const dep = getDeprecationStatus(model);
+  const lifecycle = modelLifecycle(model);
+  // Menu groups: open/change the model · org-wide flags · delete.
+  const hasModelActions = canViewDetail || canEdit || canMigrate;
+  const hasFlagActions = supportsDefault || supportsClassification;
+  const hasMenu = hasModelActions || hasFlagActions || canDelete;
+
+  // Optimistic while the write + refetch are in flight; reverts on error.
+  const pendingEnabled = flags.isPending ? flags.variables?.is_org_enabled : undefined;
+  const enabled = pendingEnabled ?? model.is_org_enabled ?? false;
+
+  function setEnabled(next: boolean) {
+    // Ignore toggles while a write is in flight; the switch stays focusable.
+    if (flags.isPending) return;
+    flags.mutate({ is_org_enabled: next });
+  }
 
   const remove = useMutation({
     mutationFn: () => deleteTenantModel(browserApi, kind, model.id),
@@ -302,134 +254,160 @@ export function ModelRow({
   });
 
   return (
-    <TableRow
-      className={cn(
-        dep.kind === "deprecated" && "bg-destructive/5",
-        dep.kind === "retiring" && "bg-warning/5"
-      )}
-    >
+    <TableRow>
       <TableCell>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <Switch
-                checked={model.is_org_enabled ?? false}
-                disabled={locked || flags.isPending}
-                aria-label={modelLabel(model)}
-                onCheckedChange={(checked) => flags.mutate({ is_org_enabled: checked })}
+        <Switch
+          label={t("admin_models_enable_model", { name: label })}
+          isLabelHidden
+          value={enabled}
+          onChange={setEnabled}
+          isDisabled={locked}
+          disabledMessage={locked ? t("api_credentials_required_for_provider") : undefined}
+        />
+      </TableCell>
+
+      <TableCell>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {canViewDetail ? (
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                onClick={() => setShowDetail(true)}
+                className={cn(
+                  "focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 items-center text-start font-semibold break-words hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11",
+                  enabled ? "text-ax-text" : "text-ax-text-secondary"
+                )}
+              >
+                {label}
+              </button>
+            ) : (
+              <span
+                className={cn(
+                  "font-semibold break-words",
+                  enabled ? "text-ax-text" : "text-ax-text-secondary"
+                )}
+              >
+                {label}
+              </span>
+            )}
+            {isDefault && <Badge variant="blue" label={t("admin_models_default_badge")} />}
+            {lifecycle.kind === "deprecated" && (
+              <Badge variant="error" label={t("model_label_deprecated")} />
+            )}
+            {lifecycle.kind === "retiring" && (
+              <Badge
+                variant="warning"
+                label={t("model_label_retiring", { date: lifecycle.date })}
               />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>
-            {locked
-              ? t("api_credentials_required_for_provider")
-              : model.is_org_enabled
-                ? t("toggle_to_disable_model")
-                : t("toggle_to_enable_model")}
-          </TooltipContent>
-        </Tooltip>
-      </TableCell>
-      <TableCell className="font-medium">
-        <span className="flex items-center gap-2">
-          {canViewDetail ? (
-            <button
-              type="button"
-              className="text-left hover:underline"
-              onClick={() => setShowDetail(true)}
-            >
-              {modelLabel(model)}
-            </button>
-          ) : (
-            modelLabel(model)
+            )}
+          </div>
+          {technicalId && (
+            <Text type="code" size="sm" color="secondary" maxLines={1}>
+              {technicalId}
+            </Text>
           )}
-          {showKind && (
-            <Badge variant="outline" className="capitalize">
-              {t(`${kind}_models_singular`)}
-            </Badge>
-          )}
-          {isDefault && (
-            <Badge variant="secondary" className="gap-1">
-              <Star className="size-3" /> {t("default_model")}
-            </Badge>
-          )}
-        </span>
+        </div>
       </TableCell>
-      <TableCell>
-        <ModelStatusIcons model={model} kind={kind} />
-      </TableCell>
-      {securityEnabled && (
-        <TableCell className="text-muted-foreground text-sm">
-          {currentClassification?.name ?? "—"}
+
+      {showKind && (
+        <TableCell>
+          <span className="text-ax-text-secondary">{typeLabel(kind)}</span>
         </TableCell>
       )}
-      <TableCell className="w-12">
-        {showActions && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label={t("actions")}>
-                <MoreHorizontal className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {canEdit && (
-                <DropdownMenuItem onSelect={() => setShowEdit(true)}>
-                  <Pencil className="size-4" /> {t("edit")}
-                </DropdownMenuItem>
-              )}
-              {canMigrate && (
-                <DropdownMenuItem onSelect={() => setShowMigrate(true)}>
-                  <ArrowLeftRight className="size-4" /> {t("migrate")}
-                </DropdownMenuItem>
-              )}
-              {canDelete && (
-                <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
-                  <Trash2 className="size-4" /> {t("delete")}
-                </DropdownMenuItem>
-              )}
-              {(canEdit || canMigrate || canDelete) &&
-                (supportsDefault || supportsClassification) && <DropdownMenuSeparator />}
-              {supportsDefault && (
-                <DropdownMenuItem
-                  disabled={isDefault || !model.is_org_enabled}
-                  onSelect={() => flags.mutate({ is_org_default: true })}
+
+      <TableCell>
+        <Capabilities model={model} />
+      </TableCell>
+
+      <TableCell className="text-end">
+        <Price model={model} kind={kind} />
+      </TableCell>
+
+      {securityEnabled && (
+        <TableCell>
+          {currentClassification ? (
+            <Badge label={currentClassification.name} />
+          ) : (
+            <span className="text-ax-text-secondary text-sm">{t("admin_models_unclassified")}</span>
+          )}
+        </TableCell>
+      )}
+
+      <TableCell className="text-end">
+        {hasMenu && (
+          <DropdownMenu
+            button={{
+              label: t("admin_models_row_menu", { name: label }),
+              tooltip: t("admin_models_row_menu", { name: label }),
+              icon: <MoreHorizontal className="size-4" aria-hidden="true" />,
+              isIconOnly: true,
+              variant: "ghost",
+              size: "sm"
+            }}
+            hasChevron={false}
+            alignment="end"
+          >
+            {canViewDetail && (
+              <DropdownMenuItem
+                icon={Info}
+                label={t("model_details")}
+                onClick={() => setShowDetail(true)}
+              />
+            )}
+            {canEdit && (
+              <DropdownMenuItem icon={Pencil} label={t("edit")} onClick={() => setShowEdit(true)} />
+            )}
+            {canMigrate && (
+              <DropdownMenuItem
+                icon={ArrowLeftRight}
+                label={t("migrate")}
+                onClick={() => setShowMigrate(true)}
+              />
+            )}
+            {hasModelActions && hasFlagActions && <DropdownMenuDivider />}
+            {supportsDefault && (
+              <DropdownMenuItem
+                icon={Star}
+                label={t("set_as_default_model")}
+                isDisabled={isDefault || !enabled}
+                onClick={() => flags.mutate({ is_org_default: true })}
+              />
+            )}
+            {supportsClassification && (
+              <DropdownMenuSubMenu icon={ShieldCheck} label={t("security_classification")}>
+                <DropdownMenuRadioGroup
+                  label={t("security_classification")}
+                  value={currentClassification?.id ?? NO_CLASSIFICATION}
+                  onChange={(value) =>
+                    flags.mutate({
+                      security_classification: value === NO_CLASSIFICATION ? null : { id: value }
+                    })
+                  }
                 >
-                  <Star className="size-4" /> {t("set_as_default_model")}
-                </DropdownMenuItem>
-              )}
-              {supportsClassification && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel>{t("security_classification")}</DropdownMenuLabel>
-                  <DropdownMenuItem
-                    onSelect={() => flags.mutate({ security_classification: null })}
-                  >
-                    <Check
-                      className={currentClassification ? "size-4 opacity-0" : "size-4 opacity-100"}
-                    />
-                    {t("none")}
-                  </DropdownMenuItem>
+                  <DropdownMenuRadioItem value={NO_CLASSIFICATION} label={t("none")} />
                   {classifications.map((classification) => (
-                    <DropdownMenuItem
+                    <DropdownMenuRadioItem
                       key={classification.id}
-                      onSelect={() =>
-                        flags.mutate({ security_classification: { id: classification.id } })
-                      }
-                    >
-                      <Check
-                        className={
-                          currentClassification?.id === classification.id
-                            ? "size-4 opacity-100"
-                            : "size-4 opacity-0"
-                        }
-                      />
-                      {classification.name}
-                    </DropdownMenuItem>
+                      value={classification.id}
+                      label={classification.name}
+                    />
                   ))}
-                </>
-              )}
-            </DropdownMenuContent>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubMenu>
+            )}
+            {canDelete && (hasModelActions || hasFlagActions) && <DropdownMenuDivider />}
+            {canDelete && (
+              <DropdownMenuItem
+                icon={Trash2}
+                label={t("delete")}
+                variant="destructive"
+                onClick={() => setShowDelete(true)}
+              />
+            )}
           </DropdownMenu>
         )}
+
         {canEdit && (
           <EditModelDialog
             model={model}
@@ -461,7 +439,7 @@ export function ModelRow({
             open={showDelete}
             onOpenChange={setShowDelete}
             title={t("delete_model")}
-            description={`${t("delete_model_confirm", { name: modelLabel(model) })} ${t("delete_model_warning")}`}
+            description={`${t("delete_model_confirm", { name: label })} ${t("delete_model_warning")}`}
             confirmLabel={remove.isPending ? t("deleting") : t("delete")}
             pending={remove.isPending}
             onConfirm={() => remove.mutate()}
