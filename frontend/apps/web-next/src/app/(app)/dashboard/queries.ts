@@ -3,12 +3,13 @@ import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { components } from "@/lib/api/schema";
 
+export type Dashboard = components["schemas"]["Dashboard"];
 export type SpaceDashboard = components["schemas"]["SpaceDashboard"];
 
 /**
  * Takes the client as a parameter so the same options (and query key) serve
  * both sides: the server component prefetches with eneoApi(), the client
- * component hydrates with browserApi.
+ * component hydrates with browserApi. The ⌘K palette reads the same cache.
  */
 export function dashboardQueryOptions(api: EneoClient) {
   return queryOptions({

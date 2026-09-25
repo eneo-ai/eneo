@@ -26,7 +26,6 @@ const PUBLIC_PREFIXES = [
   "/invite",
   "/integrations/callback"
 ];
-const MOBILE_USER_AGENT = /Mobile|iP(hone|od|ad)|Android|BlackBerry|IEMobile/;
 
 function createNonce(): string {
   const uuid = crypto.randomUUID();
@@ -69,23 +68,9 @@ function withContentSecurityPolicy<T extends NextResponse>(response: T, csp: str
   return response;
 }
 
-export function isMobileUserAgent(userAgent: string | null): boolean {
-  return Boolean(userAgent && MOBILE_USER_AGENT.test(userAgent));
-}
-
-export function shouldRedirectMobileToDashboard(pathname: string, userAgent: string | null) {
-  return !pathname.startsWith("/dashboard") && isMobileUserAgent(userAgent);
-}
-
-function authenticatedResponse(request: NextRequest, requestHeaders: Headers, csp: string) {
-  if (
-    shouldRedirectMobileToDashboard(request.nextUrl.pathname, request.headers.get("user-agent"))
-  ) {
-    return withContentSecurityPolicy(
-      NextResponse.redirect(new URL("/dashboard", request.url)),
-      csp
-    );
-  }
+// Phones get the same app as desktop (the shell turns the SideNav into a
+// drawer); there is no user-agent redirect to /dashboard any more.
+function authenticatedResponse(requestHeaders: Headers, csp: string) {
   return withContentSecurityPolicy(
     NextResponse.next({ request: { headers: requestHeaders } }),
     csp
@@ -173,7 +158,7 @@ export async function proxy(request: NextRequest) {
       .join("; ");
     securityRequestHeaders.set("cookie", rewrittenCookies);
 
-    const response = authenticatedResponse(request, securityRequestHeaders, csp);
+    const response = authenticatedResponse(securityRequestHeaders, csp);
     response.cookies.set(SESSION_COOKIE, sealed, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -189,7 +174,7 @@ export async function proxy(request: NextRequest) {
     return loginRedirect(request, csp);
   }
 
-  return authenticatedResponse(request, securityRequestHeaders, csp);
+  return authenticatedResponse(securityRequestHeaders, csp);
 }
 
 export const config = {

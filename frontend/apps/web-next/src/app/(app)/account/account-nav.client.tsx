@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 
+/** Account sub-pages as pills; a second `nav` on the page, so it is named. */
 export function AccountNav() {
   const t = useTranslations();
   const pathname = usePathname();
@@ -16,23 +17,26 @@ export function AccountNav() {
   ];
 
   return (
-    <nav className="flex gap-1 border-b pb-2">
-      {items.map((item) => {
-        const active = pathname === item.href;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "text-muted-foreground hover:bg-muted hover:text-foreground flex h-9 items-center rounded-lg px-3 text-sm font-medium transition-colors",
-              active && "bg-muted text-foreground"
-            )}
-          >
-            {item.label}
-          </Link>
-        );
-      })}
+    <nav aria-label={t("shell_account_nav_label")}>
+      <ul className="flex flex-wrap gap-1">
+        {items.map((item) => {
+          const active = pathname === item.href;
+          return (
+            <li key={item.href}>
+              <Link
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text focus-visible:outline-ring rounded-ax-element flex h-9 items-center px-3 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:h-11",
+                  active && "bg-ax-selected text-ax-text hover:bg-ax-selected font-semibold"
+                )}
+              >
+                {item.label}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
     </nav>
   );
 }

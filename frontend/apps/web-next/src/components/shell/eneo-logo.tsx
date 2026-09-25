@@ -9,17 +9,33 @@ const MARK_PATH =
 const WORDMARK_TEXT_PATH =
   "M589 24.5005C622.535 24.5005 649.5 51.9336 649.5 85.5005C649.5 119.067 622.535 146.5 589 146.5C559.742 146.5 535.486 125.619 529.774 98.0005H493C486.096 98.0005 480.5 92.404 480.5 85.5005C480.5 78.5969 486.096 73.0005 493 73.0005H526.305C521.28 59.2291 508.195 49.5005 493 49.5005C473.516 49.5005 457.5 65.4958 457.5 85.5005C457.5 105.505 473.516 121.5 493 121.5C501.708 121.5 509.722 118.303 515.925 112.983C518.905 121.001 523.153 128.41 528.429 134.955C518.485 142.212 506.256 146.5 493 146.5C479.712 146.5 467.456 142.192 457.5 134.903V145.5H432.5V85.5005C432.5 65.4958 416.484 49.5005 397 49.5005C377.516 49.5005 361.5 65.4958 361.5 85.5005V145.5H336.5V98.0005H301C294.096 98.0005 288.5 92.404 288.5 85.5005C288.5 78.5969 294.096 73.0005 301 73.0005H334.305C329.28 59.2291 316.195 49.5005 301 49.5005C281.516 49.5005 265.5 65.4958 265.5 85.5005C265.5 105.505 281.516 121.5 301 121.5C307.552 121.5 313.71 119.689 319 116.528V143.758C313.319 145.54 307.275 146.5 301 146.5C267.465 146.5 240.5 119.067 240.5 85.5005C240.5 51.9336 267.465 24.5005 301 24.5005C320.603 24.5005 337.961 33.875 349 48.3687C360.039 33.875 377.397 24.5005 397 24.5005C416.603 24.5005 433.961 33.875 445 48.3687C456.039 33.875 473.397 24.5005 493 24.5005C512.603 24.5005 529.961 33.875 541 48.3687C552.039 33.875 569.397 24.5005 589 24.5005ZM589 49.5005C569.516 49.5005 553.5 65.4958 553.5 85.5005C553.5 105.505 569.516 121.5 589 121.5C608.484 121.5 624.5 105.505 624.5 85.5005C624.5 65.4958 608.484 49.5005 589 49.5005Z";
 
-/** Eneo word mark: blue brand mark + "eneo" lettering in the text color. */
-export function EneoWordMark({ className }: { className?: string }) {
+type LogoProps = {
+  className?: string;
+  /**
+   * Hide the logo from assistive technology, e.g. inside a link that carries
+   * its own accessible name.
+   */
+  decorative?: boolean;
+};
+
+function useLogoA11y(decorative: boolean | undefined) {
   const t = useTranslations();
+  return decorative
+    ? ({ "aria-hidden": true } as const)
+    : ({ role: "img", "aria-label": t("eneo_logo") } as const);
+}
+
+/** Eneo word mark: blue brand mark + "eneo" lettering in the text color. */
+export function EneoWordMark({ className, decorative }: LogoProps) {
+  const a11y = useLogoA11y(decorative);
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 650 172"
       fill="none"
-      role="img"
-      aria-label={t("eneo_logo")}
+      focusable="false"
       className={className}
+      {...a11y}
     >
       <path d={WORDMARK_TEXT_PATH} fill="currentColor" />
       <path d={MARK_PATH} fill={ENEO_BRAND_BLUE} />
@@ -28,16 +44,16 @@ export function EneoWordMark({ className }: { className?: string }) {
 }
 
 /** Square brand mark only, for tight spaces. */
-export function EneoIcon({ className }: { className?: string }) {
-  const t = useTranslations();
+export function EneoIcon({ className, decorative }: LogoProps) {
+  const a11y = useLogoA11y(decorative);
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 -21 214 214"
       fill="none"
-      role="img"
-      aria-label={t("eneo_logo")}
+      focusable="false"
       className={className}
+      {...a11y}
     >
       <path d={MARK_PATH} fill={ENEO_BRAND_BLUE} />
     </svg>

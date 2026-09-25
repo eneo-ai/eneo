@@ -25,7 +25,10 @@ export default async function DashboardAppResultPage({
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
-      <ResultDetail runId={resultId} backHref={base} newRunHref={base} />
+      {/* Page padding inside the shell's page panel. */}
+      <div className="flex flex-col p-4 sm:p-6">
+        <ResultDetail runId={resultId} backHref={base} newRunHref={base} />
+      </div>
     </HydrationBoundary>
   );
 }
