@@ -471,5 +471,6 @@
   "space_delete_type_name_hint": "Skriv {name} exakt som det står.",
   "space_retention_no_limit_placeholder": "Ingen gräns",
   "space_synced_column": "Senast synkad",
-  "space_files_pagination_label": "Bläddra bland filer"
+  "space_files_pagination_label": "Bläddra bland filer",
+  "fix_notifications_running": "Aviseringar, {count} pågår"
 }

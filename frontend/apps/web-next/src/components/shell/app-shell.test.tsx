@@ -21,7 +21,10 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(nav.search),
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() })
 }));
-vi.mock("@/features/jobs/job-indicator", () => ({ JobIndicator: () => null }));
+// Stand-ins that show where the bells are placed (they have their own tests).
+vi.mock("@/features/jobs/job-indicator", () => ({
+  JobIndicator: () => <button type="button">Jobbklockan</button>
+}));
 vi.mock("@/features/api-keys/expiring-keys-notification", () => ({
   ExpiringKeysNotification: () => null
 }));
@@ -165,15 +168,18 @@ describe("AppShellFrame on a phone", () => {
     await waitFor(() => expect(menuButton.getAttribute("aria-expanded")).toBe("false"));
   });
 
-  it("opens the drawer when the chat's header asks for it", async () => {
+  it("opens the drawer when the chat's header asks for it, with the bells in it", async () => {
     nav.pathname = "/spaces/s1/chat";
     renderShell();
+    // Chat routes have no top bar: the drawer is where the bells are.
     act(() => {
       window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT));
     });
     await waitFor(() =>
       expect(screen.getByRole("dialog", { name: "Meny" }).hasAttribute("open")).toBe(true)
     );
+    const drawer = screen.getByRole("dialog", { name: "Meny" });
+    expect(within(drawer).getByRole("button", { name: "Jobbklockan" })).toBeTruthy();
   });
 });
 

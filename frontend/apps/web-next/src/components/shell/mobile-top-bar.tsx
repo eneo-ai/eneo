@@ -6,17 +6,13 @@ import { MobileNavToggle } from "@astryxdesign/core/MobileNav";
 import { SquarePen } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { ExpiringKeysNotification } from "@/features/api-keys/expiring-keys-notification";
-import { JobIndicator } from "@/features/jobs/job-indicator";
-import { cn } from "@/lib/utils";
 import { EneoWordMark } from "./eneo-logo";
-import { LEGACY_BUTTON_FOCUS_CLASSES } from "./nav-styles";
+import { NotificationBells } from "./notification-bells";
 import { NEW_CONVERSATION_HREF } from "./routes";
 
 /**
- * Phone layouts outside the chat: menu, Eneo and "Ny konversation", 56 px
- * high with 44 px targets. The notification bells live here on phones: they
- * are legacy (Radix) popovers, which cannot open inside the modal drawer.
+ * Phone layouts outside the chat: menu, Eneo, the notification bells and
+ * "Ny konversation", 56 px high with 44 px targets.
  */
 export function MobileTopBar() {
   const t = useTranslations();
@@ -35,14 +31,8 @@ export function MobileTopBar() {
         <EneoWordMark decorative className="h-5 w-auto" />
       </Link>
       <div className="flex-1" />
-      <div
-        className={cn(
-          "flex items-center pointer-coarse:[&_button]:size-11",
-          LEGACY_BUTTON_FOCUS_CLASSES
-        )}
-      >
-        <JobIndicator />
-        <ExpiringKeysNotification />
+      <div className="flex items-center">
+        <NotificationBells />
       </div>
       <Button
         href={NEW_CONVERSATION_HREF}

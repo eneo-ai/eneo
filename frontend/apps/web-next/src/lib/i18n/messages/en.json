@@ -4978,5 +4978,6 @@
   "space_delete_type_name_hint": "Type {name} exactly as shown.",
   "space_retention_no_limit_placeholder": "No limit",
   "space_synced_column": "Last synced",
-  "space_files_pagination_label": "Browse files"
+  "space_files_pagination_label": "Browse files",
+  "fix_notifications_running": "Notifications, {count} in progress"
 }

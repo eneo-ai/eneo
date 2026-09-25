@@ -6,11 +6,8 @@ import { useSideNavCollapse } from "@astryxdesign/core/SideNav";
 import { PanelLeft } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { ExpiringKeysNotification } from "@/features/api-keys/expiring-keys-notification";
-import { JobIndicator } from "@/features/jobs/job-indicator";
-import { cn } from "@/lib/utils";
 import { EneoIcon, EneoWordMark } from "./eneo-logo";
-import { LEGACY_BUTTON_FOCUS_CLASSES } from "./nav-styles";
+import { NotificationBells } from "./notification-bells";
 
 /** Wordmark link home, the collapse toggle and the notification bells. */
 export function NavHeader({ navId }: { navId: string }) {
@@ -34,14 +31,8 @@ export function NavHeader({ navId }: { navId: string }) {
     />
   );
 
-  // The bells are legacy (Radix) popovers; they sit here on desktop and in
-  // the mobile top bar, never inside the modal drawer (see MobileTopBar).
-  const bells = (
-    <span className={cn("contents", LEGACY_BUTTON_FOCUS_CLASSES)}>
-      <JobIndicator />
-      <ExpiringKeysNotification />
-    </span>
-  );
+  // The SideNav is on the left: the bells' popovers open toward the page.
+  const bells = <NotificationBells alignment="start" />;
 
   if (isCollapsed) {
     return (

@@ -10,6 +10,7 @@ import { EneoWordMark } from "./eneo-logo";
 import { MainSections, MainTopContent } from "./main-nav";
 import { NavFooter } from "./nav-footer";
 import { NavHeader } from "./nav-header";
+import { NotificationBells } from "./notification-bells";
 import type { NavVariant } from "./routes";
 import { DRAWER_MARKER } from "./shell-context";
 import { useSideNavCollapsed } from "./shell-state";
@@ -66,14 +67,19 @@ export function MobileNavDrawer({
       width={320}
       label={t("shell_menu_label")}
       header={
-        <Link
-          href="/"
-          aria-label={t("shell_home_link")}
-          onClick={() => onOpenChange(false)}
-          className="rounded-ax-inner focus-visible:outline-ring ms-2 flex h-11 items-center focus-visible:outline-2 focus-visible:outline-offset-2"
-        >
-          <EneoWordMark decorative className="h-5 w-auto" />
-        </Link>
+        <div className="flex min-w-0 flex-1 items-center justify-between gap-1">
+          <Link
+            href="/"
+            aria-label={t("shell_home_link")}
+            onClick={() => onOpenChange(false)}
+            className="rounded-ax-inner focus-visible:outline-ring ms-2 flex h-11 items-center focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            <EneoWordMark decorative className="h-5 w-auto" />
+          </Link>
+          <div className="flex items-center">
+            <NotificationBells />
+          </div>
+        </div>
       }
       {...{ [DRAWER_MARKER]: "" }}
     >
