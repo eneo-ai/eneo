@@ -107,7 +107,7 @@ class Space:
         self.websites = websites or []
         self.collections = collections or []
         self.integration_knowledge_list = integration_knowledge_list or []
-        self.members = members or {}
+        self._members = members or {}
         self.created_at = created_at
         self.updated_at = updated_at
         self.security_classification = security_classification
@@ -117,7 +117,30 @@ class Space:
         )
         self.available_capabilities: list[CapabilityAvailability] = []
         self.icon_id = icon_id
-        self.group_members = group_members if group_members is not None else {}
+        self._group_members = group_members if group_members is not None else {}
+        # Set by every change to the members below. SpaceRepository.update
+        # rewrites the member rows only when set, so saving a space loaded
+        # before a concurrent member change never writes that change back.
+        self.members_changed = False
+        self.group_members_changed = False
+
+    @property
+    def members(self) -> dict[UUID, SpaceMember]:
+        return self._members
+
+    @members.setter
+    def members(self, members: dict[UUID, SpaceMember]) -> None:
+        self._members = members
+        self.members_changed = True
+
+    @property
+    def group_members(self) -> dict[UUID, SpaceGroupMember]:
+        return self._group_members
+
+    @group_members.setter
+    def group_members(self, group_members: dict[UUID, SpaceGroupMember]) -> None:
+        self._group_members = group_members
+        self.group_members_changed = True
 
     def _get_member_ids(self):
         return self.members.keys()
@@ -439,18 +462,21 @@ class Space:
             raise BadRequestException("User is already a member of the space")
 
         self.members[user.id] = user
+        self.members_changed = True
 
     def remove_member(self, user_id: UUID):
         if user_id not in self._get_member_ids():
             raise BadRequestException("User is not a member of the space")
 
         del self.members[user_id]
+        self.members_changed = True
 
     def change_member_role(self, user_id: UUID, new_role: SpaceRoleValue):
         if user_id not in self._get_member_ids():
             raise BadRequestException("User is not a member of the space")
 
         self.members[user_id].role = new_role
+        self.members_changed = True
 
     def _get_group_member_ids(self):
         return self.group_members.keys()
@@ -467,6 +493,7 @@ class Space:
             raise BadRequestException("Group is already a member of the space")
 
         self.group_members[group.id] = group
+        self.group_members_changed = True
 
     def remove_group_member(self, group_id: UUID):
         """Remove a user group from this space."""
@@ -474,6 +501,7 @@ class Space:
             raise BadRequestException("Group is not a member of the space")
 
         del self.group_members[group_id]
+        self.group_members_changed = True
 
     def change_group_member_role(self, group_id: UUID, new_role: SpaceRoleValue):
         """Change the role of a user group in this space."""
@@ -481,6 +509,7 @@ class Space:
             raise BadRequestException("Group is not a member of the space")
 
         self.group_members[group_id].role = new_role
+        self.group_members_changed = True
 
     def get_group_member(self, group_id: UUID) -> SpaceGroupMember:
         """Get a group member by ID."""

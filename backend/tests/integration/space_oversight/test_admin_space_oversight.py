@@ -1011,6 +1011,115 @@ async def test_concurrent_demotions_cannot_remove_both_admins(
     ]
 
 
+async def test_a_stale_space_save_never_brings_back_a_removed_member(
+    client, db_container, admin, overseer
+):
+    """A space loaded before an oversight removal and saved after it (a
+    description edit, a new assistant) keeps the removal."""
+    _, tenant_id = await admin_row()
+    space_id = UUID(await create_space(client, admin.token))
+    removed = await insert_user(tenant_id)
+    await add_member(space_id, removed, "editor")
+    group = await insert_group(tenant_id, [await insert_user(tenant_id)])
+    await add_group(space_id, group, "editor")
+
+    async with db_container() as container:
+        repo = container.space_repo()
+        stale = await repo.one(space_id)
+        base = f"/api/v1/admin/spaces/{space_id}"
+        for path in (f"{base}/members/{removed}/", f"{base}/group-members/{group}/"):
+            resp = await client.delete(path, headers=overseer.headers)
+            assert resp.status_code == 200, resp.text
+        stale.description = "Uppdaterad beskrivning"
+        await repo.update(stale)
+
+    assert await member_row(space_id, removed) is None
+    assert (
+        await scalar(
+            "SELECT count(*) FROM spaces_user_groups WHERE space_id = :s", s=space_id
+        )
+        == 0
+    )
+    assert (
+        await scalar("SELECT description FROM spaces WHERE id = :s", s=space_id)
+        == "Uppdaterad beskrivning"
+    )
+
+
+@pytest.mark.parametrize("kind", ["user", "group"])
+async def test_a_member_change_waits_for_an_oversight_removal_and_keeps_it(
+    client, db_container, admin, overseer, kind: str
+):
+    """A space admin's member change that starts while an oversight removal
+    is uncommitted loads the members only after it commits, so its save
+    cannot write the removed member back."""
+    _, tenant_id = await admin_row()
+    space_id = UUID(await create_space(client, admin.token))
+    if kind == "user":
+        removed, added = await insert_user(tenant_id), await insert_user(tenant_id)
+        await add_member(space_id, removed, "editor")
+    else:
+        removed = await insert_group(tenant_id, [await insert_user(tenant_id)])
+        added = await insert_group(tenant_id, [await insert_user(tenant_id)])
+        await add_group(space_id, removed, "editor")
+    async with db_container() as container:
+        space_admin = await container.user_repo().get_user_by_id(admin.id)
+        oversight_user = await container.user_repo().get_user_by_id(overseer.id)
+
+    racer_pid: asyncio.Queue[int] = asyncio.Queue()
+
+    async def space_admin_adds_a_member() -> None:
+        async with db_container(user=space_admin) as container:
+            pid = await container.session().scalar(sa.text("SELECT pg_backend_pid()"))
+            racer_pid.put_nowait(pid)
+            service = container.space_service()
+            if kind == "user":
+                await service.add_member(space_id, added, SpaceRoleValue.VIEWER)
+            else:
+                await service.add_group_member(space_id, added, SpaceRoleValue.VIEWER)
+
+    racer: asyncio.Task[None] | None = None
+    try:
+        async with db_container(user=oversight_user) as container:
+            oversight = container.space_oversight_service()
+            if kind == "user":
+                await oversight.remove_member(space_id, removed)
+            else:
+                await oversight.remove_group(space_id, removed)
+            racer = asyncio.create_task(space_admin_adds_a_member())
+            async with asyncio.timeout(10):
+                while racer_pid.empty():
+                    if racer.done():
+                        racer.result()
+                    await asyncio.sleep(0.01)
+                pid = racer_pid.get_nowait()
+                while not (
+                    await container.session().execute(
+                        sa.text("SELECT cardinality(pg_blocking_pids(:pid)) > 0"),
+                        {"pid": pid},
+                    )
+                ).scalar_one():
+                    if racer.done():
+                        raise AssertionError(
+                            "the member change did not wait for the removal"
+                        )
+                    await asyncio.sleep(0.01)
+        await asyncio.wait_for(racer, timeout=10)
+    finally:
+        if racer is not None and not racer.done():
+            racer.cancel()
+            await asyncio.gather(racer, return_exceptions=True)
+
+    if kind == "user":
+        assert await _space_roles(space_id) == {admin.id: "admin", added: "viewer"}
+    else:
+        rows = await fetch(
+            "SELECT user_group_id, role FROM spaces_user_groups WHERE space_id = :s",
+            s=space_id,
+        )
+        assert {row[0]: row[1] for row in rows} == {added: "viewer"}
+
+
 async def test_removal_revokes_the_members_space_keys(
     client, admin, overseer, make_person
 ):
