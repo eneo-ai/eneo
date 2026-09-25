@@ -7,7 +7,7 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { REASON_MAX_LENGTH } from "./reason";
+  import { REASON_MAX_LENGTH, reasonLength } from "./reason";
 
   type Props = {
     id: string;
@@ -34,6 +34,8 @@
     rows = 3
   }: Props = $props();
 
+  // What the API will store and count: the normalised text, in code points.
+  const length = $derived(reasonLength(value));
   const describedBy = $derived(
     [`${id}-help`, `${id}-counter`, error ? `${id}-error` : null].filter(Boolean).join(" ")
   );
@@ -49,7 +51,6 @@
     bind:ref
     bind:value
     {rows}
-    maxlength={REASON_MAX_LENGTH}
     aria-required="true"
     aria-invalid={error ? true : undefined}
     aria-describedby={describedBy}
@@ -64,8 +65,14 @@
       {@render helpLink?.()}
     </Field.Description>
     <!-- Not live: announcing every keystroke drowns out the typing. -->
-    <p id={`${id}-counter`} class="text-secondary shrink-0 text-sm tabular-nums">
-      {m.oversight_reason_counter({ count: value.length, max: REASON_MAX_LENGTH })}
+    <p
+      id={`${id}-counter`}
+      class={[
+        "shrink-0 text-sm tabular-nums",
+        length > REASON_MAX_LENGTH ? "text-negative-stronger font-medium" : "text-secondary"
+      ]}
+    >
+      {m.oversight_reason_counter({ count: length, max: REASON_MAX_LENGTH })}
     </p>
   </div>
 </Field.Field>

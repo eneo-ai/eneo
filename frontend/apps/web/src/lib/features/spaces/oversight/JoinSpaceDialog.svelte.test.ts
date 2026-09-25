@@ -190,15 +190,31 @@ describe("JoinSpaceDialog", () => {
     expect(description(reason().element())).not.toContain("oversight_reason_too_short");
   });
 
+  test("refuses a reason the API would refuse: invisible padding, or more than 500 characters", async () => {
+    await openDialog();
+
+    await reason().fill("\u2060".repeat(12) + "Ärende 1");
+    await submit().click();
+    expect(description(reason().element())).toContain("oversight_reason_too_short(10)");
+
+    await reason().fill("a".repeat(501));
+    await submit().click();
+    await expect.element(reason()).toHaveAttribute("aria-invalid", "true");
+    expect(description(reason().element())).toContain("oversight_reason_too_long(500)");
+    expect(admin.join).not.toHaveBeenCalled();
+  });
+
   test("reads the help, the docs link and the counter with the field, without a live counter", async () => {
     await openDialog();
-    await reason().fill("Ärende 12");
+    // The counter counts what is stored: trimmed, one space per run, code points.
+    await reason().fill("  Ärende\u00a0\u00a0\u{1F4C1}12  ");
 
     const text = description(reason().element());
     expect(text).toContain("admin_spaces_join_reason_help");
-    expect(text).toContain("oversight_reason_counter(9|500)");
-    expect(reason().element().getAttribute("maxlength")).toBe("500");
-    const counter = page.getByText("oversight_reason_counter(9|500)").element();
+    expect(text).toContain("oversight_reason_counter(10|500)");
+    // A UTF-16 `maxlength` would cut off a valid reason with emoji; the API's limit is checked on submit.
+    expect(reason().element().hasAttribute("maxlength")).toBe(false);
+    const counter = page.getByText("oversight_reason_counter(10|500)").element();
     expect(counter.closest("[aria-live], [role=status], [role=alert]")).toBeNull();
     await expect
       .element(page.getByRole("link", { name: "read_more" }))
