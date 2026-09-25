@@ -33,7 +33,7 @@ const mocks = vi.hoisted(() => {
     getSummary: vi.fn(),
     showHeader: store(false),
     showJobManagerPanel: store(false),
-    user: { quota_limit: null as number | null, quota_used: 0 },
+    user: { quota_limit: null as number | null, quota_used: 0, hasPermission: vi.fn() },
     limits: {
       info_blobs: {
         formats: [
@@ -85,6 +85,7 @@ describe("BlobUpload", () => {
   beforeEach(() => {
     mocks.queueUploads.mockReset();
     mocks.getSummary.mockReset().mockResolvedValue({ limit: null, total_used: 0 });
+    mocks.user.hasPermission.mockReset().mockReturnValue(true);
     mocks.showHeader.set(false);
     mocks.showJobManagerPanel.set(false);
   });
@@ -160,5 +161,26 @@ describe("BlobUpload", () => {
 
     await confirmation.getByRole("button", { name: m.replace_files() }).click();
     expect(mocks.queueUploads).toHaveBeenCalledWith("collection-1", [pdf]);
+  });
+
+  it("blocks uploads past the tenant quota for admins", async () => {
+    mocks.getSummary.mockResolvedValue({ limit: 4, total_used: 4 });
+    render(BlobUpload, { collection, currentBlobs: [] });
+    const dialog = await openDialog();
+
+    selectFiles([new File(["%PDF"], "report.pdf", { type: "application/pdf" })]);
+    await expect.element(dialog.getByText(m.quota_limit_reached())).toBeVisible();
+    await expect.element(dialog.getByRole("button", { name: m.upload_files() })).toBeDisabled();
+  });
+
+  it("leaves the tenant quota to the server for non-admins", async () => {
+    mocks.user.hasPermission.mockReturnValue(false);
+    render(BlobUpload, { collection, currentBlobs: [] });
+    const dialog = await openDialog();
+
+    selectFiles([new File(["%PDF"], "report.pdf", { type: "application/pdf" })]);
+    await expect.element(dialog.getByRole("button", { name: m.upload_files() })).toBeEnabled();
+    expect(mocks.user.hasPermission).toHaveBeenCalledWith("admin");
+    expect(mocks.getSummary).not.toHaveBeenCalled();
   });
 });
