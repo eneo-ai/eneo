@@ -1,6 +1,8 @@
+import contextlib
 import logging
 
 import pytest
+from pydantic import ValidationError
 
 from eneo.main.config import Settings
 from eneo.main.removed_env import (
@@ -89,3 +91,30 @@ def test_settings_refuses_a_removed_variable_from_an_env_file(tmp_path) -> None:
 
     with pytest.raises(SystemExit):
         Settings(_env_file=env_file)
+
+
+@pytest.mark.parametrize("replacement_in_env_file", [True, False])
+def test_settings_only_warns_when_the_replacement_is_also_set(
+    replacement_in_env_file: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING)
+    lines = ["INTRIC_SUPER_API_KEY=old"]
+    if replacement_in_env_file:
+        lines.append("ENEO_SUPER_API_KEY=new")
+    else:
+        monkeypatch.setenv("ENEO_SUPER_API_KEY", "new")
+    env_file = tmp_path / ".env"
+    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # This minimal environment may lack required settings; those are validated
+    # after the removed-variable check, which must not exit.
+    with contextlib.suppress(ValidationError):
+        Settings(_env_file=env_file)
+
+    assert (
+        "INTRIC_SUPER_API_KEY is ignored because ENEO_SUPER_API_KEY is set"
+        in caplog.text
+    )
