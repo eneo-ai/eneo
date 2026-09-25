@@ -22,7 +22,12 @@ from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.main.exceptions import ConversationSettingsConflictException
 from eneo.questions.question_file_projection import attach_question_files
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+)
 from eneo.sessions.session import (
     SessionAdd,
     SessionFeedback,
@@ -157,6 +162,30 @@ class SessionRepository:
 
     async def update(self, session: SessionUpdate) -> SessionInDB | None:
         return await self._hydrate_optional(await self.delegate.update(session))
+
+    async def update_settings(
+        self, id: UUID, settings: ConversationSettings, expected_revision: int
+    ) -> ConversationSettingsState:
+        """Compare and swap after SessionService has checked ownership."""
+        state = ConversationSettingsState(
+            revision=expected_revision + 1, settings=settings
+        )
+        predicate = (
+            Sessions.settings.is_(None)
+            if expected_revision == 0
+            else Sessions.settings["revision"].as_integer() == expected_revision
+        )
+        result = await self.session.scalar(
+            sa.update(Sessions)
+            .where(Sessions.id == id, predicate)
+            .values(settings=state.model_dump(mode="json"))
+            .returning(Sessions.id)
+        )
+        if result is None:
+            raise ConversationSettingsConflictException(
+                "Conversation settings changed elsewhere. Reload the conversation and try again."
+            )
+        return state
 
     async def add_feedback(self, feedback: SessionFeedback, id: UUID) -> SessionInDB:
         stmt = (
