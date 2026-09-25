@@ -1268,8 +1268,10 @@ speakers would merge voices that are not on the list into one person.
 A run response carries the run's own speaker options at the top level, next to
 `input_payload_json`:
 
-- `speaker_labels` is `true` or `false` when the run chose it or the flow
-  requires labels, and `null` when the run used the flow's own setting.
+- `speaker_labels` is the run's speaker-label setting, fixed when the run was
+  created: `true` when the flow requires labels, otherwise the run's own choice
+  or the flow's default at that time. It is `null` when the flow offers no
+  speaker-label option.
 - `max_speakers` is the limit the run used, and `null` when detection was
   automatic or the run labels no speakers.
 

@@ -17,7 +17,10 @@ TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE = (
     "The run's transcript predates the current format. Start a new run."
 )
 TRANSCRIPT_REGENERATION_KEY = "transcript_regeneration"
-# The run's own speaker-label choice; absent means the flow's default.
+# The speaker-label setting settled at admission whenever the flow offers one:
+# true when the flow requires labels, else the run's choice, else the flow's
+# default then. Absent when the flow offers none, or for an older run that
+# took the default; readers then use its version's default.
 SPEAKER_LABELS_KEY = "speaker_labels"
 # The speaker-count bound settled at admission for a run that labels speakers:
 # a positive integer, or null for automatic. Absent when the run labels none.

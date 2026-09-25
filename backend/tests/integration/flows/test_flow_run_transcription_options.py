@@ -23,6 +23,7 @@ from eneo.flows.api import (
     flow_run_retry_router,
     flow_transcript_regeneration_router,
 )
+from eneo.flows.api.flow_models import FlowStepUpdateRequest
 from eneo.flows.application.flow_transcript_regeneration_service import (
     render_original_segments,
 )
@@ -112,6 +113,45 @@ async def _stored_inputs(db_container, flow_id: str) -> dict[str, dict[str, obje
             )
         )
         return {str(run_id): payload for run_id, payload in rows}
+
+
+async def _republish(
+    client: AsyncClient,
+    headers: Mapping[str, str],
+    flow_id: str,
+    wizard: Mapping[str, object],
+) -> None:
+    """Publish a new version of the flow with ``wizard`` merged into its settings."""
+    unpublished = await client.post(
+        f"/api/v1/flows/{flow_id}/unpublish/", headers=headers
+    )
+    assert unpublished.status_code == 200, unpublished.text
+    flow = await client.get(f"/api/v1/flows/{flow_id}/", headers=headers)
+    assert flow.status_code == 200, flow.text
+    metadata = flow.json()["metadata_json"]
+    updated = await client.patch(
+        f"/api/v1/flows/{flow_id}/",
+        json={
+            "name": flow.json()["name"],
+            "description": flow.json()["description"],
+            "steps": [
+                {
+                    key: value
+                    for key, value in step.items()
+                    if key in FlowStepUpdateRequest.model_fields
+                }
+                for step in flow.json()["steps"]
+            ],
+            "metadata_json": {
+                **metadata,
+                "wizard": {**metadata["wizard"], **wizard},
+            },
+        },
+        headers=headers,
+    )
+    assert updated.status_code == 200, updated.text
+    published = await client.post(f"/api/v1/flows/{flow_id}/publish/", headers=headers)
+    assert published.status_code == 200, published.text
 
 
 async def test_without_a_service_the_contract_offers_live_preview_but_no_speaker_choice(
@@ -220,7 +260,7 @@ async def test_a_runs_speaker_choice_is_kept_with_the_run_and_its_idempotency_ke
     assert (read.status_code, evidence.status_code) == (200, 200), evidence.text
     for run in (read.json(), evidence.json()["run"]):
         assert {key: run[key] for key in ("speaker_labels", "max_speakers")} == {
-            "speaker_labels": None,
+            "speaker_labels": True,
             "max_speakers": None,
             **choice,
         }
@@ -232,9 +272,9 @@ async def test_a_runs_speaker_choice_is_kept_with_the_run_and_its_idempotency_ke
     stored = await _stored_inputs(db_container, flow.flow_id)
     ((key, value),) = choice.items()
     assert stored[chosen.json()["id"]][key] == value
-    assert "speaker_labels" not in stored[default.json()["id"]]
+    assert stored[default.json()["id"]]["speaker_labels"] is True
     assert (default.json()["speaker_labels"], default.json()["max_speakers"]) == (
-        None,
+        True,
         None,
     )
     assert len(dispatched) == 2
@@ -326,6 +366,44 @@ async def test_required_labels_are_persisted_when_the_wizard_default_is_off(
     stored = (await _stored_inputs(db_container, flow.flow_id))[created.json()["id"]]
     assert stored["speaker_labels"] is True
     assert stored["max_speakers"] == 3
+    assert created.json()["speaker_labels"] is True
+
+
+@pytest.mark.parametrize("default", [True, False])
+async def test_a_run_keeps_the_flow_default_it_took_after_a_republish(
+    client,
+    flow_process_auth_headers,
+    db_container,
+    dispatched: list[UUID],
+    default: bool,
+):
+    headers = dict(flow_process_auth_headers)
+    flow = await _published_flow(
+        client,
+        headers,
+        db_container,
+        input_required=False,
+        wizard={"transcription_diarization": default},
+    )
+
+    with _deployment(service_mode="diarize"):
+        created = await _create_run(client, headers, flow.flow_id, {})
+        await _republish(
+            client, headers, flow.flow_id, {"transcription_diarization": not default}
+        )
+        later = await _create_run(client, headers, flow.flow_id, {})
+    read = await client.get(
+        f"/api/v1/flows/{flow.flow_id}/runs/{created.json()['id']}/", headers=headers
+    )
+
+    assert (created.status_code, later.status_code) == (201, 201), later.text
+    assert read.status_code == 200, read.text
+    assert (read.json()["speaker_labels"], later.json()["speaker_labels"]) == (
+        default,
+        not default,
+    )
+    stored = await _stored_inputs(db_container, flow.flow_id)
+    assert stored[created.json()["id"]]["speaker_labels"] is default
 
 
 async def test_a_flow_that_asks_for_the_count_advertises_its_form_field(
@@ -583,9 +661,11 @@ async def test_retry_and_regeneration_keep_the_source_speaker_decision(
     )
     stored = await _stored_inputs(db_container, flow.flow_id)
     ((key, value),) = choice.items()
+    source_labels = stored[str(failed_id)]["speaker_labels"]
     for child in (retried.json()["run"], regenerated.json()["run"]):
         assert key in stored[child["id"]]
         assert stored[child["id"]][key] == value
+        assert stored[child["id"]]["speaker_labels"] is source_labels
 
 
 async def test_the_contract_and_the_live_route_read_no_attachment_content(

@@ -459,9 +459,13 @@ class FlowRunService:
                     "transcription.speaker_labels in the run contract.",
                     code=FlowApiErrorCode.RUN_SPEAKER_LABELS_NOT_SELECTABLE,
                 )
-            effective_speaker_labels = (
-                True if option is not None and option.required else speaker_labels
-            )
+            # Settled once, like the speaker count, so the run records the
+            # setting it used even after a republish flips the flow's default.
+            effective_speaker_labels = speaker_labels
+            if option is not None and option.required:
+                effective_speaker_labels = True
+            elif option is not None and speaker_labels is None:
+                effective_speaker_labels = option.default
             form_input = read_semantic_flow_input_payload(prepared.input_payload_json)
             payload = build_initial_run_input_envelope(
                 normalized_inline_payload=form_input,

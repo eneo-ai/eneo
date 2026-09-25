@@ -1247,10 +1247,12 @@ class FlowRunPublic(FlowRunSummaryPublic):
     speaker_labels: bool | None = Field(
         default=None,
         description=(
-            "Whether the run labels speakers, when the run chose it with "
-            "`speaker_labels` or the flow requires labels. Null when the run took "
-            "the flow's default. To start a new run with the same choice, send it "
-            "as `speaker_labels` only when the run contract's "
+            "The run's speaker-label setting, settled when the run was created: "
+            "true when the flow requires labels, else the run's own choice, else "
+            "the flow's default at that time. Null when the flow offers no "
+            "speaker-label option or the run recorded none. To start a new run "
+            "with the same setting, send "
+            "it as `speaker_labels` only when the run contract's "
             "`transcription.speaker_labels.selectable` is true."
         ),
     )
