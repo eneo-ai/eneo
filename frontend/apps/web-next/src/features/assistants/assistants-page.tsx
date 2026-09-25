@@ -1,9 +1,11 @@
 "use client";
 
+import { Bot, SearchX } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
-import { PageHeader } from "@/components/composites/page-header";
+import { RESOURCE_GRID_CLASS } from "@/components/composites/resource-tile";
+import { SpaceSectionHeader } from "@/features/spaces/frame/space-section-header";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { useSpace } from "@/features/spaces/use-space";
@@ -13,11 +15,13 @@ import { ChatAppTile } from "./tile";
 
 function TileGrid({ items, showStatus }: { items: ChatAppItem[]; showStatus: boolean }) {
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+    <ul className={RESOURCE_GRID_CLASS}>
       {items.map((item) => (
-        <ChatAppTile key={item.id} item={item} showStatus={showStatus} />
+        <li key={item.id} className="min-w-0">
+          <ChatAppTile item={item} showStatus={showStatus} />
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }
 
@@ -34,18 +38,23 @@ export function AssistantsPage() {
   const filteredItems = filterSpaceResources(items, filter);
   const showStatus = !space.personal;
   const groupByStatus = can("publish", "assistant");
+  const canCreate = can("create", "assistant");
   const published = filteredItems.filter((item) => item.published);
   const drafts = filteredItems.filter((item) => !item.published);
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <PageHeader title={t("assistants")}>
-        {can("create", "assistant") && <CreateChatAppMenu />}
-      </PageHeader>
+    <div className="flex w-full flex-col gap-6">
+      <SpaceSectionHeader
+        title={t("assistants")}
+        actions={canCreate && items.length > 0 ? <CreateChatAppMenu /> : undefined}
+      />
       {items.length === 0 ? (
-        <EmptyState title={t("there_are_currently_no_assistants_configured")}>
-          {can("create", "assistant") && <CreateChatAppMenu />}
-        </EmptyState>
+        <EmptyState
+          icon={<Bot />}
+          title={t("space_assistants_empty_title")}
+          description={t("space_assistants_empty_description")}
+          actions={canCreate ? <CreateChatAppMenu /> : undefined}
+        />
       ) : (
         <>
           <ResourceFilterInput
@@ -54,18 +63,28 @@ export function AssistantsPage() {
             placeholder={t("filter_assistants_placeholder")}
           />
           {filteredItems.length === 0 ? (
-            <EmptyState title={t("no_results_found")} />
+            <EmptyState icon={<SearchX />} title={t("no_results_found")} isCompact />
           ) : groupByStatus ? (
             <div className="flex flex-col gap-6">
               {published.length > 0 && (
-                <section className="flex flex-col gap-2">
-                  <h2 className="text-muted-foreground text-sm font-medium">{t("published")}</h2>
+                <section aria-labelledby="assistants-published" className="flex flex-col gap-3">
+                  <h3
+                    id="assistants-published"
+                    className="text-ax-text-secondary text-sm font-semibold"
+                  >
+                    {t("published")}
+                  </h3>
                   <TileGrid items={published} showStatus={false} />
                 </section>
               )}
               {drafts.length > 0 && (
-                <section className="flex flex-col gap-2">
-                  <h2 className="text-muted-foreground text-sm font-medium">{t("drafts")}</h2>
+                <section aria-labelledby="assistants-drafts" className="flex flex-col gap-3">
+                  <h3
+                    id="assistants-drafts"
+                    className="text-ax-text-secondary text-sm font-semibold"
+                  >
+                    {t("drafts")}
+                  </h3>
                   <TileGrid items={drafts} showStatus={false} />
                 </section>
               )}

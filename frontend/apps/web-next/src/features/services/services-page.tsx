@@ -1,9 +1,11 @@
 "use client";
 
+import { SearchX, Wrench } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
-import { PageHeader } from "@/components/composites/page-header";
+import { RESOURCE_GRID_CLASS } from "@/components/composites/resource-tile";
+import { SpaceSectionHeader } from "@/features/spaces/frame/space-section-header";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { useSpace } from "@/features/spaces/use-space";
@@ -18,16 +20,21 @@ export function ServicesPage() {
   const [filter, setFilter] = useState("");
   const services = spaceServices(space);
   const filteredServices = filterSpaceResources(services, filter);
+  const canCreate = can("create", "service");
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <PageHeader title={t("services")}>
-        {can("create", "service") && <CreateServiceButton />}
-      </PageHeader>
+    <div className="flex w-full flex-col gap-6">
+      <SpaceSectionHeader
+        title={t("services")}
+        actions={canCreate && services.length > 0 ? <CreateServiceButton /> : undefined}
+      />
       {services.length === 0 ? (
-        <EmptyState title={t("there_are_currently_no_services_configured")}>
-          {can("create", "service") && <CreateServiceButton />}
-        </EmptyState>
+        <EmptyState
+          icon={<Wrench />}
+          title={t("space_services_empty_title")}
+          description={t("space_services_empty_description")}
+          actions={canCreate ? <CreateServiceButton /> : undefined}
+        />
       ) : (
         <>
           <ResourceFilterInput
@@ -36,13 +43,15 @@ export function ServicesPage() {
             placeholder={t("ui_filter_items", { resourceName: t("resource_services") })}
           />
           {filteredServices.length === 0 ? (
-            <EmptyState title={t("no_results_found")} />
+            <EmptyState icon={<SearchX />} title={t("no_results_found")} isCompact />
           ) : (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            <ul className={RESOURCE_GRID_CLASS}>
               {filteredServices.map((service) => (
-                <ServiceTile key={service.id} service={service} />
+                <li key={service.id} className="min-w-0">
+                  <ServiceTile service={service} />
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </>
       )}

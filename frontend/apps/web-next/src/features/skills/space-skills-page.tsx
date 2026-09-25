@@ -1,9 +1,13 @@
 "use client";
 
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { pixel, proportional, Table, type TableColumn } from "@astryxdesign/core/Table";
+import { Timestamp } from "@astryxdesign/core/Timestamp";
+import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpenCheck, Plus, Search, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useState, type FormEvent } from "react";
 import {
   AlertDialog,
@@ -14,14 +18,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from "@/components/ui/alert-dialog";
-import { PageHeader } from "@/components/composites/page-header";
+import { EmptyState } from "@/components/composites/empty-state";
+import { LoadingState } from "@/components/composites/loading-state";
+import { StatusLabel } from "@/components/composites/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { SpaceSectionHeader } from "@/features/spaces/frame/space-section-header";
 import { useSpace } from "@/features/spaces/use-space";
 import { skillQueryKey } from "./skill-revisions";
 
@@ -30,7 +37,6 @@ const PAGE_SIZE = 25;
 
 export function SpaceSkillsPage() {
   const t = useTranslations();
-  const locale = useLocale();
   const { space, routeId, can } = useSpace();
   const queryClient = useQueryClient();
   const [searchInput, setSearchInput] = useState("");
@@ -83,19 +89,95 @@ export function SpaceSkillsPage() {
     }
   }
 
+  const columns: TableColumn<Skill>[] = [
+    {
+      key: "display_name",
+      header: t("name"),
+      width: proportional(2),
+      renderCell: (skill) => (
+        <span className="flex min-w-0 flex-col">
+          <Link
+            className="text-ax-text focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 items-center font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+            href={`${base}/${skill.id}`}
+          >
+            {skill.display_name}
+          </Link>
+          <span className="text-ax-text-secondary text-xs break-all">{skill.slug}</span>
+        </span>
+      )
+    },
+    {
+      key: "description",
+      header: t("description"),
+      width: proportional(3),
+      renderCell: (skill) => <span className="text-ax-text-secondary">{skill.description}</span>
+    },
+    {
+      key: "status",
+      header: t("status"),
+      width: proportional(1),
+      renderCell: (skill) => (
+        <StatusLabel
+          status={skill.is_active ? "success" : "neutral"}
+          label={t(skill.is_active ? "skills_available_status" : "skills_unavailable_status")}
+        />
+      )
+    },
+    {
+      key: "revision",
+      header: t("skills_library_revision_column"),
+      width: proportional(1),
+      renderCell: (skill) =>
+        t("skills_revision_label", { revision: String(skill.current_revision_number) })
+    },
+    {
+      key: "updated_at",
+      header: t("skills_library_updated_column"),
+      width: proportional(1),
+      renderCell: (skill) => (
+        <Timestamp value={skill.updated_at} format="date_time" type="inherit" color="inherit" />
+      )
+    },
+    ...(can("delete", "skill")
+      ? [
+          {
+            key: "actions",
+            header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
+            width: pixel(56),
+            align: "end" as const,
+            renderCell: (skill: Skill) => (
+              <IconButton
+                label={t("skills_library_delete_aria", { name: skill.display_name })}
+                icon={<Trash2 aria-hidden="true" />}
+                variant="ghost"
+                onClick={() => {
+                  setDeleteError(null);
+                  setDeleteTarget(skill);
+                }}
+              />
+            )
+          }
+        ]
+      : [])
+  ];
+
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
-      <PageHeader title={t("skills")} tour="space-skills">
-        {can("create", "skill") && (
-          <Button asChild>
-            <Link href={`${base}/new`}>
-              <Plus className="size-4" />
-              {t("skills_library_create")}
-            </Link>
-          </Button>
-        )}
-      </PageHeader>
-      <p className="text-muted-foreground max-w-2xl text-sm">{t("skills_library_intro")}</p>
+    <div className="flex w-full max-w-5xl flex-col gap-6 pb-16">
+      <SpaceSectionHeader
+        title={t("skills")}
+        description={t("skills_library_intro")}
+        tour="space-skills"
+        actions={
+          can("create", "skill") ? (
+            <Button asChild>
+              <Link href={`${base}/new`}>
+                <Plus className="size-4" />
+                {t("skills_library_create")}
+              </Link>
+            </Button>
+          ) : undefined
+        }
+      />
       <p role="status" className={announcement ? "text-sm" : "sr-only"}>
         {announcement}
       </p>
@@ -118,7 +200,7 @@ export function SpaceSkillsPage() {
         </form>
       ) : null}
       {skills.isPending ? (
-        <p role="status">{t("loading")}</p>
+        <LoadingState rows={3} />
       ) : skills.isError && !skills.data ? (
         <Alert variant="destructive" role="alert">
           <AlertTitle>{t("request_failed")}</AlertTitle>
@@ -129,101 +211,33 @@ export function SpaceSkillsPage() {
           </AlertDescription>
         </Alert>
       ) : items.length === 0 ? (
-        <div className="flex max-w-3xl flex-col items-center gap-3 rounded-xl border border-dashed p-10 text-center">
-          <BookOpenCheck className="text-muted-foreground size-9" />
-          <h2 className="font-medium">
-            {search ? t("skills_library_no_results") : t("skills_library_empty_title")}
-          </h2>
-          {!search && (
-            <p className="text-muted-foreground text-sm">{t("skills_library_empty_description")}</p>
-          )}
-          {search ? (
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setSearch("");
-                setSearchInput("");
-              }}
-            >
-              {t("clear")}
-            </Button>
-          ) : (
-            can("create", "skill") && (
+        <EmptyState
+          icon={<BookOpenCheck />}
+          title={search ? t("skills_library_no_results") : t("skills_library_empty_title")}
+          description={search ? undefined : t("skills_library_empty_description")}
+          actions={
+            search ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSearch("");
+                  setSearchInput("");
+                }}
+              >
+                {t("clear")}
+              </Button>
+            ) : can("create", "skill") ? (
               <Button asChild>
                 <Link href={`${base}/new`}>{t("skills_library_create_first")}</Link>
               </Button>
-            )
-          )}
-        </div>
+            ) : undefined
+          }
+        />
       ) : (
         <>
-          <div className="overflow-x-auto rounded-xl border">
-            <table className="w-full min-w-[650px] text-sm">
-              <thead>
-                <tr className="border-b text-left">
-                  <th className="p-3">{t("name")}</th>
-                  <th className="p-3">{t("description")}</th>
-                  <th className="p-3">{t("status")}</th>
-                  <th className="p-3">{t("skills_library_revision_column")}</th>
-                  <th className="p-3">{t("skills_library_updated_column")}</th>
-                  {can("delete", "skill") && (
-                    <th className="p-3">
-                      <span className="sr-only">{t("actions")}</span>
-                    </th>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((skill) => (
-                  <tr key={skill.id} className="border-b align-top last:border-0">
-                    <td className="p-3">
-                      <Link
-                        className="font-medium underline-offset-2 hover:underline"
-                        href={`${base}/${skill.id}`}
-                      >
-                        {skill.display_name}
-                      </Link>
-                      <p className="text-muted-foreground text-xs break-all">{skill.slug}</p>
-                    </td>
-                    <td className="text-muted-foreground max-w-sm p-3">{skill.description}</td>
-                    <td className="p-3">
-                      <Badge variant={skill.is_active ? "secondary" : "outline"}>
-                        {t(
-                          skill.is_active ? "skills_available_status" : "skills_unavailable_status"
-                        )}
-                      </Badge>
-                    </td>
-                    <td className="p-3">
-                      {t("skills_revision_label", {
-                        revision: String(skill.current_revision_number)
-                      })}
-                    </td>
-                    <td className="p-3 tabular-nums">
-                      {new Date(skill.updated_at).toLocaleString(locale, {
-                        dateStyle: "short",
-                        timeStyle: "short"
-                      })}
-                    </td>
-                    {can("delete", "skill") && (
-                      <td className="p-3">
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={t("skills_library_delete_aria", { name: skill.display_name })}
-                          onClick={() => {
-                            setDeleteError(null);
-                            setDeleteTarget(skill);
-                          }}
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <SpaceTableFrame>
+            <Table data={items} columns={columns} idKey="id" verticalAlign="top" />
+          </SpaceTableFrame>
           {skills.hasNextPage && (
             <Button
               variant="outline"

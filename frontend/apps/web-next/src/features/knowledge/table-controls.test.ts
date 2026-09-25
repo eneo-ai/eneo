@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Collection, CrawlRun, EmbeddingModel, Website } from "./knowledge";
-import {
-  filterAndSortCollections,
-  filterAndSortCrawlRuns,
-  filterAndSortWebsites
-} from "./table-controls";
+import { filterAndSortCrawlRuns, filterCollections, filterWebsites } from "./table-controls";
 
 const model = (id: string) =>
   ({
@@ -55,8 +51,8 @@ function crawlRun(overrides: Partial<CrawlRun> & Pick<CrawlRun, "id" | "created_
   } as CrawlRun;
 }
 
-describe("filterAndSortWebsites", () => {
-  it("filters by website name, url, crawl status and embedding model", () => {
+describe("filterWebsites", () => {
+  it("matches website name, url, crawl status and embedding model", () => {
     const websites = [
       website({
         id: "alpha",
@@ -72,36 +68,14 @@ describe("filterAndSortWebsites", () => {
       })
     ];
 
-    expect(filterAndSortWebsites(websites, { query: "alpha complete", sort: "name_asc" })).toEqual([
-      websites[0]
-    ]);
-    expect(filterAndSortWebsites(websites, { query: "model beta", sort: "name_asc" })).toEqual([
-      websites[1]
-    ]);
-  });
-
-  it("sorts by latest crawl timestamp", () => {
-    const older = website({
-      id: "older",
-      url: "https://older.example.com",
-      latest_crawl: { id: "older-run", created_at: "2024-01-01T10:00:00Z" } as CrawlRun
-    });
-    const newer = website({
-      id: "newer",
-      url: "https://newer.example.com",
-      latest_crawl: { id: "newer-run", finished_at: "2024-01-03T10:00:00Z" } as CrawlRun
-    });
-
-    expect(
-      filterAndSortWebsites([older, newer], { query: "", sort: "latest_crawl_desc" }).map(
-        (item) => item.id
-      )
-    ).toEqual(["newer", "older"]);
+    expect(filterWebsites(websites, "alpha complete")).toEqual([websites[0]]);
+    expect(filterWebsites(websites, "model beta")).toEqual([websites[1]]);
+    expect(filterWebsites(websites, " ")).toEqual(websites);
   });
 });
 
-describe("filterAndSortCollections", () => {
-  it("filters by collection name and sorts by file count", () => {
+describe("filterCollections", () => {
+  it("matches collection name and whether it has files", () => {
     const empty = collection({
       id: "empty",
       name: "Empty",
@@ -113,16 +87,8 @@ describe("filterAndSortCollections", () => {
       metadata: { num_info_blobs: 12, size: 0 }
     });
 
-    expect(
-      filterAndSortCollections([empty, full], { query: "pol", sort: "files_desc" }).map(
-        (item) => item.id
-      )
-    ).toEqual(["full"]);
-    expect(
-      filterAndSortCollections([empty, full], { query: "", sort: "files_desc" }).map(
-        (item) => item.id
-      )
-    ).toEqual(["full", "empty"]);
+    expect(filterCollections([empty, full], "pol").map((item) => item.id)).toEqual(["full"]);
+    expect(filterCollections([empty, full], "empty").map((item) => item.id)).toEqual(["empty"]);
   });
 });
 

@@ -1,13 +1,25 @@
 "use client";
 
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import type { DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
+import {
+  pixel,
+  proportional,
+  Table,
+  useTableSortable,
+  useTableSortableState,
+  type TableColumn,
+  type UseTableSortableConfig
+} from "@astryxdesign/core/Table";
+import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { FolderClosed, MoreHorizontal, Pencil, FolderInput, Trash2 } from "lucide-react";
-import Link from "next/link";
+import { FolderClosed, FolderInput, Pencil, SearchX, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
-import { Badge } from "@/components/ui/badge";
+import { StatusLabel } from "@/components/composites/status-label";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -16,33 +28,26 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { ClientTime } from "@/features/spaces/client-time";
 import { useSpace } from "@/features/spaces/use-space";
 import { EmbeddingModelSelect } from "./embedding-model-select";
 import { embeddingModelsInUse, type Collection } from "./knowledge";
+import {
+  COLLECTION_COMPARATORS,
+  COLLECTION_DEFAULT_SORT,
+  type CollectionSortKey
+} from "./knowledge-sort";
 import { MoveResourceDialog } from "./move-dialog";
 import { NoCreatePermissionInfo } from "./no-create-permission-info";
-import { filterAndSortCollections, type CollectionSort } from "./table-controls";
-import { KnowledgeTableControls } from "./table-controls-ui";
+import { filterCollections } from "./table-controls";
+import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { KnowledgeNameCell, KnowledgeTableControls } from "./table-controls-ui";
 
 function useInvalidateSpace() {
   const { routeId } = useSpace();
@@ -154,18 +159,24 @@ function CollectionDialog({
   );
 }
 
-function CreateCollectionButton() {
+/** "Skapa samling": opens the create dialog, then goes to the new collection. */
+export function CreateCollectionButton() {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button onClick={() => setOpen(true)}>{t("create_collection")}</Button>
+      <AstryxButton
+        label={t("create_collection")}
+        variant="primary"
+        onClick={() => setOpen(true)}
+      />
       {open && <CollectionDialog open={open} onOpenChange={setOpen} />}
     </>
   );
 }
 
-function CollectionActions({ collection }: { collection: Collection }) {
+/** Row menu for a collection: rename, move to another space, delete. */
+export function CollectionActions({ collection }: { collection: Collection }) {
   const t = useTranslations();
   const { space } = useSpace();
   const invalidateSpace = useInvalidateSpace();
@@ -202,30 +213,36 @@ function CollectionActions({ collection }: { collection: Collection }) {
     onError: (error) => toastApiError(error, t)
   });
 
+  const items: DropdownMenuOption[] = [
+    { label: t("edit"), icon: <Pencil aria-hidden="true" />, onClick: () => setShowEdit(true) },
+    ...(canDelete && !space.organization
+      ? [
+          {
+            label: t("move"),
+            icon: <FolderInput aria-hidden="true" />,
+            onClick: () => setShowMove(true)
+          }
+        ]
+      : []),
+    ...(canDelete
+      ? [
+          {
+            label: t("delete"),
+            icon: <Trash2 aria-hidden="true" />,
+            variant: "destructive" as const,
+            onClick: () => setShowDelete(true)
+          }
+        ]
+      : [])
+  ];
+
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label={t("actions")}>
-            <MoreHorizontal className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => setShowEdit(true)}>
-            <Pencil className="size-4" /> {t("edit")}
-          </DropdownMenuItem>
-          {canDelete && !space.organization && (
-            <DropdownMenuItem onSelect={() => setShowMove(true)}>
-              <FolderInput className="size-4" /> {t("move")}
-            </DropdownMenuItem>
-          )}
-          {canDelete && (
-            <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
-              <Trash2 className="size-4" /> {t("delete")}
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <MoreMenu
+        label={t("space_more_actions_for", { name: collection.name })}
+        items={items}
+        alignment="end"
+      />
       {showEdit && (
         <CollectionDialog collection={collection} open={showEdit} onOpenChange={setShowEdit} />
       )}
@@ -253,37 +270,74 @@ function CollectionActions({ collection }: { collection: Collection }) {
   );
 }
 
-function CollectionRows({ collections }: { collections: Collection[] }) {
+function CollectionsTable({
+  collections,
+  sortConfig
+}: {
+  collections: Collection[];
+  sortConfig: UseTableSortableConfig<CollectionSortKey>;
+}) {
   const t = useTranslations();
   const { routeId } = useSpace();
+  const sortPlugin = useTableSortable<Collection, CollectionSortKey>(sortConfig);
+
+  const columns: TableColumn<Collection>[] = [
+    {
+      key: "name",
+      header: t("name"),
+      width: proportional(3),
+      sortable: true,
+      renderCell: (collection) => (
+        <KnowledgeNameCell
+          icon={FolderClosed}
+          href={`/spaces/${routeId}/knowledge/collections/${collection.id}`}
+        >
+          {collection.name}
+        </KnowledgeNameCell>
+      )
+    },
+    {
+      key: "files",
+      header: t("content"),
+      width: proportional(1),
+      sortable: true,
+      renderCell: (collection) =>
+        t("space_files_count", { count: collection.metadata.num_info_blobs })
+    },
+    {
+      key: "status",
+      header: t("status"),
+      width: proportional(1),
+      renderCell: (collection) =>
+        collection.metadata.num_info_blobs > 0 ? (
+          <StatusLabel status="success" label={t("space_status_indexed")} />
+        ) : (
+          <StatusLabel status="neutral" label={t("empty")} />
+        )
+    },
+    {
+      key: "updated",
+      header: t("space_updated_column"),
+      width: proportional(1),
+      sortable: true,
+      renderCell: (collection) => {
+        const updatedAt = collection.updated_at ?? collection.created_at;
+        return updatedAt ? <ClientTime value={updatedAt} format="date" /> : "—";
+      }
+    },
+    {
+      key: "actions",
+      header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
+      width: pixel(64),
+      align: "end",
+      renderCell: (collection) => <CollectionActions collection={collection} />
+    }
+  ];
+
   return (
-    <>
-      {collections.map((collection) => (
-        <TableRow key={collection.id}>
-          <TableCell>
-            <Link
-              href={`/spaces/${routeId}/knowledge/collections/${collection.id}`}
-              className="flex items-center gap-2 font-medium hover:underline"
-            >
-              <FolderClosed className="text-muted-foreground size-4" />
-              {collection.name}
-            </Link>
-          </TableCell>
-          <TableCell>
-            {collection.metadata.num_info_blobs > 0 ? (
-              <Badge variant="secondary">
-                {t("files", { count: collection.metadata.num_info_blobs })}
-              </Badge>
-            ) : (
-              <Badge variant="outline">{t("empty")}</Badge>
-            )}
-          </TableCell>
-          <TableCell className="text-right">
-            <CollectionActions collection={collection} />
-          </TableCell>
-        </TableRow>
-      ))}
-    </>
+    <SpaceTableFrame>
+      <Table data={collections} columns={columns} idKey="id" plugins={{ sort: sortPlugin }} />
+    </SpaceTableFrame>
   );
 }
 
@@ -291,12 +345,17 @@ export function CollectionsTab({ canCreate }: { canCreate: boolean }) {
   const t = useTranslations();
   const { space } = useSpace();
   const [filter, setFilter] = useState("");
-  const [sort, setSort] = useState<CollectionSort>("name_asc");
 
   const collections = space.knowledge.groups.items.filter(
     (collection) => collection.space_id === space.id
   );
-  const visibleCollections = filterAndSortCollections(collections, { query: filter, sort });
+  const visibleCollections = filterCollections(collections, filter);
+  // Sorted by the column headers; one sort order across the model groups.
+  const { sortedData, sortConfig } = useTableSortableState<Collection, CollectionSortKey>({
+    data: visibleCollections,
+    defaultSort: COLLECTION_DEFAULT_SORT,
+    comparators: COLLECTION_COMPARATORS
+  });
   const models = embeddingModelsInUse(visibleCollections, space.embedding_models);
   const grouped =
     models.length > 1 ||
@@ -309,46 +368,40 @@ export function CollectionsTab({ canCreate }: { canCreate: boolean }) {
     <NoCreatePermissionInfo resourceType={t("resource_collections")} />
   );
 
-  const sortOptions: { value: CollectionSort; label: string }[] = [
-    { value: "name_asc", label: t("sort_name_az") },
-    { value: "name_desc", label: t("sort_name_za") },
-    { value: "files_desc", label: t("sort_files_most") },
-    { value: "files_asc", label: t("sort_files_fewest") }
-  ];
-
-  const toolbar =
-    collections.length > 0 ? (
-      <KnowledgeTableControls
-        filterValue={filter}
-        onFilterChange={setFilter}
-        filterPlaceholder={t("ui_filter_items", { resourceName: t("resource_collections") })}
-        sortLabel={t("sort_by")}
-        sortValue={sort}
-        onSortChange={(value) => setSort(value as CollectionSort)}
-        sortOptions={sortOptions}
-      >
-        {action}
-      </KnowledgeTableControls>
-    ) : (
-      <div className="flex justify-end">{action}</div>
+  // Nothing to filter yet: the empty state carries the one create button.
+  if (collections.length === 0) {
+    return (
+      <EmptyState
+        icon={<FolderClosed />}
+        title={t("space_collections_empty_title")}
+        description={t("space_collections_empty_description")}
+        headingLevel={3}
+        actions={action}
+      />
     );
+  }
 
-  if (collections.length > 0 && visibleCollections.length === 0) {
+  const toolbar = (
+    <KnowledgeTableControls
+      filterValue={filter}
+      onFilterChange={setFilter}
+      filterLabel={t("space_filter_collections_label")}
+      filterPlaceholder={t("ui_filter_items", { resourceName: t("resource_collections") })}
+    >
+      {action}
+    </KnowledgeTableControls>
+  );
+
+  if (visibleCollections.length === 0) {
     return (
       <div className="flex flex-col gap-4">
         {toolbar}
         <EmptyState
+          icon={<SearchX />}
           title={t("ui_no_items_matching", { resourceNamePlural: t("resource_collections") })}
+          headingLevel={3}
+          isCompact
         />
-      </div>
-    );
-  }
-
-  if (collections.length === 0) {
-    return (
-      <div className="flex flex-col gap-4">
-        {toolbar}
-        <EmptyState title={t("there_are_currently_no_collections_configured")} />
       </div>
     );
   }
@@ -358,28 +411,17 @@ export function CollectionsTab({ canCreate }: { canCreate: boolean }) {
       {toolbar}
       {(grouped ? models : [null]).map((model) => {
         const rows = model
-          ? visibleCollections.filter((collection) => collection.embedding_model.id === model.id)
-          : visibleCollections;
+          ? sortedData.filter((collection) => collection.embedding_model.id === model.id)
+          : sortedData;
         return (
-          <div key={model?.id ?? "all"} className="flex flex-col gap-1">
+          <div key={model?.id ?? "all"} className="flex flex-col gap-2">
             {model && (
-              <h3 className="text-muted-foreground text-sm font-medium">
+              <h3 className="text-ax-text-secondary text-sm font-semibold">
                 {model.name}
                 {model.inSpace ? "" : ` (${t("disabled")})`}
               </h3>
             )}
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("name")}</TableHead>
-                  <TableHead>{t("files_header")}</TableHead>
-                  <TableHead className="w-16" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <CollectionRows collections={rows} />
-              </TableBody>
-            </Table>
+            <CollectionsTable collections={rows} sortConfig={sortConfig} />
           </div>
         );
       })}
