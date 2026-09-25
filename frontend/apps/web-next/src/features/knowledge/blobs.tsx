@@ -1,7 +1,22 @@
 "use client";
 
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import { useCollator } from "@astryxdesign/core/i18n";
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
+import {
+  paginateData,
+  pixel,
+  proportional,
+  Table,
+  useTablePagination,
+  useTableSortable,
+  useTableSortableState,
+  type TableColumn,
+  type TableSortComparator
+} from "@astryxdesign/core/Table";
+import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { FileText, Pencil, SearchX, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { Streamdown } from "streamdown";
@@ -16,28 +31,17 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { formatBytes } from "@/lib/format";
+import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
+import { matchesSearch } from "@/features/spaces/resource-filter";
 import type { InfoBlob } from "./knowledge";
+import { SpaceTableFrame } from "@/features/spaces/table-frame";
 
 const PAGE_SIZE = 100;
 
@@ -136,21 +140,27 @@ function BlobActions({ blob }: { blob: InfoBlob }) {
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label={t("actions")}>
-            <MoreHorizontal className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => setShowEdit(true)}>
-            <Pencil className="size-4" /> {t("edit")}
-          </DropdownMenuItem>
-          <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
-            <Trash2 className="size-4" /> {t("delete")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <MoreMenu
+        label={
+          blob.metadata.title
+            ? t("space_more_actions_for", { name: blob.metadata.title })
+            : t("actions")
+        }
+        alignment="end"
+        items={[
+          {
+            label: t("edit"),
+            icon: <Pencil aria-hidden="true" />,
+            onClick: () => setShowEdit(true)
+          },
+          {
+            label: t("delete"),
+            icon: <Trash2 aria-hidden="true" />,
+            variant: "destructive",
+            onClick: () => setShowDelete(true)
+          }
+        ]}
+      />
 
       <Dialog open={showEdit} onOpenChange={setShowEdit}>
         <DialogContent>
@@ -189,96 +199,122 @@ function BlobActions({ blob }: { blob: InfoBlob }) {
   );
 }
 
-function BlobRow({ blob, canEdit }: { blob: InfoBlob; canEdit: boolean }) {
+/** The file name opens a preview of its extracted text. */
+function BlobNameCell({ blob }: { blob: InfoBlob }) {
   const [showPreview, setShowPreview] = useState(false);
   return (
-    <TableRow>
-      <TableCell>
-        <button
-          type="button"
-          onClick={() => setShowPreview(true)}
-          className="flex max-w-md items-center gap-2 truncate font-medium hover:underline"
-          title={blob.metadata.title ?? undefined}
+    <>
+      <button
+        type="button"
+        onClick={() => setShowPreview(true)}
+        className="text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-h-6 max-w-xl items-center gap-2.5 text-left font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+      >
+        <span
+          aria-hidden="true"
+          className="bg-ax-muted text-ax-text-secondary rounded-ax-inner flex size-7 shrink-0 items-center justify-center"
         >
-          <FileText className="text-muted-foreground size-4 shrink-0" />
-          <span className="truncate">{blob.metadata.title}</span>
-        </button>
-        {showPreview && (
-          <BlobPreviewDialog blob={blob} open={showPreview} onOpenChange={setShowPreview} />
-        )}
-      </TableCell>
-      <TableCell className="text-muted-foreground">{formatBytes(blob.metadata.size)}</TableCell>
-      <TableCell className="text-right">{canEdit && <BlobActions blob={blob} />}</TableCell>
-    </TableRow>
+          <FileText className="size-4" />
+        </span>
+        <span className="break-words">{blob.metadata.title}</span>
+      </button>
+      {showPreview && (
+        <BlobPreviewDialog blob={blob} open={showPreview} onOpenChange={setShowPreview} />
+      )}
+    </>
   );
 }
 
+type BlobSortKey = "name" | "size";
+
+function blobComparators(
+  compare: (a: string, b: string) => number
+): Record<BlobSortKey, TableSortComparator<InfoBlob>> {
+  return {
+    name: (a, b) => compare(a.metadata.title ?? "", b.metadata.title ?? ""),
+    size: (a, b) => a.metadata.size - b.metadata.size
+  };
+}
+
+/**
+ * Files of a collection or website: a search box, name and size sortable by
+ * their headers (unsorted keeps the upload order), and pages of 100.
+ */
 export function BlobTable({ blobs, canEdit }: { blobs: InfoBlob[]; canEdit: boolean }) {
   const t = useTranslations();
+  const collator = useCollator();
   const [filter, setFilter] = useState("");
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(1);
 
-  const filtered = useMemo(() => {
-    const needle = filter.trim().toLowerCase();
-    if (!needle) return blobs;
-    return blobs.filter((blob) => (blob.metadata.title ?? "").toLowerCase().includes(needle));
-  }, [blobs, filter]);
-
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const currentPage = Math.min(page, pageCount - 1);
-  const visible = filtered.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  const filtered = blobs.filter((blob) => matchesSearch([blob.metadata.title], filter));
+  const comparators = useMemo(() => blobComparators(collator.compare), [collator]);
+  const { sortedData, sortConfig } = useTableSortableState<InfoBlob, BlobSortKey>({
+    data: filtered,
+    comparators,
+    allowUnsortedState: true
+  });
+  const sortPlugin = useTableSortable<InfoBlob, BlobSortKey>(sortConfig);
+  const hasPages = sortedData.length > PAGE_SIZE;
+  const paginationPlugin = useTablePagination<InfoBlob>({
+    page,
+    onPageChange: setPage,
+    totalItems: sortedData.length,
+    pageSize: PAGE_SIZE,
+    variant: "count",
+    position: hasPages ? "below" : "none",
+    align: "end",
+    label: t("space_files_pagination_label")
+  });
 
   if (blobs.length === 0) {
-    return <EmptyState title={t("no_files_uploaded_yet")} />;
+    return <EmptyState icon={<FileText />} title={t("no_files_uploaded_yet")} headingLevel={3} />;
   }
+
+  const columns: TableColumn<InfoBlob>[] = [
+    {
+      key: "name",
+      header: t("name"),
+      width: proportional(4),
+      sortable: true,
+      renderCell: (blob) => <BlobNameCell blob={blob} />
+    },
+    {
+      key: "size",
+      header: t("size"),
+      width: proportional(1),
+      sortable: true,
+      renderCell: (blob) => formatBytes(blob.metadata.size)
+    },
+    {
+      key: "actions",
+      header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
+      width: pixel(64),
+      align: "end",
+      renderCell: (blob) => (canEdit ? <BlobActions blob={blob} /> : null)
+    }
+  ];
 
   return (
     <div className="flex flex-col gap-3">
-      <Input
+      <ResourceFilterInput
         value={filter}
-        placeholder={t("filter")}
-        className="max-w-xs"
-        onChange={(event) => {
-          setFilter(event.target.value);
-          setPage(0);
+        label={t("space_filter_files_label")}
+        placeholder={t("space_filter_files_label")}
+        onChange={(value) => {
+          setFilter(value);
+          setPage(1);
         }}
       />
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t("name")}</TableHead>
-            <TableHead>{t("size")}</TableHead>
-            <TableHead className="w-16" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {visible.map((blob) => (
-            <BlobRow key={blob.id} blob={blob} canEdit={canEdit} />
-          ))}
-        </TableBody>
-      </Table>
-      {pageCount > 1 && (
-        <div className="flex items-center justify-end gap-2 text-sm">
-          <span className="text-muted-foreground">
-            {currentPage + 1} / {pageCount}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={currentPage === 0}
-            onClick={() => setPage(currentPage - 1)}
-          >
-            {t("previous")}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={currentPage >= pageCount - 1}
-            onClick={() => setPage(currentPage + 1)}
-          >
-            {t("next")}
-          </Button>
-        </div>
+      {filtered.length === 0 ? (
+        <EmptyState icon={<SearchX />} title={t("no_results_found")} headingLevel={3} isCompact />
+      ) : (
+        <SpaceTableFrame>
+          <Table
+            data={paginateData(sortedData, page, PAGE_SIZE)}
+            columns={columns}
+            idKey="id"
+            plugins={{ sort: sortPlugin, pagination: paginationPlugin }}
+          />
+        </SpaceTableFrame>
       )}
     </div>
   );
@@ -317,9 +353,7 @@ export function AddTextDialog({
 
   return (
     <>
-      <Button variant="outline" disabled={disabled} onClick={() => setOpen(true)}>
-        {t("add_text")}
-      </Button>
+      <AstryxButton label={t("add_text")} isDisabled={disabled} onClick={() => setOpen(true)} />
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>

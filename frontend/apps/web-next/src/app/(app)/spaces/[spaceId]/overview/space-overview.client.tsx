@@ -1,61 +1,28 @@
 "use client";
 
-import Link from "next/link";
-import { useTranslations } from "next-intl";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useSpace } from "@/features/spaces/use-space";
+import { OverviewAside } from "@/features/spaces/overview/overview-aside";
+import { OverviewAssistants } from "@/features/spaces/overview/overview-assistants";
+import { OverviewKnowledge } from "@/features/spaces/overview/overview-knowledge";
 
-function OverviewTile({ title, count, href }: { title: string; count: number; href: string }) {
-  return (
-    <Link href={href}>
-      <Card className="hover:bg-muted/50 transition-colors">
-        <CardHeader>
-          <CardTitle className="text-3xl">{count}</CardTitle>
-          <CardDescription>{title}</CardDescription>
-        </CardHeader>
-      </Card>
-    </Link>
-  );
-}
-
+/**
+ * The space overview: things to act on instead of count tiles. The newest
+ * assistants and the knowledge sources (with sync problems surfaced), and
+ * beside them what the space is set up with and who is in it. The space
+ * header above carries the name, description and primary actions.
+ */
 export function SpaceOverview() {
-  const t = useTranslations();
-  const { space, routeId, can } = useSpace();
-  const base = `/spaces/${routeId}`;
-
-  const chatCount =
-    (space.applications?.assistants.count ?? 0) + (space.applications?.group_chats.count ?? 0);
-  const knowledgeCount =
-    space.knowledge.groups.count +
-    space.knowledge.websites.count +
-    space.knowledge.integration_knowledge_list.count;
+  const { space, can } = useSpace();
+  const showAssistants = !space.organization && can("read", "assistant");
+  const showKnowledge = can("read", "collection") || can("read", "website");
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-3xl font-extrabold">{space.personal ? t("personal") : space.name}</h1>
-        <p className="text-muted-foreground max-w-prose">
-          {space.personal ? t("personal_space_description") : (space.description ?? "")}
-        </p>
+    <div className="grid w-full items-start gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="flex min-w-0 flex-col gap-7">
+        {showAssistants ? <OverviewAssistants /> : null}
+        {showKnowledge ? <OverviewKnowledge /> : null}
       </div>
-      <div className="grid gap-4 md:grid-cols-3">
-        {can("read", "assistant") && (
-          <OverviewTile title={t("assistants")} count={chatCount} href={`${base}/assistants`} />
-        )}
-        {can("read", "app") && (
-          <OverviewTile
-            title={t("apps")}
-            count={space.applications?.apps.count ?? 0}
-            href={`${base}/apps`}
-          />
-        )}
-        {(can("read", "collection") || can("read", "website")) && (
-          <OverviewTile title={t("knowledge")} count={knowledgeCount} href={`${base}/knowledge`} />
-        )}
-        {can("read", "member") && (
-          <OverviewTile title={t("members")} count={space.members.count} href={`${base}/members`} />
-        )}
-      </div>
+      <OverviewAside />
     </div>
   );
 }

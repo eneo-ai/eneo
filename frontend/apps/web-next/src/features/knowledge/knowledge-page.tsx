@@ -3,8 +3,8 @@
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { PageHeader } from "@/components/composites/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SpaceSectionHeader } from "@/features/spaces/frame/space-section-header";
 import { useSpace } from "@/features/spaces/use-space";
 import { CollectionsTab } from "./collections";
 import { IntegrationsTab } from "./integrations/tab";
@@ -43,8 +43,8 @@ export function KnowledgePage({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <PageHeader title={t("knowledge")} />
+    <div className="flex w-full flex-col gap-6">
+      <SpaceSectionHeader title={t("knowledge")} description={t("space_knowledge_description")} />
       <Tabs value={tab} onValueChange={selectTab}>
         <TabsList>
           {can("read", "collection") && (

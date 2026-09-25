@@ -1,46 +1,42 @@
 "use client";
 
-import { Search, X } from "lucide-react";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { Search } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
+/**
+ * Filter field above a resource grid or table: Astryx TextInput with a search
+ * icon and a clear button. The label is visually hidden; it defaults to "Sök".
+ */
 export function ResourceFilterInput({
   value,
   onChange,
-  placeholder
+  placeholder,
+  label,
+  className
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
+  /** Accessible name; defaults to the generic "Sök". */
+  label?: string;
+  className?: string;
 }) {
   const t = useTranslations();
 
   return (
-    <div className="relative max-w-sm">
-      <Search
-        aria-hidden="true"
-        className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2"
-      />
-      <Input
+    <div className={cn("w-full max-w-sm", className)}>
+      <TextInput
+        label={label ?? t("search")}
+        isLabelHidden
         value={value}
-        aria-label={t("search")}
+        onChange={(next) => onChange(next)}
         placeholder={placeholder}
-        className="pr-9 pl-9"
-        onChange={(event) => onChange(event.target.value)}
+        startIcon={Search}
+        hasClear
+        width="100%"
       />
-      {value && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="text-muted-foreground hover:text-foreground absolute top-1/2 right-1 size-7 -translate-y-1/2"
-          aria-label={t("clear")}
-          onClick={() => onChange("")}
-        >
-          <X className="size-4" aria-hidden="true" />
-        </Button>
-      )}
     </div>
   );
 }

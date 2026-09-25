@@ -8,12 +8,8 @@ import { pageTitle } from "@/lib/page-metadata";
 
 type Props = { params: Promise<{ spaceId: string; skillId: string }> };
 
-export async function generateMetadata({ params }: Props) {
-  const { spaceId } = await params;
-  return pageTitle(
-    spaceId === "organization" ? "organization_skills_page_title" : "skills_library_page_title"
-  )();
-}
+// The space layout's title template adds the space name: "Förmågor · Upphandling · Eneo".
+export const generateMetadata = pageTitle("skills");
 
 export default async function SkillDetailRoute({ params }: Props) {
   const { spaceId, skillId } = await params;

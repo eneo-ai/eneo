@@ -1,11 +1,11 @@
 "use client";
 
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Trash2, Users } from "lucide-react";
+import { Trash2, UserPlus, Users } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
-import { PageHeader } from "@/components/composites/page-header";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,7 @@ import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import type { SpaceMember, SpaceRoleValue } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
+import { SpaceSectionHeader } from "../frame/space-section-header";
 
 function useInvalidateSpace() {
   const { routeId } = useSpace();
@@ -137,8 +138,13 @@ function MemberRow({ member }: { member: SpaceMember }) {
   );
 }
 
-function AddMemberDialog() {
+/**
+ * Adds an existing user to the space. `variant="invite"` is the space
+ * header's "Bjud in" button; the members page uses the default trigger.
+ */
+export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "invite" }) {
   const t = useTranslations();
+  const roleId = useId();
   const { space } = useSpace();
   const invalidate = useInvalidateSpace();
   const [open, setOpen] = useState(false);
@@ -182,7 +188,15 @@ function AddMemberDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>{t("add_member")}</Button>
+        {variant === "invite" ? (
+          <AstryxButton
+            label={t("space_invite")}
+            variant="secondary"
+            icon={<UserPlus aria-hidden="true" />}
+          />
+        ) : (
+          <AstryxButton label={t("add_member")} variant="primary" />
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -221,9 +235,9 @@ function AddMemberDialog() {
             </div>
           </div>
           <div className="flex flex-col gap-2">
-            <Label>{t("role")}</Label>
+            <Label htmlFor={roleId}>{t("role")}</Label>
             <Select value={role} onValueChange={(next) => setRole(next as SpaceRoleValue)}>
-              <SelectTrigger className="w-40">
+              <SelectTrigger id={roleId} className="w-40">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -319,6 +333,8 @@ function GroupMemberRow({ group }: { group: Schema<"SpaceGroupMember"> }) {
 
 function AddGroupMemberDialog() {
   const t = useTranslations();
+  const groupId = useId();
+  const roleId = useId();
   const { space } = useSpace();
   const invalidate = useInvalidateSpace();
   const [open, setOpen] = useState(false);
@@ -356,7 +372,7 @@ function AddGroupMemberDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline">{t("add_group")}</Button>
+        <AstryxButton label={t("add_group")} variant="secondary" />
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -364,9 +380,9 @@ function AddGroupMemberDialog() {
         </DialogHeader>
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
-            <Label>{t("user_groups")}</Label>
+            <Label htmlFor={groupId}>{t("user_groups")}</Label>
             <Select value={selectedId ?? ""} onValueChange={setSelectedId}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger id={groupId} className="w-full">
                 <SelectValue placeholder={t("user_groups")} />
               </SelectTrigger>
               <SelectContent>
@@ -379,9 +395,9 @@ function AddGroupMemberDialog() {
             </Select>
           </div>
           <div className="flex flex-col gap-2">
-            <Label>{t("role")}</Label>
+            <Label htmlFor={roleId}>{t("role")}</Label>
             <Select value={role} onValueChange={(next) => setRole(next as SpaceRoleValue)}>
-              <SelectTrigger className="w-40">
+              <SelectTrigger id={roleId} className="w-40">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -422,11 +438,18 @@ export function SpaceMembers() {
   const groupMembers = space.group_members?.items ?? [];
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-      <PageHeader title={t("members")}>
-        {can("add", "group_member") && <AddGroupMemberDialog />}
-        {can("add", "member") && <AddMemberDialog />}
-      </PageHeader>
+    <div className="flex w-full max-w-5xl flex-col gap-8">
+      <SpaceSectionHeader
+        title={t("members")}
+        actions={
+          can("add", "group_member") || can("add", "member") ? (
+            <>
+              {can("add", "group_member") && <AddGroupMemberDialog />}
+              {can("add", "member") && <AddMemberDialog />}
+            </>
+          ) : undefined
+        }
+      />
 
       <SettingsGroup title={t("current_members")}>
         <SettingsRow title={t("admins_editors")} description={t("admins_editors_description")}>

@@ -2,29 +2,18 @@
 
 import { Info } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
+/**
+ * Why there is no create button: shown as text, not hidden in a tooltip, so
+ * everyone can read it (and it works with the keyboard and on touch).
+ */
 export function NoCreatePermissionInfo({ resourceType }: { resourceType: string }) {
   const t = useTranslations();
-  const message = t("knowledge_create_no_permission", { resourceType });
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label={message}
-          className="text-muted-foreground hover:text-foreground"
-        >
-          <Info className="size-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="max-w-72">
-        {message}
-      </TooltipContent>
-    </Tooltip>
+    <p className="text-ax-text-secondary flex max-w-md items-start gap-1.5 text-sm">
+      <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      <span>{t("knowledge_create_no_permission", { resourceType })}</span>
+    </p>
   );
 }

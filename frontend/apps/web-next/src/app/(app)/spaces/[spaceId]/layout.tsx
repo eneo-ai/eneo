@@ -5,11 +5,15 @@ import { getTranslations } from "next-intl/server";
 import { EneoApiError } from "@/lib/api/errors";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
+import { SpaceFrame } from "@/features/spaces/frame/space-frame";
 import { spaceQueryOptions } from "@/features/spaces/space";
 import { SpaceProvider } from "@/features/spaces/use-space";
-import { SpaceNav } from "./space-nav.client";
 
-/** Tab title is the space name (or the localized alias for personal/org). */
+/**
+ * The tab title is the space name (or the localized alias for personal/org).
+ * Tab pages set their own title, which the template puts in front of it:
+ * "Kunskap · Upphandling · Eneo".
+ */
 export async function generateMetadata({
   params
 }: {
@@ -19,12 +23,12 @@ export async function generateMetadata({
   try {
     const space = await getQueryClient().fetchQuery(spaceQueryOptions(eneoApi(), spaceId));
     const t = await getTranslations();
-    const title = space.personal
+    const name = space.personal
       ? t("personal")
       : space.organization
         ? t("organization")
         : space.name;
-    return { title };
+    return { title: { default: name, template: `%s · ${name} · Eneo` } };
   } catch {
     return {};
   }
@@ -50,12 +54,7 @@ export default async function SpaceLayout({
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
       <SpaceProvider routeId={spaceId}>
-        <div className="flex min-h-0 flex-1">
-          <aside className="bg-sidebar hidden w-56 shrink-0 overflow-y-auto border-r p-3 md:block">
-            <SpaceNav />
-          </aside>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-6">{children}</div>
-        </div>
+        <SpaceFrame>{children}</SpaceFrame>
       </SpaceProvider>
     </HydrationBoundary>
   );

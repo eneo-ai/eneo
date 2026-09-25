@@ -10,14 +10,8 @@ import { getQueryClient } from "@/lib/api/query";
 
 type Props = { params: Promise<{ spaceId: string }> };
 
-export async function generateMetadata({ params }: Props) {
-  const { spaceId } = await params;
-  return pageTitle(
-    spaceId === "organization"
-      ? "organization_skills_new_page_title"
-      : "skills_library_new_page_title"
-  )();
-}
+// The space layout's title template adds the space name: "Skapa skill · Upphandling · Eneo".
+export const generateMetadata = pageTitle("skills_library_new_heading");
 
 export default async function NewSkillRoute({ params }: Props) {
   const { spaceId } = await params;

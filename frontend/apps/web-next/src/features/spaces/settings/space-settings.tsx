@@ -7,7 +7,6 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { IconField } from "@/components/composites/icon-field";
-import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
@@ -45,6 +44,7 @@ import {
 } from "@/features/capabilities/capabilities";
 import { mcpServersQueryOptions } from "@/features/admin/mcp/mcp";
 import { useSpace } from "@/features/spaces/use-space";
+import { SpaceSectionHeader } from "../frame/space-section-header";
 import {
   pruneUnknownMcpServerIds,
   selectedVisibleMcpServerCount,
@@ -344,7 +344,7 @@ function RetentionSection() {
           min={1}
           className="w-32"
           value={days.value}
-          placeholder="∞"
+          placeholder={t("space_retention_no_limit_placeholder")}
           onChange={(event) => days.setValue(event.target.value)}
           onBlur={() => days.commit()}
         />
@@ -602,10 +602,8 @@ export function SpaceSettings() {
 
   return (
     <SaveStatusProvider>
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
-        <PageHeader title={t("settings")}>
-          <SaveStatusIndicator />
-        </PageHeader>
+      <div className="flex w-full max-w-5xl flex-col gap-10">
+        <SpaceSectionHeader title={t("settings")} actions={<SaveStatusIndicator />} />
         {!isOrgSpace && <GeneralSection />}
         {!isOrgSpace && <SecuritySection />}
         <ModelsSection />

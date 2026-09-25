@@ -1,9 +1,11 @@
 "use client";
 
+import { AppWindow, SearchX } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
-import { PageHeader } from "@/components/composites/page-header";
+import { RESOURCE_GRID_CLASS } from "@/components/composites/resource-tile";
+import { SpaceSectionHeader } from "@/features/spaces/frame/space-section-header";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { useSpace } from "@/features/spaces/use-space";
@@ -13,11 +15,13 @@ import { AppTile } from "./tile";
 
 function TileGrid({ items, showStatus }: { items: AppSparse[]; showStatus: boolean }) {
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+    <ul className={RESOURCE_GRID_CLASS}>
       {items.map((app) => (
-        <AppTile key={app.id} app={app} showStatus={showStatus} />
+        <li key={app.id} className="min-w-0">
+          <AppTile app={app} showStatus={showStatus} />
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }
 
@@ -31,16 +35,23 @@ export function AppsPage() {
   const filteredItems = filterSpaceResources(items, filter);
   const showStatus = !space.personal;
   const groupByStatus = can("publish", "app");
+  const canCreate = can("create", "app");
   const published = filteredItems.filter((app) => app.published);
   const drafts = filteredItems.filter((app) => !app.published);
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <PageHeader title={t("apps")}>{can("create", "app") && <CreateAppButton />}</PageHeader>
+    <div className="flex w-full flex-col gap-6">
+      <SpaceSectionHeader
+        title={t("apps")}
+        actions={canCreate && items.length > 0 ? <CreateAppButton /> : undefined}
+      />
       {items.length === 0 ? (
-        <EmptyState title={t("there_are_currently_no_apps_configured")}>
-          {can("create", "app") && <CreateAppButton />}
-        </EmptyState>
+        <EmptyState
+          icon={<AppWindow />}
+          title={t("space_apps_empty_title")}
+          description={t("space_apps_empty_description")}
+          actions={canCreate ? <CreateAppButton /> : undefined}
+        />
       ) : (
         <>
           <ResourceFilterInput
@@ -49,18 +60,22 @@ export function AppsPage() {
             placeholder={t("filter_apps_placeholder")}
           />
           {filteredItems.length === 0 ? (
-            <EmptyState title={t("no_results_found")} />
+            <EmptyState icon={<SearchX />} title={t("no_results_found")} isCompact />
           ) : groupByStatus ? (
             <div className="flex flex-col gap-6">
               {published.length > 0 && (
-                <section className="flex flex-col gap-2">
-                  <h2 className="text-muted-foreground text-sm font-medium">{t("published")}</h2>
+                <section aria-labelledby="apps-published" className="flex flex-col gap-3">
+                  <h3 id="apps-published" className="text-ax-text-secondary text-sm font-semibold">
+                    {t("published")}
+                  </h3>
                   <TileGrid items={published} showStatus={false} />
                 </section>
               )}
               {drafts.length > 0 && (
-                <section className="flex flex-col gap-2">
-                  <h2 className="text-muted-foreground text-sm font-medium">{t("drafts")}</h2>
+                <section aria-labelledby="apps-drafts" className="flex flex-col gap-3">
+                  <h3 id="apps-drafts" className="text-ax-text-secondary text-sm font-semibold">
+                    {t("drafts")}
+                  </h3>
                   <TileGrid items={drafts} showStatus={false} />
                 </section>
               )}
