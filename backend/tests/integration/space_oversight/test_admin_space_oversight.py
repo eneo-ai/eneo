@@ -25,6 +25,8 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.database.database import sessionmanager
 from eneo.roles.permissions import Permission
+from eneo.scim.app import scim_app
+from eneo.scim.auth import require_scim_auth
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.spaces.oversight.exceptions import SpaceLastAdminError
 from eneo.spaces.oversight.oversight_repo import last_activity_query
@@ -1625,16 +1627,91 @@ async def test_a_visit_ends_however_the_membership_goes(
     assert all(row[3] is not None and row[3] >= row[2] for row in rows)
 
 
+async def _delete_account(how: str, client, admin: Person, db_container, user_id: UUID):
+    if how == "admin_api":
+        resp = await client.delete(
+            f"/api/v1/users/admin/{user_id}/", headers=admin.headers
+        )
+        assert resp.status_code == 204, resp.text
+    elif how == "hard_delete":
+        async with db_container() as container:
+            await container.user_repo().hard_delete(user_id)
+    else:
+        _, tenant_id = await admin_row()
+        scim_app.dependency_overrides[require_scim_auth] = lambda: tenant_id
+        try:
+            if how == "scim_delete":
+                resp = await client.delete(f"/scim/v2/Users/{user_id}")
+                assert resp.status_code == 204, resp.text
+            else:
+                resp = await client.patch(
+                    f"/scim/v2/Users/{user_id}",
+                    json={
+                        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                        "Operations": [
+                            {"op": "replace", "path": "active", "value": False}
+                        ],
+                    },
+                )
+                assert resp.status_code == 200, resp.text
+        finally:
+            scim_app.dependency_overrides.pop(require_scim_auth, None)
+
+
+@pytest.mark.parametrize(
+    "how", ["admin_api", "scim_delete", "scim_patch_inactive", "hard_delete"]
+)
+async def test_a_visit_ends_when_the_account_is_deleted(
+    client, admin, overseer, db_container, how
+):
+    space_id = await create_space(client, admin.token)
+    other_space_id = await create_space(client, admin.token)
+    await add_member(other_space_id, overseer.id, "editor")
+    assert (await _join(client, overseer, space_id)).status_code == 200
+
+    await _delete_account(how, client, admin, db_container, overseer.id)
+
+    (visit_row,) = await fetch(
+        "SELECT joined_at, left_at FROM space_oversight_visits WHERE space_id = :s",
+        s=space_id,
+    )
+    assert visit_row.left_at is not None
+    assert visit_row.left_at >= visit_row.joined_at
+    # A restored account does not come back through its oversight join.
+    assert await member_row(space_id, overseer.id) is None
+    if how != "hard_delete":
+        other = await member_row(other_space_id, overseer.id)
+        assert other is not None and other.role == "editor"
+
+    resp = await client.get(f"/api/v1/spaces/{space_id}/", headers=admin.headers)
+    assert resp.status_code == 200, resp.text
+    (visit,) = resp.json()["oversight_visits"]
+    assert (visit["person"], visit["role"], visit["reason"]) == (
+        None,
+        "viewer",
+        REASON,
+    )
+    assert visit["left_at"] is not None
+
+
 async def test_members_see_visits_that_ended_in_the_last_ninety_days(
     client, admin, overseer
 ):
     _, tenant_id = await admin_row()
     space_id = await create_space(client, admin.token)
+    # Visits left open by an account deleted before deletion closed them.
     deleted = await insert_user(tenant_id, deleted=True)
+    deleted_long_ago = await insert_user(tenant_id, deleted=True)
+    await execute(
+        "UPDATE users SET deleted_at = :d WHERE id = :u",
+        d=days_ago(95),
+        u=deleted_long_ago,
+    )
     for user_id, role, joined, left in (
         (overseer.id, "viewer", days_ago(130), days_ago(100)),
         (overseer.id, "editor", days_ago(100), days_ago(80)),
         (deleted, "admin", days_ago(10), None),
+        (deleted_long_ago, "viewer", days_ago(120), None),
     ):
         await execute(
             "INSERT INTO space_oversight_visits (tenant_id, space_id, user_id,"
@@ -1651,11 +1728,12 @@ async def test_members_see_visits_that_ended_in_the_last_ninety_days(
 
     resp = await client.get(f"/api/v1/spaces/{space_id}/", headers=admin.headers)
     assert resp.status_code == 200, resp.text
+    # A deleted person's visit ended with the account.
     assert [
         (visit["role"], visit["person"], visit["left_at"] is None)
         for visit in resp.json()["oversight_visits"]
     ] == [
-        ("admin", None, True),
+        ("admin", None, False),
         ("editor", {"id": str(overseer.id), "name": overseer.username}, False),
     ]
 

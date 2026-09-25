@@ -30,6 +30,15 @@ class OversightVisitRow:
     left_at: Optional[datetime]
 
 
+def _ended_at(
+    user_deleted_at: sa.ColumnExpressionArgument[Optional[datetime]],
+) -> sa.ColumnElement[Optional[datetime]]:
+    """When a visit ended: its leave, or else the deletion of its user's
+    account, which ends the membership too. Deleting an account closes its
+    visits; this also covers a visit that was left open."""
+    return sa.func.coalesce(SpaceOversightVisits.left_at, user_deleted_at)
+
+
 class OversightVisitRepo:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -70,11 +79,24 @@ class OversightVisitRepo:
 
     async def delete_ended_before(self, cutoff: datetime) -> int:
         """Delete the visits of every tenant that ended before ``cutoff``.
-        Open visits are never deleted."""
+        The visit of someone who is still a member is never deleted."""
+        deleted_at = (
+            sa.select(Users.deleted_at)
+            .where(Users.id == SpaceOversightVisits.user_id)
+            .scalar_subquery()
+        )
         result = await self.session.execute(
             sa.delete(SpaceOversightVisits).where(
-                SpaceOversightVisits.left_at.is_not(None),
-                SpaceOversightVisits.left_at < cutoff,
+                sa.or_(
+                    _ended_at(deleted_at) < cutoff,
+                    # The user row went without the visit being closed, so it
+                    # has no end: the join is the latest time known.
+                    sa.and_(
+                        SpaceOversightVisits.user_id.is_(None),
+                        SpaceOversightVisits.left_at.is_(None),
+                        SpaceOversightVisits.joined_at < cutoff,
+                    ),
+                )
             )
         )
         return affected_row_count(result)
@@ -83,6 +105,7 @@ class OversightVisitRepo:
         self, space_id: UUID, *, since: datetime
     ) -> list[OversightVisitRow]:
         """Open visits and those that ended after ``since``, newest first."""
+        ended_at = _ended_at(Users.deleted_at)
         stmt = (
             sa.select(
                 SpaceOversightVisits.user_id,
@@ -96,15 +119,12 @@ class OversightVisitRepo:
                 SpaceOversightVisits.role,
                 SpaceOversightVisits.reason,
                 SpaceOversightVisits.joined_at,
-                SpaceOversightVisits.left_at,
+                ended_at,
             )
             .outerjoin(Users, Users.id == SpaceOversightVisits.user_id)
             .where(
                 SpaceOversightVisits.space_id == space_id,
-                sa.or_(
-                    SpaceOversightVisits.left_at.is_(None),
-                    SpaceOversightVisits.left_at >= since,
-                ),
+                sa.or_(ended_at.is_(None), ended_at >= since),
             )
             .order_by(SpaceOversightVisits.joined_at.desc(), SpaceOversightVisits.id)
         )

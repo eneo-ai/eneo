@@ -17,6 +17,7 @@ from eneo.database.tables.users_table import Users
 from eneo.main.exceptions import SystemUserProtected, UniqueException
 from eneo.main.logging import get_logger
 from eneo.main.models import ModelId
+from eneo.spaces.oversight.account_deletion import end_oversight_of_deleted_user
 from eneo.users.user import (
     PaginatedResult,
     PaginationParams,
@@ -286,17 +287,22 @@ class UsersRepository:
 
     async def hard_delete(self, id: UUID):
         await self._raise_if_system_user(id)
+        await end_oversight_of_deleted_user(
+            self.session, id, at=datetime.now(timezone.utc)
+        )
         return await self.delegate.delete(id)
 
     async def soft_delete(self, id: UUID):
         await self._raise_if_system_user(id)
+        deleted_at = datetime.now(timezone.utc)
         # Cleanup personal space
         stmt = sa.delete(Spaces).where(Spaces.user_id == id)
         await self.session.execute(stmt)
+        await end_oversight_of_deleted_user(self.session, id, at=deleted_at)
 
         stmt = (
             sa.update(Users)
-            .values(deleted_at=datetime.now(timezone.utc), state=UserState.DELETED)
+            .values(deleted_at=deleted_at, state=UserState.DELETED)
             .where(Users.id == id)
             .returning(Users)
         )
