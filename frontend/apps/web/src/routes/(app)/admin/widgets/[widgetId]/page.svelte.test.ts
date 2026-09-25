@@ -282,6 +282,8 @@ describe("widget review page", () => {
   });
 
   test("each capability visitors reach is named by its purpose", async () => {
+    // Real text: with keys as text, `image_generation` would also be the raw purpose.
+    i18n.catalog = sv;
     const base = review();
     renderPage({
       review: review({
@@ -290,7 +292,7 @@ describe("widget review page", () => {
     });
     await expect
       .element(
-        page.getByText("Kartverktyget, widget_review_web_search och image_generation", {
+        page.getByText("Kartverktyget, Webbsökning via extern leverantör och Bildgenerering", {
           exact: true
         })
       )
