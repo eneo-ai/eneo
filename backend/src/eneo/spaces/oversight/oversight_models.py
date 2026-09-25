@@ -16,6 +16,7 @@ from uuid import UUID
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from eneo.audit.application.free_text import AuditedReason
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.spaces.oversight.domain import (
     K_ANONYMITY_THRESHOLD,
@@ -26,7 +27,6 @@ from eneo.widgets.domain.widget import WidgetStatus
 
 AttentionReason = Literal["no_admin", "widget_activation_requested"]
 KnowledgeKind = Literal["collection", "website", "integration"]
-Capability = Literal["web_search", "image_generation"]
 IntegrationType = Literal["sharepoint", "confluence", "onedrive"]
 IntegrationItem = Literal["site", "folder", "file"]
 UpdateInterval = Literal["never", "daily", "every_other_day", "weekly"]
@@ -166,7 +166,11 @@ class AdminWidgetRequestRef(BaseModel):
 class AdminSpaceList(BaseModel):
     items: list[AdminSpaceListItem]
     widget_requests: list[AdminWidgetRequestRef] = Field(
-        description="Every pending widget activation request, oldest first."
+        description=(
+            "Every pending widget activation request in the tenant, oldest"
+            " first, the organisation space's included. Only the items of"
+            " shared spaces count and flag them."
+        )
     )
 
 
@@ -175,7 +179,7 @@ class AdminSpaceSettings(BaseModel):
     embedding_models: list[OversightModelRef]
     transcription_models: list[OversightModelRef]
     mcp_servers: list[OversightRef]
-    capabilities: list[Capability]
+    capabilities: list[CapabilityPurpose]
     data_retention_days: Optional[int] = None
 
 
@@ -222,7 +226,7 @@ class AdminSpaceAssistant(BaseModel):
     knowledge: list[OversightKnowledgeRef]
     attachment_count: int
     mcp_servers: list[OversightRef]
-    capabilities: list[Capability]
+    capabilities: list[CapabilityPurpose]
     insight_enabled: bool
     logging_enabled: bool
     data_retention_days: Optional[int] = Field(

@@ -1,3 +1,4 @@
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -26,6 +27,8 @@ from eneo.widgets.domain.widget import (
     Widget,
     WidgetStatus,
 )
+
+TODAY = date(2026, 9, 25)
 
 
 class _InMemoryRepo:
@@ -124,25 +127,38 @@ class _InMemoryTemplateRepo:
 
 
 class _FakeOversightRepo:
-    """The slim reads the widget service uses for admins; roles per user id."""
+    """The slim reads the widget service uses for admins, and the space role
+    reader; roles per user id."""
 
     def __init__(self) -> None:
         self.roles: dict = {}
         self.kind = "shared"
         self.configs: list = []
+        self.link_reads = 0
+        self.links_passed: list = []
 
-    async def effective_role(self, tenant_id, space_id, *, user_id, group_ids):
+    async def role_in_space(self, tenant_id, space_id, *, user_id, group_ids):
         return self.roles.get(user_id)
+
+    async def knowledge_links(self, tenant_id, space_id, *, assistant_ids=None):
+        self.link_reads += 1
+        return []
 
     async def space_summary(self, tenant_id, space_id):
         return SpaceSummaryRow(
             id=space_id, name="Ytan", kind=self.kind, security_classification=None
         )
 
-    async def assistant_configs(self, tenant_id, space_id, *, assistant_ids=None, **_):
+    async def assistant_configs(
+        self, tenant_id, space_id, *, assistant_ids=None, links=None, **_
+    ):
+        self.links_passed.append(links)
         return self.configs
 
-    async def knowledge_sources(self, tenant_id, space_id, *, source_ids=None, **_):
+    async def knowledge_sources(
+        self, tenant_id, space_id, *, source_ids=None, links=None, **_
+    ):
+        self.links_passed.append(links)
         return []
 
     async def membership(self, tenant_id, space_id, *, extra_group_ids=()):
@@ -151,6 +167,24 @@ class _FakeOversightRepo:
             groups=[],
             snapshot=MembershipSnapshot(direct={}, groups={}),
             manageable_by_group={},
+        )
+
+
+class _FakeOverviewRepo:
+    """The review's single read of the widget, with its people and usage."""
+
+    def __init__(self, repo: "_InMemoryRepo") -> None:
+        self.repo = repo
+
+    async def get_one(self, tenant_id, widget_id, *, today):
+        widget = self.repo.rows.get(widget_id)
+        if widget is None or widget.tenant_id != tenant_id:
+            return None
+        return SimpleNamespace(
+            overview=SimpleNamespace(widget=widget),
+            created_by=None,
+            activated_by=None,
+            activation_declined_by=None,
         )
 
 
@@ -177,7 +211,13 @@ def _space(space_id, assistant, *, can_edit=True):
 
 
 def _service(
-    user, space, can_edit=True, repo=None, template_repo=None, oversight_repo=None
+    user,
+    space,
+    can_edit=True,
+    repo=None,
+    template_repo=None,
+    oversight_repo=None,
+    token_service=None,
 ):
     space_service = MagicMock()
     space_service.get_space = AsyncMock(return_value=space)
@@ -193,6 +233,7 @@ def _service(
     repo = repo or _InMemoryRepo()
     for assistant_id in space.assistant_ids:
         repo.target_spaces.setdefault(assistant_id, space.id)
+    oversight_repo = oversight_repo or _FakeOversightRepo()
     return WidgetService(
         user=user,
         repo=repo,
@@ -200,7 +241,10 @@ def _service(
         space_service=space_service,
         actor_manager=actor_manager,
         tenant_service=tenant_service,
-        oversight_repo=oversight_repo or _FakeOversightRepo(),
+        oversight_repo=oversight_repo,
+        overview_repo=_FakeOverviewRepo(repo),
+        space_roles=oversight_repo,
+        token_service=token_service,
     )
 
 
@@ -347,7 +391,7 @@ async def test_admin_runs_the_lifecycle_without_loading_the_space(assistant):
     outsider.space_service.repo.one = AsyncMock(side_effect=loader_used)
     repo.locked_reads.clear()
 
-    review = await outsider.review_widget(widget.id)
+    review = await outsider.review_widget(widget.id, today=TODAY)
     assert review.view.activation_blockers == []
     assert review.space.kind == "shared"
     assert review.viewer_role is None
@@ -365,6 +409,11 @@ async def test_admin_runs_the_lifecycle_without_loading_the_space(assistant):
     assert paused.widget.status == WidgetStatus.PAUSED
     archived = await outsider.archive_widget(widget.id)
     assert archived.widget.status == WidgetStatus.ARCHIVED
+    # Each command says whether the admin acted from outside the space, for
+    # its audit entry.
+    assert [
+        view.actor_is_space_member for view in (declined, activated, paused, archived)
+    ] == [False] * 4
     # The send-back, the new request, pause and archive write past the
     # revision check, so each decides on a locked row; activate does not.
     assert repo.locked_reads == [widget.id, widget.id, widget.id, widget.id]
@@ -382,7 +431,7 @@ async def test_admin_lifecycle_reads_blockers_from_the_published_flag(assistant)
     with pytest.raises(WidgetServingBlockedError) as exc:
         await admin.activate_widget(widget.id)
     assert exc.value.blockers == ["target_not_published"]
-    review = await admin.review_widget(widget.id)
+    review = await admin.review_widget(widget.id, today=TODAY)
     assert review.view.activation_blockers == ["target_not_published"]
 
 
@@ -518,7 +567,7 @@ async def test_preview_tokens_follow_the_space_role(assistant):
         user.tenant_id = editor_user.tenant_id
         return _service(user, space, repo=repo, oversight_repo=oversight)
 
-    # Editors test drafts, also of an unpublished assistant, as before.
+    # Editors test drafts, also of an unpublished assistant.
     repo.target_published = False
     oversight.roles[editor_user.id] = SpaceRoleValue.EDITOR
     token, expires_in, public_id = await editor.preview_token(widget_id)
@@ -546,6 +595,86 @@ async def test_preview_tokens_follow_the_space_role(assistant):
     oversight.roles[viewer.id] = SpaceRoleValue.VIEWER
     with pytest.raises(UnauthorizedException):
         await service_for(viewer).preview_token(widget_id)
+
+
+async def test_an_admins_preview_token_is_short_lived(assistant):
+    """Membership is checked only when a token is minted, so a tenant admin's
+    preview must not outlast a leave or a removal by long; editors keep
+    theirs for a sitting."""
+    space, _ = _space(uuid4(), assistant)
+    repo = _InMemoryRepo()
+    oversight = _FakeOversightRepo()
+    editor_user = _user(Permission.WIDGETS)
+    view = await _service(
+        editor_user, space, repo=repo, oversight_repo=oversight
+    ).create_widget(space_id=space.id, target_id=assistant.id, name="w")
+    tokens = SimpleNamespace(mint=MagicMock(return_value=("token", 600)))
+
+    def service_for(user, role):
+        user.tenant_id = editor_user.tenant_id
+        oversight.roles[user.id] = role
+        return _service(
+            user, space, repo=repo, oversight_repo=oversight, token_service=tokens
+        )
+
+    await service_for(editor_user, SpaceRoleValue.EDITOR).preview_token(view.widget.id)
+    await service_for(_user(Permission.ADMIN), SpaceRoleValue.VIEWER).preview_token(
+        view.widget.id
+    )
+    # An admin who also edits the space with the widgets permission is an
+    # editor here.
+    await service_for(
+        _user(Permission.ADMIN, Permission.WIDGETS), SpaceRoleValue.EDITOR
+    ).preview_token(view.widget.id)
+    assert [call.kwargs for call in tokens.mint.call_args_list] == [
+        {"preview": True, "admin_preview": False},
+        {"preview": True, "admin_preview": True},
+        {"preview": True, "admin_preview": False},
+    ]
+
+
+async def test_preview_without_widget_or_admin_permission_is_refused_unread(
+    assistant,
+):
+    """No 404-or-403 answer tells whether a widget id exists."""
+    space, _ = _space(uuid4(), assistant)
+    repo = _InMemoryRepo()
+    owner = _user(Permission.WIDGETS)
+    view = await _service(owner, space, repo=repo).create_widget(
+        space_id=space.id, target_id=assistant.id, name="w"
+    )
+    stranger = _user(Permission.ASSISTANTS)
+    stranger.tenant_id = owner.tenant_id
+    repo.get = AsyncMock(side_effect=AssertionError("the widget was read"))
+    for widget_id in (view.widget.id, uuid4()):
+        with pytest.raises(UnauthorizedException):
+            await _service(stranger, space, repo=repo).preview_token(widget_id)
+
+
+async def test_the_review_reads_knowledge_links_once_and_filters_visitor_tools(
+    assistant,
+):
+    repo = _InMemoryRepo()
+    space, editor, widget = await _requested_widget(assistant, repo)
+    admin_user = _user(Permission.ADMIN)
+    admin_user.tenant_id = editor.user.tenant_id
+    oversight = _FakeOversightRepo()
+    oversight.configs = [
+        SimpleNamespace(
+            assistant=SimpleNamespace(
+                knowledge=[SimpleNamespace(id=uuid4())],
+                capabilities=["image_generation", "web_search"],
+            ),
+            visitor_mcp_servers=[],
+        )
+    ]
+    review = await _service(
+        admin_user, space, repo=repo, oversight_repo=oversight
+    ).review_widget(widget.id, today=TODAY)
+    assert review.visitor_capabilities == ["web_search"]
+    assert oversight.link_reads == 1
+    (first, second) = oversight.links_passed
+    assert first is not None and first is second
 
 
 async def test_archived_widgets_cannot_be_previewed(assistant):

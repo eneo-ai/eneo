@@ -335,6 +335,7 @@ from eneo.spaces.oversight.oversight_service import SpaceOversightService
 from eneo.spaces.oversight.visit_repo import OversightVisitRepo
 from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_init_service import SpaceInitService
+from eneo.spaces.space_reads import SpaceRoleReader
 from eneo.spaces.space_repo import SpaceRepository
 from eneo.spaces.space_service import SpaceService
 from eneo.storage.application.storage_services import StorageInfoService
@@ -689,6 +690,7 @@ class Container(containers.DeclarativeContainer):
     widget_template_repo = providers.Factory(WidgetTemplateRepoImpl, session=session)
     widget_overview_repo = providers.Factory(WidgetOverviewRepoImpl, session=session)
     space_oversight_repo = providers.Factory(SpaceOversightRepo, session=session)
+    space_role_reader = providers.Factory(SpaceRoleReader, session=session)
     oversight_visit_repo = providers.Factory(OversightVisitRepo, session=session)
     widget_assembler = providers.Factory(WidgetAssembler)
     widget_usage_repo = providers.Factory(WidgetUsageRepoImpl, session=session)
@@ -1251,6 +1253,8 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         tenant_service=tenant_service,
         oversight_repo=space_oversight_repo,
+        overview_repo=widget_overview_repo,
+        space_roles=space_role_reader,
         token_service=widget_visitor_token_service,
     )
     widget_template_service = providers.Factory(

@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from pydantic.json_schema import SkipJsonSchema
 
 from eneo.audit.application.free_text import AuditedReason
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.spaces.oversight.oversight_models import (
     AdminSpaceAssistant,
@@ -20,6 +21,7 @@ from eneo.spaces.oversight.oversight_models import (
     OversightPersonRef,
     OversightRef,
 )
+from eneo.spaces.space_reads import SpaceKind
 from eneo.widgets.domain.widget import (
     MAX_DAILY_TOKEN_BUDGET,
     BotProtection,
@@ -314,6 +316,12 @@ class WidgetOverviewItem(BaseModel):
     status: WidgetStatus
     space_id: UUID
     space_name: Optional[str] = None
+    space_kind: SpaceKind = Field(
+        description=(
+            "Only a shared space opens in space oversight; the organisation"
+            " space and personal spaces do not."
+        )
+    )
     target_id: UUID
     assistant_name: Optional[str] = None
     allowed_origins: list[str]
@@ -378,8 +386,10 @@ class AdminWidgetReviewTarget(BaseModel):
     visitor_mcp_servers: list[OversightRef] = Field(
         description="The assistant's general MCP servers that are switched on."
     )
-    visitor_capabilities: list[Literal["web_search"]] = Field(
-        description="Capabilities a visitor reaches; never image generation."
+    visitor_capabilities: list[CapabilityPurpose] = Field(
+        description=(
+            "The assistant's capabilities a visitor reaches; never image generation."
+        )
     )
 
 
@@ -399,7 +409,7 @@ class AdminWidgetReview(BaseModel):
 
     widget: WidgetPublic
     space: OversightRef
-    space_kind: Literal["shared", "organization", "personal"]
+    space_kind: SpaceKind
     space_security_classification: Optional[OversightClassification] = None
     target: Optional[AdminWidgetReviewTarget] = Field(
         default=None,

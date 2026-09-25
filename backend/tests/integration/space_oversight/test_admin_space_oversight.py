@@ -875,6 +875,46 @@ async def test_change_times_of_knowledge_and_assistants_are_days(
     assert resp.json()["target"]["assistant"]["updated_at"] == "2026-09-24"
 
 
+async def test_activation_requests_are_listed_tenant_wide_and_linked_by_kind(
+    client, admin, overseer
+):
+    """The request list covers every space; only shared spaces are list items
+    that can be opened, so only they are flagged, and the widget overview
+    says which kind each widget's space is."""
+    owner, tenant_id = await admin_row()
+    shared = await create_space(client, admin.token)
+    hub = await hub_id(tenant_id)
+    requested = {
+        "shared": await insert_widget(
+            tenant_id, shared, await insert_assistant(shared, owner), requested_by=owner
+        ),
+        "organization": await insert_widget(
+            tenant_id, hub, await insert_assistant(hub, owner), requested_by=owner
+        ),
+    }
+
+    resp = await client.get("/api/v1/admin/spaces/", headers=overseer.headers)
+    assert resp.status_code == 200, resp.text
+    listed = resp.json()
+    assert {
+        request["widget_id"]: request["space"]["id"]
+        for request in listed["widget_requests"]
+    } == {
+        str(requested["shared"]): shared,
+        str(requested["organization"]): str(hub),
+    }
+    items = {item["id"]: item for item in listed["items"]}
+    assert str(hub) not in items
+    assert items[shared]["attention"] == ["widget_activation_requested"]
+    assert items[shared]["widgets"]["awaiting_activation"] == 1
+
+    resp = await client.get("/api/v1/admin/widgets/", headers=overseer.headers)
+    assert resp.status_code == 200, resp.text
+    kinds = {item["id"]: item["space_kind"] for item in resp.json()["items"]}
+    assert kinds[str(requested["shared"])] == "shared"
+    assert kinds[str(requested["organization"])] == "organization"
+
+
 # --- member management --------------------------------------------------------
 
 

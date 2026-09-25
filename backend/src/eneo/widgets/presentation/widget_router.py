@@ -9,12 +9,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from eneo.assistants.assistant_service import VISITOR_CAPABILITY_PURPOSES
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.main.container.container import Container
-from eneo.main.exceptions import NotFoundException
 from eneo.main.models import PaginatedResponse
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.server import protocol
@@ -113,17 +111,6 @@ async def _audit(
             },
         ),
     )
-
-
-async def _actor_is_space_member(container: Container, view: WidgetView) -> bool:
-    user = container.user()
-    role = await container.space_oversight_repo().effective_role(
-        user.tenant_id,
-        view.widget.space_id,
-        user_id=user.id,
-        group_ids=user.user_groups_ids,
-    )
-    return role is not None
 
 
 def _settled_request(view: WidgetView) -> dict[str, Any] | None:
@@ -331,7 +318,11 @@ async def get_widget_usage(
         " Editors with the widgets permission test from the widget editor. A"
         " tenant admin needs to be a member of the space, and the assistant"
         " must be published (`widget_serving_blocked` otherwise): the answers"
-        " come from the space's knowledge."
+        " come from the space's knowledge. Membership is checked only here,"
+        " so an admin's token lives for WIDGET_ADMIN_PREVIEW_TOKEN_TTL_SECONDS"
+        " (10 minutes by default) and an editor's for"
+        " WIDGET_PREVIEW_TOKEN_TTL_SECONDS. Callers with neither the widgets"
+        " nor the admin permission get 403 before the widget is looked up."
     ),
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -413,7 +404,7 @@ async def decline_widget_activation_request(
             f"Sent back the activation request for widget '{view.widget.name}'"
         ),
         extra={
-            "actor_is_space_member": await _actor_is_space_member(container, view),
+            "actor_is_space_member": view.actor_is_space_member,
             "activation_request": _settled_request(view),
             "reason": view.widget.activation_decline_reason,
         },
@@ -450,7 +441,7 @@ async def activate_widget(
         description=f"Activated widget '{view.widget.name}'",
         changes={"new": _widget_snapshot(view)},
         extra={
-            "actor_is_space_member": await _actor_is_space_member(container, view),
+            "actor_is_space_member": view.actor_is_space_member,
             "activation_request": _settled_request(view),
             "reviewed_revision": revision,
         },
@@ -477,7 +468,7 @@ async def pause_widget(id: UUID, container: _ContainerWithUser):
         view=view,
         description=f"Paused widget '{view.widget.name}'",
         changes={"new": _widget_snapshot(view)},
-        extra={"actor_is_space_member": await _actor_is_space_member(container, view)},
+        extra={"actor_is_space_member": view.actor_is_space_member},
     )
     return assembler.from_view(view)
 
@@ -498,7 +489,7 @@ async def archive_widget(id: UUID, container: _ContainerWithUser):
         view=view,
         description=f"Archived widget '{view.widget.name}'",
         changes={"new": _widget_snapshot(view)},
-        extra={"actor_is_space_member": await _actor_is_space_member(container, view)},
+        extra={"actor_is_space_member": view.actor_is_space_member},
     )
     return assembler.from_view(view)
 
@@ -585,6 +576,7 @@ async def get_widget_overview(container: _ContainerWithUser):
                 status=WidgetStatus(row.status),
                 space_id=row.space_id,
                 space_name=row.space_name,
+                space_kind=row.space_kind,
                 target_id=row.target_id,
                 assistant_name=row.assistant_name,
                 allowed_origins=row.allowed_origins,
@@ -635,28 +627,17 @@ async def get_widget_overview(container: _ContainerWithUser):
     responses=responses.get_responses([403, 404]),
 )
 async def get_widget_review(id: UUID, container: _ContainerWithUser):
-    user = container.user()
-    validate_permission(user, Permission.ADMIN)
-    facts = await container.widget_service().review_widget(id)
-    overview = await container.widget_overview_repo().get_one(
-        user.tenant_id, id, today=container.widget_budget().today()
+    facts = await container.widget_service().review_widget(
+        id, today=container.widget_budget().today()
     )
-    if overview is None:
-        raise NotFoundException("Widget not found.")
-    row = overview.overview
+    row = facts.record.overview
     target = None
     if facts.target is not None:
-        assistant = facts.target.assistant
         target = AdminWidgetReviewTarget(
-            assistant=assistant,
+            assistant=facts.target.assistant,
             knowledge=facts.knowledge,
             visitor_mcp_servers=facts.target.visitor_mcp_servers,
-            visitor_capabilities=[
-                "web_search"
-                for capability in assistant.capabilities
-                if capability == "web_search"
-                and capability in VISITOR_CAPABILITY_PURPOSES
-            ],
+            visitor_capabilities=facts.visitor_capabilities,
         )
     return AdminWidgetReview(
         widget=container.widget_assembler().from_view(facts.view),
@@ -664,10 +645,10 @@ async def get_widget_review(id: UUID, container: _ContainerWithUser):
         space_kind=facts.space.kind,
         space_security_classification=facts.space.security_classification,
         target=target,
-        created_by=overview.created_by,
-        activated_by=overview.activated_by,
+        created_by=facts.record.created_by,
+        activated_by=facts.record.activated_by,
         activation_requested_by=row.activation_requested_by,
-        activation_declined_by=overview.activation_declined_by,
+        activation_declined_by=facts.record.activation_declined_by,
         viewer_role=facts.viewer_role,
         viewer_membership=facts.viewer_membership,
         usage=AdminWidgetReviewUsage(

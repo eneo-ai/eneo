@@ -19,6 +19,7 @@ from eneo.database.tables.users_table import Users
 from eneo.database.tables.widget_usage_table import WidgetDailyUsage
 from eneo.database.tables.widgets_table import Widgets
 from eneo.spaces.oversight.oversight_models import OversightPersonRef
+from eneo.spaces.space_reads import SpaceKind, space_kind
 from eneo.widgets.domain.widget import Widget, WidgetStatus
 from eneo.widgets.infrastructure.widget_repo_impl import to_entity
 
@@ -35,6 +36,7 @@ class WidgetOverviewRow:
     status: str
     space_id: UUID
     space_name: Optional[str]
+    space_kind: SpaceKind
     target_id: UUID
     assistant_name: Optional[str]
     allowed_origins: list[str]
@@ -132,6 +134,8 @@ class WidgetOverviewRepoImpl:
             sa.select(
                 Widgets,
                 Spaces.name.label("space_name"),
+                Spaces.user_id.label("space_owner_id"),
+                Spaces.tenant_space_id.label("space_parent_id"),
                 Assistants.name.label("assistant_name"),
                 Assistants.published.label("assistant_published"),
                 aggregates.c.questions_7d,
@@ -168,6 +172,7 @@ class WidgetOverviewRepoImpl:
             status=widget.status,
             space_id=widget.space_id,
             space_name=row.space_name,
+            space_kind=space_kind(row.space_owner_id, row.space_parent_id),
             target_id=widget.target_id,
             assistant_name=row.assistant_name,
             allowed_origins=list(widget.allowed_origins or []),

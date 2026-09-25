@@ -359,6 +359,8 @@ async def test_member_admin_tests_only_a_published_target(
     resp = await client.post(_path(widget, "preview-token/"), headers=overseer.headers)
     assert resp.status_code == 200, resp.text
     assert resp.json()["public_id"] == widget["public_id"]
+    # Minted on membership that a leave or removal ends: short-lived.
+    assert resp.json()["expires_in"] == 600
 
     await publish(client, admin.token, setup["assistant_id"], published=False)
     resp = await client.post(_path(widget, "preview-token/"), headers=overseer.headers)

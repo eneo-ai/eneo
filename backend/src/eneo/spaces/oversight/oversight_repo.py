@@ -81,6 +81,8 @@ from eneo.database.tables.websites_table import Websites
 from eneo.database.tables.widget_usage_table import WidgetDailyUsage
 from eneo.database.tables.widgets_table import Widgets
 from eneo.main.exceptions import NotFoundException
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
+from eneo.mcp_servers.domain.entities.mcp_server import CAPABILITY_PURPOSES
 from eneo.sessions.helper_filters import exclude_helper_run_sessions
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.spaces.oversight.domain import (
@@ -90,7 +92,6 @@ from eneo.spaces.oversight.domain import (
     DirectMembership,
     GroupMembership,
     MembershipSnapshot,
-    higher_role,
 )
 from eneo.spaces.oversight.oversight_models import (
     AdminPrincipal,
@@ -99,7 +100,6 @@ from eneo.spaces.oversight.oversight_models import (
     AdminSpaceGroupChat,
     AdminSpaceKnowledgeSource,
     AdminSpaceWidgetRef,
-    Capability,
     IntegrationItem,
     IntegrationType,
     OversightClassification,
@@ -109,6 +109,7 @@ from eneo.spaces.oversight.oversight_models import (
     OversightRef,
     UpdateInterval,
 )
+from eneo.spaces.space_reads import SpaceKind, space_kind
 from eneo.spaces.space_repo import (
     COLLECTION_SOURCE,
     INTEGRATION_KNOWLEDGE_SOURCE,
@@ -118,14 +119,11 @@ from eneo.spaces.utils.space_utils import effective_space_ids_for
 from eneo.users.user_repo import tenant_admin_user_ids_select
 from eneo.widgets.domain.widget import WidgetStatus
 
-SpaceKind = Literal["shared", "organization", "personal"]
-
 _UGU = usergroups_users_table
 _MANAGEABLE_STATES = sorted(MANAGEABLE_USER_STATES)
 _UPDATE_INTERVALS: frozenset[str] = frozenset(
     {"never", "daily", "every_other_day", "weekly"}
 )
-_CAPABILITIES: frozenset[str] = frozenset({"web_search", "image_generation"})
 _INTEGRATION_TYPES: frozenset[str] = frozenset({"sharepoint", "confluence"})
 # The status that matters most first; sorted() keeps the name order within.
 _WIDGET_STATUS_ORDER: Mapping[WidgetStatus, int] = {
@@ -236,8 +234,8 @@ def _person(
     return OversightPersonRef(id=id, name=username or email, email=email)
 
 
-def _capabilities(purposes: Iterable[str]) -> list[Capability]:
-    return sorted(cast(Capability, p) for p in set(purposes) if p in _CAPABILITIES)
+def _capabilities(purposes: Iterable[str]) -> list[CapabilityPurpose]:
+    return sorted(p for p in set(purposes) if p in CAPABILITY_PURPOSES)
 
 
 def _member_state(state: Optional[str]) -> Literal["active", "invited", "inactive"]:
@@ -372,7 +370,7 @@ class SpaceSettingsRows:
     embedding_models: list[OversightModelRef]
     transcription_models: list[OversightModelRef]
     mcp_servers: list[OversightRef]
-    capabilities: list[Capability]
+    capabilities: list[CapabilityPurpose]
 
 
 @dataclass(frozen=True)
@@ -503,64 +501,12 @@ class SpaceOversightRepo:
         if row is None:
             return None
         id, name, owner_id, tenant_space_id, sc_id, sc_name, sc_level = row
-        kind: SpaceKind
-        if owner_id is not None:
-            kind = "personal"
-        elif tenant_space_id is None:
-            kind = "organization"
-        else:
-            kind = "shared"
         return SpaceSummaryRow(
             id=id,
             name=name,
-            kind=kind,
+            kind=space_kind(owner_id, tenant_space_id),
             security_classification=_classification(sc_id, sc_name, sc_level),
         )
-
-    async def effective_role(
-        self,
-        tenant_id: UUID,
-        space_id: UUID,
-        *,
-        user_id: UUID,
-        group_ids: Collection[UUID],
-    ) -> Optional[SpaceRoleValue]:
-        """The user's role in any space of the tenant, as SpaceActor resolves
-        it for a signed-in user: the owner of a personal space counts as
-        admin, otherwise the higher of the direct and group roles."""
-        direct = (
-            sa.select(SpacesUsers.role)
-            .where(SpacesUsers.space_id == Spaces.id, SpacesUsers.user_id == user_id)
-            .scalar_subquery()
-        )
-        via_groups = (
-            sa.select(sa.func.array_agg(SpacesUserGroups.role))
-            .join(
-                UserGroups,
-                sa.and_(UserGroups.id == SpacesUserGroups.user_group_id, _live_group()),
-            )
-            .where(
-                SpacesUserGroups.space_id == Spaces.id,
-                SpacesUserGroups.user_group_id.in_(list(group_ids)),
-            )
-            .scalar_subquery()
-        )
-        stmt = sa.select(Spaces.user_id, direct, via_groups).where(
-            Spaces.id == space_id, Spaces.tenant_id == tenant_id
-        )
-        row = (await self.session.execute(stmt)).tuples().one_or_none()
-        if row is None:
-            return None
-        owner_id, direct_role, group_roles = row
-        if owner_id is not None:
-            return SpaceRoleValue.ADMIN if owner_id == user_id else None
-        # Scalar subquery: None without a direct row.
-        role = (
-            _role(direct_role) if cast(Optional[str], direct_role) is not None else None
-        )
-        for group_role in cast(Optional[list[str]], group_roles) or []:
-            role = higher_role(role, _role(group_role))
-        return role
 
     # --- list -----------------------------------------------------------------
 
