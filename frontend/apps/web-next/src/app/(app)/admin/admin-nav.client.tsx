@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Blocks,
   BookText,
   Building2,
   ChartPie,
@@ -37,7 +38,7 @@ function isActive(pathname: string, href: string): boolean {
 export function AdminNav() {
   const t = useTranslations();
   const pathname = usePathname();
-  const { settings } = useAppContext();
+  const { settings, can } = useAppContext();
 
   const configurationItems: NavItem[] = [
     { href: "/admin/models", icon: Cpu, label: t("models") },
@@ -46,6 +47,9 @@ export function AdminNav() {
       : []),
     { href: "/admin/help-assistants", icon: Sparkles, label: t("admin_help_assistants_nav_label") },
     { href: "/admin/mcp-servers", icon: Plug, label: t("mcp_servers") },
+    ...(can("modules")
+      ? [{ href: "/admin/modules", icon: Blocks, label: t("module_admin_title") }]
+      : []),
     { href: "/admin/integrations", icon: Cloud, label: t("integrations") }
   ];
 
