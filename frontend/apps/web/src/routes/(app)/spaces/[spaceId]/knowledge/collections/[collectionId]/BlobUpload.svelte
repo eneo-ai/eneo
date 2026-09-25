@@ -40,7 +40,10 @@
 
   const eneo = getEneo();
 
+  // Tenant storage usage is admin-only; for everyone else the server enforces
+  // the tenant quota when the upload job runs.
   onMount(async () => {
+    if (!user.hasPermission("admin")) return;
     try {
       const summary = await eneo.usage.storage.getSummary();
       tenantQuotaLimit = summary.limit ?? null;
