@@ -50,8 +50,9 @@
   ) => void = () => {};
 
   // The live transcript preview listens to this recorder's own audio graph: it
-  // gets the graph once the microphone is open and `null` before the graph is
-  // released. Rotation keeps the graph, so one preview spans every segment.
+  // gets the graph once the microphone is open and `null` in the task the
+  // recording stops (again, harmlessly, before the graph is released). Rotation
+  // keeps the graph, so one preview spans every segment.
   // While it returns a pending promise the recording waits, at most
   // AUDIO_GRAPH_PREPARATION_MS; `signal` aborts once the recording stops
   // waiting, and a listener that fails never keeps the recording from starting.
@@ -827,6 +828,9 @@
       recordingStats.errors.push(errorMsg);
       recordingState = "error";
     }
+    // Live audio ends here too, not once the last file is handed over a moment
+    // later: it hears only what the file has.
+    if (endsRecording && audioContext) onAudioGraph(null);
     const handedOver = Promise.all([
       overlapStopped,
       live ? recorderStops.get(live) : undefined

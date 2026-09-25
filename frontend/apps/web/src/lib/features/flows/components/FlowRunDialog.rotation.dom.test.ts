@@ -699,11 +699,9 @@ describe("FlowRunDialog live text across a rotation", () => {
 
     await rotate();
     await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    // The live text ends with the recording, before either file is handed over.
+    expect(flushRequests()).toHaveLength(1);
     media.recorders[0]?.finish();
-    await flush();
-    // The replaced recorder's file is handed over; the microphone is still open.
-    expect(flushRequests()).toHaveLength(0);
-
     media.recorders[1]?.finish();
     await flush();
     expect(flushRequests()).toHaveLength(1);
@@ -716,6 +714,32 @@ describe("FlowRunDialog live text across a rotation", () => {
     expect(socket.texts).toEqual([JSON.stringify({ type: "stop" })]);
     expect(socket.sent.at(-1)).toBe(JSON.stringify({ type: "stop" }));
     expect(flushRequests()).toHaveLength(1);
+  });
+
+  it("ends the live text in the task the recorder stops, so it hears only what the file has", async () => {
+    installLiveTranscriptFakes();
+    await openDialogAndStartRecording(
+      vi.fn(() => new Promise<UploadedFile>(() => undefined)),
+      liveText
+    );
+    const socket = FakeLiveSocket.instances[0];
+    const node = FakeWorkletNode.instances[0];
+    node.answersFlush = false;
+    socket.open();
+    socket.receive({ type: "ready", sample_rate: 16000, max_seconds: 18000 });
+    node.frame(1);
+
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    expect(node.port.postMessage).toHaveBeenCalledWith(PCM16_FLUSH);
+    node.frame(2, 1600);
+    node.post(PCM16_FLUSHED);
+    // Audio the recorder's last chunk may still bring is not live text's.
+    node.frame(3);
+    media.recorders[0]?.finish();
+    await flush();
+
+    expect(frameTags(socket)).toEqual([1, 2]);
+    expect(socket.texts).toHaveLength(1);
   });
 
   it("keeps a rotated recording's draft until Kasta actually runs, then drops it for good", async () => {
