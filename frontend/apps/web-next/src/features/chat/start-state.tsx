@@ -109,7 +109,7 @@ function QuickAssistants() {
         </h2>
         <Link
           href="/dashboard"
-          className="text-ax-text-accent focus-visible:outline-ring rounded-ax-inner text-[13px] font-semibold underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2"
+          className="text-ax-text-accent focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 items-center text-[13px] font-semibold underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
         >
           {t("chat_show_all_assistants")}
         </Link>
