@@ -4132,6 +4132,7 @@
   "organization_skills_removed_at": "Borttagen {time}",
   "eneo_error_9062": "En skill uppdateras. Inget togs bort. Vänta en stund och försök igen.",
   "eneo_error_9063": "Assistenten är publicerad som webbwidget. En administratör behöver arkivera widgeten innan assistenten kan flyttas.",
+  "eneo_error_9064": "Valen för den här konversationen ändrades någon annanstans, till exempel i en annan flik. Läs in de sparade valen och försök igen.",
   "eneo_error_9065": "Ytan måste ha minst en administratör. Utse en annan administratör först.",
   "eneo_error_9066": "Redan medlem i ytan.",
   "eneo_error_9067": "Du kan inte ändra din egen åtkomst här. Gå med i eller lämna ytan i stället, så sparas ändringen med en anledning.",
