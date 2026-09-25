@@ -192,12 +192,14 @@ image is stored as a file owned by a user, and a service key has no user.
   Ordinary assistant chats use their configured model and reasoning settings;
   group chats use the responding assistant's settings. Group chats do not
   offer per-call tool approval.
-- Switching models after a conversation has messages shows a warning and
-  offers a new conversation. The new model may fit less history or support
+- Switching models after a conversation has messages asks for confirmation and
+  offers a new conversation as an option. The new model may fit less history or support
   different tools and images. Messages remain stored; the backend prepares
   context for the selected model on each request. Changing the completion
   model does not reindex knowledge sources, which use a separate embedding
-  model. The model that produced each answer remains recorded with that message.
+  model. Provider prompt caching can affect response time and cost, but a cache
+  miss does not delete saved messages or require a new conversation. The model
+  that produced each answer remains recorded with that message.
 - Changes in an existing conversation are saved immediately, before the next
   message. A draft is saved together with its first question; refreshing an
   unsent draft restores current defaults. Older conversations without saved
