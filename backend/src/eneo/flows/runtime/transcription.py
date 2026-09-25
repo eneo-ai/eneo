@@ -711,13 +711,16 @@ async def transcribe_audio_input(
                         ):
                             live_fallback_reason = "duration_mismatch"
                         else:
+                            # Streamed deltas carry the space that joined them; the
+                            # speaker service's aligner refuses leading whitespace.
                             live_segments = tuple(
                                 TranscriptSegment(
-                                    text=str(segment["text"]),
+                                    text=str(segment["text"]).strip(),
                                     start=float(segment["start"]),
                                     end=float(segment["end"]),
                                 )
                                 for segment in live_transcript.segments
+                                if str(segment["text"]).strip()
                             )
                             transcribed = TranscribedAudio(
                                 text=live_transcript.text,

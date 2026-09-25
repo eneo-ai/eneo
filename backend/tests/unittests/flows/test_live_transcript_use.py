@@ -187,6 +187,35 @@ async def test_live_speaker_enrichment_uses_live_segments_and_run_bound(
     )
 
 
+@pytest.mark.parametrize("labels", [True, False])
+async def test_streamed_passages_are_trimmed_and_empty_ones_dropped(live_audio, labels):
+    # Streamed deltas start with the space that joined them to the text before; the
+    # speaker service's aligner refuses leading whitespace, and a blank passage is no text.
+    case = live_audio
+    case.request.run.input_payload_json["speaker_labels"] = labels
+    case.row.segments = [
+        {"text": " Hej", "start": 0.0, "end": 2.0},
+        {"text": "  ", "start": 2.0, "end": 3.0},
+        {"text": " och välkomna.", "start": 3.0, "end": 42.0},
+    ]
+    await resolve_transcribe_and_attach_audio_input(
+        request=case.request, deps=case.deps
+    )
+    case.registry.transcribe_from_filepath.assert_not_awaited()
+    expected = (
+        TranscriptSegment("Hej", 0, 2),
+        TranscriptSegment("och välkomna.", 3, 42),
+    )
+    if labels:
+        assert case.remote.label_speakers.await_args.kwargs["segments"] == expected
+    else:
+        _, prepared = case.staged[0]
+        assert [segment["text"] for segment in prepared.source.segments] == [
+            "Hej",
+            "och välkomna.",
+        ]
+
+
 @pytest.mark.parametrize(
     "condition,reason,labels",
     [
