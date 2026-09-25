@@ -214,7 +214,7 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
           description={t("password_needs_7_chars")}
           required={passwordRequired}
           autoComplete="new-password"
-          placeholder={mode === "update" ? "••••••••" : undefined}
+          placeholder={mode === "update" ? t("admin_users_password_unchanged") : undefined}
         />
 
         <RolePicker

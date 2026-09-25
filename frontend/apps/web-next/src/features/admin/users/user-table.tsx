@@ -1,81 +1,125 @@
 "use client";
 
-import { useTranslations } from "next-intl";
-import { Badge } from "@/components/ui/badge";
+import { Avatar } from "@astryxdesign/core/Avatar";
+import { Badge } from "@astryxdesign/core/Badge";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
+  TableHeaderCell,
   TableRow
-} from "@/components/ui/table";
-import { cn } from "@/lib/utils";
+} from "@astryxdesign/core/Table";
+import { Text } from "@astryxdesign/core/Text";
+import { useTranslations } from "next-intl";
+import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import { UserActions } from "./user-actions";
 import type { AdminUser, UserState } from "./users";
 
-const STATE_STYLES: Partial<Record<UserState, string>> = {
-  active: "border-success/30 bg-success/10 text-success",
-  invited: "border-primary/30 bg-primary/10 text-primary",
-  inactive: "border-border bg-muted text-muted-foreground"
+const STATE_TONE: Record<UserState, StatusTone> = {
+  active: "success",
+  invited: "accent",
+  inactive: "neutral",
+  deleted: "error"
 };
 
-function StateBadge({ state }: { state: UserState }) {
+function useStateLabel() {
   const t = useTranslations();
-  const label =
+  return (state: UserState) =>
     state === "active"
       ? t("active")
       : state === "inactive"
         ? t("inactive")
         : state === "invited"
           ? t("invited")
-          : state;
-  return (
-    <span
-      className={cn(
-        "inline-block rounded-md border px-2 py-0.5 text-xs font-medium",
-        STATE_STYLES[state] ?? "border-border bg-muted text-muted-foreground"
-      )}
-    >
-      {label}
-    </span>
-  );
+          : t("admin_users_state_deleted");
 }
 
-export function UserTable({ users }: { users: AdminUser[] }) {
+/**
+ * Users as a table: initials avatar with username and email, role badges,
+ * status dot with its label, and the row menu. Long names and emails truncate
+ * with a tooltip; below the min width the table scrolls in its own region.
+ */
+export function UserTable({
+  users,
+  label,
+  onRemoved
+}: {
+  users: AdminUser[];
+  /** Accessible name of the table (the selected tab). */
+  label: string;
+  onRemoved?: () => void;
+}) {
   const t = useTranslations();
+  const stateLabel = useStateLabel();
 
   return (
-    <Table>
+    <Table aria-label={label} hasHover className="min-w-160 table-fixed">
       <TableHeader>
-        <TableRow>
-          <TableHead>{t("email")}</TableHead>
-          <TableHead>{t("roles")}</TableHead>
-          <TableHead>{t("status")}</TableHead>
-          <TableHead className="w-12" />
+        <TableRow className="bg-ax-sunken [&>th]:text-xs">
+          <TableHeaderCell scope="col">{t("user")}</TableHeaderCell>
+          <TableHeaderCell scope="col" className="w-2/5">
+            {t("roles")}
+          </TableHeaderCell>
+          <TableHeaderCell scope="col" className="w-36">
+            {t("status")}
+          </TableHeaderCell>
+          <TableHeaderCell scope="col" className="w-14">
+            <span className="sr-only">{t("actions")}</span>
+          </TableHeaderCell>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {users.map((user) => (
-          <TableRow key={user.id}>
-            <TableCell className="font-medium">{user.email}</TableCell>
-            <TableCell>
-              <div className="flex flex-wrap gap-1">
-                {user.roles.map((role) => (
-                  <Badge key={role.id} variant="secondary">
-                    {role.name}
-                  </Badge>
-                ))}
-              </div>
-            </TableCell>
-            <TableCell>
-              <StateBadge state={user.state} />
-            </TableCell>
-            <TableCell>
-              <UserActions user={user} />
-            </TableCell>
-          </TableRow>
-        ))}
+        {users.map((user) => {
+          const name = user.username || user.email;
+          return (
+            <TableRow key={user.id}>
+              <TableCell>
+                <div className="flex min-w-0 items-center gap-3">
+                  {/* Decorative next to the visible name. */}
+                  <Avatar name={name} size={32} tooltip={false} aria-hidden="true" />
+                  <div className="flex min-w-0 flex-col">
+                    <Text weight="semibold" maxLines={1}>
+                      {name}
+                    </Text>
+                    {user.username && (
+                      <Text type="supporting" maxLines={1}>
+                        {user.email}
+                      </Text>
+                    )}
+                  </div>
+                </div>
+              </TableCell>
+              <TableCell>
+                {user.roles.length > 0 ? (
+                  <ul className="flex flex-wrap gap-1">
+                    {user.roles.map((role) => (
+                      <li key={role.id} className="flex min-w-0">
+                        <Badge label={role.name} />
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <>
+                    <span aria-hidden="true" className="text-ax-text-secondary">
+                      –
+                    </span>
+                    <span className="sr-only">{t("none")}</span>
+                  </>
+                )}
+              </TableCell>
+              <TableCell>
+                <StatusLabel
+                  status={STATE_TONE[user.state] ?? "neutral"}
+                  label={stateLabel(user.state)}
+                />
+              </TableCell>
+              <TableCell className="text-end">
+                <UserActions user={user} onRemoved={onRemoved} />
+              </TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );

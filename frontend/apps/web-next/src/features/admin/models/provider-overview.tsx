@@ -100,13 +100,16 @@ export function ProviderOverview({
   classifications,
   securityEnabled,
   onAddModel,
-  onAddProvider
+  onAddProvider,
+  onRemoved
 }: {
   models: ModelsPresentation;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
   onAddModel: (providerId: string) => void;
   onAddProvider: () => void;
+  /** Called after a delete removed a provider or model (focus rescue). */
+  onRemoved?: () => void;
 }) {
   const t = useTranslations();
   const typeLabel = useModelTypeLabel();
@@ -182,6 +185,7 @@ export function ProviderOverview({
         classifications={classifications}
         securityEnabled={securityEnabled}
         onAddModel={onAddModel}
+        onRemoved={onRemoved}
       />
     ));
   }

@@ -1,25 +1,26 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
+import { Pagination } from "@astryxdesign/core/Pagination";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { Search, UserPlus } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useFormatter, useTranslations } from "next-intl";
+import { useEffect, useId, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
-import { cn } from "@/lib/utils";
 import { rolesQueryOptions } from "@/features/admin/roles/roles";
+import { rescueFocus } from "./focus-rescue";
 import { UserEditorDialog } from "./user-editor";
 import { UserTable } from "./user-table";
 import { adminUsersQueryOptions, MIN_SEARCH_LENGTH, type StateFilter } from "./users";
 
 const SEARCH_DEBOUNCE_MS = 250;
-const numberFormat = new Intl.NumberFormat("sv-SE");
+const STATE_TABS: StateFilter[] = ["active", "inactive"];
 
 /** Sync the current filter state into the URL for shareable links. */
 function syncUrl(stateFilter: StateFilter, search: string, page: number, roleId: string | null) {
@@ -34,6 +35,7 @@ function syncUrl(stateFilter: StateFilter, search: string, page: number, roleId:
 
 export function AdminUsersPage() {
   const t = useTranslations();
+  const format = useFormatter();
   const searchParams = useSearchParams();
 
   const initialTab = searchParams.get("tab") === "inactive" ? "inactive" : "active";
@@ -46,6 +48,13 @@ export function AdminUsersPage() {
   const [search, setSearch] = useState(initialSearch);
   const [page, setPage] = useState(initialPage);
   const [showCreate, setShowCreate] = useState(false);
+
+  const baseId = useId();
+  const panelId = `${baseId}-panel`;
+  const tabId = (value: StateFilter) => `${baseId}-tab-${value}`;
+  const tabLabel = (value: StateFilter) =>
+    value === "active" ? t("active_users") : t("inactive_users");
+  const panelRef = useRef<HTMLDivElement>(null);
 
   // Debounce the search box; only commit at 0 or ≥3 chars (backend rule).
   const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -91,97 +100,129 @@ export function AdminUsersPage() {
     setPage(1);
   }
 
-  return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <PageHeader title={t("users")} tour="admin-users">
-        <Button onClick={() => setShowCreate(true)}>{t("create_user")}</Button>
-      </PageHeader>
-
-      <Tabs value={stateFilter} onValueChange={(value) => selectTab(value as StateFilter)}>
-        <TabsList>
-          <TabsTrigger value="active">
-            {t("active_users")}
-            {counts.active != null && (
-              <span className="text-muted-foreground ml-1.5">
-                ({numberFormat.format(counts.active)})
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="inactive">
-            {t("inactive_users")}
-            {counts.inactive != null && (
-              <span className="text-muted-foreground ml-1.5">
-                ({numberFormat.format(counts.inactive)})
-              </span>
-            )}
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
-
-      <div className="relative max-w-sm">
-        <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
-        <Input
-          value={searchInput}
-          placeholder={t("search")}
-          className="pl-9"
-          onChange={(event) => setSearchInput(event.target.value)}
+  let results: React.ReactNode;
+  if (isPending) {
+    results = <LoadingState rows={5} />;
+  } else if (users.length === 0) {
+    results = <EmptyState title={t("no_users_found")} />;
+  } else {
+    results = (
+      <div className="bg-ax-card border-ax-border rounded-ax-container overflow-hidden border">
+        <UserTable
+          users={users}
+          label={tabLabel(stateFilter)}
+          onRemoved={() => rescueFocus(panelRef.current)}
         />
       </div>
+    );
+  }
 
-      {roleId && (
-        <div className="bg-muted flex w-fit items-center gap-3 rounded-lg px-3 py-2 text-sm">
-          <span>
-            {t("roles_filter_label")}: <strong>{selectedRole?.name ?? roleId}</strong>
-          </span>
+  return (
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
+      <PageHeader
+        title={t("users")}
+        description={t("admin_users_description")}
+        breadcrumbs={[
+          { label: t("admin_breadcrumb_root"), href: "/admin" },
+          { label: t("admin_section_access") }
+        ]}
+        tour="admin-users"
+        actions={
           <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setRoleId(null);
-              setPage(1);
-            }}
-          >
-            {t("roles_clear_filter")}
-          </Button>
-        </div>
-      )}
+            variant="primary"
+            label={t("create_user")}
+            icon={<UserPlus className="size-4" aria-hidden="true" />}
+            onClick={() => setShowCreate(true)}
+          />
+        }
+      />
 
-      <div className={cn(isPlaceholderData && "opacity-60 transition-opacity")}>
-        {isPending ? (
-          <LoadingState rows={5} />
-        ) : users.length === 0 ? (
-          <EmptyState title={t("no_users_found")} />
-        ) : (
-          <UserTable users={users} />
+      <TabList
+        role="tablist"
+        aria-label={t("admin_users_tabs_label")}
+        value={stateFilter}
+        onChange={(value) => selectTab(value as StateFilter)}
+        hasDivider
+      >
+        {STATE_TABS.map((value) => {
+          const count = counts[value];
+          return (
+            <Tab
+              key={value}
+              id={tabId(value)}
+              value={value}
+              label={tabLabel(value)}
+              panelId={panelId}
+              endContent={
+                count != null ? (
+                  <span className="text-ax-text-secondary tabular-nums">
+                    {format.number(count)}
+                  </span>
+                ) : undefined
+              }
+            />
+          );
+        })}
+      </TabList>
+
+      {/* One panel for both tabs; it takes focus when an action removed the
+          focused row (see rescueFocus). */}
+      <div
+        ref={panelRef}
+        role="tabpanel"
+        id={panelId}
+        aria-labelledby={tabId(stateFilter)}
+        tabIndex={-1}
+        className="focus-visible:outline-ring rounded-ax-element flex flex-col gap-4 focus-visible:outline-2 focus-visible:outline-offset-4"
+      >
+        <div className="flex flex-wrap items-center gap-2.5">
+          <TextInput
+            label={t("admin_users_search")}
+            isLabelHidden
+            placeholder={t("admin_users_search_placeholder")}
+            startIcon={Search}
+            value={searchInput}
+            onChange={setSearchInput}
+            hasClear
+            autoComplete="off"
+            className="w-full sm:w-80"
+          />
+          {roleId && (
+            <div className="bg-ax-muted rounded-ax-element flex items-center gap-2 py-1 ps-3 pe-1 text-sm">
+              <span>
+                {t("roles_filter_label")}:{" "}
+                <strong className="font-semibold">{selectedRole?.name ?? roleId}</strong>
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                label={t("roles_clear_filter")}
+                onClick={() => {
+                  setRoleId(null);
+                  setPage(1);
+                }}
+              />
+            </div>
+          )}
+          {/* The result count, announced politely when a search changes it. */}
+          <p role="status" className="text-ax-text-secondary ms-auto text-sm">
+            {metadata?.total_count != null && !isPlaceholderData
+              ? t("admin_users_count", { count: metadata.total_count })
+              : ""}
+          </p>
+        </div>
+
+        <div aria-busy={isPlaceholderData || undefined}>{results}</div>
+
+        {totalPages > 1 && (
+          <Pagination
+            page={metadata?.page ?? page}
+            totalPages={totalPages}
+            onChange={setPage}
+            isDisabled={isPlaceholderData}
+          />
         )}
       </div>
-
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground text-sm">
-            {t("page")} {metadata?.page ?? page} / {totalPages}
-            {metadata?.total_count != null && ` · ${numberFormat.format(metadata.total_count)}`}
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!metadata?.has_previous || isPlaceholderData}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-            >
-              {t("previous")}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!metadata?.has_next || isPlaceholderData}
-              onClick={() => setPage((current) => current + 1)}
-            >
-              {t("next")}
-            </Button>
-          </div>
-        </div>
-      )}
 
       <UserEditorDialog open={showCreate} onOpenChange={setShowCreate} />
     </div>

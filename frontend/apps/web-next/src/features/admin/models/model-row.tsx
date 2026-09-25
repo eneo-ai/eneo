@@ -169,13 +169,16 @@ export function ModelRow({
   kind,
   classifications,
   securityEnabled,
-  showKind = false
+  showKind = false,
+  onRemoved
 }: {
   model: AdminModel;
   kind: ModelKind;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
   showKind?: boolean;
+  /** Called after the model was deleted and the list refetched. */
+  onRemoved?: () => void;
 }) {
   const t = useTranslations();
   const typeLabel = useModelTypeLabel();
@@ -227,10 +230,11 @@ export function ModelRow({
 
   const remove = useMutation({
     mutationFn: () => deleteTenantModel(browserApi, kind, model.id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
-      toast.success(t("model_deleted_success"));
+    onSuccess: async () => {
       setShowDelete(false);
+      toast.success(t("model_deleted_success"));
+      await queryClient.invalidateQueries({ queryKey: MODELS_KEY });
+      onRemoved?.();
     },
     onError: (error) => {
       if (

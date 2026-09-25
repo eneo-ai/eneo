@@ -4850,6 +4850,7 @@
   "admin_models_provider_key": "nyckel {key}",
   "admin_models_provider_menu": "Fler alternativ för {name}",
   "admin_models_add_model_to": "Lägg till modell i {name}",
+  "admin_models_provider_deleted": "{name} togs bort",
   "admin_models_column_capabilities": "Förmågor",
   "admin_models_column_price": "Pris per 1M tokens",
   "admin_models_column_security": "Säkerhetsklass",
@@ -4870,5 +4871,8 @@
   "admin_users_row_menu": "Fler åtgärder för {email}",
   "admin_users_count": "{count, plural, one {# användare} other {# användare}}",
   "admin_users_state_deleted": "Borttagen",
-  "admin_users_password_unchanged": "Lämna tomt för att behålla lösenordet"
+  "admin_users_password_unchanged": "Lämna tomt för att behålla lösenordet",
+  "admin_users_deactivated": "{email} avaktiverades",
+  "admin_users_reactivated": "{email} återaktiverades",
+  "admin_users_deleted": "{email} raderades"
 }

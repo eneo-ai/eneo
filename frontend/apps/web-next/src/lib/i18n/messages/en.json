@@ -4850,6 +4850,7 @@
   "admin_models_provider_key": "key {key}",
   "admin_models_provider_menu": "More options for {name}",
   "admin_models_add_model_to": "Add model to {name}",
+  "admin_models_provider_deleted": "{name} was deleted",
   "admin_models_column_capabilities": "Capabilities",
   "admin_models_column_price": "Price per 1M tokens",
   "admin_models_column_security": "Security class",
@@ -4870,5 +4871,8 @@
   "admin_users_row_menu": "More actions for {email}",
   "admin_users_count": "{count, plural, one {# user} other {# users}}",
   "admin_users_state_deleted": "Deleted",
-  "admin_users_password_unchanged": "Leave empty to keep the password"
+  "admin_users_password_unchanged": "Leave empty to keep the password",
+  "admin_users_deactivated": "{email} was deactivated",
+  "admin_users_reactivated": "{email} was reactivated",
+  "admin_users_deleted": "{email} was deleted"
 }

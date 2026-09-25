@@ -5,10 +5,11 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
+import { rescueFocus } from "@/features/admin/users/focus-rescue";
 import { AddModelWizard } from "./add-model-wizard";
 import { MigrationHistoryPanel } from "./migration-history-panel";
 import { adminModelsQueryOptions } from "./models";
@@ -36,6 +37,7 @@ export function ModelsPage() {
 
   const baseId = useId();
   const panelId = `${baseId}-panel`;
+  const panelRef = useRef<HTMLDivElement>(null);
   const tabId = (value: ModelsTab) => `${baseId}-tab-${value}`;
   const tabLabel = (value: ModelsTab) =>
     value === "models"
@@ -93,8 +95,16 @@ export function ModelsPage() {
       </TabList>
 
       {/* One panel whose content follows the selected tab, so every tab's
-          aria-controls points at an element that exists. */}
-      <div role="tabpanel" id={panelId} aria-labelledby={tabId(tab)}>
+          aria-controls points at an element that exists. It takes focus when
+          a delete removed the focused row or card (see rescueFocus). */}
+      <div
+        ref={panelRef}
+        role="tabpanel"
+        id={panelId}
+        aria-labelledby={tabId(tab)}
+        tabIndex={-1}
+        className="focus-visible:outline-ring rounded-ax-element focus-visible:outline-2 focus-visible:outline-offset-4"
+      >
         {tab === "models" && (
           <ProviderOverview
             models={models}
@@ -102,6 +112,7 @@ export function ModelsPage() {
             securityEnabled={security.security_enabled}
             onAddModel={openAddModel}
             onAddProvider={openAddProvider}
+            onRemoved={() => rescueFocus(panelRef.current)}
           />
         )}
         {tab === "history" && <MigrationHistoryPanel />}

@@ -77,11 +77,6 @@
       "count": 1
     }
   },
-  "src/features/admin/users/user-editor.tsx": {
-    "eneo/no-literal-accessible-name": {
-      "count": 1
-    }
-  },
   "src/features/api-keys/account-api-keys.tsx": {
     "jsx-a11y/no-autofocus": {
       "count": 1

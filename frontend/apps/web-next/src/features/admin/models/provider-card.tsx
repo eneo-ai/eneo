@@ -13,6 +13,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
+import { toast } from "sonner";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
@@ -36,13 +37,15 @@ function ModelTable({
   labelledBy,
   showKind,
   classifications,
-  securityEnabled
+  securityEnabled,
+  onRemoved
 }: {
   models: KindedModel[];
   labelledBy: string;
   showKind: boolean;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
+  onRemoved?: () => void;
 }) {
   const t = useTranslations();
 
@@ -87,6 +90,7 @@ function ModelTable({
             classifications={classifications}
             securityEnabled={securityEnabled}
             showKind={showKind}
+            onRemoved={onRemoved}
           />
         ))}
       </TableBody>
@@ -104,7 +108,8 @@ export function ProviderCard({
   showKind,
   classifications,
   securityEnabled,
-  onAddModel
+  onAddModel,
+  onRemoved
 }: {
   section: ProviderSection;
   /** The provider's models that pass the page filters. */
@@ -113,6 +118,8 @@ export function ProviderCard({
   classifications: SecurityClassification[];
   securityEnabled: boolean;
   onAddModel: (providerId: string) => void;
+  /** Called after a delete removed the provider or one of its models. */
+  onRemoved?: () => void;
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -122,10 +129,14 @@ export function ProviderCard({
 
   const remove = useMutation({
     mutationFn: () => deleteProvider(browserApi, section.providerId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: PROVIDERS_KEY });
-      void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
+    onSuccess: async () => {
       setShowDelete(false);
+      toast.success(t("admin_models_provider_deleted", { name: section.name }));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: PROVIDERS_KEY }),
+        queryClient.invalidateQueries({ queryKey: MODELS_KEY })
+      ]);
+      onRemoved?.();
     },
     onError: (error) => toastApiError(error, t)
   });
@@ -201,6 +212,7 @@ export function ProviderCard({
         showKind={showKind}
         classifications={classifications}
         securityEnabled={securityEnabled}
+        onRemoved={onRemoved}
       />
 
       <ProviderEditDialog provider={section.provider} open={showEdit} onOpenChange={setShowEdit} />
