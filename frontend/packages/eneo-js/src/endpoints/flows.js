@@ -1,4 +1,5 @@
 /** @typedef {import('../client/client').EneoError} EneoError */
+/** @typedef {import('../types/resources').FlowRunStepInputs} FlowRunStepInputs */
 /** @typedef {NonNullable<import('../types/schema').operations["list_flow_runs"]["parameters"]["query"]>} FlowRunListQuery */
 /** @typedef {NonNullable<import('../types/schema').operations["export_flow_run_evidence"]["parameters"]["query"]>} FlowRunEvidenceExportQuery */
 /** @typedef {NonNullable<import('../types/schema').operations["list_flow_run_provider_calls"]["parameters"]["query"]>} FlowRunProviderCallListQuery */
@@ -750,7 +751,7 @@ export function initFlows(client) {
        *  expected_flow_version?: number,
        *  idempotencyKey?: string,
        *  input_payload_json?: any,
-       *  step_inputs?: Record<string, {file_ids: string[]}>,
+       *  step_inputs?: FlowRunStepInputs,
        *  speaker_labels?: boolean | null,
        *  file_ids?: never
        * }} params
@@ -812,7 +813,7 @@ export function initFlows(client) {
        *  flowId: string,
        *  expectedFlowVersion?: number,
        *  input_payload_json?: any,
-       *  step_inputs?: Record<string, {file_ids?: string[]}>,
+       *  step_inputs?: FlowRunStepInputs,
        *  speaker_labels?: boolean | null,
        *  file_ids?: never
        * }} params
