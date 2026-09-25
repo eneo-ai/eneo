@@ -252,7 +252,7 @@ Response:
   "transcription": {
     "live": { "available": true, "reason": null },
     "speaker_labels": { "selectable": true, "required": false, "default": true },
-    "max_speakers": { "form_field": null }
+    "max_speakers": { "form_field": null, "participants_field": null }
   },
   "security_classification": {
     "name": "Open information",
@@ -353,6 +353,8 @@ Response:
   "input_payload_json": {
     "employee_name": "Alex Example"
   },
+  "speaker_labels": null,
+  "max_speakers": null,
   "result": null,
   "result_files": [],
   "token_usage": null,
@@ -743,6 +745,8 @@ Response:
     "input_payload_json": {
       "employee_name": "Alex Example"
     },
+    "speaker_labels": null,
+    "max_speakers": null,
     "result": null,
     "result_files": [],
     "token_usage": null,
@@ -792,6 +796,8 @@ Response:
   "input_payload_json": {
     "employee_name": "Alex Example"
   },
+  "speaker_labels": null,
+  "max_speakers": null,
   "result": {
     "kind": "artifact",
     "files": [
@@ -1250,6 +1256,26 @@ returns `flow_run_idempotency_conflict`. A positive limit on a run that labels
 no speakers returns `422 flow_run_max_speakers_not_available`.
 `max_speakers` is reserved inside `input_payload_json`; send it at the top
 level of the request.
+
+If `transcription.max_speakers.participants_field` names a field, that field
+lists the people expected to speak. Your app may offer the number of names as
+a prefill for `max_speakers`, as long as the user can see and change it. Eneo
+never sets the limit from the names itself: a limit below the real number of
+speakers would merge voices that are not on the list into one person.
+
+### Start a new run with the same speaker options
+
+A run response carries the run's own speaker options at the top level, next to
+`input_payload_json`:
+
+- `speaker_labels` is `true` or `false` when the run chose it or the flow
+  requires labels, and `null` when the run used the flow's own setting.
+- `max_speakers` is the limit the run used, and `null` when detection was
+  automatic or the run labels no speakers.
+
+To start a new run with the same options, send `max_speakers` as it is. Send
+`speaker_labels` only when the run contract's
+`transcription.speaker_labels.selectable` is `true`.
 
 ### Show live text while recording
 
