@@ -22,8 +22,6 @@ import {
 } from "./session-actions";
 import { useNow } from "./use-now";
 
-export { historyQueryKey } from "./session-actions";
-
 type SessionRow = {
   id: string;
   name: string;
