@@ -5890,6 +5890,7 @@
   "flow_run_transcription_size": "Storlek",
   "flow_run_trigger": "Kör flöde",
   "flow_run_trigger_confirm": "Starta körning",
+  "flow_run_finishing_live_text": "Slutför texten…",
   "flow_run_trigger_close": "Stäng dialogrutan Kör flöde",
   "flow_run_trigger_field_required": "{name} är obligatoriskt",
   "flow_run_trigger_field_required_generic": "Det här fältet är obligatoriskt",

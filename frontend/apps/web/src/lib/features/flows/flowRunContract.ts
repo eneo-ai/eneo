@@ -44,13 +44,24 @@ export function getBlockingTemplateReadinessItems(
   );
 }
 
+// `liveTranscriptIdsByStepId` names the step's stored live transcript, used
+// instead of transcribing its one audio file again.
 export function buildStepInputsPayload(
-  filesByStepId: Record<string, FileLike[]>
+  filesByStepId: Record<string, FileLike[]>,
+  liveTranscriptIdsByStepId: Readonly<Record<string, string>> = {}
 ): FlowRunStepInputs | undefined {
   const payloadEntries = Object.entries(filesByStepId)
     .map(([stepId, files]) => [stepId, files.map((file) => file.id).filter(Boolean)] as const)
     .filter(([, fileIds]) => fileIds.length > 0)
-    .map(([stepId, fileIds]) => [stepId, { file_ids: fileIds }] as const);
+    .map(([stepId, fileIds]) => {
+      const liveTranscriptId = liveTranscriptIdsByStepId[stepId];
+      return [
+        stepId,
+        liveTranscriptId
+          ? { file_ids: fileIds, live_transcript_id: liveTranscriptId }
+          : { file_ids: fileIds }
+      ] as const;
+    });
 
   if (payloadEntries.length === 0) {
     return undefined;

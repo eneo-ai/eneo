@@ -3,6 +3,7 @@ import { PCM16_FLUSH, PCM16_FLUSHED, PCM16_PROCESSOR } from "./pcm16-worklet.js"
 // A file of its own: Vite would inline a file this small as a data: URL, and
 // the app's `script-src 'self'` refuses worklet modules from data: URLs.
 import workletUrl from "./pcm16-worklet.js?url&no-inline";
+import { generateSessionId } from "../recordingSession";
 
 // "unavailable": the session never reached listening. "interrupted": it was
 // listening and ended while the recording went on.
@@ -21,7 +22,7 @@ export type LiveTranscriptPiece = { id: number; text: string };
 type LiveServerMessage =
   | { type: "ready"; sample_rate: number; max_seconds: number }
   | { type: "transcript.delta"; text: string }
-  | { type: "transcript.done"; text: string }
+  | { type: "transcript.done"; text: string; transcript_id?: string }
   | { type: "error"; code: string; message: string; retryable: boolean };
 
 const LIVE_PROTOCOL = "eneo-live.v1";
@@ -31,23 +32,33 @@ export const MAX_QUEUED_FRAMES = 150;
 // Frames are 100 ms (3.2 kB), so a socket holding this much has fallen minutes
 // behind the microphone. The preview then ends visibly; it never drops audio.
 const MAX_BUFFERED_BYTES = 1024 * 1024;
-// The worklet answers a flush within a render quantum; the bound only covers a
-// worklet that cannot answer any more because the recorder closed its context.
-export const FLUSH_TIMEOUT_MS = 200;
+// The worklet answers a flush within a render quantum. One that has not
+// answered by then took its last audio with it, so the stop names no count.
+export const FLUSH_TIMEOUT_MS = 1_000;
+// How long a run waits for the final text of a recording heard whole: measured
+// at 4 s on an idle machine and over 10 s under load, against minutes for
+// transcribing the audio again.
+export const FINAL_TEXT_WAIT_MS = 20_000;
 // A backstop just past the server's own wait for the final text (60 s).
 const FINAL_TEXT_TIMEOUT_MS = 65_000;
 
 /**
  * One owner of a step's live transcript preview: the ticket, the socket, the
  * worklet on the recorder's graph and the text shown so far. The preview is a
- * draft; the recording is uploaded and transcribed as usual, so nothing here
- * ever stops or changes the recording. A dropped session is not reconnected.
+ * draft; the recording is uploaded as usual, so nothing here ever stops or
+ * changes the recording. A dropped session is not reconnected.
+ *
+ * Each recording is named in its ticket request. When the session heard all of
+ * it, its stop counts the samples, and Eneo's final text may name a stored
+ * transcript that the run can use for the recording's one file instead of
+ * transcribing it again.
  */
 export class LiveTranscriptPreview {
   #status = $state<LiveTranscriptStatus>("idle");
   #pieces = $state.raw<LiveTranscriptPiece[]>([]);
   #errorCode = $state<string | null>(null);
   #stepId = $state<string | null>(null);
+  #finishing = $state(false);
 
   #socket: WebSocket | null = null;
   #node: AudioWorkletNode | null = null;
@@ -60,6 +71,15 @@ export class LiveTranscriptPreview {
   #generation = 0;
   #sessionText = "";
   #nextPieceId = 0;
+  #recordingId: string | null = null;
+  // Samples the worklet captured, counted before any wait or discard, and
+  // whether this session heard the recording whole: from its first sample,
+  // with nothing lost on the way. Once lost, never whole again.
+  #produced = 0;
+  #whole = false;
+  #transcriptId: string | null = null;
+  #fileId: string | null = null;
+  #finishingTimer: ReturnType<typeof setTimeout> | undefined;
 
   get status(): LiveTranscriptStatus {
     return this.#status;
@@ -76,6 +96,41 @@ export class LiveTranscriptPreview {
   // The step whose recording the text belongs to.
   get stepId(): string | null {
     return this.#stepId;
+  }
+
+  // The name the ticket request gave the recording.
+  get recordingId(): string | null {
+    return this.#recordingId;
+  }
+
+  // A counted stop awaits its final text, which may name a stored transcript:
+  // the run waits for it, at most FINAL_TEXT_WAIT_MS.
+  get finishing(): boolean {
+    return this.#finishing;
+  }
+
+  // The recording's one segment is uploaded as `fileId`: its transcript goes
+  // with that file only. A segment of an earlier recording changes nothing.
+  recordingUploaded(recordingId: string, fileId: string): void {
+    if (recordingId === this.#recordingId) this.#fileId = fileId;
+  }
+
+  // Eneo's stored transcript of the recording, when the step's files are
+  // exactly the recording's one file.
+  transcriptIdFor(fileIds: readonly string[]): string | undefined {
+    const [fileId, ...others] = fileIds;
+    return this.#transcriptId !== null && others.length === 0 && fileId === this.#fileId
+      ? this.#transcriptId
+      : undefined;
+  }
+
+  // Some of the recording never reaches this session's transcript (it rotated
+  // into a second file, or the run no longer takes one): the text stays a
+  // preview, for good, and nothing waits for it.
+  lose(): void {
+    this.#whole = false;
+    this.#transcriptId = null;
+    this.#stopFinishing();
   }
 
   /**
@@ -109,6 +164,11 @@ export class LiveTranscriptPreview {
     this.#errorCode = null;
     this.#sessionText = "";
     this.#onListening = onListening;
+    this.#recordingId = generateSessionId();
+    this.#produced = 0;
+    this.#whole = true;
+    this.#transcriptId = null;
+    this.#fileId = null;
 
     signal?.addEventListener(
       "abort",
@@ -117,7 +177,11 @@ export class LiveTranscriptPreview {
       },
       { once: true }
     );
-    const session = eneo.flows.liveTranscription.createSession({ id: flowId, stepId });
+    const session = eneo.flows.liveTranscription.createSession({
+      id: flowId,
+      stepId,
+      recordingId: this.#recordingId
+    });
     const tapped = graph.context.audioWorklet.addModule(workletUrl).then(() => {
       if (generation === this.#generation) this.#tap(graph);
     });
@@ -138,19 +202,30 @@ export class LiveTranscriptPreview {
       this.#teardown();
       return;
     }
+    if (this.#whole) {
+      this.#finishing = true;
+      this.#finishingTimer = setTimeout(() => this.#stopFinishing(), FINAL_TEXT_WAIT_MS);
+    }
     const node = this.#node;
     if (!node) {
       this.#sendStop(socket);
       return;
     }
     // The worklet posts its frame in progress, then PCM16_FLUSHED.
-    this.#stopTimer = setTimeout(() => this.#sendStop(socket), FLUSH_TIMEOUT_MS);
+    this.#stopTimer = setTimeout(() => {
+      this.lose();
+      this.#sendStop(socket);
+    }, FLUSH_TIMEOUT_MS);
     node.port.postMessage(PCM16_FLUSH);
   }
 
   // The recording was thrown away, or the preview goes: nothing of this
-  // session shows again, not even a late message.
+  // session shows again, not even a late message, and no transcript of it is
+  // kept for a later recording.
   discard(): void {
+    this.lose();
+    this.#recordingId = null;
+    this.#fileId = null;
     this.#teardown();
     this.#pieces = [];
     this.#status = "idle";
@@ -190,6 +265,9 @@ export class LiveTranscriptPreview {
 
   // Mono in, no output: nothing of the microphone reaches the speakers.
   #tap(graph: RecorderAudioGraph) {
+    // The recorder starts in this same task. A context that is not running
+    // hears none of the opening the recorder records.
+    if (graph.context.state !== "running") this.#whole = false;
     const node = new AudioWorkletNode(graph.context, PCM16_PROCESSOR, {
       numberOfInputs: 1,
       numberOfOutputs: 0,
@@ -210,6 +288,7 @@ export class LiveTranscriptPreview {
   }
 
   #takeFrame(frame: ArrayBuffer) {
+    this.#produced += frame.byteLength / 2;
     const socket = this.#socket;
     if (socket?.readyState === WebSocket.OPEN) {
       this.#send(socket, frame);
@@ -242,7 +321,11 @@ export class LiveTranscriptPreview {
     clearTimeout(this.#stopTimer);
     this.#detachAudio();
     if (socket !== this.#socket || socket.readyState !== WebSocket.OPEN) return;
-    socket.send(JSON.stringify({ type: "stop" }));
+    // A recording not heard whole names no count, and Eneo keeps no text.
+    const stop = this.#whole
+      ? { type: "stop", produced_samples: this.#produced }
+      : { type: "stop" };
+    socket.send(JSON.stringify(stop));
     this.#stopTimer = setTimeout(() => this.#teardown(), FINAL_TEXT_TIMEOUT_MS);
   }
 
@@ -261,6 +344,9 @@ export class LiveTranscriptPreview {
         // text that was never sent as a delta is added at the end.
         if (message.text.startsWith(this.#sessionText)) {
           this.#append(message.text.slice(this.#sessionText.length));
+        }
+        if (this.#whole && typeof message.transcript_id === "string") {
+          this.#transcriptId = message.transcript_id;
         }
         this.#end("session_ended");
         return;
@@ -287,6 +373,7 @@ export class LiveTranscriptPreview {
 
   #teardown() {
     this.#generation += 1;
+    this.#stopFinishing();
     this.#detachAudio();
     this.#queue = [];
     clearTimeout(this.#stopTimer);
@@ -294,6 +381,11 @@ export class LiveTranscriptPreview {
     const socket = this.#socket;
     this.#socket = null;
     socket?.close();
+  }
+
+  #stopFinishing() {
+    clearTimeout(this.#finishingTimer);
+    this.#finishing = false;
   }
 
   #detachAudio() {

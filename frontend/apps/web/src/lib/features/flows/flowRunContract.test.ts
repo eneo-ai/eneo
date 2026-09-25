@@ -41,6 +41,18 @@ describe("flowRunContract helpers", () => {
     });
   });
 
+  it("sends a step's live transcript beside its file", () => {
+    expect(
+      buildStepInputsPayload(
+        { "step-audio": [{ id: "file-1" }], "step-document": [{ id: "file-2" }] },
+        { "step-audio": "transcript-1" }
+      )
+    ).toEqual({
+      "step-audio": { file_ids: ["file-1"], live_transcript_id: "transcript-1" },
+      "step-document": { file_ids: ["file-2"] }
+    });
+  });
+
   it("builds a canonical flow run intent payload", () => {
     expect(
       buildFlowRunIntent({

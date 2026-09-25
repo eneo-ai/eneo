@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EneoError, type Eneo, type FlowLiveTranscriptionSession } from "@eneo/eneo-js";
 import {
+  FINAL_TEXT_WAIT_MS,
   FLUSH_TIMEOUT_MS,
   LiveTranscriptPreview,
   MAX_QUEUED_FRAMES,
@@ -27,14 +28,16 @@ afterEach(() => {
 
 function setup({
   createSession = vi.fn(async () => liveSession),
-  addModule = vi.fn(async () => undefined)
+  addModule = vi.fn(async () => undefined),
+  contextState = "running"
 }: {
   createSession?: () => Promise<FlowLiveTranscriptionSession>;
   addModule?: () => Promise<void>;
+  contextState?: AudioContextState;
 } = {}) {
   const source = { connect: vi.fn(), disconnect: vi.fn() };
   const graph = {
-    context: { audioWorklet: { addModule } },
+    context: { state: contextState, audioWorklet: { addModule } },
     source
   } as unknown as RecorderAudioGraph;
   const eneo = {
@@ -70,6 +73,10 @@ async function tapped(count = 1) {
 async function connected(count = 1) {
   await vi.waitFor(() => expect(FakeLiveSocket.instances).toHaveLength(count));
   return FakeLiveSocket.instances[count - 1];
+}
+
+function stopMessage(producedSamples: number) {
+  return JSON.stringify({ type: "stop", produced_samples: producedSamples });
 }
 
 function texts(preview: LiveTranscriptPreview) {
@@ -136,7 +143,11 @@ describe("LiveTranscriptPreview", () => {
     await started;
 
     const socket = await connected();
-    expect(harness.createSession).toHaveBeenCalledWith({ id: "flow-1", stepId: "step-audio" });
+    expect(harness.createSession).toHaveBeenCalledWith({
+      id: "flow-1",
+      stepId: "step-audio",
+      recordingId: harness.preview.recordingId
+    });
     expect(socket.url).toBe("wss://eneo.example.test/api/v1/flows/live-transcription");
     expect(socket.protocols).toEqual(["eneo-live.v1", "ticket.t0k3n"]);
 
@@ -155,7 +166,7 @@ describe("LiveTranscriptPreview", () => {
     harness.preview.stop();
     harness.preview.stop();
     expect(harness.preview.status).toBe("finished");
-    await vi.waitFor(() => expect(socket.texts).toEqual([JSON.stringify({ type: "stop" })]));
+    await vi.waitFor(() => expect(socket.texts).toEqual([stopMessage(1600)]));
     expect(harness.source.disconnect).toHaveBeenCalledWith(node);
     expect(socket.close).not.toHaveBeenCalled();
 
@@ -177,10 +188,10 @@ describe("LiveTranscriptPreview", () => {
     node.frame(9, 1600);
     node.post(PCM16_FLUSHED);
     expect(frameTags(socket)).toEqual([9]);
-    expect(socket.sent.at(-1)).toBe(JSON.stringify({ type: "stop" }));
+    expect(socket.sent.at(-1)).toBe(stopMessage(800));
   });
 
-  it("asks for the final text anyway when the worklet cannot answer", async () => {
+  it("asks for the final text anyway, uncounted, when the worklet cannot answer", async () => {
     const harness = setup();
     const { socket, node } = await listening(harness);
     node.answersFlush = false;
@@ -329,5 +340,169 @@ describe("LiveTranscriptPreview", () => {
 
     expect(texts(harness.preview)).toEqual([]);
     expect(harness.preview.status).toBe("idle");
+  });
+});
+
+describe("LiveTranscriptPreview reuse of the final text", () => {
+  // A recording heard whole: its session is listening, then the recording
+  // stops, the worklet answers, and Eneo sends the final text.
+  async function heardWhole(harness: ReturnType<typeof setup>, count = 1) {
+    const { socket, node } = await listening(harness, count);
+    node.frame(1);
+    harness.preview.stop();
+    await vi.waitFor(() => expect(socket.texts).toHaveLength(1));
+    return { socket, node };
+  }
+
+  it("names each recording in its ticket request", async () => {
+    const harness = setup();
+    await harness.start();
+    const first = harness.preview.recordingId;
+    harness.preview.stop();
+    await harness.start();
+
+    const named = vi
+      .mocked(harness.createSession)
+      .mock.calls.map((call) => (call as unknown as [{ recordingId: string }])[0].recordingId);
+    expect(named).toEqual([first, harness.preview.recordingId]);
+    expect(named[0]).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    expect(named[0]).not.toBe(named[1]);
+  });
+
+  it("counts every captured sample, the queued ones and the last partial frame included", async () => {
+    const ticket = pending<FlowLiveTranscriptionSession>();
+    const harness = setup({ createSession: ticket.request });
+    void harness.start();
+    const node = await tapped();
+    node.frame(1);
+    ticket.settle(liveSession);
+    const socket = await connected();
+    socket.open();
+    socket.receive({ type: "ready", sample_rate: 16000, max_seconds: 18000 });
+    node.frame(2);
+    node.answersFlush = false;
+
+    harness.preview.stop();
+    node.frame(3, 640);
+    node.post(PCM16_FLUSHED);
+
+    expect(frameTags(socket)).toEqual([1, 2, 3]);
+    expect(socket.texts).toEqual([stopMessage(1600 + 1600 + 320)]);
+  });
+
+  it("keeps the final text's transcript for the recording's one file only", async () => {
+    const harness = setup();
+    const { socket } = await heardWhole(harness);
+    const recordingId = harness.preview.recordingId as string;
+
+    socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "transcript-1" });
+    harness.preview.recordingUploaded("another-recording", "file-other");
+    expect(harness.preview.transcriptIdFor(["file-other"])).toBeUndefined();
+    harness.preview.recordingUploaded(recordingId, "file-1");
+
+    expect(harness.preview.transcriptIdFor(["file-1"])).toBe("transcript-1");
+    expect(harness.preview.transcriptIdFor(["file-1", "file-2"])).toBeUndefined();
+    expect(harness.preview.transcriptIdFor(["file-2"])).toBeUndefined();
+  });
+
+  it("keeps the transcript whether the file or the final text comes last", async () => {
+    const harness = setup();
+    const { socket } = await heardWhole(harness);
+
+    harness.preview.recordingUploaded(harness.preview.recordingId as string, "file-1");
+    expect(harness.preview.transcriptIdFor(["file-1"])).toBeUndefined();
+    socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "transcript-1" });
+
+    expect(harness.preview.transcriptIdFor(["file-1"])).toBe("transcript-1");
+  });
+
+  it("names no count, and keeps no transcript, when the worklet does not answer the stop", async () => {
+    const harness = setup();
+    const { socket, node } = await listening(harness);
+    node.answersFlush = false;
+    vi.useFakeTimers();
+
+    harness.preview.stop();
+    vi.advanceTimersByTime(FLUSH_TIMEOUT_MS);
+    socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "transcript-1" });
+    harness.preview.recordingUploaded(harness.preview.recordingId as string, "file-1");
+
+    expect(socket.texts).toEqual([JSON.stringify({ type: "stop" })]);
+    expect(harness.preview.transcriptIdFor(["file-1"])).toBeUndefined();
+  });
+
+  it("is a preview only when the recorder's audio context is not running as it records", async () => {
+    const harness = setup({ contextState: "suspended" });
+    const { socket } = await heardWhole(harness);
+
+    expect(socket.texts).toEqual([JSON.stringify({ type: "stop" })]);
+    expect(harness.preview.finishing).toBe(false);
+  });
+
+  it("names no count once part of the recording is lost, and forgets a kept transcript", async () => {
+    const harness = setup();
+    const { socket } = await listening(harness);
+    harness.preview.lose();
+    harness.preview.stop();
+    await vi.waitFor(() => expect(socket.texts).toEqual([JSON.stringify({ type: "stop" })]));
+    socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "transcript-1" });
+    harness.preview.recordingUploaded(harness.preview.recordingId as string, "file-1");
+    expect(harness.preview.transcriptIdFor(["file-1"])).toBeUndefined();
+
+    const whole = await heardWhole(harness, 2);
+    whole.socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "transcript-2" });
+    harness.preview.recordingUploaded(harness.preview.recordingId as string, "file-2");
+    expect(harness.preview.transcriptIdFor(["file-2"])).toBe("transcript-2");
+    harness.preview.lose();
+    expect(harness.preview.transcriptIdFor(["file-2"])).toBeUndefined();
+  });
+
+  it("keeps nothing of a discarded recording for the next one", async () => {
+    const harness = setup();
+    const { socket } = await heardWhole(harness);
+    const recordingId = harness.preview.recordingId as string;
+    socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "transcript-1" });
+
+    harness.preview.discard();
+    harness.preview.recordingUploaded(recordingId, "file-1");
+
+    expect(harness.preview.recordingId).toBeNull();
+    expect(harness.preview.transcriptIdFor(["file-1"])).toBeUndefined();
+  });
+
+  it("awaits the final text of a counted stop, at most FINAL_TEXT_WAIT_MS, and keeps a later one", async () => {
+    const harness = setup();
+    const { socket, node } = await listening(harness);
+    vi.useFakeTimers();
+
+    harness.preview.stop();
+    expect(harness.preview.finishing).toBe(true);
+    node.post(PCM16_FLUSHED);
+    vi.advanceTimersByTime(FINAL_TEXT_WAIT_MS - 1);
+    expect(harness.preview.finishing).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(harness.preview.finishing).toBe(false);
+
+    socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "transcript-1" });
+    harness.preview.recordingUploaded(harness.preview.recordingId as string, "file-1");
+    expect(harness.preview.transcriptIdFor(["file-1"])).toBe("transcript-1");
+  });
+
+  it("stops awaiting when the final text comes, when the session ends, or when it is lost", async () => {
+    const harness = setup();
+    const done = await heardWhole(harness);
+    expect(harness.preview.finishing).toBe(true);
+    done.socket.receive({ type: "transcript.done", text: "Hej." });
+    expect(harness.preview.finishing).toBe(false);
+
+    const dropped = await heardWhole(harness, 2);
+    expect(harness.preview.finishing).toBe(true);
+    dropped.socket.drop();
+    expect(harness.preview.finishing).toBe(false);
+
+    await heardWhole(harness, 3);
+    expect(harness.preview.finishing).toBe(true);
+    harness.preview.lose();
+    expect(harness.preview.finishing).toBe(false);
   });
 });

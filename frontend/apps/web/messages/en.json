@@ -5890,6 +5890,7 @@
   "flow_run_transcription_size": "Size",
   "flow_run_trigger": "Run flow",
   "flow_run_trigger_confirm": "Start run",
+  "flow_run_finishing_live_text": "Finishing the text…",
   "flow_run_trigger_close": "Close the Run flow dialog",
   "flow_run_trigger_field_required": "{name} is required",
   "flow_run_trigger_field_required_generic": "This field is required",

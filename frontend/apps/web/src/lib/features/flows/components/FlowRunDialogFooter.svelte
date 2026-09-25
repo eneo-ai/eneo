@@ -14,6 +14,7 @@
     isReviewPage,
     showReuseLastInput,
     showPrevious,
+    liveTextFinishing = false,
     canGoPrevious = true,
     nextDisabledReason,
     reasonId,
@@ -33,6 +34,8 @@
     isReviewPage: boolean;
     showReuseLastInput: boolean;
     showPrevious: boolean;
+    // A recording's final text is still coming, and the run waits for it.
+    liveTextFinishing?: boolean;
     // False while a step records: going back would drop its recording.
     canGoPrevious?: boolean;
     nextDisabledReason: string | undefined;
@@ -46,6 +49,9 @@
     onApplyLastInput: () => void;
     onRequestClose: () => void;
   } = $props();
+
+  // Only when the final text is all the run waits for.
+  const awaitsLiveText = $derived(liveTextFinishing && canSubmitRun);
 </script>
 
 <footer
@@ -140,15 +146,18 @@
         {/if}
 
         {#if isReviewPage}
+          <!-- While the final text comes the button is not disabled, so focus
+               stays on it; a press does nothing. -->
           <Button
             onclick={onTriggerRun}
             disabled={!canSubmitRun}
+            aria-disabled={awaitsLiveText || undefined}
             class="order-1 w-full min-w-[8rem] sm:order-none sm:w-auto"
           >
-            {#if isSubmitting}
+            {#if isSubmitting || awaitsLiveText}
               <IconLoadingSpinner data-icon="inline-start" class="animate-spin" />
             {/if}
-            {m.flow_run_trigger_confirm()}
+            {awaitsLiveText ? m.flow_run_finishing_live_text() : m.flow_run_trigger_confirm()}
           </Button>
         {:else}
           <Button

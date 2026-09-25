@@ -15,6 +15,8 @@ export type FlowRunRecordingSessionPhase = "idle" | "reconnecting" | "paused-fai
 export type PreparedRecordedSegment = {
   sessionId: string;
   segmentIndex: number;
+  // The recording this segment is the one file of, as its live text named it.
+  liveRecordingId?: string | null;
 };
 
 export type PendingRecordedSegment = PreparedRecordedSegment & {

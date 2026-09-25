@@ -63,7 +63,11 @@
     type FlowLocale,
     type FlowRunWizardPage
   } from "$lib/features/flows/flowRunWizard";
-  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
+  import {
+    extractFlowApiError,
+    FLOW_API_ERROR_CODE,
+    getFlowRuntimeErrorMessage
+  } from "$lib/features/flows/flowRuntimeErrorMapping";
   import { formatBytes } from "$lib/features/flows/flowByteSize";
   import { getFlowRunDialogLabels } from "./flowRunDialogLabels";
   import FlowRunDialogForm from "./FlowRunDialogForm.svelte";
@@ -143,10 +147,16 @@
     }
     return preview;
   }
+  // A preview is never replaced, so what reads its state keeps reading it.
   function discardLivePreviews() {
     for (const preview of livePreviewsByStepId.values()) preview.discard();
-    livePreviewsByStepId.clear();
   }
+  // Eneo will not use the request's live transcript, and made no run for it.
+  const LIVE_TRANSCRIPT_REFUSALS = new Set<string>([
+    FLOW_API_ERROR_CODE.RUN_LIVE_TRANSCRIPT_NOT_FOUND,
+    FLOW_API_ERROR_CODE.RUN_LIVE_TRANSCRIPT_ALREADY_BOUND,
+    FLOW_API_ERROR_CODE.RUN_LIVE_TRANSCRIPT_REQUIRES_ONE_AUDIO_FILE
+  ]);
 
   const AUDIO_ACCEPT_FILTER = "audio/*,video/webm,video/mp4";
   const NAVIGATION_REASON_ID = "flow-run-navigation-reason";
@@ -272,6 +282,13 @@
     runContract !== null && !runContractError && !isSubmitting && runBlockers.length === 0
   );
   const isReviewPage = $derived(currentPage?.kind === "review");
+  // The final text of a recording its live text heard whole is still coming:
+  // the run waits for it, within the preview's own bound.
+  const liveTextFinishing = $derived(
+    stepsRequiringInput.some(
+      (step) => step.input_format === "audio" && livePreviewFor(step.step_id).finishing
+    )
+  );
   const showReuseLastInput = $derived(
     lastInputPayload !== null && (currentPage?.kind === "form" || currentPage?.kind === "freeform")
   );
@@ -961,6 +978,9 @@
       uploadedFileId: uploaded.id
     });
     if (isStale(operationGeneration, operationFlowId)) return;
+    if (segment.liveRecordingId) {
+      livePreviewFor(step.step_id).recordingUploaded(segment.liveRecordingId, uploaded.id);
+    }
     fileInputState.recordedSegmentUploaded(step.step_id, segment);
   }
 
@@ -970,6 +990,10 @@
   ) {
     const operationGeneration = dialogGeneration;
     const operationFlowId = flow.id;
+    // A recording in more than one file has no one file for its live text's
+    // transcript: that text stays a preview.
+    const livePreview = livePreviewFor(step.step_id);
+    if (params.reason === "rotation") livePreview.lose();
     // Hand the reason to the session controller as soon as the recorder
     // reports it, so a recording started while this upload runs gets a fresh
     // session. A rotation records on; error/stall trip the reconnect retry
@@ -984,7 +1008,10 @@
       }
     }
     if (!params.blob) return;
-    const prepared = fileInputState.prepareRecordedSegment(step.step_id);
+    const prepared = {
+      ...fileInputState.prepareRecordedSegment(step.step_id),
+      liveRecordingId: params.reason === "rotation" ? null : livePreview.recordingId
+    };
     const capturedAt = Date.now();
     const filenameBase = buildSegmentFilenameBase(
       prepared.sessionId,
@@ -1196,11 +1223,27 @@
     }
   }
 
+  // Each step's stored live transcript, where the step's files are exactly
+  // the one file its live text heard whole.
+  function liveTranscriptIdsFor(filesByStepId: Record<string, UploadedFile[]>) {
+    const ids: Record<string, string> = {};
+    for (const [stepId, preview] of livePreviewsByStepId) {
+      const id = preview.transcriptIdFor((filesByStepId[stepId] ?? []).map((file) => file.id));
+      if (id) ids[stepId] = id;
+    }
+    return ids;
+  }
+
   async function triggerRun() {
     if (!flow.id || !runContract || runBlockers.length > 0) return;
+    // The button says the final text is still coming: a press sends nothing,
+    // now or later.
+    if (liveTextFinishing) return;
 
     isSubmitting = true;
     try {
+      const flowId = flow.id;
+      const publishedFlowVersion = runContract.published_flow_version;
       const payload = buildFlowRunInputPayload({
         formValues: launchInputState.formValuesSnapshot,
         freeformText: launchInputState.freeformText,
@@ -1208,26 +1251,44 @@
         hasFormFields,
         showFreeformTextInput
       });
+      const speakerLabels = launchInputState.speakerLabels(runContract.transcription);
+      const files = fileInputState.runtimeFilesSnapshot;
+      const liveTranscriptIds = liveTranscriptIdsFor(files);
+      // What this request asks, a repeat asks: a final text that comes after
+      // it is never used.
+      for (const [stepId, preview] of livePreviewsByStepId) {
+        if (!liveTranscriptIds[stepId]) preview.lose();
+      }
 
-      const stepInputs = buildStepInputsPayload(fileInputState.runtimeFilesSnapshot);
-      const runIntent = buildFlowRunIntent({
-        publishedFlowVersion: runContract.published_flow_version,
-        inputPayloadJson: payload,
-        stepInputs,
-        speakerLabels: launchInputState.speakerLabels(runContract.transcription)
-      });
-      // The key covers the whole intent: the API fingerprints every field of it.
-      const { expected_flow_version, ...intent } = runIntent;
-      const idempotencyKey = await eneo.flows.runs.deriveUploadIntentIdempotencyKey({
-        flowId: flow.id,
-        expectedFlowVersion: expected_flow_version,
-        ...intent
-      });
-      const createdRun = await eneo.flows.runs.create({
-        flow: { id: flow.id },
-        ...runIntent,
-        idempotencyKey
-      });
+      const createRun = async (withLiveTranscripts: Record<string, string>) => {
+        const runIntent = buildFlowRunIntent({
+          publishedFlowVersion,
+          inputPayloadJson: payload,
+          stepInputs: buildStepInputsPayload(files, withLiveTranscripts),
+          speakerLabels
+        });
+        // The key covers the whole intent: the API fingerprints every field of it.
+        const { expected_flow_version, ...intent } = runIntent;
+        const idempotencyKey = await eneo.flows.runs.deriveUploadIntentIdempotencyKey({
+          flowId,
+          expectedFlowVersion: expected_flow_version,
+          ...intent
+        });
+        return eneo.flows.runs.create({ flow: { id: flowId }, ...runIntent, idempotencyKey });
+      };
+      let createdRun: FlowRun;
+      try {
+        createdRun = await createRun(liveTranscriptIds);
+      } catch (error) {
+        const code = extractFlowApiError(error)?.code ?? "";
+        if (Object.keys(liveTranscriptIds).length === 0 || !LIVE_TRANSCRIPT_REFUSALS.has(code)) {
+          throw error;
+        }
+        // No run was made: the transcripts are forgotten, and the same request
+        // goes once without them, so the run transcribes the audio as usual.
+        for (const preview of livePreviewsByStepId.values()) preview.lose();
+        createdRun = await createRun({});
+      }
 
       onRunCreated?.({ run: createdRun });
       toast.success(m.flow_run_started_toast());
@@ -1414,6 +1475,7 @@
       {isReviewPage}
       {showReuseLastInput}
       {showPrevious}
+      {liveTextFinishing}
       canGoPrevious={recordingSettled}
       {nextDisabledReason}
       reasonId={NAVIGATION_REASON_ID}

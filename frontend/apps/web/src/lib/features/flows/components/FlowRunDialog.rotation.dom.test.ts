@@ -8,6 +8,7 @@ import type {
   FlowRunContractTranscription,
   UploadedFile
 } from "@eneo/eneo-js";
+import { EneoError } from "@eneo/eneo-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -18,6 +19,7 @@ import {
   scanRecoverableSessionsForSteps
 } from "$lib/features/audio/flowRunRecordingSession";
 import { AUDIO_GRAPH_PREPARATION_MS } from "$lib/features/audio/AudioRecorder.svelte";
+import { FINAL_TEXT_WAIT_MS } from "$lib/features/audio/live/LiveTranscriptPreview.svelte";
 import {
   FakeLiveSocket,
   FakeWorkletNode,
@@ -32,6 +34,7 @@ import {
   SEGMENT_ROTATION_MS
 } from "$lib/features/audio/recordingSession";
 import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
+import { toast } from "$lib/components/toast";
 import { m } from "$lib/paraglide/messages";
 import FlowRunDialog from "./FlowRunDialog.svelte";
 
@@ -785,6 +788,115 @@ describe("FlowRunDialog live text across a rotation", () => {
 
     expect(screen.queryByRole("log")).toBeNull();
     expect(screen.queryByText(/Anna talar/)).toBeNull();
+  });
+});
+
+describe("FlowRunDialog live transcript in the run", () => {
+  const ready = { type: "ready", sample_rate: 16000, max_seconds: 18000 };
+  const upload = vi.fn(async ({ file }: { file: File }) => uploadedFile("file-1", file.name));
+
+  // Records one file with live text that heard all of it: the stop is sent,
+  // counted, and the file is uploaded; the final text is still to come.
+  async function recordHeardWhole(options: DialogOptions = {}) {
+    installLiveTranscriptFakes();
+    await openDialogAndStartRecording(upload, { ...liveText, ...options });
+    const socket = FakeLiveSocket.instances[0];
+    socket.open();
+    socket.receive(ready);
+    FakeWorkletNode.instances[0].frame(1);
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    await flush();
+    media.recorders[0]?.finish();
+    await flush();
+    expect(socket.texts).toEqual([JSON.stringify({ type: "stop", produced_samples: 1600 })]);
+    await fireEvent.click(screen.getByRole("button", { name: "Nästa" }));
+    await flush();
+    return socket;
+  }
+
+  const startButton = () =>
+    screen.getByRole("button", {
+      name: new RegExp(`${m.flow_run_trigger_confirm()}|${m.flow_run_finishing_live_text()}`)
+    });
+  const stepInputs = (create: ReturnType<typeof vi.fn>) =>
+    create.mock.calls.map((call) => (call as unknown as [{ step_inputs: unknown }])[0].step_inputs);
+
+  it("starts the run with the transcript of a recording heard whole, beside its one file", async () => {
+    const create = vi.fn(async () => ({ id: "run-1" }));
+    const socket = await recordHeardWhole({ create });
+    socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "transcript-1" });
+    await flush();
+
+    await fireEvent.click(startButton());
+    await flush();
+
+    expect(stepInputs(create)).toEqual([
+      { "step-audio": { file_ids: ["file-1"], live_transcript_id: "transcript-1" } }
+    ]);
+  });
+
+  it("waits for the final text: the button says so, and a press sends nothing, now or later", async () => {
+    const create = vi.fn(async () => ({ id: "run-1" }));
+    const socket = await recordHeardWhole({ create });
+
+    expect(startButton().textContent).toContain(m.flow_run_finishing_live_text());
+    expect(startButton().getAttribute("aria-disabled")).toBe("true");
+    expect((startButton() as HTMLButtonElement).disabled).toBe(false);
+    await fireEvent.click(startButton());
+    socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "transcript-1" });
+    await flush();
+
+    expect(create).not.toHaveBeenCalled();
+    expect(startButton().textContent).toContain(m.flow_run_trigger_confirm());
+    expect(startButton().getAttribute("aria-disabled")).toBeNull();
+    await fireEvent.click(startButton());
+    await flush();
+    expect(stepInputs(create)).toEqual([
+      { "step-audio": { file_ids: ["file-1"], live_transcript_id: "transcript-1" } }
+    ]);
+  });
+
+  it("waits FINAL_TEXT_WAIT_MS at most; a later final text never changes a repeated request", async () => {
+    const create = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ id: "run-1" });
+    const socket = await recordHeardWhole({ create });
+
+    vi.advanceTimersByTime(FINAL_TEXT_WAIT_MS);
+    await flush();
+    expect(startButton().getAttribute("aria-disabled")).toBeNull();
+    await fireEvent.click(startButton());
+    await flush();
+    socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "transcript-1" });
+    await fireEvent.click(startButton());
+    await flush();
+
+    expect(stepInputs(create)).toEqual([
+      { "step-audio": { file_ids: ["file-1"] } },
+      { "step-audio": { file_ids: ["file-1"] } }
+    ]);
+  });
+
+  it("asks once more without a transcript Eneo will not use, and says nothing about it", async () => {
+    const refusal = new EneoError("Unavailable", "RESPONSE", 404, 0, {
+      code: "flow_run_live_transcript_not_found",
+      message: "The live transcript is unavailable."
+    });
+    const create = vi.fn().mockRejectedValueOnce(refusal).mockResolvedValueOnce({ id: "run-1" });
+    const socket = await recordHeardWhole({ create });
+    socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "transcript-1" });
+    await flush();
+
+    await fireEvent.click(startButton());
+    await flush();
+
+    expect(stepInputs(create)).toEqual([
+      { "step-audio": { file_ids: ["file-1"], live_transcript_id: "transcript-1" } },
+      { "step-audio": { file_ids: ["file-1"] } }
+    ]);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalledWith(m.flow_run_started_toast());
   });
 });
 
