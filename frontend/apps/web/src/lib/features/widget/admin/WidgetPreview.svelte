@@ -16,9 +16,12 @@
   type Props = {
     widget: Widget;
     eneo: Eneo;
+    /** 3 where the preview sits inside another section. */
+    headingLevel?: 2 | 3;
+    title?: string;
   };
 
-  let { widget, eneo }: Props = $props();
+  let { widget, eneo, headingLevel = 2, title }: Props = $props();
 
   let token = $state<string | null>(null);
   let tokenGeneration = $state<number | null>(null);
@@ -112,7 +115,11 @@
   class="border-default bg-primary flex flex-col gap-3 rounded-xl border p-4"
 >
   <div class="flex flex-wrap items-center justify-between gap-2">
-    <h2 id="widget-preview-title" class="text-base font-semibold">{m.widget_admin_preview()}</h2>
+    <svelte:element
+      this={`h${headingLevel}`}
+      id="widget-preview-title"
+      class="text-base font-semibold">{title ?? m.widget_admin_preview()}</svelte:element
+    >
     <div class="flex flex-wrap items-center gap-2">
       <div role="group" aria-label={m.widget_admin_preview_scheme()} class="flex gap-1">
         {#each schemes as option (option.value)}

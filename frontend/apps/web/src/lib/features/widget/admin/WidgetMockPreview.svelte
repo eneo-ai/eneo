@@ -21,9 +21,13 @@
     name: string;
     texts: WidgetTexts;
     theme: WidgetTheme;
+    /** Leave out the card, heading and template note, e.g. inside a section that has its own. */
+    framed?: boolean;
+    /** What the picture shows, for screen readers; defaults to the template wording. */
+    alt?: string;
   };
 
-  let { name, texts, theme }: Props = $props();
+  let { name, texts, theme, framed = true, alt }: Props = $props();
 
   // Previewed in the scheme the template pins, else what the admin sees in
   // Eneo; the toggle lets them check the other one.
@@ -42,42 +46,35 @@
   const left = $derived(theme.position === "bottom-left");
 </script>
 
-<section
-  aria-labelledby="widget-mock-preview-title"
-  class="border-default bg-primary flex flex-col gap-3 rounded-xl border p-4"
->
-  <div class="flex flex-wrap items-center justify-between gap-2">
-    <h2 id="widget-mock-preview-title" class="text-base font-semibold">
-      {m.widget_admin_template_preview()}
-    </h2>
-    <div role="group" aria-label={m.widget_admin_preview_scheme()} class="flex gap-1">
-      <Button
-        variant={dark ? "outline" : "secondary"}
-        size="sm"
-        aria-pressed={!dark}
-        onclick={() => (scheme = "light")}
-      >
-        <Sun aria-hidden="true" data-icon="inline-start" />
-        {m.widget_admin_scheme_light()}
-      </Button>
-      <Button
-        variant={dark ? "secondary" : "outline"}
-        size="sm"
-        aria-pressed={dark}
-        onclick={() => (scheme = "dark")}
-      >
-        <Moon aria-hidden="true" data-icon="inline-start" />
-        {m.widget_admin_scheme_dark()}
-      </Button>
-    </div>
+{#snippet schemeToggle()}
+  <div role="group" aria-label={m.widget_admin_preview_scheme()} class="flex gap-1">
+    <Button
+      variant={dark ? "outline" : "secondary"}
+      size="sm"
+      aria-pressed={!dark}
+      onclick={() => (scheme = "light")}
+    >
+      <Sun aria-hidden="true" data-icon="inline-start" />
+      {m.widget_admin_scheme_light()}
+    </Button>
+    <Button
+      variant={dark ? "secondary" : "outline"}
+      size="sm"
+      aria-pressed={dark}
+      onclick={() => (scheme = "dark")}
+    >
+      <Moon aria-hidden="true" data-icon="inline-start" />
+      {m.widget_admin_scheme_dark()}
+    </Button>
   </div>
-  <p class="text-secondary text-sm">{m.widget_admin_template_preview_description()}</p>
+{/snippet}
 
+{#snippet picture()}
   <div
     class={["bg-secondary flex items-end gap-3 rounded-lg p-4", left && "flex-row-reverse"]}
     data-theme={scheme}
     role="img"
-    aria-label={m.widget_admin_template_preview_alt({ name })}
+    aria-label={alt ?? m.widget_admin_template_preview_alt({ name })}
   >
     <div
       class="bg-primary text-primary flex w-full max-w-sm flex-col overflow-hidden shadow"
@@ -165,4 +162,25 @@
       >
     </span>
   </div>
-</section>
+{/snippet}
+
+{#if framed}
+  <section
+    aria-labelledby="widget-mock-preview-title"
+    class="border-default bg-primary flex flex-col gap-3 rounded-xl border p-4"
+  >
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h2 id="widget-mock-preview-title" class="text-base font-semibold">
+        {m.widget_admin_template_preview()}
+      </h2>
+      {@render schemeToggle()}
+    </div>
+    <p class="text-secondary text-sm">{m.widget_admin_template_preview_description()}</p>
+    {@render picture()}
+  </section>
+{:else}
+  <div class="flex flex-col gap-3">
+    {@render schemeToggle()}
+    {@render picture()}
+  </div>
+{/if}
