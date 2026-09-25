@@ -1,0 +1,76 @@
+import type { AdminSpaceAdmins, AdminSpaceListItem } from "@eneo/eneo-js";
+import { formatList } from "$lib/features/spaces/oversight/format";
+import { spaceRoleLabel } from "$lib/features/spaces/roles";
+import { m } from "$lib/paraglide/messages";
+
+/** "Ada och Bo", or "Ada, Bo och 3 till" past `max` names; null when the space has none. */
+export function adminNames(admins: Pick<AdminSpaceAdmins, "principals">, max = 2): string | null {
+  const names = admins.principals.map((principal) => principal.name);
+  if (names.length === 0) return null;
+  if (names.length <= max) return formatList(names);
+  return m.admin_spaces_admins_more({
+    names: names.slice(0, max).join(", "),
+    count: names.length - max
+  });
+}
+
+/** The viewer's own relation to a space as one short phrase. */
+export function listMembershipLabel(membership: AdminSpaceListItem["viewer_membership"]): string {
+  if (!membership.role) return m.admin_spaces_not_member();
+  const role = spaceRoleLabel(membership.role);
+  if (membership.via_group_only) return m.admin_spaces_role_via_group({ role });
+  if (membership.oversight_joined_at) return m.admin_spaces_role_via_oversight({ role });
+  return role;
+}
+
+/** "3 assistenter · 1 app · 2 kunskapskällor", leaving out kinds the space has none of. */
+export function resourceSummary(
+  resources: AdminSpaceListItem["resources"],
+  format: (value: number) => string
+): string {
+  const parts: string[] = [];
+  const { assistants, apps, group_chats, knowledge_sources } = resources;
+  if (assistants > 0) {
+    parts.push(
+      assistants === 1
+        ? m.admin_spaces_count_assistants_one()
+        : m.admin_spaces_count_assistants({ count: format(assistants) })
+    );
+  }
+  if (apps > 0) {
+    parts.push(
+      apps === 1
+        ? m.admin_spaces_count_apps_one()
+        : m.admin_spaces_count_apps({ count: format(apps) })
+    );
+  }
+  if (group_chats > 0) {
+    parts.push(
+      group_chats === 1
+        ? m.admin_spaces_count_group_chats_one()
+        : m.admin_spaces_count_group_chats({ count: format(group_chats) })
+    );
+  }
+  if (knowledge_sources > 0) {
+    parts.push(
+      knowledge_sources === 1
+        ? m.admin_spaces_count_knowledge_one()
+        : m.admin_spaces_count_knowledge({ count: format(knowledge_sources) })
+    );
+  }
+  return parts.length > 0 ? parts.join(" · ") : m.admin_spaces_none();
+}
+
+/** "{n} grupper" / "1 grupp". */
+export function groupCount(value: number, format: (value: number) => string): string {
+  return value === 1
+    ? m.admin_spaces_count_groups_one()
+    : m.admin_spaces_count_groups({ count: format(value) });
+}
+
+/** "{n} aktiva webbwidgetar" / "1 aktiv webbwidget". */
+export function activeWidgetCount(value: number, format: (value: number) => string): string {
+  return value === 1
+    ? m.admin_spaces_count_active_widgets_one()
+    : m.admin_spaces_count_active_widgets({ count: format(value) });
+}

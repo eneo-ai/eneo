@@ -5,11 +5,12 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import "../../../app.css";
 
 const modulePermission = vi.hoisted(() => ({ enabled: true }));
+const route = vi.hoisted(() => ({ url: new URL("http://localhost/admin/storage") }));
 
 vi.mock("$app/stores", () => ({
-  page: readable({
-    url: new URL("http://localhost/admin/storage")
-  })
+  page: {
+    subscribe: (run: (value: { url: URL }) => void) => readable({ url: route.url }).subscribe(run)
+  }
 }));
 
 vi.mock("$lib/core/AppContext", () => ({
@@ -58,6 +59,7 @@ import AdminLayout from "./+layout.svelte";
 describe("admin layout navigation", () => {
   beforeEach(async () => {
     modulePermission.enabled = true;
+    route.url = new URL("http://localhost/admin/storage");
     await page.viewport(375, 800);
   });
 
@@ -79,6 +81,30 @@ describe("admin layout navigation", () => {
       }
     }
   );
+
+  test("lists Ytor first under governance, and marks it current on a space's page", async () => {
+    await page.viewport(1280, 800);
+    route.url = new URL("http://localhost/admin/spaces/space-1");
+    render(AdminLayout);
+
+    const link = page.getByRole("link", { name: "admin_spaces_nav" });
+    await expect.element(link).toHaveAttribute("href", "/admin/spaces");
+    await expect.element(link).toHaveAttribute("aria-current", "page");
+    const governance = [...document.querySelectorAll('[data-sidebar="group"]')].find((group) =>
+      group.textContent?.includes("admin_section_governance")
+    );
+    expect(governance?.querySelector("a")?.textContent?.trim()).toBe("admin_spaces_nav");
+  });
+
+  test("shows Ytor in the mobile drawer without scrolling sideways at 375 px", async () => {
+    render(AdminLayout);
+    await page.getByRole("button", { name: "admin_nav_toggle" }).click();
+
+    const link = page.getByRole("link", { name: "admin_spaces_nav" });
+    await expect.element(link).toBeVisible();
+    expect(link.element().getBoundingClientRect().right).toBeLessThanOrEqual(375);
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(375);
+  });
 
   test("opens the mobile drawer and restores focus to its localized trigger", async () => {
     render(AdminLayout);
