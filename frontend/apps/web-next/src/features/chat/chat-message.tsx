@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import {
   CitationSourcesProvider,
   citationComponents,
-  remarkCitations
+  useCitationRemarkPlugins
 } from "@/components/ai-elements/citation";
 import {
   Message,
@@ -72,6 +72,8 @@ export function ChatMessage({
   const mcpReferences = mcpReferencesFromParts(message.parts, message.metadata?.mcpToolReferences);
   const sources = mergeSources(message.parts, message.metadata?.webSearchReferences, mcpReferences);
   const sourceIds = sources.map((source) => source.sourceId);
+  // Appended to Streamdown's defaults by MessageResponse (GFM stays on).
+  const remarkPlugins = useCitationRemarkPlugins(sources.length, message.id);
 
   return (
     <Message from={message.role}>
@@ -98,7 +100,7 @@ export function ChatMessage({
               <CitationSourcesProvider key={index} value={sources}>
                 <MessageResponse
                   className="font-voice text-[15px] leading-[1.7]"
-                  remarkPlugins={[remarkCitations(sources.length, message.id)]}
+                  remarkPlugins={remarkPlugins}
                   components={citationComponents}
                 >
                   {resolveInrefs(isStreaming ? trimPartialInref(part.text) : part.text, sourceIds)}

@@ -4829,5 +4829,21 @@
   "replace_files": "Ersätt filer",
   "upload_dropzone_prompt": "Dra och släpp filer eller mappar här",
   "upload_skipped_unsupported_files": "Hoppades över eftersom filtypen inte stöds: {fileList}",
-  "a11y_statement_link": "Tillgänglighetsredogörelse"
+  "a11y_statement_link": "Tillgänglighetsredogörelse",
+  "chat_md_table_label": "Tabell",
+  "chat_md_code_label": "Kodblock ({language})",
+  "chat_md_code_label_plain": "Kodblock",
+  "chat_md_copy_code": "Kopiera kod",
+  "chat_md_copy_link": "Kopiera länk",
+  "chat_md_download_file": "Ladda ner fil",
+  "chat_md_download_image": "Ladda ner bild",
+  "chat_md_download_diagram": "Ladda ner diagram",
+  "chat_md_image_unavailable": "Bilden är inte tillgänglig",
+  "chat_md_fullscreen": "Visa i helskärm",
+  "chat_md_exit_fullscreen": "Stäng helskärm",
+  "chat_md_zoom_in": "Zooma in",
+  "chat_md_zoom_out": "Zooma ut",
+  "chat_md_reset_view": "Återställ vy",
+  "chat_md_open_link": "Öppna länk",
+  "chat_citation_label": "Källa {number}: {title}"
 }

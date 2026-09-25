@@ -4829,5 +4829,21 @@
   "replace_files": "Replace files",
   "upload_dropzone_prompt": "Drag and drop files or folders here",
   "upload_skipped_unsupported_files": "Skipped because the file type is not supported: {fileList}",
-  "a11y_statement_link": "Accessibility statement"
+  "a11y_statement_link": "Accessibility statement",
+  "chat_md_table_label": "Table",
+  "chat_md_code_label": "Code block ({language})",
+  "chat_md_code_label_plain": "Code block",
+  "chat_md_copy_code": "Copy code",
+  "chat_md_copy_link": "Copy link",
+  "chat_md_download_file": "Download file",
+  "chat_md_download_image": "Download image",
+  "chat_md_download_diagram": "Download diagram",
+  "chat_md_image_unavailable": "Image not available",
+  "chat_md_fullscreen": "View fullscreen",
+  "chat_md_exit_fullscreen": "Exit fullscreen",
+  "chat_md_zoom_in": "Zoom in",
+  "chat_md_zoom_out": "Zoom out",
+  "chat_md_reset_view": "Reset view",
+  "chat_md_open_link": "Open link",
+  "chat_citation_label": "Source {number}: {title}"
 }
