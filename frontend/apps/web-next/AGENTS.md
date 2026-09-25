@@ -175,8 +175,10 @@ shadcn names (`bg-background`, `text-muted-foreground`, `border-input`,
   overrides.
 - `--color-*` custom properties are Astryx tokens (`--color-accent` is the blue);
   `--accent` is the shadcn hover tint. Don't mix them up in `var()`.
-- The body is still `bg-background` (surface) until the shell adopts the page
-  panel layout (`bg-ax-body` around a `bg-ax-surface rounded-ax-page` panel).
+- Page layout: the app shell (`src/components/shell/app-shell.tsx`) puts
+  pages in a `bg-ax-surface rounded-ax-page` panel on the `bg-ax-body`
+  background, and `main#main-content` is the scroll container. Pages don't
+  set their own page background.
 
 ## Shared building blocks (`src/components/composites`)
 
