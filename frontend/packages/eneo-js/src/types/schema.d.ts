@@ -9652,7 +9652,8 @@ export interface components {
       icon_id?: string | null;
       /**
        * Created At
-       * Format: date-time
+       * Format: date
+       * @description The day (UTC) the space was created.
        */
       created_at: string;
       /**
@@ -9817,7 +9818,8 @@ export interface components {
       icon_id?: string | null;
       /**
        * Created At
-       * Format: date-time
+       * Format: date
+       * @description The day (UTC) the space was created.
        */
       created_at: string;
       security_classification?: components["schemas"]["OversightClassification"] | null;
