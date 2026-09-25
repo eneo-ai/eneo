@@ -278,8 +278,6 @@ export class LiveTranscriptPreview {
     // hears none of the opening the recorder records, and one that stops
     // running later misses what the recorder goes on recording.
     if (graph.context.state !== "running") this.#whole = false;
-    graph.context.addEventListener("statechange", this.#onContextState);
-    this.#context = graph.context;
     const node = new AudioWorkletNode(graph.context, PCM16_PROCESSOR, {
       numberOfInputs: 1,
       numberOfOutputs: 0,
@@ -297,6 +295,9 @@ export class LiveTranscriptPreview {
     graph.source.connect(node);
     this.#node = node;
     this.#source = graph.source;
+    // Watched from here on: #detachAudio lets go of it with the node.
+    graph.context.addEventListener("statechange", this.#onContextState);
+    this.#context = graph.context;
   }
 
   #takeFrame(frame: ArrayBuffer) {

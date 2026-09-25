@@ -466,6 +466,25 @@ describe("LiveTranscriptPreview reuse of the final text", () => {
     expect(harness.preview.finishing).toBe(false);
   });
 
+  it("leaves no listener on the context when the worklet node cannot be made", async () => {
+    vi.stubGlobal(
+      "AudioWorkletNode",
+      class {
+        constructor() {
+          throw new Error("No worklet node");
+        }
+      }
+    );
+    const harness = setup();
+    const added = vi.spyOn(harness.context, "addEventListener");
+    const removed = vi.spyOn(harness.context, "removeEventListener");
+
+    await harness.start();
+    await vi.waitFor(() => expect(harness.preview.status).toBe("unavailable"));
+
+    expect(added.mock.calls.length).toBe(removed.mock.calls.length);
+  });
+
   it("is a preview only when the context stopped running before a stop that came before its event", async () => {
     const harness = setup();
     const { socket, node } = await listening(harness);
