@@ -44,7 +44,7 @@ function assistant(patch: Partial<AdminSpaceAssistant> = {}): AdminSpaceAssistan
     description: "Svarar på frågor om ekonomiska rutiner.",
     published: true,
     is_default: false,
-    updated_at: "2026-09-20T10:00:00Z",
+    updated_at: "2026-09-20",
     completion_model: { id: "m1", name: "GPT-5", hosting: "swe", org: "OpenAI" },
     instructions: INSTRUCTIONS,
     knowledge_mode: "tool",

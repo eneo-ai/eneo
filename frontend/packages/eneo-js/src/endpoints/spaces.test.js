@@ -196,7 +196,13 @@ test("the schema carries the oversight fields the web app reads", () => {
   assert.match(assistant, /\n {6}widgets: components\["schemas"\]\["AdminSpaceWidgetRef"\]\[\];/);
   assert.doesNotMatch(assistant, /\n {6}widget\??:/);
   // Change times are days, never a time of day.
-  assert.match(assistant, /Format: date\n[^\n]*\n {7}\*\/\n {6}updated_at: string;/);
+  for (const name of ["AdminSpaceAssistant", "AdminSpaceDetail"]) {
+    assert.match(
+      schemaEntry(name),
+      /Format: date\n[^\n]*\n {7}\*\/\n {6}updated_at: string;/,
+      name
+    );
+  }
 
   // Each count is withheld on its own; widget questions until a widget was live.
   const usage = schemaEntry("AdminSpaceUsage");

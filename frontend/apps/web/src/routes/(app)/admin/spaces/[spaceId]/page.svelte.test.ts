@@ -104,7 +104,7 @@ function assistant(name: string, patch: Partial<AdminSpaceAssistant> = {}): Admi
     description: "Svarar på frågor om budgetprocessen och förvaltningarnas prognoser.",
     published: true,
     is_default: false,
-    updated_at: "2026-09-01T10:00:00Z",
+    updated_at: "2026-09-01",
     completion_model: { id: "m1", name: "GPT-5", hosting: "eu", org: "OpenAI" },
     instructions: "Du är en hjälpsam assistent för ekonomiavdelningen.\nSvara kort och sakligt.",
     knowledge_mode: "tool",
@@ -130,7 +130,7 @@ function detail(patch: Partial<AdminSpaceDetail> = {}): AdminSpaceDetail {
     description: "Budget, prognoser och uppföljning för förvaltningarna.",
     icon_id: null,
     created_at: "2025-03-14T09:00:00Z",
-    updated_at: "2026-09-01T09:00:00Z",
+    updated_at: "2026-09-01",
     security_classification: { id: "sc", name: "Konfidentiell", security_level: 3 },
     settings: {
       completion_models: [{ id: "m1", name: "GPT-5", hosting: "eu", org: "OpenAI" }],
