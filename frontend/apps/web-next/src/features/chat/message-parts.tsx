@@ -1,11 +1,10 @@
 "use client";
 
-import { Download, ExternalLink } from "lucide-react";
+import { Button as AxButton } from "@astryxdesign/core/Button";
 import { useMutation } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
-import { useState, type ReactNode } from "react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
+import { Download, ExternalLink, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
+import { useId, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,21 +22,14 @@ import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import type { EneoUIMessage, SessionData, ToolApprovalData } from "@/lib/chat/types";
-import { AttachmentPreviewDialog, FileKindIcon, useSignedUrl } from "./attachments";
+import { cn } from "@/lib/utils";
+import { AttachmentPreviewDialog, FileTypeTile, useSignedUrl } from "./attachments";
+import { formatFileSize } from "./format";
 
 type Part = EneoUIMessage["parts"][number];
 type McpToolReference = Schema<"McpToolReferencePublic">;
 
-/** How many source/web chips to show before collapsing behind a show-more toggle. */
-const CHIPS_COLLAPSE_AT = 5;
-
-const chipClass =
-  "bg-card hover:border-ring hover:bg-accent flex max-w-full items-center gap-1.5 rounded-lg border py-1.5 pr-2.5 pl-2 text-xs transition-colors";
-
-const moreButtonClass =
-  "text-muted-foreground hover:text-foreground hover:border-ring rounded-lg border px-2.5 py-1.5 text-xs transition-colors";
-
-type McpSnippetSource = {
+export type McpSnippetSource = {
   uri: string;
   content?: string | null;
   pageRange?: string | null;
@@ -198,12 +190,8 @@ export function mergeSources(
   return [...docs, ...web, ...mcp];
 }
 
-/**
- * Unified provenance: one numbered "sources" section (documents + web) with
- * show-more. Each chip carries a `{idPrefix}-cite-N` anchor so inline citations
- * can jump to it.
- */
-function McpResourceSnippetDialog({
+/** Shows an MCP resource's snippet (content, section, page range) in a dialog. */
+export function McpResourceSnippetDialog({
   source,
   snippet,
   children
@@ -265,91 +253,12 @@ function McpResourceSnippetDialog({
   );
 }
 
-export function MessageSources({ sources, idPrefix }: { sources: SourceChip[]; idPrefix: string }) {
-  const t = useTranslations();
-  const [expanded, setExpanded] = useState(false);
-  if (sources.length === 0) return null;
-
-  const visible = expanded ? sources : sources.slice(0, CHIPS_COLLAPSE_AT);
-  const hidden = sources.length - visible.length;
-
-  return (
-    <div className="mt-3 flex flex-col gap-2">
-      <span className="text-muted-foreground text-xs">
-        {t("chat_sources_label")} · {sources.length}
-      </span>
-      <div className="flex flex-wrap gap-2">
-        {visible.map((source, index) => {
-          const body = (
-            <>
-              <span className="bg-secondary text-secondary-foreground flex size-4 shrink-0 items-center justify-center rounded-[4px] text-[10px] font-bold">
-                {index + 1}
-              </span>
-              <span className="truncate">{source.title}</span>
-            </>
-          );
-          const anchorId = `${idPrefix}-cite-${index + 1}`;
-          if (source.mcpSnippet) {
-            return (
-              <McpResourceSnippetDialog
-                key={source.key}
-                source={source}
-                snippet={source.mcpSnippet}
-              >
-                <button
-                  id={anchorId}
-                  type="button"
-                  title={source.title}
-                  className={`${chipClass} scroll-mt-24 text-left`}
-                >
-                  {body}
-                </button>
-              </McpResourceSnippetDialog>
-            );
-          }
-          return source.url ? (
-            <a
-              key={source.key}
-              id={anchorId}
-              href={source.url}
-              target="_blank"
-              rel="noreferrer"
-              title={source.title}
-              className={`${chipClass} scroll-mt-24`}
-            >
-              {body}
-            </a>
-          ) : (
-            <span
-              key={source.key}
-              id={anchorId}
-              title={source.title}
-              className={`${chipClass} scroll-mt-24`}
-            >
-              {body}
-            </span>
-          );
-        })}
-        {sources.length > CHIPS_COLLAPSE_AT && (
-          <button
-            type="button"
-            onClick={() => setExpanded((value) => !value)}
-            className={moreButtonClass}
-          >
-            {expanded ? t("chat_sources_less") : t("chat_sources_more", { count: hidden })}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 /**
  * MCP tool approval card for the data-tool-approval part. Each tool can be
  * approved/denied individually (the backend accepts a partial array of
- * decisions and tracks the remainder); a batch all-approve/all-deny is offered
+ * decisions and tracks the remainder); "Godkänn alla" / "Avvisa alla" appear
  * when more than one tool is still pending. The still-open stream continues
- * server-side as decisions arrive.
+ * server-side as decisions arrive. The decisions stay on the card as a record.
  */
 export function ToolApprovalCard({
   data,
@@ -359,6 +268,7 @@ export function ToolApprovalCard({
   onResolved?: () => void;
 }) {
   const t = useTranslations();
+  const headingId = useId();
   const [decisions, setDecisions] = useState<Record<string, "approved" | "denied">>({});
 
   const submit = useMutation({
@@ -383,84 +293,108 @@ export function ToolApprovalCard({
   });
 
   const timedOut = data.status === "timeout_denied";
-  const pending = data.tools.filter((tool) => tool.tool_call_id && !decisions[tool.tool_call_id]);
+  const pending = timedOut
+    ? []
+    : data.tools.filter((tool) => tool.tool_call_id && !decisions[tool.tool_call_id]);
   const decideAll = (approved: boolean) =>
     submit.mutate(pending.map((tool) => ({ tool_call_id: tool.tool_call_id ?? "", approved })));
 
   return (
-    <Alert>
-      <AlertTitle>{t("chat_tool_awaiting_approval")}</AlertTitle>
-      <AlertDescription>
-        <div className="flex flex-col gap-2">
-          <ul className="flex flex-col gap-2">
-            {data.tools.map((tool, index) => {
-              const decision = tool.tool_call_id ? decisions[tool.tool_call_id] : undefined;
-              return (
-                <li
-                  key={tool.tool_call_id ?? index}
-                  className="flex items-center justify-between gap-2"
-                >
-                  <span className="font-mono text-xs">
-                    {tool.server_name}/{tool.tool_name}
-                  </span>
-                  {timedOut ? (
-                    <Badge variant="outline">{t("tool_rejected_by_user")}</Badge>
-                  ) : decision ? (
-                    <Badge variant={decision === "approved" ? "default" : "destructive"}>
-                      {decision === "approved" ? t("tool_accept") : t("tool_deny")}
-                    </Badge>
-                  ) : (
-                    <div className="flex gap-1">
-                      <Button
-                        size="sm"
-                        disabled={submit.isPending}
-                        onClick={() =>
-                          submit.mutate([{ tool_call_id: tool.tool_call_id ?? "", approved: true }])
-                        }
-                      >
-                        {t("tool_accept")}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={submit.isPending}
-                        onClick={() =>
-                          submit.mutate([
-                            { tool_call_id: tool.tool_call_id ?? "", approved: false }
-                          ])
-                        }
-                      >
-                        {t("tool_deny")}
-                      </Button>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-          {!timedOut && pending.length > 1 && (
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={submit.isPending}
-                onClick={() => decideAll(true)}
-              >
-                {t("tool_accept_all", { count: pending.length })}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={submit.isPending}
-                onClick={() => decideAll(false)}
-              >
-                {t("tool_deny_all")}
-              </Button>
-            </div>
+    <section
+      aria-labelledby={headingId}
+      className="border-ax-border bg-ax-card rounded-ax-container flex w-full flex-col gap-3 border p-3.5 font-sans"
+    >
+      <div className="flex items-start gap-2.5">
+        <ShieldAlert aria-hidden="true" className="text-ax-warning mt-0.5 size-4 shrink-0" />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <h3 id={headingId} className="text-[13.5px] font-semibold">
+            {pending.length > 0 ? t("chat_tool_awaiting_approval") : t("chat_tool_approval_record")}
+          </h3>
+          {pending.length > 0 && (
+            <p className="text-ax-text-secondary text-[13px]">{t("chat_tool_approval_hint")}</p>
           )}
         </div>
-      </AlertDescription>
-    </Alert>
+      </div>
+      <ul className="flex flex-col gap-1.5">
+        {data.tools.map((tool, index) => {
+          const decision = tool.tool_call_id ? decisions[tool.tool_call_id] : undefined;
+          const name = `${tool.server_name}/${tool.tool_name}`;
+          return (
+            <li
+              key={tool.tool_call_id ?? index}
+              className="bg-ax-muted rounded-ax-element flex flex-wrap items-center justify-between gap-2 px-2.5 py-2"
+            >
+              <span className="min-w-0 font-mono text-xs break-all">{name}</span>
+              {timedOut ? (
+                <span className="text-ax-text-secondary flex items-center gap-1 text-xs font-medium">
+                  <ShieldX aria-hidden="true" className="size-3.5" />
+                  {t("chat_tool_approval_timed_out")}
+                </span>
+              ) : decision ? (
+                <span
+                  className={cn(
+                    "flex items-center gap-1 text-xs font-medium",
+                    decision === "approved" ? "text-ax-success" : "text-ax-error"
+                  )}
+                >
+                  {decision === "approved" ? (
+                    <ShieldCheck aria-hidden="true" className="size-3.5" />
+                  ) : (
+                    <ShieldX aria-hidden="true" className="size-3.5" />
+                  )}
+                  {decision === "approved" ? t("chat_tool_approved") : t("chat_tool_denied")}
+                </span>
+              ) : (
+                <span className="flex gap-1.5">
+                  <AxButton
+                    label={t("tool_accept")}
+                    variant="primary"
+                    size="sm"
+                    isDisabled={submit.isPending}
+                    onClick={() =>
+                      submit.mutate([{ tool_call_id: tool.tool_call_id ?? "", approved: true }])
+                    }
+                  >
+                    {t("tool_accept")}
+                    <span className="sr-only">: {name}</span>
+                  </AxButton>
+                  <AxButton
+                    label={t("tool_deny")}
+                    variant="secondary"
+                    size="sm"
+                    isDisabled={submit.isPending}
+                    onClick={() =>
+                      submit.mutate([{ tool_call_id: tool.tool_call_id ?? "", approved: false }])
+                    }
+                  >
+                    {t("tool_deny")}
+                    <span className="sr-only">: {name}</span>
+                  </AxButton>
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {pending.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          <AxButton
+            label={t("tool_accept_all", { count: pending.length })}
+            variant="primary"
+            size="sm"
+            isDisabled={submit.isPending}
+            onClick={() => decideAll(true)}
+          />
+          <AxButton
+            label={t("tool_deny_all")}
+            variant="secondary"
+            size="sm"
+            isDisabled={submit.isPending}
+            onClick={() => decideAll(false)}
+          />
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -469,23 +403,42 @@ export function InlineImage({ file }: { file: Schema<"FilePublic"> }) {
   const url = useSignedUrl(file.id);
 
   if (!url) {
-    return <div className="bg-muted h-40 w-56 max-w-full animate-pulse rounded-lg border" />;
+    return <div className="bg-ax-muted rounded-ax-container h-40 w-56 max-w-full animate-pulse" />;
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element -- signed cross-origin URL
-    <img src={url} alt={file.name} className="max-h-96 rounded-lg border" />
+    <img
+      src={url}
+      alt={file.name}
+      className="border-ax-border rounded-ax-container max-h-96 border"
+    />
   );
 }
 
-/** A non-image attachment shown as a compact card. */
-function FileCard({ file }: { file: Schema<"FilePublic"> }) {
+/** A file as a compact token: coloured type tile, name, size. */
+function FileTokenBody({
+  name,
+  mimetype,
+  size
+}: {
+  name: string;
+  mimetype: string;
+  size?: number | null;
+}) {
+  const locale = useLocale();
   return (
-    <div className="bg-card group-hover:bg-accent flex max-w-full items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors">
-      <FileKindIcon mimetype={file.mimetype} className="text-muted-foreground size-4 shrink-0" />
-      <span className="truncate">{file.name}</span>
-    </div>
+    <>
+      <FileTypeTile mimetype={mimetype} size="sm" />
+      <span className="min-w-0 truncate font-semibold">{name}</span>
+      {size ? (
+        <span className="text-ax-text-secondary shrink-0">{formatFileSize(size, locale)}</span>
+      ) : null}
+    </>
   );
 }
+
+const FILE_TOKEN_CLASS =
+  "border-ax-border focus-visible:outline-ring flex h-8 max-w-full items-center gap-2 rounded-ax-element border py-0 ps-1 pe-2.5 text-[12.5px] transition-colors hover:bg-ax-hover focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:h-11";
 
 function providerFile(part: Extract<Part, { type: "file" }>): Partial<Schema<"FilePublic">> {
   return ((part.providerMetadata?.eneo ?? {}) as Partial<Schema<"FilePublic">>) ?? {};
@@ -495,26 +448,23 @@ function fileNameFromPart(part: Extract<Part, { type: "file" }>): string {
   return part.filename ?? providerFile(part).name ?? part.mediaType;
 }
 
-function DownloadFileCard({
+function DownloadFileToken({
   name,
   mimetype,
+  size,
   url
 }: {
   name: string;
   mimetype: string;
+  size?: number | null;
   url: string;
 }) {
+  const t = useTranslations();
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      download={name}
-      className="bg-card hover:bg-accent focus-visible:ring-ring flex max-w-full items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors focus-visible:ring-2 focus-visible:outline-none"
-    >
-      <FileKindIcon mimetype={mimetype} className="text-muted-foreground size-4 shrink-0" />
-      <span className="truncate">{name}</span>
-      <Download aria-hidden="true" className="text-muted-foreground ml-auto size-3.5 shrink-0" />
+    <a href={url} target="_blank" rel="noreferrer" download={name} className={FILE_TOKEN_CLASS}>
+      <FileTokenBody name={name} mimetype={mimetype} size={size} />
+      <Download aria-hidden="true" className="text-ax-text-secondary size-3.5 shrink-0" />
+      <span className="sr-only">{t("download")}</span>
     </a>
   );
 }
@@ -525,11 +475,22 @@ export function MessageFilePart({ part }: { part: Extract<Part, { type: "file" }
   if (part.mediaType.startsWith("image/")) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- signed cross-origin URL or local data URL
-      <img src={part.url} alt={name} className="max-h-96 rounded-lg border" />
+      <img
+        src={part.url}
+        alt={name}
+        className="border-ax-border rounded-ax-container max-h-96 border"
+      />
     );
   }
 
-  return <DownloadFileCard name={name} mimetype={part.mediaType} url={part.url} />;
+  return (
+    <DownloadFileToken
+      name={name}
+      mimetype={part.mediaType}
+      size={providerFile(part).size}
+      url={part.url}
+    />
+  );
 }
 
 /** Opens a message attachment in the shared preview dialog (signs the URL on open). */
@@ -552,43 +513,46 @@ function MessageFilePreview({
   );
 }
 
-/** Files attached to a message: images inline, documents as cards; click to preview. */
+/**
+ * Files attached to a user message: images as thumbnails, documents as file
+ * tokens (type tile, name, size). Each opens the preview.
+ */
 export function MessageFiles({ files }: { files: Schema<"FilePublic">[] }) {
+  const t = useTranslations();
   const [preview, setPreview] = useState<Schema<"FilePublic"> | null>(null);
   if (files.length === 0) return null;
   const images = files.filter((file) => file.mimetype.startsWith("image/"));
   const docs = files.filter((file) => !file.mimetype.startsWith("image/"));
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex max-w-full flex-col items-end gap-1.5">
       {images.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+        <ul className="flex flex-wrap justify-end gap-1.5" aria-label={t("attachments")}>
           {images.map((file) => (
-            <button
-              key={file.id}
-              type="button"
-              aria-label={file.name}
-              onClick={() => setPreview(file)}
-              className="focus-visible:ring-ring rounded-lg focus-visible:ring-2 focus-visible:outline-none"
-            >
-              <InlineImage file={file} />
-            </button>
+            <li key={file.id}>
+              <button
+                type="button"
+                aria-label={t("chat_preview_file", { name: file.name })}
+                onClick={() => setPreview(file)}
+                className="focus-visible:outline-ring rounded-ax-container block focus-visible:outline-2 focus-visible:outline-offset-2"
+              >
+                <InlineImage file={file} />
+              </button>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
       {docs.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+        <ul className="flex flex-wrap justify-end gap-1.5" aria-label={t("attachments")}>
           {docs.map((file) => (
-            <button
-              key={file.id}
-              type="button"
-              onClick={() => setPreview(file)}
-              className="group text-left"
-            >
-              <FileCard file={file} />
-            </button>
+            <li key={file.id} className="max-w-full">
+              <button type="button" onClick={() => setPreview(file)} className={FILE_TOKEN_CLASS}>
+                <span className="sr-only">{t("preview")}: </span>
+                <FileTokenBody name={file.name} mimetype={file.mimetype} size={file.size} />
+              </button>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
       {preview && <MessageFilePreview file={preview} onClose={() => setPreview(null)} />}
     </div>
@@ -613,7 +577,10 @@ export function McpImageStrip({ references }: { references: McpToolReference[] }
   return (
     <div className="flex flex-wrap gap-2 pt-2">
       {images.map(({ reference, src, title }) => (
-        <div key={reference.id} className="max-w-80 overflow-hidden rounded-lg border shadow-sm">
+        <div
+          key={reference.id}
+          className="border-ax-border rounded-ax-container shadow-ax-low max-w-80 overflow-hidden border"
+        >
           {/* eslint-disable-next-line @next/next/no-img-element -- external MCP resource URL */}
           <img src={src} alt={title} className="max-h-96 w-auto object-contain" />
         </div>
@@ -622,11 +589,17 @@ export function McpImageStrip({ references }: { references: McpToolReference[] }
   );
 }
 
-/** Renders a generated image file from an assistant message. */
+/** Renders a generated file from an assistant message (images inline, others as download tokens). */
 export function GeneratedFile({ file }: { file: Schema<"FilePublic"> }) {
   const url = useSignedUrl(file.id);
 
   if (file.mimetype.startsWith("image/")) return <InlineImage file={file} />;
-  if (!url) return <FileCard file={file} />;
-  return <DownloadFileCard name={file.name} mimetype={file.mimetype} url={url} />;
+  if (!url) {
+    return (
+      <span className={FILE_TOKEN_CLASS}>
+        <FileTokenBody name={file.name} mimetype={file.mimetype} size={file.size} />
+      </span>
+    );
+  }
+  return <DownloadFileToken name={file.name} mimetype={file.mimetype} size={file.size} url={url} />;
 }

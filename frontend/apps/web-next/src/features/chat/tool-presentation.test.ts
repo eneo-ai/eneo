@@ -59,3 +59,15 @@ describe("chat tool presentation", () => {
     ).toBe(false);
   });
 });
+
+describe("eneo tool metadata", () => {
+  it("reads live (AI SDK v6) and saved-session metadata alike", async () => {
+    const { eneoToolMetadata } = await import("./tool-presentation");
+    const eneo = { server_name: "skills", title: "Upphandling" };
+    expect(eneoToolMetadata({ toolName: "x", providerMetadata: { eneo } })).toEqual(eneo);
+    expect(eneoToolMetadata({ toolName: "x", callProviderMetadata: { eneo } })).toEqual(eneo);
+    expect(eneoToolMetadata({ toolName: "x", resultProviderMetadata: { eneo } })).toEqual(eneo);
+    expect(isSkillCall({ toolName: "x", callProviderMetadata: { eneo } })).toBe(true);
+    expect(eneoToolMetadata({ toolName: "x" })).toEqual({});
+  });
+});

@@ -22,7 +22,8 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
       parts: [{ type: "text", text: message.question ?? "" }],
       metadata: {
         files: message.files ?? [],
-        tokens: { prompt: message.num_tokens_question }
+        tokens: { prompt: message.num_tokens_question },
+        createdAt: message.created_at ?? null
       }
     });
 
@@ -54,7 +55,9 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
           eneo: {
             server_name: tool.server_name,
             title: tool.title ?? null,
-            purpose: tool.purpose ?? null
+            purpose: tool.purpose ?? null,
+            // Approval record for MCP tools that needed approval (null: none needed).
+            approved: tool.approved ?? null
           }
         },
         state:
@@ -85,6 +88,7 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
           ? {
               id: String(message.completion_model.id),
               name: message.completion_model.name,
+              nickname: message.completion_model.nickname ?? null,
               token_limit: message.completion_model.max_input_tokens
             }
           : null,
@@ -93,7 +97,8 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
               id: String(message.tools.assistants[0].id),
               handle: message.tools.assistants[0].handle
             }
-          : null
+          : null,
+        createdAt: message.updated_at ?? message.created_at ?? null
       }
     });
   }

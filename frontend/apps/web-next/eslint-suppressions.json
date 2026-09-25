@@ -1,22 +1,7 @@
 {
-  "src/components/ai-elements/code-block.tsx": {
-    "eneo/no-literal-accessible-name": {
-      "count": 2
-    }
-  },
   "src/components/ai-elements/context.tsx": {
     "eneo/no-literal-accessible-name": {
       "count": 1
-    }
-  },
-  "src/components/ai-elements/conversation.tsx": {
-    "eneo/no-literal-accessible-name": {
-      "count": 2
-    }
-  },
-  "src/components/ai-elements/message.tsx": {
-    "eneo/no-literal-accessible-name": {
-      "count": 2
     }
   },
   "src/components/composites/context-budget.tsx": {

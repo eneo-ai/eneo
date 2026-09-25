@@ -15,6 +15,11 @@ export async function askChatQuestion(page: Page, question: string) {
   await page.getByRole("button", { name: /skicka meddelande|send message/i }).click();
 }
 
+/** The chat's message list (a named log); appears once the first question is sent. */
+export function conversationLog(page: Page) {
+  return page.getByRole("log", { name: /konversation|conversation/i });
+}
+
 export async function expectOkUrl(page: Page, pattern: RegExp) {
   await expect(page).toHaveURL(pattern, { timeout: 15_000 });
 }

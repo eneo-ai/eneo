@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { CheckIcon, CopyIcon } from "lucide-react";
+import { useTranslations } from "next-intl";
 import type { ComponentProps, CSSProperties, HTMLAttributes } from "react";
 import {
   createContext,
@@ -441,6 +442,7 @@ export const CodeBlockCopyButton = ({
   className,
   ...props
 }: CodeBlockCopyButtonProps) => {
+  const t = useTranslations();
   const [isCopied, setIsCopied] = useState(false);
   const timeoutRef = useRef<number>(0);
   const { code } = useContext(CodeBlockContext);
@@ -474,7 +476,7 @@ export const CodeBlockCopyButton = ({
 
   return (
     <Button
-      aria-label={ariaLabel ?? (isCopied ? "Code copied" : "Copy code")}
+      aria-label={ariaLabel ?? (isCopied ? t("chat_md_code_copied") : t("chat_md_copy_code"))}
       className={cn("shrink-0", className)}
       onClick={copyToClipboard}
       size="icon"

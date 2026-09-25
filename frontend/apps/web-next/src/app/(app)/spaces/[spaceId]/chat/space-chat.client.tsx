@@ -1,32 +1,19 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Check, ChevronDown, Pencil, Sparkles, Users } from "lucide-react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
-import { iconUrl } from "@/components/composites/icon-field";
+import { LoadingState } from "@/components/composites/loading-state";
 import { useAppContext } from "@/components/providers/app-context";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
-import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import type { ChatPartner } from "@/lib/chat/types";
 import { selectEffectiveModelId } from "@/features/ai-models/select-effective-chat-model";
 import { ChatPage } from "@/features/chat/chat-page";
-import {
-  chatPartnerSwitcherItems,
-  type ChatPartnerSwitcherItem
-} from "@/features/chat/partner-switcher";
+import { chatPartnerSwitcherItems } from "@/features/chat/partner-switcher";
+import { partnerKnowledge } from "@/features/chat/partner-knowledge";
 import { useSpace } from "@/features/spaces/use-space";
 
 function toModelInfo(
@@ -102,55 +89,8 @@ function ModelSwitcher() {
       disabled={update.isPending}
       size="sm"
       showPricing={tenant.show_model_pricing}
+      className="text-ax-text-secondary hover:text-ax-text rounded-ax-element h-8 border-0 px-2 text-[13px] font-semibold pointer-coarse:h-11"
     />
-  );
-}
-
-function PartnerIcon({ item }: { item: ChatPartnerSwitcherItem }) {
-  const icon = iconUrl(item.iconId);
-  if (icon) {
-    return (
-      // Backend-served upload behind the auth proxy; next/image cannot optimize it.
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={icon} alt="" className="size-7 rounded-md object-cover" />
-    );
-  }
-  const Icon =
-    item.type === "default-assistant" ? Sparkles : item.type === "group-chat" ? Users : Bot;
-  return (
-    <span className="bg-muted text-muted-foreground grid size-7 place-items-center rounded-md">
-      <Icon className="size-4" />
-    </span>
-  );
-}
-
-function ChatPartnerSwitcher({ items }: { items: ChatPartnerSwitcherItem[] }) {
-  const t = useTranslations();
-  const active = items.find((item) => item.active) ?? items[0];
-  if (!active) return null;
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="-ml-2 max-w-[min(24rem,60vw)] min-w-0 justify-start">
-          <PartnerIcon item={active} />
-          <span className="truncate text-sm font-semibold">{active.name}</span>
-          <ChevronDown className="text-muted-foreground ml-1 size-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-72">
-        <DropdownMenuLabel>{t("select_an_assistant")}</DropdownMenuLabel>
-        {items.map((item) => (
-          <DropdownMenuItem key={`${item.type}:${item.id}`} asChild>
-            <Link href={item.href} className="flex min-w-0 items-center gap-2">
-              <PartnerIcon item={item} />
-              <span className="min-w-0 flex-1 truncate">{item.name}</span>
-              {item.active && <Check className="text-primary size-4" />}
-            </Link>
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 
@@ -177,6 +117,16 @@ export function SpaceChat() {
       unwrap(browserApi.GET("/api/v1/group-chats/{id}/", { params: { path: { id: partnerId! } } }))
   });
 
+  const spaceName = space.personal
+    ? t("personal")
+    : space.organization
+      ? t("organization")
+      : space.name;
+  const spaceInfo = {
+    spaceName,
+    securityClassification: space.security_classification?.name ?? null
+  };
+
   let partner: ChatPartner | null = null;
   if (type === "group-chat" && groupChatQuery.data) {
     const groupChat = groupChatQuery.data;
@@ -186,6 +136,8 @@ export function SpaceChat() {
       name: groupChat.name,
       allowedAttachments: groupChat.allowed_attachments,
       insightEnabled: groupChat.insight_enabled,
+      iconId: groupChat.icon_id ?? null,
+      ...spaceInfo,
       showResponseLabel: groupChat.show_response_label,
       mentionableAssistants: groupChat.allow_mentions
         ? groupChat.tools.assistants.map((assistant) => ({
@@ -202,6 +154,10 @@ export function SpaceChat() {
       name: assistant.name,
       allowedAttachments: assistant.allowed_attachments,
       insightEnabled: assistant.insight_enabled,
+      description: assistant.description ?? null,
+      iconId: assistant.icon_id ?? null,
+      knowledge: partnerKnowledge(assistant),
+      ...spaceInfo,
       mcpServers: assistant.mcp_servers ?? [],
       enabledCapabilities: assistant.enabled_capabilities,
       availableCapabilities: assistant.available_capabilities,
@@ -217,6 +173,9 @@ export function SpaceChat() {
         name: assistant.name,
         allowedAttachments: assistant.allowed_attachments,
         insightEnabled: false,
+        iconId: assistant.icon_id ?? null,
+        knowledge: partnerKnowledge(assistant),
+        ...spaceInfo,
         mcpServers: assistant.mcp_servers ?? [],
         enabledCapabilities: assistant.enabled_capabilities,
         availableCapabilities: assistant.available_capabilities,
@@ -228,9 +187,8 @@ export function SpaceChat() {
 
   if (!partner) {
     return (
-      <div className="flex flex-1 flex-col gap-3 p-6">
-        <Skeleton className="h-10 w-1/3" />
-        <Skeleton className="h-32 w-full" />
+      <div className="mx-auto w-full max-w-[712px] p-6">
+        <LoadingState rows={4} />
       </div>
     );
   }
@@ -254,28 +212,15 @@ export function SpaceChat() {
       // Remount when the partner changes so chat state never leaks across.
       key={`${partner.type}:${partner.id}`}
       partner={partner}
-      initialSessionId={sessionId}
-      partnerSwitcher={
-        <ChatPartnerSwitcher
-          items={chatPartnerSwitcherItems({
-            space,
-            routeId,
-            activeType: partner.type,
-            activeId: partner.id
-          })}
-        />
-      }
+      sessionId={sessionId}
+      switcherItems={chatPartnerSwitcherItems({
+        space,
+        routeId,
+        activeType: partner.type,
+        activeId: partner.id
+      })}
       modelSelector={partner.type === "default-assistant" ? <ModelSwitcher /> : undefined}
-      actions={
-        editHref ? (
-          <Button asChild variant="outline" size="sm">
-            <Link href={editHref}>
-              <Pencil className="size-4" />
-              <span className="hidden sm:inline">{t("edit")}</span>
-            </Link>
-          </Button>
-        ) : undefined
-      }
+      editHref={editHref}
       buildSessionUrl={(nextSessionId) => {
         const params = new URLSearchParams(query);
         if (nextSessionId) params.set("session_id", nextSessionId);

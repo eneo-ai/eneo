@@ -11,8 +11,14 @@ import { mermaid } from "@streamdown/mermaid";
 import type { UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
+import { useTranslations } from "next-intl";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { Streamdown } from "streamdown";
+import { defaultRehypePlugins, defaultRemarkPlugins, Streamdown } from "streamdown";
+import {
+  markdownComponents,
+  rehypeCodeBlockRegions,
+  useStreamdownTranslations
+} from "./markdown-components";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -214,11 +220,12 @@ export const MessageBranchSelector = ({ className, ...props }: MessageBranchSele
 export type MessageBranchPreviousProps = ComponentProps<typeof Button>;
 
 export const MessageBranchPrevious = ({ children, ...props }: MessageBranchPreviousProps) => {
+  const t = useTranslations();
   const { goToPrevious, totalBranches } = useMessageBranch();
 
   return (
     <Button
-      aria-label="Previous branch"
+      aria-label={t("chat_previous_branch")}
       disabled={totalBranches <= 1}
       onClick={goToPrevious}
       size="icon-sm"
@@ -234,11 +241,12 @@ export const MessageBranchPrevious = ({ children, ...props }: MessageBranchPrevi
 export type MessageBranchNextProps = ComponentProps<typeof Button>;
 
 export const MessageBranchNext = ({ children, ...props }: MessageBranchNextProps) => {
+  const t = useTranslations();
   const { goToNext, totalBranches } = useMessageBranch();
 
   return (
     <Button
-      aria-label="Next branch"
+      aria-label={t("chat_next_branch")}
       disabled={totalBranches <= 1}
       onClick={goToNext}
       size="icon-sm"
@@ -270,16 +278,67 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
 const streamdownPlugins = { cjk, code, math, mermaid };
 
+// Streamdown REPLACES its defaults when `remarkPlugins`/`rehypePlugins` are
+// passed. The defaults carry GFM (tables, strikethrough, autolinks), code meta
+// and the sanitize/harden pipeline, so dropping them rendered tables as raw
+// `| a | b |` text. MessageResponse therefore always keeps them and appends the
+// caller's plugins.
+const DEFAULT_REMARK_PLUGINS = Object.values(defaultRemarkPlugins);
+const DEFAULT_REHYPE_PLUGINS = Object.values(defaultRehypePlugins);
+
+/**
+ * Assistant markdown (Streamdown) with Eneo defaults: GFM always on, accessible
+ * tables/headings/lists/code regions (markdown-components.tsx) and Streamdown's
+ * UI strings in the user's language. `remarkPlugins`, `rehypePlugins` and
+ * `components` ADD to those defaults; memoize them in the caller so blocks are
+ * not re-parsed on every render.
+ */
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
-    <Streamdown
-      className={cn("size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0", className)}
-      plugins={streamdownPlugins}
-      {...props}
-    />
-  ),
+  ({ className, remarkPlugins, rehypePlugins, components, ...props }: MessageResponseProps) => {
+    const t = useTranslations();
+    const translations = useStreamdownTranslations();
+    const codeRegionLabel = useCallback(
+      (language: string | null) =>
+        language ? t("chat_md_code_label", { language }) : t("chat_md_code_label_plain"),
+      [t]
+    );
+    const remark = useMemo(
+      () => [...DEFAULT_REMARK_PLUGINS, ...(remarkPlugins ?? [])],
+      [remarkPlugins]
+    );
+    const rehype = useMemo(
+      () => [
+        ...DEFAULT_REHYPE_PLUGINS,
+        rehypeCodeBlockRegions(codeRegionLabel),
+        ...(rehypePlugins ?? [])
+      ],
+      [rehypePlugins, codeRegionLabel]
+    );
+    const mergedComponents = useMemo(
+      () => ({ ...markdownComponents, ...components }),
+      [components]
+    );
+
+    return (
+      <Streamdown
+        className={cn("size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0", className)}
+        plugins={streamdownPlugins}
+        controls={{ table: false }}
+        remarkPlugins={remark}
+        rehypePlugins={rehype}
+        components={mergedComponents}
+        translations={translations}
+        {...props}
+      />
+    );
+  },
   (prevProps, nextProps) =>
-    prevProps.children === nextProps.children && nextProps.isAnimating === prevProps.isAnimating
+    prevProps.children === nextProps.children &&
+    prevProps.isAnimating === nextProps.isAnimating &&
+    prevProps.remarkPlugins === nextProps.remarkPlugins &&
+    prevProps.rehypePlugins === nextProps.rehypePlugins &&
+    prevProps.components === nextProps.components &&
+    prevProps.className === nextProps.className
 );
 
 MessageResponse.displayName = "MessageResponse";

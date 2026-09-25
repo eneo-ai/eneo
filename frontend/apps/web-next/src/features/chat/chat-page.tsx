@@ -1,26 +1,33 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { useQuery } from "@tanstack/react-query";
-import { History, Plus, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { useCallback, useRef, useState, type ReactNode } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { toastApiError } from "@/lib/api/toast";
 import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
-import { cn } from "@/lib/utils";
-import { ChatView } from "./chat-view";
-import { HistoryPanel } from "./history-panel";
+import { ChatHeader, PartnerSwitcher, type HeaderMenuItem } from "./chat-header";
+import { ChatView, type ActivityState } from "./chat-view";
+import { HistoryAside } from "./history-panel";
 import { InsightsPanel } from "./insights-panel";
+import type { ChatPartnerSwitcherItem } from "./partner-switcher";
+import { DeleteSessionDialog, RenameSessionDialog, useSessionMutations } from "./session-actions";
 
 type ActiveConversation = {
   /** Remount key: changes when the conversation context changes. */
   key: string;
   sessionId: string | null;
   messages: EneoUIMessage[];
+  title: string | null;
+  feedback: 1 | -1 | null;
+  /** The first question was sent (the header then shows a title). */
+  started: boolean;
 };
 
 function hasInsights(partner: ChatPartner): partner is ChatPartner & {
@@ -29,37 +36,85 @@ function hasInsights(partner: ChatPartner): partner is ChatPartner & {
   return Boolean(partner.insightEnabled && partner.type !== "default-assistant");
 }
 
+let conversationCounter = 0;
+
+/** A fresh, unsent conversation (a new remount key each time). */
+function newConversationState(): ActiveConversation {
+  conversationCounter += 1;
+  return {
+    key: `new-${conversationCounter}`,
+    sessionId: null,
+    messages: [],
+    title: null,
+    feedback: null,
+    started: false
+  };
+}
+
 /**
- * Chat surface: ChatView with a collapsible history panel. History is closed by
- * default (avoids a second sidebar next to the space nav) and opens as an
- * inline panel on sm+ / an overlay drawer on mobile. Owns session selection; the
- * ChatView is remounted (key) per conversation so useChat state stays scoped.
+ * Chat surface: header, the conversation (ChatView, remounted per
+ * conversation so useChat state stays scoped) or the insights view, and one
+ * right-hand panel at a time (history or an answer's activity). Owns session
+ * selection and keeps `?session_id=` (or the route's session segment) in the
+ * address bar.
  */
 export function ChatPage({
   partner,
-  initialSessionId,
+  sessionId: urlSessionId = null,
   buildSessionUrl,
   modelSelector,
-  partnerSwitcher,
-  actions
+  switcherItems,
+  editHref
 }: {
   partner: ChatPartner;
-  initialSessionId?: string | null;
+  /**
+   * The conversation in the URL (`?session_id=` or the route segment). Followed
+   * when it changes on the same route: a different id opens that conversation,
+   * none starts a new one. URL updates made by this page itself are ignored.
+   */
+  sessionId?: string | null;
   /** Builds the shareable URL for a session id (kept in the address bar). */
   buildSessionUrl?: (sessionId: string | null) => string;
   /** Interactive model picker rendered in the composer (default-assistant). */
-  modelSelector?: React.ReactNode;
-  /** Optional interactive partner picker for space chat. */
-  partnerSwitcher?: React.ReactNode;
-  /** Header actions for editable partners (e.g. an Edit button for assistants). */
-  actions?: React.ReactNode;
+  modelSelector?: ReactNode;
+  /** The space's assistants and group chats for the assistant selector. */
+  switcherItems?: ChatPartnerSwitcherItem[];
+  /** Editor link for partners the user may edit. */
+  editHref?: string | null;
 }) {
   const t = useTranslations();
-  const [active, setActive] = useState<ActiveConversation | null>(
-    initialSessionId ? null : { key: "new", sessionId: null, messages: [] }
+  const router = useRouter();
+  // History is an inline panel from 768px up, an overlay drawer below.
+  const historyInline = useMediaQuery("(min-width: 768px)");
+  const [active, setActive] = useState<ActiveConversation | null>(() =>
+    urlSessionId
+      ? null
+      : { key: "new", sessionId: null, messages: [], title: null, feedback: null, started: false }
   );
-  const [pendingSessionId, setPendingSessionId] = useState<string | null>(initialSessionId ?? null);
+  const [pendingSessionId, setPendingSessionId] = useState<string | null>(urlSessionId);
+  const [followedUrlSession, setFollowedUrlSession] = useState<string | null>(urlSessionId);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [activity, setActivity] = useState<ActivityState | null>(null);
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+  const historyTrigger = useRef<HTMLElement | null>(null);
+
+  // Follow the URL (SideNav "Senaste", "Ny konversation", back/forward) on the
+  // same route. The page writes its own URL with replaceState too; those
+  // changes already match what it shows, so they are no-ops here.
+  if (urlSessionId !== followedUrlSession) {
+    setFollowedUrlSession(urlSessionId);
+    const showing = pendingSessionId ?? active?.sessionId ?? null;
+    if (urlSessionId !== showing) {
+      setActivity(null);
+      if (urlSessionId) {
+        setPendingSessionId(urlSessionId);
+      } else {
+        setPendingSessionId(null);
+        setActive(newConversationState());
+      }
+    }
+  }
   const [tab, setTab] = useState<"chat" | "insights">(() =>
     typeof window !== "undefined" &&
     window.location.search.includes("tab=insights") &&
@@ -71,22 +126,36 @@ export function ChatPage({
 
   // Loading a session (initial deep-link or history click) goes through
   // pendingSessionId; the mapped messages then become the active conversation.
-  useQuery({
+  // Never served from cache: re-opening a conversation must show its latest
+  // messages, and a cached (fresh) result would skip the switch entirely.
+  const detail = useQuery({
     queryKey: ["conversations", "detail", pendingSessionId],
     enabled: pendingSessionId !== null,
+    staleTime: 0,
+    gcTime: 0,
+    // A missing or forbidden session will not appear on retry; fail once, visibly.
+    retry: false,
     queryFn: async () => {
-      const session = await unwrap(
-        browserApi.GET("/api/v1/conversations/{session_id}/", {
-          params: { path: { session_id: pendingSessionId! } }
-        })
-      );
-      setActive({
-        key: session.id,
-        sessionId: session.id,
-        messages: mapSessionMessages(session.messages)
-      });
-      setPendingSessionId(null);
-      return session;
+      try {
+        const session = await unwrap(
+          browserApi.GET("/api/v1/conversations/{session_id}/", {
+            params: { path: { session_id: pendingSessionId! } }
+          })
+        );
+        setActive({
+          key: session.id,
+          sessionId: session.id,
+          messages: mapSessionMessages(session.messages),
+          title: session.name,
+          feedback: session.feedback?.value ?? null,
+          started: session.messages.length > 0
+        });
+        setPendingSessionId(null);
+        return session;
+      } catch (error) {
+        toastApiError(error, t);
+        throw error;
+      }
     }
   });
 
@@ -99,155 +168,181 @@ export function ChatPage({
 
   const selectTab = useCallback((next: "chat" | "insights") => {
     setTab(next);
+    setActivity(null);
     const url = new URL(window.location.href);
     if (next === "insights") url.searchParams.set("tab", "insights");
     else url.searchParams.delete("tab");
     window.history.replaceState(null, "", url);
   }, []);
 
+  const closeHistory = useCallback(() => {
+    setHistoryOpen(false);
+    const trigger = historyTrigger.current;
+    historyTrigger.current = null;
+    if (trigger?.isConnected) requestAnimationFrame(() => trigger.focus());
+  }, []);
+
+  function toggleHistory() {
+    if (historyOpen) {
+      closeHistory();
+      return;
+    }
+    historyTrigger.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setActivity(null);
+    setHistoryOpen(true);
+  }
+
   function selectSession(sessionId: string) {
     setPendingSessionId(sessionId);
+    setActivity(null);
     updateUrl(sessionId);
-    // On mobile the panel is an overlay over the chat; close it so the picked
-    // conversation is visible. On sm+ it sits inline, so keep it open to browse.
-    if (window.matchMedia("(max-width: 639px)").matches) setHistoryOpen(false);
+    // On phones the panel is an overlay over the chat; close it so the picked
+    // conversation is visible. On wider screens it sits inline, so keep it open.
+    if (!historyInline) closeHistory();
   }
 
   function newConversation() {
-    setActive({ key: `new-${Date.now()}`, sessionId: null, messages: [] });
+    setActive(newConversationState());
+    setActivity(null);
     updateUrl(null);
   }
 
-  // Escape closes the panel (matches the overlay drawer's click-away on mobile).
-  useEffect(() => {
-    if (!historyOpen) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setHistoryOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [historyOpen]);
+  const onActivityChange = useCallback((next: ActivityState | null) => {
+    if (next) setHistoryOpen(false);
+    setActivity(next);
+  }, []);
+
+  const { rename, remove } = useSessionMutations(partner, {
+    onRenamed: (id, name) => {
+      setRenaming(null);
+      setActive((current) => (current?.sessionId === id ? { ...current, title: name } : current));
+    },
+    onDeleted: (id) => {
+      setDeleting(null);
+      if (active?.sessionId === id) newConversation();
+    }
+  });
 
   const insightPartner = hasInsights(partner) ? partner : null;
-  const showInsightsTab = Boolean(insightPartner);
-  const effectiveTab = showInsightsTab ? tab : "chat";
+  const effectiveTab = insightPartner ? tab : "chat";
+  const sessionId = active?.sessionId ?? null;
+  const started = Boolean(active?.started);
+  // The conversation title is the page's h1; the start state's greeting is h1 instead.
+  const title = active && started ? (active.title ?? t("new_conversation")) : null;
+  const isPersonal = partner.type === "default-assistant";
+
+  const menuItems: HeaderMenuItem[] = [
+    ...(sessionId
+      ? [
+          {
+            label: t("chat_rename_conversation"),
+            onClick: () => setRenaming({ id: sessionId, name: active?.title ?? "" })
+          }
+        ]
+      : []),
+    ...(editHref
+      ? [{ label: t("chat_edit_assistant"), onClick: () => router.push(editHref) }]
+      : []),
+    ...(sessionId
+      ? [
+          {
+            label: t("chat_delete_conversation"),
+            variant: "destructive" as const,
+            onClick: () => setDeleting({ id: sessionId, name: active?.title ?? "" })
+          }
+        ]
+      : [])
+  ];
+
+  const partnerToken =
+    isPersonal && (switcherItems?.length ?? 0) > 1 ? (
+      <PartnerSwitcher partner={partner} items={switcherItems} subtitle={null} variant="token" />
+    ) : undefined;
 
   return (
-    <div className="relative flex min-h-0 flex-1">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col px-4">
-        <div className="-mx-4 flex h-13 shrink-0 items-center gap-2.5 border-b px-4">
-          {partnerSwitcher ?? (
-            <span className="truncate text-sm font-semibold">{partner.name}</span>
-          )}
-          {showInsightsTab && (
-            <div className="bg-muted flex rounded-md p-0.5">
-              <Button
-                type="button"
-                variant={effectiveTab === "chat" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-7 px-2"
-                onClick={() => selectTab("chat")}
-              >
-                {t("chat")}
-              </Button>
-              <Button
-                type="button"
-                variant={effectiveTab === "insights" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-7 px-2"
-                onClick={() => selectTab("insights")}
-              >
-                {t("insights")}
-              </Button>
+    <div className="bg-ax-surface relative flex min-h-0 flex-1 flex-col">
+      <ChatHeader
+        partner={partner}
+        switcherItems={switcherItems}
+        title={effectiveTab === "insights" ? t("insights") : title}
+        modelName={partner.completionModel?.name ?? null}
+        view={insightPartner ? { value: effectiveTab, onChange: selectTab } : null}
+        historyOpen={historyOpen}
+        onToggleHistory={toggleHistory}
+        onNewConversation={newConversation}
+        menuItems={menuItems}
+        minimal={isPersonal && !started && pendingSessionId === null && effectiveTab === "chat"}
+      />
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {insightPartner && effectiveTab === "insights" ? (
+            <InsightsPanel partner={insightPartner} />
+          ) : active ? (
+            <ChatView
+              key={active.key}
+              partner={partner}
+              initialSessionId={active.sessionId}
+              initialMessages={active.messages}
+              initialFeedback={active.feedback}
+              modelSelector={modelSelector}
+              partnerToken={partnerToken}
+              onNewConversation={newConversation}
+              onStarted={() =>
+                setActive((current) => (current ? { ...current, started: true } : current))
+              }
+              onTitle={(name) =>
+                setActive((current) => (current ? { ...current, title: name } : current))
+              }
+              onSessionCreated={(id) => {
+                setActive((current) => (current ? { ...current, sessionId: id } : current));
+                updateUrl(id);
+              }}
+              activity={activity}
+              onActivityChange={onActivityChange}
+            />
+          ) : detail.isError ? (
+            <div className="flex flex-col items-center gap-3 p-6 text-center">
+              <p className="text-ax-error text-sm">{t("chat_conversation_load_failed")}</p>
+              <Button label={t("new_conversation")} variant="secondary" onClick={newConversation} />
+            </div>
+          ) : (
+            <div className="mx-auto w-full max-w-[712px] p-6">
+              <LoadingState rows={4} label={t("chat_loading_conversation")} />
             </div>
           )}
-          <div className="ml-auto flex items-center gap-2">
-            {/* Fixed-model partners show a read-only badge; the default
-                assistant's interactive picker lives in the composer instead. */}
-            {!modelSelector && partner.completionModel && (
-              <Badge variant="outline" className="text-foreground font-medium">
-                {partner.completionModel.name}
-              </Badge>
-            )}
-            {actions}
-            <Button variant="outline" size="sm" onClick={newConversation}>
-              <Plus className="size-4" />
-              <span className="hidden sm:inline">{t("new_conversation")}</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn("size-8", historyOpen && "bg-muted text-foreground")}
-              aria-label={t("history")}
-              aria-expanded={historyOpen}
-              aria-controls="chat-history"
-              onClick={() => setHistoryOpen((open) => !open)}
-            >
-              <History className="size-4" />
-            </Button>
-          </div>
         </div>
-        {insightPartner && effectiveTab === "insights" ? (
-          <InsightsPanel partner={insightPartner} />
-        ) : active ? (
-          <ChatView
-            key={active.key}
+        {historyOpen && (
+          <HistoryAside
+            inline={historyInline}
             partner={partner}
-            initialSessionId={active.sessionId}
-            initialMessages={active.messages}
-            modelSelector={modelSelector}
-            onNewConversation={newConversation}
-            onSessionCreated={(sessionId) => {
-              setActive((current) => current && { ...current, sessionId });
-              updateUrl(sessionId);
+            activeSessionId={sessionId ?? pendingSessionId}
+            onSelect={selectSession}
+            onDeleted={(id) => {
+              if (active?.sessionId === id) newConversation();
             }}
+            onRenamed={(id, name) =>
+              setActive((current) =>
+                current?.sessionId === id ? { ...current, title: name } : current
+              )
+            }
+            onClose={closeHistory}
           />
-        ) : (
-          <div className="flex flex-1 flex-col gap-3 p-6">
-            <Skeleton className="h-16 w-2/3" />
-            <Skeleton className="h-16 w-1/2 self-end" />
-          </div>
         )}
       </div>
 
-      {historyOpen && (
-        <>
-          {/* Mobile: dim + click-away closes the overlay drawer. */}
-          <button
-            type="button"
-            aria-hidden
-            tabIndex={-1}
-            onClick={() => setHistoryOpen(false)}
-            className="bg-foreground/20 fixed inset-0 z-20 sm:hidden"
-          />
-          <aside
-            id="chat-history"
-            aria-label={t("history")}
-            className="bg-sidebar text-sidebar-foreground border-sidebar-border fixed inset-y-0 right-0 z-30 flex w-72 max-w-[85vw] shrink-0 flex-col border-l p-3 sm:static sm:z-auto sm:max-w-none"
-          >
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-semibold">{t("history")}</span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7"
-                aria-label={t("close")}
-                onClick={() => setHistoryOpen(false)}
-              >
-                <X className="size-4" />
-              </Button>
-            </div>
-            <HistoryPanel
-              partner={partner}
-              activeSessionId={active?.sessionId ?? pendingSessionId}
-              onSelect={selectSession}
-              onDeleted={(sessionId) => {
-                if (active?.sessionId === sessionId) newConversation();
-              }}
-            />
-          </aside>
-        </>
-      )}
+      <RenameSessionDialog
+        session={renaming}
+        pending={rename.isPending}
+        onCancel={() => setRenaming(null)}
+        onSave={(name) => renaming && rename.mutate({ id: renaming.id, name })}
+      />
+      <DeleteSessionDialog
+        session={deleting}
+        pending={remove.isPending}
+        onCancel={() => setDeleting(null)}
+        onConfirm={() => deleting && remove.mutate(deleting.id)}
+      />
     </div>
   );
 }

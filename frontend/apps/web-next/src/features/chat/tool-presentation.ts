@@ -1,17 +1,44 @@
 import { humanizeToolName } from "@/components/ai-elements/tool-status";
 
 type Translate = (key: string, values?: Record<string, string>) => string;
-type ToolLike = { toolName: string; input?: unknown; providerMetadata?: unknown };
+type ToolLike = {
+  toolName: string;
+  input?: unknown;
+  /** Set on parts mapped from a saved session (map-session.ts). */
+  providerMetadata?: unknown;
+  /** AI SDK v6 keeps a streamed tool's metadata here (input phase)… */
+  callProviderMetadata?: unknown;
+  /** …and here (output phase). */
+  resultProviderMetadata?: unknown;
+};
+
+/**
+ * The `eneo` provider metadata of a tool part (server_name, title, purpose,
+ * approved), wherever the AI SDK put it: saved sessions use
+ * `providerMetadata`, live streams `callProviderMetadata` /
+ * `resultProviderMetadata`.
+ */
+export function eneoToolMetadata(part: ToolLike): Record<string, unknown> {
+  for (const provider of [
+    part.providerMetadata,
+    part.callProviderMetadata,
+    part.resultProviderMetadata
+  ]) {
+    const eneo =
+      provider && typeof provider === "object" && "eneo" in provider
+        ? (provider as { eneo?: unknown }).eneo
+        : null;
+    if (eneo && typeof eneo === "object") return eneo as Record<string, unknown>;
+  }
+  return {};
+}
 
 function metadata(part: ToolLike): {
   serverName: string;
   title: string | null;
   purpose: string | null;
 } {
-  const provider = part.providerMetadata;
-  const eneo =
-    provider && typeof provider === "object" && "eneo" in provider ? provider.eneo : null;
-  const values = eneo && typeof eneo === "object" ? eneo : {};
+  const values = eneoToolMetadata(part);
   const server = "server_name" in values ? values.server_name : null;
   const title = "title" in values ? values.title : null;
   const purpose = "purpose" in values ? values.purpose : null;
