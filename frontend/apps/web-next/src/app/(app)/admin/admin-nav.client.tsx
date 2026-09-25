@@ -33,8 +33,8 @@ function isActive(pathname: string, href: string): boolean {
 
 /**
  * Admin sidebar navigation, grouped like the Svelte AdminMenu. Sections are
- * added as their pages land during the phase-7 migration; legacy roles /
- * user-groups are intentionally dropped (overview OQ-2).
+ * added as their pages land during the phase-7 migration; legacy user-groups
+ * remain dropped (overview OQ-2). Current role administration is a separate page.
  */
 export function AdminNav() {
   const t = useTranslations();
@@ -92,6 +92,7 @@ export function AdminNav() {
       label: t("admin_section_access"),
       items: [
         { href: "/admin/users", icon: Users, label: t("users") },
+        { href: "/admin/roles", icon: ShieldCheck, label: t("roles") },
         { href: "/admin/api-keys", icon: Key, label: t("api_keys") }
       ]
     }

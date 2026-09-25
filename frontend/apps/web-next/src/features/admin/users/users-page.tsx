@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { cn } from "@/lib/utils";
+import { rolesQueryOptions } from "@/features/admin/roles/roles";
 import { UserEditorDialog } from "./user-editor";
 import { UserTable } from "./user-table";
 import { adminUsersQueryOptions, MIN_SEARCH_LENGTH, type StateFilter } from "./users";
@@ -20,11 +21,12 @@ const SEARCH_DEBOUNCE_MS = 250;
 const numberFormat = new Intl.NumberFormat("sv-SE");
 
 /** Sync the current filter state into the URL for shareable links. */
-function syncUrl(stateFilter: StateFilter, search: string, page: number) {
+function syncUrl(stateFilter: StateFilter, search: string, page: number, roleId: string | null) {
   const params = new URLSearchParams();
   if (stateFilter !== "active") params.set("tab", stateFilter);
   if (search) params.set("search", search);
   if (page > 1) params.set("page", String(page));
+  if (roleId) params.set("role_id", roleId);
   const query = params.toString();
   window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
 }
@@ -36,6 +38,7 @@ export function AdminUsersPage() {
   const initialTab = searchParams.get("tab") === "inactive" ? "inactive" : "active";
   const initialSearch = searchParams.get("search") ?? "";
   const initialPage = Math.max(1, Number(searchParams.get("page")) || 1);
+  const [roleId, setRoleId] = useState(searchParams.get("role_id"));
 
   const [stateFilter, setStateFilter] = useState<StateFilter>(initialTab);
   const [searchInput, setSearchInput] = useState(initialSearch);
@@ -59,11 +62,21 @@ export function AdminUsersPage() {
   }, [searchInput, search]);
 
   useEffect(() => {
-    syncUrl(stateFilter, search, page);
-  }, [stateFilter, search, page]);
+    syncUrl(stateFilter, search, page, roleId);
+  }, [stateFilter, search, page, roleId]);
+
+  const roles = useQuery(rolesQueryOptions(browserApi));
+  const selectedRole = [...(roles.data?.custom ?? []), ...(roles.data?.predefined ?? [])].find(
+    (role) => role.id === roleId
+  );
 
   const { data, isPending, isPlaceholderData } = useQuery({
-    ...adminUsersQueryOptions(browserApi, { page, stateFilter, search }),
+    ...adminUsersQueryOptions(browserApi, {
+      page,
+      stateFilter,
+      search,
+      roleId: roleId ?? undefined
+    }),
     placeholderData: keepPreviousData
   });
 
@@ -113,6 +126,24 @@ export function AdminUsersPage() {
           onChange={(event) => setSearchInput(event.target.value)}
         />
       </div>
+
+      {roleId && (
+        <div className="bg-muted flex w-fit items-center gap-3 rounded-lg px-3 py-2 text-sm">
+          <span>
+            {t("roles_filter_label")}: <strong>{selectedRole?.name ?? roleId}</strong>
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setRoleId(null);
+              setPage(1);
+            }}
+          >
+            {t("roles_clear_filter")}
+          </Button>
+        </div>
+      )}
 
       <div className={cn(isPlaceholderData && "opacity-60 transition-opacity")}>
         {isPending ? (

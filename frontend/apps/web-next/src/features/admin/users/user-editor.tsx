@@ -23,7 +23,8 @@ import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { rolesQueryOptions, type AdminUser, type Role } from "./users";
+import { rolesQueryOptions, type Role } from "@/features/admin/roles/roles";
+import { type AdminUser } from "./users";
 
 function RolePicker({
   selected,

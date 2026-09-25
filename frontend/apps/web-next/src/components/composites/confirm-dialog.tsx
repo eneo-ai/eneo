@@ -30,6 +30,7 @@ export function ConfirmDialogControlled({
   title,
   description,
   confirmLabel,
+  variant = "destructive",
   pending,
   onConfirm
 }: {
@@ -38,6 +39,7 @@ export function ConfirmDialogControlled({
   title: string;
   description: string;
   confirmLabel: string;
+  variant?: "default" | "destructive";
   pending?: boolean;
   onConfirm: () => void;
 }) {
@@ -51,7 +53,7 @@ export function ConfirmDialogControlled({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>{t("cancel")}</AlertDialogCancel>
-          <Button variant="destructive" disabled={pending} onClick={onConfirm}>
+          <Button variant={variant} disabled={pending} onClick={onConfirm}>
             {confirmLabel}
           </Button>
         </AlertDialogFooter>
