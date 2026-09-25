@@ -366,7 +366,7 @@ class AdminSpaceDetail(BaseModel):
     description: Optional[str] = None
     icon_id: Optional[UUID] = None
     created_at: datetime
-    updated_at: datetime
+    updated_at: ChangeDay = Field(description="The day (UTC) of the last change.")
     security_classification: Optional[OversightClassification] = None
     settings: AdminSpaceSettings
     usage: AdminSpaceUsage

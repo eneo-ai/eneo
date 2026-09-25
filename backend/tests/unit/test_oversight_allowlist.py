@@ -11,6 +11,7 @@ dotted field paths, so a new field fails here until it is added on purpose.
 
 import typing
 from collections.abc import Iterator
+from datetime import date
 
 import pytest
 from pydantic import BaseModel
@@ -479,6 +480,39 @@ def test_no_content_or_credential_field_names(model: type[BaseModel]) -> None:
         paths.discard("widget.texts.title")
     leaves = {path.rsplit(".", 1)[-1] for path in paths}
     assert leaves & _FORBIDDEN_LEAVES == set()
+
+
+def _annotations(
+    model: type[BaseModel], prefix: str = ""
+) -> Iterator[tuple[str, object]]:
+    for name, field in model.model_fields.items():
+        path = f"{prefix}{name}"
+        yield path, field.annotation
+        for nested in _models_in(field.annotation):
+            yield from _annotations(nested, f"{path}.")
+
+
+def _value_types(annotation: object) -> set[object]:
+    """The types a field can hold, without None and Annotated metadata."""
+    if typing.get_origin(annotation) is typing.Annotated:
+        return _value_types(typing.get_args(annotation)[0])
+    args = typing.get_args(annotation)
+    if not args:
+        return {annotation} - {type(None)}
+    return set().union(*(_value_types(arg) for arg in args))
+
+
+@pytest.mark.parametrize("model", [AdminSpaceList, AdminSpaceDetail, AdminSpaceMembers])
+def test_change_times_are_days(model: type[BaseModel]) -> None:
+    """When something last changed is given to the day: in a one-person space
+    the time of day would show when that person worked."""
+    precise = sorted(
+        path
+        for path, annotation in _annotations(model)
+        if path.rsplit(".", 1)[-1] == "updated_at"
+        and _value_types(annotation) != {date}
+    )
+    assert precise == []
 
 
 def test_the_walk_catches_a_new_nested_field() -> None:
