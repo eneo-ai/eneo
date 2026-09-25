@@ -4,6 +4,7 @@ import {
   type CompletionModel,
   type McpServer,
   availableServers,
+  capabilityMarker,
   buildConfirmations,
   buildUpdate,
   canSave,
@@ -16,6 +17,7 @@ import {
   modelsByProvider,
   modelsDirty,
   promptDirty,
+  policyServers,
   reasoningDirty,
   reasoningOptions,
   seedEditable,
@@ -78,6 +80,82 @@ describe("seedEditable", () => {
     });
     const state = seedEditable(saved, [], availableServers(SERVERS));
     expect(state.mcpSelections.s1).toEqual({ isDefaultEnabled: false });
+  });
+});
+
+describe("capability governance", () => {
+  const source: McpServer = {
+    id: "search-provider",
+    name: "Search provider",
+    purpose: "web_search",
+    is_available: true,
+    is_enabled: true,
+    readiness_reason: null,
+    tools: [{ id: "provider-tool", name: "search" }]
+  };
+
+  it("offers one stable function marker instead of a provider server", () => {
+    const prepared = policyServers([source, ...SERVERS]);
+    expect(prepared.map((server) => server.id)).toEqual([
+      "s1",
+      "capability:web_search",
+      "capability:image_generation"
+    ]);
+    expect(prepared.find((server) => server.id === "capability:web_search")?.is_available).toBe(
+      true
+    );
+    expect(
+      prepared.find((server) => server.id === "capability:image_generation")?.is_available
+    ).toBe(false);
+    expect(prepared.flatMap((server) => server.tools ?? []).map((tool) => tool.id)).toEqual(["t1"]);
+  });
+
+  it("keeps a saved capability when its provider changes or becomes inactive", () => {
+    const saved = policy({
+      mcp_restriction: {
+        enabled: true,
+        servers: [],
+        capabilities: [{ purpose: "web_search", is_default_enabled: false }],
+        disabled_tool_ids: []
+      }
+    });
+    const prepared = policyServers([]);
+    const state = seedEditable(saved, [], prepared);
+    expect(state.mcpSelections[capabilityMarker("web_search")]).toEqual({
+      isDefaultEnabled: false
+    });
+    expect(
+      mcpDirty(state, saved, selectableServerIdSet(prepared), selectableToolIdSet(prepared))
+    ).toBe(false);
+    expect(
+      buildUpdate(state, { models: false, mcp: true, prompt: false }, prepared).mcp_restriction
+    ).toEqual({
+      enabled: true,
+      servers: [],
+      capabilities: [{ purpose: "web_search", is_default_enabled: false }],
+      disabled_tool_ids: []
+    });
+  });
+
+  it("writes capability switches independently from general server grants", () => {
+    const saved = policy();
+    const prepared = policyServers([source, ...SERVERS]);
+    let state = seedEditable(saved, [], prepared);
+    state = draftReducer(state, { type: "setMcpEnabled", on: true });
+    state = draftReducer(state, {
+      type: "toggleMcp",
+      id: capabilityMarker("web_search"),
+      on: true,
+      toolIds: []
+    });
+    expect(
+      buildUpdate(state, { models: false, mcp: true, prompt: false }, prepared).mcp_restriction
+    ).toEqual({
+      enabled: true,
+      servers: [],
+      capabilities: [{ purpose: "web_search", is_default_enabled: true }],
+      disabled_tool_ids: []
+    });
   });
 });
 

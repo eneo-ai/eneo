@@ -8,6 +8,7 @@
  * mutation; keeping the logic here makes it unit-testable in isolation.
  */
 import type { GovernancePolicy, GovernancePolicyUpdate } from "./governance";
+import { CAPABILITIES, type Capability } from "@/features/capabilities/capabilities";
 import { disabledToolIdsForSelectedServers } from "./mcp-policy";
 import { bindingsFromSummaries, type Binding } from "@/features/skills/skill-bindings";
 
@@ -40,6 +41,9 @@ export type McpServer = {
   name: string;
   description?: string | null;
   is_available?: boolean;
+  is_enabled?: boolean;
+  readiness_reason?: string | null;
+  purpose?: "general" | Capability;
   tools?: McpTool[] | null;
 };
 export type PromptOption = { id: string; name: string; description?: string | null };
@@ -97,6 +101,36 @@ export function availableServers(servers: McpServer[]): McpServer[] {
   return servers.filter((server) => server.is_available);
 }
 
+export function capabilityMarker(purpose: Capability): string {
+  return `capability:${purpose}`;
+}
+
+function purposeFromMarker(id: string): Capability | null {
+  return (
+    CAPABILITIES.find((capability) => capabilityMarker(capability.purpose) === id)?.purpose ?? null
+  );
+}
+
+/** General MCP servers stay server-specific; each function gets one stable policy marker. */
+export function policyServers(servers: McpServer[]): McpServer[] {
+  const general = availableServers(
+    servers.filter((server) => !server.purpose || server.purpose === "general")
+  );
+  const capabilities = CAPABILITIES.map((capability) => ({
+    id: capabilityMarker(capability.purpose),
+    name: capability.purpose,
+    purpose: capability.purpose,
+    is_available: servers.some(
+      (server) =>
+        server.purpose === capability.purpose &&
+        server.is_enabled === true &&
+        !server.readiness_reason
+    ),
+    tools: []
+  }));
+  return [...general, ...capabilities];
+}
+
 /**
  * The same servers prepared for display: globally-disabled / remotely-removed
  * tools are hidden (they never run regardless of this policy).
@@ -143,6 +177,11 @@ export function seedEditable(
   for (const server of policy.mcp_restriction.servers) {
     if (!serverIds.has(server.mcp_server_id)) continue;
     mcpSelections[server.mcp_server_id] = { isDefaultEnabled: server.is_default_enabled };
+  }
+  for (const capability of policy.mcp_restriction.capabilities ?? []) {
+    mcpSelections[capabilityMarker(capability.purpose)] = {
+      isDefaultEnabled: capability.is_default_enabled ?? true
+    };
   }
 
   return {
@@ -228,11 +267,15 @@ export function mcpDirty(
 ): boolean {
   // Intersect the baseline with the selectable set so an orphaned (since-disabled)
   // server in the saved policy does not register as a pending change on load.
-  const initialServers = new Map(
-    policy.mcp_restriction.servers
+  const initialServers = new Map([
+    ...policy.mcp_restriction.servers
       .filter((server) => serverIds.has(server.mcp_server_id))
-      .map((server) => [server.mcp_server_id, server.is_default_enabled] as const)
-  );
+      .map((server) => [server.mcp_server_id, server.is_default_enabled] as const),
+    ...(policy.mcp_restriction.capabilities ?? []).map(
+      (capability) =>
+        [capabilityMarker(capability.purpose), capability.is_default_enabled ?? true] as const
+    )
+  ]);
   const initialDisabled = new Set(
     (policy.mcp_restriction.disabled_tool_ids ?? []).filter((id) => toolIds.has(id))
   );
@@ -354,10 +397,16 @@ export function buildUpdate(
   if (flags.mcp) {
     update.mcp_restriction = {
       enabled: state.mcpEnabled,
-      servers: Object.entries(state.mcpSelections).map(([id, value]) => ({
-        mcp_server_id: id,
-        is_default_enabled: value.isDefaultEnabled
-      })),
+      servers: Object.entries(state.mcpSelections)
+        .filter(([id]) => purposeFromMarker(id) === null)
+        .map(([id, value]) => ({
+          mcp_server_id: id,
+          is_default_enabled: value.isDefaultEnabled
+        })),
+      capabilities: Object.entries(state.mcpSelections).flatMap(([id, value]) => {
+        const purpose = purposeFromMarker(id);
+        return purpose ? [{ purpose, is_default_enabled: value.isDefaultEnabled }] : [];
+      }),
       disabled_tool_ids: disabledToolIdsForSelectedServers(
         available,
         Object.keys(state.mcpSelections),

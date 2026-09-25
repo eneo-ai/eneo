@@ -6,10 +6,10 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Binding } from "@/features/skills/skill-bindings";
+import { type Capability } from "@/features/capabilities/capabilities";
 import { GOVERNANCE_POLICY_KEY, type GovernancePolicy } from "./governance";
 import {
   activeProviders,
-  availableServers,
   buildConfirmations,
   buildUpdate,
   canSave as canSaveOf,
@@ -29,6 +29,8 @@ import {
   modelsDirty,
   type PromptOption,
   promptDirty,
+  policyServers,
+  capabilityMarker,
   reasoningDirty,
   reasoningOptions as reasoningOptionsOf,
   seedEditable,
@@ -67,7 +69,7 @@ export function usePolicyDraft(input: PolicyDraftInput) {
   // Prepared source lists (only what the policy can legally reference).
   const models = useMemo(() => selectableModels(input.models), [input.models]);
   const providers = useMemo(() => activeProviders(input.providers), [input.providers]);
-  const available = useMemo(() => availableServers(input.servers), [input.servers]);
+  const available = useMemo(() => policyServers(input.servers), [input.servers]);
   const display = useMemo(() => displayServers(available), [available]);
   const serverIds = useMemo(() => selectableServerIdSet(available), [available]);
   const toolIds = useMemo(() => selectableToolIdSet(available), [available]);
@@ -260,6 +262,13 @@ export function usePolicyDraft(input: PolicyDraftInput) {
       }),
     toggleMcpDefault: (id: string, on: boolean) => dispatch({ type: "toggleMcpDefault", id, on }),
     toggleMcpTool: (toolId: string, on: boolean) => dispatch({ type: "toggleMcpTool", toolId, on }),
+    toggleCapability: (purpose: Capability, on: boolean) => {
+      const id = capabilityMarker(purpose);
+      if (on && !available.find((server) => server.id === id)?.is_available) return;
+      dispatch({ type: "toggleMcp", id, on, toolIds: [] });
+    },
+    toggleCapabilityDefault: (purpose: Capability, on: boolean) =>
+      dispatch({ type: "toggleMcpDefault", id: capabilityMarker(purpose), on }),
     // prompt section
     promptEnabled: state.promptEnabled,
     setPromptEnabled: (on: boolean) => dispatch({ type: "setPromptEnabled", on }),
