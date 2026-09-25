@@ -6,6 +6,8 @@
   export let parent: { title?: string; href: string } | null = null;
   export let title: string | undefined = undefined;
   export let truncate = false;
+  /** Let a long title wrap onto more lines instead of cutting it off, e.g. a user-given name. */
+  export let wrap = false;
   /** Anchor for the What's new "Show me" spotlight (rendered as data-tour). */
   export let tour: string | undefined = undefined;
 
@@ -72,7 +74,11 @@
         <h1
           in:fly|global={{ x: -5, duration: parent ? 300 : 0, easing: quadInOut, opacity: 0.3 }}
           class:pl-2={isOverflowing}
-          class="text-primary inline-block w-full items-center gap-2 truncate pr-4 text-[1.45rem] leading-normal font-extrabold"
+          class:truncate={!wrap}
+          class:min-w-0={wrap}
+          class:break-words={wrap}
+          class:hyphens-auto={wrap}
+          class="text-primary inline-block w-full items-center gap-2 pr-4 text-[1.45rem] leading-normal font-extrabold"
         >
           {title}
         </h1>

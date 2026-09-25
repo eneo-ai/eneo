@@ -111,6 +111,6 @@ describe("SkillsPolicySection", () => {
 
     await expect
       .element(page.getByText("1 Skill", { exact: true }))
-      .toHaveClass(/text-destructive/);
+      .toHaveClass(/text-negative-stronger/);
   });
 });

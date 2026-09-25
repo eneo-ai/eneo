@@ -61,6 +61,7 @@
 <Page.Root>
   <Page.Header>
     <Page.Title
+      wrap
       parent={{ title: m.admin_spaces_nav(), href: listHref }}
       title={space?.name ?? m.admin_spaces_not_found_title()}
     ></Page.Title>

@@ -31,7 +31,7 @@
   import ActivationRequestsTable from "$lib/features/widget/admin/ActivationRequestsTable.svelte";
   import WidgetOverviewList from "$lib/features/widget/admin/WidgetOverviewList.svelte";
   import { MAX_DAILY_TOKEN_BUDGET } from "$lib/features/widget/admin/limits";
-  import { urlTab } from "$lib/features/widget/admin/tabState.svelte";
+  import { urlTab } from "$lib/core/helpers/urlTab.svelte";
   import { Autosave } from "$lib/features/widget/admin/widgetAutosave.svelte";
   import { guardAutosaveNavigation } from "$lib/features/widget/admin/guardAutosaveNavigation";
   import { DEFAULT_PRIMARY_COLOR, isHexColor } from "$lib/features/widget/contrast";

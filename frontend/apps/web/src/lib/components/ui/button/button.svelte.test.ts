@@ -3,13 +3,9 @@ import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
-import { Badge } from "./index.js";
+import { Button } from "./index.js";
 import "../../../../app.css";
 
-// Reference component test: renders a real Svelte 5 component in Chromium and
-// asserts on the resulting DOM. The `.svelte.test.ts` suffix routes this file to
-// the browser-mode "client" Vitest project (see vite.config.ts). Use this as the
-// template for testing any component.
 const label = (text: string) => createRawSnippet(() => ({ render: () => `<span>${text}</span>` }));
 
 async function contrastViolations(context: Element) {
@@ -27,32 +23,19 @@ afterEach(() => {
   document.body.classList.remove("bg-primary");
 });
 
-describe("Badge", () => {
-  it("renders the content passed via the children snippet", async () => {
-    render(Badge, { children: label("Active") });
-
-    await expect.element(page.getByText("Active")).toBeVisible();
-  });
-
-  it("applies variant-specific styling", async () => {
-    render(Badge, { variant: "destructive", children: label("Failed") });
-
-    const root = page.getByText("Failed").element().closest('[data-slot="badge"]');
-    expect(root?.className).toContain("text-negative-stronger");
-  });
-
+describe("Button", () => {
   it.each(["light", "dark"] as const)(
-    "keeps a destructive badge readable at rest and when a linked one is hovered (%s)",
+    "keeps a destructive button readable at rest and on hover (%s)",
     async (scheme) => {
       document.documentElement.dataset.theme = scheme;
-      // Small, medium-weight text like the widget status badges: 4.5:1 applies.
-      render(Badge, { variant: "destructive", children: label("Pausad") });
-      render(Badge, { variant: "destructive", href: "#paused", children: label("Pausad länk") });
+      render(Button, { variant: "destructive", children: label("Ta bort") });
+      const button = page.getByRole("button", { name: "Ta bort" });
 
       await userEvent.unhover(document.body);
       expect(await contrastViolations(document.body)).toEqual([]);
 
-      await userEvent.hover(page.getByRole("link", { name: "Pausad länk" }));
+      await userEvent.hover(button);
+      // The hover colours are what axe measures, not a transition halfway there.
       await expect.poll(() => document.getAnimations()).toHaveLength(0);
       expect(await contrastViolations(document.body)).toEqual([]);
     }

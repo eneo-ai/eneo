@@ -139,23 +139,24 @@ describe("ConfirmDialog", () => {
     expect(page.getByRole("alert").elements()).toHaveLength(0);
   });
 
-  it.each(["light", "dark"] as const)("keeps an inline failure readable (%s)", async (scheme) => {
-    document.documentElement.dataset.theme = scheme;
-    // The app shell paints the page; without it dark text is measured on white.
-    document.body.classList.add("bg-primary");
-    render(ConfirmDialog, {
-      ...baseProps,
-      errorDisplay: "inline",
-      onConfirm: () => Promise.reject(new Error("forbidden"))
-    });
+  it.each(["light", "dark"] as const)(
+    "keeps the dialog and an inline failure readable (%s)",
+    async (scheme) => {
+      document.documentElement.dataset.theme = scheme;
+      // The app shell paints the page; without it dark text is measured on white.
+      document.body.classList.add("bg-primary");
+      render(ConfirmDialog, {
+        ...baseProps,
+        errorDisplay: "inline",
+        onConfirm: () => Promise.reject(new Error("forbidden"))
+      });
 
-    await page.getByRole("button", { name: "Delete" }).click();
-    await expect.element(page.getByRole("alert")).toBeVisible();
+      await page.getByRole("button", { name: "Delete" }).click();
+      await expect.element(page.getByRole("alert")).toBeVisible();
 
-    // Scoped to the message: the destructive Button variant has its own, pre-existing
-    // contrast shortfall that this dialog does not own.
-    expect(await axeViolations(page.getByRole("alert").element())).toEqual([]);
-  });
+      expect(await axeViolations(page.getByRole("alertdialog").element())).toEqual([]);
+    }
+  );
 
   it("scrolls as a whole on a short viewport instead of clipping its body (400 % zoom)", async () => {
     await page.viewport(320, 256);

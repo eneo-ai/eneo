@@ -15,7 +15,10 @@ const navigation = vi.hoisted(() => ({
   invalidateAll: vi.fn(),
   replaceState: vi.fn()
 }));
-const route = vi.hoisted(() => ({ url: new URL("http://localhost/admin/spaces/space-1") }));
+const route = vi.hoisted(() => ({
+  url: new URL("http://localhost/admin/spaces/space-1"),
+  state: {} as App.PageState
+}));
 const admin = vi.hoisted(() => ({ leave: vi.fn(), join: vi.fn() }));
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
 // Messages read as their keys, or as the real Swedish text where length matters.
@@ -37,7 +40,9 @@ vi.mock("$app/state", () => ({
     get url() {
       return route.url;
     },
-    state: {}
+    get state() {
+      return route.state;
+    }
   }
 }));
 vi.mock("$lib/core/Eneo", () => ({
@@ -337,11 +342,35 @@ function horizontalOverflow() {
   ];
 }
 
+/** The opaque colour of `layers` painted in order, bottom first. */
+function paint(...layers: string[]): [number, number, number] {
+  const context = document.createElement("canvas").getContext("2d")!;
+  for (const layer of layers) {
+    context.fillStyle = layer;
+    context.fillRect(0, 0, 1, 1);
+  }
+  const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+  return [r, g, b];
+}
+
+function contrast(a: [number, number, number], b: [number, number, number]) {
+  const luminance = (rgb: [number, number, number]) => {
+    const [r, g, b] = rgb.map((channel) => {
+      const c = channel / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (light + 0.05) / (dark + 0.05);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   navigation.invalidate.mockResolvedValue(undefined);
   navigation.invalidateAll.mockResolvedValue(undefined);
   route.url = new URL("http://localhost/admin/spaces/space-1");
+  route.state = {};
   i18n.catalog = null;
   delete document.documentElement.dataset.theme;
   document.body.classList.add("bg-primary");
@@ -495,6 +524,52 @@ describe("a space in Admin → Ytor", () => {
     expect(String(navigation.replaceState.mock.lastCall?.[0])).toContain("tab=assistants");
   });
 
+  test("Back and Forward bring back the tab the history entry was left on", async () => {
+    // SvelteKit restores the entry's shallow state but not the query it was left with.
+    route.state = { tab: "widgets" };
+    renderPage();
+
+    await expect.element(tabTrigger(/^widget_admin_nav/)).toHaveAttribute("aria-selected", "true");
+    await openTab(/^members/);
+    await vi.waitFor(() => expect(navigation.replaceState).toHaveBeenCalled());
+    const [url, state] = navigation.replaceState.mock.lastCall ?? [];
+    expect(String(url)).toContain("tab=members");
+    expect(state).toEqual({ tab: "members" });
+  });
+
+  test.each(["light", "dark"] as const)(
+    "the selected tab stands out from the others (%s)",
+    async (scheme) => {
+      document.documentElement.dataset.theme = scheme;
+      renderPage();
+      await userEvent.unhover(document.body);
+      await vi.waitFor(() => expect(document.getAnimations()).toHaveLength(0));
+
+      const selected = getComputedStyle(tabTrigger(/^settings/).element());
+      const list = getComputedStyle(page.getByRole("tablist").element());
+      const surface = getComputedStyle(document.body).backgroundColor;
+      const behind = paint(surface, list.backgroundColor);
+      const border = paint(
+        surface,
+        list.backgroundColor,
+        selected.backgroundColor,
+        selected.borderTopColor
+      );
+      // WCAG 1.4.11: the selection indicator needs 3:1 against what is next to it.
+      expect(contrast(border, behind)).toBeGreaterThanOrEqual(3);
+    }
+  );
+
+  test("a tab panel shows where keyboard focus is", async () => {
+    renderPage();
+    (tabTrigger(/^settings/).element() as HTMLElement).focus();
+    await userEvent.keyboard("{Tab}");
+
+    const panel = page.getByRole("tabpanel").element();
+    expect(document.activeElement).toBe(panel);
+    expect(getComputedStyle(panel).boxShadow).not.toBe("none");
+  });
+
   test("every tab panel starts with its own heading", async () => {
     renderPage();
     const tabs: [RegExp, string][] = [
@@ -586,7 +661,17 @@ describe("a space in Admin → Ytor", () => {
     async (width) => {
       i18n.catalog = sv;
       await page.viewport(width, 900);
-      renderPage(withMembership(viaGroup, detail({ attention: ["no_admin"] })));
+      renderPage(
+        withMembership(
+          viaGroup,
+          detail({ attention: ["no_admin"], name: "Utbildningsförvaltningens vuxenutbildning" })
+        )
+      );
+
+      // The name wraps instead of being cut off.
+      const title = page.getByRole("heading", { level: 1 }).element() as HTMLElement;
+      await expect.element(title).toHaveTextContent("Utbildningsförvaltningens vuxenutbildning");
+      expect(title.scrollWidth).toBeLessThanOrEqual(title.clientWidth);
 
       for (const name of [
         /^Inställningar/,

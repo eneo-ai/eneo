@@ -23,7 +23,7 @@
   import { untrack } from "svelte";
   import { blockerLabel } from "./blockers";
   import { getCapability } from "$lib/features/mcp/capabilities";
-  import { urlTab } from "./tabState.svelte";
+  import { urlTab } from "$lib/core/helpers/urlTab.svelte";
   import type { LoaderRelease } from "./snippet";
   import { isGroupLocked, lockedTextFields } from "./templateLocks";
   import { collapseWhitespace, TextDraft } from "./textDraft.svelte";
