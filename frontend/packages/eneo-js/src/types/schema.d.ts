@@ -13064,6 +13064,8 @@ export interface components {
       dimensions?: number | null;
       /** Max Input */
       max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
       /** Stability */
@@ -13195,6 +13197,8 @@ export interface components {
       dimensions?: number | null;
       /** Max Input */
       max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
       /** Stability */
