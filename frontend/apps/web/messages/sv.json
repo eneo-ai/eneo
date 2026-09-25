@@ -4856,7 +4856,7 @@
   "admin_spaces_remove_named": "Ta bort {name} från ytan",
   "space_oversight_notice_title": "En organisationsadministratör har gått med i ytan",
   "space_oversight_notice_title_many": "Organisationsadministratörer har gått med i ytan",
-  "space_oversight_notice_help": "Organisationens administratörer går med i en yta när de behöver se innehållet. Att de har gått med visas här i 90 dagar, även efter att de har lämnat.",
+  "space_oversight_notice_help": "Organisationens administratörer går med i en yta när de behöver se innehållet. Att de har gått med visas här så länge de är medlemmar och i 90 dagar efter att de har lämnat.",
   "space_oversight_visit_open": "{name} gick med {date} med rollen {role}.",
   "space_oversight_visit_left": "{name} gick med {joined} med rollen {role} och lämnade {left}.",
   "space_oversight_visit_deleted_person": "En borttagen användare",
