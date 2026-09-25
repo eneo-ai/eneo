@@ -70,7 +70,7 @@
           {$currentSpace.description ?? m.welcome_to_space({ space: $currentSpace.name })}
         </p>
         <div class="max-w-[70ch] pt-2">
-          <OversightJoinNotice members={$currentSpace.members} />
+          <OversightJoinNotice visits={$currentSpace.oversight_visits ?? []} />
         </div>
       {/if}
 

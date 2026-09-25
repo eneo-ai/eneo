@@ -15,20 +15,27 @@ vi.mock("$lib/paraglide/messages", () => ({
 }));
 vi.mock("$lib/paraglide/runtime", () => ({ getLocale: () => "sv" }));
 
+import type { SpaceOversightVisit } from "@eneo/eneo-js";
 import OversightJoinNotice from "./OversightJoinNotice.svelte";
 
 const JOINED_AT = "2026-09-20T09:30:00Z";
-const dateText = new Intl.DateTimeFormat("sv-SE", { dateStyle: "medium" }).format(
-  new Date(JOINED_AT)
-);
+const LEFT_AT = "2026-09-21T15:00:00Z";
+const day = (value: string) =>
+  new Intl.DateTimeFormat("sv-SE", { dateStyle: "medium" }).format(new Date(value));
 
-const viewer = { id: "u1", email: "vera@example.org", username: "Vera", role: "viewer" as const };
-const overseer = {
-  id: "u2",
-  email: "olle@example.org",
-  username: null,
-  role: "editor" as const,
-  oversight_join: { joined_at: JOINED_AT, reason: null }
+const open: SpaceOversightVisit = {
+  person: { id: "u2", name: "olle@example.org" },
+  role: "editor",
+  joined_at: JOINED_AT,
+  left_at: null,
+  reason: null
+};
+const ended: SpaceOversightVisit = {
+  person: { id: "u3", name: "Ada" },
+  role: "viewer",
+  joined_at: JOINED_AT,
+  left_at: LEFT_AT,
+  reason: null
 };
 
 const notice = () => page.getByRole("note");
@@ -44,19 +51,20 @@ afterEach(() => {
 
 describe("OversightJoinNotice", () => {
   test("stays away while nobody joined through oversight", async () => {
-    render(OversightJoinNotice, { members: [viewer] });
+    render(OversightJoinNotice, { visits: [] });
     expect(notice().elements()).toHaveLength(0);
     expect(document.body.textContent).not.toContain("space_oversight");
   });
 
   test("tells every member who joined, when and with which role, without a reason they may not see", async () => {
-    render(OversightJoinNotice, { members: [viewer, overseer] });
+    render(OversightJoinNotice, { visits: [open] });
 
     await expect.element(notice()).toHaveAccessibleName("space_oversight_notice_title");
+    await expect.element(notice()).toHaveTextContent("space_oversight_notice_help");
     await expect
       .element(notice())
       .toHaveTextContent(
-        `space_oversight_notice_item(olle@example.org|${dateText}|space_role_editor)`
+        `space_oversight_visit_open(olle@example.org|${day(JOINED_AT)}|space_role_editor)`
       );
     expect(notice().element().textContent).not.toContain("space_oversight_notice_reason");
     // A standing notice on the page: no alert, no live region and no extra heading.
@@ -64,25 +72,38 @@ describe("OversightJoinNotice", () => {
     expect(notice().element().querySelector("h1, h2, h3, h4, h5, h6")).toBeNull();
   });
 
-  test("shows the reason when the member may read it, and names several administrators", async () => {
+  test("keeps a visit that has ended, with when the administrator left", async () => {
+    render(OversightJoinNotice, { visits: [ended] });
+
+    await expect
+      .element(notice())
+      .toHaveTextContent(
+        `space_oversight_visit_left(Ada|${day(JOINED_AT)}|space_role_viewer|${day(LEFT_AT)})`
+      );
+  });
+
+  test("names a deleted administrator neutrally and counts people, not visits", async () => {
+    const again = { ...open, joined_at: "2026-09-10T08:00:00Z", left_at: "2026-09-11T08:00:00Z" };
+    const { rerender } = render(OversightJoinNotice, { visits: [open, again] });
+    // One person, two visits.
+    await expect.element(notice()).toHaveAccessibleName("space_oversight_notice_title");
+    expect(page.getByRole("listitem").elements()).toHaveLength(2);
+
+    await rerender({ visits: [open, { ...ended, person: null }] });
+    await expect.element(notice()).toHaveAccessibleName("space_oversight_notice_title_many");
+    expect(page.getByRole("listitem").elements()[1].textContent).toContain(
+      "space_oversight_visit_left(space_oversight_visit_deleted_person|"
+    );
+  });
+
+  test("shows the reason when the member may read it", async () => {
     render(OversightJoinNotice, {
-      members: [
-        { ...overseer, oversight_join: { joined_at: JOINED_AT, reason: "Ärende 2026-114" } },
-        {
-          id: "u3",
-          email: "ada@example.org",
-          username: "Ada",
-          role: "admin",
-          oversight_join: { joined_at: JOINED_AT, reason: null }
-        }
-      ]
+      visits: [{ ...open, reason: "Ärende 2026-114" }, ended]
     });
 
-    await expect.element(notice()).toHaveAccessibleName("space_oversight_notice_title_many");
     const items = page.getByRole("listitem").elements();
     expect(items).toHaveLength(2);
     expect(items[0].textContent).toContain("space_oversight_notice_reason(Ärende 2026-114)");
-    expect(items[1].textContent).toContain(`space_oversight_notice_item(Ada|${dateText}|`);
     expect(items[1].textContent).not.toContain("space_oversight_notice_reason");
   });
 
@@ -90,9 +111,7 @@ describe("OversightJoinNotice", () => {
     "passes every WCAG 2.2 A and AA rule (%s)",
     async (scheme) => {
       document.documentElement.dataset.theme = scheme;
-      render(OversightJoinNotice, {
-        members: [{ ...overseer, oversight_join: { joined_at: JOINED_AT, reason: "Ärende 12" } }]
-      });
+      render(OversightJoinNotice, { visits: [{ ...open, reason: "Ärende 12" }, ended] });
       await expect.element(notice()).toBeVisible();
       await userEvent.unhover(document.body);
 

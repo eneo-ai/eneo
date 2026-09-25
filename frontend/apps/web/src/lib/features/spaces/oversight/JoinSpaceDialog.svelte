@@ -4,11 +4,7 @@
   members and the audit log will see.
 -->
 <script lang="ts">
-  import type {
-    AdminSpaceMembers,
-    AdminSpaceViewerMembership,
-    SpaceRoleValue
-  } from "@eneo/eneo-js";
+  import type { AdminSpaceViewerMembership, SpaceRoleValue } from "@eneo/eneo-js";
   import {
     CircleAlert,
     DoorOpen,
@@ -38,38 +34,26 @@
   import ReasonField from "./ReasonField.svelte";
 
   type Props = {
-    open?: boolean;
     space: {
       id: string;
       name: string;
       security_classification?: { name: string; security_level: number } | null;
     };
     membership: AdminSpaceViewerMembership;
-    /** The built-in "Gå med i ytan…" button's look. */
+    /** The "Gå med i ytan…" button's look. */
     triggerVariant?: "default" | "outline";
-    /** Leave out the built-in button and open the dialog through `open` instead. */
-    hideTrigger?: boolean;
     /**
      * Where focus goes after joining, since the button that opened the dialog
      * usually disappears with the change: e.g. the membership banner's heading.
      */
     focusAfterJoin?: () => HTMLElement | null | undefined;
-    /** Runs after the join is saved and the page data has been reloaded. */
-    onJoined?: (members: AdminSpaceMembers, role: SpaceRoleValue) => unknown;
   };
 
-  let {
-    open = $bindable(false),
-    space,
-    membership,
-    triggerVariant = "default",
-    hideTrigger = false,
-    focusAfterJoin,
-    onJoined
-  }: Props = $props();
+  let { space, membership, triggerVariant = "default", focusAfterJoin }: Props = $props();
 
   const eneo = getEneo();
   const uid = $props.id();
+  let open = $state(false);
 
   const roles = $derived(sortRolesAscending(membership.joinable_roles));
   let chosen = $state<SpaceRoleValue | null>(null);
@@ -120,9 +104,8 @@
     }
 
     pending = true;
-    let members: AdminSpaceMembers;
     try {
-      members = await eneo.spaces.admin.join({ spaceId: space.id, role, reason });
+      await eneo.spaces.admin.join({ spaceId: space.id, role, reason });
     } catch (error) {
       serverError = getErrorMessage(error, m.admin_spaces_join_failed());
       await tick();
@@ -137,7 +120,6 @@
     open = false;
     await invalidateAll();
     toast.success(m.admin_spaces_join_done({ role: spaceRoleLabel(joinedAs), space: space.name }));
-    await onJoined?.(members, joinedAs);
     await tick();
     focusAfterJoin?.()?.focus();
   }
@@ -151,7 +133,7 @@
     }
   }
 >
-  {#if !hideTrigger && roles.length > 0}
+  {#if roles.length > 0}
     <Dialog.Trigger class={buttonVariants({ variant: triggerVariant, class: "max-md:min-h-11" })}>
       {m.admin_spaces_join_open()}
     </Dialog.Trigger>

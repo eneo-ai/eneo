@@ -210,11 +210,11 @@ test("an organisation administrator oversees a space, joins it with a reason and
   const viewerPage = await signIn(browser, baseURL!, viewer);
   try {
     await viewerPage.goto(`/spaces/${space.id}/overview`);
-    const notice = viewerPage.getByRole("note", { name: "Organisationsadministratör i ytan" });
+    const notice = viewerPage.getByRole("note", {
+      name: "En organisationsadministratör har gått med i ytan"
+    });
     await expect(notice).toBeVisible();
-    await expect(notice).toContainText(
-      /gick med i ytan .+ som organisationsadministratör, med rollen Visare\./
-    );
+    await expect(notice).toContainText(/ gick med .+ med rollen Visare\./);
     await expect(notice).not.toContainText("Anledning");
     await expect(viewerPage.getByText(reason)).toHaveCount(0);
   } finally {
@@ -243,6 +243,22 @@ test("an organisation administrator oversees a space, joins it with a reason and
   await expect(viewingTitle).toBeFocused();
   await expect(page.getByText(`Du har lämnat ${spaceName}.`)).toBeVisible();
   expect(await joinOf(owner)).toBeUndefined();
+
+  // Members still see the visit after the administrator has left, with when they left.
+  const visitsOf = async (person: Person) => {
+    const response = await fetchAs(person, request, `/api/v1/spaces/${space.id}/`);
+    await expectOk(response, "reading the space");
+    return ((await response.json()) as { oversight_visits: { left_at: string | null }[] })
+      .oversight_visits;
+  };
+  expect((await visitsOf(viewer)).map((visit) => visit.left_at === null)).toEqual([false]);
+  const laterPage = await signIn(browser, baseURL!, viewer);
+  try {
+    await laterPage.goto(`/spaces/${space.id}/overview`);
+    await expect(laterPage.getByRole("note")).toContainText(/ med rollen Visare och lämnade /);
+  } finally {
+    await laterPage.context().close();
+  }
 });
 
 test("an editor's activation request is reviewed and activated at the reviewed revision", async ({

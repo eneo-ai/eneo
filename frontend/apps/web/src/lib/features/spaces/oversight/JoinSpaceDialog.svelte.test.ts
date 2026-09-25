@@ -222,9 +222,8 @@ describe("JoinSpaceDialog", () => {
   });
 
   test("joins with the chosen role and reason, reloads, confirms and moves focus on", async () => {
-    const onJoined = vi.fn();
     const target = focusTarget();
-    await openDialog({ focusAfterJoin: () => target, onJoined });
+    await openDialog({ focusAfterJoin: () => target });
 
     await radio("admin").click();
     await reason().fill(REASON);
@@ -234,7 +233,6 @@ describe("JoinSpaceDialog", () => {
     expect(admin.join).toHaveBeenCalledWith({ spaceId: "space-1", role: "admin", reason: REASON });
     expect(navigation.invalidateAll).toHaveBeenCalledTimes(1);
     expect(toast.success).toHaveBeenCalledWith("admin_spaces_join_done(space_role_admin|Ekonomi)");
-    expect(onJoined).toHaveBeenCalledWith(members, "admin");
     await vi.waitFor(() => expect(document.activeElement).toBe(target));
     // The dialog hands focus back to its opener as it closes; it must not win.
     await vi.waitFor(() => expect(document.getAnimations()).toHaveLength(0));

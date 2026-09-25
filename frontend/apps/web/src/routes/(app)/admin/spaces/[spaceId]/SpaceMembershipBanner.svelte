@@ -15,12 +15,11 @@
   import { localizeHref } from "$lib/paraglide/runtime";
   import LeaveSpaceDialog from "./LeaveSpaceDialog.svelte";
 
-  type Props = {
-    space: AdminSpaceDetail;
-    heading?: HTMLHeadingElement | null;
-  };
+  type Props = { space: AdminSpaceDetail };
 
-  let { space, heading = $bindable(null) }: Props = $props();
+  let { space }: Props = $props();
+
+  let heading = $state<HTMLHeadingElement | null>(null);
 
   const membership = $derived(space.members.viewer_membership);
   const variant = $derived(
