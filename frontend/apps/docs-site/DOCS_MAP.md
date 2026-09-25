@@ -19,6 +19,7 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | `docs/deployment/env_*.template`, `docs/deployment/docker-compose*.yml`, `docs/deployment/*.md`, `docker/**`                      | `guides/deployment.mdx`, `index.mdx` (quick start), `guides/upgrade-*.mdx` |
 | `backend/src/eneo/main/config.py` (settings, defaults, env names)                                                                 | `guides/deployment.mdx`, plus the feature page for the setting (below)     |
+| `backend/src/eneo/main/removed_env.py`, `frontend/apps/web/src/lib/core/deploymentEnv.server.ts` (removed and required variables) | `guides/upgrade-2-2-0.mdx`, `guides/deployment.mdx`                        |
 | `backend/src/eneo/server/main.py` (API prefix, health endpoints, middleware), `backend/src/eneo/server/routers.py` (mount points) | `docs/api.mdx`, `docs/architecture.mdx`, `guides/deployment.mdx`           |
 | `.devcontainer/**`, `backend/pyproject.toml`, `backend/run.sh`, `frontend/package.json`, `Taskfile.yml`                           | `docs/getting-started.mdx`, `docs/INSTALLATION.md` (root)                  |
 | `backend/alembic/versions/**` (breaking migrations, data migrations)                                                              | `guides/upgrade-*.mdx`, `docs/architecture.mdx` (data model)               |

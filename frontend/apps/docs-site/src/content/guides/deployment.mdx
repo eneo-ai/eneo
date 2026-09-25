@@ -1010,6 +1010,13 @@ checksum and skew-recovery checks.
 
 Edit `docker-compose.yml` and update the image tags, for example `ghcr.io/eneo-ai/eneo-backend:2.1.1` → `ghcr.io/eneo-ai/eneo-backend:2.2.0`. Eneo image tags have no `v` prefix.
 
+### Rename environment variables that are no longer read
+
+From 2.2, the backend, worker and web app refuse to start while a renamed
+variable is set without its replacement, and the web app refuses to start
+without `ENEO_BACKEND_URL`. Before upgrading to 2.2, follow
+[Upgrading to 2.2.0](/guides/upgrade-2-2-0#environment-variables).
+
 ### Review network changes
 
 If your current deployment predates the isolated-network template, recreating

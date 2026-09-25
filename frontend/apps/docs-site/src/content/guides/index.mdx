@@ -9,6 +9,7 @@ matters.
 | If you need to…                          | Start with                                                             |
 | ---------------------------------------- | ---------------------------------------------------------------------- |
 | Deploy Eneo                              | [Deploy Eneo](/guides/deployment)                                      |
+| Upgrade to 2.2.0 (renamed variables)     | [Upgrading to 2.2.0](/guides/upgrade-2-2-0)                            |
 | Upgrade to 1.7.0 (tenant models)         | [Upgrading to 1.7.0](/guides/upgrade-1-7-0)                            |
 | Upgrade legacy File/Icon storage         | [Upgrade File & Icon Storage](/guides/file-icon-storage-upgrade)       |
 | Choose where durable bytes live          | [Choose Content Storage](/guides/object-content-storage)               |
@@ -99,6 +100,15 @@ Deploy Eneo in production environments:
 - Network isolation between proxy, data, and module tiers
 - Using nginx instead of Traefik
 - Object content storage options
+
+### [Upgrading to 2.2.0](/guides/upgrade-2-2-0)
+
+Rename the deployment settings that 2.2 no longer reads:
+
+- Environment variables to rename, and the ones removed without a replacement
+- What the backend and web app log or refuse at startup
+- API names that changed for integrations
+- Commands, log names and open browser tabs after the upgrade
 
 ### [Upgrading to 1.7.0](/guides/upgrade-1-7-0)
 
