@@ -104,6 +104,8 @@ export function widgetErrorMessage(error: unknown): string | null {
       return m.widget_admin_template_in_use();
     case "widget_revision_conflict":
       return m.widget_admin_save_conflict();
+    case "widget_activation_request_missing":
+      return m.widget_request_error_missing();
     case "widget_policy_violation":
       return m.widget_admin_error_policy_violation({
         reasons: refusalCodes(error).map(blockerLabel).join(" ")

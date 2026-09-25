@@ -13,6 +13,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import { blockerLabel } from "./blockers";
+  import { widgetStatusLabel } from "./status";
   import { toastWidgetError } from "./errors";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
@@ -59,19 +60,6 @@
     onlyActive ? overview.items.filter((item) => item.status === "active") : overview.items
   );
 
-  function statusLabel(item: WidgetOverviewItem) {
-    switch (item.status) {
-      case "active":
-        return m.widget_admin_status_active();
-      case "paused":
-        return m.widget_admin_status_paused();
-      case "archived":
-        return m.widget_admin_status_archived();
-      default:
-        return m.widget_admin_status_draft();
-    }
-  }
-
   function widgetHref(item: WidgetOverviewItem) {
     return localizeHref(`/spaces/${item.space_id}/assistants/${item.target_id}/widget`);
   }
@@ -115,7 +103,7 @@
                       ? "default"
                       : item.status === "paused"
                         ? "destructive"
-                        : "outline"}>{statusLabel(item)}</Badge
+                        : "outline"}>{widgetStatusLabel(item.status)}</Badge
                   >
                 </h2>
               </Card.Title>

@@ -67,6 +67,7 @@ describe("assistant widget page", () => {
         currentSpace: { id: "s1" },
         eneo: { widgets: { archive, update, previewToken: pending, usage: pending } },
         isAdmin: true,
+        user: { id: "u1" },
         policy: null,
         release: null,
         templates: []

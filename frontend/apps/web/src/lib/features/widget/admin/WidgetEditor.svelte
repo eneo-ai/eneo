@@ -44,6 +44,8 @@
     assistant: Assistant;
     eneo: Eneo;
     isAdmin: boolean;
+    /** Tells the editor's own activation request apart from someone else's. */
+    currentUserId: string;
     policy: WidgetPolicy | null;
     release: LoaderRelease | null;
     templates?: WidgetTemplate[];
@@ -56,6 +58,7 @@
     assistant,
     eneo,
     isAdmin,
+    currentUserId,
     policy,
     release,
     templates: allTemplates = [],
@@ -230,8 +233,14 @@
   <WidgetStatusBar
     {autosave}
     {isAdmin}
+    {currentUserId}
     onReload={async () => autosave.reload(await eneo.widgets.get({ id: widget.id }))}
-    onActivate={lifecycle(eneo.widgets.activate)}
+    onActivate={lifecycle((params) =>
+      // Read after the flush, so the admin activates exactly what is saved.
+      eneo.widgets.activate({ ...params, revision: autosave.widget.revision })
+    )}
+    onRequestActivation={lifecycle(eneo.widgets.requestActivation)}
+    onWithdrawRequest={lifecycle(eneo.widgets.withdrawActivationRequest)}
     onPause={lifecycle(eneo.widgets.pause)}
     onArchive={async () => {
       await lifecycle(eneo.widgets.archive)();

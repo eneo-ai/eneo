@@ -75,6 +75,7 @@
             assistant={data.assistant}
             eneo={data.eneo}
             isAdmin={data.isAdmin}
+            currentUserId={data.user.id}
             policy={data.policy}
             release={data.release}
             {templates}
