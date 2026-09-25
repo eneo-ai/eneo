@@ -55,7 +55,11 @@ from eneo.flows.domain.step_output import (
 )
 from eneo.flows.domain.transcript_source import TranscriptSourceReference
 from eneo.flows.enums import FlowOutputType, FlowRunStatus
-from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
+from eneo.flows.flow_run_input_envelope import (
+    read_max_speakers,
+    read_semantic_flow_input_payload,
+    read_speaker_labels_choice,
+)
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.flows.http_transport import redact_persisted_config
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
@@ -159,6 +163,8 @@ class FlowAssembler:
                 "input_payload_json": read_semantic_flow_input_payload(
                     run.input_payload_json
                 ),
+                "speaker_labels": read_speaker_labels_choice(run.input_payload_json),
+                "max_speakers": read_max_speakers(run.input_payload_json),
                 "result": self.to_run_result_public(
                     run=run,
                     final_output=final_output,

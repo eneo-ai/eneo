@@ -43,6 +43,10 @@ from eneo.flows.domain.flow import FlowRun
 from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_input_envelope import (
+    read_max_speakers,
+    read_speaker_labels_choice,
+)
 from eneo.flows.flow_run_redaction import redact_payload
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.main.container.container import Container
@@ -198,6 +202,10 @@ async def get_flow_run_evidence(
                 for field_name in FlowRunPublic.model_fields
                 if field_name in evidence.run
             }
+            run_payload["speaker_labels"] = read_speaker_labels_choice(
+                run.input_payload_json
+            )
+            run_payload["max_speakers"] = read_max_speakers(run.input_payload_json)
             run_payload["result"] = (
                 redact_payload(projected_result.model_dump(mode="json"))
                 if projected_result is not None

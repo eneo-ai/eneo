@@ -374,6 +374,8 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "run_label": "Case 123",
     "error": None,
     "input_payload_json": {"employee_name": "Alex Example"},
+    "speaker_labels": None,
+    "max_speakers": None,
     "result": None,
     "result_files": [],
     "token_usage": None,
@@ -1240,6 +1242,26 @@ class FlowRunPublic(FlowRunSummaryPublic):
             "Structured run input as accepted at creation, echoed back for display. "
             "It holds the published form-field values; uploaded files are referenced "
             "from step results, not from here."
+        ),
+    )
+    speaker_labels: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the run labels speakers, when the run chose it with "
+            "`speaker_labels` or the flow requires labels. Null when the run took "
+            "the flow's default. To start a new run with the same choice, send it "
+            "as `speaker_labels` only when the run contract's "
+            "`transcription.speaker_labels.selectable` is true."
+        ),
+    )
+    max_speakers: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "The upper bound on speakers the run settled at creation: its own "
+            "`max_speakers`, else the form's speaker-count field. Null when the "
+            "bound is automatic or the run labels no speakers. Send it as "
+            "`max_speakers` to start a new run with the same bound."
         ),
     )
     result: FlowRunResultPublic | None = Field(

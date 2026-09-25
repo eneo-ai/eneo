@@ -211,9 +211,19 @@ async def test_a_runs_speaker_choice_is_kept_with_the_run_and_its_idempotency_ke
         default = await _create_run(
             client, headers, flow.flow_id, {"speaker_labels": None}
         )
+    run_path = f"/api/v1/flows/{flow.flow_id}/runs/{chosen.json()['id']}/"
+    read = await client.get(run_path, headers=headers)
+    evidence = await client.get(f"{run_path}evidence/", headers=headers)
 
     assert chosen.status_code == 201, chosen.text
     assert chosen.json()["input_payload_json"] == {}
+    assert (read.status_code, evidence.status_code) == (200, 200), evidence.text
+    for run in (read.json(), evidence.json()["run"]):
+        assert {key: run[key] for key in ("speaker_labels", "max_speakers")} == {
+            "speaker_labels": None,
+            "max_speakers": None,
+            **choice,
+        }
     assert repeated.status_code == 201, repeated.text
     assert repeated.json()["id"] == chosen.json()["id"]
     assert changed.status_code == 400, changed.text
@@ -223,6 +233,10 @@ async def test_a_runs_speaker_choice_is_kept_with_the_run_and_its_idempotency_ke
     ((key, value),) = choice.items()
     assert stored[chosen.json()["id"]][key] == value
     assert "speaker_labels" not in stored[default.json()["id"]]
+    assert (default.json()["speaker_labels"], default.json()["max_speakers"]) == (
+        None,
+        None,
+    )
     assert len(dispatched) == 2
 
 

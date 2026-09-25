@@ -563,6 +563,32 @@ def test_run_public_exposes_only_semantic_input_payload() -> None:
     assert "expected_flow_version" in (run.input_payload_json or {})
 
 
+@pytest.mark.parametrize(
+    ("envelope", "speaker_options"),
+    [
+        ({"speaker_labels": True, "max_speakers": 3}, (True, 3)),
+        ({"speaker_labels": False}, (False, None)),
+        ({"max_speakers": None}, (None, None)),
+        # A run from a build that stored neither key.
+        ({}, (None, None)),
+    ],
+)
+def test_run_public_carries_the_runs_speaker_options(
+    envelope: dict[str, object], speaker_options: tuple[bool | None, int | None]
+) -> None:
+    run = _completed_run(output_payload_json=None).model_copy(
+        update={
+            "status": FlowRunStatus.QUEUED,
+            "input_payload_json": {"expected_flow_version": 3, **envelope},
+        }
+    )
+
+    public = FlowAssembler().to_run_detail_public(run)
+
+    assert (public.speaker_labels, public.max_speakers) == speaker_options
+    assert public.input_payload_json == {}
+
+
 def _completed_run(*, output_payload_json: dict[str, object] | None) -> FlowRun:
     now = datetime(2026, 3, 17, 10, 5, tzinfo=timezone.utc)
     return FlowRun(
