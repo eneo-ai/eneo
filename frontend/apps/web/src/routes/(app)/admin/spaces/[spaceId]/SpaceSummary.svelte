@@ -1,0 +1,119 @@
+<!--
+  The space at a glance. Usage counts people's questions only above the
+  anonymity threshold; below it the page says why a number is missing.
+-->
+<script lang="ts">
+  import type { AdminSpaceDetail } from "@eneo/eneo-js";
+  import { TriangleAlert } from "@lucide/svelte";
+  import { formatBytes } from "$lib/core/formatting/formatBytes";
+  import { formatDateMedium, intlLocale } from "$lib/core/formatting/dateTime";
+  import SecurityClassificationBadge from "$lib/features/security-classifications/components/SecurityClassificationBadge.svelte";
+  import { activityLabel } from "$lib/features/spaces/oversight/activity";
+  import { m } from "$lib/paraglide/messages";
+  import { adminNames, groupCount, peopleCount } from "../labels";
+
+  type Props = {
+    space: AdminSpaceDetail;
+    securityEnabled: boolean;
+  };
+
+  let { space, securityEnabled }: Props = $props();
+
+  const number = new Intl.NumberFormat(intlLocale());
+  const format = (value: number) => number.format(value);
+
+  const usage = $derived(space.usage);
+  const days = $derived(usage.window_days ?? 30);
+  const admins = $derived(adminNames(space.members.admins, 3));
+  const suppressedText = $derived(
+    m.admin_spaces_suppressed({ threshold: format(usage.threshold ?? 5) })
+  );
+</script>
+
+{#snippet count(value: number | null | undefined)}
+  {#if usage.suppressed || value == null}
+    <span class="text-secondary text-sm font-normal">{suppressedText}</span>
+  {:else}
+    <span class="tabular-nums">{format(value)}</span>
+  {/if}
+{/snippet}
+
+<section aria-labelledby="space-summary-title" class="flex flex-col gap-2">
+  <h2 id="space-summary-title" class="sr-only">{m.admin_spaces_summary_title()}</h2>
+  <dl
+    class="border-default bg-primary grid grid-cols-1 gap-x-6 gap-y-4 rounded-lg border p-4 @xl:grid-cols-2 @4xl:grid-cols-4"
+  >
+    {#if securityEnabled}
+      <div class="flex min-w-0 flex-col gap-1">
+        <dt class="text-secondary text-xs">{m.admin_spaces_col_classification()}</dt>
+        <dd>
+          {#if space.security_classification}
+            <SecurityClassificationBadge classification={space.security_classification} />
+          {:else}
+            {m.no_classification()}
+          {/if}
+        </dd>
+      </div>
+    {/if}
+    <div class="flex min-w-0 flex-col gap-1">
+      <dt class="text-secondary text-xs">{m.admin_spaces_col_admins()}</dt>
+      <dd class="font-medium wrap-anywhere">
+        {#if admins}
+          {admins}
+        {:else}
+          <span class="text-warning-stronger inline-flex items-center gap-1">
+            <TriangleAlert class="size-4 shrink-0" aria-hidden="true" />
+            {m.admin_spaces_admins_missing()}
+          </span>
+        {/if}
+      </dd>
+    </div>
+    <div class="flex min-w-0 flex-col gap-1">
+      <dt class="text-secondary text-xs">{m.members()}</dt>
+      <dd class="font-medium">
+        {peopleCount(space.members.member_count, format)} · {groupCount(
+          space.members.group_count,
+          format
+        )}
+      </dd>
+    </div>
+    <div class="flex min-w-0 flex-col gap-1">
+      <dt class="text-secondary text-xs">{m.admin_spaces_col_last_active()}</dt>
+      <dd class="font-medium">{activityLabel(usage.last_activity)}</dd>
+    </div>
+    <div class="flex min-w-0 flex-col gap-1">
+      <dt class="text-secondary text-xs">{m.admin_spaces_fact_questions({ days })}</dt>
+      <dd class="font-medium">{@render count(usage.questions)}</dd>
+    </div>
+    <div class="flex min-w-0 flex-col gap-1">
+      <dt class="text-secondary text-xs">{m.admin_spaces_fact_active_users({ days })}</dt>
+      <dd class="font-medium">{@render count(usage.active_users)}</dd>
+    </div>
+    {#if space.apps.length > 0}
+      <div class="flex min-w-0 flex-col gap-1">
+        <dt class="text-secondary text-xs">{m.admin_spaces_fact_app_runs({ days })}</dt>
+        <dd class="font-medium">{@render count(usage.app_runs)}</dd>
+      </div>
+    {/if}
+    {#if space.widgets.length > 0}
+      <!-- Visitors are anonymous, so these are never held back. -->
+      <div class="flex min-w-0 flex-col gap-1">
+        <dt class="text-secondary text-xs">{m.admin_spaces_fact_widget_questions({ days })}</dt>
+        <dd class="font-medium tabular-nums">{format(usage.widget_questions)}</dd>
+      </div>
+    {/if}
+    <div class="flex min-w-0 flex-col gap-1">
+      <dt class="text-secondary text-xs">{m.admin_spaces_fact_knowledge_size()}</dt>
+      <dd class="font-medium tabular-nums">{formatBytes(usage.knowledge_bytes)}</dd>
+    </div>
+    <div class="flex min-w-0 flex-col gap-1">
+      <dt class="text-secondary text-xs">{m.created()}</dt>
+      <dd class="font-medium">
+        <time datetime={space.created_at}>{formatDateMedium(space.created_at)}</time>
+      </dd>
+    </div>
+  </dl>
+  {#if usage.suppressed}
+    <p class="text-secondary text-sm">{m.admin_spaces_suppressed_help()}</p>
+  {/if}
+</section>

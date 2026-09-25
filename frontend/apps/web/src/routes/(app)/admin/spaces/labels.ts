@@ -1,4 +1,5 @@
 import type { AdminSpaceAdmins, AdminSpaceListItem } from "@eneo/eneo-js";
+import { findHostingLabel } from "$lib/features/ai-models/hosting/hostingOptions";
 import { formatList } from "$lib/features/spaces/oversight/format";
 import { spaceRoleLabel } from "$lib/features/spaces/roles";
 import { m } from "$lib/paraglide/messages";
@@ -73,4 +74,19 @@ export function activeWidgetCount(value: number, format: (value: number) => stri
   return value === 1
     ? m.admin_spaces_count_active_widgets_one()
     : m.admin_spaces_count_active_widgets({ count: format(value) });
+}
+
+/** "{n} personer" / "1 person". */
+export function peopleCount(value: number, format: (value: number) => string): string {
+  return value === 1
+    ? m.admin_spaces_count_people_one()
+    : m.admin_spaces_count_people({ count: format(value) });
+}
+
+/** "GPT-5 · EU", the model's name and where it is hosted when known. */
+export function modelLabel(model: { name: string; hosting?: string | null }): string {
+  const hosting = model.hosting
+    ? findHostingLabel(model.hosting) || model.hosting.toUpperCase()
+    : "";
+  return hosting ? `${model.name} · ${hosting}` : model.name;
 }

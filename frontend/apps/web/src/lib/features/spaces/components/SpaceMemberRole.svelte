@@ -96,7 +96,7 @@
       aria-busy={changing || undefined}
       class={cn(
         "min-w-36 justify-between max-md:min-h-12 max-md:flex-1",
-        disabled && "text-secondary cursor-not-allowed"
+        disabled && "cursor-not-allowed opacity-60"
       )}
     >
       <span class="flex items-center gap-2">
@@ -132,7 +132,7 @@
         size="icon"
         class={cn(
           "text-secondary shrink-0 max-md:size-12",
-          disabled ? "cursor-not-allowed" : "hover:text-negative-stronger"
+          disabled ? "cursor-not-allowed opacity-60" : "hover:text-negative-stronger"
         )}
         aria-label={m.admin_spaces_remove_named({ name })}
         aria-disabled={disabled || undefined}

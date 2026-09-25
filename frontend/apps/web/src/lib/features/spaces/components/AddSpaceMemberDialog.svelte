@@ -100,7 +100,7 @@
   }
 
   const add = createAsyncState(async () => {
-    if (!selected || !role || add.isLoading) return;
+    if (!selected || !role) return;
     error = null;
     try {
       await onAdd(selected, role);
@@ -125,7 +125,7 @@
       class="contents"
       onsubmit={(event) => {
         event.preventDefault();
-        add();
+        if (!add.isLoading) void add();
       }}
     >
       <Dialog.Header class={dialogLayout.header}>
@@ -153,7 +153,8 @@
                         class: "w-full justify-between font-normal max-md:min-h-11"
                       })}
                     >
-                      <span class="truncate" class:text-muted={!selected}>
+                      <!-- Full-strength text: a muted placeholder falls below 4.5:1 on the dark outline surface. -->
+                      <span class="truncate">
                         {selected ? getLabel(selected) : searchPlaceholder}
                       </span>
                       <IconSearch />
