@@ -5,6 +5,7 @@ import {
   BookOpen,
   BookOpenCheck,
   ChevronLeft,
+  Globe,
   KeyRound,
   type LucideIcon,
   MessageSquare,
@@ -30,6 +31,7 @@ import { chatPartnerHref } from "../assistants";
 import { AiSection } from "./ai-section";
 import { GeneralSection } from "./general-section";
 import { AttachmentsSection } from "./attachments-section";
+import { CapabilitiesSection } from "./capabilities-section";
 import { InstructionsSection } from "./instructions-section";
 import { KnowledgeSection } from "./knowledge-section";
 import { McpSection } from "./mcp-section";
@@ -128,6 +130,12 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
           }
         ]
       : []),
+    {
+      id: "capabilities",
+      label: t("capabilities"),
+      icon: Globe,
+      node: <CapabilitiesSection assistant={assistant} />
+    },
     {
       id: "attachments",
       label: t("attachments"),

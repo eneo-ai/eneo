@@ -37,6 +37,12 @@ import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { ResourceApiKeysSection } from "@/features/api-keys/resource-api-keys-section";
+import {
+  CAPABILITIES,
+  capabilityBlockReason,
+  readinessKey,
+  toggleCapability
+} from "@/features/capabilities/capabilities";
 import { mcpServersQueryOptions } from "@/features/admin/mcp/mcp";
 import { useSpace } from "@/features/spaces/use-space";
 import {
@@ -536,6 +542,59 @@ function SpaceApiKeysSection() {
   return <ResourceApiKeysSection scopeType="space" scopeId={space.id} resourceName={space.name} />;
 }
 
+function SpaceCapabilitiesSection() {
+  const t = useTranslations();
+  const { space, can } = useSpace();
+  const update = useUpdateSpace();
+  const autosave = useAutosave("capabilities");
+  const selected = space.enabled_capabilities ?? [];
+
+  return (
+    <SettingsGroup
+      id="capabilities"
+      title={t("capabilities")}
+      description={t("space_capabilities_description")}
+    >
+      {CAPABILITIES.map((capability) => {
+        const availability = space.available_capabilities?.find(
+          (item) => item.purpose === capability.purpose
+        );
+        const enabled = selected.includes(capability.purpose);
+        const blocked = capabilityBlockReason({
+          enabled,
+          spaceEnabled: true,
+          available: availability?.available === true,
+          modelSupportsTools: true
+        });
+        const hint = blocked
+          ? t(readinessKey(availability?.reason ?? blocked))
+          : t(capability.spaceHint);
+        return (
+          <div key={capability.purpose} className="flex items-center gap-3 rounded-lg border p-4">
+            <capability.icon aria-hidden="true" className="text-muted-foreground size-5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <Label htmlFor={`space-${capability.purpose}`}>{t(capability.purpose)}</Label>
+              <p className="text-muted-foreground text-sm">{hint}</p>
+            </div>
+            <Switch
+              id={`space-${capability.purpose}`}
+              checked={enabled}
+              disabled={!can("edit", "space") || update.isPending || blocked !== null}
+              onCheckedChange={() =>
+                void autosave(() =>
+                  update.mutateAsync({
+                    enabled_capabilities: toggleCapability(selected, capability.purpose)
+                  })
+                )
+              }
+            />
+          </div>
+        );
+      })}
+    </SettingsGroup>
+  );
+}
+
 export function SpaceSettings() {
   const t = useTranslations();
   const { space, can } = useSpace();
@@ -550,6 +609,7 @@ export function SpaceSettings() {
         {!isOrgSpace && <GeneralSection />}
         {!isOrgSpace && <SecuritySection />}
         <ModelsSection />
+        {!isOrgSpace && <SpaceCapabilitiesSection />}
         <SpaceApiKeysSection />
         {!isOrgSpace && can("delete", "space") && <DangerSection />}
       </div>
