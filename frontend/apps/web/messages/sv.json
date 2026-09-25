@@ -4971,7 +4971,7 @@
   "admin_spaces_suppressed_questions": "Visas inte – färre än {threshold} personer har ställt frågor",
   "admin_spaces_suppressed_app_runs": "Visas inte – färre än {threshold} personer har kört appar",
   "admin_spaces_widget_questions_hidden": "Visas inte – ingen webbwidget har varit aktiv",
-  "admin_spaces_suppressed_help": "Varje tal visas bara när minst {threshold} olika personer ligger bakom det, så att ingen enskild persons användning går att utläsa.",
+  "admin_spaces_suppressed_help": "Antalet frågor, appkörningar och aktiva användare visas bara när minst {threshold} olika personer ligger bakom varje siffra, så att ingen enskild persons användning går att utläsa.",
   "admin_spaces_tab_assistants": "Assistenter och appar",
   "admin_spaces_retention_org": "Organisationens inställning",
   "admin_spaces_capabilities": "Funktioner",

@@ -1,6 +1,7 @@
 <!--
-  The space at a glance. Each usage count shows only when enough different
-  people are behind it; otherwise the page says why that number is missing.
+  The space at a glance. Question, app-run and active-user counts show only
+  when enough different people are behind each; widget questions wait until a
+  widget has been public. A missing count says why it is missing.
 -->
 <script lang="ts">
   import type { AdminSpaceDetail } from "@eneo/eneo-js";

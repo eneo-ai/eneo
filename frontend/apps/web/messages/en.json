@@ -4971,7 +4971,7 @@
   "admin_spaces_suppressed_questions": "Not shown – fewer than {threshold} people asked questions",
   "admin_spaces_suppressed_app_runs": "Not shown – fewer than {threshold} people ran apps",
   "admin_spaces_widget_questions_hidden": "Not shown – no web widget has been active",
-  "admin_spaces_suppressed_help": "Each figure is shown only when at least {threshold} different people are behind it, so no individual's usage can be inferred.",
+  "admin_spaces_suppressed_help": "Question, app-run and active-user figures are shown only when at least {threshold} different people are behind each, so no individual's usage can be inferred.",
   "admin_spaces_tab_assistants": "Assistants and apps",
   "admin_spaces_retention_org": "Organisation setting",
   "admin_spaces_capabilities": "Capabilities",
