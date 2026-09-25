@@ -20133,7 +20133,7 @@ export interface components {
       run_label?: string | null;
       /**
        * Speaker Labels
-       * @description The run's speaker-label setting, settled when the run was created: true when the flow requires labels, else the run's own choice, else the flow's default at that time. Null when the flow offers no speaker-label option or the run recorded none. To start a new run with the same setting, send it as `speaker_labels` only when the run contract's `transcription.speaker_labels.selectable` is true.
+       * @description The run's speaker-label setting, settled when the run was created: true when the flow requires labels, else the run's own choice, else the flow's default at that time. Null when the run recorded no setting: the flow offers no speaker-label option, or the run predates recording it; a new run then follows the flow's current default. When true or false, a new run keeps the setting by sending it as `speaker_labels`, only when the run contract's `transcription.speaker_labels.selectable` is true.
        */
       speaker_labels?: boolean | null;
       /**
@@ -21768,7 +21768,7 @@ export interface components {
       run_label?: string | null;
       /**
        * Speaker Labels
-       * @description The run's speaker-label setting, settled when the run was created: true when the flow requires labels, else the run's own choice, else the flow's default at that time. Null when the flow offers no speaker-label option or the run recorded none. To start a new run with the same setting, send it as `speaker_labels` only when the run contract's `transcription.speaker_labels.selectable` is true.
+       * @description The run's speaker-label setting, settled when the run was created: true when the flow requires labels, else the run's own choice, else the flow's default at that time. Null when the run recorded no setting: the flow offers no speaker-label option, or the run predates recording it; a new run then follows the flow's current default. When true or false, a new run keeps the setting by sending it as `speaker_labels`, only when the run contract's `transcription.speaker_labels.selectable` is true.
        */
       speaker_labels?: boolean | null;
       /**

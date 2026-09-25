@@ -1270,14 +1270,17 @@ A run response carries the run's own speaker options at the top level, next to
 
 - `speaker_labels` is the run's speaker-label setting, fixed when the run was
   created: `true` when the flow requires labels, otherwise the run's own choice
-  or the flow's default at that time. It is `null` when the flow offers no
-  speaker-label option.
+  or the flow's default at that time. It is `null` when the run recorded no
+  setting: the flow offers no speaker-label option, or the run was created
+  before Eneo recorded it.
 - `max_speakers` is the limit the run used, and `null` when detection was
   automatic or the run labels no speakers.
 
-To start a new run with the same options, send `max_speakers` as it is. Send
-`speaker_labels` only when the run contract's
-`transcription.speaker_labels.selectable` is `true`.
+To start a new run with the same options, send `max_speakers` as it is. When
+`speaker_labels` is `true` or `false`, send it too, but only when the run
+contract's `transcription.speaker_labels.selectable` is `true`. When it is
+`null`, omit it: the new run follows the flow's current default, which may
+differ from what the earlier run used.
 
 ### Show live text while recording
 
