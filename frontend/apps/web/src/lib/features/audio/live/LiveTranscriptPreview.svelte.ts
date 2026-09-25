@@ -393,7 +393,10 @@ export class LiveTranscriptPreview {
   }
 
   #onContextState = () => {
-    if (this.#context?.state !== "running") this.lose();
+    // Only while the recording goes on: once it stops, the recorder closes its
+    // context as it lets go of it, and the stop's last audio still comes, or
+    // its wait times out.
+    if (this.#status !== "finished" && this.#context?.state !== "running") this.lose();
   };
 
   #isRecordingFile(fileIds: readonly string[]): boolean {

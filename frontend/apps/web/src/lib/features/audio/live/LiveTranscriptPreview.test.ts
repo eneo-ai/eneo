@@ -457,11 +457,18 @@ describe("LiveTranscriptPreview reuse of the final text", () => {
     expect(harness.preview.finishing).toBe(false);
   });
 
-  it("keeps the transcript when the context closes after the stop's last audio", async () => {
+  it("keeps the count when the recorder closes its context before the stop's last audio is in", async () => {
     const harness = setup();
-    const { socket } = await heardWhole(harness);
+    const { socket, node } = await listening(harness);
+    node.answersFlush = false;
 
+    // A browser's order: the recorder stops, releases and closes its context,
+    // and only then does the worklet's answer to the stop arrive.
+    harness.preview.stop();
     harness.setContextState("closed");
+    node.post(PCM16_FLUSHED);
+    expect(socket.texts).toEqual([stopMessage(0)]);
+
     socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "transcript-1" });
     harness.preview.recordingUploaded(harness.preview.recordingId as string, "file-1");
 

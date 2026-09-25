@@ -850,6 +850,27 @@ describe("FlowRunDialog live transcript in the run", () => {
     ]);
   });
 
+  it("keeps the count when the recorder's release closes its context before the last audio", async () => {
+    installLiveTranscriptFakes();
+    await openDialogAndStartRecording(upload, liveText);
+    const socket = FakeLiveSocket.instances[0];
+    const node = FakeWorkletNode.instances[0];
+    node.answersFlush = false;
+    socket.open();
+    socket.receive(ready);
+    node.frame(1);
+
+    // A browser's order: the recorder hands over its file and closes its
+    // context, and only then does the worklet answer the stop.
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+    expect(media.contexts[0]?.close).toHaveBeenCalledOnce();
+    node.post(PCM16_FLUSHED);
+
+    expect(socket.texts).toEqual([JSON.stringify({ type: "stop", produced_samples: 1600 })]);
+  });
+
   it("leaves the text a preview when the recorder pauses on its own", async () => {
     installLiveTranscriptFakes();
     await openDialogAndStartRecording(upload, liveText);
