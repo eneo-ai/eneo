@@ -701,14 +701,15 @@ async def transcribe_audio_input(
                         or live_transcript.bound_file_id != file.id
                     ):
                         live_fallback_reason = "unavailable"
+                    elif live_transcript.segments is None:
+                        # Known before any decode: batch it is.
+                        live_fallback_reason = "no_timing"
                     else:
                         duration = await audio_file.measure_duration()
                         if abs(duration - live_transcript.received_audio_seconds) > max(
                             1.0, duration * 0.005
                         ):
                             live_fallback_reason = "duration_mismatch"
-                        elif live_transcript.segments is None:
-                            live_fallback_reason = "no_timing"
                         else:
                             live_segments = tuple(
                                 TranscriptSegment(

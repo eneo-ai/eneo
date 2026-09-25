@@ -8,6 +8,7 @@ import pytest
 from eneo.database.tables.flow_tables import FlowLiveTranscripts
 from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.flow_run_error import TranscriptionFailureKind
+from eneo.flows.runtime.audio_spool import SpooledAudio
 from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.live_transcription.repository import LiveTranscriptRepository
@@ -193,14 +194,21 @@ async def test_live_speaker_enrichment_uses_live_segments_and_run_bound(
         ("no_segments", "no_timing", False),
         ("no_segments", "no_timing", True),
         ("missing", "unavailable", False),
-        ("expired", "unavailable", False),
         ("different_file", "unavailable", False),
     ],
 )
 async def test_unusable_live_transcript_calls_batch_once(
-    live_audio, condition, reason, labels
+    live_audio, monkeypatch, condition, reason, labels
 ):
     case = live_audio
+    measured: list[object] = []
+    original_measure = SpooledAudio.measure_duration
+
+    async def measure(self: SpooledAudio) -> float:
+        measured.append(self)
+        return await original_measure(self)
+
+    monkeypatch.setattr(SpooledAudio, "measure_duration", measure)
     case.request.run.input_payload_json["speaker_labels"] = labels
     if condition == "duration":
         case.row.received_audio_seconds = 45
@@ -208,14 +216,14 @@ async def test_unusable_live_transcript_calls_batch_once(
         case.row.segments = None
     elif condition == "missing":
         case.lookup.return_value = None
-    elif condition == "expired":
-        case.row.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
     else:
         case.row.bound_file_id = uuid4()
     result = await resolve_transcribe_and_attach_audio_input(
         request=case.request, deps=case.deps
     )
     case.registry.transcribe_from_filepath.assert_awaited_once()
+    if condition == "no_segments" and not labels:
+        assert measured == [], "no timing is known before any decode"
     assert result.transcription_metadata["transcript_origin"] == "batch"
     assert result.transcription_metadata["live_fallback_reason"] == reason
     if labels:
@@ -227,6 +235,18 @@ async def test_unusable_live_transcript_calls_batch_once(
     else:
         assert result.text == "Batch text."
         case.remote.label_speakers.assert_not_awaited()
+
+
+async def test_an_expired_transcript_bound_to_this_file_is_still_used(live_audio):
+    # Expiry limits how long an unbound transcript waits; a retry of a run over
+    # the same file keeps using it.
+    case = live_audio
+    case.row.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+    result = await resolve_transcribe_and_attach_audio_input(
+        request=case.request, deps=case.deps
+    )
+    case.registry.transcribe_from_filepath.assert_not_awaited()
+    assert result.transcription_metadata["transcript_origin"] == "live"
 
 
 async def test_live_enrichment_failure_keeps_batch_error_mapping_without_asr(

@@ -31,6 +31,11 @@ class LiveTranscriptScope:
     model_id: UUID | None
 
     def matches(self, row: FlowLiveTranscripts) -> bool:
+        """Whether the row belongs to this run's owner, flow version, step and model.
+
+        Expiry is not part of it: it limits how long an unbound transcript waits for
+        its first run; once bound, the transcript lives as long as a run uses the file.
+        """
         return (
             row.tenant_id == self.tenant_id
             and row.user_id == self.user_id
@@ -38,7 +43,6 @@ class LiveTranscriptScope:
             and row.flow_version == self.flow_version
             and row.step_id == self.step_id
             and row.model_id == self.model_id
-            and (row.expires_at is None or row.expires_at > datetime.now(timezone.utc))
         )
 
 
@@ -69,16 +73,22 @@ class LiveTranscriptRepository:
         row = await self.get(
             transcript_id, tenant_id=scope.tenant_id, lock_for_binding=True
         )
+        not_found = NotFoundException(
+            "Live transcript not found.",
+            code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_NOT_FOUND.value,
+        )
         if row is None or not scope.matches(row):
-            raise NotFoundException(
-                "Live transcript not found.",
-                code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_NOT_FOUND.value,
-            )
-        if row.bound_file_id is not None and row.bound_file_id != file_id:
+            raise not_found
+        if row.bound_file_id == file_id:
+            # A retry of a run over this file keeps its transcript, expired or not.
+            return
+        if row.bound_file_id is not None:
             raise ConflictException(
                 "Live transcript is already bound to another file.",
                 code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_ALREADY_BOUND.value,
             )
+        if row.expires_at is not None and row.expires_at <= datetime.now(timezone.utc):
+            raise not_found
         row.bound_file_id = file_id
         await self.session.flush()
 

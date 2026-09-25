@@ -193,6 +193,16 @@ async def test_live_transcript_binds_and_same_file_retry_is_accepted(admission):
     }
 
 
+async def test_an_expired_transcript_already_bound_to_this_file_is_accepted(admission):
+    # A retry re-admits the run's own binding; expiry refuses only a first binding.
+    case = admission
+    case.row.bound_file_id = case.files[0].id
+    case.row.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+    await _submit(case)
+    assert case.row.bound_file_id == case.files[0].id
+    case.repo.create.assert_awaited_once()
+
+
 async def test_live_transcript_identity_is_part_of_idempotent_replay(admission):
     case = admission
     first = await _submit(case, key="live-recording")

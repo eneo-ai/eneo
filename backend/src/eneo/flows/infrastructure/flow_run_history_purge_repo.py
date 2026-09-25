@@ -257,6 +257,9 @@ class FlowRunHistoryPurgeRepository:
         deleted_generated_file_ids = await self._delete_unreferenced_files(
             candidate_generated_file_ids
         )
+        # A live transcript bound to a source file lives as long as a run uses the file;
+        # released first, or the file's live-transcript reference would keep it forever.
+        await self._delete_released_live_transcripts(set(candidate_source_sizes))
         deleted_runtime_upload_ids = await self._delete_unreferenced_runtime_uploads(
             set(candidate_source_sizes)
         )
@@ -658,6 +661,27 @@ class FlowRunHistoryPurgeRepository:
         )
         return set(result.all())
 
+    async def _delete_released_live_transcripts(self, file_ids: set[UUID]) -> None:
+        if not file_ids:
+            return
+        retained_run_reference = (
+            sa.select(sa.literal(1))
+            .select_from(FlowRunStepInputFiles)
+            .where(FlowRunStepInputFiles.file_id == FlowLiveTranscripts.bound_file_id)
+            .exists()
+        )
+        await self.session.execute(
+            sa.delete(FlowLiveTranscripts)
+            .where(
+                _uuid_is_in_batch(
+                    FlowLiveTranscripts.bound_file_id,
+                    file_ids,
+                    parameter_name="released_live_transcript_file_ids",
+                )
+            )
+            .where(sa.not_(retained_run_reference))
+        )
+
     async def _delete_webhook_deliveries(self, run_ids: set[UUID]) -> int:
         result = await self.session.execute(
             sa.delete(FlowRunWebhookDeliveries).where(
@@ -914,7 +938,9 @@ def _abandoned_runtime_upload_eligibility(
 
 
 def _uuid_is_in_batch(
-    column: sa.ColumnElement[UUID] | InstrumentedAttribute[UUID],
+    column: sa.ColumnElement[UUID]
+    | InstrumentedAttribute[UUID]
+    | InstrumentedAttribute[UUID | None],
     values: set[UUID],
     *,
     parameter_name: str,

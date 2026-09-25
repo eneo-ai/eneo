@@ -23,6 +23,7 @@ from eneo.database.tables.audit_retention_policy_table import AuditRetentionPoli
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     BuilderSessions,
+    FlowLiveTranscripts,
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
@@ -1711,6 +1712,25 @@ async def test_flow_run_history_purge_reclaims_runtime_source_after_final_refere
     )
     source_file_id = fixture.runtime_input_file.id
     flow_id = fixture.flow.id
+    # A Strömma transcript bound to the file lives exactly as long as a run uses the
+    # file, whatever its own expiry says; the final purge releases it with the file.
+    live_transcript = FlowLiveTranscripts(
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        flow_id=flow_id,
+        flow_version=1,
+        step_id=fixture.step_id,
+        model_id=uuid4(),
+        recording_id="recording-1",
+        text="Hej.",
+        segments=None,
+        received_audio_seconds=1.0,
+        expires_at=datetime.now(timezone.utc) - timedelta(days=1),
+        bound_file_id=source_file_id,
+    )
+    async_session.add(live_transcript)
+    await async_session.flush()
+    live_transcript_id = live_transcript.id
 
     first_result = await flow_retention_service.purge_old_flow_run_history_batch(
         now=datetime.now(timezone.utc),
@@ -1735,6 +1755,7 @@ async def test_flow_run_history_purge_reclaims_runtime_source_after_final_refere
         flow_id=flow_id,
         tenant_id=test_tenant.id,
     )
+    assert await async_session.get(FlowLiveTranscripts, live_transcript_id) is not None
 
     second_result = await flow_retention_service.purge_old_flow_run_history_batch(
         now=datetime.now(timezone.utc),
@@ -1752,6 +1773,7 @@ async def test_flow_run_history_purge_reclaims_runtime_source_after_final_refere
     assert second_result.counts.flow_runtime_source_bytes_deleted == 128
     assert await async_session.get(FlowRuns, second_run_id) is None
     assert await async_session.get(Files, source_file_id) is None
+    assert await async_session.get(FlowLiveTranscripts, live_transcript_id) is None
     assert not await _flow_runtime_upload_exists(
         async_session,
         file_id=source_file_id,
