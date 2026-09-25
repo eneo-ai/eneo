@@ -7,16 +7,16 @@
 <script lang="ts" generics="T extends { id: string }">
   import { IconSearch } from "@eneo/icons/search";
   import type { SpaceRoleValue } from "@eneo/eneo-js";
-  import { CircleAlert } from "@lucide/svelte";
   import { tick, untrack, type Snippet } from "svelte";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import InlineError from "$lib/components/InlineError.svelte";
   import { Button, buttonVariants, type ButtonVariant } from "$lib/components/ui/button/index.js";
   import * as Command from "$lib/components/ui/command/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
-  import { getErrorMessage } from "$lib/core/errors";
+  import { getErrorMessageWithContext } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
   import { lowestRole, sortRolesAscending, spaceRoleLabel } from "../roles";
@@ -105,7 +105,7 @@
     try {
       await onAdd(selected, role);
     } catch (e) {
-      error = `${errorContext} ${getErrorMessage(e)}`;
+      error = getErrorMessageWithContext(e, errorContext);
       return;
     }
     open = false;
@@ -210,13 +210,7 @@
         </div>
 
         {#if error}
-          <div
-            role="alert"
-            class="bg-negative-dimmer text-negative-stronger flex items-start gap-2 rounded-lg p-3 text-sm"
-          >
-            <CircleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-            <p class="min-w-0">{error}</p>
-          </div>
+          <InlineError message={error} />
         {/if}
       </div>
 

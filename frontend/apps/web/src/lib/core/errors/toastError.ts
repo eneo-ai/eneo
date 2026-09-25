@@ -1,5 +1,5 @@
 import { toast } from "$lib/components/toast";
-import { getErrorMessage } from "./getErrorMessage";
+import { getErrorMessageWithContext } from "./getErrorMessage";
 
 /**
  * Show a localized error toast for any error.
@@ -17,6 +17,5 @@ import { getErrorMessage } from "./getErrorMessage";
  * toastError(error, m.could_not_delete_assistant());
  */
 export function toastError(error: unknown, context?: string): void {
-  const message = getErrorMessage(error);
-  toast.error(context ? `${context}: ${message}` : message);
+  toast.error(getErrorMessageWithContext(error, context));
 }

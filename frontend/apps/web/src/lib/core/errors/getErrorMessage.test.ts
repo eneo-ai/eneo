@@ -15,7 +15,7 @@ vi.mock("$lib/paraglide/messages", () => ({
   }
 }));
 
-import { getErrorMessage } from "./getErrorMessage";
+import { getErrorMessage, getErrorMessageWithContext } from "./getErrorMessage";
 
 /** Reason codes for the Skill lifecycle conflicts, and the code that used to
     answer for all of them: the AI model display-name collision. */
@@ -70,5 +70,26 @@ describe("getErrorMessage", () => {
         expect(skillCopy).not.toBe(modelCopy);
       }
     }
+  });
+});
+
+describe("getErrorMessageWithContext", () => {
+  const error = new EneoError("Backend fallback", "RESPONSE", 409, 9048, {}, { endpoint: "" });
+
+  it("joins what failed and why the same way, whether the context is a sentence or not", () => {
+    expect(getErrorMessageWithContext(error, "Could not add new member.")).toBe(
+      "Could not add new member: Slug taken."
+    );
+    expect(getErrorMessageWithContext(error, "Could not rename")).toBe(
+      "Could not rename: Slug taken."
+    );
+    expect(getErrorMessageWithContext(error, "Could not rename: ")).toBe(
+      "Could not rename: Slug taken."
+    );
+  });
+
+  it("is the message alone without a context", () => {
+    expect(getErrorMessageWithContext(error)).toBe("Slug taken.");
+    expect(getErrorMessageWithContext(error, "")).toBe("Slug taken.");
   });
 });

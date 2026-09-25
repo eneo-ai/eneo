@@ -123,6 +123,16 @@ export function getErrorMessage(error: unknown, fallback?: string): string {
 }
 
 /**
+ * The error message after what failed: "Could not delete assistant: You do not
+ * have permission". A context written as a sentence drops its full stop, so
+ * every caller joins the two the same way.
+ */
+export function getErrorMessageWithContext(error: unknown, context?: string): string {
+  const message = getErrorMessage(error);
+  return context ? `${context.replace(/[.:]\s*$/, "")}: ${message}` : message;
+}
+
+/**
  * Localized message for a backend error code alone.
  *
  * Use it where the EneoError itself is gone — SvelteKit serializes errors to

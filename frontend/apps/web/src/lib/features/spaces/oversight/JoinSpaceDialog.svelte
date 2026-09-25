@@ -5,17 +5,11 @@
 -->
 <script lang="ts">
   import type { AdminSpaceViewerMembership, SpaceRoleValue } from "@eneo/eneo-js";
-  import {
-    CircleAlert,
-    DoorOpen,
-    ExternalLink,
-    Eye,
-    ScrollText,
-    ShieldCheck
-  } from "@lucide/svelte";
+  import { DoorOpen, ExternalLink, Eye, ScrollText, ShieldCheck } from "@lucide/svelte";
   import { tick, untrack } from "svelte";
   import { invalidateAll } from "$app/navigation";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import InlineError from "$lib/components/InlineError.svelte";
   import { toast } from "$lib/components/toast";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
@@ -255,14 +249,7 @@
         </ReasonField>
 
         {#if serverError}
-          <div
-            bind:this={errorAlert}
-            role="alert"
-            class="bg-negative-dimmer text-negative-stronger flex items-start gap-2 rounded-lg p-3 text-sm"
-          >
-            <CircleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-            <p class="min-w-0">{serverError}</p>
-          </div>
+          <InlineError bind:ref={errorAlert} message={serverError} />
         {/if}
       </div>
 

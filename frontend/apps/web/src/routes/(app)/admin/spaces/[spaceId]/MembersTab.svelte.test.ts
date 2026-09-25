@@ -371,7 +371,7 @@ describe("MembersTab", () => {
 
     await expect
       .element(page.getByRole("alert"))
-      .toHaveTextContent("admin_spaces_add_person_failed eneo_error_9067");
+      .toHaveTextContent("admin_spaces_add_person_failed: eneo_error_9067");
     await expect.element(page.getByRole("dialog")).toBeVisible();
   });
 
@@ -453,7 +453,7 @@ describe("MembersTab", () => {
 
     await expect
       .element(page.getByRole("alert"))
-      .toHaveTextContent("admin_spaces_add_group_failed eneo_error_9066");
+      .toHaveTextContent("admin_spaces_add_group_failed: eneo_error_9066");
     await expect.element(page.getByRole("dialog")).toBeVisible();
     expect(toast.success).not.toHaveBeenCalled();
   });

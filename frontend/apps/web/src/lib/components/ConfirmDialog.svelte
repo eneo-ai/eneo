@@ -1,10 +1,10 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button, type ButtonVariant } from "$lib/components/ui/button/index.js";
   import { dialogLayout, type DialogWidth } from "$lib/components/dialogLayout.js";
-  import { getErrorMessage, toastError } from "$lib/core/errors";
+  import InlineError from "$lib/components/InlineError.svelte";
+  import { getErrorMessageWithContext, toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
@@ -65,8 +65,7 @@
       open = false;
     } catch (error) {
       if (errorDisplay === "inline") {
-        const message = getErrorMessage(error);
-        inlineError = errorContext ? `${errorContext}: ${message}` : message;
+        inlineError = getErrorMessageWithContext(error, errorContext);
       } else {
         toastError(error, errorContext);
       }
@@ -114,14 +113,7 @@
       <div class={dialogLayout.body}>
         {@render children?.()}
         {#if inlineError}
-          <!-- Not the destructive Alert: its text falls below 4.5:1 in dark mode. -->
-          <div
-            role="alert"
-            class="bg-negative-dimmer text-negative-stronger flex items-start gap-2 rounded-lg p-3 text-sm"
-          >
-            <CircleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-            <p class="min-w-0">{inlineError}</p>
-          </div>
+          <InlineError message={inlineError} />
         {/if}
       </div>
     {/if}
