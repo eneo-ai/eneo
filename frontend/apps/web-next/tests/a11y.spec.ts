@@ -69,6 +69,30 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
+    test("assistant catalogue (dashboard)", async ({ page }) => {
+      await scan(page, "/dashboard", async () => {
+        await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      });
+    });
+
+    // Phone layouts: the top bar or the chat's own header instead of the
+    // SideNav, and a touch pointer, so the 44 px touch targets apply.
+    test.describe("phone (390 × 844)", () => {
+      test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+      test("personal chat", async ({ page }) => {
+        await scan(page, "/spaces/personal/chat", async () => {
+          await expect(page.locator("textarea").last()).toBeVisible();
+        });
+      });
+
+      test("spaces list", async ({ page }) => {
+        await scan(page, "/spaces/list", async () => {
+          await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+        });
+      });
+    });
+
     test("space overview and knowledge", async ({ page }) => {
       const name = uniqueName(`E2E A11y Space ${colorScheme}`);
       const space = await createSpace(page, name);
