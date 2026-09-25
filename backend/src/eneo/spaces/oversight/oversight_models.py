@@ -28,6 +28,7 @@ AttentionReason = Literal["no_admin", "widget_activation_requested"]
 KnowledgeKind = Literal["collection", "website", "integration"]
 Capability = Literal["web_search", "image_generation"]
 IntegrationType = Literal["sharepoint", "confluence", "onedrive"]
+IntegrationItem = Literal["site", "folder", "file"]
 UpdateInterval = Literal["never", "daily", "every_other_day", "weekly"]
 MemberState = Literal["active", "invited", "inactive"]
 
@@ -167,12 +168,23 @@ class AdminSpaceSettings(BaseModel):
     data_retention_days: Optional[int] = None
 
 
+_INTEGRATION_NAME = (
+    "None for an integration source that is not a whole site: a file or"
+    " folder name is a document title, and a OneDrive name is personal."
+)
+_INTEGRATION_ITEM = (
+    "What an integration source covers: a whole site, a folder or a file."
+)
+
+
 class OversightKnowledgeRef(BaseModel):
     id: UUID
-    name: Optional[str] = Field(
-        default=None, description="None for a personal OneDrive folder."
-    )
+    name: Optional[str] = Field(default=None, description=_INTEGRATION_NAME)
     kind: KnowledgeKind
+    integration_type: Optional[IntegrationType] = None
+    integration_item: Optional[IntegrationItem] = Field(
+        default=None, description=_INTEGRATION_ITEM
+    )
     from_organization: bool
 
 
@@ -232,11 +244,12 @@ class AdminSpaceGroupChat(BaseModel):
 
 class AdminSpaceKnowledgeSource(BaseModel):
     id: UUID
-    name: Optional[str] = Field(
-        default=None, description="None for a personal OneDrive folder."
-    )
+    name: Optional[str] = Field(default=None, description=_INTEGRATION_NAME)
     kind: KnowledgeKind
     integration_type: Optional[IntegrationType] = None
+    integration_item: Optional[IntegrationItem] = Field(
+        default=None, description=_INTEGRATION_ITEM
+    )
     item_count: int = Field(description="Active documents or pages.")
     size_bytes: int
     updated_at: Optional[datetime] = None

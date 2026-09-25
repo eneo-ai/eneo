@@ -100,6 +100,7 @@ from eneo.spaces.oversight.oversight_models import (
     AdminSpaceKnowledgeSource,
     AdminSpaceWidgetRef,
     Capability,
+    IntegrationItem,
     IntegrationType,
     OversightClassification,
     OversightKnowledgeRef,
@@ -132,6 +133,47 @@ _AUTO_DISABLE_FAILURES = 10
 
 def _live_group() -> sa.ColumnElement[bool]:
     return sa.or_(UserGroups.state.is_(None), UserGroups.state != "deleted")
+
+
+def _integration_site_name() -> sa.ColumnElement[Optional[str]]:
+    """The name of an integration source that covers a whole SharePoint or
+    Confluence site, else NULL: a file or folder name is a document title
+    and a OneDrive name is personal. A source that points at a drive item
+    (``folder_id``) is never a whole site, even before its first sync sets
+    ``selected_item_type``; anything unrecognised stays nameless."""
+    return sa.case(
+        (
+            sa.and_(
+                sa.func.coalesce(IntegrationKnowledge.resource_type, "site") == "site",
+                IntegrationKnowledge.folder_id.is_(None),
+                sa.func.coalesce(IntegrationKnowledge.selected_item_type, "site_root")
+                == "site_root",
+            ),
+            IntegrationKnowledge.name,
+        ),
+        else_=sa.null(),
+    )
+
+
+def _integration_type(
+    resource_type: Optional[str], integration_type: Optional[str]
+) -> Optional[IntegrationType]:
+    if resource_type == "onedrive":
+        return "onedrive"
+    if integration_type in _INTEGRATION_TYPES:
+        return cast(IntegrationType, integration_type)
+    return None
+
+
+def _integration_item(
+    selected_item_type: Optional[str], folder_id: Optional[str]
+) -> Optional[IntegrationItem]:
+    if selected_item_type in ("file", "folder"):
+        return cast(IntegrationItem, selected_item_type)
+    if folder_id is None and selected_item_type in (None, "site_root"):
+        return "site"
+    # A drive item not yet synced: a file or a folder.
+    return None
 
 
 def _shared_space_ids(tenant_id: UUID) -> sa.Select[tuple[UUID]]:
@@ -334,6 +376,8 @@ class KnowledgeLinkRow:
     kind: Literal["collection", "website", "integration"]
     name: Optional[str]
     source_space_id: Optional[UUID]
+    integration_type: Optional[IntegrationType] = None
+    integration_item: Optional[IntegrationItem] = None
 
 
 @dataclass(frozen=True)
@@ -1300,9 +1344,10 @@ class SpaceOversightRepo:
         *,
         assistant_ids: Optional[Sequence[UUID]] = None,
     ) -> list[KnowledgeLinkRow]:
-        """The knowledge each assistant of the space uses. OneDrive sources
-        are personal folders: their names are never returned."""
+        """The knowledge each assistant of the space uses. Integration
+        sources keep their name only when they cover a whole site."""
         ids = self._assistant_ids(tenant_id, space_id, assistant_ids)
+        no_text = sa.null().cast(sa.Text)
         collections = (
             sa.select(
                 sa.literal("collection").label("kind"),
@@ -1311,6 +1356,10 @@ class SpaceOversightRepo:
                 CollectionsTable.id.label("source_id"),
                 CollectionsTable.name.label("name"),
                 CollectionsTable.space_id.label("source_space_id"),
+                no_text.label("resource_type"),
+                no_text.label("integration_type"),
+                no_text.label("selected_item_type"),
+                no_text.label("folder_id"),
             )
             .select_from(AssistantsGroups)
             .join(Assistants, Assistants.id == AssistantsGroups.assistant_id)
@@ -1325,6 +1374,10 @@ class SpaceOversightRepo:
                 Websites.id.label("source_id"),
                 sa.func.coalesce(Websites.name, Websites.url).label("name"),
                 Websites.space_id.label("source_space_id"),
+                no_text.label("resource_type"),
+                no_text.label("integration_type"),
+                no_text.label("selected_item_type"),
+                no_text.label("folder_id"),
             )
             .select_from(AssistantsWebsites)
             .join(Assistants, Assistants.id == AssistantsWebsites.assistant_id)
@@ -1337,11 +1390,12 @@ class SpaceOversightRepo:
                 AssistantIntegrationKnowledge.assistant_id.label("assistant_id"),
                 Assistants.name.label("assistant_name"),
                 IntegrationKnowledge.id.label("source_id"),
-                sa.case(
-                    (IntegrationKnowledge.resource_type == "onedrive", sa.null()),
-                    else_=IntegrationKnowledge.name,
-                ).label("name"),
+                _integration_site_name().label("name"),
                 IntegrationKnowledge.space_id.label("source_space_id"),
+                IntegrationKnowledge.resource_type.label("resource_type"),
+                Integration.integration_type.label("integration_type"),
+                IntegrationKnowledge.selected_item_type.label("selected_item_type"),
+                IntegrationKnowledge.folder_id.label("folder_id"),
             )
             .select_from(AssistantIntegrationKnowledge)
             .join(
@@ -1352,6 +1406,15 @@ class SpaceOversightRepo:
                 IntegrationKnowledge.id
                 == AssistantIntegrationKnowledge.integration_knowledge_id,
             )
+            .outerjoin(
+                UserIntegration,
+                UserIntegration.id == IntegrationKnowledge.user_integration_id,
+            )
+            .outerjoin(
+                TenantIntegration,
+                TenantIntegration.id == UserIntegration.tenant_integration_id,
+            )
+            .outerjoin(Integration, Integration.id == TenantIntegration.integration_id)
             .where(AssistantIntegrationKnowledge.assistant_id.in_(ids))
         )
         links = sa.union_all(collections, websites, integrations).subquery("links")
@@ -1362,6 +1425,10 @@ class SpaceOversightRepo:
             links.c.source_id,
             links.c.name,
             links.c.source_space_id,
+            links.c.resource_type,
+            links.c.integration_type,
+            links.c.selected_item_type,
+            links.c.folder_id,
         ).order_by(
             links.c.assistant_id,
             links.c.kind,
@@ -1376,6 +1443,16 @@ class SpaceOversightRepo:
                 kind=cast(Literal["collection", "website", "integration"], kind),
                 name=name,
                 source_space_id=source_space_id,
+                integration_type=(
+                    _integration_type(resource_type, integration_type)
+                    if kind == "integration"
+                    else None
+                ),
+                integration_item=(
+                    _integration_item(selected_item_type, folder_id)
+                    if kind == "integration"
+                    else None
+                ),
             )
             for (
                 kind,
@@ -1384,6 +1461,10 @@ class SpaceOversightRepo:
                 source_id,
                 name,
                 source_space_id,
+                resource_type,
+                integration_type,
+                selected_item_type,
+                folder_id,
             ) in (await self.session.execute(stmt)).tuples()
         ]
 
@@ -1456,6 +1537,8 @@ class SpaceOversightRepo:
                     id=link.source_id,
                     name=link.name,
                     kind=link.kind,
+                    integration_type=link.integration_type,
+                    integration_item=link.integration_item,
                     from_organization=(
                         link.source_space_id is not None
                         and link.source_space_id != space_id
@@ -1777,8 +1860,10 @@ class SpaceOversightRepo:
         integrations = (
             sa.select(
                 IntegrationKnowledge.id,
-                IntegrationKnowledge.name,
+                _integration_site_name(),
                 IntegrationKnowledge.resource_type,
+                IntegrationKnowledge.selected_item_type,
+                IntegrationKnowledge.folder_id,
                 IntegrationKnowledge.size,
                 IntegrationKnowledge.last_synced_at,
                 Integration.integration_type,
@@ -1800,21 +1885,24 @@ class SpaceOversightRepo:
                 which(IntegrationKnowledge),
             )
         )
-        for id, name, resource_type, size, synced_at, integration_type, count in (
-            await self.session.execute(integrations)
-        ).tuples():
-            onedrive = resource_type == "onedrive"
-            kind: Optional[IntegrationType] = None
-            if onedrive:
-                kind = "onedrive"
-            elif integration_type in _INTEGRATION_TYPES:
-                kind = cast(IntegrationType, integration_type)
+        for (
+            id,
+            name,
+            resource_type,
+            selected_item_type,
+            folder_id,
+            size,
+            synced_at,
+            integration_type,
+            count,
+        ) in (await self.session.execute(integrations)).tuples():
             sources.append(
                 AdminSpaceKnowledgeSource(
                     id=id,
-                    name=None if onedrive else name,
+                    name=name,
                     kind="integration",
-                    integration_type=kind,
+                    integration_type=_integration_type(resource_type, integration_type),
+                    integration_item=_integration_item(selected_item_type, folder_id),
                     item_count=int(count),
                     size_bytes=int(size or 0),
                     updated_at=synced_at,

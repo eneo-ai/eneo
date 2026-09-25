@@ -3,8 +3,8 @@
 Every column oversight must not return gets a ``SECRET-`` marker: document
 titles and text, questions and answers, conversation names and feedback, app
 run input and output, file names, website credentials, MCP
-settings, integration paths and tokens, OneDrive names, prompt history and
-free-text internals. No marker may appear in any byte of the list, the
+settings, integration paths and tokens, OneDrive names, the names of
+SharePoint files and folders, prompt history and free-text internals. No marker may appear in any byte of the list, the
 detail, a member change or the widget review, for an admin session or an
 admin API key. The selected instructions do appear: the canary would pass
 vacuously if nothing were read.
@@ -13,6 +13,7 @@ vacuously if nothing were read.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -39,6 +40,27 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 MARKER = "SECRET-"
 INSTRUCTIONS = "Visible instructions: answer politely about opening hours."
 APP_INSTRUCTIONS = "Visible app instructions: summarise the meeting."
+
+
+# Only a whole site keeps its name; the rest say what they are, not which.
+INTEGRATIONS: list[tuple[str, str | None, str | None, str | None]] = [
+    ("integration", "Socialtjänsten", "sharepoint", "site"),
+    ("integration", None, "onedrive", "folder"),
+    ("integration", None, "sharepoint", "file"),
+    ("integration", None, "sharepoint", "folder"),
+    ("integration", None, "sharepoint", None),
+]
+
+
+def _described(
+    source: dict[str, Any],
+) -> tuple[str, str | None, str | None, str | None]:
+    return (
+        source["kind"],
+        source["name"],
+        source.get("integration_type"),
+        source.get("integration_item"),
+    )
 
 
 async def _insert(table: str, **values: Any) -> None:
@@ -106,9 +128,10 @@ async def _seed_content(
         a=assistant_id,
     )
 
-    # Knowledge the assistant uses: a collection, a website that needs a
-    # login and a SharePoint folder, each with a document; plus a OneDrive
-    # folder whose name is personal.
+    # Knowledge the assistant uses, each with a document: a collection, a
+    # website that needs a login, a whole SharePoint site; and, nameless, a
+    # OneDrive folder, a SharePoint file and folder (their names are
+    # document titles) and a drive item not yet synced.
     collection = uuid4()
     await _insert(
         "groups",
@@ -175,9 +198,12 @@ async def _seed_content(
         tenant_integration_id=tenant_integration,
     )
     sources = []
-    for name, resource_type in (
-        ("Socialtjänsten", "site"),
-        (f"{MARKER}onedrive-name", "onedrive"),
+    for name, resource_type, item_type, drive_item in (
+        ("Socialtjänsten", "site", "site_root", False),
+        (f"{MARKER}onedrive-name", "onedrive", "folder", True),
+        (f"{MARKER}Utredning LSS 19800101.docx", "site", "file", True),
+        (f"{MARKER}sharepoint-folder-name", "site", "folder", True),
+        (f"{MARKER}unsynced-item-name", "site", None, True),
     ):
         source = uuid4()
         sources.append(source)
@@ -193,10 +219,12 @@ async def _seed_content(
             size=10,
             site_id=f"{MARKER}site-id",
             delta_token=f"{MARKER}delta-token",
+            folder_id=f"{MARKER}folder-id" if drive_item else None,
             folder_path=f"/{MARKER}folder-path",
             drive_id=f"{MARKER}drive-id",
             original_name=f"{MARKER}original-name",
             wrapper_name=f"{MARKER}wrapper-name",
+            selected_item_type=item_type,
             resource_type=resource_type,
             last_sync_summary={"files": [f"{MARKER}synced-file.docx"]},
         )
@@ -367,20 +395,24 @@ async def test_oversight_never_returns_content(client, admin, overseer, make_per
     assert assistant["instructions"] == INSTRUCTIONS
     assert assistant["attachment_count"] == 1
     assert [s["name"] for s in assistant["mcp_servers"]] == ["Kalender"]
-    assert {(ref["kind"], ref["name"]) for ref in assistant["knowledge"]} == {
-        ("collection", "Blanketter"),
-        ("website", "Intranätet"),
-        ("integration", "Socialtjänsten"),
-        ("integration", None),
-    }
+    assert Counter(_described(ref) for ref in assistant["knowledge"]) == Counter(
+        [
+            ("collection", "Blanketter", None, None),
+            ("website", "Intranätet", None, None),
+        ]
+        + INTEGRATIONS
+    )
     assert [app["instructions"] for app in detail["apps"]] == [APP_INSTRUCTIONS]
-    knowledge = {(k["kind"], k["name"]): k for k in detail["knowledge"]}
-    assert knowledge[("website", "Intranätet")]["requires_login"] is True
-    assert knowledge[("integration", None)]["integration_type"] == "onedrive"
-    assert all(k["item_count"] == 1 for k in knowledge.values())
-    assert len(knowledge) == 4
+    knowledge = detail["knowledge"]
+    (website,) = [k for k in knowledge if k["kind"] == "website"]
+    assert website["requires_login"] is True
+    assert Counter(
+        _described(k) for k in knowledge if k["kind"] == "integration"
+    ) == Counter(INTEGRATIONS)
+    assert all(k["item_count"] == 1 for k in knowledge)
+    assert len(knowledge) == 7
     assert detail["inherited_knowledge_count"] == 1
-    assert detail["usage"]["knowledge_bytes"] == 40
+    assert detail["usage"]["knowledge_bytes"] == 70
     assert detail["usage"]["suppressed"] is False
     assert detail["usage"]["questions"] == 5
     assert detail["group_chats"][0]["assistant_count"] == 1
@@ -392,7 +424,7 @@ async def test_oversight_never_returns_content(client, admin, overseer, make_per
         "assistants": 1,
         "apps": 1,
         "group_chats": 1,
-        "knowledge_sources": 4,
+        "knowledge_sources": 7,
     }
     assert item["widgets"] == {
         "active": 0,
@@ -404,7 +436,11 @@ async def test_oversight_never_returns_content(client, admin, overseer, make_per
 
     review = json.loads(bodies[f"session GET /api/v1/admin/widgets/{widget['id']}/"])
     assert review["target"]["assistant"]["instructions"] == INSTRUCTIONS
-    assert len(review["target"]["knowledge"]) == 4
+    assert Counter(
+        _described(k)
+        for k in review["target"]["knowledge"]
+        if k["kind"] == "integration"
+    ) == Counter(INTEGRATIONS)
     assert (
         bodies[f"api key GET /api/v1/admin/spaces/{space_id}/"].count(INSTRUCTIONS) == 1
     )
