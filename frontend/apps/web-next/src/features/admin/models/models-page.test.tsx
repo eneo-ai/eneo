@@ -236,9 +236,18 @@ describe("ModelsPage", () => {
     );
   });
 
-  it("switches tabs with the keyboard pattern and keeps the page header", async () => {
+  it("moves between tabs with the arrow keys and opens them with Enter", async () => {
     renderPage();
+    const models = screen.getByRole("tab", { name: "Modeller" });
     const history = screen.getByRole("tab", { name: "Migreringshistorik" });
+    // Roving tabindex: the tab strip is one tab stop.
+    expect(models.tabIndex).toBe(0);
+    expect(history.tabIndex).toBe(-1);
+
+    models.focus();
+    fireEvent.keyDown(models, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(history);
+    fireEvent.keyDown(history, { key: "Enter" });
     fireEvent.click(history);
 
     expect(history.getAttribute("aria-selected")).toBe("true");
@@ -253,5 +262,30 @@ describe("ModelsPage", () => {
     await act(async () => {
       await expectNoAxeViolations(document.body);
     });
+  });
+
+  it("opens a row menu from the keyboard and returns focus to it on Escape", async () => {
+    renderPage();
+    const trigger = screen.getByRole("button", { name: "Fler åtgärder för Claude Opus 4.7" });
+    trigger.focus();
+    // jsdom does not turn Enter into a click; Astryx opens menus on the key.
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    // jsdom has no popover styles, so every row's (closed) menu is "visible":
+    // take the one this trigger controls.
+    const menu = document.getElementById(trigger.getAttribute("aria-controls")!)!;
+    expect(menu.getAttribute("role")).toBe("menu");
+    for (const name of ["Modelldetaljer", "Redigera", "Migrera", "Ta bort"]) {
+      expect(within(menu).getByRole("menuitem", { name })).toBeTruthy();
+    }
+    // The default model can't be made default again.
+    expect(
+      within(menu)
+        .getByRole("menuitem", { name: "Ange som standardmodell" })
+        .getAttribute("aria-disabled")
+    ).toBe("true");
+
+    fireEvent.keyDown(document.activeElement ?? menu, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 });
