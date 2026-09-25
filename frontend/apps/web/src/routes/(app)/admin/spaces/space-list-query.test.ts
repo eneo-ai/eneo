@@ -29,7 +29,7 @@ function space(
     id: `id-${name}`,
     name,
     description: null,
-    created_at: "2026-01-01T00:00:00Z",
+    created_at: "2026-01-01",
     member_count: 1,
     group_count: 0,
     admins: { manageable: true, count: 1, principals: [{ kind: "user", id: "a", name: "Ada" }] },

@@ -6,7 +6,7 @@
   import type { AdminSpaceDetail } from "@eneo/eneo-js";
   import { TriangleAlert } from "@lucide/svelte";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
-  import { formatDateMedium, intlLocale } from "$lib/core/formatting/dateTime";
+  import { formatDayMedium, intlLocale } from "$lib/core/formatting/dateTime";
   import SecurityClassificationBadge from "$lib/features/security-classifications/components/SecurityClassificationBadge.svelte";
   import { activityLabel } from "$lib/features/spaces/oversight/activity";
   import { m } from "$lib/paraglide/messages";
@@ -131,7 +131,7 @@
     <div class="flex min-w-0 flex-col gap-1">
       <dt class="text-secondary text-xs">{m.created()}</dt>
       <dd class="font-medium">
-        <time datetime={space.created_at}>{formatDateMedium(space.created_at)}</time>
+        <time datetime={space.created_at}>{formatDayMedium(space.created_at)}</time>
       </dd>
     </div>
   </dl>

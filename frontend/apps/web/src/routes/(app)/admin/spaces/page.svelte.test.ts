@@ -62,7 +62,7 @@ function space(name: string, patch: Partial<AdminSpaceListItem> = {}): AdminSpac
     id: `id-${name.toLowerCase().replace(/\W+/g, "-")}`,
     name,
     description: `Allt om ${name.toLowerCase()} för medarbetarna i förvaltningen`,
-    created_at: "2026-01-01T00:00:00Z",
+    created_at: "2026-01-01",
     security_classification: { id: "sc", name: "Intern", security_level: 1 },
     member_count: 12,
     group_count: 2,

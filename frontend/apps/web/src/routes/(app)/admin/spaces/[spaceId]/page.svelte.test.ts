@@ -129,7 +129,7 @@ function detail(patch: Partial<AdminSpaceDetail> = {}): AdminSpaceDetail {
     name: "Ekonomi",
     description: "Budget, prognoser och uppföljning för förvaltningarna.",
     icon_id: null,
-    created_at: "2025-03-14T09:00:00Z",
+    created_at: "2025-03-14",
     updated_at: "2026-09-01",
     security_classification: { id: "sc", name: "Konfidentiell", security_level: 3 },
     settings: {
@@ -608,6 +608,14 @@ describe("a space in Admin → Ytor", () => {
 
     expect(fact("admin_spaces_fact_widget_questions")).toBe("admin_spaces_widget_questions_hidden");
     expect(fact("admin_spaces_fact_questions")).toBe("1 234");
+  });
+
+  test("the space's creation is a day, never a time", async () => {
+    renderPage();
+
+    const summary = page.getByRole("region", { name: "admin_spaces_summary_title" }).element();
+    expect(summary.querySelector("time")?.getAttribute("datetime")).toBe("2025-03-14");
+    expect(fact("created")).toBe("14 mars 2025");
   });
 
   test("no recorded activity says it counts what retention has left", async () => {
