@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Globe, Paperclip, Sparkles } from "lucide-react";
+import { Paperclip, Sparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -24,6 +24,7 @@ import {
   type PromptInputMessage
 } from "@/components/ai-elements/prompt-input";
 import { useAppContext } from "@/components/providers/app-context";
+import { CAPABILITIES, readinessKey, type Capability } from "@/features/capabilities/capabilities";
 import {
   Select,
   SelectContent,
@@ -38,6 +39,11 @@ import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
 import { cn } from "@/lib/utils";
 import { ComposerAttachments } from "./attachments";
+import {
+  chatCapabilities,
+  defaultDisabledCapabilities,
+  disabledCapabilitiesForRequest
+} from "./chat-capabilities";
 import { ChatMessage } from "./chat-message";
 import { ContextUsageBar } from "./context-usage-bar";
 import { historyQueryKey } from "./history-panel";
@@ -146,19 +152,22 @@ export function ChatView({
   modelSelector?: ReactNode;
 }) {
   const t = useTranslations();
-  const { featureFlags, user } = useAppContext();
+  const { featureFlags, user, can } = useAppContext();
   const queryClient = useQueryClient();
   const attachments = useAttachments(partner);
-  const canUseWebSearch =
-    featureFlags.showWebSearch &&
-    partner.type === "default-assistant" &&
-    (partner.effectiveConfig?.enabled_capabilities?.includes("web_search") ?? false);
+  const capabilities = useMemo(
+    () =>
+      chatCapabilities(partner, can).filter(
+        (capability) => capability.purpose !== "web_search" || featureFlags.showWebSearch
+      ),
+    [partner, can, featureFlags.showWebSearch]
+  );
   const mcpServers = useMemo(() => chatPartnerMcpServers(partner), [partner]);
 
   const [input, setInput] = useState("");
   const [streamErrorCode, setStreamErrorCode] = useState<number | null>(null);
-  const [useWebSearch, setUseWebSearch] = useState(
-    () => !(partner.effectiveConfig?.default_disabled_capabilities?.includes("web_search") ?? false)
+  const [disabledCapabilities, setDisabledCapabilities] = useState<Set<Capability>>(
+    () => new Set(defaultDisabledCapabilities(partner))
   );
   const [autoAcceptTools, setAutoAcceptTools] = useState(autoAcceptToolsPreference);
   const [disabledMcpServerIds, setDisabledMcpServerIds] = useState<Set<string>>(
@@ -348,10 +357,11 @@ export function ChatView({
       group_chat_id: !continuing && partner.type === "group-chat" ? partner.id : null,
       files: attachments.fileIds.map((id) => ({ id })),
       tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
-      disabled_capabilities:
-        partner.type === "default-assistant" && (!canUseWebSearch || !useWebSearch)
-          ? ["web_search"]
-          : undefined,
+      disabled_capabilities: disabledCapabilitiesForRequest(
+        partner,
+        disabledCapabilities,
+        featureFlags.showWebSearch
+      ),
       ...mcpOptions
     };
 
@@ -444,16 +454,35 @@ export function ChatView({
                   <Paperclip className="text-muted-foreground size-4" /> {t("attachments")}
                 </PromptInputButton>
               )}
-              {canUseWebSearch && (
-                <PromptInputButton
-                  variant={useWebSearch ? "default" : "outline"}
-                  onClick={() => setUseWebSearch((value) => !value)}
-                  aria-label={t("web_search")}
-                >
-                  <Globe className={cn("size-4", !useWebSearch && "text-muted-foreground")} />{" "}
-                  {t("web_search")}
-                </PromptInputButton>
-              )}
+              {capabilities.map((capability) => {
+                const descriptor = CAPABILITIES.find((item) => item.purpose === capability.purpose);
+                if (!descriptor) return null;
+                const enabled =
+                  capability.available && !disabledCapabilities.has(capability.purpose);
+                return (
+                  <PromptInputButton
+                    key={capability.purpose}
+                    variant={enabled ? "default" : "outline"}
+                    disabled={!capability.available}
+                    title={!capability.available ? t(readinessKey(capability.reason)) : undefined}
+                    onClick={() =>
+                      setDisabledCapabilities((current) => {
+                        const next = new Set(current);
+                        if (next.has(capability.purpose)) next.delete(capability.purpose);
+                        else next.add(capability.purpose);
+                        return next;
+                      })
+                    }
+                    aria-label={t(capability.purpose)}
+                    aria-pressed={enabled}
+                  >
+                    <descriptor.icon
+                      className={cn("size-4", !enabled && "text-muted-foreground")}
+                    />{" "}
+                    {t(capability.purpose)}
+                  </PromptInputButton>
+                );
+              })}
               {mcpServers.length > 0 && (
                 <ChatMcpServers
                   servers={mcpServers}

@@ -22,6 +22,8 @@ export type ChatPartner = {
   showResponseLabel?: boolean;
   /** MCP servers that can be toggled for this partner when no policy overrides them. */
   mcpServers?: Schema<"MCPServerPublicDict">[];
+  enabledCapabilities?: Schema<"AssistantPublic">["enabled_capabilities"];
+  availableCapabilities?: Schema<"AssistantPublic">["available_capabilities"];
   /** Personal-assistant governance hints, including enforced MCP defaults. */
   effectiveConfig?: Schema<"EffectiveConfigPublic"> | null;
   /** Whether the partner exposes the conversation insights tab. */

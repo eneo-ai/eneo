@@ -36,6 +36,8 @@ export function DashboardChat({
     allowedAttachments: assistant.allowed_attachments,
     insightEnabled: assistant.insight_enabled,
     mcpServers: assistant.mcp_servers ?? [],
+    enabledCapabilities: assistant.enabled_capabilities,
+    availableCapabilities: assistant.available_capabilities,
     effectiveConfig: assistant.effective_config ?? null,
     completionModel: assistant.completion_model
       ? {

@@ -86,6 +86,13 @@ describe("MCP chat controls", () => {
     expect(chatPartnerMcpServers(partner)).toEqual([assistantServer]);
   });
 
+  it("keeps capability providers out of the generic MCP server picker", () => {
+    const capability = { ...server("image-provider"), purpose: "image_generation" };
+    expect(
+      chatPartnerMcpServers({ ...basePartner, mcpServers: [server("general"), capability] })
+    ).toEqual([server("general")]);
+  });
+
   it("prunes disabled ids to available servers and counts active servers", () => {
     const servers = [server("a"), server("b")];
     const disabled = pruneDisabledMcpServerIds(new Set(["a", "missing"]), servers);

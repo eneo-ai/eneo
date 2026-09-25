@@ -203,6 +203,8 @@ export function SpaceChat() {
       allowedAttachments: assistant.allowed_attachments,
       insightEnabled: assistant.insight_enabled,
       mcpServers: assistant.mcp_servers ?? [],
+      enabledCapabilities: assistant.enabled_capabilities,
+      availableCapabilities: assistant.available_capabilities,
       effectiveConfig: assistant.effective_config ?? null,
       completionModel: toModelInfo(assistant.completion_model)
     };
@@ -216,6 +218,8 @@ export function SpaceChat() {
         allowedAttachments: assistant.allowed_attachments,
         insightEnabled: false,
         mcpServers: assistant.mcp_servers ?? [],
+        enabledCapabilities: assistant.enabled_capabilities,
+        availableCapabilities: assistant.available_capabilities,
         effectiveConfig: assistant.effective_config ?? null,
         completionModel: toModelInfo(assistant.completion_model)
       };

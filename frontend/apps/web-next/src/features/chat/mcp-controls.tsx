@@ -17,9 +17,11 @@ export type McpServerSummary = Pick<
 
 export function chatPartnerMcpServers(partner: ChatPartner): McpServerSummary[] {
   if (partner.effectiveConfig?.mcp_enforced) {
-    return partner.effectiveConfig.available_mcp_servers ?? [];
+    return (partner.effectiveConfig.available_mcp_servers ?? []).filter(
+      (server) => server.purpose === "general"
+    );
   }
-  return partner.mcpServers ?? [];
+  return (partner.mcpServers ?? []).filter((server) => server.purpose === "general");
 }
 
 export function defaultDisabledMcpServerIds(partner: ChatPartner): string[] {

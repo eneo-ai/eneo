@@ -8,6 +8,7 @@ import { unwrap } from "@/lib/api/errors";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import type { ChatPartner } from "@/lib/chat/types";
+import { chatCapabilities } from "./chat-capabilities";
 import { type ChatAttachmentRejection, planChatAttachmentUploads } from "./chat-attachment-plan";
 
 export type Attachment = {
@@ -50,10 +51,14 @@ function toastRejection(
  */
 export function useAttachments(partner: ChatPartner) {
   const t = useTranslations();
-  const { limits } = useAppContext();
+  const { limits, can } = useAppContext();
   const [attachments, setAttachments] = useState<Attachment[]>([]);
 
-  const vision = partner.completionModel?.vision ?? false;
+  const vision =
+    (partner.completionModel?.vision ?? false) ||
+    chatCapabilities(partner, can).some(
+      (capability) => capability.purpose === "image_generation" && capability.available
+    );
   const formats = limits.attachments.formats.filter((format) => !format.vision || vision);
   const acceptString = formats.map((format) => format.mimetype).join(",");
   const maxFiles = partner.allowedAttachments?.limit.max_files ?? Infinity;
