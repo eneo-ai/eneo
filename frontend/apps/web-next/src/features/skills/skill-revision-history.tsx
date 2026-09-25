@@ -17,12 +17,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from "@/components/ui/alert-dialog";
-import { browserApi } from "@/lib/api/browser";
-import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
+import { EneoApiError, getErrorMessage } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
-import { ORGANIZATION_SKILLS_KEY } from "./organization-skills";
+import {
+  getSkillRevision,
+  listSkillRevisions,
+  restoreSkillRevision,
+  skillQueryKey,
+  type SkillScope
+} from "./skill-revisions";
 
-type Skill = Schema<"OrganizationSkillPublic">;
+type Skill = Schema<"OrganizationSkillPublic"> | Schema<"SkillPublic">;
 type Revision = Schema<"SkillRevisionPublic">;
 
 function RevisionContent({ revision, current }: { revision: Revision; current: Revision }) {
@@ -58,7 +63,17 @@ function RevisionContent({ revision, current }: { revision: Revision; current: R
   );
 }
 
-export function SkillRevisionHistory({ skill, unsaved }: { skill: Skill; unsaved: boolean }) {
+export function SkillRevisionHistory({
+  skill,
+  unsaved,
+  scope,
+  allowRestore = true
+}: {
+  skill: Skill;
+  unsaved: boolean;
+  scope: SkillScope;
+  allowRestore?: boolean;
+}) {
   const t = useTranslations();
   const locale = useLocale();
   const queryClient = useQueryClient();
@@ -67,46 +82,34 @@ export function SkillRevisionHistory({ skill, unsaved }: { skill: Skill; unsaved
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
-  const path = { skill_id: skill.id };
+  const key = skillQueryKey(scope);
+  const canRestore = allowRestore && !("removed_at" in skill && skill.removed_at);
   const revisions = useInfiniteQuery({
-    queryKey: [...ORGANIZATION_SKILLS_KEY, skill.id, "revisions"],
+    queryKey: [...key, skill.id, "revisions"],
     initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) =>
-      unwrap(
-        browserApi.GET("/api/v1/skills/organization/{skill_id}/revisions/", {
-          params: { path, query: { cursor: pageParam } }
-        })
-      ),
+    queryFn: ({ pageParam }) => listSkillRevisions(scope, skill.id, pageParam),
     getNextPageParam: (page) => page.next_cursor ?? undefined,
     retry: false
   });
   const preview = useQuery({
-    queryKey: [...ORGANIZATION_SKILLS_KEY, skill.id, "revision", viewId],
+    queryKey: [...key, skill.id, "revision", viewId],
     enabled: Boolean(viewId) && viewId !== skill.current_revision_id,
-    queryFn: () =>
-      unwrap(
-        browserApi.GET("/api/v1/skills/organization/{skill_id}/revisions/{revision_id}/", {
-          params: { path: { ...path, revision_id: viewId as string } }
-        })
-      ),
+    queryFn: () => getSkillRevision(scope, skill.id, viewId as string),
     retry: false
   });
   const revision = viewId === skill.current_revision_id ? skill.current_revision : preview.data;
   const items = revisions.data?.pages.flatMap((page) => page.items) ?? [];
 
   async function restore() {
-    if (!restoreId || restoring || skill.removed_at) return;
+    if (!restoreId || restoring || !canRestore) return;
     setRestoring(true);
     setError(null);
     try {
-      const outcome = await unwrap(
-        browserApi.POST(
-          "/api/v1/skills/organization/{skill_id}/revisions/{source_revision_id}/restore/",
-          {
-            params: { path: { ...path, source_revision_id: restoreId } },
-            body: { reviewed_current_revision_id: skill.current_revision_id }
-          }
-        )
+      const outcome = await restoreSkillRevision(
+        scope,
+        skill.id,
+        restoreId,
+        skill.current_revision_id
       );
       setRestoreId(null);
       setViewId(null);
@@ -118,12 +121,11 @@ export function SkillRevisionHistory({ skill, unsaved }: { skill: Skill; unsaved
             })
           : t("skills_library_restore_noop")
       );
-      if (outcome.created)
-        await queryClient.invalidateQueries({ queryKey: ORGANIZATION_SKILLS_KEY });
+      if (outcome.created) await queryClient.invalidateQueries({ queryKey: key });
     } catch (cause) {
       setError(getErrorMessage(cause, t));
       if (cause instanceof EneoApiError && cause.status === 409) {
-        await queryClient.invalidateQueries({ queryKey: [...ORGANIZATION_SKILLS_KEY, skill.id] });
+        await queryClient.invalidateQueries({ queryKey: [...key, skill.id] });
         setRestoreId(null);
       }
     } finally {
@@ -241,7 +243,7 @@ export function SkillRevisionHistory({ skill, unsaved }: { skill: Skill; unsaved
           ) : revision ? (
             <>
               <RevisionContent revision={revision} current={skill.current_revision} />
-              {!skill.removed_at && revision.id !== skill.current_revision_id && (
+              {canRestore && revision.id !== skill.current_revision_id && (
                 <Button
                   className="w-fit"
                   disabled={unsaved}

@@ -3,6 +3,7 @@
 import {
   AppWindow,
   BookOpen,
+  BookOpenCheck,
   Cog,
   LayoutDashboard,
   MessageSquare,
@@ -97,6 +98,14 @@ export function SpaceNav() {
           active={section === "knowledge"}
           icon={BookOpen}
           label={t("knowledge")}
+        />
+      )}
+      {can("read", "skill") && (
+        <NavItem
+          href={`${base}/skills`}
+          active={section === "skills"}
+          icon={BookOpenCheck}
+          label={t("skills")}
         />
       )}
       {can("read", "service") && (

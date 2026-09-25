@@ -4654,5 +4654,8 @@
   "eneo_error_9050": "A selected Skill is used by an App run that is queued or in progress. Wait for the run to finish, then try removing it again.",
   "eneo_error_9051": "A selected Skill is still attached. Remove its bindings from Assistants, Apps and Personal Chat before removing it.",
   "eneo_error_9052": "The execution block changed after you reviewed it. Review the block state below before trying again.",
-  "governance_manage_skills_action": "Open Skill catalogue"
+  "governance_manage_skills_action": "Open Skill catalogue",
+  "skills_available_status": "Available",
+  "skills_unavailable_status": "Unavailable",
+  "skills_library_deleted_success": "Skill deleted."
 }

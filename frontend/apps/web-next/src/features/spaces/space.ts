@@ -18,6 +18,7 @@ export type SpaceResource =
   | "default_assistant"
   | "group_chat"
   | "service"
+  | "skill"
   | "website"
   | "integrationKnowledge"
   | "collection"
@@ -47,6 +48,8 @@ export function spaceHasPermission(
       return space.applications?.apps.permissions?.includes(action) ?? false;
     case "service":
       return space.applications?.services.permissions?.includes(action) ?? false;
+    case "skill":
+      return space.skill_permissions?.includes(action) ?? false;
     case "collection":
       return space.knowledge.groups.permissions?.includes(action) ?? false;
     case "website":
