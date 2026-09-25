@@ -59,6 +59,8 @@ export class LiveTranscriptPreview {
   #errorCode = $state<string | null>(null);
   #stepId = $state<string | null>(null);
   #finishing = $state(false);
+  // The recording's one file, once uploaded: what the run's wait depends on.
+  #fileId = $state<string | null>(null);
 
   #socket: WebSocket | null = null;
   #node: AudioWorkletNode | null = null;
@@ -79,7 +81,6 @@ export class LiveTranscriptPreview {
   #produced = 0;
   #whole = false;
   #transcriptId: string | null = null;
-  #fileId: string | null = null;
   #finishingTimer: ReturnType<typeof setTimeout> | undefined;
 
   get status(): LiveTranscriptStatus {
@@ -119,10 +120,14 @@ export class LiveTranscriptPreview {
   // Eneo's stored transcript of the recording, when the step's files are
   // exactly the recording's one file.
   transcriptIdFor(fileIds: readonly string[]): string | undefined {
-    const [fileId, ...others] = fileIds;
-    return this.#transcriptId !== null && others.length === 0 && fileId === this.#fileId
+    return this.#transcriptId !== null && this.#isRecordingFile(fileIds)
       ? this.#transcriptId
       : undefined;
+  }
+
+  // The final text is still coming and could still go with the step's files.
+  awaitsFinalTextFor(fileIds: readonly string[]): boolean {
+    return this.#finishing && this.#isRecordingFile(fileIds);
   }
 
   // Some of the recording never reaches this session's transcript (it rotated
@@ -390,6 +395,10 @@ export class LiveTranscriptPreview {
   #onContextState = () => {
     if (this.#context?.state !== "running") this.lose();
   };
+
+  #isRecordingFile(fileIds: readonly string[]): boolean {
+    return fileIds.length === 1 && fileIds[0] === this.#fileId;
+  }
 
   #stopFinishing() {
     clearTimeout(this.#finishingTimer);

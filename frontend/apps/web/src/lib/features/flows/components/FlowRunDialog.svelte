@@ -282,11 +282,16 @@
     runContract !== null && !runContractError && !isSubmitting && runBlockers.length === 0
   );
   const isReviewPage = $derived(currentPage?.kind === "review");
-  // The final text of a recording its live text heard whole is still coming:
-  // the run waits for it, within the preview's own bound.
+  // The final text of a recording its live text heard whole is still coming,
+  // and the step's files are still that recording's one file: the run waits
+  // for it, within the preview's own bound.
   const liveTextFinishing = $derived(
     stepsRequiringInput.some(
-      (step) => step.input_format === "audio" && livePreviewFor(step.step_id).finishing
+      (step) =>
+        step.input_format === "audio" &&
+        livePreviewFor(step.step_id).awaitsFinalTextFor(
+          fileInputState.getUploadedFiles(step.step_id).map((file) => file.id)
+        )
     )
   );
   const showReuseLastInput = $derived(

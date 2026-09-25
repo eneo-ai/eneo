@@ -797,9 +797,16 @@ describe("FlowRunDialog live transcript in the run", () => {
 
   // Records one file with live text that heard all of it: the stop is sent,
   // counted, and the file is uploaded; the final text is still to come.
-  async function recordHeardWhole(options: DialogOptions = {}) {
+  async function recordHeardWhole(
+    options: DialogOptions = {},
+    { beforeReview = async () => {} }: { beforeReview?: () => Promise<void> } = {}
+  ) {
     installLiveTranscriptFakes();
-    await openDialogAndStartRecording(upload, { ...liveText, ...options });
+    let uploads = 0;
+    const uploadEach = vi.fn(async ({ file }: { file: File }) =>
+      uploadedFile(`file-${(uploads += 1)}`, file.name)
+    );
+    await openDialogAndStartRecording(uploadEach, { ...liveText, ...options });
     const socket = FakeLiveSocket.instances[0];
     socket.open();
     socket.receive(ready);
@@ -809,10 +816,18 @@ describe("FlowRunDialog live transcript in the run", () => {
     media.recorders[0]?.finish();
     await flush();
     expect(socket.texts).toEqual([JSON.stringify({ type: "stop", produced_samples: 1600 })]);
+    await beforeReview();
     await fireEvent.click(screen.getByRole("button", { name: "Nästa" }));
     await flush();
     return socket;
   }
+
+  const removeRecordedFile = async () => {
+    await fireEvent.click(
+      screen.getByRole("button", { name: new RegExp(`^${m.delete()} recording-`) })
+    );
+    await flush();
+  };
 
   const startButton = () =>
     screen.getByRole("button", {
@@ -868,6 +883,42 @@ describe("FlowRunDialog live transcript in the run", () => {
     expect(stepInputs(create)).toEqual([
       { "step-audio": { file_ids: ["file-1"], live_transcript_id: "transcript-1" } }
     ]);
+  });
+
+  it("does not wait for text that can no longer go with the run's file", async () => {
+    const create = vi.fn(async () => ({ id: "run-1" }));
+    await recordHeardWhole(
+      { create },
+      {
+        beforeReview: async () => {
+          await removeRecordedFile();
+          await fireEvent.drop(screen.getByRole("button", { name: /Audio input/ }), {
+            dataTransfer: { files: [new File(["audio"], "other.webm", { type: "audio/webm" })] }
+          });
+          await flush();
+        }
+      }
+    );
+
+    expect(startButton().textContent).toContain(m.flow_run_trigger_confirm());
+    expect(startButton().getAttribute("aria-disabled")).toBeNull();
+    await fireEvent.click(startButton());
+    await flush();
+    expect(stepInputs(create)).toEqual([{ "step-audio": { file_ids: ["file-2"] } }]);
+  });
+
+  it("does not wait for text once its file is removed from an optional step", async () => {
+    const create = vi.fn(async () => ({ id: "run-1" }));
+    await recordHeardWhole(
+      { create, steps: [{ ...audioStep, required: false }] },
+      { beforeReview: removeRecordedFile }
+    );
+
+    expect(startButton().textContent).toContain(m.flow_run_trigger_confirm());
+    expect(startButton().getAttribute("aria-disabled")).toBeNull();
+    await fireEvent.click(startButton());
+    await flush();
+    expect(create).toHaveBeenCalledOnce();
   });
 
   it("waits FINAL_TEXT_WAIT_MS at most; a later final text never changes a repeated request", async () => {
