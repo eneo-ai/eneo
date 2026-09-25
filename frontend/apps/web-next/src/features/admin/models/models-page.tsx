@@ -32,6 +32,9 @@ export function ModelsPage() {
   const { data: security } = useSuspenseQuery(securityClassificationsQueryOptions(browserApi));
 
   const [tab, setTab] = useState<ModelsTab>("models");
+  // Tabs stay mounted once opened (hidden when inactive), so the model filters
+  // survive a look at the history; the history still loads on first visit.
+  const [visited, setVisited] = useState<ReadonlySet<ModelsTab>>(() => new Set(["models"]));
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardProviderId, setWizardProviderId] = useState<string | undefined>(undefined);
 
@@ -45,6 +48,11 @@ export function ModelsPage() {
       : value === "history"
         ? t("migration_history_title")
         : t("settings");
+
+  function selectTab(next: ModelsTab) {
+    setTab(next);
+    setVisited((current) => (current.has(next) ? current : new Set([...current, next])));
+  }
 
   function openAddProvider() {
     setWizardProviderId(undefined);
@@ -80,7 +88,7 @@ export function ModelsPage() {
         role="tablist"
         aria-label={t("admin_models_tabs_label")}
         value={tab}
-        onChange={(value) => setTab(value as ModelsTab)}
+        onChange={(value) => selectTab(value as ModelsTab)}
         hasDivider
       >
         {TABS.map((value) => (
@@ -105,18 +113,28 @@ export function ModelsPage() {
         tabIndex={-1}
         className="focus-visible:outline-ring rounded-ax-element focus-visible:outline-2 focus-visible:outline-offset-4"
       >
-        {tab === "models" && (
-          <ProviderOverview
-            models={models}
-            classifications={security.security_classifications}
-            securityEnabled={security.security_enabled}
-            onAddModel={openAddModel}
-            onAddProvider={openAddProvider}
-            onRemoved={() => rescueFocus(panelRef.current)}
-          />
+        {visited.has("models") && (
+          <div hidden={tab !== "models"}>
+            <ProviderOverview
+              models={models}
+              classifications={security.security_classifications}
+              securityEnabled={security.security_enabled}
+              onAddModel={openAddModel}
+              onAddProvider={openAddProvider}
+              onRemoved={() => rescueFocus(panelRef.current)}
+            />
+          </div>
         )}
-        {tab === "history" && <MigrationHistoryPanel />}
-        {tab === "settings" && <PricingVisibilityToggle />}
+        {visited.has("history") && (
+          <div hidden={tab !== "history"}>
+            <MigrationHistoryPanel />
+          </div>
+        )}
+        {visited.has("settings") && (
+          <div hidden={tab !== "settings"}>
+            <PricingVisibilityToggle />
+          </div>
+        )}
       </div>
 
       <AddModelWizard

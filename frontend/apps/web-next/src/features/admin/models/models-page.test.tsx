@@ -256,6 +256,18 @@ describe("ModelsPage", () => {
     expect(history.getAttribute("aria-controls")).toBe(panel.id);
     expect(await within(panel).findByText("Inga migreringar utförda ännu")).toBeTruthy();
 
+    // Back and forth: the model filters are kept while another tab is open.
+    fireEvent.click(screen.getByRole("tab", { name: "Modeller" }));
+    const types = screen.getByRole("radiogroup", { name: "Modelltyp" });
+    fireEvent.click(within(types).getByRole("radio", { name: "Chatt (2)" }));
+    fireEvent.click(history);
+    fireEvent.click(screen.getByRole("tab", { name: "Modeller" }));
+    expect(
+      within(screen.getByRole("radiogroup", { name: "Modelltyp" }))
+        .getByRole("radio", { name: "Chatt (2)" })
+        .getAttribute("aria-checked")
+    ).toBe("true");
+
     fireEvent.click(screen.getByRole("tab", { name: "Inställningar" }));
     const pricing = screen.getByRole("switch", { name: "Visa modellpriser för användare" });
     expect((pricing as HTMLInputElement).checked).toBe(true);
