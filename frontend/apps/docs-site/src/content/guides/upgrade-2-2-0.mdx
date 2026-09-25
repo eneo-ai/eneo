@@ -1,0 +1,112 @@
+# Upgrade Guide: Eneo 2.2.0
+
+Eneo 2.2 completes the rename from Intric to Eneo. The old `INTRIC_*`
+environment variable names are no longer read, and the API uses Eneo names
+throughout. This page lists what to change before you deploy and how to
+recognise a deployment that still uses an old name.
+
+import { Callout } from 'nextra/components'
+
+<Callout type="warning">
+  **Rename environment variables before you deploy 2.2.** The backend, the
+  worker and the web app refuse to start while a renamed variable is set
+  without its replacement.
+</Callout>
+
+For the rest of the procedure (backups, draining work, File and Icon storage),
+follow [Updating Eneo](/guides/deployment#updating-eneo).
+
+---
+
+## Environment variables
+
+Earlier releases accepted the old names as aliases. From 2.2 only the new names
+are read.
+
+| Old variable                | New variable              | File               |
+| --------------------------- | ------------------------- | ------------------ |
+| `INTRIC_SUPER_API_KEY`      | `ENEO_SUPER_API_KEY`      | `env_backend.env`  |
+| `INTRIC_BACKEND_URL`        | `ENEO_BACKEND_URL`        | `env_frontend.env` |
+| `INTRIC_BACKEND_SERVER_URL` | `ENEO_BACKEND_SERVER_URL` | `env_frontend.env` |
+| `PUBLIC_INTRIC_BACKEND_URL` | `PUBLIC_ENEO_BACKEND_URL` | `env_frontend.env` |
+
+`ENEO_SUPER_DUPER_API_KEY` and `INTRIC_SUPER_DUPER_API_KEY` are removed without
+a replacement. Module administration happens in **Admin → Modules** by an
+administrator with the `modules` permission; see
+[Module administration](/guides/deployment#module-administration). Delete the
+variable.
+
+Find old names in the environment files:
+
+```bash
+grep -n -E 'INTRIC_|SUPER_DUPER' env_backend.env env_frontend.env
+```
+
+If you pass variables another way, such as Compose `environment:` entries or a
+secret store, check there too.
+
+### What you see at startup
+
+| Situation                                         | Backend and worker                               | Web app                                  |
+| ------------------------------------------------- | ------------------------------------------------ | ---------------------------------------- |
+| An old name is set and its new name is not        | Stops and names the replacement                  | Stops and names the replacement          |
+| Both the old and the new name are set             | Starts; warns that the old name is ignored       | Starts; warns that the old name is ignored |
+| `ENEO_SUPER_DUPER_API_KEY` or its old name is set | Starts; logs an error that it is no longer read  | —                                        |
+| `ENEO_BACKEND_URL` is not set                     | —                                                | Stops and says that it is required       |
+
+A stopped service logs, for example:
+
+```text
+INTRIC_SUPER_API_KEY is no longer read (removed in Eneo 2.2). Rename it to ENEO_SUPER_API_KEY.
+```
+
+To check a running deployment for leftovers:
+
+```bash
+docker compose logs backend worker frontend | grep -E 'no longer read|is ignored|cannot start'
+```
+
+---
+
+## API changes for integrations
+
+Clients that call the Eneo API directly must use the new names. The API no
+longer uses the old ones.
+
+| Area                       | Before 2.2                     | From 2.2                   |
+| -------------------------- | ------------------------------ | -------------------------- |
+| Error response field       | `intric_error_code`            | `eneo_error_code`          |
+| Streaming event name       | `intric_event`                 | `eneo_event`               |
+| Streaming event type field | `intric_event_type`            | `eneo_event_type`          |
+| WebSocket subprotocol      | `intric`                       | `eneo`                     |
+| OpenAPI schema names       | `IntricEventType`, `intric__…` | `EneoEventType`, `eneo__…` |
+
+The event type field changed on every streaming event that carries it: tool
+calls, tool approvals, token usage and image generation. Regenerate clients that
+are generated from the OpenAPI schema. The error envelope is described in
+[API](/docs/api).
+
+---
+
+## Open browser tabs
+
+Reload open Eneo tabs after the upgrade. A tab loaded before the upgrade keeps
+the old app code until it is reloaded: live updates stop, and chat no longer
+shows image generation progress or token usage.
+
+---
+
+## Commands and monitoring
+
+If you override the container commands, use the new module paths:
+
+```bash
+gunicorn src.eneo.server.main:app
+arq src.eneo.worker.arq.WorkerSettings
+python -m eneo.cli.<command>
+```
+
+Log records use `eneo.*` logger names and worker traces use the `eneo.worker`
+tracer. Update log filters, alerts and dashboards that match `intric.*`.
+
+Background jobs queued before the upgrade still run after it.
