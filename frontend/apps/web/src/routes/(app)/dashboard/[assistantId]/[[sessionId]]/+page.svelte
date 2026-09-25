@@ -1,7 +1,7 @@
 <script lang="ts">
   import { formatRelativeTime } from "$lib/core/formatting/dateTime";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { pushState, replaceState } from "$app/navigation";
+  import { pushState } from "$app/navigation";
   import ConversationView from "$lib/features/chat/components/conversation/ConversationView.svelte";
   import { fade, fly, slide } from "svelte/transition";
   import { quadInOut } from "svelte/easing";
@@ -9,7 +9,6 @@
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import { untrack } from "svelte";
-  import { page } from "$app/state";
 
   let { data } = $props();
 
@@ -18,20 +17,8 @@
   let showHistory = $state(false);
 
   $effect(() => {
-    // Route data owns initialization; streaming state must not re-run it.
-    const initial = data;
-    untrack(() => chat.init(initial));
-  });
-
-  $effect(() => {
-    const id = chat.currentConversation.id;
-    if (!id) return;
-    const path = `/dashboard/${chat.partner.id}/${id}`;
-    if (page.url.pathname === path) return;
-    untrack(() => {
-      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic assistant and conversation IDs
-      replaceState(path, page.state);
-    });
+    // Re-init if rout param changes
+    chat.init(data);
   });
 
   async function loadConversation(conversation: { id: string; name: string | null }) {

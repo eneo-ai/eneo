@@ -1309,9 +1309,7 @@ class TestReadOverrideSnapshot:
         ],
         "CONVERSATIONS_READ_OVERRIDES": [
             "chat",
-            "conversation_settings_defaults",
             "leave_feedback",
-            "update_conversation_settings",
         ],
         "APPS_READ_OVERRIDES": [
             "run_app",

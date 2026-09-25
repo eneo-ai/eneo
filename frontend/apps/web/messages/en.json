@@ -28,10 +28,6 @@
   "governance_confirm_mcp_disabled": "All MCP servers will be disabled in the personal assistant.",
   "governance_mcp_error_none": "Select at least one capability or MCP server.",
   "governance_mcp_default_label": "On by default",
-  "personal_chat_model_change_title": "Change model in this conversation?",
-  "personal_chat_model_change_description": "A different model may have a smaller context window or support different tools and images. Earlier messages remain, but the next answer may use less history. We recommend starting a new conversation instead.",
-  "personal_chat_model_new_conversation": "Start new conversation",
-  "personal_chat_model_change_anyway": "Change anyway",
   "governance_mcp_default_aria": "Start {name} switched on in users' chat",
   "governance_mcp_allow_aria": "Allow {name}",
   "governance_mcp_show_tools": "Show tools",
@@ -4132,7 +4128,6 @@
   "organization_skills_removed_at": "Removed {time}",
   "eneo_error_9062": "A skill is being updated. Nothing was removed. Wait a moment and try again.",
   "eneo_error_9063": "This assistant is published as a web widget. An administrator must archive the widget before the assistant can be moved.",
-  "eneo_error_9064": "The choices for this conversation were changed somewhere else, such as in another tab. Reload the saved choices and try again.",
   "eneo_error_9065": "The space must keep at least one administrator. Appoint another administrator first.",
   "eneo_error_9066": "Already a member of this space.",
   "eneo_error_9067": "You can't change your own access here. Join or leave the space instead, so the change is recorded with a reason.",
@@ -5058,9 +5053,5 @@
   "admin_spaces_activation_not_applicable": "Not applicable",
   "admin_spaces_assistant_missing": "The assistant no longer exists",
   "admin_spaces_no_widgets": "The space has no web widgets.",
-  "admin_spaces_no_widgets_help": "Widgets are created by the space's editors. They appear here and under Web widgets, where you also activate them.",
-  "conversation_settings_save_failed": "The settings could not be saved or loaded.",
-  "conversation_settings_reload": "Reload saved choices",
-  "conversation_settings_model_unavailable": "The saved model is unavailable",
-  "conversation_settings_use_default": "Use the available default model"
+  "admin_spaces_no_widgets_help": "Widgets are created by the space's editors. They appear here and under Web widgets, where you also activate them."
 }

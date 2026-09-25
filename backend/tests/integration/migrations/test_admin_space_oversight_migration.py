@@ -28,7 +28,7 @@ seed_default_models = expand.seed_default_models
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-PARENT = "202609251000"
+PARENT = "202609231701"
 OVERSIGHT = "202609251100"
 REASON = "Ärende KS 2026/123 – kontroll av underlag"
 

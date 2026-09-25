@@ -1,7 +1,6 @@
 <script lang="ts">
   import * as Select from "$lib/components/ui/select/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { getChatService } from "../../ChatService.svelte";
   import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
   import { getModelKwargOptionLabel } from "$lib/features/ai-models/ModelKwargCapabilities";
   import { m } from "$lib/paraglide/messages";
@@ -11,26 +10,24 @@
   const VALUE_PREFIX = "reasoning:";
 
   const {
-    state: { currentSpace }
+    state: { currentSpace },
+    updateDefaultAssistant
   } = getSpacesManager();
 
   const assistant = $derived($currentSpace.default_assistant!);
-  const chat = getChatService();
   const effectiveConfig = $derived(assistant.effective_config);
   const selectedModel = $derived(
-    chat.selectedPersonalModel ??
-      selectEffectiveChatModel(
-        assistant.completion_model,
-        effectiveConfig,
-        $currentSpace.completion_models
-      ) ??
-      null
+    selectEffectiveChatModel(
+      assistant.completion_model,
+      effectiveConfig,
+      $currentSpace.completion_models
+    ) ?? null
   );
   const capability = $derived(selectedModel?.supported_model_kwargs?.reasoning_effort);
   const options = $derived(
     capability?.supported && capability.control === "select" ? (capability.options ?? []) : []
   );
-  const storedEffort = $derived(chat.settings?.reasoning_effort ?? null);
+  const storedEffort = $derived(assistant.completion_model_kwargs?.reasoning_effort ?? null);
   const effectiveEffort = $derived.by(() => {
     if (storedEffort && options.includes(storedEffort)) return storedEffort;
     const policyDefault = effectiveConfig?.default_reasoning_effort;
@@ -52,14 +49,15 @@
     const reasoningEffort = value.startsWith(VALUE_PREFIX)
       ? value.slice(VALUE_PREFIX.length)
       : null;
-    void chat.updateSettings({ reasoning_effort: reasoningEffort });
+    updateDefaultAssistant({
+      modelKwargs: { reasoning_effort: reasoningEffort }
+    });
   }
 </script>
 
 {#if effectiveConfig?.reasoning_effort_user_configurable && options.length > 0}
   <Select.Root type="single" value={selectedValue} onValueChange={selectEffort}>
     <Select.Trigger
-      disabled={chat.settingsBusy || !chat.settings || chat.askQuestion.isLoading}
       size="sm"
       class="hover:bg-muted h-8 max-w-40 border-transparent bg-transparent px-2 font-medium shadow-none"
       aria-label={`${m.reasoning_effort()}: ${effectiveEffort ? getModelKwargOptionLabel(effectiveEffort) : m.default_behavior()}`}

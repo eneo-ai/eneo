@@ -14,7 +14,6 @@ from eneo.conversations.application.conversation_service import ConversationServ
 from eneo.conversations.conversation_models import PreflightResponse
 from eneo.files.file_models import FileType
 from eneo.main.exceptions import BadRequestException
-from eneo.sessions.conversation_settings import ConversationSettings
 
 
 def _make_service(
@@ -73,29 +72,6 @@ def _make_service(
         completion_service=MagicMock(),
         space_service=MagicMock(),
         file_service=file_service,
-    )
-
-
-@pytest.mark.asyncio
-async def test_mention_preflight_uses_the_mentioned_assistants_model_and_baseline():
-    parent_id, mentioned_id = uuid4(), uuid4()
-    parent = _make_assistant(model_name="gpt-4o")
-    mentioned = _make_assistant(model_name="claude-3-5-sonnet")
-    parent.tool_assistants = [SimpleNamespace(id=mentioned_id)]
-    service = _make_service(assistant=parent)
-    service.assistant_service.get_assistant_with_effective_config.side_effect = (
-        lambda id: (parent if id == parent_id else mentioned, [], None)
-    )
-    result = await service.preflight_tokens(
-        question="hello",
-        file_ids=[],
-        assistant_id=parent_id,
-        tool_assistant_id=mentioned_id,
-        settings=ConversationSettings(completion_model_id=uuid4()),
-    )
-    assert result.model_name == "claude-3-5-sonnet"
-    assert service.assistant_service.get_preflight_baseline.await_args.args == (
-        mentioned_id,
     )
 
 
@@ -605,7 +581,7 @@ async def test_empty_assistant_preflight_baseline_includes_derived_images():
 async def test_preflight_baseline_zero_for_session_target():
     """An existing session already carries the prompt + attachments in its
     history, so the baseline fields stay 0 and the baseline is not fetched."""
-    session = MagicMock(settings=None)
+    session = MagicMock()
     session.group_chat_id = None
     session.assistant = MagicMock()
     session.assistant.id = uuid4()
@@ -649,7 +625,7 @@ async def test_preflight_resolves_session_assistant_model():
     session_id = uuid4()
     assistant_id = uuid4()
 
-    session = MagicMock(settings=None)
+    session = MagicMock()
     session.group_chat_id = None
     session.assistant = MagicMock()
     session.assistant.id = assistant_id
@@ -680,7 +656,7 @@ async def test_preflight_resolves_session_to_group_chat_model():
     session_id = uuid4()
     group_chat_id = uuid4()
 
-    session = MagicMock(settings=None)
+    session = MagicMock()
     session.group_chat_id = group_chat_id
     session.assistant = None
 

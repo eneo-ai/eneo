@@ -13,7 +13,7 @@ Every column is nullable without a default, so adding it only changes the
 catalog. The CHECK constraints scan two small tables once.
 
 Revision ID: 202609251100
-Revises: 202609251000
+Revises: 202609231701
 Create Date: 2026-09-25 11:00:00.000000
 """
 
@@ -26,7 +26,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202609251100"
-down_revision: str | None = "202609251000"
+down_revision: str | None = "202609231701"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

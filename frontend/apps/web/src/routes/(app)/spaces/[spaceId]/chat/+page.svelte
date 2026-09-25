@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { pushState, replaceState } from "$app/navigation";
+  import { pushState } from "$app/navigation";
   import { Page } from "$lib/components/layout/index.js";
   import { getAppContext } from "$lib/core/AppContext.js";
   import { initChatService } from "$lib/features/chat/ChatService.svelte";
@@ -51,23 +51,6 @@
     });
   }
 
-  // The first answer creates the conversation id in place. Put it in the URL
-  // so a refresh opens that same conversation and restores its tool choices.
-  $effect(() => {
-    const conversationId = chat.currentConversation.id;
-    if (!conversationId || page.url.searchParams.has("session_id")) return;
-
-    untrack(() => {
-      const nextUrl = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({
-        chatPartner: chat.partner,
-        conversation: chat.currentConversation,
-        tab: "chat"
-      })}`;
-      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with query string
-      replaceState(nextUrl, page.state);
-    });
-  });
-
   function partnerEditHref() {
     return localizeHref(
       `/spaces/${$currentSpace.routeId}/${chat.partner.type}s/${chat.partner.id}/edit`
@@ -92,8 +75,11 @@
     });
   });
 
-  // Keep the partner's admin-controlled defaults and policy current. The model
-  // chosen for this conversation is held separately by ChatService.
+  // Single sync point for the personal chat: keep the chat partner pointed at
+  // the canonical default assistant held by SpacesManager. The page loader only
+  // snapshots it, so without this the partner (and its model) could drift from
+  // what the model picker writes. Same id, so this never resets the open
+  // conversation (see ChatService.changeChatPartner).
   $effect(() => {
     const canonical = $currentSpace.default_assistant;
     untrack(() => {
