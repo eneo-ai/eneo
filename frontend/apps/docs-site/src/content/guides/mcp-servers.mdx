@@ -167,11 +167,17 @@ For an identity-forwarding server, an admin sync is only the acting admin's
 view. Eneo therefore does not mark a tool as removed merely because that admin
 cannot see it.
 
-Before every tool-capable model turn, Eneo also lists tools as the signed-in
-user. A user-only tool that is not in the approved catalog is stored as a
-pending definition and omitted from that model request. After an admin approves
-it, a later request may expose it to users for whom the remote server still
-returns it.
+Before every tool-capable model turn, Eneo lists tools on identity-forwarding
+servers as the signed-in user. A user-only tool that is not in the approved
+catalog is stored as a pending definition and omitted from that model request.
+After an admin approves it, a later request may expose it to users for whom
+the remote server still returns it. Other MCP servers connect when a tool is
+first called.
+
+If a tool reports an explicit `Unauthorized` or `401` error, Eneo retains the
+server's original error and adds a short permissions and credentials message to
+the failed tool result. This does not change the server's configuration or
+disable its other tools.
 
 <Callout type="info">
   **Why approval?** The approval step is a security measure. It prevents a compromised or misbehaving MCP server from silently injecting or modifying tool definitions. An admin must review and explicitly approve every change before it takes effect.

@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 
 import eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session as proxy_module
-from eneo.main.exceptions import MCPClientError
+from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
@@ -664,6 +664,25 @@ async def test_identity_scoped_catalog_fails_closed_when_live_discovery_fails(
 
 
 @pytest.mark.asyncio
+async def test_unscoped_server_keeps_lazy_connection_without_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_client(
+        monkeypatch,
+        live_tools_by_user={"": []},
+        failing_users={""},
+    )
+    proxy = MCPProxySession([_make_server()])
+
+    await proxy.prepare_tools_for_context()
+
+    assert proxy.get_allowed_tool_names() == {"server__tool"}
+    assert _FakeMCPClient.instances == []
+    assert proxy._clients == {}
+    assert proxy._owner_task is None
+
+
+@pytest.mark.asyncio
 async def test_identity_scoped_catalog_fails_closed_when_staging_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -813,6 +832,99 @@ async def test_call_tool_marks_server_failed_but_keeps_client_for_close():
     result = await proxy.call_tool("server__tool", {"q": "x"})
     assert result["is_error"] is True
     assert dead_client.call_tool.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_unauthorized_tool_result_keeps_original_and_allows_corrected_call():
+    server = _make_server(name="Sundsvall.se")
+    proxy = MCPProxySession([server])
+    client = SimpleNamespace(
+        call_tool=AsyncMock(
+            side_effect=[
+                {
+                    "content": [{"type": "text", "text": '{"error":"Unauthorized"}'}],
+                    "is_error": True,
+                    "meta": {"request_id": "upstream-123"},
+                },
+                {"content": [{"type": "text", "text": "works"}], "is_error": False},
+            ]
+        )
+    )
+    proxy._clients[server.id] = client
+
+    first = await proxy.call_tool("sundsvall_se__tool", {"query": "bad"})
+    corrected = await proxy.call_tool("sundsvall_se__tool", {"query": "good"})
+
+    assert first["is_error"] is True
+    assert first["content"][0]["text"] == '{"error":"Unauthorized"}'
+    assert "credentials" in first["content"][1]["text"]
+    assert first["meta"] == {"request_id": "upstream-123"}
+    assert corrected["content"][0]["text"] == "works"
+    assert client.call_tool.await_count == 2
+    assert server.id not in proxy_module._CIRCUIT_BREAKER_STATE
+
+
+@pytest.mark.asyncio
+async def test_error_text_containing_401_does_not_imply_authentication_failure():
+    server = _make_server()
+    proxy = MCPProxySession([server])
+    error = {
+        "content": [{"type": "text", "text": "Page 401 failed to parse"}],
+        "is_error": True,
+    }
+    proxy._clients[server.id] = SimpleNamespace(call_tool=AsyncMock(return_value=error))
+
+    result = await proxy.call_tool("server__tool", {})
+
+    assert result == error
+
+
+@pytest.mark.asyncio
+async def test_tool_error_result_does_not_trip_server_circuit_breaker():
+    server = _make_server()
+    proxy = MCPProxySession([server])
+    client = SimpleNamespace(
+        call_tool=AsyncMock(
+            return_value={
+                "content": [{"type": "text", "text": "Bad argument"}],
+                "is_error": True,
+            }
+        )
+    )
+    proxy._clients[server.id] = client
+
+    for _ in range(proxy_module._settings.mcp_circuit_breaker_failure_threshold + 1):
+        result = await proxy.call_tool("server__tool", {})
+        assert result["content"][0]["text"] == "Bad argument"
+
+    assert client.call_tool.await_count == (
+        proxy_module._settings.mcp_circuit_breaker_failure_threshold + 1
+    )
+    assert server.id not in proxy_module._CIRCUIT_BREAKER_STATE
+
+
+@pytest.mark.asyncio
+async def test_transport_authentication_failure_returns_actionable_error():
+    server = _make_server()
+    proxy = MCPProxySession([server])
+    client = SimpleNamespace(
+        call_tool=AsyncMock(
+            side_effect=[
+                MCPAuthenticationError("HTTP 401"),
+                {"content": [{"type": "text", "text": "works"}], "is_error": False},
+            ]
+        )
+    )
+    proxy._clients[server.id] = client
+
+    result = await proxy.call_tool("server__tool", {})
+    retry = await proxy.call_tool("server__tool", {})
+
+    assert result["is_error"] is True
+    assert "credentials" in result["content"][0]["text"]
+    assert retry["is_error"] is False
+    assert server.id not in proxy._failed_server_ids
+    assert server.id not in proxy_module._CIRCUIT_BREAKER_STATE
 
 
 @pytest.mark.asyncio
