@@ -2354,6 +2354,9 @@ async def test_flow_run_history_purge_skips_old_non_terminal_runs(
     )
     fixture.run.status = status.value
     fixture.run.finished_at = None
+    if status is FlowRunStatus.RUNNING:
+        # A running run always has an execution heartbeat (ck_flow_runs_running_execution_heartbeat).
+        fixture.run.execution_heartbeat_at = datetime.now(timezone.utc)
     await async_session.flush()
     source_file_id = fixture.runtime_input_file.id
     run_id = fixture.run.id
