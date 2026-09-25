@@ -76,11 +76,13 @@ describe("MessageResponse", () => {
     expect(screen.getByRole("link", { name: "Källa 2: LOU 19 kap." })).toBeTruthy();
   });
 
-  it("puts wide tables and code blocks in named, keyboard-scrollable regions", async () => {
+  it("puts tables and code blocks in named scroll regions", async () => {
     renderAnswer();
+    // Astryx ScrollableArea: a named region that joins the tab order only when
+    // the table overflows (jsdom has no layout, so it never does here).
     const tableRegion = screen.getByRole("region", { name: "Tabell" });
-    expect(tableRegion.getAttribute("tabindex")).toBe("0");
     expect(tableRegion.querySelector("table")).not.toBeNull();
+    expect(tableRegion.hasAttribute("tabindex")).toBe(false);
 
     const codeRegion = await screen.findByRole("region", { name: "Kodblock (json)" });
     expect(codeRegion.getAttribute("tabindex")).toBe("0");

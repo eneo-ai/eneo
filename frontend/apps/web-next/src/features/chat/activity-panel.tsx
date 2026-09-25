@@ -1,7 +1,9 @@
 "use client";
 
 import { BottomSheet } from "@astryxdesign/core/BottomSheet";
+import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { IconButton } from "@astryxdesign/core/IconButton";
+import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -48,7 +50,7 @@ export function sourceAnchorId(messageId: string, number: number): string {
   return `${messageId}-source-${number}`;
 }
 
-export const ACTIVITY_PANEL_ID = "chat-activity-panel";
+const ACTIVITY_PANEL_ID = "chat-activity-panel";
 
 // ---------------------------------------------------------------------------
 // Step presentation
@@ -93,7 +95,7 @@ const SKILL_FAILURE_KEYS: Record<string, string> = {
 type Translate = ReturnType<typeof useTranslations>;
 
 /** The human title of a step (also used by the live pill while streaming). */
-export function stepTitle(step: ActivityStep, t: Translate): string {
+function stepTitle(step: ActivityStep, t: Translate): string {
   const done = step.status !== "running" && step.status !== "waiting";
   switch (step.kind) {
     case "reasoning":
@@ -106,7 +108,9 @@ export function stepTitle(step: ActivityStep, t: Translate): string {
       return t(
         step.status === "error" || step.status === "denied"
           ? "tool_activate_skill_failed"
-          : "tool_activate_skill",
+          : done
+            ? "skill_used_in_reply"
+            : "tool_activate_skill",
         { name: skillName(step.part) }
       );
     case "answer":
@@ -147,10 +151,13 @@ function StatusCircle({ status }: { status: StepStatus }) {
   );
 }
 
+// Compact Astryx Collapsible for disclosures inside the panel's steps.
+const PANEL_COLLAPSIBLE_CLASS =
+  "[&_.astryx-collapsible-trigger]:text-ax-text-secondary [&_.astryx-collapsible-trigger]:min-h-8 [&_.astryx-collapsible-trigger]:text-[12.5px] [&_.astryx-collapsible-trigger]:font-medium";
+
 function ToolResult({ part, sessionId }: { part: ToolPart; sessionId: string | null }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
-  const regionId = useId();
   const finished = part.state === "output-available" || part.state === "output-error";
   const canLoad = Boolean(sessionId && part.toolCallId && finished);
   const result = useQuery({
@@ -186,63 +193,44 @@ function ToolResult({ part, sessionId }: { part: ToolPart; sessionId: string | n
         : (errorText ?? t("mcp_tool_response_empty"));
 
   return (
-    <div className="border-ax-border border-t">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={open ? regionId : undefined}
-        onClick={() => setOpen((value) => !value)}
-        className="text-ax-text-secondary hover:bg-ax-hover focus-visible:outline-ring flex min-h-8 w-full items-center gap-1.5 px-2.5 text-left text-[12.5px] font-medium focus-visible:outline-2 focus-visible:-outline-offset-2"
+    <div className={cn("border-ax-border border-t px-2.5", PANEL_COLLAPSIBLE_CLASS)}>
+      <Collapsible
+        trigger={t("chat_tool_result")}
+        chevronPosition="start"
+        isOpen={open}
+        onOpenChange={setOpen}
       >
-        <ChevronRight
-          aria-hidden="true"
-          className={cn("size-3.5 transition-transform", open && "rotate-90")}
-        />
-        {open ? t("chat_tool_hide_result") : t("chat_tool_show_result")}
-      </button>
-      {open && (
-        <pre
-          id={regionId}
-          role="region"
-          tabIndex={0}
-          aria-label={t("chat_tool_result")}
-          className="text-ax-text focus-visible:outline-ring max-h-48 overflow-auto px-2.5 pb-2 font-mono text-[11.5px] break-words whitespace-pre-wrap focus-visible:outline-2 focus-visible:-outline-offset-2"
+        <ScrollableArea
+          axis="both"
+          label={t("chat_tool_result")}
+          className="focus-visible:outline-ring max-h-48 focus-visible:outline-2 focus-visible:-outline-offset-2"
         >
-          {body}
-        </pre>
-      )}
+          <pre className="text-ax-text pb-2 font-mono text-[11.5px] break-words whitespace-pre-wrap">
+            {body}
+          </pre>
+        </ScrollableArea>
+      </Collapsible>
     </div>
   );
 }
 
 function StepDetails({ step, sessionId }: { step: ActivityStep; sessionId: string | null }) {
   const t = useTranslations();
-  const [showReasoning, setShowReasoning] = useState(false);
-  const reasoningId = useId();
 
   switch (step.kind) {
     case "reasoning":
       if (!step.text.trim()) return null;
       return (
-        <div className="flex flex-col gap-1.5">
-          <button
-            type="button"
-            aria-expanded={showReasoning}
-            aria-controls={showReasoning ? reasoningId : undefined}
-            onClick={() => setShowReasoning((value) => !value)}
-            className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner -ms-1 flex min-h-6 w-fit items-center gap-1 px-1 text-[12.5px] font-medium focus-visible:outline-2 focus-visible:outline-offset-2"
+        <div className={PANEL_COLLAPSIBLE_CLASS}>
+          <Collapsible
+            trigger={t("chat_activity_reasoning")}
+            chevronPosition="start"
+            defaultIsOpen={false}
           >
-            <ChevronRight
-              aria-hidden="true"
-              className={cn("size-3.5 transition-transform", showReasoning && "rotate-90")}
-            />
-            {showReasoning ? t("chat_activity_hide_reasoning") : t("chat_activity_show_reasoning")}
-          </button>
-          {showReasoning && (
-            <div id={reasoningId} className="text-ax-text-secondary text-[12.5px] leading-relaxed">
+            <div className="text-ax-text-secondary text-[12.5px] leading-relaxed">
               <MessageResponse>{step.text}</MessageResponse>
             </div>
-          )}
+          </Collapsible>
         </div>
       );
     case "knowledge":
@@ -275,15 +263,16 @@ function StepDetails({ step, sessionId }: { step: ActivityStep; sessionId: strin
       return (
         <div className="flex flex-col gap-1.5">
           <div className="bg-ax-card border-ax-border rounded-ax-element overflow-hidden border">
-            <div
-              role="region"
-              tabIndex={0}
-              aria-label={t("chat_tool_call_label")}
-              className="focus-visible:outline-ring overflow-x-auto px-2.5 py-1.5 font-mono text-[11.5px] whitespace-nowrap focus-visible:outline-2 focus-visible:-outline-offset-2"
+            <ScrollableArea
+              axis="inline"
+              label={t("chat_tool_call_label")}
+              className="focus-visible:outline-ring focus-visible:outline-2 focus-visible:-outline-offset-2"
             >
-              {server ? `${server}/` : ""}
-              {step.part.toolName}({args})
-            </div>
+              <code className="block px-2.5 py-1.5 font-mono text-[11.5px] whitespace-nowrap">
+                {server ? `${server}/` : ""}
+                {step.part.toolName}({args})
+              </code>
+            </ScrollableArea>
             <ToolResult part={step.part} sessionId={sessionId} />
           </div>
           {step.references.length > 0 && (
@@ -336,13 +325,16 @@ function StepDetails({ step, sessionId }: { step: ActivityStep; sessionId: strin
       const failed = step.status === "error" || step.status === "denied";
       const reasonKey =
         typeof args.reason === "string" ? SKILL_FAILURE_KEYS[args.reason] : undefined;
+      const mode = t(
+        args.mode === "always"
+          ? "skills_activation_mode_always"
+          : "skills_activation_mode_on_demand"
+      );
       return (
         <p className="text-ax-text-secondary text-[12.5px]">
           {failed
             ? t(reasonKey ?? "skill_step_failed_detail")
-            : t(
-                args.mode === "always" ? "skill_step_always_detail" : "skill_step_on_demand_detail"
-              )}
+            : `${mode} · ${t(args.mode === "always" ? "skill_step_always_detail" : "skill_step_on_demand_detail")}`}
         </p>
       );
     }

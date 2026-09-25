@@ -35,10 +35,10 @@ import type { useAttachments } from "./use-attachments";
 type Attachments = ReturnType<typeof useAttachments>;
 
 /** Shared look of the composer's pill buttons (attach, capabilities, tools, knowledge). */
-export const PILL_CLASS =
+const PILL_CLASS =
   "focus-visible:outline-ring inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:text-ax-text-disabled pointer-coarse:h-11 pointer-coarse:min-w-11";
-export const PILL_IDLE_CLASS = "text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text";
-export const PILL_ACTIVE_CLASS = "bg-ax-accent-muted text-ax-text-accent";
+const PILL_IDLE_CLASS = "text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text";
+const PILL_ACTIVE_CLASS = "bg-ax-accent-muted text-ax-text-accent";
 
 /**
  * The composer's text field. A real <textarea> (e2e and assistive tech rely

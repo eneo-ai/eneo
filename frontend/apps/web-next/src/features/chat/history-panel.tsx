@@ -1,12 +1,13 @@
 "use client";
 
+import { BottomSheet } from "@astryxdesign/core/BottomSheet";
+import { Button as AxButton } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState, type Ref } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
-import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { ChatPartner } from "@/lib/chat/types";
@@ -61,7 +62,7 @@ export function groupSessions<T extends SessionRow>(
  * The partner's conversation history, grouped by date (Idag, Igår, …). Each
  * row opens the conversation; its menu renames, rates or deletes it.
  */
-export function HistoryPanel({
+function HistoryPanel({
   partner,
   activeSessionId,
   onSelect,
@@ -208,16 +209,22 @@ export function HistoryPanel({
         {(history.hasPreviousPage || history.hasNextPage) && (
           <div className="flex justify-between gap-2 p-2">
             {history.hasPreviousPage ? (
-              <Button variant="ghost" size="sm" onClick={history.previousPage}>
-                {t("chat_history_newer")}
-              </Button>
+              <AxButton
+                label={t("chat_history_newer")}
+                variant="ghost"
+                size="sm"
+                onClick={history.previousPage}
+              />
             ) : (
               <span />
             )}
             {history.hasNextPage && (
-              <Button variant="ghost" size="sm" onClick={history.nextPage}>
-                {t("load_more")}
-              </Button>
+              <AxButton
+                label={t("load_more")}
+                variant="ghost"
+                size="sm"
+                onClick={history.nextPage}
+              />
             )}
           </div>
         )}
@@ -240,25 +247,26 @@ export function HistoryPanel({
 }
 
 /**
- * History as a side panel (≥768px) or an overlay drawer (phones). Focus moves
- * to its heading when it opens; Escape closes it (the caller returns focus to
- * the history button).
+ * History as a side panel (≥768px, focus moves to its heading, Escape closes)
+ * or an Astryx bottom sheet on phones (modal: it traps focus and returns it).
+ * The caller returns focus to the history button when the panel closes.
  */
 export function HistoryAside({
   onClose,
+  inline,
   ...props
-}: Omit<Parameters<typeof HistoryPanel>[0], "headingRef">) {
+}: Omit<Parameters<typeof HistoryPanel>[0], "headingRef"> & { inline: boolean }) {
   const t = useTranslations();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const asideRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    headingRef.current?.focus();
-  }, []);
+    if (inline) headingRef.current?.focus();
+  }, [inline]);
 
   useEffect(() => {
     const aside = asideRef.current;
-    if (!aside) return;
+    if (!inline || !aside) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
@@ -266,26 +274,29 @@ export function HistoryAside({
     };
     aside.addEventListener("keydown", onKeyDown);
     return () => aside.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [inline, onClose]);
+
+  if (!inline) {
+    return (
+      <BottomSheet
+        isOpen
+        onOpenChange={(open) => !open && onClose()}
+        label={t("history")}
+        height="tall"
+      >
+        <HistoryPanel {...props} onClose={onClose} />
+      </BottomSheet>
+    );
+  }
 
   return (
-    <>
-      {/* Phones: dim the chat; a tap outside closes the drawer. */}
-      <button
-        type="button"
-        tabIndex={-1}
-        aria-label={t("chat_history_close")}
-        onClick={onClose}
-        className="bg-ax-scrim fixed inset-0 z-20 md:hidden"
-      />
-      <aside
-        ref={asideRef}
-        id="chat-history"
-        aria-label={t("history")}
-        className="bg-ax-sunken border-ax-border fixed inset-y-0 end-0 z-30 flex w-72 max-w-[85vw] shrink-0 flex-col border-s md:static md:z-auto md:max-w-none"
-      >
-        <HistoryPanel {...props} onClose={onClose} headingRef={headingRef} />
-      </aside>
-    </>
+    <aside
+      ref={asideRef}
+      id="chat-history"
+      aria-label={t("history")}
+      className="bg-ax-sunken border-ax-border flex w-72 shrink-0 flex-col border-s"
+    >
+      <HistoryPanel {...props} onClose={onClose} headingRef={headingRef} />
+    </aside>
   );
 }

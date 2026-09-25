@@ -148,6 +148,19 @@ describe("ActivityPanel", () => {
     expect(pill.getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("keeps reasoning behind a collapsible disclosure and names the tool call region", () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: /aktivitet:/i }));
+    const reasoning = screen.getByRole("button", { name: "Resonemang" });
+    expect(reasoning.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(reasoning);
+    expect(reasoning.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Jämför policyn mot LOU.")).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Verktygsanrop" }).textContent).toBe(
+      "lou/lou_troskelvarden(ar: 2026)"
+    );
+  });
+
   it("switches to numbered sources with where they come from", () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: /aktivitet:/i }));

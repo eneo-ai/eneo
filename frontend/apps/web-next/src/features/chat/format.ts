@@ -14,38 +14,8 @@ export function formatSeconds(ms: number, locale: string): string {
   return `${value} s`;
 }
 
-/** "1 842" in Swedish (narrow no-break space grouping), "1,842" in English. */
-export function formatCount(value: number, locale: string): string {
-  return new Intl.NumberFormat(intlLocale(locale)).format(value);
-}
-
-export type DayRelation = "today" | "yesterday" | "earlier";
-
 function startOfDay(date: Date): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-}
-
-export function dayRelation(date: Date, now: Date): DayRelation {
-  const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
-  if (diffDays <= 0) return "today";
-  if (diffDays === 1) return "yesterday";
-  return "earlier";
-}
-
-/** Clock time ("09:42") for a message timestamp. */
-export function formatClock(date: Date, locale: string): string {
-  return new Intl.DateTimeFormat(intlLocale(locale), { hour: "2-digit", minute: "2-digit" }).format(
-    date
-  );
-}
-
-/** Short date ("12 sep.") for timestamps older than yesterday. */
-export function formatShortDate(date: Date, now: Date, locale: string): string {
-  return new Intl.DateTimeFormat(intlLocale(locale), {
-    day: "numeric",
-    month: "short",
-    ...(date.getFullYear() === now.getFullYear() ? {} : { year: "numeric" })
-  }).format(date);
 }
 
 export type Greeting = "morning" | "day" | "evening";

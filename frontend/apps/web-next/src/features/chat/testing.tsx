@@ -92,4 +92,11 @@ export function installDomPolyfills({ desktop = true }: { desktop?: boolean } = 
   if (!Element.prototype.scrollIntoView) {
     Element.prototype.scrollIntoView = () => undefined;
   }
+  window.scrollTo = (() => undefined) as typeof window.scrollTo;
+  if (typeof globalThis.CSS === "undefined" || !globalThis.CSS.escape) {
+    globalThis.CSS = {
+      ...(globalThis.CSS ?? {}),
+      escape: (value: string) => value.replace(/([^\w-])/g, "\\$1")
+    } as typeof CSS;
+  }
 }

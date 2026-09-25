@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { Button } from "@astryxdesign/core/Button";
 import { ChatLayout, ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
-import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -43,7 +43,6 @@ import { ChatMessage, PendingAnswer, type ActivityRequest } from "./chat-message
 import { Composer } from "./composer";
 import { ContextUsageBar } from "./context-usage-bar";
 import { historyQueryKey } from "./history-panel";
-import { LiveRegion, useLiveRegion } from "./live-region";
 import {
   ChatMcpServers,
   chatPartnerMcpServers,
@@ -146,7 +145,9 @@ export function ChatView({
   const queryClient = useQueryClient();
   const attachments = useAttachments(partner);
   const isDesktop = useMediaQuery("(min-width: 1024px)");
-  const { regionRef, announce } = useLiveRegion();
+  // Astryx's shared polite live region (mounted empty, cleared after a moment):
+  // only "Svaret är klart", errors and tool approvals go there, never tokens.
+  const announce = useAnnounce();
   const [timings] = useState(() => new ActivityTimings());
   useSyncExternalStore(timings.subscribe, timings.getVersion, timings.getVersion);
 
@@ -637,8 +638,7 @@ export function ChatView({
             }
           />
         </div>
-        {/* One live region and file input for the view's lifetime (same key in both layouts). */}
-        <LiveRegion key="live-region" regionRef={regionRef} />
+        {/* One file input for the view's lifetime (same position in both layouts). */}
         {fileInputElement}
       </>
     );
@@ -727,7 +727,6 @@ export function ChatView({
           />
         )}
       </div>
-      <LiveRegion key="live-region" regionRef={regionRef} />
       {fileInputElement}
     </>
   );

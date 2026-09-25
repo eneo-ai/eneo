@@ -1,20 +1,13 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -79,7 +72,7 @@ export function useSessionMutations(
   return { rename, remove, feedback };
 }
 
-/** Rename dialog with a visible label (WCAG 3.3.2); Enter saves. */
+/** Rename dialog (Astryx Dialog, form purpose) with a visible label; Enter saves. */
 export function RenameSessionDialog({
   session,
   pending,
@@ -92,48 +85,51 @@ export function RenameSessionDialog({
   onSave: (name: string) => void;
 }) {
   const t = useTranslations();
-  const inputId = useId();
-  const descriptionId = useId();
   const [draft, setDraft] = useState<{ id: string; name: string } | null>(null);
   const value = draft && draft.id === session?.id ? draft.name : (session?.name ?? "");
+  const save = () => {
+    if (value.trim() && !pending) onSave(value.trim());
+  };
 
   return (
-    <Dialog open={session !== null} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (value.trim() && !pending) onSave(value.trim());
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>{t("chat_history_rename")}</DialogTitle>
-            <DialogDescription id={descriptionId}>
-              {t("chat_history_rename_description")}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor={inputId}>{t("chat_history_name_label")}</Label>
-            <Input
-              id={inputId}
+    <Dialog
+      isOpen={session !== null}
+      onOpenChange={(open) => !open && onCancel()}
+      purpose="form"
+      width={440}
+    >
+      <Layout
+        header={
+          <DialogHeader
+            title={t("chat_history_rename")}
+            subtitle={t("chat_history_rename_description")}
+            onOpenChange={(open) => !open && onCancel()}
+          />
+        }
+        content={
+          <LayoutContent>
+            <TextInput
+              label={t("chat_history_name_label")}
               value={value}
-              aria-describedby={descriptionId}
-              onChange={(event) =>
-                session && setDraft({ id: session.id, name: event.target.value })
-              }
+              onChange={(next) => session && setDraft({ id: session.id, name: next })}
+              onEnter={save}
             />
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onCancel}>
-              {t("cancel")}
-            </Button>
-            <Button type="submit" disabled={!value.trim() || pending}>
-              {t("save")}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
+          </LayoutContent>
+        }
+        footer={
+          <LayoutFooter>
+            <HStack gap={2} hAlign="end">
+              <Button label={t("cancel")} variant="secondary" onClick={onCancel} />
+              <Button
+                label={t("save")}
+                variant="primary"
+                isDisabled={!value.trim() || pending}
+                onClick={save}
+              />
+            </HStack>
+          </LayoutFooter>
+        }
+      />
     </Dialog>
   );
 }

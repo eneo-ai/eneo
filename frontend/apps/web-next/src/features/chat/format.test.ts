@@ -1,18 +1,6 @@
-// @vitest-environment jsdom
-import { act, cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  dayRelation,
-  firstNameOf,
-  formatFileSize,
-  formatSeconds,
-  greetingFor,
-  historyBucket
-} from "./format";
+import { describe, expect, it } from "vitest";
+import { firstNameOf, formatFileSize, formatSeconds, greetingFor, historyBucket } from "./format";
 import { groupSessions } from "./history-panel";
-import { LiveRegion, useLiveRegion } from "./live-region";
-
-afterEach(cleanup);
 
 describe("chat formatting", () => {
   it("formats durations and file sizes the Swedish way", () => {
@@ -36,11 +24,10 @@ describe("chat formatting", () => {
     expect(firstNameOf({ username: null, email: "anna.lind@sundsvall.se" })).toBe("anna.lind");
   });
 
-  it("relates dates to today for timestamps and history groups", () => {
+  it("buckets dates for the history groups", () => {
     const now = new Date(2026, 8, 25, 12, 0);
-    expect(dayRelation(new Date(2026, 8, 25, 9, 42), now)).toBe("today");
-    expect(dayRelation(new Date(2026, 8, 24, 23, 59), now)).toBe("yesterday");
-    expect(dayRelation(new Date(2026, 8, 12), now)).toBe("earlier");
+    expect(historyBucket(new Date(2026, 8, 25, 9, 42), now)).toBe("today");
+    expect(historyBucket(new Date(2026, 8, 24, 23, 59), now)).toBe("yesterday");
     expect(historyBucket(new Date(2026, 8, 21), now)).toBe("week");
     expect(historyBucket(new Date(2026, 8, 1), now)).toBe("month");
     expect(historyBucket(new Date(2026, 5, 1), now)).toBe("older");
@@ -62,33 +49,5 @@ describe("chat formatting", () => {
       ["older", ["4"]]
     ]);
     expect(groupSessions(sessions, null)).toEqual([{ bucket: null, sessions }]);
-  });
-});
-
-function Announcer({ message }: { message: string }) {
-  const { regionRef, announce } = useLiveRegion();
-  return (
-    <>
-      <LiveRegion regionRef={regionRef} />
-      <button type="button" onClick={() => announce(message)}>
-        announce
-      </button>
-    </>
-  );
-}
-
-describe("chat live region", () => {
-  it("starts empty and receives short messages, then clears", () => {
-    vi.useFakeTimers();
-    render(<Announcer message="Svaret är klart" />);
-    const region = screen.getByRole("status");
-    expect(region.getAttribute("aria-live")).toBe("polite");
-    expect(region.textContent).toBe("");
-    act(() => screen.getByRole("button").click());
-    act(() => vi.advanceTimersByTime(60));
-    expect(region.textContent).toBe("Svaret är klart");
-    act(() => vi.advanceTimersByTime(5_000));
-    expect(region.textContent).toBe("");
-    vi.useRealTimers();
   });
 });

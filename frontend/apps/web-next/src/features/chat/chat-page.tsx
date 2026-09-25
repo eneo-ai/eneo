@@ -1,5 +1,7 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -7,6 +9,7 @@ import { useCallback, useRef, useState, type ReactNode } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { toastApiError } from "@/lib/api/toast";
 import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { ChatHeader, PartnerSwitcher, type HeaderMenuItem } from "./chat-header";
@@ -72,6 +75,8 @@ export function ChatPage({
 }) {
   const t = useTranslations();
   const router = useRouter();
+  // History is an inline panel from 768px up, an overlay drawer below.
+  const historyInline = useMediaQuery("(min-width: 768px)");
   const [active, setActive] = useState<ActiveConversation | null>(() =>
     initialSessionId
       ? null
@@ -94,25 +99,36 @@ export function ChatPage({
 
   // Loading a session (initial deep-link or history click) goes through
   // pendingSessionId; the mapped messages then become the active conversation.
+  // Never served from cache: re-opening a conversation must show its latest
+  // messages, and a cached (fresh) result would skip the switch entirely.
   const detail = useQuery({
     queryKey: ["conversations", "detail", pendingSessionId],
     enabled: pendingSessionId !== null,
+    staleTime: 0,
+    gcTime: 0,
+    // A missing or forbidden session will not appear on retry; fail once, visibly.
+    retry: false,
     queryFn: async () => {
-      const session = await unwrap(
-        browserApi.GET("/api/v1/conversations/{session_id}/", {
-          params: { path: { session_id: pendingSessionId! } }
-        })
-      );
-      setActive({
-        key: session.id,
-        sessionId: session.id,
-        messages: mapSessionMessages(session.messages),
-        title: session.name,
-        feedback: session.feedback?.value ?? null,
-        started: session.messages.length > 0
-      });
-      setPendingSessionId(null);
-      return session;
+      try {
+        const session = await unwrap(
+          browserApi.GET("/api/v1/conversations/{session_id}/", {
+            params: { path: { session_id: pendingSessionId! } }
+          })
+        );
+        setActive({
+          key: session.id,
+          sessionId: session.id,
+          messages: mapSessionMessages(session.messages),
+          title: session.name,
+          feedback: session.feedback?.value ?? null,
+          started: session.messages.length > 0
+        });
+        setPendingSessionId(null);
+        return session;
+      } catch (error) {
+        toastApiError(error, t);
+        throw error;
+      }
     }
   });
 
@@ -156,7 +172,7 @@ export function ChatPage({
     updateUrl(sessionId);
     // On phones the panel is an overlay over the chat; close it so the picked
     // conversation is visible. On wider screens it sits inline, so keep it open.
-    if (window.matchMedia("(max-width: 767px)").matches) closeHistory();
+    if (!historyInline) closeHistory();
   }
 
   function newConversation() {
@@ -259,9 +275,10 @@ export function ChatPage({
               onActivityChange={onActivityChange}
             />
           ) : detail.isError ? (
-            <p role="alert" className="text-ax-error p-6 text-sm">
-              {t("request_failed")}
-            </p>
+            <div className="flex flex-col items-center gap-3 p-6 text-center">
+              <p className="text-ax-error text-sm">{t("chat_conversation_load_failed")}</p>
+              <Button label={t("new_conversation")} variant="secondary" onClick={newConversation} />
+            </div>
           ) : (
             <div className="mx-auto w-full max-w-[712px] p-6">
               <LoadingState rows={4} label={t("chat_loading_conversation")} />
@@ -270,6 +287,7 @@ export function ChatPage({
         </div>
         {historyOpen && (
           <HistoryAside
+            inline={historyInline}
             partner={partner}
             activeSessionId={sessionId ?? pendingSessionId}
             onSelect={selectSession}

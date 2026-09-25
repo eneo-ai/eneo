@@ -75,7 +75,7 @@ function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-export function toolStatus(part: ToolPart): StepStatus {
+function toolStatus(part: ToolPart): StepStatus {
   switch (part.state) {
     case "input-streaming":
     case "approval-requested":
@@ -178,7 +178,7 @@ function modelName(message: EneoUIMessage): string | null {
 }
 
 /** The sources of a message, numbered in citation order, with where they come from. */
-export function activitySources(
+function activitySources(
   message: EneoUIMessage,
   knowledge: KnowledgeOrigin[] = []
 ): ActivitySource[] {

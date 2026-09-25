@@ -3,9 +3,10 @@
 import { ChatMessage as AxChatMessage, ChatMessageBubble } from "@astryxdesign/core/Chat";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
+import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { Copy, ThumbsDown, ThumbsUp } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useCallback, useId, useMemo, useRef } from "react";
 import { toast } from "sonner";
 
@@ -30,7 +31,6 @@ import {
   getPreferredAssistantCopyFormat,
   type AssistantCopyFormat
 } from "./copy-assistant-answer";
-import { dayRelation, formatClock, formatShortDate } from "./format";
 import {
   answeringAssistantFromParts,
   GeneratedFile,
@@ -40,11 +40,6 @@ import {
   MessageFiles,
   ToolApprovalCard
 } from "./message-parts";
-import { SkillActivationStep } from "./skill-activation-step";
-import { isSkillCall } from "./tool-presentation";
-import { useNow } from "./use-now";
-
-type ToolPart = Extract<EneoUIMessage["parts"][number], { type: "dynamic-tool" }>;
 
 /** Who answers: the chat partner's name and tile. */
 export type AssistantIdentity = { id: string; name: string; iconId?: string | null };
@@ -63,29 +58,6 @@ function messageText(message: EneoUIMessage): string {
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("\n\n");
-}
-
-function MessageTimestamp({ iso }: { iso: string | null | undefined }) {
-  const t = useTranslations();
-  const locale = useLocale();
-  const now = useNow();
-  if (!iso || now === null) return null;
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return null;
-  const today = new Date(now);
-  const time = formatClock(date, locale);
-  const relation = dayRelation(date, today);
-  const label =
-    relation === "today"
-      ? t("chat_time_today", { time })
-      : relation === "yesterday"
-        ? t("chat_time_yesterday", { time })
-        : t("chat_time_date", { date: formatShortDate(date, today, locale), time });
-  return (
-    <time dateTime={date.toISOString()} className="text-ax-text-secondary text-xs tabular-nums">
-      {label}
-    </time>
-  );
 }
 
 /** The user's question: a filled bubble on the right, attachments as file tokens below. */
@@ -265,7 +237,7 @@ function AnswerActions({
         <MoreMenu label={t("chat_more_actions")} items={moreItems} size="sm" placement="below" />
       </div>
       <span className="flex-1" />
-      <MessageTimestamp iso={timestamp} />
+      {timestamp && <Timestamp value={timestamp} format="date_time" />}
     </div>
   );
 }
@@ -343,11 +315,6 @@ function AssistantMessage({
             onToggle={(trigger) => onActivityToggle?.(trigger)}
           />
         )}
-        {message.parts
-          .filter((part): part is ToolPart => part.type === "dynamic-tool" && isSkillCall(part))
-          .map((part) => (
-            <SkillActivationStep key={part.toolCallId} part={part} />
-          ))}
         {isStreaming && !hasText && <AnswerSkeleton />}
         {message.parts.map((part, index) => {
           if (part.type === "text") {

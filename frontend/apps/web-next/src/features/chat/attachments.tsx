@@ -123,7 +123,7 @@ type PendingPreview = { name: string; mimetype: string; url: string };
 
 type FileKind = "pdf" | "doc" | "sheet" | "image" | "other";
 
-export function fileKind(mimetype: string): FileKind {
+function fileKind(mimetype: string): FileKind {
   if (mimetype.startsWith("image/")) return "image";
   if (mimetype === "application/pdf") return "pdf";
   if (mimetype.includes("sheet") || mimetype.includes("csv") || mimetype.includes("excel")) {

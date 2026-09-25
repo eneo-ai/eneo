@@ -341,11 +341,7 @@
   "chat_activity_knowledge_title": "Searched knowledge",
   "chat_activity_knowledge_hits": "{count, plural, one {# hit} other {# hits}}",
   "chat_activity_answer_done": "Wrote the answer",
-  "chat_activity_show_reasoning": "Show reasoning",
-  "chat_activity_hide_reasoning": "Hide reasoning",
   "chat_tool_call_label": "Tool call",
-  "chat_tool_show_result": "Show result",
-  "chat_tool_hide_result": "Hide result",
   "chat_tool_approved": "Approved",
   "chat_tool_denied": "Denied",
   "chat_activity_tokens": "{count, plural, one {# token} other {# tokens}}",
@@ -410,9 +406,6 @@
   "chat_starter_draft_description": "Memos, emails or replies to residents",
   "chat_starter_plan_description": "Steps, owners and a timeline",
   "chat_switch_assistant": "Switch assistant",
-  "chat_time_today": "Today {time}",
-  "chat_time_yesterday": "Yesterday {time}",
-  "chat_time_date": "{date} {time}",
   "chat_tool_approval_hint": "The assistant wants to run tools. Approve or deny each call.",
   "chat_tool_approval_record": "Tool approval",
   "chat_tool_approval_timed_out": "Denied, timed out",
@@ -425,5 +418,7 @@
   "chat_greeting_evening": "Good evening, {name}",
   "chat_md_code_copied": "Code copied",
   "chat_previous_branch": "Previous version",
-  "chat_next_branch": "Next version"
+  "chat_next_branch": "Next version",
+  "chat_conversation_load_failed": "The conversation could not be loaded.",
+  "chat_activity_reasoning": "Reasoning"
 }

@@ -24,7 +24,7 @@ import { BrandMark } from "./start-state";
 /** Asks the app shell to open its navigation drawer (mobile). The shell listens for this event. */
 export const OPEN_NAV_EVENT = "eneo:open-nav";
 
-export function openAppNavigation() {
+function openAppNavigation() {
   window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT));
 }
 

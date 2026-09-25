@@ -1,5 +1,6 @@
 "use client";
 
+import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
 import { useTranslations } from "next-intl";
 import { useMemo, type ComponentProps } from "react";
 import type { StreamdownTranslations } from "streamdown";
@@ -9,7 +10,8 @@ import { cn } from "@/lib/utils";
  * Eneo overrides for Streamdown's markdown elements (assistant answers, MCP
  * snippets). They exist for WCAG 2.2 AA (ACCESSIBILITY.md → AI chat):
  *
- * - Tables sit in a bordered, named, keyboard-scrollable region (2.1.1) with
+ * - Tables sit in a bordered Astryx ScrollableArea: a named region that joins
+ *   the tab order only when the table actually overflows (2.1.1), with
  *   `<th scope="col">` header cells (1.3.1).
  * - Headings start at h3 so they nest under the page's h1 and the
  *   conversation (1.3.1, 2.4.6): markdown `#`/`##` → h3, `###` → h4, …
@@ -24,11 +26,11 @@ type MarkdownProps<Tag extends keyof React.JSX.IntrinsicElements> = ComponentPro
 function MarkdownTable({ children, className, node: _node, ...props }: MarkdownProps<"table">) {
   const t = useTranslations();
   return (
-    <div
+    <ScrollableArea
+      axis="inline"
       role="region"
-      aria-label={t("chat_md_table_label")}
-      tabIndex={0}
-      className="border-ax-border focus-visible:outline-ring rounded-ax-container my-4 overflow-x-auto border font-sans focus-visible:outline-2 focus-visible:outline-offset-2"
+      label={t("chat_md_table_label")}
+      className="border-ax-border focus-visible:outline-ring rounded-ax-container my-4 border font-sans focus-visible:outline-2 focus-visible:outline-offset-2"
     >
       <table
         className={cn("w-full border-collapse text-left text-[13.5px] leading-snug", className)}
@@ -36,7 +38,7 @@ function MarkdownTable({ children, className, node: _node, ...props }: MarkdownP
       >
         {children}
       </table>
-    </div>
+    </ScrollableArea>
   );
 }
 

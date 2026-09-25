@@ -4855,11 +4855,7 @@
   "chat_activity_knowledge_title": "Sökte i kunskap",
   "chat_activity_knowledge_hits": "{count, plural, one {# träff} other {# träffar}}",
   "chat_activity_answer_done": "Skrev svaret",
-  "chat_activity_show_reasoning": "Visa resonemang",
-  "chat_activity_hide_reasoning": "Dölj resonemang",
   "chat_tool_call_label": "Verktygsanrop",
-  "chat_tool_show_result": "Visa resultat",
-  "chat_tool_hide_result": "Dölj resultat",
   "chat_tool_approved": "Godkänt",
   "chat_tool_denied": "Nekat",
   "chat_activity_tokens": "{count, plural, one {# token} other {# tokens}}",
@@ -4924,9 +4920,6 @@
   "chat_starter_draft_description": "Tjänsteskrivelse, mejl eller svar till invånare",
   "chat_starter_plan_description": "Steg, ansvar och tidslinje",
   "chat_switch_assistant": "Byt assistent",
-  "chat_time_today": "Idag {time}",
-  "chat_time_yesterday": "Igår {time}",
-  "chat_time_date": "{date} {time}",
   "chat_tool_approval_hint": "Assistenten vill köra verktyg. Godkänn eller avvisa varje anrop.",
   "chat_tool_approval_record": "Verktygsgodkännande",
   "chat_tool_approval_timed_out": "Avvisad, tiden gick ut",
@@ -4939,5 +4932,7 @@
   "chat_greeting_evening": "God kväll, {name}",
   "chat_md_code_copied": "Koden är kopierad",
   "chat_previous_branch": "Föregående version",
-  "chat_next_branch": "Nästa version"
+  "chat_next_branch": "Nästa version",
+  "chat_conversation_load_failed": "Konversationen kunde inte laddas.",
+  "chat_activity_reasoning": "Resonemang"
 }

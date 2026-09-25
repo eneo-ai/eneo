@@ -126,7 +126,7 @@ describe("ChatView start state", () => {
 });
 
 describe("ChatView conversation", () => {
-  it("names the message list, keeps it out of live announcements and mounts one polite region", () => {
+  it("names the message list and keeps it out of live announcements", () => {
     render(<Harness partner={assistant} messages={history} sessionId="session-1" />);
     const log = screen.getByRole("log", { name: "Konversation" });
     expect(log.getAttribute("aria-live")).toBe("off");
@@ -134,12 +134,10 @@ describe("ChatView conversation", () => {
     expect(
       within(log).getByRole("article", { name: /svar från upphandlingsassistenten/i })
     ).toBeTruthy();
-
-    const regions = screen
-      .getAllByRole("status")
-      .filter((element) => element.getAttribute("aria-live") === "polite");
-    const live = regions.find((element) => element.dataset.testid === "chat-live-region");
-    expect(live?.textContent).toBe("");
+    // Answer text never sits in a live region (announcements go through
+    // Astryx useAnnounce instead of reading streamed tokens).
+    const answerText = within(log).getByText("Direktupphandlingsgränsen är 700 000 kr.");
+    expect(answerText.closest('[aria-live]:not([aria-live="off"])')).toBeNull();
     expect(screen.getByRole("button", { name: "Skicka meddelande" })).toBeTruthy();
   });
 
