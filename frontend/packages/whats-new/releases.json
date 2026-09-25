@@ -34,6 +34,19 @@
             "href": "/admin/spaces",
             "anchor": "admin-spaces"
           }
+        },
+        {
+          "id": "conversation-settings",
+          "type": "improved",
+          "area": "chat",
+          "title": {
+            "en": "Each conversation remembers its choices",
+            "sv": "Varje konversation kommer ihåg sina val"
+          },
+          "body": {
+            "en": "Tool choices and approval preferences now stay with each conversation when you reload or switch devices. Personal Chat also remembers the model and allowed reasoning level. New conversations start with current defaults, and changing the model in an existing conversation offers a warning and the option to start a new one.",
+            "sv": "Verktygsval och inställningar för godkännande följer nu konversationen när du laddar om sidan eller byter enhet. Personliga chatten kommer också ihåg modellen och tillåten resonemangsnivå. Nya konversationer börjar med aktuella standardvärden, och vid modellbyte i en pågående konversation får du en varning och möjlighet att starta en ny."
+          }
         }
       ]
     },

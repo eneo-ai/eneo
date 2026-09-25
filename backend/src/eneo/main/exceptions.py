@@ -91,6 +91,7 @@ class ErrorCodes(int, Enum):
     CURRENT_PASSWORD_INCORRECT = 9061
     SKILL_REMOVAL_BUSY = 9062
     ASSISTANT_PUBLISHED_AS_WIDGET = 9063
+    CONVERSATION_SETTINGS_CONFLICT = 9064
     # Space oversight by tenant administrators
     SPACE_LAST_ADMIN = 9065
     SPACE_ALREADY_MEMBER = 9066
@@ -365,6 +366,10 @@ class NameCollisionException(Exception):
     pass
 
 
+class ConversationSettingsConflictException(Exception):
+    pass
+
+
 class SkillRevisionConflictException(Exception):
     pass
 
@@ -510,6 +515,11 @@ EXCEPTION_MAP = {
         ErrorCodes.CHUNK_EMBEDDING_MISMATCH,
     ),
     NameCollisionException: (409, None, ErrorCodes.NAME_COLLISION),
+    ConversationSettingsConflictException: (
+        409,
+        None,
+        ErrorCodes.CONVERSATION_SETTINGS_CONFLICT,
+    ),
     SkillRevisionConflictException: (
         409,
         None,

@@ -24,6 +24,10 @@ from eneo.main.exceptions import (
 from eneo.main.logging import get_logger
 from eneo.questions.question import QuestionAdd, ToolCallInfo
 from eneo.questions.questions_repo import QuestionRepository
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+)
 from eneo.sessions.session import (
     SessionAdd,
     SessionFeedback,
@@ -336,6 +340,17 @@ class SessionService:
             name_filter=name_filter,
         )
 
+    async def update_settings(
+        self, id: UUID, settings: ConversationSettings, expected_revision: int
+    ) -> ConversationSettingsState:
+        await self.get_session_by_uuid(id)
+        # A short transaction avoids holding the parent row lock while a
+        # streaming turn commits its question in a separate transaction.
+        async with self._placeholder_transaction() as db_session:
+            return await self._session_repository(db_session).update_settings(
+                id, settings, expected_revision
+            )
+
     async def update_session(self, session_update: SessionUpdate) -> SessionInDB:
         session = await self.session_repo.update(session_update)
         return self._check_exists_and_belongs_to_user(session)
@@ -439,6 +454,7 @@ class SessionService:
         self,
         *,
         name: str,
+        settings: ConversationSettingsState | None = None,
         question: str,
         files: Sequence[File] | None = None,
         session_assistant_id: UUID | None = None,
@@ -454,6 +470,7 @@ class SessionService:
             assistant_id=session_assistant_id,
             group_chat_id=group_chat_id,
         )
+        session_add.settings = settings
         async with self._placeholder_transaction() as db_session:
             session_record = await self._session_repository(db_session).add(session_add)
             question_add = self._build_question_placeholder(

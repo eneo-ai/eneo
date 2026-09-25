@@ -28,6 +28,10 @@
   "governance_confirm_mcp_disabled": "Alla MCP-servrar inaktiveras i den personliga assistenten.",
   "governance_mcp_error_none": "Välj minst en funktion eller MCP-server.",
   "governance_mcp_default_label": "På som standard",
+  "personal_chat_model_change_title": "Byta modell i den här konversationen?",
+  "personal_chat_model_change_description": "En annan modell kan ha ett mindre kontextfönster eller stödja andra verktyg och bilder. Tidigare meddelanden finns kvar, men nästa svar kan använda mindre historik. Vi rekommenderar att du startar en ny konversation i stället.",
+  "personal_chat_model_new_conversation": "Starta ny konversation",
+  "personal_chat_model_change_anyway": "Byt ändå",
   "governance_mcp_default_aria": "Starta {name} påslagen i användarnas chatt",
   "governance_mcp_allow_aria": "Tillåt {name}",
   "governance_mcp_show_tools": "Visa verktyg",
@@ -5053,5 +5057,9 @@
   "admin_spaces_activation_not_applicable": "Inte aktuellt",
   "admin_spaces_assistant_missing": "Assistenten finns inte längre",
   "admin_spaces_no_widgets": "Ytan har inga webbwidgetar.",
-  "admin_spaces_no_widgets_help": "Widgetar skapas av redigerare i ytan. De visas här och under Webbwidgetar, där du också aktiverar dem."
+  "admin_spaces_no_widgets_help": "Widgetar skapas av redigerare i ytan. De visas här och under Webbwidgetar, där du också aktiverar dem.",
+  "conversation_settings_save_failed": "Inställningarna kunde inte sparas eller hämtas.",
+  "conversation_settings_reload": "Läs in sparade val",
+  "conversation_settings_model_unavailable": "Den sparade modellen är inte tillgänglig",
+  "conversation_settings_use_default": "Använd tillgänglig standardmodell"
 }

@@ -45,14 +45,23 @@ const spacesManagerMock = vi.hoisted(() => {
       current = space;
       subscribers.forEach((run) => run(current));
     },
-    updateDefaultAssistant: vi.fn()
+    updateSettings: vi.fn()
   };
 });
 
 vi.mock("$lib/features/spaces/SpacesManager", () => ({
   getSpacesManager: () => ({
     state: { currentSpace: spacesManagerMock.currentSpace },
-    updateDefaultAssistant: spacesManagerMock.updateDefaultAssistant
+    updateSettings: spacesManagerMock.updateSettings
+  })
+}));
+
+vi.mock("../../ChatService.svelte", () => ({
+  getChatService: () => ({
+    settings: { reasoning_effort: "high" },
+    settingsBusy: false,
+    askQuestion: { isLoading: false },
+    updateSettings: spacesManagerMock.updateSettings
   })
 }));
 
@@ -113,8 +122,8 @@ describe("ChatReasoningSelect", () => {
 
     await page.getByRole("option", { name: getModelKwargOptionLabel("xhigh") }).click();
 
-    expect(spacesManagerMock.updateDefaultAssistant).toHaveBeenCalledWith({
-      modelKwargs: { reasoning_effort: "xhigh" }
+    expect(spacesManagerMock.updateSettings).toHaveBeenCalledWith({
+      reasoning_effort: "xhigh"
     });
   });
 

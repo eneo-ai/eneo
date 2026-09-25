@@ -1,6 +1,6 @@
 """Revision 202609251100: the oversight join marker and widget activation
 requests. Additive and reversible: the columns arrive empty, their CHECK
-constraints hold, and a downgrade restores the widgets head exactly while
+constraints hold, and a downgrade restores the parent revision exactly while
 keeping every row."""
 
 from collections.abc import Generator
@@ -28,7 +28,7 @@ seed_default_models = expand.seed_default_models
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-PARENT = widget_migrations.WIDGET_HEAD
+PARENT = "202609251000"
 OVERSIGHT = "202609251100"
 REASON = "Ärende KS 2026/123 – kontroll av underlag"
 
