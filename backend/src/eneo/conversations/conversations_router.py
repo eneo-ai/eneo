@@ -24,6 +24,7 @@ from eneo.conversations.conversation_models import (
     ChatTurnDiagnostics,
     ConversationRenameRequest,
     ConversationRequest,
+    ConversationTarget,
     PreflightRequest,
     PreflightResponse,
 )
@@ -39,6 +40,11 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+    ConversationSettingsUpdate,
+)
 from eneo.sessions.session import (
     SessionFeedback,
     SessionInDB,
@@ -358,6 +364,8 @@ async def chat(
             require_tool_approval=request.require_tool_approval,
             disabled_mcp_server_ids=request.disabled_mcp_server_ids,
             disabled_capabilities=request.disabled_capabilities,
+            settings=request.settings,
+            settings_revision=request.settings_revision,
         )
 
     return await to_conversation_response(
@@ -489,6 +497,8 @@ async def preflight_tokens(
             group_chat_id=request.group_chat_id,
             tool_assistant_id=tool_assistant_id,
             assistant_prompt=request.assistant_prompt,
+            settings=request.settings,
+            settings_revision=request.settings_revision,
         )
 
 
@@ -575,6 +585,67 @@ async def list_conversations(
         cursor=cursor,  # pyright: ignore[reportArgumentType]  # session_protocol cursor param has wrong annotation (datetime instead of Optional[datetime])
         previous=previous,
         total_count=total_count,
+    )
+
+
+@router.post(
+    "/settings/defaults/",
+    response_model=ConversationSettings,
+    dependencies=[
+        Depends(
+            require_resource_permission_for_method(
+                "conversations",
+                read_override_endpoints=frozenset({"conversation_settings_defaults"}),
+            )
+        )
+    ],
+)
+async def conversation_settings_defaults(
+    request: ConversationTarget,
+    http_request: Request,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    """Current defaults for a draft, or for a legacy conversation without settings."""
+    await _validate_conversation_scope(
+        http_request=http_request,
+        container=container,
+        assistant_id=request.assistant_id,
+        group_chat_id=request.group_chat_id,
+        session_id=request.session_id,
+    )
+    return await container.conversation_service().settings_defaults(
+        assistant_id=request.assistant_id,
+        group_chat_id=request.group_chat_id,
+        session_id=request.session_id,
+    )
+
+
+@router.patch(
+    "/{session_id}/settings/",
+    response_model=ConversationSettingsState,
+    responses=responses.get_responses([400, 403, 404, 409]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+async def update_conversation_settings(
+    session_id: UUID,
+    http_request: Request,
+    request: ConversationSettingsUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    await _validate_conversation_scope(
+        http_request=http_request,
+        container=container,
+        session_id=session_id,
+        assistant_id=None,
+        group_chat_id=None,
+    )
+    session = await container.session_service().get_session_by_uuid(session_id)
+    assert session is not None
+    await _authorize_session_access(container, session)
+    return await container.conversation_service().update_settings(
+        session_id,
+        request.settings,
+        request.expected_revision,
     )
 
 

@@ -253,6 +253,8 @@ CONVERSATIONS_READ_OVERRIDES: frozenset[str] = frozenset(
     {
         "chat",
         "leave_feedback",
+        "conversation_settings_defaults",
+        "update_conversation_settings",
     }
 )
 

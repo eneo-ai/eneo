@@ -28,6 +28,10 @@
   "governance_confirm_mcp_disabled": "All MCP servers will be disabled in the personal assistant.",
   "governance_mcp_error_none": "Select at least one capability or MCP server.",
   "governance_mcp_default_label": "On by default",
+  "personal_chat_model_change_title": "Change model in this conversation?",
+  "personal_chat_model_change_description": "A different model may have a smaller context window or support different tools and images. Earlier messages remain, but the next answer may use less history. We recommend starting a new conversation instead.",
+  "personal_chat_model_new_conversation": "Start new conversation",
+  "personal_chat_model_change_anyway": "Change anyway",
   "governance_mcp_default_aria": "Start {name} switched on in users' chat",
   "governance_mcp_allow_aria": "Allow {name}",
   "governance_mcp_show_tools": "Show tools",
@@ -4660,5 +4664,9 @@
   "upload_files_to_collection_description": "Selected files are uploaded to {name} and processed in the background.",
   "duplicate_files_dialog_title": "Replace existing files?",
   "duplicate_files_dialog_description": "These files already exist in the collection. Uploading will replace them with the new versions.",
-  "replace_files": "Replace files"
+  "replace_files": "Replace files",
+  "conversation_settings_save_failed": "The settings could not be saved or loaded.",
+  "conversation_settings_reload": "Reload saved choices",
+  "conversation_settings_model_unavailable": "The saved model is unavailable",
+  "conversation_settings_use_default": "Use the available default model"
 }

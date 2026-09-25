@@ -6,12 +6,14 @@
     AI Elements-style model selector for the chat input toolbar: a command
     palette grouped by model vendor with provider logos and text search.
     Policy-filtered models, a locked label when the policy pins a single model,
-    and a plain label when only one model is available. Switching updates the
-    personal space's default assistant. Only meaningful for the default
-    assistant — callers gate on partner.type.
+    and a plain label when only one model is available. Selection belongs to
+    the personal conversation, not the default assistant.
 -->
 <script lang="ts">
   import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { getChatService } from "../../ChatService.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { sortModels } from "$lib/features/ai-models/sortModels";
   import { groupModelsByVendor } from "$lib/features/ai-models/groupModels";
@@ -21,9 +23,10 @@
   import ChatModelDetails from "./ChatModelDetails.svelte";
 
   const {
-    state: { currentSpace },
-    updateDefaultAssistant
+    state: { currentSpace }
   } = getSpacesManager();
+  const chat = getChatService();
+  const { onNewConversation }: { onNewConversation: () => void } = $props();
 
   // Only rendered when chat.partner.type === "default-assistant", which
   // guarantees the personal space's default_assistant is present.
@@ -52,17 +55,29 @@
     )
   );
   const selectedModel = $derived.by(() => {
+    const selected = visibleModels.find((model) => model.id === chat.selectedPersonalModel?.id);
     return (
+      selected ??
       selectEffectiveChatModel(
         defaultAssistant.completion_model,
         effectiveConfig,
         $currentSpace.completion_models
-      ) ?? null
+      ) ??
+      null
     );
   });
-  const selectedId = $derived(selectedModel?.id ?? "");
-  const selectedLabel = $derived(selectedModel?.nickname ?? m.select_a_model());
+  const selectedId = $derived(chat.settings?.completion_model_id ?? selectedModel?.id ?? "");
+  const savedModelUnavailable = $derived(
+    Boolean(chat.settings?.completion_model_id) &&
+      !visibleModels.some((model) => model.id === chat.settings?.completion_model_id)
+  );
+  const selectedLabel = $derived(
+    savedModelUnavailable
+      ? m.conversation_settings_model_unavailable()
+      : (selectedModel?.nickname ?? m.select_a_model())
+  );
   let selectorOpen = $state(false);
+  let pendingModelId = $state<string | null>(null);
   let previewedModelId = $state<string | null>(null);
   const previewedModel = $derived(
     visibleModels.find((model) => model.id === previewedModelId) ??
@@ -80,16 +95,51 @@
   // identically.
   const modelGroups = $derived(groupModelsByVendor(visibleModels, m.model_group_other()));
 
+  $effect(() => chat.setModelCatalog($currentSpace.completion_models));
+
+  async function applyModel(id: string) {
+    const model = visibleModels.find((candidate) => candidate.id === id);
+    if (!model) return;
+    pendingModelId = null;
+    await chat.loadSettings();
+    await chat.selectPersonalModel(model);
+  }
+
   function selectModel(id: string) {
-    if (!id || id === selectedId) return;
-    // Persist the model on the personal default assistant. The chat page keeps
-    // the chat partner synced with SpacesManager, so no manual partner update
-    // is needed here.
-    updateDefaultAssistant({ completionModel: { id } });
+    if (
+      !id ||
+      id === selectedId ||
+      chat.askQuestion.isLoading ||
+      chat.settingsBusy ||
+      !chat.settings
+    )
+      return;
+    selectorOpen = false;
+    if (chat.currentConversation.messages.length > 0) {
+      pendingModelId = id;
+    } else {
+      applyModel(id);
+    }
   }
 </script>
 
-{#if lockedModel}
+{#if savedModelUnavailable}
+  <div class="text-destructive flex items-center gap-2 text-sm" role="status">
+    <span>{m.conversation_settings_model_unavailable()}</span>
+    {#if selectedModel}
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={chat.settingsBusy || chat.askQuestion.isLoading}
+        onclick={() => {
+          if (selectedModel) selectModel(selectedModel.id);
+        }}
+      >
+        {m.conversation_settings_use_default()}
+      </Button>
+    {/if}
+  </div>
+{:else if lockedModel}
   <div
     class="text-muted-foreground flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm"
     title={m.governance_locked_by_admin()}
@@ -103,7 +153,10 @@
   </div>
 {:else}
   <ModelSelector.Root bind:open={selectorOpen}>
-    <ModelSelector.Trigger aria-label={m.choose_a_completion_model()}>
+    <ModelSelector.Trigger
+      disabled={chat.settingsBusy || !chat.settings || chat.askQuestion.isLoading}
+      aria-label={m.choose_a_completion_model()}
+    >
       {#if selectedModel}
         <ModelSelector.Logo provider={selectedModel.org ?? selectedModel.provider_type} />
       {/if}
@@ -143,3 +196,37 @@
     </ModelSelector.Content>
   </ModelSelector.Root>
 {/if}
+
+<AlertDialog.Root
+  open={pendingModelId !== null}
+  onOpenChange={(open) => {
+    if (!open) pendingModelId = null;
+  }}
+>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.personal_chat_model_change_title()}</AlertDialog.Title>
+      <AlertDialog.Description>{m.personal_chat_model_change_description()}</AlertDialog.Description
+      >
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <Button
+        variant="outline"
+        onclick={() => {
+          const id = pendingModelId;
+          if (!id) return;
+          onNewConversation();
+          applyModel(id);
+        }}>{m.personal_chat_model_new_conversation()}</Button
+      >
+      <AlertDialog.Action
+        onclick={() => {
+          if (pendingModelId) applyModel(pendingModelId);
+        }}
+      >
+        {m.personal_chat_model_change_anyway()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
