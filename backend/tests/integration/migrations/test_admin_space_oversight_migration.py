@@ -4,15 +4,20 @@ constraints hold, and a downgrade restores the widgets head exactly while
 keeping every row."""
 
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from uuid import uuid4
 
 import psycopg2
 import pytest
 from psycopg2 import errors
+from sqlalchemy import create_engine
 from testcontainers.postgres import PostgresContainer
 
 from alembic import command
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from alembic.script import ScriptDirectory
 from tests.integration.migrations import test_file_icon_staged_backfill_expand as expand
 from tests.integration.migrations import test_widget_migrations as widget_migrations
 
@@ -253,15 +258,41 @@ def test_upgrade_gives_up_instead_of_queueing_behind_a_long_transaction(
 ):
     """The revision takes a lock on spaces_users and widgets; with a reader
     holding one open it must fail fast rather than stall every space read
-    queued behind it."""
+    queued behind it. Run in a worker with a bound, so a lost timeout fails
+    the test instead of hanging the migration job."""
     config = expand._alembic_config(database)
+    executor = ThreadPoolExecutor(max_workers=1)
     with closing(psycopg2.connect(database.replace("+psycopg2", ""))) as blocker:
-        with blocker.cursor() as cursor:
-            cursor.execute("SELECT 1 FROM widgets FOR UPDATE")
+        try:
+            with blocker.cursor() as cursor:
+                cursor.execute("SELECT 1 FROM widgets FOR UPDATE")
+            upgrade = executor.submit(command.upgrade, config, OVERSIGHT)
             with pytest.raises(Exception, match="lock timeout"):
-                command.upgrade(config, OVERSIGHT)
-        blocker.rollback()
+                upgrade.result(timeout=60)
+        finally:
+            blocker.rollback()
+            executor.shutdown(wait=True)
     assert widget_migrations._fetch(
         database, "SELECT version_num FROM alembic_version"
     ) == [(PARENT,)]
     command.upgrade(config, OVERSIGHT)
+
+
+def test_upgrade_hands_back_the_default_lock_timeout(database: str):
+    """Revisions after this one run in the same transaction and must not
+    inherit its short timeout."""
+    config = expand._alembic_config(database)
+    migration = ScriptDirectory.from_config(config).get_revision(OVERSIGHT).module
+    engine = create_engine(database)
+    try:
+        with engine.connect() as connection:
+            # One transaction, as alembic runs every pending revision.
+            default = connection.exec_driver_sql("SHOW lock_timeout").scalar()
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.upgrade()
+            after = connection.exec_driver_sql("SHOW lock_timeout").scalar()
+            connection.rollback()
+    finally:
+        engine.dispose()
+    assert default != "5s"
+    assert after == default

@@ -1896,7 +1896,7 @@ async def test_reason_is_normalised_in_audit_and_column(client, admin, overseer)
 # --- API keys -----------------------------------------------------------------
 
 
-async def test_admin_api_key_can_read_but_not_mutate(client, admin, overseer):
+async def test_admin_api_key_can_read(client, admin):
     space_id = await create_space(client, admin.token)
     assistant_id = await create_assistant(client, admin.token, space_id)
     widget = await create_widget(client, admin.token, space_id, assistant_id)
@@ -1917,18 +1917,33 @@ async def test_admin_api_key_can_read_but_not_mutate(client, admin, overseer):
         resp = await client.get(path, headers=space_key)
         assert resp.status_code == 403, (path, resp.text)
 
-    for path, body in (
-        (
-            f"/api/v1/admin/spaces/{space_id}/members/",
-            {"user_id": str(overseer.id), "role": "viewer"},
-        ),
-        (
-            f"/api/v1/admin/spaces/{space_id}/join/",
-            {"role": "viewer", "reason": REASON},
-        ),
-    ):
-        resp = await client.post(path, json=body, headers=tenant_admin_key)
-        assert resp.status_code == 403, (path, resp.text)
-        assert "session_auth_required" in resp.text, resp.text
+
+MUTATION_ROUTES = range(ROUTE_NAMES.index("M1"), len(ROUTE_NAMES))
+
+
+@pytest.mark.parametrize(
+    "route", MUTATION_ROUTES, ids=[ROUTE_NAMES[i] for i in MUTATION_ROUTES]
+)
+async def test_admin_api_key_cannot_mutate(client, admin, overseer, route):
+    """Every member change and the join are session-only: a tenant-admin key
+    is refused before anything is read or written."""
+    space_id = await create_space(client, admin.token)
+    group = await insert_group((await admin_row())[1], [overseer.id])
+    await add_group(space_id, group, "viewer")
+    tenant_admin_key = key(await create_service_key(client, admin.token))
+    method, path, body = _routes(space_id, overseer.id)[route]
+    if ROUTE_NAMES[route] in ("M4", "M5", "M6"):
+        method, path, body = _routes(space_id, group)[route]
+
+    resp = await client.request(method, path, json=body, headers=tenant_admin_key)
+    assert resp.status_code == 403, (path, resp.text)
+    assert "session_auth_required" in resp.text, resp.text
 
     assert await _space_roles(space_id) == {admin.id: "admin"}
+    assert (
+        await scalar(
+            "SELECT role FROM spaces_user_groups WHERE space_id = :s", s=space_id
+        )
+        == "viewer"
+    )
+    assert await audit_rows() == []

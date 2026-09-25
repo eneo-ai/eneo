@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Sundsvalls Kommun
+#
+# Licensed under the MIT License.
+
 """Audit actions a tenant can never turn off.
 
 These record access and changes a tenant administrator makes without space

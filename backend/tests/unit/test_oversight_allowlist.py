@@ -1,11 +1,12 @@
-"""The only fields tenant-admin oversight may return (spec §6.1).
+"""The only fields tenant-admin oversight may return.
 
 Oversight shows configuration and metadata of spaces the administrator is not
 a member of; content (documents, questions, answers, file names,
-conversations) and credentials must never appear. Each response model is
-walked recursively and compared with a frozen list of dotted field paths, so
-a new field fails here until it is added on purpose, next to the §6.1
-allowlist in the docs.
+conversations) and credentials must never appear. The promise is published in
+the space oversight guide, section "What is never shown"
+(frontend/apps/docs-site/src/content/guides/space-oversight.mdx). Each
+response model is walked recursively and compared with a frozen list of
+dotted field paths, so a new field fails here until it is added on purpose.
 """
 
 import typing
@@ -432,8 +433,9 @@ def test_oversight_responses_return_only_allowlisted_fields(
 ) -> None:
     actual = field_paths(model)
     assert sorted(actual - allowed) == [], (
-        "New oversight fields: add them to the allowlist here and to spec"
-        " §6.1 only if they are configuration or metadata, never content."
+        "New oversight fields: add them to the allowlist here only if they"
+        " are configuration or metadata, never content, and check them"
+        " against 'What is never shown' in guides/space-oversight.mdx."
     )
     assert sorted(allowed - actual) == [], "Stale allowlist entries."
 
