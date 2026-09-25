@@ -12,9 +12,9 @@ export function getChatQueryParams({
   const currentParams = page.url.searchParams;
   const params = new URLSearchParams();
 
-  // Build a map of parameters with fallbacks
+  // A missing conversation intentionally clears the previous session id.
   const paramMap: Record<string, string | undefined> = {
-    session_id: conversation?.id ?? currentParams.get("session_id") ?? undefined,
+    session_id: conversation?.id,
     tab: tab ?? currentParams.get("tab") ?? undefined
   };
 

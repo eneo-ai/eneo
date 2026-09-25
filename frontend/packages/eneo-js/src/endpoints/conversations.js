@@ -61,6 +61,38 @@ export function initConversations(client) {
     },
 
     /**
+     * Current defaults for a new conversation or a legacy conversation without settings.
+     * @param {{chatPartner: ChatPartner, conversation?: {id: string}}} params
+     * @returns {Promise<import('../types/resources').ConversationSettings>}
+     */
+    settingsDefaults: async ({ chatPartner, conversation }) => {
+      const target = conversation?.id
+        ? { session_id: conversation.id }
+        : chatPartner.type === "group-chat"
+          ? { group_chat_id: chatPartner.id }
+          : { assistant_id: chatPartner.id };
+      return await client.fetch("/api/v1/conversations/settings/defaults/", {
+        method: "post",
+        requestBody: { "application/json": target }
+      });
+    },
+
+    /**
+     * Save choices without overwriting another tab's changes.
+     * @param {{id: string}} conversation
+     * @param {import('../types/resources').ConversationSettings} settings
+     * @param {number} expectedRevision Zero initializes an older conversation.
+     * @returns {Promise<import('../types/resources').ConversationSettingsState>}
+     */
+    updateSettings: async ({ id: session_id }, settings, expectedRevision) => {
+      return await client.fetch("/api/v1/conversations/{session_id}/settings/", {
+        method: "patch",
+        params: { path: { session_id } },
+        requestBody: { "application/json": { settings, expected_revision: expectedRevision } }
+      });
+    },
+
+    /**
      * Rename a conversation.
      * NOTE: This endpoint exists in backend, but the generated schema types may lag behind.
      * We intentionally bypass type checking here to keep runtime behavior working until types are regenerated.
@@ -142,6 +174,8 @@ export function initConversations(client) {
      * @param {boolean} [params.requireToolApproval] Should tool calls require user approval before execution? Defaults to false
      * @param {("web_search" | "image_generation")[]} [params.disabledCapabilities] Capability purposes disabled for this request
      * @param {string[]} [params.disabledMcpServerIds] MCP server ids the user switched off for this message
+     * @param {import("../types/resources").ConversationSettings} [params.settings] Initial choices for a new conversation
+     * @param {number} [params.settingsRevision] Expected revision for an existing conversation
      * @param {{assistants: {id: string; handle: string}[]} | undefined} [params.tools] Tool use
      * @param {Object} [params.callbacks]
      * @param {(data: import("../types/resources").SSE.FirstChunk) => void} [params.callbacks.onFirstChunk] Callback to run when the first chunk of the answer is received
@@ -165,6 +199,8 @@ export function initConversations(client) {
       requireToolApproval,
       disabledMcpServerIds,
       disabledCapabilities,
+      settings,
+      settingsRevision,
       abortController,
       callbacks
     }) => {
@@ -203,11 +239,9 @@ export function initConversations(client) {
               stream: true,
               require_tool_approval: requireToolApproval,
               disabled_capabilities: disabledCapabilities,
-              // Spread (not a direct property) so it doesn't trip excess-property
-              // checks until schema.d.ts is regenerated via `bun run update`.
-              ...(disabledMcpServerIds && disabledMcpServerIds.length > 0
-                ? { disabled_mcp_server_ids: disabledMcpServerIds }
-                : {})
+              settings,
+              settings_revision: settingsRevision,
+              disabled_mcp_server_ids: disabledMcpServerIds
             }
           }
         },
@@ -280,11 +314,22 @@ export function initConversations(client) {
      * @param {{id: string}[]} [params.files] Pending file attachments
      * @param {import("../types/resources").ConversationTools} [params.tools] Pending assistant target
      * @param {string} [params.assistantPrompt] Unsaved assistant prompt override
+     * @param {import("../types/resources").ConversationSettings} [params.settings] Initial choices for a new conversation
+     * @param {number} [params.settingsRevision] Expected revision for an existing conversation
      * for config-time baseline estimates
      * @returns {Promise<import('../types/resources').PreflightResponse>}
      * @throws {EneoError}
      */
-    preflight: async ({ chatPartner, conversation, question, files, tools, assistantPrompt }) => {
+    preflight: async ({
+      chatPartner,
+      conversation,
+      question,
+      files,
+      tools,
+      assistantPrompt,
+      settings,
+      settingsRevision
+    }) => {
       /** @type {{session_id?: string, assistant_id?: string, group_chat_id?: string}} */
       const target = { session_id: undefined, assistant_id: undefined, group_chat_id: undefined };
 
@@ -311,7 +356,9 @@ export function initConversations(client) {
             question,
             file_ids: (files ?? []).map((f) => f.id),
             tools,
-            assistant_prompt: assistantPrompt
+            assistant_prompt: assistantPrompt,
+            settings,
+            settings_revision: settingsRevision
           }
         }
       });
