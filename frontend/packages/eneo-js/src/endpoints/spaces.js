@@ -267,8 +267,9 @@ export function initSpaces(client) {
      */
     admin: {
       /**
-       * Every shared space in the organisation, with the pending widget
-       * activation requests (oldest first).
+       * Every shared space in the organisation, with every pending widget
+       * activation request in it (oldest first), the organisation space's
+       * included.
        * @returns {Promise<AdminSpaceList>}
        * @throws {EneoError}
        * */
@@ -281,7 +282,8 @@ export function initSpaces(client) {
 
       /**
        * Settings, resources, members and usage of one shared space. Personal
-       * spaces and the organisation space are not found.
+       * spaces and the organisation space are not found. Each usage count is
+       * null while fewer than `usage.threshold` people are behind it.
        * @param {{id: string}} space
        * @returns {Promise<AdminSpaceDetail>}
        * @throws {EneoError}
@@ -297,6 +299,9 @@ export function initSpaces(client) {
       /**
        * Join a space with a written reason. Only a role above the one held
        * through a group can be chosen (`viewer_membership.joinable_roles`).
+       * The API normalises the reason (see `AdminSpaceJoin.reason`) and needs
+       * at least 10 visible characters. The space's members see the join, with
+       * role and dates, for 90 days after you leave (`Space.oversight_visits`).
        * @param {{spaceId: string, role: SpaceRoleValue, reason: string}} params
        * @returns {Promise<AdminSpaceMembers>}
        * @throws {EneoError}
@@ -327,7 +332,8 @@ export function initSpaces(client) {
       members: {
         /**
          * Add a user without joining the space. Adding yourself is refused;
-         * use `join`.
+         * use `join`. Adding another organisation administrator is refused
+         * with error code 9067: they join themselves, with a reason.
          * @param {{spaceId: string, userId: string, role: SpaceRoleValue}} params
          * @returns {Promise<AdminSpaceMembers>}
          * @throws {EneoError}
@@ -342,6 +348,8 @@ export function initSpaces(client) {
         },
 
         /**
+         * Raising another organisation administrator's role is refused with
+         * error code 9067; lowering it is allowed.
          * @param {{spaceId: string, userId: string, role: SpaceRoleValue}} params
          * @returns {Promise<AdminSpaceMembers>}
          * @throws {EneoError}
@@ -372,6 +380,8 @@ export function initSpaces(client) {
 
       groupMembers: {
         /**
+         * A group already in the space is refused with 9065 before anything
+         * else is checked.
          * @param {{spaceId: string, groupId: string, role: SpaceRoleValue}} params
          * @returns {Promise<AdminSpaceMembers>}
          * @throws {EneoError}

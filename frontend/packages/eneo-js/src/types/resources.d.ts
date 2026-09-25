@@ -85,6 +85,8 @@ export type WidgetPreviewToken = components["schemas"]["WidgetPreviewToken"];
 export type WidgetTemplate = components["schemas"]["WidgetTemplatePublic"];
 export type WidgetOverview = components["schemas"]["WidgetOverviewPublic"];
 export type WidgetOverviewItem = components["schemas"]["WidgetOverviewItem"];
+/** Only a `shared` space opens in space oversight. */
+export type WidgetSpaceKind = WidgetOverviewItem["space_kind"];
 export type WidgetTemplateUpdate = components["schemas"]["WidgetTemplateUpdate"];
 export type WidgetTemplateLockGroup = components["schemas"]["TemplateLockGroup"];
 export type AdminWidgetReview = components["schemas"]["AdminWidgetReview"];
@@ -150,6 +152,7 @@ export type Space = components["schemas"]["SpacePublic"];
 export type SpaceSparse = components["schemas"]["SpaceSparse"];
 export type SpaceRoleValue = components["schemas"]["SpaceRoleValue"];
 export type SpaceMemberOversightJoin = components["schemas"]["SpaceMemberOversightJoin"];
+export type SpaceOversightVisit = components["schemas"]["SpaceOversightVisit"];
 export type AdminSpaceList = components["schemas"]["AdminSpaceList"];
 export type AdminSpaceListItem = components["schemas"]["AdminSpaceListItem"];
 export type AdminWidgetRequestRef = components["schemas"]["AdminWidgetRequestRef"];
@@ -172,6 +175,8 @@ export type OversightModelRef = components["schemas"]["OversightModelRef"];
 export type OversightClassification = components["schemas"]["OversightClassification"];
 export type OversightKnowledgeRef = components["schemas"]["OversightKnowledgeRef"];
 export type SpaceActivityBucket = AdminSpaceListItem["last_activity"];
+/** What an integration source covers; null for a drive item not yet synced. */
+export type OversightIntegrationItem = AdminSpaceKnowledgeSource["integration_item"];
 export type SpaceAttentionReason = AdminSpaceListItem["attention"][number];
 export type Dashboard = components["schemas"]["Dashboard"];
 export type Prompt = components["schemas"]["PromptPublic"];

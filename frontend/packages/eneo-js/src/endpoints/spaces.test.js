@@ -22,6 +22,18 @@ function assertSchemaOperations(calls) {
   }
 }
 
+/**
+ * One top-level entry of the generated `components["schemas"]`, up to the next.
+ * @param {string} name
+ */
+function schemaEntry(name) {
+  const start = SCHEMA.indexOf(`\n    ${name}:`);
+  assert.notEqual(start, -1, `${name} is not a schema in schema.d.ts`);
+  const rest = SCHEMA.slice(start + 1);
+  const next = rest.search(/\n {4}(?:\/\*\*|[A-Za-z_])/);
+  return next === -1 ? rest : rest.slice(0, next);
+}
+
 const SPACE_ID = "0b5f6c43-5b8e-4a1e-9d65-1f1c2d3e4f50";
 const USER_ID = "6f1d2c3b-4a59-4e8f-9d7c-6b5a4f3e2d10";
 const GROUP_ID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
@@ -176,4 +188,40 @@ test("group member changes address the group", async () => {
     }
   ]);
   assertSchemaOperations(calls);
+});
+
+test("the schema carries the oversight fields the web app reads", () => {
+  const assistant = schemaEntry("AdminSpaceAssistant");
+  // Every widget of an assistant, not the last one by name.
+  assert.match(assistant, /\n {6}widgets: components\["schemas"\]\["AdminSpaceWidgetRef"\]\[\];/);
+  assert.doesNotMatch(assistant, /\n {6}widget\??:/);
+  // Change times are days, never a time of day.
+  assert.match(assistant, /Format: date\n[^\n]*\n {7}\*\/\n {6}updated_at: string;/);
+
+  // Each count is withheld on its own; widget questions until a widget was live.
+  const usage = schemaEntry("AdminSpaceUsage");
+  for (const field of ["questions", "app_runs", "active_users", "widget_questions"]) {
+    assert.match(usage, new RegExp(`\\n {6}${field}\\?: number \\| null;`), field);
+  }
+
+  // A nameless integration source says what it covers instead.
+  for (const name of ["OversightKnowledgeRef", "AdminSpaceKnowledgeSource"]) {
+    assert.match(
+      schemaEntry(name),
+      /\n {6}integration_item\?: \("site" \| "folder" \| "file"\) \| null;/,
+      name
+    );
+  }
+
+  // Members see oversight joins after the administrator has left.
+  assert.match(
+    schemaEntry("SpacePublic"),
+    /\n {6}oversight_visits\?: components\["schemas"\]\["SpaceOversightVisit"\]\[\];/
+  );
+  assert.match(schemaEntry("SpaceOversightVisit"), /\n {6}left_at\?: string \| null;/);
+
+  // Another tenant admin must join; group membership changes are always logged.
+  assert.match(schemaEntry("ErrorCodes"), /\| 9067/);
+  assert.match(schemaEntry("ActionType"), /\| "user_group_member_added"/);
+  assert.match(schemaEntry("ActionType"), /\| "user_group_member_removed"/);
 });

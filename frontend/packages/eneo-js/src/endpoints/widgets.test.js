@@ -21,6 +21,18 @@ function assertSchemaOperations(calls) {
   }
 }
 
+/**
+ * One top-level entry of the generated `components["schemas"]`, up to the next.
+ * @param {string} name
+ */
+function schemaEntry(name) {
+  const start = SCHEMA.indexOf(`\n    ${name}:`);
+  assert.notEqual(start, -1, `${name} is not a schema in schema.d.ts`);
+  const rest = SCHEMA.slice(start + 1);
+  const next = rest.search(/\n {4}(?:\/\*\*|[A-Za-z_])/);
+  return next === -1 ? rest : rest.slice(0, next);
+}
+
 const WIDGET_ID = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a";
 
 function recordingWidgets() {
@@ -123,4 +135,17 @@ test("the review is read from the admin widget route", async () => {
     }
   ]);
   assertSchemaOperations(calls);
+});
+
+test("overview rows say which kind of space the widget lives in", () => {
+  // Only a shared space opens in space oversight.
+  assert.match(
+    schemaEntry("WidgetOverviewItem"),
+    /\n {6}space_kind: "shared" \| "organization" \| "personal";/
+  );
+  // The review lists what visitors reach by capability purpose.
+  assert.match(
+    schemaEntry("AdminWidgetReviewTarget"),
+    /\n {6}visitor_capabilities: \("web_search" \| "image_generation"\)\[\];/
+  );
 });

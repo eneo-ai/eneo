@@ -131,7 +131,9 @@ export function initWidgets(client) {
     /**
      * Send a pending request back to the editors with what needs to change
      * (tenant admins only); fails with `widget_activation_request_missing`
-     * when nothing is pending.
+     * when nothing is pending. The API normalises the reason (see
+     * `WidgetActivationDecline.reason`) and needs at least 10 visible
+     * characters.
      * @param {{id: string, reason: string}} params
      * @returns {Promise<Widget>}
      * @throws {EneoError}
@@ -147,8 +149,9 @@ export function initWidgets(client) {
 
     /**
      * Everything an admin reviews before activating: the visitor-facing
-     * settings, the target assistant with its instructions and knowledge,
-     * what visitors get access to and recent usage (admins only).
+     * settings, the target assistant with its instructions, knowledge and
+     * every widget serving it, the capabilities visitors reach and recent
+     * usage (admins only).
      * @param {{id: string}} widget
      * @returns {Promise<AdminWidgetReview>}
      * @throws {EneoError}
@@ -204,7 +207,10 @@ export function initWidgets(client) {
 
     /**
      * Token that lets a live test frame the real embed page of a draft or paused widget.
-     * A tenant admin needs to be a member of the space, and the assistant published.
+     * A tenant admin needs to be a member of the space, and the assistant published;
+     * their token expires sooner (`expires_in`, 10 minutes by default) than an
+     * editor's, since membership is only checked here. Without the widgets or
+     * admin permission the call is refused before the widget is looked up.
      * @param {{id: string}} widget
      * @returns {Promise<WidgetPreviewToken>}
      * @throws {EneoError}
@@ -250,6 +256,8 @@ export function initWidgets(client) {
 
     /**
      * Every widget in the organisation with its recent usage (admins only).
+     * `space_kind` says whether the widget's space opens in space oversight
+     * (only `shared` does).
      * @returns {Promise<WidgetOverview>}
      * @throws {EneoError}
      */

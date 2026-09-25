@@ -2683,7 +2683,7 @@ export interface paths {
     put?: never;
     /**
      * Add Admin Space Member
-     * @description Add a person to a shared space without being a member yourself. Refused for yourself (join instead) and for an existing member. Always recorded in the audit log.
+     * @description Add a person to a shared space without being a member yourself. Refused for yourself and for another organisation administrator (they join themselves, with a reason), and for an existing member. Always recorded in the audit log.
      */
     post: operations["add_admin_space_member_api_v1_admin_spaces__space_id__members__post"];
     delete?: never;
@@ -2711,7 +2711,7 @@ export interface paths {
     head?: never;
     /**
      * Change Admin Space Member Role
-     * @description Change a member's role. Refused for yourself and when it would leave the space without an administrator who can manage it. Always recorded in the audit log.
+     * @description Change a member's role. Refused for yourself, for raising another organisation administrator's role (they join themselves, with a reason) and when it would leave the space without an administrator who can manage it. Always recorded in the audit log.
      */
     patch: operations["change_admin_space_member_role_api_v1_admin_spaces__space_id__members__user_id___patch"];
     trace?: never;
@@ -3337,7 +3337,7 @@ export interface paths {
     put?: never;
     /**
      * Update User Group
-     * @description Update an existing user group by id.
+     * @description Update an existing user group by id. Every user added to or removed from the group is always recorded in the audit log.
      */
     post: operations["update_user_group_api_v1_user_groups__id___post"];
     /**
@@ -3361,12 +3361,12 @@ export interface paths {
     put?: never;
     /**
      * Add User To User Group
-     * @description Add a user to a user group.
+     * @description Add a user to a user group. The user gets the group's role in every space the group belongs to. Always recorded in the audit log.
      */
     post: operations["add_user_to_user_group_api_v1_user_groups__id__users__user_id___post"];
     /**
      * Delete User From User Group
-     * @description Remove a user from a user group.
+     * @description Remove a user from a user group. Always recorded in the audit log.
      */
     delete: operations["delete_user_from_user_group_api_v1_user_groups__id__users__user_id___delete"];
     options?: never;
@@ -3493,7 +3493,7 @@ export interface paths {
     put?: never;
     /**
      * Create Widget Preview Token
-     * @description Mint a visitor token for a live preview. Admits the embed page for draft and paused widgets; each call is a fresh pseudonymous visitor. Editors with the widgets permission test from the widget editor. A tenant admin needs to be a member of the space, and the assistant must be published (`widget_serving_blocked` otherwise): the answers come from the space's knowledge.
+     * @description Mint a visitor token for a live preview. Admits the embed page for draft and paused widgets; each call is a fresh pseudonymous visitor. Editors with the widgets permission test from the widget editor. A tenant admin needs to be a member of the space, and the assistant must be published (`widget_serving_blocked` otherwise): the answers come from the space's knowledge. Membership is checked only here, so an admin's token lives for WIDGET_ADMIN_PREVIEW_TOKEN_TTL_SECONDS (10 minutes by default) and an editor's for WIDGET_PREVIEW_TOKEN_TTL_SECONDS. Callers with neither the widgets nor the admin permission get 403 before the widget is looked up.
      */
     post: operations["create_widget_preview_token_api_v1_widgets__id__preview_token__post"];
     delete?: never;
@@ -9474,7 +9474,9 @@ export interface components {
       | "space_oversight_left"
       | "space_oversight_member_added"
       | "space_oversight_member_role_changed"
-      | "space_oversight_member_removed";
+      | "space_oversight_member_removed"
+      | "user_group_member_added"
+      | "user_group_member_removed";
     /**
      * ActionUpdate
      * @description Represents an action-level configuration change request.
@@ -9597,7 +9599,8 @@ export interface components {
       is_default: boolean;
       /**
        * Updated At
-       * Format: date-time
+       * Format: date
+       * @description The day (UTC) of the last change.
        */
       updated_at: string;
       completion_model?: components["schemas"]["OversightModelRef"] | null;
@@ -9628,8 +9631,11 @@ export interface components {
        * @description The assistant's own value; None follows the space.
        */
       data_retention_days?: number | null;
-      /** @description The non-archived widget serving the assistant. */
-      widget?: components["schemas"]["AdminSpaceWidgetRef"] | null;
+      /**
+       * Widgets
+       * @description Every non-archived widget serving the assistant: active first, then paused, then drafts, each by name.
+       */
+      widgets: components["schemas"]["AdminSpaceWidgetRef"][];
     };
     /** AdminSpaceDetail */
     AdminSpaceDetail: {
@@ -9728,7 +9734,7 @@ export interface components {
       role: components["schemas"]["SpaceRoleValue"];
       /**
        * Reason
-       * @description Why you need the content: 10-500 characters after line breaks, control and bidirectional characters are removed. Shown to the space's administrators and stored in the audit log.
+       * @description Why you need the content: at least 10 visible characters and at most 500 once invisible and control characters are removed, the text is NFC-composed and every whitespace run, line breaks included, is one space. Shown to the space's administrators and stored in the audit log.
        */
       reason: string;
     };
@@ -9741,7 +9747,7 @@ export interface components {
       id: string;
       /**
        * Name
-       * @description None for a personal OneDrive folder.
+       * @description None for an integration source that is not a whole site: a file or folder name is a document title, and a OneDrive name is personal.
        */
       name?: string | null;
       /**
@@ -9752,13 +9758,21 @@ export interface components {
       /** Integration Type */
       integration_type?: ("sharepoint" | "confluence" | "onedrive") | null;
       /**
+       * Integration Item
+       * @description What an integration source covers: a whole site, a folder or a file.
+       */
+      integration_item?: ("site" | "folder" | "file") | null;
+      /**
        * Item Count
        * @description Active documents or pages.
        */
       item_count: number;
       /** Size Bytes */
       size_bytes: number;
-      /** Updated At */
+      /**
+       * Updated At
+       * @description The day (UTC) the source last changed: an upload or removal, a crawl or a sync.
+       */
       updated_at?: string | null;
       /** Website Url */
       website_url?: string | null;
@@ -9783,7 +9797,7 @@ export interface components {
       items: components["schemas"]["AdminSpaceListItem"][];
       /**
        * Widget Requests
-       * @description Every pending widget activation request, oldest first.
+       * @description Every pending widget activation request in the tenant, oldest first, the organisation space's included. Only the items of shared spaces count and flag them.
        */
       widget_requests: components["schemas"]["AdminWidgetRequestRef"][];
     };
@@ -9919,23 +9933,29 @@ export interface components {
       threshold?: number;
       /**
        * Suppressed
-       * @description Fewer active users than the threshold: questions, app runs and active users are withheld.
+       * @description At least one of questions, app runs and active users is withheld. Each is judged on its own: it is shown only when at least `threshold` different signed-in people are behind it in the window.
        */
       suppressed: boolean;
       /**
        * Questions
-       * @description Questions from signed-in users.
+       * @description Questions from signed-in users; None when fewer than `threshold` people asked.
        */
       questions?: number | null;
-      /** App Runs */
+      /**
+       * App Runs
+       * @description None when fewer than `threshold` people ran apps.
+       */
       app_runs?: number | null;
-      /** Active Users */
+      /**
+       * Active Users
+       * @description People who asked questions or ran apps; None when fewer than `threshold`.
+       */
       active_users?: number | null;
       /**
        * Widget Questions
-       * @description Questions from anonymous widget visitors; never withheld.
+       * @description Questions through the space's web widgets that have been active at some point, including editors' and administrators' test questions. Questions to a widget that has never been active are not counted, and the value is None while no widget of the space has been: until then every question is a test by someone identifiable. Not held to `threshold`.
        */
-      widget_questions: number;
+      widget_questions?: number | null;
       /**
        * Last Activity
        * @enum {string}
@@ -10071,9 +10091,9 @@ export interface components {
       visitor_mcp_servers: components["schemas"]["OversightRef"][];
       /**
        * Visitor Capabilities
-       * @description Capabilities a visitor reaches; never image generation.
+       * @description The assistant's capabilities a visitor reaches; never image generation.
        */
-      visitor_capabilities: "web_search"[];
+      visitor_capabilities: ("web_search" | "image_generation")[];
     };
     /** AdminWidgetReviewUsage */
     AdminWidgetReviewUsage: {
@@ -14071,7 +14091,8 @@ export interface components {
       | 9063
       | 9064
       | 9065
-      | 9066;
+      | 9066
+      | 9067;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -17125,7 +17146,7 @@ export interface components {
       id: string;
       /**
        * Name
-       * @description None for a personal OneDrive folder.
+       * @description None for an integration source that is not a whole site: a file or folder name is a document title, and a OneDrive name is personal.
        */
       name?: string | null;
       /**
@@ -17133,6 +17154,13 @@ export interface components {
        * @enum {string}
        */
       kind: "collection" | "website" | "integration";
+      /** Integration Type */
+      integration_type?: ("sharepoint" | "confluence" | "onedrive") | null;
+      /**
+       * Integration Item
+       * @description What an integration source covers: a whole site, a folder or a file.
+       */
+      integration_item?: ("site" | "folder" | "file") | null;
       /** From Organization */
       from_organization: boolean;
     };
@@ -20602,6 +20630,45 @@ export interface components {
       /** Reason */
       reason?: string | null;
     };
+    /**
+     * SpaceOversightVisit
+     * @description A tenant administrator's join through oversight, kept for members to
+     *     see after the administrator has left.
+     */
+    SpaceOversightVisit: {
+      /** @description None once the user is deleted. */
+      person?: components["schemas"]["SpaceOversightVisitor"] | null;
+      /** @description The role they joined with. */
+      role: components["schemas"]["SpaceRoleValue"];
+      /**
+       * Joined At
+       * Format: date-time
+       */
+      joined_at: string;
+      /**
+       * Left At
+       * @description None while they are still a member.
+       */
+      left_at?: string | null;
+      /**
+       * Reason
+       * @description None when the reader may not read the space's members.
+       */
+      reason?: string | null;
+    };
+    /** SpaceOversightVisitor */
+    SpaceOversightVisitor: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Name
+       * @description The username, or the email when unset.
+       */
+      name: string;
+    };
     /** SpacePublic */
     SpacePublic: {
       /**
@@ -20650,6 +20717,11 @@ export interface components {
       knowledge: components["schemas"]["Knowledge"];
       members: components["schemas"]["PaginatedPermissions_SpaceMember_"];
       group_members: components["schemas"]["PaginatedPermissions_SpaceGroupMember_"];
+      /**
+       * Oversight Visits
+       * @description Joins through oversight by tenant administrators that are still open or ended within the last 90 days, newest first.
+       */
+      oversight_visits?: components["schemas"]["SpaceOversightVisit"][];
       /** Skill Permissions */
       skill_permissions: components["schemas"]["ResourcePermission"][];
       /** Available Roles */
@@ -23382,7 +23454,7 @@ export interface components {
     WidgetActivationDecline: {
       /**
        * Reason
-       * @description What needs to change: 10-500 characters after line breaks, control and bidirectional characters are removed. Shown to the space's editors and stored in the audit log.
+       * @description What needs to change: at least 10 visible characters and at most 500 once invisible and control characters are removed, the text is NFC-composed and every whitespace run, line breaks included, is one space. Shown to the space's editors and stored in the audit log.
        */
       reason: string;
     };
@@ -23552,6 +23624,12 @@ export interface components {
       space_id: string;
       /** Space Name */
       space_name?: string | null;
+      /**
+       * Space Kind
+       * @description Only a shared space opens in space oversight; the organisation space and personal spaces do not.
+       * @enum {string}
+       */
+      space_kind: "shared" | "organization" | "personal";
       /**
        * Target Id
        * Format: uuid
