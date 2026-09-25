@@ -12,11 +12,10 @@ from eneo.mcp_servers.domain.capabilities import (
     CapabilityPurpose,
 )
 from eneo.questions.question import UseTools
-from eneo.sessions.conversation_settings import ConversationSettings
 from eneo.skills.domain.skill import SkillActivationEvidenceV1
 
 
-class ConversationTarget(BaseModel):
+class _ConversationTarget(BaseModel):
     """Shared targeting fields for chat-style requests.
 
     Exactly one of `session_id`, `assistant_id`, or `group_chat_id` must be
@@ -29,7 +28,7 @@ class ConversationTarget(BaseModel):
     group_chat_id: Optional[UUID] = None
 
     @model_validator(mode="after")
-    def _validate_exactly_one_target(self) -> "ConversationTarget":
+    def _validate_exactly_one_target(self) -> "_ConversationTarget":
         ids = [
             value
             for value in (self.session_id, self.assistant_id, self.group_chat_id)
@@ -46,31 +45,16 @@ class ConversationTarget(BaseModel):
         return self
 
 
-class ConversationTurnTarget(ConversationTarget):
-    settings: ConversationSettings | None = None
-    settings_revision: int | None = Field(default=None, ge=1)
-
-    @model_validator(mode="after")
-    def _validate_settings_target(self) -> "ConversationTurnTarget":
-        if self.session_id is not None and self.settings is not None:
-            raise ValueError(
-                "Use the settings endpoint to change an existing conversation."
-            )
-        if self.session_id is None and self.settings_revision is not None:
-            raise ValueError("A settings revision requires an existing conversation.")
-        return self
-
-
 # Hard cap on attachments per preflight call. Mirrors a reasonable per-message
 # upload limit and bounds the DB lookup + token-counting work a single request
 # can trigger. Chat itself is already bounded by file-size limits.
 _MAX_FILES_PER_PREFLIGHT = 50
 
 
-class PreflightRequest(ConversationTurnTarget):
+class PreflightRequest(_ConversationTarget):
     """Request shape for /conversations/preflight.
 
-    Inherits the "exactly one target" rule from `ConversationTarget`. Adds
+    Inherits the "exactly one target" rule from `_ConversationTarget`. Adds
     its own rule that at least one of `question` or `file_ids` must be
     non-empty, except for a bare assistant target. That empty assistant request
     is useful: it returns the assistant's always-present prompt/attachment
@@ -147,7 +131,7 @@ class PreflightResponse(BaseModel):
     )
 
 
-class ConversationRequest(ConversationTurnTarget):
+class ConversationRequest(_ConversationTarget):
     """
     A unified model for asking questions to either assistants or group chats.
 

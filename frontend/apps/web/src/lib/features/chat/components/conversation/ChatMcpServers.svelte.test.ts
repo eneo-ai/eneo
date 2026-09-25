@@ -6,7 +6,7 @@ import { m } from "$lib/paraglide/messages";
 import ChatMcpServers from "./ChatMcpServers.svelte";
 
 describe("ChatMcpServers", () => {
-  it("reports the current conversation's external server selection", async () => {
+  it("reports the complete external server selection after a user toggle", async () => {
     const selectionSnapshots: string[][] = [];
     const disabledServerIds = new SvelteSet<string>();
 
@@ -25,7 +25,6 @@ describe("ChatMcpServers", () => {
       .click();
     await page.getByRole("switch", { name: "Server A" }).click();
 
-    expect([...disabledServerIds]).toEqual([]);
     expect(selectionSnapshots).toEqual([["server-a"]]);
   });
 
@@ -39,11 +38,7 @@ describe("ChatMcpServers", () => {
       ],
       capabilityServers: [{ id: "search-provider", name: "Acme Search", purpose: "web_search" }],
       disabledServerIds,
-      autoAcceptTools: true,
-      onSelectionChange: (ids) => {
-        disabledServerIds.clear();
-        for (const id of ids) disabledServerIds.add(id);
-      }
+      autoAcceptTools: true
     });
 
     await page
@@ -68,11 +63,7 @@ describe("ChatMcpServers", () => {
         { id: "capability:image_generation", name: "Acme Images", purpose: "image_generation" }
       ],
       disabledServerIds,
-      autoAcceptTools: true,
-      onSelectionChange: (ids) => {
-        disabledServerIds.clear();
-        for (const id of ids) disabledServerIds.add(id);
-      }
+      autoAcceptTools: true
     });
 
     await page

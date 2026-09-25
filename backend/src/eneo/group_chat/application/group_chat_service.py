@@ -16,9 +16,7 @@ from eneo.group_chat.domain.entities.group_chat import (
 )
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.main.models import NOT_PROVIDED, NotProvided
-from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 from eneo.questions.question import ToolAssistant, UseTools
-from eneo.sessions.conversation_settings import ConversationSettingsState
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -443,9 +441,6 @@ class GroupChatService:
         stream: bool = False,
         version: int = 1,
         tool_assistant_id: Optional["UUID"] = None,
-        conversation_settings: ConversationSettingsState | None = None,
-        disabled_mcp_server_ids: list["UUID"] | None = None,
-        disabled_capabilities: list[CapabilityPurpose] | None = None,
     ) -> AssistantResponse:
         """Ask a question to the most appropriate assistant in a group chat
 
@@ -465,8 +460,6 @@ class GroupChatService:
             session = None
         else:
             session = await self.session_service.get_session_by_uuid(id=session_id)
-            if conversation_settings is None:
-                conversation_settings = session.settings
 
         selection_result = None
         if tool_assistant_id is not None:
@@ -514,7 +507,6 @@ class GroupChatService:
                     _question_created_at,
                 ) = await self.session_service.create_session_with_question_placeholder(
                     name=question,
-                    settings=conversation_settings,
                     question=question,
                     group_chat_id=group_chat_id,
                     completion_model=first_completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
@@ -530,8 +522,6 @@ class GroupChatService:
                     assistant_id=None,
                     completion_model=first_completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
                 )
-            if conversation_settings is not None:
-                session.settings = conversation_settings
             final_response = await self._handle_response(
                 response=response_from_selector,
                 question=question,
@@ -556,9 +546,6 @@ class GroupChatService:
             response = await self.assistant_service.ask(
                 question=question,
                 assistant_id=assistant_to_ask,
-                conversation_settings=conversation_settings,
-                disabled_mcp_server_ids=disabled_mcp_server_ids,
-                disabled_capabilities=disabled_capabilities,
                 group_chat_id=group_chat_id,
                 session_id=session_id,
                 file_ids=file_ids or [],

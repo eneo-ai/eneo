@@ -242,7 +242,6 @@ if TYPE_CHECKING:
         IntegrationKnowledgeRepository,
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
-    from eneo.sessions.conversation_settings import ConversationSettingsState
     from eneo.sessions.session import SessionInDB
     from eneo.sessions.session_service import SessionService
     from eneo.skills.application.skill_service import SkillService
@@ -482,33 +481,6 @@ class AssistantService:
         return await self.effective_config_service.resolve_for(
             assistant, space_is_personal=space.is_personal()
         )
-
-    @staticmethod
-    def resolve_personal_chat_model_override(
-        *,
-        space: "Space",
-        assistant: Assistant,
-        effective_config: "EffectiveConfig | None",
-        completion_model_id: UUID,
-    ) -> "CompletionModel":
-        """Validate a conversation's model against current space and policy rules."""
-        if (
-            not space.is_personal()
-            or space.default_assistant is None
-            or assistant.id != space.default_assistant.id
-        ):
-            raise BadRequestException("A model can only be selected for personal chat.")
-        if not space.is_completion_model_available(completion_model_id):
-            raise BadRequestException("The selected model is no longer available.")
-        if effective_config is not None and effective_config.models_enforced:
-            allowed_ids = {model.id for model in effective_config.available_models}
-            if completion_model_id not in allowed_ids:
-                raise BadRequestException(
-                    "The selected model is no longer allowed by the personal chat policy."
-                )
-        model = space.get_completion_model(completion_model_id)
-        space.validate_model_security_compatibility(model)
-        return model
 
     @staticmethod
     def _governed_base_instructions(
@@ -1931,7 +1903,6 @@ class AssistantService:
         assistant_id: UUID,
         *,
         prompt_override: str | None = None,
-        completion_model_id: UUID | None = None,
     ) -> AssistantPreflightBaseline:
         """The always-present cost of an assistant: its system prompt text and
         its persistent attachments, which ride along on every question.
@@ -1954,13 +1925,6 @@ class AssistantService:
             base_instructions_override=prompt_override,
         )
         model = self._context_model(assistant, effective_config=effective_config)
-        if completion_model_id is not None:
-            model = self.resolve_personal_chat_model_override(
-                space=space,
-                assistant=assistant,
-                effective_config=effective_config,
-                completion_model_id=completion_model_id,
-            )
         prompt_tokens = 0
         skill_context_tokens = 0
         if model is not None:
@@ -2910,7 +2874,6 @@ class AssistantService:
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: list["UUID"] | None = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
-        conversation_settings: "ConversationSettingsState | None" = None,
     ):
         # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
         # Assistant via the normal ask path. Both ``POST /assistants/{id}/sessions/``
@@ -2981,70 +2944,8 @@ class AssistantService:
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant_to_ask
         )
-        if conversation_settings is None and session_id is not None:
-            existing = await self.session_service.get_session_by_uuid(
-                id=session_id,
-                assistant_id=assistant_id if group_chat_id is None else None,
-                group_chat_id=group_chat_id,
-            )
-            conversation_settings = existing.settings
-        choices = conversation_settings.settings if conversation_settings else None
-        completion_model_id = (
-            choices.completion_model_id
-            if choices
-            and assistant_to_ask is active_assistant
-            and group_chat_id is None
-            else None
-        )
-        if choices:
-            require_tool_approval = (
-                require_tool_approval or choices.require_tool_approval
-            )
-            disabled_mcp_server_ids = list(
-                set(disabled_mcp_server_ids or [])
-                | set(
-                    choices.disabled_servers(
-                        effective_config.default_disabled_mcp_server_ids
-                        if effective_config
-                        else []
-                    )
-                )
-            )
-            disabled_capabilities = list(
-                set(disabled_capabilities or [])
-                | set(
-                    choices.disabled_capabilities(
-                        effective_config.default_disabled_capabilities
-                        if effective_config
-                        else []
-                    )
-                )
-            )
-        if require_tool_approval and not stream:
-            raise BadRequestException("Tool approval requires streaming.")
-        if completion_model_id is not None:
-            completion_model_override = self.resolve_personal_chat_model_override(
-                space=space,
-                assistant=active_assistant,
-                effective_config=effective_config,
-                completion_model_id=completion_model_id,
-            )
-            if (
-                assistant_to_ask.completion_model is None
-                or completion_model_id != assistant_to_ask.completion_model.id
-            ) and (
-                effective_config is None
-                or not effective_config.reasoning_policy_configured
-            ):
-                # A reasoning preference stored on the assistant's default
-                # model must not silently carry into a conversation-only model.
-                model_kwargs_override = (
-                    assistant_to_ask.completion_model_kwargs.model_copy(
-                        update={"reasoning_effort": None}
-                    )
-                )
         if effective_config is not None:
-            if effective_config.models_enforced and completion_model_override is None:
+            if effective_config.models_enforced:
                 # Same resolution preflight uses, so the projected and actual
                 # models can't diverge. None here means the whitelist is empty.
                 resolved_model = select_effective_completion_model(
@@ -3092,11 +2993,7 @@ class AssistantService:
                     effective_reasoning_effort = select_effective_reasoning_effort(
                         selected_model=selected_model,
                         stored_effort=(
-                            choices.reasoning_effort
-                            if choices
-                            and assistant_to_ask is active_assistant
-                            and group_chat_id is None
-                            else assistant_to_ask.completion_model_kwargs.reasoning_effort
+                            assistant_to_ask.completion_model_kwargs.reasoning_effort
                         ),
                         effective_config=effective_config,
                     )
@@ -3252,7 +3149,6 @@ class AssistantService:
                     question_created_at,
                 ) = await self.session_service.create_session_with_question_placeholder(
                     name=name,
-                    settings=conversation_settings,
                     question=question,
                     files=files,
                     question_assistant_id=assistant_to_ask.id,
@@ -3270,7 +3166,6 @@ class AssistantService:
                     question_created_at,
                 ) = await self.session_service.create_session_with_question_placeholder(
                     name=name,
-                    settings=conversation_settings,
                     question=question,
                     files=files,
                     session_assistant_id=active_assistant.id,
@@ -3283,10 +3178,6 @@ class AssistantService:
                 )
 
         assert session is not None
-        if conversation_settings is not None:
-            # Return the snapshot used by this turn, even if another tab saved
-            # a newer revision while context was being prepared.
-            session.settings = conversation_settings
         for _question in session.questions:
             _question.question = clean_eneo_tag(_question.question)
 

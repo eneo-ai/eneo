@@ -28,10 +28,6 @@
   "governance_confirm_mcp_disabled": "Alla MCP-servrar inaktiveras i den personliga assistenten.",
   "governance_mcp_error_none": "Välj minst en funktion eller MCP-server.",
   "governance_mcp_default_label": "På som standard",
-  "personal_chat_model_change_title": "Byta modell i den här konversationen?",
-  "personal_chat_model_change_description": "Vi rekommenderar att du startar en ny konversation vid modellbyte för att undvika att blanda svar från olika modeller. Dina meddelanden finns kvar om du fortsätter här, men den nya modellen kan använda mindre av historiken och ha annat stöd för bilder och verktyg.",
-  "personal_chat_model_new_conversation": "Starta ny konversation",
-  "personal_chat_model_change_anyway": "Byt ändå",
   "governance_mcp_default_aria": "Starta {name} påslagen i användarnas chatt",
   "governance_mcp_allow_aria": "Tillåt {name}",
   "governance_mcp_show_tools": "Visa verktyg",
@@ -4130,7 +4126,6 @@
   "organization_skills_removed_at": "Borttagen {time}",
   "eneo_error_9062": "En skill uppdateras. Inget togs bort. Vänta en stund och försök igen.",
   "eneo_error_9063": "Assistenten är publicerad som webbwidget. En administratör behöver arkivera widgeten innan assistenten kan flyttas.",
-  "eneo_error_9064": "Valen för den här konversationen ändrades någon annanstans, till exempel i en annan flik. Läs in de sparade valen och försök igen.",
   "widget_send": "Skicka",
   "widget_input_label": "Din fråga",
   "widget_input_placeholder": "Skriv din fråga…",
@@ -4665,9 +4660,5 @@
   "upload_files_to_collection_description": "Valda filer laddas upp till {name} och bearbetas i bakgrunden.",
   "duplicate_files_dialog_title": "Ersätt befintliga filer?",
   "duplicate_files_dialog_description": "Dessa filer finns redan i samlingen. Uppladdningen ersätter dem med de nya versionerna.",
-  "replace_files": "Ersätt filer",
-  "conversation_settings_save_failed": "Inställningarna kunde inte sparas eller hämtas.",
-  "conversation_settings_reload": "Läs in sparade val",
-  "conversation_settings_model_unavailable": "Den sparade modellen är inte tillgänglig",
-  "conversation_settings_use_default": "Använd tillgänglig standardmodell"
+  "replace_files": "Ersätt filer"
 }

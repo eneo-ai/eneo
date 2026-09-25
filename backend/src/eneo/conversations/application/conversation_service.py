@@ -2,7 +2,7 @@
 #
 # Licensed under the MIT License.
 
-from typing import TYPE_CHECKING, Optional, get_args
+from typing import TYPE_CHECKING, Optional
 
 from eneo.completion_models.infrastructure.context_builder import (
     count_attachment_tokens,
@@ -17,19 +17,11 @@ from eneo.files.file_reference import inline_file_text_for_model, url_only_file_
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
     select_effective_inline_file_text,
-    select_effective_reasoning_effort,
 )
 from eneo.main.config import get_settings
-from eneo.main.exceptions import (
-    BadRequestException,
-    ConversationSettingsConflictException,
-)
+from eneo.main.exceptions import BadRequestException
 from eneo.mcp_servers.domain.capabilities import (
     CapabilityPurpose,
-)
-from eneo.sessions.conversation_settings import (
-    ConversationSettings,
-    ConversationSettingsState,
 )
 from eneo.sessions.session import SessionUpdate
 
@@ -82,135 +74,6 @@ class ConversationService:
         self.space_service = space_service
         self.file_service = file_service
 
-    async def settings_defaults(
-        self,
-        *,
-        session_id: "UUID | None" = None,
-        assistant_id: "UUID | None" = None,
-        group_chat_id: "UUID | None" = None,
-    ) -> ConversationSettings:
-        if session_id is not None:
-            session = await self.session_service.get_session_by_uuid(session_id)
-            assert session is not None
-            group_chat_id = session.group_chat_id
-            assistant_id = session.assistant.id if session.assistant else None
-        if group_chat_id is not None:
-            await self.group_chat_service.get_group_chat(group_chat_id)
-            return ConversationSettings()
-        if assistant_id is None:
-            raise BadRequestException("A conversation target is required.")
-        (
-            assistant,
-            _,
-            config,
-        ) = await self.assistant_service.get_assistant_with_effective_config(
-            assistant_id
-        )
-        space = await self.space_service.get_space_by_assistant(assistant_id)
-        personal = (
-            space.is_personal()
-            and space.default_assistant is not None
-            and space.default_assistant.id == assistant_id
-        )
-        model = select_effective_completion_model(
-            current_model=None
-            if config and config.models_enforced
-            else assistant.completion_model,
-            effective_config=config,
-        )
-        servers = (
-            config.available_mcp_servers
-            if config and config.mcp_enforced
-            else assistant.mcp_servers
-        )
-        disabled_servers = config.default_disabled_mcp_server_ids if config else []
-        disabled_capabilities = config.default_disabled_capabilities if config else []
-        return ConversationSettings(
-            completion_model_id=model.id if personal and model else None,
-            reasoning_effort=select_effective_reasoning_effort(
-                selected_model=model, stored_effort=None, effective_config=config
-            )
-            if model and config and config.reasoning_effort_user_configurable
-            else None,
-            mcp_server_states={
-                server.id: server.id not in disabled_servers for server in servers
-            },
-            capability_states={
-                purpose: purpose not in disabled_capabilities
-                for purpose in get_args(CapabilityPurpose)
-            },
-        )
-
-    async def validate_settings(
-        self,
-        settings: ConversationSettings,
-        *,
-        assistant_id: "UUID | None",
-        group_chat_id: "UUID | None",
-    ) -> None:
-        if group_chat_id is not None:
-            await self.group_chat_service.get_group_chat(group_chat_id)
-            if (
-                settings.completion_model_id is not None
-                or settings.reasoning_effort is not None
-                or settings.require_tool_approval
-            ):
-                raise BadRequestException(
-                    "Group chats use each responding assistant's model and do not support tool approval."
-                )
-            return
-        if assistant_id is None:
-            raise BadRequestException("A conversation target is required.")
-        (
-            assistant,
-            _,
-            config,
-        ) = await self.assistant_service.get_assistant_with_effective_config(
-            assistant_id
-        )
-        if settings.completion_model_id is not None:
-            space = await self.space_service.get_space_by_assistant(assistant_id)
-            model = self.assistant_service.resolve_personal_chat_model_override(
-                space=space,
-                assistant=assistant,
-                effective_config=config,
-                completion_model_id=settings.completion_model_id,
-            )
-        else:
-            model = select_effective_completion_model(
-                current_model=assistant.completion_model, effective_config=config
-            )
-        if settings.reasoning_effort is not None:
-            if (
-                not config
-                or not config.reasoning_effort_user_configurable
-                or model is None
-            ):
-                raise BadRequestException(
-                    "Reasoning effort is managed by the assistant's policy."
-                )
-            capability = model.get_supported_model_kwargs().reasoning_effort
-            if not capability.supported or not capability.accepts(
-                settings.reasoning_effort
-            ):
-                raise BadRequestException(
-                    "This model does not support the selected reasoning effort."
-                )
-
-    async def update_settings(
-        self, session_id: "UUID", settings: ConversationSettings, expected_revision: int
-    ) -> ConversationSettingsState:
-        session = await self.session_service.get_session_by_uuid(session_id)
-        assert session is not None
-        await self.validate_settings(
-            settings,
-            assistant_id=session.assistant.id if session.assistant else None,
-            group_chat_id=session.group_chat_id,
-        )
-        return await self.session_service.update_settings(
-            session_id, settings, expected_revision
-        )
-
     async def ask_conversation(
         self,
         question: str,
@@ -224,68 +87,101 @@ class ConversationService:
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: "list[UUID] | None" = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
-        settings: ConversationSettings | None = None,
-        settings_revision: int | None = None,
     ) -> "AssistantResponse":
-        state = None
-        if session_id is not None:
+        """
+        Routes a conversation request to the appropriate service based on the parameters.
+
+        Args:
+            question: The question to ask
+            session_id: The existing session ID to continue a conversation, if any
+            assistant_id: The assistant ID to start a new conversation with, if no session_id
+            group_chat_id: The group chat ID to start a new conversation with, if no session_id
+            file_ids: List of file IDs to attach to the question
+            stream: Whether to stream the response
+            tool_assistant_id: Optional ID of a specific assistant to target (for tools.assistants)
+            version: API version
+
+        Returns:
+            The response from the appropriate service
+
+        Raises:
+            ValueError: If neither session_id, assistant_id, nor group_chat_id is provided
+        """
+        if not file_ids:
+            file_ids = []
+
+        if require_tool_approval and group_chat_id is not None:
+            raise BadRequestException("Tool approval is not supported for group chats.")
+
+        # case 1: continuing a conversation (session_id is provided)
+        if session_id:
+            # get session information to determine where it belongs
             session = await self.session_service.get_session_by_uuid(session_id)
             assert session is not None
-            assistant_id = session.assistant.id if session.assistant else None
-            group_chat_id = session.group_chat_id
-            state = session.settings
-        if state is None:
-            choices = settings or await self.settings_defaults(
-                assistant_id=assistant_id, group_chat_id=group_chat_id
-            )
-            await self.validate_settings(
-                choices, assistant_id=assistant_id, group_chat_id=group_chat_id
-            )
-            if session_id is not None:
-                state = await self.session_service.update_settings(
-                    session_id, choices, 0
+
+            if session.group_chat_id:
+                if require_tool_approval:
+                    raise BadRequestException(
+                        "Tool approval is not supported for group chats."
+                    )
+                # this is a group chat conversation
+                return await self.group_chat_service.ask_group_chat(  # type: ignore[return-value]
+                    question=question,
+                    group_chat_id=session.group_chat_id,
+                    file_ids=file_ids,
+                    stream=stream,
+                    session_id=session_id,
+                    tool_assistant_id=tool_assistant_id,
+                    version=version,
                 )
             else:
-                state = ConversationSettingsState(revision=1, settings=choices)
-        if settings_revision is not None and settings_revision != state.revision:
-            raise ConversationSettingsConflictException(
-                "Conversation settings changed elsewhere. Reload the conversation and try again."
-            )
-        if (
-            require_tool_approval or state.settings.require_tool_approval
-        ) and not stream:
-            raise BadRequestException("Tool approval requires streaming.")
-        if group_chat_id is not None:
-            if require_tool_approval:
-                raise BadRequestException(
-                    "Tool approval is not supported for group chats."
+                # this is an assistant conversation
+                assert session.assistant is not None
+                return await self.assistant_service.ask(  # type: ignore[return-value]
+                    question=question,
+                    assistant_id=session.assistant.id,
+                    file_ids=file_ids,
+                    stream=stream,
+                    session_id=session_id,
+                    tool_assistant_id=tool_assistant_id,
+                    version=version,
+                    require_tool_approval=require_tool_approval,
+                    disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    disabled_capabilities=disabled_capabilities,
                 )
-            return await self.group_chat_service.ask_group_chat(
-                question=question,
-                group_chat_id=group_chat_id,
-                file_ids=file_ids or [],
-                stream=stream,
-                session_id=session_id,
-                tool_assistant_id=tool_assistant_id,
-                version=version,
-                conversation_settings=state,
-                disabled_mcp_server_ids=disabled_mcp_server_ids,
-                disabled_capabilities=disabled_capabilities,
-            )
-        assert assistant_id is not None
-        return await self.assistant_service.ask(
-            question=question,
-            assistant_id=assistant_id,
-            file_ids=file_ids or [],
-            stream=stream,
-            session_id=session_id,
-            tool_assistant_id=tool_assistant_id,
-            version=version,
-            require_tool_approval=require_tool_approval,
-            disabled_mcp_server_ids=disabled_mcp_server_ids,
-            disabled_capabilities=disabled_capabilities,
-            conversation_settings=state,
-        )
+
+        # case 2: starting a new conversation
+        else:
+            if group_chat_id:
+                # starting a new group chat conversation
+                return await self.group_chat_service.ask_group_chat(  # type: ignore[return-value]
+                    question=question,
+                    group_chat_id=group_chat_id,
+                    file_ids=file_ids,
+                    stream=stream,
+                    session_id=None,  # explicitly None for new conversation
+                    tool_assistant_id=tool_assistant_id,
+                    version=version,
+                )
+            elif assistant_id:
+                # starting a new assistant conversation
+                return await self.assistant_service.ask(  # type: ignore[return-value]
+                    question=question,
+                    assistant_id=assistant_id,
+                    file_ids=file_ids,
+                    stream=stream,
+                    session_id=None,  # explicitly None for new conversation
+                    tool_assistant_id=tool_assistant_id,
+                    version=version,
+                    require_tool_approval=require_tool_approval,
+                    disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    disabled_capabilities=disabled_capabilities,
+                )
+            else:
+                # should never happen due to model validation, but just to be safe
+                raise ValueError(
+                    "Either session_id, assistant_id, or group_chat_id must be provided"
+                )
 
     async def preflight_tokens(
         self,
@@ -296,8 +192,6 @@ class ConversationService:
         group_chat_id: Optional["UUID"] = None,
         tool_assistant_id: Optional["UUID"] = None,
         assistant_prompt: str | None = None,
-        settings: ConversationSettings | None = None,
-        settings_revision: int | None = None,
     ) -> PreflightResponse:
         """Estimate the tokens this request would add to context, without sending.
 
@@ -310,32 +204,12 @@ class ConversationService:
         up-front. Model name and context window are echoed so the caller can
         compute percentage fill without a round-trip.
         """
-        session = None
-        if session_id is not None:
-            session = await self.session_service.get_session_by_uuid(session_id)
-            assert session is not None
-            if session.settings:
-                if (
-                    settings_revision is not None
-                    and settings_revision != session.settings.revision
-                ):
-                    raise ConversationSettingsConflictException(
-                        "Conversation settings changed elsewhere. Reload the conversation and try again."
-                    )
-                settings = session.settings.settings
-        completion_model_id = (
-            settings.completion_model_id
-            if settings and tool_assistant_id is None
-            else None
-        )
         model, selector_tokens, inline_file_text = await self._resolve_preflight_model(
             question=question,
             session_id=session_id,
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
             tool_assistant_id=tool_assistant_id,
-            completion_model_id=completion_model_id,
-            session=session,
         )
         model_name = _litellm_token_counter_name(model)
 
@@ -365,9 +239,8 @@ class ConversationService:
         # path cost identical to before.
         if assistant_id is not None and session_id is None and group_chat_id is None:
             baseline = await self.assistant_service.get_preflight_baseline(
-                tool_assistant_id or assistant_id,
+                assistant_id,
                 prompt_override=assistant_prompt,
-                completion_model_id=completion_model_id,
             )
             prompt_tokens = baseline.prompt_tokens
             skill_context_tokens = baseline.skill_context_tokens
@@ -466,8 +339,6 @@ class ConversationService:
         assistant_id: Optional["UUID"],
         group_chat_id: Optional["UUID"],
         tool_assistant_id: Optional["UUID"] = None,
-        completion_model_id: Optional["UUID"] = None,
-        session: "SessionInDB | None" = None,
     ) -> "tuple[CompletionModel, int, bool]":
         """Resolve the completion model the next chat request would target.
 
@@ -484,21 +355,10 @@ class ConversationService:
         on actual send (no assistants in group chat, no completion model set).
         """
         inline_file_text = True
-        if completion_model_id is not None and (
-            group_chat_id is not None or tool_assistant_id is not None
-        ):
-            raise BadRequestException(
-                "A model cannot be selected for this chat target."
-            )
         if session_id:
-            if session is None:
-                session = await self.session_service.get_session_by_uuid(session_id)
+            session = await self.session_service.get_session_by_uuid(session_id)
             assert session is not None
             if session.group_chat_id:
-                if completion_model_id is not None:
-                    raise BadRequestException(
-                        "A model cannot be selected for a group chat."
-                    )
                 model, selector_tokens = await self._group_chat_preflight_model(
                     session.group_chat_id,
                     question=question,
@@ -507,16 +367,12 @@ class ConversationService:
             else:
                 assert session.assistant is not None
                 model, inline_file_text = await self._assistant_preflight_settings(
-                    session.assistant.id,
-                    completion_model_id=completion_model_id,
-                    tool_assistant_id=tool_assistant_id,
+                    session.assistant.id
                 )
                 selector_tokens = 0
         elif assistant_id:
             model, inline_file_text = await self._assistant_preflight_settings(
-                assistant_id,
-                completion_model_id=completion_model_id,
-                tool_assistant_id=tool_assistant_id,
+                assistant_id
             )
             selector_tokens = 0
         elif group_chat_id:
@@ -537,10 +393,7 @@ class ConversationService:
         return model, selector_tokens, inline_file_text
 
     async def _assistant_preflight_settings(
-        self,
-        assistant_id: "UUID",
-        completion_model_id: Optional["UUID"] = None,
-        tool_assistant_id: Optional["UUID"] = None,
+        self, assistant_id: "UUID"
     ) -> tuple["CompletionModel | None", bool]:
         """Governance-aware model and file-inlining mode for one assistant.
 
@@ -555,25 +408,10 @@ class ConversationService:
         ) = await self.assistant_service.get_assistant_with_effective_config(
             assistant_id
         )
-        if tool_assistant_id is not None:
-            if tool_assistant_id not in [tool.id for tool in assistant.tool_assistants]:
-                raise BadRequestException(
-                    "This assistant is not available as a mention."
-                )
-            return await self._assistant_preflight_settings(tool_assistant_id)
-        if completion_model_id is not None:
-            space = await self.space_service.get_space_by_assistant(assistant_id)
-            model = self.assistant_service.resolve_personal_chat_model_override(
-                space=space,
-                assistant=assistant,
-                effective_config=effective_config,
-                completion_model_id=completion_model_id,
-            )
-        else:
-            model = select_effective_completion_model(
-                current_model=assistant.completion_model,
-                effective_config=effective_config,
-            )
+        model = select_effective_completion_model(
+            current_model=assistant.completion_model,
+            effective_config=effective_config,
+        )
         inline_file_text = select_effective_inline_file_text(
             assistant.inline_file_text, effective_config
         )

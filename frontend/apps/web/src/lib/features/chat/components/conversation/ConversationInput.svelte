@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onMount, untrack } from "svelte";
+  import { browser } from "$app/environment";
   import AttachmentUploadIconButton from "$lib/features/attachments/components/AttachmentUploadIconButton.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as PromptInput from "$lib/components/ai-elements/prompt-input/index.js";
@@ -14,6 +15,12 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getChatService } from "../../ChatService.svelte";
   import { effectiveKnowledgeMode, internalMcpServerNames } from "../../internalMcpAvailability";
+  import {
+    initialDisabledMcpServerIds,
+    loadMcpServerPreferences,
+    saveMcpServerPreferences,
+    type McpServerPreferencesContext
+  } from "../../mcpServerPreferences";
   import { selectEffectiveChatModel } from "../../selectEffectiveChatModel";
   import { track } from "$lib/core/helpers/track";
   import { getAppContext } from "$lib/core/AppContext";
@@ -21,7 +28,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import { TriangleAlert, X } from "@lucide/svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
-  import { getCapability, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
+  import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { chatCapabilities } from "../../chatCapabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
 
@@ -38,7 +45,7 @@
   };
 
   const chat = getChatService();
-  const { user } = getAppContext();
+  const { tenant, user } = getAppContext();
 
   const {
     state: { attachments, isUploading, uploadError },
@@ -65,30 +72,69 @@
   const { scrollToBottom, onNewConversation }: Props = $props();
 
   let abortController: AbortController | undefined;
-  const autoAcceptTools = $derived(!chat.settings?.require_tool_approval);
-  const settingsDisabled = $derived(
-    !chat.settings || chat.settingsBusy || chat.askQuestion.isLoading
-  );
+  const AUTO_ACCEPT_TOOLS_STORAGE_KEY = "autoAcceptToolsEnabled";
+  let autoAcceptTools = $state(true);
+  let hasHydratedToolApprovalPreference = $state(false);
 
-  $effect(() => {
-    const conversation = chat.currentConversation;
-    untrack(() => {
-      if (conversation) void chat.loadSettings();
-    });
-  });
+  // MCP servers the user has switched OFF in the toolbar popover for this
+  // conversation; everything else stays active. Sent with each ask request so
+  // the backend narrows the effective server set accordingly. Mutated in place
+  // by ChatMcpServers.
+  const disabledMcpServerIds = new SvelteSet<string>();
+
+  function mcpServerPreferencesContext(): McpServerPreferencesContext | null {
+    const partner = chat.partner;
+    if (!partner || partner.type !== "default-assistant") return null;
+
+    return {
+      tenantId: tenant.id,
+      userId: user.id,
+      assistantId: partner.id
+    };
+  }
 
   function persistMcpServerSelection(disabledServerIds: ReadonlySet<string>) {
-    const mcp_server_states = { ...chat.settings?.mcp_server_states };
-    const capability_states = { ...chat.settings?.capability_states };
-    for (const id of availableMcpServerIds) {
-      const purpose = getCapability(
-        id.startsWith("capability:") ? id.slice("capability:".length) : null
-      )?.purpose;
-      if (purpose) capability_states[purpose] = !disabledServerIds.has(id);
-      else mcp_server_states[id] = !disabledServerIds.has(id);
-    }
-    void chat.updateSettings({ mcp_server_states, capability_states });
+    if (!browser) return;
+    const context = mcpServerPreferencesContext();
+    if (!context) return;
+
+    saveMcpServerPreferences(context, toolPreferenceIds, disabledServerIds);
   }
+
+  onMount(() => {
+    if (!browser) {
+      hasHydratedToolApprovalPreference = true;
+      return;
+    }
+
+    // Load auto-accept tools preference (default to true = auto-accept)
+    try {
+      const storedAutoAccept = window.localStorage.getItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY);
+      if (storedAutoAccept === "false") {
+        autoAcceptTools = false;
+      } else {
+        autoAcceptTools = true;
+        window.localStorage.setItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY, "true");
+      }
+    } catch (error) {
+      console.warn("Unable to read auto-accept tools preference", error);
+    } finally {
+      hasHydratedToolApprovalPreference = true;
+    }
+  });
+
+  $effect(() => {
+    if (!browser || !hasHydratedToolApprovalPreference) return;
+
+    try {
+      window.localStorage.setItem(
+        AUTO_ACCEPT_TOOLS_STORAGE_KEY,
+        autoAcceptTools ? "true" : "false"
+      );
+    } catch (error) {
+      console.warn("Unable to persist auto-accept tools preference", error);
+    }
+  });
 
   function queueUploadsFromClipboard(event: ClipboardEvent) {
     if (!event.clipboardData?.files || event.clipboardData.files.length === 0) return;
@@ -130,6 +176,7 @@
         : undefined;
     // Approval controls external MCP servers only. Eneo's read-only internal
     // knowledge/files tools are core capabilities and always auto-execute.
+    const toolApprovalEnabled = !autoAcceptTools && hasMcpTools;
     // The question is echoed in the conversation as soon as the backend
     // confirms it, so clear the composer now instead of showing it dimmed
     // behind a spinner until the answer finishes. The full draft (mention
@@ -140,7 +187,18 @@
     scrollToBottom();
 
     try {
-      await chat.askQuestion(questionText, files, tools, undefined, abortController);
+      // A model or reasoning switch is applied optimistically; the backend
+      // resolves the model from the stored assistant, so let that write land
+      // before the question is sent under it.
+      await spacesManager?.awaitDefaultAssistantUpdates();
+      await chat.askQuestion(
+        questionText,
+        files,
+        tools,
+        toolApprovalEnabled,
+        abortController,
+        disabledMcpServerIds.size > 0 ? Array.from(disabledMcpServerIds) : undefined
+      );
       clearUploads();
     } catch (error: unknown) {
       // Put the draft back unless the user has already started a new one
@@ -200,8 +258,11 @@
   // Request a token preflight whenever the user input or attached files
   // change. Debounced inside ChatService; safe to fire on every keystroke.
   $effect(() => {
-    // Recalculate for the model that will answer the next turn.
-    track(chat.partner, chat.selectedPersonalModel, chat.settings, chat.settingsBusy);
+    // Also re-run on a partner/model switch: the personal-chat model picker
+    // replaces the partner object, and the estimate (and its context window)
+    // must track the model that will actually answer, not the one that was
+    // active when the user started typing.
+    track(chat.partner);
     const fileIds = $attachments
       .map((a) => a.fileRef?.id)
       .filter((id): id is string => Boolean(id));
@@ -255,25 +316,60 @@
       }))
   );
   const capabilityServers = $derived(chatCapabilities(chat.partner, user));
-  const availableMcpServerIds = $derived(
-    [...generalMcpServers, ...capabilityServers].map((s) => s.id)
-  );
+  const toolPreferenceIds = $derived([...generalMcpServers, ...capabilityServers].map((s) => s.id));
 
-  const disabledMcpServerIds = $derived.by(() => {
-    const disabled = new SvelteSet<string>();
-    const config = "effective_config" in chat.partner ? chat.partner.effective_config : null;
-    for (const id of availableMcpServerIds) {
-      const purpose = getCapability(
-        id.startsWith("capability:") ? id.slice("capability:".length) : null
-      )?.purpose;
-      const enabled = purpose
-        ? (chat.settings?.capability_states?.[purpose] ??
-          !config?.default_disabled_capabilities?.includes(purpose))
-        : (chat.settings?.mcp_server_states?.[id] ??
-          !config?.default_disabled_mcp_server_ids?.includes(id));
-      if (!enabled) disabled.add(id);
+  $effect(() => {
+    const validIds = new Set(toolPreferenceIds);
+    let selectionChanged = false;
+    for (const id of Array.from(disabledMcpServerIds)) {
+      if (!validIds.has(id)) {
+        disabledMcpServerIds.delete(id);
+        selectionChanged = true;
+      }
     }
-    return disabled;
+    if (selectionChanged) persistMcpServerSelection(disabledMcpServerIds);
+  });
+
+  // Seed the toggles from the governance policy's per-server chat defaults.
+  // Keyed on the conversation OBJECT: ChatService replaces it on new/loaded
+  // conversations but mutates it while a conversation is running, so the seed
+  // never wipes toggles the user made mid-conversation.
+  let seededConversation: unknown = null;
+  $effect(() => {
+    const conversation = chat.currentConversation;
+    const partner = chat.partner;
+    if (conversation === seededConversation) return;
+    seededConversation = conversation;
+    untrack(() => {
+      const availableServerIds = toolPreferenceIds;
+      const defaultDisabledServerIds =
+        partner && "effective_config" in partner
+          ? [
+              ...(partner.effective_config?.default_disabled_mcp_server_ids ?? []),
+              ...(partner.effective_config?.default_disabled_capabilities ?? []).map(
+                (p) => "capability:" + p
+              )
+            ]
+          : [];
+      const preferencesContext = mcpServerPreferencesContext();
+      const preferences =
+        browser && preferencesContext ? loadMcpServerPreferences(preferencesContext) : null;
+      const initialDisabledServerIds = initialDisabledMcpServerIds({
+        availableServerIds,
+        defaultDisabledServerIds,
+        preferences
+      });
+
+      disabledMcpServerIds.clear();
+      for (const id of initialDisabledServerIds) disabledMcpServerIds.add(id);
+
+      // Normalize an existing preference to the currently available server set.
+      // A missing preference remains missing until the user changes a toggle, so
+      // future governance defaults can still take effect.
+      if (preferences && preferencesContext) {
+        saveMcpServerPreferences(preferencesContext, availableServerIds, disabledMcpServerIds);
+      }
+    });
   });
 
   // Whether the popover has anything to show: general servers plus the
@@ -313,9 +409,7 @@
   const effectiveModel = $derived.by(() => {
     const partner = chat.partner;
     if (!partner || !("completion_model" in partner)) return undefined;
-    return partner.type === "default-assistant" && chat.selectedPersonalModel
-      ? chat.selectedPersonalModel
-      : selectEffectiveChatModel(partner.completion_model, partner.effective_config);
+    return selectEffectiveChatModel(partner.completion_model, partner.effective_config);
   });
   const supportsToolCalling = $derived(effectiveModel?.supports_tool_calling === true);
   const runtimeKnowledgeMode = $derived(
@@ -351,8 +445,9 @@
     }).map((name) => ({ name }));
   });
 
-  // The picker uses SpacesManager for the available model catalog. Other
-  // mounts of the default assistant (e.g. a deep link into dashboard chat)
+  // ChatModelSelect edits the personal space's default assistant via the
+  // SpacesManager context, which only the spaces route tree provides. Other
+  // mounts of the default assistant (e.g. a deep link into the dashboard chat)
   // have no such context, so gate on its presence or the picker throws on init.
   const spacesManager = getSpacesManager();
   const showModelSelect = $derived(
@@ -364,7 +459,7 @@
   const isAskingDisabled = $derived(
     isConversationSubmitDisabled({
       isLoading: chat.askQuestion.isLoading,
-      sendPending: sendPending || settingsDisabled || Boolean(chat.settingsError),
+      sendPending,
       isUploading: $isUploading,
       hasContent: $question !== "" || $attachments.length > 0,
       hasCompletionModel: chat.hasCompletionModel,
@@ -393,15 +488,6 @@
   <PromptInput.Body>
     <MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
   </PromptInput.Body>
-
-  {#if chat.settingsError}
-    <div class="text-destructive flex items-center gap-2 px-3 py-2 text-sm" role="alert">
-      <p>{m.conversation_settings_save_failed()} {getErrorMessage(chat.settingsError)}</p>
-      <Button variant="ghost" size="sm" onclick={() => void chat.loadSettings(true)}
-        >{m.conversation_settings_reload()}</Button
-      >
-    </div>
-  {/if}
 
   {#if $uploadError}
     <div
@@ -476,11 +562,7 @@
           internalServers={internalMcpServers}
           disabledServerIds={disabledMcpServerIds}
           onSelectionChange={persistMcpServerSelection}
-          {autoAcceptTools}
-          disabled={settingsDisabled}
-          showApproval={chat.partner.type !== "group-chat"}
-          onAutoAcceptChange={(enabled) =>
-            void chat.updateSettings({ require_tool_approval: !enabled })}
+          bind:autoAcceptTools
         />
       {/if}
     </PromptInput.Tools>
@@ -488,7 +570,7 @@
     <!-- Right cluster: model + send/stop -->
     <div class="flex items-center gap-2">
       {#if showModelSelect}
-        <ChatModelSelect onNewConversation={startNewConversation} />
+        <ChatModelSelect />
         <ChatReasoningSelect />
       {/if}
 

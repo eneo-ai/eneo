@@ -16,19 +16,6 @@
             "en": "Editors create a chat widget for a published assistant under Publishing, preview it, test it inside Eneo and copy the install snippet for the organisation's website. Administrators set the policy, activate widgets and keep house-style templates. Visitors chat anonymously without cookies, with citations, bot protection, limits and a daily budget built in.",
             "sv": "Redaktörer skapar en chattwidget för en publicerad assistent under Publicering, förhandsgranskar den, testar den i Eneo och kopierar installationskoden till organisationens webbplats. Administratörer sätter policyn, aktiverar widgetar och underhåller mallar för husstilen. Besökare chattar anonymt utan kakor och ser källorna i svaren; botskydd, begränsningar och en daglig budget ingår."
           }
-        },
-        {
-          "id": "conversation-settings",
-          "type": "improved",
-          "area": "chat",
-          "title": {
-            "en": "Each conversation remembers its choices",
-            "sv": "Varje konversation kommer ihåg sina val"
-          },
-          "body": {
-            "en": "Tool choices and approval preferences now stay with each conversation when you reload or switch devices. Personal Chat also remembers the model and allowed reasoning level. New conversations start with current defaults. When changing the model, you can review how history, image and tool support may differ, then continue in the same conversation or start a new one.",
-            "sv": "Verktygsval och inställningar för godkännande följer nu konversationen när du laddar om sidan eller byter enhet. Personliga chatten kommer också ihåg modellen och tillåten resonemangsnivå. Nya konversationer börjar med aktuella standardvärden. Vid modellbyte får du information om möjliga skillnader i historik, bild- och verktygsstöd och kan fortsätta i samma konversation eller starta en ny."
-          }
         }
       ]
     },
