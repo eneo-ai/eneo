@@ -24,10 +24,16 @@ from eneo.flows.domain.transcript_source import (
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
+    read_live_transcript_ids,
     read_max_speakers,
     read_speaker_labels_choice,
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.live_transcription.repository import (
+    LiveTranscriptRepository,
+    LiveTranscriptScope,
+)
+from eneo.flows.transcription_config import parse_transcription_config
 
 from .audio_spool import OpenAudioDownload
 from .transcription import (
@@ -226,6 +232,24 @@ async def resolve_transcribe_and_attach_audio_input(
     request: AudioRuntimeRequest,
     deps: AudioRuntimeDeps,
 ) -> AudioRuntimeResolution:
+    live_id = read_live_transcript_ids(request.run.input_payload_json).get(
+        request.step.step_id
+    )
+    live_transcript = None
+    if live_id is not None:
+        live_transcript = await LiveTranscriptRepository(
+            deps.flow_run_repo.session
+        ).get(live_id, tenant_id=request.run.tenant_id)
+        scope = LiveTranscriptScope(
+            tenant_id=request.run.tenant_id,
+            user_id=request.run.principal_user_id,
+            flow_id=request.run.flow_id,
+            flow_version=request.run.flow_version,
+            step_id=request.step.step_id,
+            model_id=parse_transcription_config(request.version_metadata).model_id,
+        )
+        if live_transcript is not None and not scope.matches(live_transcript):
+            live_transcript = None
     transcription_result = await resolve_and_transcribe_audio_for_step(
         version_metadata=request.version_metadata,
         space_repo=deps.space_repo,
@@ -241,6 +265,8 @@ async def resolve_transcribe_and_attach_audio_input(
         max_speakers=read_max_speakers(request.run.input_payload_json),
         speaker_labels=read_speaker_labels_choice(request.run.input_payload_json),
         source_preparation=request.source_preparation,
+        live_transcript=live_transcript,
+        live_transcript_requested=live_id is not None,
     )
     metadata = transcription_result.to_metadata()
     reference = TranscriptSourceReference(

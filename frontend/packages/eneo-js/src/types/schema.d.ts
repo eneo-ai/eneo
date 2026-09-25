@@ -16929,6 +16929,9 @@ export interface components {
       | "flow_runtime_file_empty"
       | "flow_runtime_file_attached"
       | "flow_live_transcription_unavailable"
+      | "flow_run_live_transcript_requires_one_audio_file"
+      | "flow_run_live_transcript_not_found"
+      | "flow_run_live_transcript_already_bound"
       | "flow_evidence_audit_logging_failed"
       | "flow_evidence_export_reason_required"
       | "flow_evidence_export_too_large"
@@ -33623,6 +33626,11 @@ export interface components {
        * @description Uploaded file ids to attach to this specific step. Use the step ids from `GET /api/v1/flows/{id}/run-contract/` rather than sending all files to the first step. File order is preserved for this step after duplicate ids are collapsed by first occurrence.
        */
       file_ids?: string[];
+      /**
+       * Live Transcript Id
+       * @description Clean live-session transcript for this step's single audio file. It must match the run's user, flow, published version, step, and model. Admission binds it to that file; execution uses it when timing and decoded duration permit, otherwise it transcribes the file.
+       */
+      live_transcript_id?: string | null;
     };
     /**
      * StepShareFact
@@ -54900,6 +54908,22 @@ export interface operations {
            *       "code": "not_found",
            *       "eneo_error_code": 9000,
            *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The live transcript is already bound to another file. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_run_live_transcript_already_bound",
+           *       "eneo_error_code": 9057,
+           *       "message": "Live transcript is already bound to another file."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

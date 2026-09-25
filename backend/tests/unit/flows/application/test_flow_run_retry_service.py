@@ -153,6 +153,24 @@ async def test_reuses_completed_prefix_and_preserves_creation_inputs(context):
     assert context.source.status == "failed"
 
 
+async def test_retry_preserves_live_transcript_for_steps_that_execute_again(context):
+    completed, failed = context.results[0], context.results[2]
+    completed_live, failed_live = uuid4(), uuid4()
+    context.files[completed.id] = [uuid4()]
+    context.files[failed.id] = [uuid4()]
+    context.source.input_payload_json["step_inputs"] = {
+        str(completed.step_id): {"live_transcript_id": str(completed_live)},
+        str(failed.step_id): {"live_transcript_id": str(failed_live)},
+    }
+
+    await context.service.retry_from_failed_step(**context.request)
+
+    args = context.service.run_service.create_run.await_args.kwargs
+    assert args["step_inputs"][failed.step_id].live_transcript_id == failed_live
+    assert args["step_inputs"][completed.step_id].live_transcript_id is None
+    assert args["input_payload_json"] == {"question": "Summarize"}
+
+
 async def test_replay_returns_same_child_without_new_creation_or_audit(context):
     await context.service.retry_from_failed_step(**context.request)
     seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]

@@ -54,6 +54,7 @@ from eneo.flows.runtime.run_cancellation import (
     RunCancelProbe,
     current_run_cancel_probe,
 )
+from eneo.flows.runtime.speaker_enrichment import enrich_transcript
 from eneo.flows.runtime.step_deadline import (
     StepDeadline,
     budget_refusal,
@@ -706,6 +707,28 @@ class RemoteFlowTranscriber:
             diarization="external" if diarize else None,
             alignment=result.alignment if diarize else None,
             speaker_review=result.speaker_review,
+        )
+
+    async def enrich(
+        self,
+        file: SpooledAudio,
+        transcription_model: TranscriptionModel,
+        *,
+        transcribed: TranscribedAudio,
+        file_id: UUID,
+        language: str | None = None,
+        observer: ProviderCallObserver | None = None,
+        max_speakers: int | None = None,
+    ) -> TranscribedAudio:
+        return await enrich_transcript(
+            self,
+            file,
+            transcription_model,
+            transcribed=transcribed,
+            file_id=file_id,
+            language=language,
+            observer=observer,
+            max_speakers=max_speakers,
         )
 
     async def label_speakers(

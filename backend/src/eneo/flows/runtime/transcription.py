@@ -6,11 +6,12 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 from uuid import UUID
 
 from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.files.audio import AudioDecodeLimitExceeded, AudioMimeTypes
+from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.domain.speaker_labels import (
     build_label_renumbering,
     build_speaker_inventory,
@@ -53,6 +54,7 @@ from eneo.model_providers.domain.provider_call_observer import (
 )
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     EmptyTranscriptionInterval,
+    TranscriptSegment,
 )
 
 
@@ -133,6 +135,18 @@ class FlowStepTranscriber(Protocol):
         observer: "ProviderCallObserver | None" = None,
         max_speakers: int | None = None,
     ) -> "TranscribedAudio": ...
+
+    async def enrich(
+        self,
+        file: SpooledAudio,
+        transcription_model: "TranscriptionModel",
+        *,
+        transcribed: TranscribedAudio,
+        file_id: UUID,
+        language: str | None = None,
+        observer: "ProviderCallObserver | None" = None,
+        max_speakers: int | None = None,
+    ) -> TranscribedAudio: ...
 
 
 # Must stay aligned with
@@ -216,8 +230,8 @@ def _join_transcription_blocks(
 
 
 if TYPE_CHECKING:
+    from eneo.database.tables.flow_tables import FlowLiveTranscripts
     from eneo.files.file_models import FileInfo
-    from eneo.files.transcriber import TranscribedAudio
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
     )
@@ -225,9 +239,6 @@ if TYPE_CHECKING:
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
-    )
-    from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
-        TranscriptSegment,
     )
 
 
@@ -242,6 +253,8 @@ MAX_DETAIL_BYTES = MAX_SEGMENTS_BYTES
 # anchor to the stored segments by index, so they exist only when the
 # segments do. An hour of speech is a few megabytes of words.
 MAX_WORDS_BYTES = 8 * 1024 * 1024
+
+LiveFallbackReason = Literal["duration_mismatch", "no_timing", "unavailable"]
 
 
 def serialize_segments(
@@ -505,6 +518,8 @@ class FlowTranscriptionResult:
     # Coarsest word-timestamp source across files, as reported by the service.
     alignment: str | None = None
     empty_intervals: tuple[EmptyTranscriptionInterval, ...] = ()
+    transcript_origin: Literal["live", "batch"] = "batch"
+    live_fallback_reason: LiveFallbackReason | None = None
 
     @property
     def source(self) -> TranscriptSource:
@@ -529,6 +544,12 @@ class FlowTranscriptionResult:
             "speakers": self.speakers,
             "max_speakers": self.max_speakers,
             "alignment": self.alignment,
+            "transcript_origin": self.transcript_origin,
+            **(
+                {"live_fallback_reason": self.live_fallback_reason}
+                if self.live_fallback_reason is not None
+                else {}
+            ),
         }
 
 
@@ -609,6 +630,8 @@ async def transcribe_audio_input(
     diarize: bool = True,
     max_speakers: int | None = None,
     source_preparation: TranscriptSourcePreparation | None = None,
+    live_transcript: FlowLiveTranscripts | None = None,
+    live_transcript_requested: bool = False,
 ) -> FlowTranscriptionResult:
     """Transcribe files in request order, closing each spool on every exit."""
     if not files:
@@ -654,6 +677,8 @@ async def transcribe_audio_input(
     label_offset = source_preparation.speakers_count
 
     empty_intervals: list[EmptyTranscriptionInterval] = []
+    transcript_origin: Literal["live", "batch"] = "batch"
+    live_fallback_reason: LiveFallbackReason | None = None
     for file_index, file in enumerate(files):
         try:
             try:
@@ -668,16 +693,59 @@ async def transcribe_audio_input(
                     code=FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value,
                 ) from exc
             try:
-                transcribed = await transcriber.transcribe(
-                    audio_file,
-                    transcription_model,
-                    file_id=file.id,
-                    language=provider_language,
-                    diarize=diarize,
-                    persist_cache_to_file=False,
-                    observer=transcription_call_observer,
-                    max_speakers=max_speakers if diarize else None,
-                )
+                transcribed = None
+                if live_transcript_requested:
+                    if (
+                        live_transcript is None
+                        or len(files) != 1
+                        or live_transcript.bound_file_id != file.id
+                    ):
+                        live_fallback_reason = "unavailable"
+                    else:
+                        duration = await audio_file.measure_duration()
+                        if abs(duration - live_transcript.received_audio_seconds) > max(
+                            1.0, duration * 0.005
+                        ):
+                            live_fallback_reason = "duration_mismatch"
+                        elif live_transcript.segments is None:
+                            live_fallback_reason = "no_timing"
+                        else:
+                            live_segments = tuple(
+                                TranscriptSegment(
+                                    text=str(segment["text"]),
+                                    start=float(segment["start"]),
+                                    end=float(segment["end"]),
+                                )
+                                for segment in live_transcript.segments
+                            )
+                            transcribed = TranscribedAudio(
+                                text=live_transcript.text,
+                                duration_seconds=duration,
+                                segments=live_segments,
+                                transcript_segments=live_segments,
+                            )
+                            if diarize:
+                                transcribed = await transcriber.enrich(
+                                    audio_file,
+                                    transcription_model,
+                                    transcribed=transcribed,
+                                    file_id=file.id,
+                                    language=provider_language,
+                                    observer=transcription_call_observer,
+                                    max_speakers=max_speakers,
+                                )
+                            transcript_origin = "live"
+                if transcribed is None:
+                    transcribed = await transcriber.transcribe(
+                        audio_file,
+                        transcription_model,
+                        file_id=file.id,
+                        language=provider_language,
+                        diarize=diarize,
+                        persist_cache_to_file=False,
+                        observer=transcription_call_observer,
+                        max_speakers=max_speakers if diarize else None,
+                    )
             finally:
                 await audio_file.aclose()
         except (
@@ -831,6 +899,8 @@ async def transcribe_audio_input(
         max_speakers=max_speakers if diarize else None,
         alignment=_coarsest_alignment(alignments),
         empty_intervals=tuple(empty_intervals),
+        transcript_origin=transcript_origin,
+        live_fallback_reason=live_fallback_reason,
     )
 
 
@@ -893,6 +963,8 @@ async def resolve_and_transcribe_audio_for_step(
     max_speakers: int | None = None,
     speaker_labels: bool | None = None,
     source_preparation: TranscriptSourcePreparation | None = None,
+    live_transcript: FlowLiveTranscripts | None = None,
+    live_transcript_requested: bool = False,
 ) -> FlowTranscriptionResult:
     try:
         transcription_config = parse_transcription_config(version_metadata)
@@ -941,4 +1013,6 @@ async def resolve_and_transcribe_audio_for_step(
         diarize=transcription_config.diarize(speaker_labels),
         max_speakers=max_speakers,
         source_preparation=source_preparation,
+        live_transcript=live_transcript,
+        live_transcript_requested=live_transcript_requested,
     )

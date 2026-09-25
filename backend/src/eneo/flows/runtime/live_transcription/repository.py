@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import FlowLiveTranscripts, Flows
 from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionGrant
+from eneo.main.exceptions import ConflictException, NotFoundException
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,19 +21,66 @@ class LiveTranscriptPurgeCounts:
     purged_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class LiveTranscriptScope:
+    tenant_id: UUID
+    user_id: UUID | None
+    flow_id: UUID
+    flow_version: int
+    step_id: UUID
+    model_id: UUID | None
+
+    def matches(self, row: FlowLiveTranscripts) -> bool:
+        return (
+            row.tenant_id == self.tenant_id
+            and row.user_id == self.user_id
+            and row.flow_id == self.flow_id
+            and row.flow_version == self.flow_version
+            and row.step_id == self.step_id
+            and row.model_id == self.model_id
+            and (row.expires_at is None or row.expires_at > datetime.now(timezone.utc))
+        )
+
+
 class LiveTranscriptRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
     async def get(
-        self, transcript_id: UUID, *, tenant_id: UUID
+        self, transcript_id: UUID, *, tenant_id: UUID, lock_for_binding: bool = False
     ) -> FlowLiveTranscripts | None:
-        return await self.session.scalar(
-            sa.select(FlowLiveTranscripts).where(
-                FlowLiveTranscripts.id == transcript_id,
-                FlowLiveTranscripts.tenant_id == tenant_id,
-            )
+        statement = sa.select(FlowLiveTranscripts).where(
+            FlowLiveTranscripts.id == transcript_id,
+            FlowLiveTranscripts.tenant_id == tenant_id,
         )
+        if lock_for_binding:
+            if not self.session.in_transaction():
+                raise RuntimeError(
+                    "Live transcript binding requires an active transaction."
+                )
+            statement = statement.with_for_update(
+                of=FlowLiveTranscripts
+            ).execution_options(populate_existing=True)
+        return await self.session.scalar(statement)
+
+    async def bind(
+        self, transcript_id: UUID, *, file_id: UUID, scope: LiveTranscriptScope
+    ) -> None:
+        row = await self.get(
+            transcript_id, tenant_id=scope.tenant_id, lock_for_binding=True
+        )
+        if row is None or not scope.matches(row):
+            raise NotFoundException(
+                "Live transcript not found.",
+                code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_NOT_FOUND.value,
+            )
+        if row.bound_file_id is not None and row.bound_file_id != file_id:
+            raise ConflictException(
+                "Live transcript is already bound to another file.",
+                code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_ALREADY_BOUND.value,
+            )
+        row.bound_file_id = file_id
+        await self.session.flush()
 
     async def create(
         self,

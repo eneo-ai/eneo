@@ -72,6 +72,7 @@ class RuntimeStepInputSpec:
 @dataclass(frozen=True)
 class FlowRunStepInputFiles:
     file_ids: tuple[UUID, ...] = ()
+    live_transcript_id: UUID | None = None
 
 
 class FlowRunStepInputFileProjection(TypedDict):
@@ -175,6 +176,30 @@ def normalize_step_inputs_payload(
         normalized[step_id] = list(dict.fromkeys(normalized_ids))
 
     return normalized
+
+
+def validate_live_transcript_inputs(
+    *,
+    step_inputs: FlowRunStepInputs,
+    normalized_step_inputs: dict[UUID, list[UUID]],
+    specs: dict[UUID, RuntimeStepInputSpec],
+) -> dict[UUID, UUID]:
+    live_ids: dict[UUID, UUID] = {}
+    for step_id, submitted in step_inputs.items():
+        if submitted.live_transcript_id is None:
+            continue
+        spec = specs.get(step_id)
+        if (
+            len(normalized_step_inputs[step_id]) != 1
+            or spec is None
+            or spec.runtime_input.input_format is not FlowRuntimeInputFormat.AUDIO
+        ):
+            raise FlowBadRequestException(
+                "A live transcript requires exactly one audio file for the step.",
+                code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_REQUIRES_ONE_AUDIO_FILE,
+            )
+        live_ids[step_id] = submitted.live_transcript_id
+    return live_ids
 
 
 async def validate_submitted_step_inputs(

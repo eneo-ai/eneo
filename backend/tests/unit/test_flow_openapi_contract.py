@@ -50,6 +50,12 @@ from tests.unit.api_key_test_utils import flatten_routes
 FLOW_SETTINGS_PATH_PREFIX = "/api/v1/settings/flow-"
 
 
+def test_create_run_documents_live_transcript_binding_conflict(openapi_spec):
+    operation = openapi_spec["paths"]["/api/v1/flows/{id}/runs/"]["post"]
+    response = operation["responses"]["409"]
+    assert "flow_run_live_transcript_already_bound" in str(response)
+
+
 def test_text_processing_contract_fields_are_typed(openapi_spec):
     schemas = openapi_spec["components"]["schemas"]
     for name in ("FlowStepCreateRequest", "FlowStepUpdateRequest"):
@@ -744,7 +750,7 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
     (
         "/api/v1/flows/{id}/runs/",
         "post",
-    ): {"400", "403", "404", "422"},
+    ): {"400", "403", "404", "409", "422"},
     (
         "/api/v1/flows/{id}/runs/{run_id}/steps/",
         "get",
@@ -3008,6 +3014,10 @@ def test_openapi_flow_run_create_schema_documents_step_file_routing(
     create_properties = schemas.get("FlowRunCreateRequest", {}).get("properties", {})
     step_run_input = schemas.get("StepRunInput", {}).get("properties", {})
 
+    assert set(step_run_input) == {"file_ids", "live_transcript_id"}
+    assert {"type": "string", "format": "uuid"} in step_run_input["live_transcript_id"][
+        "anyOf"
+    ]
     assert "run contract" in create_properties["expected_flow_version"]["description"]
     assert "form_fields" in create_properties["input_payload_json"]["description"]
     assert "Per-step runtime inputs" in create_properties["step_inputs"]["description"]

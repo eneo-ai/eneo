@@ -852,6 +852,15 @@ class FlowPublic(FlowSparsePublic):
 class StepRunInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    live_transcript_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Clean live-session transcript for this step's single audio file. "
+            "It must match the run's user, flow, published version, step, and model. "
+            "Admission binds it to that file; execution uses it when timing and "
+            "decoded duration permit, otherwise it transcribes the file."
+        ),
+    )
     file_ids: list[UUID] = Field(
         default_factory=lambda: cast(list[UUID], []),
         description=(

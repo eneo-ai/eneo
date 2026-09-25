@@ -373,6 +373,12 @@ async def get_flow_run_capacity(
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
         ),
+        409: error_response(
+            description="The live transcript is already bound to another file.",
+            message="Live transcript is already bound to another file.",
+            eneo_error_code=ErrorCodes.CONFLICT,
+            code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_ALREADY_BOUND,
+        ),
         429: {
             **error_response(
                 description=(
@@ -444,7 +450,8 @@ async def create_flow_run(
                 step_inputs=(
                     {
                         step_id: FlowRunStepInputFiles(
-                            file_ids=tuple(step_input.file_ids)
+                            file_ids=tuple(step_input.file_ids),
+                            live_transcript_id=step_input.live_transcript_id,
                         )
                         for step_id, step_input in run_in.step_inputs.items()
                     }

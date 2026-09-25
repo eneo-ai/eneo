@@ -1253,7 +1253,7 @@ level of the request.
 
 ### Show live text while recording
 
-Live text is a preview. Eneo can store the final text of a clean session and return its identity; it keeps no audio from the session. Record the audio in your app as usual. When the recording ends, upload it and create the run; the flow's transcription model still transcribes the uploaded file. A stored live transcript does not yet change run execution.
+Eneo can use the stored text of a clean live session when the run starts, avoiding a second transcription. It keeps no audio from the session, so record the audio in your app as usual and upload it when recording ends. Reuse requires one uninterrupted capture and exactly one audio file for the step.
 
 Before you start, read `transcription.live.available` from the run contract. When it is `false`, record without live text. Requesting a ticket needs the same access as creating a run, and a service key can request one for a published flow.
 
@@ -1284,7 +1284,7 @@ Before you start, read `transcription.live.available` from the run contract. Whe
 3. **Wait for `ready`.** Then send the recording as binary frames of mono 16-bit little-endian PCM at 16 kHz. Each frame holds 2 bytes to 64 KiB, an even number of bytes. Keep sending for as long as the recording runs, silence included.
 4. **Show the text.** Append the `text` of each `transcript.delta` event to the preview.
 5. **Stop.** When the recording ends, send `{"type": "stop", "produced_samples": 3200}`. Count every 16 kHz sample captured for this session **before** client-side queueing or discarding. The count must be a non-negative integer, not a boolean. The plain `{"type": "stop"}` remains valid. Missing or invalid counts leave the session ineligible for storage; unrelated extra fields remain ignored. Eneo answers with `transcript.done`, which carries the full preview text of this session, and closes the socket.
-6. **Upload and run.** Upload the recording to the audio step and create the run, as in the [worked example](#worked-end-to-end-example).
+6. **Upload and run.** Upload the recording to the audio step and create the run, as in the [worked example](#worked-end-to-end-example). If `transcript.done` includes a `transcript_id` covering the whole recording, send it as `step_inputs[step_id].live_transcript_id` alongside that step's single `file_ids` entry. Otherwise omit it and the run transcribes the uploaded audio as usual.
 
 The session works when the socket sends `ready` after it opens. If the socket sends `error` instead, its `code` says why.
 
@@ -1305,6 +1305,25 @@ For a clean session, `transcript.done` also includes `"transcript_id": "<uuid>"`
 
 The stored text is the authoritative done text. Timed passages are kept only when every delta supplies valid timing and the delta text matches the done text exactly; otherwise the text is stored without passages. Unbound transcripts use the tenant's runtime-upload abandonment retention period at creation. Once expired, they are removed in bounded batches by the tenant administrator's Flow history purge, within its selected tenant, space, or flow scope. The purge response reports `transcript_candidate_count` and `transcript_purged_count` separately from run counts, even when no runs are eligible. The requested limit applies independently to runs and transcripts. A dry run reports transcript candidates, deletes nothing and reports zero deletions. Real purges include both transcript counts in the required audit record, without transcript text. If the retention period is disabled, transcripts have no expiry. Bound transcripts are excluded from this purge.
 
+#### Use the live transcript in a run
+
+```json
+{
+  "step_inputs": {
+    "00000000-0000-0000-0000-000000000101": {
+      "file_ids": ["00000000-0000-0000-0000-000000000201"],
+      "live_transcript_id": "00000000-0000-0000-0000-000000000301"
+    }
+  }
+}
+```
+
+The transcript must belong to the same tenant, user, flow, published version, step, and transcription model, and must not have expired. Admission binds it permanently to the uploaded file. The same transcript can be submitted again for that file; another file receives `409 flow_run_live_transcript_already_bound`. An unavailable, expired, or foreign transcript receives `404 flow_run_live_transcript_not_found`. A step without exactly one audio file receives `400 flow_run_live_transcript_requires_one_audio_file`. The ID is part of the request's idempotency fingerprint.
+
+Before using the text, Eneo decodes the file and compares its duration with the live session's received audio. The difference must be at most one second or 0.5% of the decoded duration, whichever is larger. With speaker labels off, the live passages become the transcript segments. With labels on, the existing speaker service labels those passages using the run's `max_speakers`. Reduced-precision alignment is retained and reported just as for batch transcription; a speaker-service failure follows the usual run failure and retry behavior.
+
+The step's transcription evidence records `transcript_origin` as `live` or `batch`. If the requested live transcript cannot be used at execution, Eneo transcribes the file through the normal batch path and adds `live_fallback_reason`: `duration_mismatch`, `no_timing` (in either label mode), or `unavailable`. The existing `source` reference continues to identify the stored transcript for playback, corrections, and regeneration.
+
 #### When a session ends with an error
 
 An `error` event ends the session, and nothing carries over to a new one: each ticket starts a fresh session on the model server, and its `transcript.done` covers only that session's audio. The recording in your app is unaffected, and so is the run, which transcribes the uploaded file.
@@ -1312,6 +1331,8 @@ An `error` event ends the session, and nothing carries over to a new one: each t
 - **While the recording runs**, if `retryable` is `true`, you can request a new ticket and start a fresh session for the rest of the recording. Keep the text you already show, and append the new session's text after it. Speech from the gap between the sessions is missing from the preview, not from the run.
 - **After you sent `stop`**, do not request a new ticket: a new session cannot recover the final text. Keep the preview text you have, and go on with the upload and the run.
 - **If `retryable` is `false`**, go on without live text.
+
+After any interrupted or restarted session, omit `live_transcript_id` for the recording. A later session's ID covers only that session's audio.
 
 #### Limits and refusals
 

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from typing import Self
+from uuid import UUID
+
+from pydantic import TypeAdapter
+from typing_extensions import NotRequired, TypedDict
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.step_output import FileBackedStepText, InlineTranscript
@@ -18,6 +22,13 @@ SPEAKER_LABELS_KEY = "speaker_labels"
 # The speaker-count bound settled at admission for a run that labels speakers:
 # a positive integer, or null for automatic. Absent when the run labels none.
 MAX_SPEAKERS_KEY = "max_speakers"
+
+
+class LiveTranscriptStepInput(TypedDict):
+    live_transcript_id: NotRequired[UUID]
+
+
+_LIVE_TRANSCRIPT_INPUTS = TypeAdapter(dict[UUID, LiveTranscriptStepInput])
 
 _REMOVED_TOP_LEVEL_RUNTIME_FILE_IDS_KEY = "file_ids"
 _PERSISTED_RUNTIME_INPUT_KEYS = frozenset(
@@ -84,6 +95,19 @@ def read_speaker_labels_choice(
     return choice if isinstance(choice, bool) else None
 
 
+def read_live_transcript_ids(
+    input_payload_json: FlowPersistedJsonObject | None,
+) -> dict[UUID, UUID]:
+    values = (input_payload_json or {}).get(STEP_INPUTS_KEY)
+    if not isinstance(values, dict):
+        return {}
+    return {
+        step_id: value["live_transcript_id"]
+        for step_id, value in _LIVE_TRANSCRIPT_INPUTS.validate_python(values).items()
+        if "live_transcript_id" in value
+    }
+
+
 def read_max_speakers_decision(
     input_payload_json: FlowPersistedJsonObject | None,
 ) -> int | None | NotProvided:
@@ -109,6 +133,7 @@ def build_initial_run_input_envelope(
     flow_version: int,
     speaker_labels: bool | None = None,
     max_speakers: int | None | NotProvided = NOT_PROVIDED,
+    live_transcript_ids: dict[UUID, UUID] | None = None,
 ) -> FlowPersistedJsonObject:
     payload = dict(normalized_inline_payload or {})
     payload[EXPECTED_FLOW_VERSION_KEY] = flow_version
@@ -116,4 +141,9 @@ def build_initial_run_input_envelope(
         payload[SPEAKER_LABELS_KEY] = speaker_labels
     if not isinstance(max_speakers, NotProvided):
         payload[MAX_SPEAKERS_KEY] = max_speakers
+    if live_transcript_ids:
+        payload[STEP_INPUTS_KEY] = {
+            str(step_id): {"live_transcript_id": str(transcript_id)}
+            for step_id, transcript_id in live_transcript_ids.items()
+        }
     return payload

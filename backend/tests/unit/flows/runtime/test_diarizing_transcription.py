@@ -7,11 +7,9 @@ from uuid import uuid4
 import pytest
 
 from eneo.files.transcriber import TranscribedAudio
-from eneo.flows.runtime.diarizing_transcription import (
-    DIARIZATION_SKIPPED_EMPTY_TRANSCRIPT,
-    DiarizingFlowTranscriber,
-)
+from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
 from eneo.flows.runtime.remote_transcription import RemoteTranscriptionResult
+from eneo.flows.runtime.speaker_enrichment import DIARIZATION_SKIPPED_EMPTY_TRANSCRIPT
 from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     EmptyTranscriptionInterval,

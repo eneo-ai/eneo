@@ -31,6 +31,7 @@ from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE,
     TRANSCRIPT_REGENERATION_KEY,
+    read_live_transcript_ids,
     read_max_speakers_decision,
     read_semantic_flow_input_payload,
     read_speaker_labels_choice,
@@ -313,6 +314,7 @@ class FlowRunRetryService:
         )
         if existing is not None:
             return _replay_result(existing, source.id)
+        live_transcript_ids = read_live_transcript_ids(source.input_payload_json)
         created = await self.run_service.create_run(
             flow_id=flow_id,
             run_label=source.run_label,
@@ -321,7 +323,14 @@ class FlowRunRetryService:
             ),
             expected_flow_version=source.flow_version,
             step_inputs={
-                step.step_id: FlowRunStepInputFiles(file_ids=tuple(files[step.id]))
+                step.step_id: FlowRunStepInputFiles(
+                    file_ids=tuple(files[step.id]),
+                    live_transcript_id=(
+                        live_transcript_ids.get(step.step_id)
+                        if step.step_order >= first_executed_step_order
+                        else None
+                    ),
+                )
                 for step in steps
                 if files.get(step.id)
             },

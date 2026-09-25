@@ -70,6 +70,7 @@ from eneo.flows.flow_run_input_envelope import (
     SPEAKER_LABELS_KEY,
     TRANSCRIPT_REGENERATION_KEY,
     build_initial_run_input_envelope,
+    read_live_transcript_ids,
     read_semantic_flow_input_payload,
     read_speaker_labels_choice,
 )
@@ -84,6 +85,7 @@ from eneo.flows.flow_run_step_inputs import (
     build_runtime_step_input_specs,
     normalize_step_inputs_payload,
     runtime_file_not_bound_to_flow_error,
+    validate_live_transcript_inputs,
     validate_submitted_step_inputs,
 )
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
@@ -111,6 +113,11 @@ from eneo.flows.published_definition import (
     parse_verified_published_definition,
 )
 from eneo.flows.published_runtime import load_published_definition
+from eneo.flows.runtime.live_transcription.repository import (
+    LiveTranscriptRepository,
+    LiveTranscriptScope,
+)
+from eneo.flows.transcription_config import parse_transcription_config
 from eneo.main.config import get_settings
 from eneo.main.exceptions import NotFoundException, ValidationException
 from eneo.main.models import NOT_PROVIDED, NotProvided
@@ -460,6 +467,9 @@ class FlowRunService:
                 normalized_inline_payload=form_input,
                 flow_version=published.flow_version,
                 speaker_labels=effective_speaker_labels,
+                live_transcript_ids=read_live_transcript_ids(
+                    prepared.input_payload_json
+                ),
                 max_speakers=settle_max_speakers(
                     max_speakers,
                     steps=steps,
@@ -473,6 +483,31 @@ class FlowRunService:
                 flow_id=flow_id, input_payload_json=payload
             )
             prepared = replace(prepared, input_payload_json=payload)
+        live_transcript_ids = read_live_transcript_ids(prepared.input_payload_json)
+        if live_transcript_ids:
+            file_ids_by_step = {
+                projection["step_id"]: projection["file_ids"][0]
+                for projection in prepared.step_input_files
+            }
+            model_id = parse_transcription_config(
+                {"wizard": published.definition.metadata().wizard}
+            ).model_id
+            live_repo = LiveTranscriptRepository(self.flow_run_repo.session)
+            for step_id, transcript_id in sorted(
+                live_transcript_ids.items(), key=lambda item: item[1]
+            ):
+                await live_repo.bind(
+                    transcript_id,
+                    file_id=file_ids_by_step[step_id],
+                    scope=LiveTranscriptScope(
+                        tenant_id=self.user.tenant_id,
+                        user_id=principal.principal_user_id,
+                        flow_id=flow_id,
+                        flow_version=published.flow_version,
+                        step_id=step_id,
+                        model_id=model_id,
+                    ),
+                )
         created_run = await self._create_persisted_run(
             flow=published.flow,
             flow_version=published.flow_version,
@@ -558,6 +593,7 @@ class FlowRunService:
             for identity in definition.step_identities
         ]
         step_input_file_projections: list[FlowRunStepInputFileProjection] = []
+        live_transcript_ids: dict[UUID, UUID] = {}
         if step_inputs is not None or definition.has_required_runtime_input():
             runtime_steps = definition.runtime_steps()
             limits = await self._resolve_flow_input_limits()
@@ -568,6 +604,11 @@ class FlowRunService:
                 steps=runtime_steps,
                 limits=limits,
                 mapped_policy=mapped_policy,
+            )
+            live_transcript_ids = validate_live_transcript_inputs(
+                step_inputs=step_inputs or {},
+                normalized_step_inputs=normalized_step_inputs,
+                specs=runtime_specs,
             )
             await validate_submitted_step_inputs(
                 flow_id=flow_id,
@@ -598,6 +639,7 @@ class FlowRunService:
             flow_version=flow_version,
             speaker_labels=speaker_labels,
             max_speakers=max_speakers,
+            live_transcript_ids=live_transcript_ids,
         )
         request_fingerprint = self._build_idempotency_fingerprint(
             tenant_id=self.user.tenant_id,

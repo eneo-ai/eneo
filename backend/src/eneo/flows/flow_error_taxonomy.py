@@ -75,6 +75,27 @@ def _entry(
 
 
 FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
+    FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_REQUIRES_ONE_AUDIO_FILE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A live transcript was submitted without exactly one audio file for its step.",
+        consumer_action="Submit one audio file for the step or omit live_transcript_id.",
+        user_action="Use one recording or transcribe the uploaded files again.",
+    ),
+    FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_NOT_FOUND: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The live transcript is unavailable for this run.",
+        consumer_action="Omit live_transcript_id to transcribe the uploaded audio.",
+        user_action="Start the run with the uploaded recording again.",
+    ),
+    FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_ALREADY_BOUND: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The live transcript is already bound to a different file.",
+        consumer_action="Reuse the original file or omit live_transcript_id for another file.",
+        user_action="Use the original uploaded recording or transcribe the new file.",
+    ),
     FlowApiErrorCode.FLOW_NOT_PUBLISHED: _entry(
         category="Flow access",
         surfaced_through="API error response",
