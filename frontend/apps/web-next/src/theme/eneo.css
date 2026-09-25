@@ -768,6 +768,34 @@
 }
 
 @layer astryx-theme {
+@media (pointer: coarse) {
+  @scope ([data-astryx-theme="eneo"]) to ([data-astryx-theme]) {
+    :scope {
+      --size-element-sm: 44px;
+      --size-element-md: 44px;
+      --size-element-lg: 44px;
+    }
+
+    .astryx-segmented-control-item {
+      min-height: 44px;
+    }
+
+    .astryx-checkbox-input {
+      min-height: 44px;
+    }
+
+    .astryx-radio-list-item {
+      min-height: 44px;
+    }
+
+    .astryx-switch-field {
+      min-height: 44px;
+    }
+  }
+}
+}
+
+@layer astryx-theme {
 @scope ([data-astryx-theme="eneo"]) to ([data-astryx-theme]) {
   [data-astryx-media="dark"] {
     color-scheme: dark;

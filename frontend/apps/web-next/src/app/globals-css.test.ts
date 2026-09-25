@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import tailwind from "@tailwindcss/postcss";
-import postcss from "postcss";
+import postcss, { type AtRule, type Rule } from "postcss";
 import { beforeAll, describe, expect, it } from "vitest";
 
 // Compiles globals.css through the same PostCSS + Tailwind pipeline Next uses,
@@ -71,5 +71,41 @@ describe("globals.css", () => {
 
   it("pins color-scheme to the next-themes class", () => {
     expect(css).toMatch(/:root\.dark,\s*:root\.dark \[data-astryx-theme\]:not\(\[data-theme\]\)/);
+  });
+
+  it("gives Astryx controls 44 px targets on a coarse pointer", () => {
+    // selector → declarations of every rule under @media (pointer: coarse)
+    const coarse = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkAtRules("media", (media: AtRule) => {
+      if (media.params !== "(pointer: coarse)") return;
+      media.walkRules((rule: Rule) => {
+        const declarations = coarse.get(rule.selector) ?? {};
+        rule.walkDecls((decl) => {
+          declarations[decl.prop] = decl.value;
+        });
+        coarse.set(rule.selector, declarations);
+      });
+    });
+
+    // Element sizes: buttons (icon-only ones are square), menu triggers,
+    // tabs, nav items, inputs and selectors.
+    expect(coarse.get(":scope")).toMatchObject({
+      "--size-element-sm": "44px",
+      "--size-element-md": "44px",
+      "--size-element-lg": "44px"
+    });
+    for (const component of [
+      "segmented-control-item",
+      "checkbox-input",
+      "radio-list-item",
+      "switch-field"
+    ]) {
+      expect(coarse.get(`.astryx-${component}`)).toMatchObject({ "min-height": "44px" });
+    }
+    // The native inputs checkbox, radio and switch take pointer input on.
+    const inputs = [...coarse.entries()].find(([selector]) =>
+      selector.includes(".astryx-checkbox-input, .astryx-radio-list-item, .astryx-switch-field")
+    );
+    expect(inputs?.[1]).toMatchObject({ "min-inline-size": "44px", "min-block-size": "44px" });
   });
 });

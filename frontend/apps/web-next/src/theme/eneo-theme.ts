@@ -232,5 +232,31 @@ export const eneoTheme = defineTheme({
     switch: {
       base: { "--color-background-gray": "var(--eneo-color-border-control)" }
     }
+  },
+
+  // Touch layouts: 44×44 px targets (ACCESSIBILITY.md → Target size, the
+  // Eneo standard above WCAG 2.5.8's 24 px). The element sizes drive buttons
+  // (icon-only ones are square), menu triggers, tabs, nav items, inputs and
+  // selectors; segmented items sit 4 px inside theirs, and checkbox, radio
+  // and switch rows get the height their enlarged inputs need (globals.css).
+  adaptations: {
+    rules: [
+      {
+        when: { pointer: "coarse" },
+        value: {
+          tokens: {
+            "--size-element-sm": "44px",
+            "--size-element-md": "44px",
+            "--size-element-lg": "44px"
+          },
+          components: {
+            "segmented-control-item": { base: { minHeight: "44px" } },
+            "checkbox-input": { base: { minHeight: "44px" } },
+            "radio-list-item": { base: { minHeight: "44px" } },
+            "switch-field": { base: { minHeight: "44px" } }
+          }
+        }
+      }
+    ]
   }
 });

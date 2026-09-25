@@ -111,20 +111,18 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   around it (the spacing exception). Inline links in running text are exempt.
   Astryx element sizes (28/32/36 px) and shadcn `size="icon"` (36 px) pass;
   never go below `size-6` for an icon button.
-- **Design standard: 44×44 px on touch layouts.** Custom targets use
-  Tailwind's `pointer-coarse:` variant (`pointer-coarse:size-11`). Astryx
-  controls get it from a theme adaptation in `eneo-theme.ts`, added with the
-  first touch layout:
-
-  ```ts
-  export const eneoTheme = defineTheme({
-    // …
-    adaptations: {
-      rules: [{ when: { pointer: "coarse" }, value: { tokens: { "--size-element-md": "44px" } } }]
-    }
-  });
-  ```
-
+- **Design standard: 44×44 px on touch layouts** (`pointer: coarse`).
+  Astryx controls get it centrally; don't add sizes for them:
+  - `eneo-theme.ts` → `adaptations` sets the element sizes
+    (`--size-element-sm/md/lg`) to 44 px: buttons (icon-only ones are
+    square), menu triggers, tabs, nav items, inputs and selectors. Segmented
+    control items and checkbox, radio and switch rows get `min-height: 44px`.
+  - `globals.css` (section 7) grows the transparent native input of checkboxes,
+    radios and switches to 44 × 44; the theme cannot reach it.
+  - A class that fixes a size (`size-10`, `h-8`) overrides the theme; give it
+    `pointer-coarse:size-11` or drop it. Custom targets (links styled as
+    buttons, legacy shadcn controls) use Tailwind's `pointer-coarse:` variant
+    (`pointer-coarse:min-h-11`).
 - Measured on real pages by axe (`target-size`) in `tests/a11y.spec.ts`.
 
 ### 5. Colour and contrast (1.4.1, 1.4.3, 1.4.11)

@@ -75,7 +75,6 @@ export function MobileNavDrawer({
           <EneoWordMark decorative className="h-5 w-auto" />
         </Link>
       }
-      className="pointer-coarse:[&_button]:min-h-11 pointer-coarse:[&_button]:min-w-11"
       {...{ [DRAWER_MARKER]: "" }}
     >
       <SideNavRenderContext value="drawer-content">
