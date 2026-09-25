@@ -14,7 +14,7 @@ import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
 import { rolesQueryOptions } from "@/features/admin/roles/roles";
-import { rescueFocus } from "./focus-rescue";
+import { rescueFocus } from "@/lib/focus-rescue";
 import { UserEditorDialog } from "./user-editor";
 import { UserTable } from "./user-table";
 import { adminUsersQueryOptions, MIN_SEARCH_LENGTH, type StateFilter } from "./users";

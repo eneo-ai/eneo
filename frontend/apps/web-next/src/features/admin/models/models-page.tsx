@@ -9,7 +9,7 @@ import { useId, useRef, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
-import { rescueFocus } from "@/features/admin/users/focus-rescue";
+import { rescueFocus } from "@/lib/focus-rescue";
 import { AddModelWizard } from "./add-model-wizard";
 import { MigrationHistoryPanel } from "./migration-history-panel";
 import { adminModelsQueryOptions } from "./models";

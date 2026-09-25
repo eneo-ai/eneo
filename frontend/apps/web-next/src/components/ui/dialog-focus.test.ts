@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { isFocusLost, returnTarget, trackFocus } from "./dialog-focus";
+import { returnTarget, trackFocus } from "./dialog-focus";
 
 beforeAll(trackFocus);
 afterEach(() => {
@@ -47,22 +47,5 @@ describe("returnTarget", () => {
     byId("edit").focus();
     byId("edit").blur();
     expect(returnTarget()).toBeNull();
-  });
-});
-
-describe("isFocusLost", () => {
-  it("is lost on the body, in a closed dialog or on a menu item, not on a button", () => {
-    html(`
-      <button id="page">Sida</button>
-      <dialog id="dialog"><button id="inside">Stäng</button></dialog>
-      <div role="menu"><div id="item" role="menuitem" tabindex="-1">Byt namn</div></div>
-    `);
-    expect(isFocusLost()).toBe(true);
-    byId("inside").focus();
-    expect(isFocusLost()).toBe(true);
-    byId("item").focus();
-    expect(isFocusLost()).toBe(true);
-    byId("page").focus();
-    expect(isFocusLost()).toBe(false);
   });
 });

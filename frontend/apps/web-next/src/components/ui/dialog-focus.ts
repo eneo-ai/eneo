@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { isFocusLost } from "@/lib/focus-rescue";
 
 /*
  * Focus return for dialogs (ACCESSIBILITY.md rule 2: when the focused element
@@ -59,16 +60,6 @@ export function returnTarget(): HTMLElement | null {
   const menu = opener.closest('[role="menu"]');
   if (menu) return menuTrigger(menu);
   return opener.isConnected ? opener : null;
-}
-
-/** Focus is on nothing, inside a dialog that has closed, or on a closed menu's item. */
-export function isFocusLost(): boolean {
-  const active = document.activeElement;
-  return (
-    !active ||
-    active === document.body ||
-    active.closest('dialog:not([open]), [role="menu"]') !== null
-  );
 }
 
 /**
