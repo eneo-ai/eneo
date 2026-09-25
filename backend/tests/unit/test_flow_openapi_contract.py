@@ -4233,6 +4233,11 @@ def test_openapi_flow_list_discovers_flows_without_naming_a_space(
         schema = openapi_spec["components"]["schemas"][schema_name]
         assert schema["properties"]["space_name"]["type"] == "string"
         assert "space_name" in schema["required"]
+        delivery = schema["properties"]["delivery"]
+        assert _non_null_schema(delivery) == {
+            "$ref": "#/components/schemas/FlowOutputDelivery"
+        }
+        assert "FlowFinalOutputContractPublic.delivery" in delivery["description"]
 
 
 def test_openapi_flow_authoring_docs_separate_draft_and_service_key_runtime(

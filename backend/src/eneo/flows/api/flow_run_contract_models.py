@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from enum import Enum
 from typing import Annotated, Any, Literal, TypeAlias, cast
 from uuid import UUID
 
@@ -11,6 +10,7 @@ from eneo.flows.api.flow_live_transcription_models import (
 )
 from eneo.flows.domain.text_processing import TextProcessingMode
 from eneo.flows.enums import (
+    FlowOutputDelivery,
     FlowOutputMode,
     FlowOutputType,
     FlowRuntimeInputFormat,
@@ -235,12 +235,6 @@ class FlowReviewStepContractPublic(BaseModel):
             "This is useful for prebuilding review forms before the run starts."
         ),
     )
-
-
-class FlowOutputDelivery(str, Enum):
-    PAYLOAD = "payload"
-    ARTIFACT = "artifact"
-    OUTBOUND_HTTP = "outbound_http"
 
 
 class FlowFinalOutputContractPublic(BaseModel):

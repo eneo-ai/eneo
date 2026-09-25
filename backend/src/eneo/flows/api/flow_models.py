@@ -41,9 +41,6 @@ from eneo.flows.api.flow_run_contract_models import (
     FlowFinalOutputContractPublic as FlowFinalOutputContractPublic,
 )
 from eneo.flows.api.flow_run_contract_models import (
-    FlowOutputDelivery as FlowOutputDelivery,
-)
-from eneo.flows.api.flow_run_contract_models import (
     FlowReviewStepContractPublic as FlowReviewStepContractPublic,
 )
 from eneo.flows.api.flow_run_contract_models import (
@@ -110,6 +107,9 @@ from eneo.flows.enums import (
     FlowStepAttemptStatus,
     FlowStepResultStatus,
 )
+from eneo.flows.enums import (
+    FlowOutputDelivery as FlowOutputDelivery,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_review_policy import (
     FLOW_STEP_REVIEW_POLICY_DESCRIPTION,
@@ -167,6 +167,12 @@ FLOW_SPARSE_OUTPUT_TYPE_DESCRIPTION = (
     "the flow has no steps. Uses the same `FlowOutputType` values as "
     "`FlowFinalOutputContractPublic.output_type` on the run contract, so "
     "clients can reuse one output-type label mapping for both."
+)
+FLOW_SPARSE_DELIVERY_DESCRIPTION = (
+    "How clients receive the result of the flow's last step, in step order. "
+    "Null when the flow has no steps. Uses the same `FlowOutputDelivery` "
+    "values and rule as `FlowFinalOutputContractPublic.delivery` on the run "
+    "contract, so clients can use one rule for both."
 )
 
 
@@ -307,6 +313,7 @@ FLOW_SPARSE_PUBLIC_EXAMPLE: dict[str, Any] = {
     "step_count": 2,
     "input_type": "audio",
     "output_type": "pdf",
+    "delivery": "artifact",
     "metadata_json": {"wizard": {"transcription_enabled": True}},
     "run_history_retention": {
         "state": "configured",
@@ -826,6 +833,10 @@ class FlowSparsePublic(BaseModel):
     output_type: FlowOutputType | None = Field(
         default=None,
         description=FLOW_SPARSE_OUTPUT_TYPE_DESCRIPTION,
+    )
+    delivery: FlowOutputDelivery | None = Field(
+        default=None,
+        description=FLOW_SPARSE_DELIVERY_DESCRIPTION,
     )
     metadata_json: dict[str, Any] | None = None
     run_history_retention: FlowRunRetentionProjection = Field(

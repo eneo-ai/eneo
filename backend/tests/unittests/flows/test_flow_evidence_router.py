@@ -23,10 +23,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.authentication.signed_urls import verify_signed_token
 from eneo.flows.api import flow_access_context as flow_access_context_module
-from eneo.flows.api.flow_run_contract_models import (
-    FlowFinalOutputContractPublic,
-    FlowOutputDelivery,
-)
+from eneo.flows.api.flow_run_contract_models import FlowFinalOutputContractPublic
 from eneo.flows.api.flow_run_evidence_router import (
     export_flow_run_evidence,
     get_flow_run_evidence,
@@ -41,6 +38,7 @@ from eneo.flows.application.flow_run_service import FlowRunStepResultWithFiles
 from eneo.flows.domain.flow import FlowRunStatus, FlowStepResult
 from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.enums import (
+    FlowOutputDelivery,
     FlowOutputMode,
     FlowOutputType,
     FlowRunLifecycleSource,

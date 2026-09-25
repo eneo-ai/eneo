@@ -56,6 +56,12 @@ class FlowOutputType(str, Enum):
     DOCX = "docx"
 
 
+class FlowOutputDelivery(str, Enum):
+    PAYLOAD = "payload"
+    ARTIFACT = "artifact"
+    OUTBOUND_HTTP = "outbound_http"
+
+
 class FlowOutputMode(str, Enum):
     PASS_THROUGH = "pass_through"
     COMPOSE_TEXT = "compose_text"
@@ -132,6 +138,21 @@ def final_step_output_type(output_types: Sequence[str]) -> FlowOutputType | None
     if not output_types:
         return None
     return FlowOutputType(output_types[-1])
+
+
+def final_output_delivery(
+    *, output_type: FlowOutputType, output_mode: FlowOutputMode
+) -> FlowOutputDelivery:
+    """How a client receives the output of a flow's last step.
+
+    The run contract's `final_output.delivery` and a flow list's derived
+    `delivery` both resolve through this rule so they cannot drift apart.
+    """
+    if flow_output_mode_has_outbound_delivery(output_mode):
+        return FlowOutputDelivery.OUTBOUND_HTTP
+    if output_type in {FlowOutputType.PDF, FlowOutputType.DOCX}:
+        return FlowOutputDelivery.ARTIFACT
+    return FlowOutputDelivery.PAYLOAD
 
 
 class FlowAuthoringOutputMode(str, Enum):

@@ -25,6 +25,7 @@ from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionProjecti
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
+    FlowOutputDelivery,
     FlowOutputMode,
     FlowOutputType,
     FlowRunPurpose,
@@ -199,10 +200,11 @@ class FlowSparse(BaseModel):
     # Sparse list projection of `steps` (see `_derived_step_projection` in
     # infrastructure/flow_repo.py). Not auto-derived from `steps` — a
     # transient `model_copy(update={"steps": ...})` elsewhere must not be
-    # trusted for these three fields until the repository recomputes them.
+    # trusted for these fields until the repository recomputes them.
     step_count: int = 0
     input_type: FlowRuntimeInputFormat | None = None
     output_type: FlowOutputType | None = None
+    delivery: FlowOutputDelivery | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

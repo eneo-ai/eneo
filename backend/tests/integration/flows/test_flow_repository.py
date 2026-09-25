@@ -25,7 +25,11 @@ from eneo.flows import (
     FlowVersionRepository,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
-from eneo.flows.enums import FlowOutputType, FlowRuntimeInputFormat
+from eneo.flows.enums import (
+    FlowOutputDelivery,
+    FlowOutputType,
+    FlowRuntimeInputFormat,
+)
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
@@ -1187,6 +1191,7 @@ def _build_step_with(
     output_type: str,
     input_config: dict[str, object] | None,
     input_type: str = "text",
+    output_mode: str = "pass_through",
 ) -> FlowStep:
     return FlowStep(
         id=None,
@@ -1198,7 +1203,7 @@ def _build_step_with(
         input_source="flow_input" if step_order == 1 else "previous_step",
         input_type=input_type,
         input_contract=None,
-        output_mode="pass_through",
+        output_mode=output_mode,
         output_type=output_type,
         output_contract=None,
         input_bindings=None,
@@ -1305,6 +1310,36 @@ async def test_flow_repository_sparse_list_derives_step_projection_in_one_batche
             ),
             tenant_id=admin_user.tenant_id,
         )
+        delivering_flows = {
+            delivery: await repo.create(
+                flow=Flow(
+                    id=None,
+                    tenant_id=admin_user.tenant_id,
+                    space_id=space.id,
+                    name=f"Delivers {delivery}",
+                    created_by_user_id=admin_user.id,
+                    owner_user_id=admin_user.id,
+                    published_version=None,
+                    steps=[
+                        _build_step_with(
+                            tenant_id=admin_user.tenant_id,
+                            assistant_id=assistant.id,
+                            step_order=1,
+                            output_type=output_type,
+                            output_mode=output_mode,
+                            input_config=None,
+                        )
+                        for output_type, output_mode in steps
+                    ],
+                ),
+                tenant_id=admin_user.tenant_id,
+            )
+            for delivery, steps in (
+                (FlowOutputDelivery.PAYLOAD, [("text", "pass_through")]),
+                (FlowOutputDelivery.OUTBOUND_HTTP, [("json", "http_post")]),
+                (None, []),
+            )
+        }
 
         captured_selects: list[str] = []
 
@@ -1351,6 +1386,10 @@ async def test_flow_repository_sparse_list_derives_step_projection_in_one_batche
         assert by_id[single_json_step_flow.id].step_count == 1
         assert by_id[single_json_step_flow.id].input_type is None
         assert by_id[single_json_step_flow.id].output_type == FlowOutputType.JSON
+        assert by_id[audio_to_pdf_flow.id].delivery == FlowOutputDelivery.ARTIFACT
+        assert by_id[single_json_step_flow.id].delivery == FlowOutputDelivery.PAYLOAD
+        for delivery, flow in delivering_flows.items():
+            assert by_id[flow.id].delivery == delivery
 
         # Both repository read paths must agree on the same flow's projection,
         # since the sparse steps query reads only the runtime-input subfield
@@ -1359,6 +1398,7 @@ async def test_flow_repository_sparse_list_derives_step_projection_in_one_batche
         assert full_flow.step_count == 2
         assert full_flow.input_type == FlowRuntimeInputFormat.AUDIO
         assert full_flow.output_type == FlowOutputType.PDF
+        assert full_flow.delivery == FlowOutputDelivery.ARTIFACT
 
 
 @pytest.mark.asyncio

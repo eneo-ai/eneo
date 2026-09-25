@@ -47,7 +47,11 @@ from eneo.flows.domain.flow_run_retention_policy import (
     flow_run_retention_policy_from_storage,
     resolve_flow_run_retention_policy,
 )
-from eneo.flows.enums import final_step_output_type
+from eneo.flows.enums import (
+    FlowOutputMode,
+    final_output_delivery,
+    final_step_output_type,
+)
 from eneo.flows.flow_evidence_policy import (
     FlowEvidenceAccessContext,
     flow_metadata_marks_sensitive_or_unreadable,
@@ -93,26 +97,33 @@ _FlowReadModel = TypeVar("_FlowReadModel", Flow, FlowSparse)
 def _derived_step_projection(
     *,
     output_types: Sequence[str],
+    output_modes: Sequence[str],
     input_configs: Sequence[dict[str, Any] | None],
 ) -> dict[str, Any]:
     """Sparse list projection of a flow's steps: count, primary input, terminal output.
 
-    Both sequences must already be ordered by `step_order` ascending (every
+    All sequences must already be ordered by `step_order` ascending (every
     caller queries `FlowSteps` with that order) and have matching length, one
-    entry per step. Resolves through the flow's single output-type and
-    input-format derivations (`final_step_output_type`,
-    `primary_runtime_input_format`) so these fields can never diverge from
-    what the run contract exposes for the same flow.
+    entry per step. Resolves through the flow's single output-type, delivery
+    and input-format derivations (`final_step_output_type`,
+    `final_output_delivery`, `primary_runtime_input_format`) so these fields
+    can never diverge from what the run contract exposes for the same flow.
 
-    The result populates `FlowSparse.step_count`/`input_type`/`output_type`,
+    The result populates `FlowSparse.step_count`/`input_type`/`output_type`/`delivery`,
     which are not auto-derived from `Flow.steps` — every repository method
     that returns a persisted `Flow`/`FlowSparse` must call this with that
     flow's current steps, or the projection silently goes stale.
     """
+    output_type = final_step_output_type(list(output_types))
     return {
         "step_count": len(output_types),
         "input_type": primary_runtime_input_format(list(input_configs)),
-        "output_type": final_step_output_type(list(output_types)),
+        "output_type": output_type,
+        "delivery": None
+        if output_type is None
+        else final_output_delivery(
+            output_type=output_type, output_mode=FlowOutputMode(output_modes[-1])
+        ),
     }
 
 
@@ -348,6 +359,7 @@ class FlowRepository:
             **FlowSparse.model_validate(flow_in_db).model_dump(),
             **_derived_step_projection(
                 output_types=[step.output_type for step in steps],
+                output_modes=[step.output_mode for step in steps],
                 input_configs=[step.input_config for step in steps],
             ),
             "space_name": space_name,
@@ -451,6 +463,7 @@ class FlowRepository:
                 sa.select(
                     FlowSteps.flow_id,
                     FlowSteps.output_type,
+                    FlowSteps.output_mode,
                     FlowSteps.input_config["runtime_input"],
                 )
                 .where(FlowSteps.flow_id.in_(flow_ids))
@@ -458,16 +471,18 @@ class FlowRepository:
                 .order_by(FlowSteps.flow_id.asc(), FlowSteps.step_order.asc())
             )
         ).all()
-        step_columns_by_flow: dict[UUID, list[tuple[str, dict[str, Any] | None]]] = (
-            defaultdict(list)
-        )
+        step_columns_by_flow: dict[
+            UUID, list[tuple[str, str, dict[str, Any] | None]]
+        ] = defaultdict(list)
         for row in step_columns:
             # `primary_runtime_input_format` resolves through the same
             # step-level `build_runtime_input_config` parser used everywhere
             # else, which reads `input_config["runtime_input"]` itself — so
             # this rewraps the extracted subfield into that shape rather than
             # introducing a second, narrower parser.
-            step_columns_by_flow[row[0]].append((row[1], {"runtime_input": row[2]}))
+            step_columns_by_flow[row[0]].append(
+                (row[1], row[2], {"runtime_input": row[3]})
+            )
 
         return [
             _attach_run_history_retention(
@@ -476,13 +491,19 @@ class FlowRepository:
                         **_derived_step_projection(
                             output_types=[
                                 output_type
-                                for output_type, _ in step_columns_by_flow.get(
+                                for output_type, _, _ in step_columns_by_flow.get(
+                                    row[0].id, []
+                                )
+                            ],
+                            output_modes=[
+                                output_mode
+                                for _, output_mode, _ in step_columns_by_flow.get(
                                     row[0].id, []
                                 )
                             ],
                             input_configs=[
                                 input_config
-                                for _, input_config in step_columns_by_flow.get(
+                                for _, _, input_config in step_columns_by_flow.get(
                                     row[0].id, []
                                 )
                             ],

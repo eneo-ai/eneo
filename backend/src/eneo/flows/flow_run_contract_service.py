@@ -13,7 +13,6 @@ from eneo.flows.api.flow_live_transcription_models import (
 from eneo.flows.api.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
     FlowMaxSpeakersOptionPublic,
-    FlowOutputDelivery,
     FlowReviewStepContractPublic,
     FlowRunContractPublic,
     FlowRuntimeInputContractPublic,
@@ -39,6 +38,7 @@ from eneo.flows.enums import (
     FlowOutputType,
     FlowRuntimeInputFormat,
     FlowTemplateAssetStatus,
+    final_output_delivery,
     final_step_output_type,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -258,7 +258,9 @@ def build_final_output_contract(
         label=final_step.user_description,
         output_type=output_type,
         output_mode=output_mode,
-        delivery=_output_delivery(output_type=output_type, output_mode=output_mode),
+        delivery=final_output_delivery(
+            output_type=output_type, output_mode=output_mode
+        ),
         output_contract=final_step.output_contract,
     )
 
@@ -390,18 +392,6 @@ def _security_classification(space: Space) -> FlowSecurityClassificationPublic |
         description=classification.description,
         security_level=classification.security_level,
     )
-
-
-def _output_delivery(
-    *,
-    output_type: FlowOutputType,
-    output_mode: FlowOutputMode,
-) -> FlowOutputDelivery:
-    if output_mode is FlowOutputMode.HTTP_POST:
-        return FlowOutputDelivery.OUTBOUND_HTTP
-    if output_type in {FlowOutputType.PDF, FlowOutputType.DOCX}:
-        return FlowOutputDelivery.ARTIFACT
-    return FlowOutputDelivery.PAYLOAD
 
 
 def _published_form_fields(

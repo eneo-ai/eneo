@@ -25,7 +25,6 @@ from eneo.flows.api.flow_models import (
 )
 from eneo.flows.api.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
-    FlowOutputDelivery,
     FlowRunArtifactResultPublic,
     FlowRunFileBackedTextResultPublic,
     FlowRunInlineTextResultPublic,
@@ -54,7 +53,7 @@ from eneo.flows.domain.step_output import (
     interpret_step_text,
 )
 from eneo.flows.domain.transcript_source import TranscriptSourceReference
-from eneo.flows.enums import FlowOutputType, FlowRunStatus
+from eneo.flows.enums import FlowOutputDelivery, FlowOutputType, FlowRunStatus
 from eneo.flows.flow_run_input_envelope import (
     read_max_speakers,
     read_semantic_flow_input_payload,
