@@ -86,7 +86,14 @@ export function MainTopContent() {
   const keepDrawerOpen = useMemo(() => ({ ...mobile, closeMobileNav: () => {} }), [mobile]);
 
   return (
-    <div className={cn("flex flex-col gap-1", NAV_ITEM_CLASSES)}>
+    // The design sets "Sök" (the only button row) in secondary text.
+    <div
+      className={cn(
+        "flex flex-col gap-1",
+        NAV_ITEM_CLASSES,
+        "[&_button.astryx-side-nav-item]:text-ax-text-secondary"
+      )}
+    >
       <WithNavTarget>
         {(target) => <NewConversationButton isCurrent={target.kind === "new-conversation"} />}
       </WithNavTarget>

@@ -5,13 +5,15 @@ import { ArrowLeft } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useAppContext } from "@/components/providers/app-context";
+import { cn } from "@/lib/utils";
 import { adminNavGroups, isAdminItemActive } from "./admin-nav-items";
 import { NAV_ITEM_CLASSES } from "./nav-styles";
 
 export function AdminTopContent() {
   const t = useTranslations();
   return (
-    <div className={NAV_ITEM_CLASSES}>
+    // The way back is set apart from the admin pages: secondary, semibold.
+    <div className={cn(NAV_ITEM_CLASSES, "[&_a]:text-ax-text-secondary [&_a]:font-semibold")}>
       <SideNavItem label={t("shell_back_to_eneo")} icon={ArrowLeft} size="lg" href="/" />
     </div>
   );
