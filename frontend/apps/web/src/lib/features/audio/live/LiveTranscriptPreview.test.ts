@@ -54,7 +54,16 @@ function setup({
     context.state = state;
     context.dispatchEvent(new Event("statechange"));
   };
-  return { preview, start, createSession, addModule, source, onListening, setContextState };
+  return {
+    preview,
+    start,
+    createSession,
+    addModule,
+    source,
+    onListening,
+    context,
+    setContextState
+  };
 }
 
 // A request the test answers, so audio can arrive before it does.
@@ -454,6 +463,21 @@ describe("LiveTranscriptPreview reuse of the final text", () => {
     harness.preview.stop();
 
     await vi.waitFor(() => expect(socket.texts).toEqual([JSON.stringify({ type: "stop" })]));
+    expect(harness.preview.finishing).toBe(false);
+  });
+
+  it("is a preview only when the context stopped running before a stop that came before its event", async () => {
+    const harness = setup();
+    const { socket, node } = await listening(harness);
+    node.answersFlush = false;
+
+    // The state changes at once; the browser dispatches its event later.
+    harness.context.state = "suspended";
+    harness.preview.stop();
+    harness.context.dispatchEvent(new Event("statechange"));
+    node.post(PCM16_FLUSHED);
+
+    expect(socket.texts).toEqual([JSON.stringify({ type: "stop" })]);
     expect(harness.preview.finishing).toBe(false);
   });
 

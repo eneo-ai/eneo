@@ -202,6 +202,9 @@ export class LiveTranscriptPreview {
     if (this.#status === "idle" || this.#status === "finished") return;
     const socket = this.#socket;
     const awaitsFinalText = this.#status === "listening" && socket?.readyState === WebSocket.OPEN;
+    // The context's own state, not its event: the browser may dispatch that
+    // after this stop, which then no longer listens.
+    if (this.#context && this.#context.state !== "running") this.lose();
     // A notice about the recording going on is no longer true.
     this.#status = "finished";
     if (!socket || !awaitsFinalText) {
