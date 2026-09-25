@@ -308,5 +308,11 @@
   "file_format_group_audio": "Ljud",
   "file_format_group_other": "Övriga filer",
   "file_types_and_sizes": "Filtyper och storlekar",
-  "max_size_per_file": "upp till {size} per fil"
+  "max_size_per_file": "upp till {size} per fil",
+  "upload_files_to_collection_description": "Valda filer laddas upp till {name} och bearbetas i bakgrunden.",
+  "duplicate_files_dialog_title": "Ersätt befintliga filer?",
+  "duplicate_files_dialog_description": "Dessa filer finns redan i samlingen. Uppladdningen ersätter dem med de nya versionerna.",
+  "replace_files": "Ersätt filer",
+  "upload_dropzone_prompt": "Dra och släpp filer eller mappar här",
+  "upload_skipped_unsupported_files": "Hoppades över eftersom filtypen inte stöds: {fileList}"
 }

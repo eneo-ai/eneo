@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { AttachmentPreviewDialog, useSignedUrl } from "@/features/chat/attachments";
 import { FileFormatDetails } from "@/features/files/file-format-details";
+import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
 import { fileRestrictionsRules, planFileUploads } from "@/features/files/upload-plan";
 import { browserApi } from "@/lib/api/browser";
@@ -511,7 +512,9 @@ export function ResourceAttachmentsSection({
             onDrop={(event) => {
               event.preventDefault();
               setDragActive(false);
-              void uploadFiles(Array.from(event.dataTransfer.files));
+              void collectDroppedFiles(event.dataTransfer)
+                .then(uploadFiles)
+                .catch((error: unknown) => toastApiError(error, t));
             }}
             className={cn(
               "flex min-h-28 flex-col items-center justify-center gap-3 rounded-lg border border-dashed px-4 py-5 text-center",

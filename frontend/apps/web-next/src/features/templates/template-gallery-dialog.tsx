@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileKindIcon } from "@/features/chat/attachments";
+import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
 import { FileFormatDetails } from "@/features/files/file-format-details";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
 import { planFileUploads, type FileUploadRules } from "@/features/files/upload-plan";
@@ -227,7 +228,16 @@ function TemplateWizard({
           badge={wizard.attachments.required ? t("required") : undefined}
         >
           {wizard.attachments.required ? (
-            <div className="flex flex-col gap-3">
+            <div
+              className="flex flex-col gap-3 rounded-lg border-2 border-dashed p-4"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                void collectDroppedFiles(event.dataTransfer)
+                  .then(onAddFiles)
+                  .catch(() => toast.error(t("file_upload_error")));
+              }}
+            >
               <input
                 ref={fileInputRef}
                 type="file"
@@ -240,6 +250,7 @@ function TemplateWizard({
                 }}
               />
               <TemplateAttachmentList attachments={attachments} onRemove={onRemoveAttachment} />
+              <p className="text-muted-foreground text-sm">{t("upload_dropzone_prompt")}</p>
               <Button
                 type="button"
                 variant="outline"

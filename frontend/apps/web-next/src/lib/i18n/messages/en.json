@@ -4822,5 +4822,11 @@
   "file_format_group_audio": "Audio",
   "file_format_group_other": "Other files",
   "file_types_and_sizes": "File types and sizes",
-  "max_size_per_file": "up to {size} per file"
+  "max_size_per_file": "up to {size} per file",
+  "upload_files_to_collection_description": "Selected files are uploaded to {name} and processed in the background.",
+  "duplicate_files_dialog_title": "Replace existing files?",
+  "duplicate_files_dialog_description": "These files already exist in the collection. Uploading will replace them with the new versions.",
+  "replace_files": "Replace files",
+  "upload_dropzone_prompt": "Drag and drop files or folders here",
+  "upload_skipped_unsupported_files": "Skipped because the file type is not supported: {fileList}"
 }

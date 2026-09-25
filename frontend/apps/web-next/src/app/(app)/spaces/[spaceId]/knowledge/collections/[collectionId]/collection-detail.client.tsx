@@ -41,6 +41,7 @@ export function CollectionDetail({ collectionId }: { collectionId: string }) {
           <AddTextDialog collectionId={collection.id} disabled={readonly || modelDisabled} />
           <UploadBlobsDialog
             collectionId={collection.id}
+            collectionName={collection.name}
             currentBlobs={blobs}
             disabled={readonly || modelDisabled}
           />
