@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type APIRequestContext, type Browser, type Page } from "@playwright/test";
 import { BACKEND_URL, backendFetch, expectOk, loginViaUi, uniqueName } from "./helpers";
@@ -10,6 +11,11 @@ import { BACKEND_URL, backendFetch, expectOk, loginViaUi, uniqueName } from "./h
 // the admin reviews without joining and activates exactly what they saw.
 
 const PASSWORD = "E2eOversightPassword1!";
+const LATEST_RELEASE = (
+  JSON.parse(
+    readFileSync(new URL("../../../packages/whats-new/releases.json", import.meta.url), "utf8")
+  ) as { releases: { version: string }[] }
+).releases[0].version;
 
 type Person = { id: string; email: string; token: string };
 type FetchOptions = Parameters<APIRequestContext["fetch"]>[1];
@@ -66,11 +72,22 @@ async function createPerson(
     form: { username: email, password: PASSWORD }
   });
   await expectOk(login, `signing in ${email}`);
-  return {
+  const person: Person = {
     id: (await created.json()).id,
     email,
     token: (await login.json()).access_token
   };
+  // The first page after sign-in announces the newest release and records it
+  // while the test may already be navigating, so the dialog can reopen over
+  // the next page and block its clicks. Record it before they sign in.
+  await expectOk(
+    await fetchAs(person, request, "/api/v1/whats-new/announced/", {
+      method: "PUT",
+      data: { version: LATEST_RELEASE }
+    }),
+    `recording the release announcement for ${email}`
+  );
+  return person;
 }
 
 function fetchAs(
