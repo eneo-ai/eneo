@@ -631,15 +631,69 @@ async def test_usage_is_suppressed_below_five_active_users(client, admin, overse
         "questions": None,
         "app_runs": None,
         "active_users": None,
-        "widget_questions": 0,
+        # The only widget has never been active.
+        "widget_questions": None,
         "last_activity": "past_week",
         "knowledge_bytes": 0,
     }
 
+    # Five people asked, one ran the app: that one person's run stays hidden.
     await insert_question(tenant_id, assistant, user_id=users[4])
     usage = (await _detail(client, overseer, space_id))["usage"]
+    assert usage["suppressed"] is True
+    assert (usage["questions"], usage["app_runs"], usage["active_users"]) == (
+        5,
+        None,
+        5,
+    )
+
+    for user in users[1:]:
+        await execute(
+            "INSERT INTO app_runs (tenant_id, user_id, app_id, completion_model_id)"
+            " VALUES (:t, :u, :a, :m)",
+            t=tenant_id,
+            u=user,
+            a=app_id,
+            m=await _completion_model(tenant_id),
+        )
+    usage = (await _detail(client, overseer, space_id))["usage"]
     assert usage["suppressed"] is False
-    assert (usage["questions"], usage["app_runs"], usage["active_users"]) == (5, 1, 5)
+    assert (usage["questions"], usage["app_runs"], usage["active_users"]) == (5, 5, 5)
+
+
+async def test_one_persons_count_is_hidden_next_to_four_others(client, admin, overseer):
+    """Four people run the app and one asks seven questions: five active
+    users, but the question count is that one person's."""
+    _, tenant_id = await admin_row()
+    space_id = await create_space(client, admin.token)
+    assistant = await insert_assistant(space_id, admin.id)
+    users = [await insert_user(tenant_id) for _ in range(5)]
+    for _ in range(7):
+        await insert_question(tenant_id, assistant, user_id=users[0])
+    app_id = uuid4()
+    await execute(
+        "INSERT INTO apps (id, name, tenant_id, user_id, space_id, published)"
+        " VALUES (:id, 'Transkribering', :t, :u, :s, false)",
+        id=app_id,
+        t=tenant_id,
+        u=admin.id,
+        s=space_id,
+    )
+    for user in users[1:]:
+        await execute(
+            "INSERT INTO app_runs (tenant_id, user_id, app_id, completion_model_id)"
+            " VALUES (:t, :u, :a, :m)",
+            t=tenant_id,
+            u=user,
+            a=app_id,
+            m=await _completion_model(tenant_id),
+        )
+
+    usage = (await _detail(client, overseer, space_id))["usage"]
+    assert usage["active_users"] == 5
+    assert usage["questions"] is None
+    assert usage["app_runs"] is None
+    assert usage["suppressed"] is True
 
 
 async def test_last_activity_is_only_a_bucket(client, admin, overseer):
@@ -660,14 +714,48 @@ async def test_last_activity_is_only_a_bucket(client, admin, overseer):
         created_at=days_ago(120),
     )
 
+    # Spaces used only through an app: runs before the 90-day app-run window
+    # still tell an old space from one never used.
+    app_spaces = {}
+    for label, age in (("app_recent", 45), ("app_old", 120), ("app_unused", None)):
+        app_spaces[label] = await create_space(client, admin.token)
+        app_id = uuid4()
+        await execute(
+            "INSERT INTO apps (id, name, tenant_id, user_id, space_id, published)"
+            " VALUES (:id, 'Transkribering', :t, :u, :s, false)",
+            id=app_id,
+            t=tenant_id,
+            u=admin.id,
+            s=app_spaces[label],
+        )
+        if age is not None:
+            await execute(
+                "INSERT INTO app_runs (tenant_id, user_id, app_id,"
+                " completion_model_id, created_at) VALUES (:t, :u, :a, :m, :c)",
+                t=tenant_id,
+                u=admin.id,
+                a=app_id,
+                m=await _completion_model(tenant_id),
+                c=days_ago(age),
+            )
+
     items = await _items(client, overseer)
     assert [items[space]["last_activity"] for space in (idle, quiet, dormant)] == [
         "none",
         "past_quarter",
         "older",
     ]
+    assert {
+        label: items[space]["last_activity"] for label, space in app_spaces.items()
+    } == {
+        "app_recent": "past_quarter",
+        "app_old": "older",
+        "app_unused": "none",
+    }
     detail = await _detail(client, overseer, quiet)
     assert detail["usage"]["last_activity"] == "past_quarter"
+    detail = await _detail(client, overseer, app_spaces["app_old"])
+    assert detail["usage"]["last_activity"] == "older"
 
 
 async def test_usage_counts_widget_questions_separately(client, admin, overseer):
@@ -694,10 +782,97 @@ async def test_usage_counts_widget_questions_separately(client, admin, overseer)
             q=questions,
         )
 
+    # Only the editors test a widget that has never been active.
     usage = (await _detail(client, overseer, space_id))["usage"]
-    # Anonymous visitors identify no one, so their count is never withheld.
+    assert usage["widget_questions"] is None
+
+    await execute(
+        "UPDATE widgets SET status = 'paused', activated_at = now() - interval"
+        " '5 days', paused_at = now() WHERE id = :w",
+        w=widget,
+    )
+    draft = await insert_widget(
+        tenant_id, space_id, await insert_assistant(space_id, admin.id)
+    )
+    await execute(
+        "INSERT INTO widget_daily_usage (widget_id, day, questions)"
+        " VALUES (:w, :d, 23)",
+        w=draft,
+        d=days_ago(0).date(),
+    )
+    usage = (await _detail(client, overseer, space_id))["usage"]
+    # Not held to the threshold of signed-in people; the draft's tests are
+    # left out.
     assert usage["suppressed"] is True
     assert usage["widget_questions"] == 10
+
+
+async def test_an_assistant_lists_every_widget_it_serves(client, admin, overseer):
+    _, tenant_id = await admin_row()
+    space_id = await create_space(client, admin.token)
+    assistant = await insert_assistant(space_id, admin.id)
+    other = await insert_assistant(space_id, admin.id)
+    ids = {
+        name: await insert_widget(
+            tenant_id, space_id, assistant, name=name, status=status
+        )
+        for name, status in (
+            ("Alfa", "draft"),
+            ("Beta", "active"),
+            ("Gamma", "paused"),
+            ("Delta", "archived"),
+            ("Epsilon", "active"),
+        )
+    }
+
+    detail = await _detail(client, overseer, space_id)
+    cards = {card["id"]: card for card in detail["assistants"]}
+    # An active widget never hides behind a draft that sorts after it.
+    assert [(w["name"], w["status"]) for w in cards[str(assistant)]["widgets"]] == [
+        ("Beta", "active"),
+        ("Epsilon", "active"),
+        ("Gamma", "paused"),
+        ("Alfa", "draft"),
+    ]
+    assert cards[str(assistant)]["widgets"][0]["id"] == str(ids["Beta"])
+    assert cards[str(other)]["widgets"] == []
+
+
+async def test_change_times_of_knowledge_and_assistants_are_days(
+    client, admin, overseer
+):
+    """A late-night upload in a one-person space shows as a day, not as the
+    minute that person worked."""
+    _, tenant_id = await admin_row()
+    space_id = await create_space(client, admin.token)
+    assistant = await insert_assistant(space_id, admin.id)
+    collection = uuid4()
+    await execute(
+        "INSERT INTO groups (id, name, tenant_id, user_id, space_id, size,"
+        " updated_at) VALUES (:id, 'Samling', :t, :u, :s, 0,"
+        " '2026-09-24 23:41:07+00')",
+        id=collection,
+        t=tenant_id,
+        u=admin.id,
+        s=space_id,
+    )
+    await execute(
+        "UPDATE assistants SET updated_at = '2026-09-25 01:41:07+02' WHERE id = :a",
+        a=assistant,
+    )
+
+    detail = await _detail(client, overseer, space_id)
+    (card,) = [a for a in detail["assistants"] if a["id"] == str(assistant)]
+    assert card["updated_at"] == "2026-09-24"
+    (source,) = detail["knowledge"]
+    assert source["updated_at"] == "2026-09-24"
+
+    widget = await insert_widget(tenant_id, space_id, assistant)
+    resp = await client.get(
+        f"/api/v1/admin/widgets/{widget}/", headers=overseer.headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["target"]["assistant"]["updated_at"] == "2026-09-24"
 
 
 # --- member management --------------------------------------------------------

@@ -93,8 +93,8 @@ _ASSISTANT = frozenset(
         "insight_enabled",
         "logging_enabled",
         "data_retention_days",
-        "widget",
-        *_nested("widget", _WIDGET_REF),
+        "widgets",
+        *_nested("widgets", _WIDGET_REF),
     }
 )
 # Document counts and sizes, never titles; whether a login is set, never the

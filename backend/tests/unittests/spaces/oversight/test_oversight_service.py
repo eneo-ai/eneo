@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
@@ -36,6 +37,7 @@ from eneo.spaces.oversight.oversight_repo import (
     MemberAggregate,
     SharedSpaceRow,
     SpaceMembership,
+    SpaceOversightRepo,
     SpaceSettingsRows,
     UsageCounts,
 )
@@ -46,6 +48,19 @@ EDITOR = SpaceRoleValue.EDITOR
 VIEWER = SpaceRoleValue.VIEWER
 REASON = "Ärende KS 2026/123 – kontroll av underlag"
 NOW = datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
+
+
+def _usage(**counts: Any) -> UsageCounts:
+    defaults: dict[str, Any] = {
+        "questions": 40,
+        "question_users": 5,
+        "app_runs": 12,
+        "app_run_users": 5,
+        "active_users": 6,
+        "widget_questions": 7,
+        "has_been_public": True,
+    }
+    return UsageCounts(**{**defaults, **counts})
 
 
 class _FakeRepo:
@@ -71,12 +86,12 @@ class _FakeRepo:
         self.groups: dict[UUID, GroupMemberRow] = {}
         self.group_users: dict[UUID, frozenset[UUID]] = {}
         self.locks: list[UUID] = []
+        # "lock" and "read" in the order the service asked for them.
+        self.calls: list[str] = []
         self.writes: list[tuple] = []
         self.assistant_ids = [uuid4()]
         self.app_ids = [uuid4()]
-        self.usage_counts = UsageCounts(
-            questions=40, app_runs=3, active_users=5, widget_questions=7
-        )
+        self.usage_counts = _usage()
 
     # people and rows
 
@@ -121,9 +136,11 @@ class _FakeRepo:
             raise NotFoundException("Space not found")
         if lock:
             self.locks.append(space_id)
+            self.calls.append("lock")
         return self.space
 
     async def membership(self, tenant_id, space_id, *, extra_group_ids=()):
+        self.calls.append("read")
         wanted = {g for g, row in self.groups.items() if row.role == ADMIN}
         wanted |= set(extra_group_ids)
         by_group = {g: self._manageable(g) for g in wanted if self._manageable(g)}
@@ -465,7 +482,15 @@ async def test_adding_an_existing_member_or_group_conflicts():
         await h.service.add_member(h.space_id, person, EDITOR)
     with pytest.raises(SpaceAlreadyMemberError):
         await h.service.add_group(h.space_id, group, VIEWER)
+    # Your own group already in the space is a conflict too, not a
+    # self-escalation, whatever role is asked for.
+    own_group = h.repo.group(VIEWER, h.actor_id)
+    h.user.user_groups_ids = {own_group}
+    for role in (VIEWER, ADMIN):
+        with pytest.raises(SpaceAlreadyMemberError):
+            await h.service.add_group(h.space_id, own_group, role)
     h.audit_service.log_required.assert_not_awaited()
+    assert [write for write in h.repo.writes if write[0] == "insert_group"] == []
 
 
 async def test_unknown_users_groups_and_rows_are_not_found():
@@ -782,39 +807,115 @@ async def test_group_changes_are_audited_with_the_group():
     h.revoker.revoke_member_keys.assert_not_awaited()
 
 
-async def test_every_change_locks_the_space_row():
+def _mutations() -> dict[str, Callable[[_Harness], Awaitable[Any]]]:
+    def member(h: _Harness) -> UUID:
+        person = h.repo.person()
+        h.repo.member(person, VIEWER)
+        return person
+
+    def group(h: _Harness, *, in_space: bool = True) -> UUID:
+        return h.repo.group(VIEWER, h.repo.person(), member=in_space)
+
+    async def leave(h: _Harness) -> Any:
+        h.repo.member(h.actor_id, VIEWER)
+        return await h.service.leave(h.space_id)
+
+    return {
+        "M1 add member": lambda h: h.service.add_member(
+            h.space_id, h.repo.person(), VIEWER
+        ),
+        "M2 change member role": lambda h: h.service.change_member_role(
+            h.space_id, member(h), EDITOR
+        ),
+        "M3 remove member": lambda h: h.service.remove_member(h.space_id, member(h)),
+        "M4 add group": lambda h: h.service.add_group(
+            h.space_id, group(h, in_space=False), VIEWER
+        ),
+        "M5 change group role": lambda h: h.service.change_group_role(
+            h.space_id, group(h), EDITOR
+        ),
+        "M6 remove group": lambda h: h.service.remove_group(h.space_id, group(h)),
+        "M7 join": lambda h: h.service.join(h.space_id, VIEWER, REASON),
+        "M8 leave": leave,
+    }
+
+
+@pytest.mark.parametrize("mutation", list(_mutations()))
+async def test_every_change_locks_the_space_row_before_reading_members(mutation):
     h = _Harness()
     h.with_admin()
-    person = h.repo.person()
-    await h.service.add_member(h.space_id, person, VIEWER)
-    await h.service.remove_member(h.space_id, person)
-    await h.service.join(h.space_id, VIEWER, REASON)
-    await h.service.leave(h.space_id)
-    assert h.repo.locks == [h.space_id] * 4
+    await _mutations()[mutation](h)
+    assert h.repo.locks == [h.space_id]
+    # Guards judge members read under the lock, never a snapshot from before.
+    assert h.repo.calls[0] == "lock"
+    assert "read" in h.repo.calls
+    assert len(h.audited()) == 1
+
+
+async def test_the_space_lock_is_for_no_key_update_on_the_space_row():
+    """FOR NO KEY UPDATE serialises member writes without blocking the
+    FOR KEY SHARE that foreign-key inserts into the space take."""
+    statements: list[Any] = []
+
+    class _Session:
+        async def execute(self, statement):
+            statements.append(statement)
+            return SimpleNamespace(
+                tuples=lambda: SimpleNamespace(one_or_none=lambda: None)
+            )
+
+    repo = SpaceOversightRepo(_Session())  # type: ignore[arg-type]
+    for lock in (True, False):
+        with pytest.raises(NotFoundException):
+            await repo.shared_space(uuid4(), uuid4(), lock=lock)
+    locked, plain = (
+        str(statement.compile(dialect=postgresql.dialect())) for statement in statements
+    )
+    assert locked.rstrip().endswith("FOR NO KEY UPDATE OF spaces")
+    assert "FOR " not in plain
 
 
 # --- usage --------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("active_users", "suppressed"), [(4, True), (5, False)])
-async def test_usage_is_withheld_below_five_active_users(active_users, suppressed):
+@pytest.mark.parametrize(
+    ("people", "shown"),
+    [
+        # (asked, ran apps, active) -> (questions, app runs, active users)
+        ((5, 5, 6), (40, 12, 6)),
+        ((4, 5, 6), (None, 12, 6)),
+        ((5, 1, 5), (40, None, 5)),
+        ((0, 0, 0), (None, None, None)),
+        ((4, 4, 5), (None, None, 5)),
+        ((4, 4, 4), (None, None, None)),
+    ],
+)
+async def test_each_usage_count_is_withheld_below_five_people_behind_it(people, shown):
     h = _Harness()
     h.with_admin()
-    h.repo.usage_counts = UsageCounts(
-        questions=40, app_runs=3, active_users=active_users, widget_questions=7
+    question_users, app_run_users, active_users = people
+    h.repo.usage_counts = _usage(
+        question_users=question_users,
+        app_run_users=app_run_users,
+        active_users=active_users,
     )
     usage = (await h.service.get_space(h.space_id)).usage
-    assert usage.suppressed is suppressed
-    if suppressed:
-        assert (usage.questions, usage.app_runs, usage.active_users) == (
-            None,
-            None,
-            None,
-        )
-    else:
-        assert (usage.questions, usage.app_runs, usage.active_users) == (40, 3, 5)
-    # Anonymous widget questions carry no identity and are never withheld.
+    assert (usage.questions, usage.app_runs, usage.active_users) == shown
+    assert usage.suppressed is (None in shown)
     assert usage.widget_questions == 7
+
+
+@pytest.mark.parametrize(("has_been_public", "expected"), [(True, 7), (False, None)])
+async def test_widget_questions_are_withheld_until_a_widget_has_been_active(
+    has_been_public, expected
+):
+    h = _Harness()
+    h.with_admin()
+    h.repo.usage_counts = _usage(has_been_public=has_been_public)
+    usage = (await h.service.get_space(h.space_id)).usage
+    assert usage.widget_questions == expected
+    # Not a threshold: the flag is about the counts of signed-in people.
+    assert usage.suppressed is False
 
 
 async def test_the_detail_flags_a_space_without_an_admin():

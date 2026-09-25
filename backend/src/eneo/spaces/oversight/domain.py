@@ -14,12 +14,13 @@ from uuid import UUID
 
 from eneo.spaces.api.space_models import SpaceRoleValue
 
-# Fewer distinct signed-in users than this in the usage window and the
-# usage counts are withheld: in a tiny space they describe one person's work.
+# A usage count is withheld when fewer distinct signed-in people than this
+# contributed to it in the window: then it describes one person's work.
 K_ANONYMITY_THRESHOLD = 5
 USAGE_WINDOW_DAYS = 30
-# App runs have no index on app_id, so the last-activity probe only looks this
-# far back in the tenant-wide app run index.
+# App runs have no index on app_id, so the latest app run is only looked up
+# this far back in the tenant-wide app run index; before it, only whether a
+# run exists. Equal to the oldest bucket's bound, so either reads as older.
 APP_RUN_ACTIVITY_WINDOW_DAYS = 90
 # How long a space's members see that an administrator joined through
 # oversight, counted from when the visit ended.
@@ -52,6 +53,13 @@ def bucket_for(timestamp: Optional[datetime], now: datetime) -> ActivityBucket:
     if age <= timedelta(days=90):
         return "past_quarter"
     return "older"
+
+
+def count_if_enough_people(count: int, people: int) -> Optional[int]:
+    """The count, or None when fewer than K_ANONYMITY_THRESHOLD people are
+    behind it. Each count is judged by its own contributors: a combined
+    figure would publish one person's count next to four others'."""
+    return count if people >= K_ANONYMITY_THRESHOLD else None
 
 
 def higher_role(

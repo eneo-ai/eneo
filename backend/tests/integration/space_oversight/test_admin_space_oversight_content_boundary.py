@@ -277,8 +277,8 @@ async def _seed_content(
         mcp_server_id=mcp_server,
     )
 
-    # Conversations: five people, so usage is not withheld and every count
-    # the detail returns is computed from these rows.
+    # Conversations: five people, so the question count is not withheld and
+    # is computed from these rows.
     for index in range(5):
         user = await insert_user(tenant_id)
         await insert_question(
@@ -413,8 +413,11 @@ async def test_oversight_never_returns_content(client, admin, overseer, make_per
     assert len(knowledge) == 7
     assert detail["inherited_knowledge_count"] == 1
     assert detail["usage"]["knowledge_bytes"] == 70
-    assert detail["usage"]["suppressed"] is False
     assert detail["usage"]["questions"] == 5
+    assert detail["usage"]["active_users"] == 6
+    # One person ran the app: that count is withheld on its own.
+    assert detail["usage"]["app_runs"] is None
+    assert detail["usage"]["suppressed"] is True
     assert detail["group_chats"][0]["assistant_count"] == 1
 
     listed = json.loads(bodies["session GET /api/v1/admin/spaces/"])

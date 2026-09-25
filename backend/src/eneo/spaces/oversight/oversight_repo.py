@@ -127,6 +127,13 @@ _UPDATE_INTERVALS: frozenset[str] = frozenset(
 )
 _CAPABILITIES: frozenset[str] = frozenset({"web_search", "image_generation"})
 _INTEGRATION_TYPES: frozenset[str] = frozenset({"sharepoint", "confluence"})
+# The status that matters most first; sorted() keeps the name order within.
+_WIDGET_STATUS_ORDER: Mapping[WidgetStatus, int] = {
+    WidgetStatus.ACTIVE: 0,
+    WidgetStatus.PAUSED: 1,
+    WidgetStatus.DRAFT: 2,
+    WidgetStatus.ARCHIVED: 3,
+}
 # Website.is_auto_disabled: crawling was switched off after this many failures.
 _AUTO_DISABLE_FAILURES = 10
 
@@ -390,9 +397,14 @@ class AssistantConfig:
 @dataclass(frozen=True)
 class UsageCounts:
     questions: int
+    # Distinct signed-in people behind each count.
+    question_users: int
     app_runs: int
+    app_run_users: int
     active_users: int
+    # Questions through widgets that have been active at some point.
     widget_questions: int
+    has_been_public: bool
 
 
 class SpaceOversightRepo:
@@ -859,6 +871,7 @@ class SpaceOversightRepo:
         """The latest question or app run per space. The value is reduced to
         a bucket by the caller and never leaves the service."""
         scope = _scope(tenant_id, space_id)
+        window_start = now - timedelta(days=APP_RUN_ACTIVITY_WINDOW_DAYS)
         # One index probe per assistant (idx_questions_assistant_created).
         # No helper-run exclusion: help assistants live only in the
         # organisation space, which oversight never lists.
@@ -887,15 +900,34 @@ class SpaceOversightRepo:
             .join(Apps, Apps.id == AppRuns.app_id)
             .where(
                 AppRuns.tenant_id == tenant_id,
-                AppRuns.created_at
-                >= now - timedelta(days=APP_RUN_ACTIVITY_WINDOW_DAYS),
+                AppRuns.created_at >= window_start,
                 Apps.space_id.in_(scope),
             )
             .group_by(Apps.space_id)
         )
+        # Whether an app ran before the window at all, so a space used only
+        # through apps long ago reads as older rather than as never used.
+        # EXISTS stops at the first older run; the time is past the window,
+        # which is all the bucket needs.
+        before_window = sa.cast(
+            sa.literal(window_start - timedelta(days=1)),
+            sa.DateTime(timezone=True),
+        )
+        older_app_runs = sa.select(
+            Apps.space_id.label("space_id"), before_window.label("at")
+        ).where(
+            Apps.space_id.in_(scope),
+            sa.exists().where(
+                AppRuns.tenant_id == tenant_id,
+                AppRuns.app_id == Apps.id,
+                AppRuns.created_at < window_start,
+            ),
+        )
         latest: dict[UUID, datetime] = {}
         for space, at in (
-            await self.session.execute(sa.union_all(questions, app_runs))
+            await self.session.execute(
+                sa.union_all(questions, app_runs, older_app_runs)
+            )
         ).tuples():
             if space is None or at is None:
                 continue
@@ -1608,11 +1640,11 @@ class SpaceOversightRepo:
                 space_id,
                 target_ids=[row[0] for row in assistant_rows],
             )
-        widget_by_assistant = {
-            widget.assistant.id: widget
-            for widget in widgets
-            if widget.assistant is not None
-        }
+        # Nothing makes a widget the only one of its assistant.
+        widgets_by_assistant: dict[UUID, list[AdminSpaceWidgetRef]] = defaultdict(list)
+        for widget in sorted(widgets, key=lambda w: _WIDGET_STATUS_ORDER[w.status]):
+            if widget.assistant is not None:
+                widgets_by_assistant[widget.assistant.id].append(widget)
 
         configs: list[AssistantConfig] = []
         for (
@@ -1655,7 +1687,7 @@ class SpaceOversightRepo:
                         insight_enabled=insight_enabled,
                         logging_enabled=logging_enabled,
                         data_retention_days=retention,
-                        widget=widget_by_assistant.get(id),
+                        widgets=widgets_by_assistant.get(id, []),
                     ),
                     visitor_mcp_servers=visitor_mcp.get(id, []),
                 )
@@ -1955,8 +1987,10 @@ class SpaceOversightRepo:
     async def usage(
         self, tenant_id: UUID, space_id: UUID, *, now: datetime
     ) -> UsageCounts:
-        """Questions from signed-in users, app runs and distinct active users
-        in the window, plus anonymous widget questions."""
+        """Questions from signed-in users, app runs and the distinct people
+        behind each in the window, plus widget questions. Questions to a
+        widget that has never been active are left out: they are its
+        editors' tests."""
         scope = _space_ids(tenant_id, space_id)
         since = now - timedelta(days=USAGE_WINDOW_DAYS)
         # No join to users: that would silently drop widget and API-key
@@ -1988,28 +2022,50 @@ class SpaceOversightRepo:
             sa.select(app_runs.c.user_id).where(app_runs.c.user_id.is_not(None)),
         ).subquery("active_users")
         first_day = (now - timedelta(days=USAGE_WINDOW_DAYS - 1)).date()
+        # Kept through pause and archive: the widget has faced the public.
+        has_been_public = sa.and_(
+            Widgets.tenant_id == tenant_id,
+            Widgets.space_id.in_(scope),
+            Widgets.activated_at.is_not(None),
+        )
         widget_questions = (
             sa.select(sa.func.coalesce(sa.func.sum(WidgetDailyUsage.questions), 0))
             .join(Widgets, Widgets.id == WidgetDailyUsage.widget_id)
-            .where(
-                Widgets.tenant_id == tenant_id,
-                Widgets.space_id.in_(scope),
-                WidgetDailyUsage.day >= first_day,
-            )
+            .where(has_been_public, WidgetDailyUsage.day >= first_day)
             .scalar_subquery()
         )
+
+        def distinct_users(source: Any) -> Any:
+            return (
+                sa.select(sa.func.count(sa.distinct(source.c.user_id)))
+                .select_from(source)
+                .scalar_subquery()
+            )
+
         stmt = sa.select(
             sa.select(sa.func.count()).select_from(questions).scalar_subquery(),
+            distinct_users(questions),
             sa.select(sa.func.count()).select_from(app_runs).scalar_subquery(),
+            distinct_users(app_runs),
             sa.select(sa.func.count()).select_from(active).scalar_subquery(),
             widget_questions,
+            sa.exists().where(has_been_public),
         )
-        question_count, app_run_count, active_users, widget_count = (
-            (await self.session.execute(stmt)).tuples().one()
-        )
+        (
+            question_count,
+            question_users,
+            app_run_count,
+            app_run_users,
+            active_users,
+            widget_count,
+            public,
+        ) = (await self.session.execute(stmt)).tuples().one()
         return UsageCounts(
             questions=int(question_count or 0),
+            question_users=int(question_users or 0),
             app_runs=int(app_run_count or 0),
+            app_run_users=int(app_run_users or 0),
             active_users=int(active_users or 0),
             widget_questions=int(widget_count or 0),
+            has_been_public=bool(public),
         )

@@ -25,13 +25,13 @@ from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.spaces.oversight.domain import (
-    K_ANONYMITY_THRESHOLD,
     MANAGEABLE_USER_STATES,
     DirectMembership,
     GroupMembership,
     MembershipSnapshot,
     bucket_for,
     can_leave,
+    count_if_enough_people,
     direct_role,
     effective_role,
     group_role,
@@ -399,7 +399,9 @@ class SpaceOversightService:
         usage = await self.repo.usage(tenant_id, space_id, now=now)
         activity = await self.repo.last_activity(tenant_id, now, space_id)
 
-        suppressed = usage.active_users < K_ANONYMITY_THRESHOLD
+        questions = count_if_enough_people(usage.questions, usage.question_users)
+        app_runs = count_if_enough_people(usage.app_runs, usage.app_run_users)
+        active_users = count_if_enough_people(usage.active_users, usage.active_users)
         attention: list[AttentionReason] = []
         if not members.admins.manageable:
             attention.append("no_admin")
@@ -422,11 +424,13 @@ class SpaceOversightService:
                 data_retention_days=space.data_retention_days,
             ),
             usage=AdminSpaceUsage(
-                suppressed=suppressed,
-                questions=None if suppressed else usage.questions,
-                app_runs=None if suppressed else usage.app_runs,
-                active_users=None if suppressed else usage.active_users,
-                widget_questions=usage.widget_questions,
+                suppressed=None in (questions, app_runs, active_users),
+                questions=questions,
+                app_runs=app_runs,
+                active_users=active_users,
+                widget_questions=(
+                    usage.widget_questions if usage.has_been_public else None
+                ),
                 last_activity=bucket_for(activity.get(space_id), now),
                 knowledge_bytes=sum(source.size_bytes for source in knowledge),
             ),
@@ -563,6 +567,9 @@ class SpaceOversightService:
         membership = await self.repo.membership(
             self._tenant_id, space_id, extra_group_ids=[group_id]
         )
+        # Before the guards: they judge an after-state that replaces the row.
+        if membership.group(group_id) is not None:
+            raise SpaceAlreadyMemberError()
         before = membership.snapshot
         after = before.with_group(
             group_id,

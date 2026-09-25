@@ -850,5 +850,6 @@ async def test_space_oversight_usage_excludes_helper(db_container, admin_user):
 
         detail = await container.space_oversight_service().get_space(shared_space)
 
-    assert detail.usage.suppressed is False
     assert (detail.usage.questions, detail.usage.active_users) == (5, 5)
+    # Nobody ran an app: that count stays withheld on its own.
+    assert detail.usage.app_runs is None

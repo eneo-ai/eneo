@@ -312,20 +312,29 @@ async def insert_widget(
     *,
     requested_by: Optional[UUID] = None,
     status: str = "draft",
+    activated: Optional[bool] = None,
+    name: str = "Webbchatt",
 ) -> UUID:
+    """``activated`` records an activation; by default an active or paused
+    widget has one and a draft has not."""
     widget_id = uuid4()
+    if activated is None:
+        activated = status in ("active", "paused")
     await execute(
         "INSERT INTO widgets (id, public_id, tenant_id, space_id, target_type,"
-        " target_id, name, status, activation_requested_at,"
+        " target_id, name, status, activated_at, activation_requested_at,"
         " activation_requested_by_user_id)"
-        " VALUES (:id, :p, :t, :s, 'assistant', :a, 'Webbchatt', :st,"
+        " VALUES (:id, :p, :t, :s, 'assistant', :a, :name, :st,"
+        " CASE WHEN :activated THEN now() ELSE NULL END,"
         " CASE WHEN CAST(:r AS uuid) IS NULL THEN NULL ELSE now() END, :r)",
         id=widget_id,
         p=generate_public_id(),
         t=tenant_id,
         s=str(space_id),
         a=str(assistant_id),
+        name=name,
         st=status,
+        activated=activated,
         r=requested_by,
     )
     return widget_id
