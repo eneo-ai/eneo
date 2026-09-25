@@ -33,6 +33,7 @@ import {
   staticCatalogModels
 } from "./model-catalog";
 import { providerCapabilitiesQueryOptions } from "./model-providers";
+import { useModelTypeLabel } from "./model-type-label";
 import { createTenantModel, MODELS_KEY, type ModelKind, validateProviderModel } from "./models";
 
 function CapabilityIcons({ model }: { model: CatalogModel }) {
@@ -84,6 +85,7 @@ export function ModelCatalogStep({
   onBack: () => void;
 }) {
   const t = useTranslations();
+  const typeLabel = useModelTypeLabel();
   const queryClient = useQueryClient();
 
   const capsQuery = useQuery(providerCapabilitiesQueryOptions(browserApi));
@@ -301,7 +303,7 @@ export function ModelCatalogStep({
             <SelectContent>
               {modes.map((supportedMode) => (
                 <SelectItem key={supportedMode} value={supportedMode}>
-                  {t(`${supportedMode}_models`)}
+                  {typeLabel(supportedMode)}
                 </SelectItem>
               ))}
             </SelectContent>

@@ -21,6 +21,7 @@ import { LoadingState } from "@/components/composites/loading-state";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
 import { formatDateTime } from "@/lib/format";
+import { useModelTypeLabel } from "./model-type-label";
 import { type ModelMigrationHistory, migrationHistoryQueryOptions } from "./models";
 
 type TypeFilter = "all" | "completion" | "transcription";
@@ -49,6 +50,7 @@ const STATUS_TONE: Record<string, StatusTone> = {
  */
 export function MigrationHistoryPanel() {
   const t = useTranslations();
+  const typeLabel = useModelTypeLabel();
   const { data, isPending, isError, refetch } = useQuery(migrationHistoryQueryOptions(browserApi));
   const [search, setSearch] = useState("");
   const [type, setType] = useState<TypeFilter>("all");
@@ -113,8 +115,8 @@ export function MigrationHistoryPanel() {
           isLabelHidden
           options={[
             { value: "all", label: t("filter_all") },
-            { value: "completion", label: t("completion_models") },
-            { value: "transcription", label: t("transcription_models") }
+            { value: "completion", label: typeLabel("completion") },
+            { value: "transcription", label: typeLabel("transcription") }
           ]}
           value={type}
           onChange={(value) => setType(value as TypeFilter)}
@@ -209,7 +211,7 @@ export function MigrationHistoryPanel() {
                       />
                     </TableCell>
                   </TableRow>
-                  {open && <DetailRow id={detailId} row={row} t={t} />}
+                  {open && <DetailRow id={detailId} row={row} t={t} typeLabel={typeLabel} />}
                 </Fragment>
               );
             })}
@@ -225,11 +227,13 @@ const DETAIL_STATUS_KEYS = new Set(["completed", "failed", "in_progress"]);
 function DetailRow({
   id,
   row,
-  t
+  t,
+  typeLabel
 }: {
   id: string;
   row: ModelMigrationHistory;
   t: ReturnType<typeof useTranslations>;
+  typeLabel: ReturnType<typeof useModelTypeLabel>;
 }) {
   const details = Object.entries(row.migration_details ?? {}).filter(
     ([key, value]) => key !== "total" && value > 0 && key in DETAIL_LABELS
@@ -243,7 +247,7 @@ function DetailRow({
           <div className="flex flex-wrap gap-x-6 gap-y-1">
             <span>
               <span className="text-ax-text-secondary">{t("migration_history_type")}: </span>
-              {t(row.model_type === "completion" ? "completion_models" : "transcription_models")}
+              {typeLabel(row.model_type)}
             </span>
             {row.duration != null && (
               <span>

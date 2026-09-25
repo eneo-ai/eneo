@@ -77,7 +77,7 @@ export function UserTable({
               <TableCell>
                 <div className="flex min-w-0 items-center gap-3">
                   {/* Decorative next to the visible name. */}
-                  <Avatar name={name} size={32} tooltip={false} aria-hidden="true" />
+                  <Avatar name={name} size="md" tooltip={false} aria-hidden="true" />
                   <div className="flex min-w-0 flex-col">
                     <Text weight="semibold" maxLines={1}>
                       {name}

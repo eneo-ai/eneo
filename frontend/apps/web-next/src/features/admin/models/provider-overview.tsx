@@ -17,7 +17,7 @@ import {
 } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { modelProvidersQueryOptions } from "./model-providers";
-import { useModelTypeLabel } from "./model-row";
+import { useModelTypeLabel } from "./model-type-label";
 import { type ModelsPresentation, modelLabel } from "./models";
 import { ProviderCard } from "./provider-card";
 import {

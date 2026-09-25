@@ -34,6 +34,7 @@ import { toastApiError } from "@/lib/api/toast";
 import { cn } from "@/lib/utils";
 import { EditModelDialog } from "./edit-model-dialog";
 import { MigrateModelDialog } from "./migrate-model-dialog";
+import { useModelTypeLabel } from "./model-type-label";
 import { ModelDetailDialog } from "./model-detail-dialog";
 import {
   type AdminModel,
@@ -81,17 +82,6 @@ async function updateModelFlags(kind: ModelKind, id: string, flags: ModelFlags):
 
 function hasDefault(model: AdminModel): model is AdminModel & { is_org_default?: boolean } {
   return "is_org_default" in model;
-}
-
-/** Translated model type ("Chatt", "Inbäddning", "Transkription"). */
-export function useModelTypeLabel() {
-  const t = useTranslations();
-  return (kind: ModelKind) =>
-    kind === "completion"
-      ? t("admin_model_type_completion")
-      : kind === "embedding"
-        ? t("admin_model_type_embedding")
-        : t("admin_model_type_transcription");
 }
 
 /** Vision / reasoning / tools as small tokens; "–" where the type has none. */
@@ -324,7 +314,8 @@ export function ModelRow({
         <Capabilities model={model} />
       </TableCell>
 
-      <TableCell className="text-end">
+      {/* Inactive rows are dimmed with the secondary text token, never opacity. */}
+      <TableCell className={cn("text-end", !enabled && "text-ax-text-secondary")}>
         <Price model={model} kind={kind} />
       </TableCell>
 
