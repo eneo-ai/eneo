@@ -125,11 +125,12 @@ export function getErrorMessage(error: unknown, fallback?: string): string {
 /**
  * The error message after what failed: "Could not delete assistant: You do not
  * have permission". A context written as a sentence drops its full stop, so
- * every caller joins the two the same way.
+ * every caller joins the two the same way. An ellipsis ("..." or "…"), e.g. at
+ * the end of a file name, is kept.
  */
 export function getErrorMessageWithContext(error: unknown, context?: string): string {
   const message = getErrorMessage(error);
-  return context ? `${context.replace(/[.:]\s*$/, "")}: ${message}` : message;
+  return context ? `${context.replace(/:\s*$|(^|[^.])\.\s*$/, "$1")}: ${message}` : message;
 }
 
 /**

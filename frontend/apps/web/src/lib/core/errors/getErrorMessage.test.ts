@@ -88,6 +88,33 @@ describe("getErrorMessageWithContext", () => {
     );
   });
 
+  it("keeps an ellipsis instead of cutting it to two dots", () => {
+    expect(getErrorMessageWithContext(error, "Could not delete notes...")).toBe(
+      "Could not delete notes...: Slug taken."
+    );
+    expect(getErrorMessageWithContext(error, "Could not delete notes..")).toBe(
+      "Could not delete notes..: Slug taken."
+    );
+    expect(getErrorMessageWithContext(error, "Could not delete notes…")).toBe(
+      "Could not delete notes…: Slug taken."
+    );
+    expect(getErrorMessageWithContext(error, "Could not delete notes...:")).toBe(
+      "Could not delete notes...: Slug taken."
+    );
+  });
+
+  it("drops a single full stop or colon, also after one character", () => {
+    expect(getErrorMessageWithContext(error, "Could not delete a.")).toBe(
+      "Could not delete a: Slug taken."
+    );
+    expect(getErrorMessageWithContext(error, "Could not delete a:")).toBe(
+      "Could not delete a: Slug taken."
+    );
+    expect(getErrorMessageWithContext(error, "Could not delete a. ")).toBe(
+      "Could not delete a: Slug taken."
+    );
+  });
+
   it("is the message alone without a context", () => {
     expect(getErrorMessageWithContext(error)).toBe("Slug taken.");
     expect(getErrorMessageWithContext(error, "")).toBe("Slug taken.");
