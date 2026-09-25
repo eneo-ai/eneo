@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
+import { FileFormatDetails } from "@/features/files/file-format-details";
 import { useJobs } from "@/features/jobs/use-jobs";
 import type { InfoBlob } from "./knowledge";
 
@@ -125,6 +126,13 @@ export function UploadBlobsDialog({
               multiple
               accept={acceptedMimeTypes.join(",")}
               onChange={(event) => setFiles([...(event.target.files ?? [])])}
+            />
+            <FileFormatDetails
+              formats={limits.info_blobs.formats.map((format) => ({
+                mimetype: format.mimetype,
+                extensions: format.extensions,
+                maxSize: format.size
+              }))}
             />
             {files.length > 0 && (
               <ul className="max-h-48 overflow-y-auto rounded-md border p-2 text-sm">

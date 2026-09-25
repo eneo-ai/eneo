@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { inputFieldRules } from "@/features/files/upload-plan";
+import { FileFormatDetails } from "@/features/files/file-format-details";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { InputField } from "../apps";
@@ -129,6 +130,16 @@ export function UploadInput({
           {acceptedLabel && <span className="text-muted-foreground text-xs">{acceptedLabel}</span>}
         </button>
       )}
+
+      <div className="w-full">
+        <FileFormatDetails
+          formats={rules.perTypeLimits.map(({ mimetype, extensions, sizeLimit }) => ({
+            mimetype,
+            extensions,
+            maxSize: sizeLimit
+          }))}
+        />
+      </div>
 
       <input
         ref={inputRef}

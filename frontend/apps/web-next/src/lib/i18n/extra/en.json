@@ -302,5 +302,11 @@
   "sort_oldest_crawl": "Oldest crawl",
   "sort_auto_updates": "Auto updates",
   "attachments_add_later_hint": "You can add attachments after creating the item.",
-  "attachments_open_files_help": "When enabled, the assistant reads attached files as needed. When disabled, their content is included directly in the conversation."
+  "attachments_open_files_help": "When enabled, the assistant reads attached files as needed. When disabled, their content is included directly in the conversation.",
+  "file_format_group_documents": "Documents",
+  "file_format_group_images": "Images",
+  "file_format_group_audio": "Audio",
+  "file_format_group_other": "Other files",
+  "file_types_and_sizes": "File types and sizes",
+  "max_size_per_file": "up to {size} per file"
 }

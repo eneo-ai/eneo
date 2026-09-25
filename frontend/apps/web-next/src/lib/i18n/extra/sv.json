@@ -302,5 +302,11 @@
   "sort_oldest_crawl": "Äldsta indexering",
   "sort_auto_updates": "Automatiska uppdateringar",
   "attachments_add_later_hint": "Du kan lägga till bilagor efter att objektet har skapats.",
-  "attachments_open_files_help": "När funktionen är på läser assistenten bifogade filer vid behov. När den är av läggs innehållet direkt i konversationen."
+  "attachments_open_files_help": "När funktionen är på läser assistenten bifogade filer vid behov. När den är av läggs innehållet direkt i konversationen.",
+  "file_format_group_documents": "Dokument",
+  "file_format_group_images": "Bilder",
+  "file_format_group_audio": "Ljud",
+  "file_format_group_other": "Övriga filer",
+  "file_types_and_sizes": "Filtyper och storlekar",
+  "max_size_per_file": "upp till {size} per fil"
 }

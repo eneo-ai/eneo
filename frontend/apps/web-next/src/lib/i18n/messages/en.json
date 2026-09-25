@@ -4816,5 +4816,11 @@
   "chat_debug_rejection_context_limit_exceeded": "Activating this Skill would have exceeded the Skill context budget.",
   "chat_debug_rejection_model_context_limit_exceeded": "Activating this Skill would have exceeded the model context limit.",
   "chat_debug_rejection_token_measurement_unavailable": "The Skill could not be activated because token measurement was unavailable.",
-  "chat_debug_rejection_reserved_tool_collision": "The activation key collided with a reserved tool name."
+  "chat_debug_rejection_reserved_tool_collision": "The activation key collided with a reserved tool name.",
+  "file_format_group_documents": "Documents",
+  "file_format_group_images": "Images",
+  "file_format_group_audio": "Audio",
+  "file_format_group_other": "Other files",
+  "file_types_and_sizes": "File types and sizes",
+  "max_size_per_file": "up to {size} per file"
 }

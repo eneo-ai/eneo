@@ -6,11 +6,11 @@ export type FileUploadRules = {
   /** Max combined size in bytes, or Infinity when unset. */
   maxSize: number;
   /** Per-mimetype size caps (bytes). */
-  perTypeLimits: { mimetype: string; sizeLimit: number }[];
+  perTypeLimits: { mimetype: string; sizeLimit: number; extensions: string[] }[];
 };
 
 export type FileRestrictionsLike = {
-  accepted_file_types: { mimetype: string; size_limit: number }[];
+  accepted_file_types: { mimetype: string; size_limit: number; extensions?: string[] }[];
   limit: { max_files: number; max_size: number };
 };
 
@@ -46,7 +46,8 @@ function fileUploadRules(
         : restrictions.limit.max_size,
     perTypeLimits: restrictions.accepted_file_types.map((type) => ({
       mimetype: type.mimetype,
-      sizeLimit: type.size_limit
+      sizeLimit: type.size_limit,
+      extensions: type.extensions ?? []
     }))
   };
 }

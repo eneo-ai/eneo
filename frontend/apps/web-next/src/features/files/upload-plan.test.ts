@@ -5,8 +5,8 @@ describe("inputFieldRules", () => {
   it("derives accept string, caps and per-type limits", () => {
     const rules = inputFieldRules({
       accepted_file_types: [
-        { mimetype: "application/pdf", size_limit: 1000 },
-        { mimetype: "text/plain", size_limit: 500 }
+        { mimetype: "application/pdf", size_limit: 1000, extensions: [".pdf"] },
+        { mimetype: "text/plain", size_limit: 500, extensions: [".txt"] }
       ],
       limit: { max_files: 3, max_size: 5000 }
     });
@@ -14,8 +14,8 @@ describe("inputFieldRules", () => {
     expect(rules.maxFiles).toBe(3);
     expect(rules.maxSize).toBe(5000);
     expect(rules.perTypeLimits).toEqual([
-      { mimetype: "application/pdf", sizeLimit: 1000 },
-      { mimetype: "text/plain", sizeLimit: 500 }
+      { mimetype: "application/pdf", sizeLimit: 1000, extensions: [".pdf"] },
+      { mimetype: "text/plain", sizeLimit: 500, extensions: [".txt"] }
     ]);
   });
 

@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { AttachmentPreviewDialog, useSignedUrl } from "@/features/chat/attachments";
+import { FileFormatDetails } from "@/features/files/file-format-details";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
 import { fileRestrictionsRules, planFileUploads } from "@/features/files/upload-plan";
 import { browserApi } from "@/lib/api/browser";
@@ -535,6 +536,14 @@ export function ResourceAttachmentsSection({
               {t("attach_files")}
             </Button>
           </div>
+
+          <FileFormatDetails
+            formats={rules.perTypeLimits.map(({ mimetype, extensions, sizeLimit }) => ({
+              mimetype,
+              extensions,
+              maxSize: sizeLimit
+            }))}
+          />
 
           <input
             ref={fileInput}

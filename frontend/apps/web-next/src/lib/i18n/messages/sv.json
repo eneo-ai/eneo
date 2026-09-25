@@ -4816,5 +4816,11 @@
   "chat_debug_rejection_context_limit_exceeded": "Aktiveringen skulle ha överskridit kontextbudgeten för skills.",
   "chat_debug_rejection_model_context_limit_exceeded": "Aktiveringen skulle ha överskridit modellens kontextgräns.",
   "chat_debug_rejection_token_measurement_unavailable": "Skillen kunde inte aktiveras eftersom tokenmätning saknades.",
-  "chat_debug_rejection_reserved_tool_collision": "Aktiveringsnyckeln krockade med namnet på ett reserverat verktyg."
+  "chat_debug_rejection_reserved_tool_collision": "Aktiveringsnyckeln krockade med namnet på ett reserverat verktyg.",
+  "file_format_group_documents": "Dokument",
+  "file_format_group_images": "Bilder",
+  "file_format_group_audio": "Ljud",
+  "file_format_group_other": "Övriga filer",
+  "file_types_and_sizes": "Filtyper och storlekar",
+  "max_size_per_file": "upp till {size} per fil"
 }

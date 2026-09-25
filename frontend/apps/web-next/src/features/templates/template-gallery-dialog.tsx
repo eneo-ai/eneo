@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileKindIcon } from "@/features/chat/attachments";
+import { FileFormatDetails } from "@/features/files/file-format-details";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
 import { planFileUploads, type FileUploadRules } from "@/features/files/upload-plan";
 import { KnowledgePicker } from "@/features/knowledge/select/knowledge-picker";
@@ -60,7 +61,8 @@ function templateAttachmentRules(formats: Schema<"AttachmentLimits">["formats"])
     maxSize: Infinity,
     perTypeLimits: supported.map((format) => ({
       mimetype: format.mimetype,
-      sizeLimit: format.size
+      sizeLimit: format.size,
+      extensions: format.extensions
     }))
   };
 }
@@ -252,6 +254,13 @@ function TemplateWizard({
                 )}
                 {t("upload_files")}
               </Button>
+              <FileFormatDetails
+                formats={uploadRules.perTypeLimits.map(({ mimetype, extensions, sizeLimit }) => ({
+                  mimetype,
+                  extensions,
+                  maxSize: sizeLimit
+                }))}
+              />
             </div>
           ) : (
             <p className="text-muted-foreground text-sm italic">
