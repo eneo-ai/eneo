@@ -463,8 +463,9 @@ async def test_only_tenant_admins_send_a_request_back(assistant):
     admin_user = _user(Permission.ADMIN)
     admin_user.tenant_id = editor.user.tenant_id
     admin = _service(admin_user, space, repo=repo)
+    # The reason arrives normalised by AuditedReason and is stored as given.
     declined = await admin.decline_activation_request(
-        widget.id, "  Skriv en tydligare\nvälkomsttext  "
+        widget.id, "Skriv en tydligare välkomsttext"
     )
     assert declined.widget.activation_decline_reason == (
         "Skriv en tydligare välkomsttext"

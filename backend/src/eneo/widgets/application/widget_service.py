@@ -10,7 +10,6 @@ from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 
-from eneo.audit.application.free_text import normalize_free_text
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -522,9 +521,7 @@ class WidgetService:
         validate_permission(self.user, Permission.ADMIN)
         widget = await self._owned_widget(widget_id, for_update=True)
         settled = ActivationRequestRef.pending_on(widget)
-        widget.decline_activation_request(
-            by=self.user.id, reason=normalize_free_text(reason)
-        )
+        widget.decline_activation_request(by=self.user.id, reason=reason)
         widget = await self.repo.update(
             widget, check_revision=False, only=ACTIVATION_REVIEW_FIELDS
         )

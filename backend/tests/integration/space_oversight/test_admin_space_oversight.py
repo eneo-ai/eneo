@@ -1645,7 +1645,16 @@ async def test_a_rolled_back_removal_leaves_no_key_revocation_entry(
 async def test_reason_is_normalised_in_audit_and_column(client, admin, overseer):
     space_id = await create_space(client, admin.token)
     base = f"/api/v1/admin/spaces/{space_id}"
-    for too_short_or_long in ("  kort​\r\n ", "x" * 501):
+    for too_short_or_long in (
+        "  kort\u200b\r\n ",
+        "x" * 501,
+        # Nine once the zero-width space is gone and e + U+0301 composes: a
+        # 422, never an IntegrityError from the CHECK on the stored reason.
+        "abcdefgh" + "e\u200b\u0301",
+        "\u2060" * 10,
+        "\ufeff" * 10,
+        "\u2800" * 10,
+    ):
         resp = await client.post(
             f"{base}/join/",
             json={"role": "viewer", "reason": too_short_or_long},

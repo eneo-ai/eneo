@@ -593,9 +593,8 @@ async def test_join_refuses_a_direct_member_and_roles_not_above_the_group_role()
 async def test_join_records_the_marker_and_audits_role_and_reason():
     h = _Harness()
     h.with_admin()
-    members = await h.service.join(
-        h.space_id, VIEWER, "  Ärende KS 2026/123\n– kontroll  "
-    )
+    # The reason arrives normalised by AuditedReason and is stored as given.
+    members = await h.service.join(h.space_id, VIEWER, "Ärende KS 2026/123 – kontroll")
     row = h.repo.users[h.actor_id]
     assert row.oversight_joined_at is not None
     assert row.oversight_join_reason == "Ärende KS 2026/123 – kontroll"
@@ -628,7 +627,7 @@ async def test_join_records_the_marker_and_audits_role_and_reason():
 async def test_a_join_opens_a_visit_members_keep_seeing():
     h = _Harness()
     h.with_admin()
-    await h.service.join(h.space_id, EDITOR, "  Ärende KS 2026/123\n– kontroll  ")
+    await h.service.join(h.space_id, EDITOR, "Ärende KS 2026/123 – kontroll")
 
     row = h.repo.users[h.actor_id]
     h.visits.open.assert_awaited_once_with(

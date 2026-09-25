@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from eneo.audit.application.audit_metadata import AuditMetadata
-from eneo.audit.application.free_text import normalize_free_text
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_models import ApiKeyStateReasonCode
@@ -689,7 +688,6 @@ class SpaceOversightService:
             raise BadRequestException(
                 "Choose a role above the one you have through a group."
             )
-        reason = normalize_free_text(reason)
         joined_at = self._now()
         if not await self.repo.insert_member(
             space_id,

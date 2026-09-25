@@ -364,8 +364,10 @@ class AdminSpaceJoin(BaseModel):
     role: SpaceRoleValue
     reason: AuditedReason = Field(
         description=(
-            "Why you need the content: 10-500 characters after line breaks,"
-            " control and bidirectional characters are removed. Shown to the"
-            " space's administrators and stored in the audit log."
+            "Why you need the content: at least 10 visible characters and at"
+            " most 500 once invisible and control characters are removed, the"
+            " text is NFC-composed and every whitespace run, line breaks"
+            " included, is one space. Shown to the space's administrators and"
+            " stored in the audit log."
         )
     )

@@ -83,9 +83,11 @@ class WidgetActivationDecline(BaseModel):
 
     reason: AuditedReason = Field(
         description=(
-            "What needs to change: 10-500 characters after line breaks,"
-            " control and bidirectional characters are removed. Shown to the"
-            " space's editors and stored in the audit log."
+            "What needs to change: at least 10 visible characters and at most"
+            " 500 once invisible and control characters are removed, the text"
+            " is NFC-composed and every whitespace run, line breaks included,"
+            " is one space. Shown to the space's editors and stored in the"
+            " audit log."
         )
     )
 

@@ -204,6 +204,31 @@ async def test_a_returned_request_is_visible_to_the_editor(
     assert again["activation_requested_at"] != requested["activation_requested_at"]
 
 
+@pytest.mark.parametrize(
+    "reason",
+    [
+        # Nine characters once the zero-width space is gone and e + U+0301
+        # composes: a 422, never an IntegrityError from the stored CHECK.
+        "abcdefgh" + "e\u200b\u0301",
+        "\u2060" * 10,
+        "\U000e0041" * 12,
+        "\u3164" * 10,
+    ],
+    ids=["composes-short", "word-joiners", "tag-characters", "hangul-fillers"],
+)
+async def test_a_reason_without_ten_visible_characters_is_refused(
+    client, editor, overseer, setup, reason
+):
+    widget = setup["widget"]
+    await _request(client, editor, widget)
+
+    resp = await _decline(client, overseer, widget, reason)
+    assert resp.status_code == 422, resp.text
+    fields = await _review_fields(widget["id"])
+    assert fields["activation_requested_at"] is not None
+    assert fields["activation_decline_reason"] is None
+
+
 async def test_requests_are_refused_like_activation(
     client, db_container, admin, editor, overseer, setup, patch_auth_service_jwt
 ):
