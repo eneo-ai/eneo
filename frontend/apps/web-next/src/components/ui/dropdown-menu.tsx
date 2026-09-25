@@ -7,8 +7,16 @@ import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import { usePortalContainer } from "@/components/ui/portal-container";
 import { cn } from "@/lib/utils";
 
-function DropdownMenu({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
+/**
+ * Non-modal by default, like Astryx menus. A modal Radix menu hides the rest
+ * of the page with aria-hidden, sparing [aria-live] subtrees: every Astryx
+ * Button holds one, so the page's buttons stayed exposed without their names.
+ */
+function DropdownMenu({
+  modal = false,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
+  return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" modal={modal} {...props} />;
 }
 
 function DropdownMenuPortal({

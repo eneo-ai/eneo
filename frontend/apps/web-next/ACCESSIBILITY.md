@@ -285,8 +285,10 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   any modal is open appear inside it, so they stay visible and announced.
 - Let the dialog place initial focus: the title (alert dialogs: Cancel). No
   `autoFocus`; it runs before `showModal()` and does nothing.
-- Menus that select something use radio or checkbox items so the state is
-  announced (see `ThemeSwitcher`).
+- Menus are non-modal, the legacy shadcn `DropdownMenu` included (a modal
+  Radix menu hides the page with `aria-hidden`, which strips Astryx buttons of
+  their names). Menus that select something use radio or checkbox items so
+  the state is announced (see `ThemeSwitcher`).
 - Tooltips only repeat or supplement; essential information is never only in
   a tooltip. Hover and focus content can be dismissed with Esc and hovered.
 

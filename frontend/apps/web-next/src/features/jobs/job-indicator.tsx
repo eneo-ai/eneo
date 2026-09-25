@@ -160,7 +160,7 @@ export function JobIndicator({ alignment = "end" }: { alignment?: "start" | "end
             </Section>
           ))}
           {runningCount === 0 && sections.length === 0 && uploads.length === 0 && (
-            <p className="text-ax-text-secondary flex h-24 items-center justify-center text-sm">
+            <p className="text-ax-text-secondary flex min-h-24 items-center justify-center text-sm">
               {t("everything_up_to_date")}
             </p>
           )}
