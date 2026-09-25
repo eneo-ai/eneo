@@ -25,7 +25,8 @@
     ShieldCheck,
     Sparkles,
     UserRound,
-    UsersRound
+    UsersRound,
+    MessageSquareCode
   } from "@lucide/svelte";
   import { page } from "$app/stores";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
@@ -74,7 +75,7 @@
       items: [
         navItem("/admin/models", Cpu, m.models()),
         ...(settings?.using_templates
-          ? [navItem("/admin/templates", LayoutTemplate, m.templates())]
+          ? [navItem("/admin/templates", LayoutTemplate, m.assistant_and_app_templates())]
           : []),
         navItem("/admin/skills", BookOpenCheck, m.admin_skills_nav_label()),
         navItem("/admin/help-assistants", Sparkles, m.admin_help_assistants_nav_label()),
@@ -83,7 +84,8 @@
         ...(user.hasPermission("modules")
           ? [navItem("/admin/modules", Boxes, m.module_admin_title())]
           : []),
-        navItem("/admin/storage", HardDrive, m.storage_settings_nav())
+        navItem("/admin/storage", HardDrive, m.storage_settings_nav()),
+        navItem("/admin/widgets", MessageSquareCode, m.widget_admin_nav())
       ]
     },
     {

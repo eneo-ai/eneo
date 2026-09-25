@@ -9,6 +9,7 @@ import jwt
 from pydantic import ValidationError
 
 from eneo.authentication.auth_models import (
+    WIDGET_MCP_AUDIENCE,
     JWTCreds,
     JWTMeta,
     JWTPayload,
@@ -133,12 +134,37 @@ class AuthService:
         claim so tools need no scope argument and cannot be redirected to
         another assistant. Unknown claims ride through ``JWTPayload`` (which
         ignores them on decode) and are read out separately by the loopback
-        endpoint.
+        endpoint. Widget visitors instead receive a dedicated audience and
+        their widget scope; the receiver revalidates live widget and tenant
+        state before rebuilding the visitor identity.
 
         ``mcp_server_id`` is set for a built-in provider: the loopback tool
         reads its configuration from that ``mcp_servers`` row, so the row
         cannot be chosen by the caller.
         """
+        visitor = getattr(user, "active_widget", None)
+        if visitor is not None:
+            if assistant_id != visitor.target_id:
+                raise ValueError(
+                    "Internal tool scope must match the widget's assistant."
+                )
+            now = datetime.now(timezone.utc)
+            # No username or normal API audience: this credential represents
+            # a visitor delegation, never an Eneo account. It stays server-side.
+            return jwt.encode(
+                {
+                    "aud": WIDGET_MCP_AUDIENCE,
+                    "iss": JWT_ISSUER,
+                    "iat": (now - timedelta(seconds=2)).timestamp(),
+                    "exp": (now + timedelta(minutes=expires_in)).timestamp(),
+                    "assistant_id": str(assistant_id),
+                    "mcp_server_id": str(mcp_server_id) if mcp_server_id else None,
+                    "widget_visitor": visitor.model_dump(mode="json"),
+                },
+                str(JWT_SECRET),
+                algorithm=JWT_ALGORITHM,
+            )
+
         secret_key = str(JWT_SECRET)
 
         jwt_meta = JWTMeta(

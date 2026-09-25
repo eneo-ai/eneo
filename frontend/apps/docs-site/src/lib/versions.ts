@@ -28,12 +28,15 @@ export function getStableDocsVersion(): DocsVersion | undefined {
   return getDocsVersions().find((version) => version.kind === "stable");
 }
 
-export function versionTitle(version: DocsVersion): string {
+export function versionTitle(
+  version: DocsVersion,
+  language: "en" | "sv" = "en",
+): string {
   switch (version.kind) {
     case "stable":
-      return `${version.label} (latest)`;
+      return `${version.label} (${language === "sv" ? "senaste" : "latest"})`;
     case "dev":
-      return "dev (unreleased)";
+      return language === "sv" ? "dev (ej släppt)" : "dev (unreleased)";
     default:
       return version.label;
   }

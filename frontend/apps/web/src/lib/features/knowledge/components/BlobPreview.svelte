@@ -10,6 +10,7 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { getEneo } from "$lib/core/Eneo";
+  import { assignLocation } from "$lib/core/navigation";
   import { downloadTextFile } from "$lib/core/helpers/download";
   import * as m from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -74,7 +75,7 @@
         infoBlobId: blob.id,
         contentDisposition: "attachment"
       });
-      window.location.assign(response.url);
+      assignLocation(response.url);
     } catch (e) {
       console.error("Error generating original download URL:", e);
       toast.error(m.error_downloading_original());

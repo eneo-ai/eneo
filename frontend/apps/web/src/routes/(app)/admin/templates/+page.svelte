@@ -37,12 +37,12 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – {m.admin()} – {m.templates()}</title>
+  <title>Eneo.ai – {m.admin()} – {m.assistant_and_app_templates()}</title>
 </svelte:head>
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.templates()}></Page.Title>
+    <Page.Title title={m.assistant_and_app_templates()}></Page.Title>
 
     <Button onclick={handleCreateTemplate}>
       <LayoutTemplate size={16} />
@@ -56,6 +56,17 @@
     </Page.Tabbar>
   </Page.Header>
   <Page.Main>
+    <p class="text-secondary py-3 pr-6 text-sm">
+      {m.templates_widget_hint()}
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- localized href to a widget admin tab -->
+      <a
+        href={localizeHref("/admin/widgets?tab=templates")}
+        class="text-primary underline underline-offset-2"
+      >
+        {m.templates_widget_hint_link()}
+      </a>
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
+    </p>
     <Page.Tab id="assistant_templates">
       {#if data.assistantTemplates.length === 0}
         <div class="flex flex-col items-center justify-center gap-4 py-24">

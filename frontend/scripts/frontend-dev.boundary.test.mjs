@@ -260,6 +260,7 @@ processBoundaryTest(
         ...originalWorkerPids,
       ]);
       expect((await startedPids(fixture, "build")).length).toBe(2);
+      expect((await startedPids(fixture, "loader")).length).toBe(2);
       expect(
         (await readEvents(fixture)).filter((event) =>
           event.startsWith("clean:start:"),
@@ -332,6 +333,26 @@ processBoundaryTest(
       expect(uiPids.slice(1).filter(isProcessAlive)).toHaveLength(1);
       expect(webPids.slice(1).filter(isProcessAlive)).toHaveLength(1);
       expect(await readControllerPid(fixture)).toBe(restartController.pid);
+    } finally {
+      await cleanupFixture(fixture, spawnedProcesses);
+    }
+  },
+  30_000,
+);
+
+processBoundaryTest(
+  "a failing widget loader build still starts the stack",
+  async () => {
+    const fixture = await createFixture();
+    fixture.env.ENEO_FRONTEND_DEV_FIXTURE_LOADER_EXIT = "1";
+    const spawnedProcesses = [];
+    try {
+      const controller = spawnLifecycle(fixture, "start");
+      spawnedProcesses.push(controller);
+      await waitForManagedStack(fixture, 1);
+
+      expect(await startedPids(fixture, "loader")).toHaveLength(1);
+      expect(isProcessAlive(controller.pid)).toBe(true);
     } finally {
       await cleanupFixture(fixture, spawnedProcesses);
     }

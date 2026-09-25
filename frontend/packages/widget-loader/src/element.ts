@@ -1,0 +1,541 @@
+import {
+  envelope,
+  parseFrameMessage,
+  parseWidgetSettings,
+  type ColorScheme,
+  type HostMessage,
+  type LauncherColors,
+  type PageContext,
+  type WidgetSettings
+} from "./protocol";
+import { FULL_SCREEN_MEDIA, styles } from "./styles";
+
+export type WidgetEventName = "ready" | "open" | "close" | "conversation_started" | "unread";
+
+/** Prefix for the DOM events the element dispatches (bubbling, composed). */
+export const EVENT_PREFIX = "eneo-widget:";
+/** Dispatched on the document when an element connects; the API replays queued commands on it. */
+export const CONNECTED_EVENT = "eneo-widget:connected";
+
+const CLOSE_ANIMATION_MS = 180;
+/** How long the launcher waits for the saved settings before it shows with its attributes. */
+const SETTINGS_TIMEOUT_MS = 3000;
+// `allow-forms`: the composer and the comment dialog are forms, and a sandbox
+// without it drops their submit event before any handler runs. Nothing is
+// ever really submitted: the handlers prevent it and the embed CSP pins
+// form-action to the Eneo origin.
+const SANDBOX =
+  "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
+
+type Labels = { open: string; close: string; title: string; unread: (count: number) => string };
+
+const LABELS: Record<string, Labels> = {
+  sv: {
+    open: "Öppna chatt",
+    close: "Stäng chatt",
+    title: "Chatt",
+    unread: (count) =>
+      `Öppna chatt, ${count} ${count === 1 ? "nytt meddelande" : "nya meddelanden"}`
+  },
+  en: {
+    open: "Open chat",
+    close: "Close chat",
+    title: "Chat",
+    unread: (count) => `Open chat, ${count} new ${count === 1 ? "message" : "messages"}`
+  }
+};
+
+const CHAT_ICON =
+  '<svg class="chat" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/></svg>';
+const CLOSE_ICON =
+  '<svg class="close" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>';
+
+/** The value when it parses as an absolute http(s) URL, else null. */
+function httpUrl(value: string): string | null {
+  try {
+    const url = new URL(value, location.href);
+    return url.protocol === "http:" || url.protocol === "https:" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function reducedMotion(): boolean {
+  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/**
+ * `<eneo-widget widget-id="wgt_…">`: a launcher button and, once opened, an
+ * iframe with the Eneo embed page. All chat UI lives in the iframe; this
+ * element only owns placement, focus and the postMessage bridge.
+ */
+export class EneoWidgetElement extends HTMLElement {
+  /** Origin the loader script was served from; set by the bootstrap. */
+  static defaultBaseUrl = "";
+
+  static get observedAttributes(): string[] {
+    return ["color-scheme", "label", "launcher"];
+  }
+
+  private launcher!: HTMLButtonElement;
+  private panel!: HTMLDivElement;
+  private badge!: HTMLSpanElement;
+  private frame: HTMLIFrameElement | null = null;
+  private frameReady = false;
+  private pendingOpen = false;
+  private isOpen = false;
+  private unread = 0;
+  private context: PageContext | null = null;
+  private colors: LauncherColors | null = null;
+  private widgetTitle: string | null = null;
+  private lastFocus: Element | null = null;
+  private closeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Host elements made inert while the panel covers the page. */
+  private inerted: Element[] = [];
+  private settings: WidgetSettings | null = null;
+  private unavailable = false;
+  private settling = false;
+  private settled = false;
+  private openWhenSettled = false;
+  private prefetchWhenSettled = false;
+
+  private readonly onMessage = (event: MessageEvent) => this.receive(event);
+  private readonly onViewport = () => this.layout();
+  private readonly onHostKeydown = (event: KeyboardEvent) => this.hostKeydown(event);
+  private readonly onSchemeChange = () => {
+    this.paintLauncher();
+    this.sendTheme();
+  };
+  private schemeQuery: MediaQueryList | null = null;
+
+  get widgetId(): string {
+    return this.getAttribute("widget-id") || "";
+  }
+
+  get baseUrl(): string {
+    // Only an http(s) base may become the frame's address: a CMS that lets
+    // editors set data attributes must not get a `javascript:` frame out of it.
+    const attribute = this.getAttribute("base-url");
+    const raw =
+      (attribute && httpUrl(attribute)) || EneoWidgetElement.defaultBaseUrl || location.origin;
+    return raw.replace(/\/+$/, "");
+  }
+
+  /** Only messages from this origin are accepted and only it receives ours. */
+  get eneoOrigin(): string {
+    return httpUrl(this.baseUrl) ? new URL(this.baseUrl, location.href).origin : location.origin;
+  }
+
+  /** A language fixed in the widget's settings, else the host's: `lang`, then `<html lang>`. */
+  get lang(): string {
+    const raw =
+      this.settings?.language || this.getAttribute("lang") || document.documentElement.lang || "sv";
+    return raw.slice(0, 2).toLowerCase() === "en" ? "en" : "sv";
+  }
+
+  get colorScheme(): ColorScheme {
+    const raw = this.getAttribute("color-scheme");
+    return raw === "light" || raw === "dark" ? raw : "auto";
+  }
+
+  /** What the host page actually shows: the attribute, else the visitor's system setting. */
+  get effectiveScheme(): "light" | "dark" {
+    const pinned = this.colorScheme;
+    if (pinned !== "auto") return pinned;
+    return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+  }
+
+  get open(): boolean {
+    return this.isOpen;
+  }
+
+  /** Whether an open panel fills the screen; see `FULL_SCREEN_MEDIA`. */
+  get fullScreen(): boolean {
+    return typeof matchMedia === "function" && matchMedia(FULL_SCREEN_MEDIA).matches;
+  }
+
+  /** The frame's accessible name: the host's `frame-title`, else the widget's own title. */
+  get frameTitle(): string {
+    return this.getAttribute("frame-title") || this.widgetTitle || this.labels.title;
+  }
+
+  get frameUrl(): string {
+    const prefix = this.lang === "en" ? "/en" : "";
+    const origin = encodeURIComponent(location.origin);
+    const scheme = `&scheme=${this.effectiveScheme}`;
+    // Editors test draft widgets with a preview token; the fragment never
+    // reaches a server log and the embed page reads it client-side.
+    const preview = this.getAttribute("preview");
+    const suffix = preview ? `&preview=1#preview=${encodeURIComponent(preview)}` : "";
+    return `${this.baseUrl}${prefix}/embed/${encodeURIComponent(this.widgetId)}?origin=${origin}${scheme}${suffix}`;
+  }
+
+  private get labels(): Labels {
+    return LABELS[this.lang];
+  }
+
+  connectedCallback(): void {
+    if (!this.shadowRoot) this.render();
+    window.addEventListener("message", this.onMessage);
+    if (typeof matchMedia === "function") {
+      this.schemeQuery = matchMedia("(prefers-color-scheme: dark)");
+      this.schemeQuery.addEventListener("change", this.onSchemeChange);
+    }
+    document.dispatchEvent(new CustomEvent(CONNECTED_EVENT, { detail: this }));
+    this.loadSettings();
+    if (this.isOpen) {
+      // Moved within the page while open: listen and hold the page again.
+      this.watch();
+      this.layout();
+    } else if (this.getAttribute("auto-open") === "true") {
+      this.openPanel();
+    }
+  }
+
+  /**
+   * The launcher stays hidden until the widget's saved settings are in (or
+   * have failed or timed out), so it never appears in one corner and moves
+   * to the other. Settings that arrive later still update the colours and
+   * labels, never the position. A preview shows what the editor passes in.
+   */
+  private loadSettings(): void {
+    if (this.settling) return;
+    this.settling = true;
+    if (this.getAttribute("preview")) return this.settle();
+    const timer = setTimeout(() => this.settle(), SETTINGS_TIMEOUT_MS);
+    this.fetchSettings(`${this.baseUrl}/widget/settings/${encodeURIComponent(this.widgetId)}`)
+      .then((raw) => {
+        if (raw === null) {
+          // A definitive 404 means the widget is still a draft or is paused.
+          // Network and CSP failures still use the launcher fallback below.
+          this.unavailable = true;
+          this.openWhenSettled = false;
+          this.prefetchWhenSettled = false;
+          if (this.isOpen) this.closePanel(false);
+          this.syncLauncher();
+          return;
+        }
+        this.settings = parseWidgetSettings(raw);
+        if (this.settings?.colors) {
+          this.colors = this.settings.colors;
+          this.paintLauncher();
+        }
+        this.syncLauncher();
+      })
+      .catch(() => {})
+      .then(() => {
+        clearTimeout(timer);
+        this.settle();
+      });
+  }
+
+  /** Null is reserved for a definitive inactive widget (404). */
+  protected fetchSettings(url: string): Promise<unknown> {
+    return fetch(url, { credentials: "omit", referrerPolicy: "strict-origin" }).then((response) => {
+      if (response.status === 404) return null;
+      if (!response.ok) throw new Error(`Widget settings returned ${response.status}`);
+      return response.json();
+    });
+  }
+
+  private settle(): void {
+    if (this.settled) return;
+    this.settled = true;
+    const position = this.settings?.position;
+    if (position) this.setAttribute("position", position);
+    this.syncLauncher();
+    if (this.prefetchWhenSettled && !this.unavailable) this.ensureFrame();
+    if (this.openWhenSettled) {
+      this.openWhenSettled = false;
+      if (!this.unavailable) this.openPanel();
+    }
+  }
+
+  disconnectedCallback(): void {
+    // An open or prefetch waiting for the settings belongs to this page
+    // visit; run on a detached element it would leak viewport listeners.
+    this.openWhenSettled = false;
+    this.prefetchWhenSettled = false;
+    window.removeEventListener("message", this.onMessage);
+    this.schemeQuery?.removeEventListener("change", this.onSchemeChange);
+    this.unwatch();
+    // Never leave the host page inert behind a panel that is gone.
+    this.releasePage();
+  }
+
+  private sendTheme(): void {
+    this.send({ type: "theme", payload: { scheme: this.effectiveScheme } });
+  }
+
+  attributeChangedCallback(name: string): void {
+    if (!this.shadowRoot) return;
+    if (name === "color-scheme") {
+      this.paintLauncher();
+      this.sendTheme();
+    } else {
+      this.syncLauncher();
+    }
+  }
+
+  private render(): void {
+    const root = this.attachShadow({ mode: "open" });
+    root.innerHTML =
+      `<style>${styles}</style>` +
+      `<button type="button" part="launcher" class="launcher" aria-haspopup="dialog" aria-expanded="false" aria-controls="eneo-panel">${CHAT_ICON}${CLOSE_ICON}<span class="badge" aria-hidden="true" hidden></span></button>` +
+      `<div id="eneo-panel" part="panel" class="panel" role="dialog" hidden></div>`;
+    this.launcher = root.querySelector(".launcher") as HTMLButtonElement;
+    this.panel = root.querySelector(".panel") as HTMLDivElement;
+    this.badge = root.querySelector(".badge") as HTMLSpanElement;
+    this.launcher.addEventListener("click", () => this.toggle());
+    this.syncLauncher();
+  }
+
+  /**
+   * The launcher takes the widget's own colour for the scheme in effect. A
+   * host page's `--eneo-widget-color` still wins; see styles.
+   */
+  private paintLauncher(): void {
+    const scheme = this.colors?.[this.effectiveScheme];
+    if (scheme) {
+      this.launcher.style.setProperty("--_eneo-accent", scheme.accent);
+      this.launcher.style.setProperty("--_eneo-on-accent", scheme.on_accent);
+    } else {
+      this.launcher.style.removeProperty("--_eneo-accent");
+      this.launcher.style.removeProperty("--_eneo-on-accent");
+    }
+  }
+
+  private syncLauncher(): void {
+    const custom = this.getAttribute("label");
+    const label = this.isOpen
+      ? this.labels.close
+      : this.unread > 0
+        ? this.labels.unread(this.unread)
+        : custom || this.labels.open;
+    this.launcher.setAttribute("aria-label", label);
+    this.launcher.title = label;
+    this.panel.setAttribute("aria-label", this.labels.title);
+    this.launcher.hidden =
+      !this.settled || this.unavailable || this.getAttribute("launcher") === "none";
+    this.badge.hidden = this.unread === 0 || this.isOpen;
+    this.badge.textContent = this.unread > 99 ? "99+" : String(this.unread);
+  }
+
+  private ensureFrame(): HTMLIFrameElement {
+    if (this.frame) return this.frame;
+    const frame = document.createElement("iframe");
+    frame.title = this.frameTitle;
+    frame.setAttribute("sandbox", SANDBOX);
+    frame.setAttribute("referrerpolicy", "strict-origin");
+    frame.setAttribute("allow", "clipboard-write");
+    frame.src = this.frameUrl;
+    this.panel.appendChild(frame);
+    this.frame = frame;
+    return frame;
+  }
+
+  /** Load the iframe ahead of the first open, e.g. from `prefetch="true"`. */
+  prefetch(): void {
+    if (this.unavailable) return;
+    if (this.settled) this.ensureFrame();
+    else this.prefetchWhenSettled = true;
+  }
+
+  toggle(): void {
+    if (this.isOpen) this.closePanel();
+    else this.openPanel();
+  }
+
+  openPanel(): void {
+    if (this.unavailable) return;
+    if (this.isOpen) return;
+    if (!this.settled) {
+      this.openWhenSettled = true;
+      return;
+    }
+    if (this.closeTimer) {
+      clearTimeout(this.closeTimer);
+      this.closeTimer = null;
+    }
+    this.lastFocus = document.activeElement;
+    this.isOpen = true;
+    this.unread = 0;
+    const frame = this.ensureFrame();
+    this.setAttribute("open", "");
+    this.launcher.setAttribute("aria-expanded", "true");
+    this.syncLauncher();
+    this.panel.hidden = false;
+    if (reducedMotion()) this.panel.classList.add("open");
+    else requestAnimationFrame(() => this.panel.classList.add("open"));
+    this.watch();
+    this.layout();
+    if (this.frameReady) {
+      this.send({ type: "open" });
+      frame.focus();
+    } else {
+      this.pendingOpen = true;
+    }
+    this.emit("open");
+  }
+
+  /** `restoreFocus = false` leaves focus where it is, e.g. on the host page the visitor moved to. */
+  closePanel(restoreFocus = true): void {
+    this.openWhenSettled = false;
+    if (!this.isOpen) return;
+    this.isOpen = false;
+    this.pendingOpen = false;
+    this.removeAttribute("open");
+    this.launcher.setAttribute("aria-expanded", "false");
+    this.syncLauncher();
+    this.panel.classList.remove("open");
+    const hide = () => {
+      this.closeTimer = null;
+      this.panel.hidden = true;
+    };
+    if (reducedMotion()) hide();
+    else this.closeTimer = setTimeout(hide, CLOSE_ANIMATION_MS);
+    this.unwatch();
+    // Releases the page before focus goes back to it.
+    this.layout();
+    if (restoreFocus) this.restoreFocus();
+    else this.lastFocus = null;
+    this.emit("close");
+  }
+
+  /**
+   * Escape on the host page closes the panel too, so an open panel never
+   * keeps covering what the visitor moved on to (WCAG 2.4.11); focus stays
+   * there. Inside the chat the embed page handles Escape itself.
+   */
+  private hostKeydown(event: KeyboardEvent): void {
+    if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+    const active = document.activeElement;
+    this.closePanel(!active || active === document.body || active === this);
+  }
+
+  private restoreFocus(): void {
+    const target = this.launcher.hidden ? this.lastFocus : this.launcher;
+    this.lastFocus = null;
+    if (target instanceof HTMLElement && target.isConnected) target.focus();
+  }
+
+  /** Tell the assistant which page the visitor is on. Opt-in: nothing is sent unless the host asks. */
+  setContext(context: PageContext): void {
+    this.context = {
+      page_url: typeof context.page_url === "string" ? context.page_url : undefined,
+      page_title: typeof context.page_title === "string" ? context.page_title : undefined
+    };
+    this.send({ type: "context", payload: this.context });
+  }
+
+  private receive(event: MessageEvent): void {
+    if (!this.frame || event.source !== this.frame.contentWindow) return;
+    if (event.origin !== this.eneoOrigin) return;
+    const message = parseFrameMessage(event.data);
+    if (!message) return;
+    switch (message.type) {
+      case "ready":
+        this.frameReady = true;
+        // Reflected for the styles: on small screens the launcher stays on top
+        // of the full-screen panel as the close control until the chat is up.
+        this.setAttribute("ready", "");
+        this.colors = message.payload?.colors ?? null;
+        this.widgetTitle = message.payload?.title ?? null;
+        this.frame.title = this.frameTitle;
+        this.paintLauncher();
+        this.sendTheme();
+        if (this.context) this.send({ type: "context", payload: this.context });
+        if (this.pendingOpen) {
+          this.pendingOpen = false;
+          this.send({ type: "open" });
+          this.frame.focus();
+        }
+        this.emit("ready");
+        break;
+      case "close":
+        this.closePanel();
+        break;
+      case "unread":
+        if (!this.isOpen) {
+          this.unread = message.payload.count;
+          this.syncLauncher();
+        }
+        this.emit("unread", message.payload);
+        break;
+      case "conversation_started":
+        this.emit("conversation_started");
+        break;
+    }
+  }
+
+  private send(message: HostMessage): void {
+    if (!this.frame || !this.frameReady) return;
+    this.post(this.frame.contentWindow, envelope(message));
+  }
+
+  /** Seam for tests; the target is always the iframe's window. */
+  protected post(target: Window | null, data: Record<string, unknown>): void {
+    target?.postMessage(data, this.eneoOrigin);
+  }
+
+  private emit(name: WidgetEventName, detail?: unknown): void {
+    this.dispatchEvent(
+      new CustomEvent(EVENT_PREFIX + name, { detail, bubbles: true, composed: true })
+    );
+  }
+
+  /** Listeners that only matter while the panel is open. */
+  private watch(): void {
+    window.addEventListener("keydown", this.onHostKeydown);
+    window.addEventListener("resize", this.onViewport);
+    window.visualViewport?.addEventListener("resize", this.onViewport);
+    window.visualViewport?.addEventListener("scroll", this.onViewport);
+  }
+
+  private unwatch(): void {
+    window.removeEventListener("keydown", this.onHostKeydown);
+    window.removeEventListener("resize", this.onViewport);
+    window.visualViewport?.removeEventListener("resize", this.onViewport);
+    window.visualViewport?.removeEventListener("scroll", this.onViewport);
+  }
+
+  /**
+   * Full screen, the panel follows the visual viewport so the on-screen
+   * keyboard never covers the composer, and it is a modal dialog: the rest of
+   * the page is inert, so neither Tab nor a screen reader's cursor can reach
+   * content hidden behind it. Beside the page it stays a non-modal dialog.
+   */
+  private layout(): void {
+    const viewport = window.visualViewport;
+    const full = this.isOpen && this.fullScreen;
+    this.panel.style.height = full && viewport ? `${viewport.height}px` : "";
+    this.panel.style.top = full && viewport ? `${viewport.offsetTop}px` : "";
+    if (full) {
+      this.panel.setAttribute("aria-modal", "true");
+      this.inertAround(this);
+    } else {
+      this.panel.removeAttribute("aria-modal");
+      this.releasePage();
+    }
+  }
+
+  /** Everything around `node` up to `<body>`; elements the page made inert stay its own. */
+  private inertAround(node: Element): void {
+    const parent = node.parentElement;
+    if (!parent || node === document.body) return;
+    for (const sibling of Array.from(parent.children)) {
+      if (sibling !== node && !sibling.hasAttribute("inert")) {
+        sibling.setAttribute("inert", "");
+        this.inerted.push(sibling);
+      }
+    }
+    this.inertAround(parent);
+  }
+
+  private releasePage(): void {
+    for (const element of this.inerted) element.removeAttribute("inert");
+    this.inerted = [];
+  }
+}

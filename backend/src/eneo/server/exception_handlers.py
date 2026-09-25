@@ -74,6 +74,10 @@ from eneo.users.password import (
     PasswordPolicyViolationError,
     PasswordReuseError,
 )
+from eneo.widgets.domain.exceptions import (
+    AssistantPublishedAsWidgetError,
+    WidgetPublicError,
+)
 
 # Partial unique indexes that guard active model display names, per
 # 20260602_unique_model_display_names. Their names all end in this suffix.
@@ -324,6 +328,12 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "validated. Run the update again against the current policy.",
         ErrorCodes.SKILL_RUNTIME_POLICY_CHANGED,
     ),
+    AssistantPublishedAsWidgetError: (
+        400,
+        "This Assistant is published as a web widget. An administrator must "
+        "archive the widget before the Assistant can move to another Space.",
+        ErrorCodes.ASSISTANT_PUBLISHED_AS_WIDGET,
+    ),
 }
 
 
@@ -432,3 +442,21 @@ def add_exception_handlers(app: FastAPI):
         )
 
     app.add_exception_handler(IntegrityError, integrity_error_handler)
+
+    async def widget_public_error_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        error = cast(WidgetPublicError, exc)
+        return JSONResponse(
+            status_code=error.status_code,
+            content={
+                "detail": {
+                    **error.details(),
+                    "code": error.code,
+                    "message": error.message,
+                }
+            },
+            headers=error.headers,
+        )
+
+    app.add_exception_handler(WidgetPublicError, widget_public_error_handler)

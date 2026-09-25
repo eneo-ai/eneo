@@ -17,9 +17,24 @@ from pydantic import (
 
 from eneo.audit.domain.actor_types import ActorType
 from eneo.main.config import get_settings
+from eneo.widgets.domain.visitor import WidgetVisitorContext
 
 if TYPE_CHECKING:
     from eneo.users.user import UserInDB
+
+
+WIDGET_MCP_AUDIENCE = "eneo:widget-internal-mcp"
+
+
+class ScopedMcpClaims(BaseModel):
+    """Verified scope carried across the internal MCP HTTP boundary."""
+
+    model_config = ConfigDict(frozen=True)
+
+    aud: str
+    assistant_id: UUID
+    mcp_server_id: UUID | None = None
+    widget_visitor: WidgetVisitorContext | None = None
 
 
 class JWTMeta(BaseModel):
@@ -57,6 +72,15 @@ class AccessToken(BaseModel):
 class ApiKeyOwnership(str, Enum):
     USER = "user"
     SERVICE = "service"
+
+
+def is_widget_visitor(user: object) -> bool:
+    """Is the request authenticated as an anonymous widget visitor?
+
+    Visitors resolve to a synthetic UserInDB carrying ``active_widget``; they
+    own sessions by widget + visitor id and never reach user-keyed storage.
+    """
+    return getattr(user, "active_widget", None) is not None
 
 
 def is_service_api_key(user: "UserInDB") -> bool:

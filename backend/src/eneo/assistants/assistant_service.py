@@ -77,6 +77,7 @@ from eneo.mcp_servers.domain.capabilities import (
     CapabilityPurpose,
 )
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    CAPABILITY_PURPOSES,
     GENERAL_PURPOSE,
     allowed_capability_purposes,
     duplicate_capability_purposes,
@@ -127,6 +128,16 @@ from eneo.users.user import UserInDB
 from eneo.workflows.step_repo import StepRepository
 
 logger = get_logger(__name__)
+
+# What a widget visitor can run. A visitor is a synthetic principal with no
+# users row. Loopback servers accept its widget-scoped token, but a generated
+# image is a file owned by a user, so a visitor gets no image generation and
+# no built-in provider, and images other MCP tools return are dropped. The
+# assistant's knowledge, its own MCP servers and an external web search
+# provider serve visitors as configured.
+VISITOR_CAPABILITY_PURPOSES: frozenset[str] = frozenset(CAPABILITY_PURPOSES) - {
+    "image_generation"
+}
 
 _IMAGE_EXTENSIONS = {
     "image/jpeg": "jpeg",
@@ -401,8 +412,28 @@ class AssistantService:
         authenticated.tools = await with_live_builtin_tools(server)
         return authenticated
 
-    async def _save_generated_image(self, image: "GeneratedImage") -> "File":
-        """Persist a tool-produced image as a generated file."""
+    def _allowed_capability_purposes(self) -> set[str]:
+        # A widget visitor holds no permissions: the assistant's own
+        # configuration decides, less what a visitor cannot run.
+        if self.user.active_widget is not None:
+            return set(VISITOR_CAPABILITY_PURPOSES)
+        return allowed_capability_purposes(self.user.permissions)
+
+    async def _save_generated_image(self, image: "GeneratedImage") -> "File | None":
+        """Persist a tool-produced image as a generated file.
+
+        None for a widget visitor, who owns no files: the image is dropped
+        (the model only ever saw its placeholder).
+        """
+        if self.user.active_widget is not None:
+            logger.info(
+                "Dropped a tool-generated image for a widget visitor",
+                extra={
+                    "widget_id": str(self.user.active_widget.widget_id),
+                    "mcp_tool_name": image.mcp_tool_name,
+                },
+            )
+            return None
         extension = _extension_for_mime(image.mime_type)
         return await self.file_service.save_image_from_bytes(
             image.data,
@@ -936,7 +967,7 @@ class AssistantService:
                 requested_capabilities=sorted(requested_capabilities),
                 supports_tool_calling=model.supports_tool_calling,
                 user_group_ids=self.user.user_groups_ids,
-                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+                allowed_purposes=self._allowed_capability_purposes(),
                 space_security_classification=space.security_classification,
             )
             effective_mcp_servers = [
@@ -2104,6 +2135,16 @@ class AssistantService:
         space.remove_assistant(assistant)
         await self.space_repo.update(space)
 
+        # After the delete: a widget created meanwhile holds the assistant row
+        # until it commits, so it is archived here too.
+        from eneo.widgets.application.widget_target_lifecycle import (
+            archive_widgets_of_deleted_assistant,
+        )
+
+        await archive_widgets_of_deleted_assistant(
+            self.space_repo.session, assistant_id=assistant_id, user=self.user
+        )
+
         if icon_id:
             await self.icon_repo.delete(icon_id)
 
@@ -2227,6 +2268,8 @@ class AssistantService:
                             and chunk.image is not None
                         ):
                             image_file = await self._save_generated_image(chunk.image)
+                            if image_file is None:
+                                continue
                             generated_files.append(image_file)
                             # The image chunk precedes the tool-call chunk that
                             # references it; the ids are attached to the tool
@@ -2591,6 +2634,8 @@ class AssistantService:
                         getattr(answer, "generated_images", None) or [],
                     ):
                         image_file = await self._save_generated_image(image)
+                        if image_file is None:
+                            continue
                         generated_files.append(image_file)
                         if image.tool_call_id:
                             generated_file_ids_by_call.setdefault(
@@ -2823,6 +2868,8 @@ class AssistantService:
         stream: bool = False,
         tool_assistant_id: Optional["UUID"] = None,
         version: int = 1,
+        num_chunks_override: int | None = None,
+        prompt_addendum: str | None = None,
         assistant_selector_tokens: int = 0,
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: list["UUID"] | None = None,
@@ -3047,7 +3094,7 @@ class AssistantService:
                 requested_capabilities=sorted(requested_capabilities),
                 supports_tool_calling=effective_completion_model.supports_tool_calling,
                 user_group_ids=self.user.user_groups_ids,
-                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+                allowed_purposes=self._allowed_capability_purposes(),
                 space_security_classification=space.security_classification,
             )
             mcp_servers_override = resolution.general_servers
@@ -3056,6 +3103,8 @@ class AssistantService:
                     server, assistant_id=assistant_to_ask.id
                 )
                 for server in resolution.capability_servers
+                if self.user.active_widget is None
+                or not is_builtin_provider(server.http_auth_type)
             ]
 
         # This message's own uploads have no save-time fit gate and are inlined
@@ -3185,6 +3234,8 @@ class AssistantService:
         # calling never get a server and fall back to legacy
         # retrieve-and-inject inside Assistant.ask.
         knowledge_mcp_server = None
+        # Internal tool credentials preserve the authenticated principal,
+        # including a widget visitor's restricted scope.
         if internal_mcp.knowledge:
             knowledge_mcp_server = await build_knowledge_mcp_server(
                 token=mint_scoped_token(),
@@ -3198,7 +3249,8 @@ class AssistantService:
         # inlined files it still pages into text the window truncated).
         # External servers coexist; tool descriptions steer the choice.
         files_mcp_server = None
-        if internal_mcp.files:
+        # Visitors upload no files, so they never get the files tool.
+        if internal_mcp.files and self.user.active_widget is None:
             seen_labels: set[str] = set()
             attachment_labels: list[str] = []
             for file in [*files, *history_files]:
@@ -3248,12 +3300,14 @@ class AssistantService:
                 files=completion_file_inputs.completion_message_files,
                 stream=stream,
                 version=version,
+                num_chunks_override=num_chunks_override,
                 capability_mcp_servers=capability_mcp_servers,
                 require_tool_approval=require_tool_approval,
                 completion_model_override=completion_model_override,
                 model_kwargs_override=model_kwargs_override,
                 mcp_servers_override=mcp_servers_override,
                 prompt_override=prompt_override,
+                prompt_addendum=prompt_addendum,
                 completion_prompt_files=completion_file_inputs.completion_prompt_files,
                 skill_runtime=skill_runtime,
                 knowledge_mcp_server=knowledge_mcp_server,

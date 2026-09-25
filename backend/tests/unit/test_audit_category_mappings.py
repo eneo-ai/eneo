@@ -5,6 +5,7 @@ from eneo.audit.domain.category_mappings import (
     CATEGORY_MAPPINGS,
     get_category_for_action,
 )
+from tests.audit_category_counts import EXPECTED_CATEGORY_COUNTS
 
 
 class TestCategoryMappings:
@@ -53,8 +54,9 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "admin_actions"
         ]
-        assert len(admin_actions) == 49, (
-            f"Expected 49 admin actions, got {len(admin_actions)}"
+        expected = EXPECTED_CATEGORY_COUNTS["admin_actions"]
+        assert len(admin_actions) == expected, (
+            f"Expected {expected} admin actions, got {len(admin_actions)}"
         )
 
     def test_admin_actions_mapping(self):
@@ -100,8 +102,9 @@ class TestCategoryMappings:
         user_actions = [
             action for action, cat in CATEGORY_MAPPINGS.items() if cat == "user_actions"
         ]
-        assert len(user_actions) == 49, (
-            f"Expected 49 user actions, got {len(user_actions)}"
+        expected = EXPECTED_CATEGORY_COUNTS["user_actions"]
+        assert len(user_actions) == expected, (
+            f"Expected {expected} user actions, got {len(user_actions)}"
         )
         assert ActionType.TOOL_APPROVAL_SUBMITTED.value in user_actions
 
@@ -261,15 +264,7 @@ class TestCategoryDistribution:
 
     def test_category_counts_match_expected(self):
         """Verify exact counts for each category."""
-        expected_counts = {
-            "admin_actions": 49,
-            "user_actions": 49,
-            "security_events": 12,
-            "file_operations": 6,
-            "integration_events": 19,
-            "system_actions": 3,
-            "audit_access": 3,  # Includes AUDIT_SESSION_CREATED
-        }
+        expected_counts = EXPECTED_CATEGORY_COUNTS
 
         for category, expected_count in expected_counts.items():
             actual_count = sum(

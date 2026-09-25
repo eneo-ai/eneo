@@ -5,7 +5,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
-from eneo.authentication.auth_models import is_service_api_key
+from eneo.authentication.auth_models import is_service_api_key, is_widget_visitor
 from eneo.main.models import ResourcePermission
 from eneo.roles.permissions import Permission
 
@@ -518,6 +518,14 @@ class SpaceActor:
         return permission_map.get(resource_type)
 
     def _get_role(self):
+        # Widget visitors have no membership either: the widget is the only
+        # access path, and only into its own space, as a viewer — which lets
+        # them read (ask) published assistants and nothing else.
+        if is_widget_visitor(self.user):
+            widget = self.user.active_widget
+            assert widget is not None  # guaranteed by is_widget_visitor
+            return SpaceRole.VIEWER if widget.space_id == self.space.id else None
+
         # Service keys have no user membership — the key is the only access
         # path into any space.
         if self._is_service_api_key():
@@ -703,6 +711,14 @@ class SpaceActor:
         """
         if resource_type not in PERMISSION_RESOURCES or self._is_service_api_key():
             return True
+        if is_widget_visitor(self.user):
+            # Widget visitors are authorized by the widget (activated by a
+            # tenant admin), not by a role: they may read (ask) an assistant
+            # and nothing else.
+            return (
+                action == SpaceAction.READ
+                and resource_type == SpaceResourceType.ASSISTANT
+            )
         permission = self._to_permisson(resource_type=resource_type)
         if permission is not None and permission in self.user.permissions:
             return True

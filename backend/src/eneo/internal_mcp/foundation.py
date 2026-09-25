@@ -24,23 +24,30 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 from uuid import UUID, uuid4
 
 import jwt
 from dependency_injector import providers
 from mcp.server.fastmcp import Context, FastMCP
+from pydantic import ValidationError
 
+from eneo.authentication.auth_models import WIDGET_MCP_AUDIENCE, ScopedMcpClaims
 from eneo.database.database import sessionmanager
 from eneo.main.config import get_settings
+from eneo.main.exceptions import AuthenticationException
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+
+if TYPE_CHECKING:
+    from eneo.main.container.container import Container
+    from eneo.users.user import UserInDB
 
 
 class ToolContext(NamedTuple):
     """User-bound DI container + identity for one internal tool call."""
 
-    container: Any
-    user: Any
+    container: Container
+    user: UserInDB
     assistant_id: UUID
 
 
@@ -52,33 +59,35 @@ def bearer_from_ctx(ctx: Context) -> str:
     return header.split(" ", 1)[1].strip()
 
 
-def assistant_id_from_token(token: str) -> UUID:
+def scoped_claims_from_token(token: str) -> ScopedMcpClaims:
+    """Verify the credential before choosing an account or visitor identity."""
     settings = get_settings()
-    claims = jwt.decode(
-        token,
-        key=str(settings.jwt_secret),
-        audience=settings.jwt_audience,
-        algorithms=[settings.jwt_algorithm],
-    )
-    raw = claims.get("assistant_id")
-    if not raw:
-        raise ValueError("Access token is not scoped to an assistant.")
-    return UUID(str(raw))
+    try:
+        raw = jwt.decode(
+            token,
+            key=str(settings.jwt_secret),
+            audience=[settings.jwt_audience, WIDGET_MCP_AUDIENCE],
+            algorithms=[settings.jwt_algorithm],
+            options={"require": ["exp", "iat", "aud"]},
+        )
+        claims = ScopedMcpClaims.model_validate(raw)
+    except (jwt.PyJWTError, ValidationError) as exc:
+        raise AuthenticationException("Invalid internal MCP credential.") from exc
+    if (claims.aud == WIDGET_MCP_AUDIENCE) != (claims.widget_visitor is not None):
+        raise AuthenticationException("Invalid internal MCP identity.")
+    return claims
+
+
+def assistant_id_from_token(token: str) -> UUID:
+    return scoped_claims_from_token(token).assistant_id
 
 
 def mcp_server_id_from_token(token: str) -> UUID:
     """The built-in provider row this token was minted for."""
-    settings = get_settings()
-    claims = jwt.decode(
-        token,
-        key=str(settings.jwt_secret),
-        audience=settings.jwt_audience,
-        algorithms=[settings.jwt_algorithm],
-    )
-    raw = claims.get("mcp_server_id")
-    if not raw:
+    server_id = scoped_claims_from_token(token).mcp_server_id
+    if server_id is None:
         raise ValueError("Access token is not scoped to a built-in provider.")
-    return UUID(str(raw))
+    return server_id
 
 
 @asynccontextmanager
@@ -87,8 +96,8 @@ async def internal_tool_context(ctx: Context):
 
     Yields :class:`ToolContext`. The container is bound to the authenticated
     user, so loading resources runs the normal permission checks (e.g.
-    ``SpaceActor`` for assistants). Internal tools are read-only; the
-    transaction simply closes on exit.
+    ``SpaceActor`` for assistants). The transaction closes on exit; tools
+    retain their normal resource authorization checks.
     """
     # Imported lazily: the Container pulls in the whole service graph, so a
     # top-level import would create a cycle.
@@ -96,13 +105,20 @@ async def internal_tool_context(ctx: Context):
     from eneo.main.container.container_overrides import override_user
 
     token = bearer_from_ctx(ctx)
-    assistant_id = assistant_id_from_token(token)
+    claims = scoped_claims_from_token(token)
     async with sessionmanager.session() as session:
         async with session.begin():
             container = Container(session=providers.Object(session))
-            user = await container.user_service().authenticate(token=token)
+            if claims.widget_visitor is not None:
+                user = await container.widget_authentication_service().authenticate_internal(
+                    claims.widget_visitor, assistant_id=claims.assistant_id
+                )
+            else:
+                user = await container.user_service().authenticate(token=token)
             override_user(container=container, user=user)
-            yield ToolContext(container=container, user=user, assistant_id=assistant_id)
+            yield ToolContext(
+                container=container, user=user, assistant_id=claims.assistant_id
+            )
 
 
 def default_page_cap() -> int:

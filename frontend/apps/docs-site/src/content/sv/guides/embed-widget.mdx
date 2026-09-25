@@ -1,0 +1,563 @@
+---
+title: Bädda in en chattwidget på webbplatsen
+translationSource: guides/embed-widget.mdx@514b623d063a
+---
+
+# Bädda in en chattwidget på webbplatsen
+
+import { Callout } from "nextra/components";
+
+Med en webbwidget kan en publicerad Eneo-assistent visas som en chattknapp på
+en extern webbplats, till exempel kommunens publika webb. Besökaren behöver
+inget Eneo-konto. Widgeten sätter inga kakor och sparar inget innan besökaren
+skickar sitt första meddelande.
+
+Guiden vänder sig till redaktörer, webbansvariga och administratörer. Den
+beskriver vad besökare kommer åt, hur en widget publiceras och installeras,
+policy, mallar, serverinställningar, säkerhet och dataskydd samt vad som bör
+stå i tillgänglighetsredogörelsen. Om du har fått ett installationsskript och
+ska lägga in det på webbplatsen, börja med
+[För webbansvariga](#for-the-website-team).
+
+## Så fungerar det [#how-it-works]
+
+- Webbplatsen hämtar ett litet skript (_laddaren_, omkring 5 kB komprimerat) från
+  er Eneo-installation. Innan chattknappen visas läser skriptet widgetens
+  sparade språk, placering och färger från Eneo, så senare ändringar når
+  webbplatsen utan ny installationskod. När besökaren öppnar chatten laddas den
+  i en `iframe` från Eneos domän.
+- Konversationen hanteras helt på Eneos origin; värdwebbplatsen får inte
+  tillgång till den. Webbläsaren låter bara de webbplatser ni har listat bädda
+  in chatten (`Content-Security-Policy: frame-ancestors`).
+- Före första meddelandet löser webbläsaren en osynlig beräkningsuppgift
+  (ALTCHA, i er egen installation, utan tredje part) och får en kortlivad
+  besökartoken. Begränsningar per besökare och IP-adress, en längsta
+  frågelängd och en daglig tokenbudget per widget begränsar användningen.
+- Besökaren använder assistenten så som den är konfigurerad, inom fasta
+  gränser; se [Vad besökare kommer åt](#what-visitors-can-reach).
+
+## Vad besökare kommer åt [#what-visitors-can-reach]
+
+En widget publicerar assistenten så som den är konfigurerad. Det finns ingen
+separat verktygsinställning per widget. En besökare får:
+
+- **Kunskap**: assistentens samlingar och webbplatser, i assistentens
+  kunskapsläge. Med _Vid behov (sökverktyg)_ söker assistenten i dem med Eneos
+  kunskapsverktyg, som körs med besökarens begränsade widgetidentitet och inte
+  kräver något Eneo-konto. Annars hämtas relevanta avsnitt och läggs till
+  frågan.
+- **Assistentens egna MCP-servrar**: de som är aktiverade på assistenten och
+  som ytans säkerhetsklassificering tillåter, med verktygen så som de är
+  konfigurerade. Besökaren är anonym: en server med _Vidarebefordra
+  användaridentitet_ får inga identitetsrubriker, och inget verktygsanrop
+  väntar på godkännande.
+- **Webbsökning**, när både ytan och assistenten har den påslagen och modellen
+  kan anropa verktyg. Webbsökningen körs på organisationens externa sökserver
+  (se [Webbsökning och bildgenerering](/guides/capabilities)).
+
+Aldrig tillgängligt för besökare, oavsett hur assistenten är konfigurerad:
+bildgenerering, filuppladdning, läsning av bilagor, inbyggda
+funktionsleverantörer och bilder som ett verktyg returnerar, som tas bort.
+Publicera bara kunskap och verktyg som är lämpliga för anonyma besökare.
+
+<Callout type="warning">
+  En ändring av assistentens MCP-servrar eller funktioner ändrar direkt vad en
+  aktiv widget exponerar, utan ny aktivering. Allt som en servers verktyg kan
+  läsa eller göra kan en anonym besökare be assistenten att använda. Medan en
+  aktiv widget publicerar assistenten visar redigeringssidan det överst i
+  avsnittet **Verktyg** ("Publicerad som webbwidget") för alla som kan redigera
+  assistenten, med en länk till widgeten för dem som hanterar widgetar.
+</Callout>
+
+Fliken **Publicera** i widgeten listar vad besökare får av assistenten så som
+den är konfigurerad just nu.
+
+Allt som når besökaren passerar ett och samma filter på servern. Besökaren får
+aldrig modellens namn, dess resonemang, assistenten eller de Skills som ligger
+bakom ett svar, verktygsresultat eller innehållet i ett verktygs resurser.
+Reglagen **Visa källor** och **Visa verktygsaktivitet** styr resten; se
+[Källor, verktygsaktivitet och återkoppling](#sources-tool-activity-and-feedback).
+
+## För redaktörer: publicera en widget [#for-editors-publish-a-widget]
+
+Du behöver behörigheten för webbwidgetar och rätt att redigera assistenten.
+
+1. Publicera assistenten i dess yta under **Publicering**.
+2. Öppna **Webbwidget** på samma sida och skapa en widget, eventuellt från en
+   organisationsmall.
+3. Anpassa widgeten. Ändringar sparas automatiskt, och sidan följer
+   arbetsordningen:
+   - **Innehåll**: namn och språk, reglagen **Visa källor** och **Visa
+     verktygsaktivitet**, och texterna besökaren läser: titel, välkomsttext, upp
+     till fyra föreslagna frågor (som läggs till en i taget), den obligatoriska
+     beskrivningen under titeln (som standard en upplysning om att besökaren
+     möter AI) och en sidfot med valfri länk.
+   - **Utseende**: koppla gärna widgeten till en av organisationens mallar; de
+     delar mallen låser är då skrivskyddade här tills du kopplar loss den. Här
+     väljer du också primärfärg (en kontrastkontroll visar om den blir för
+     ljus), valfri rubrikfärg och logotyp, färgschema, placering och hörnradie.
+     Textfärg väljs automatiskt för kontrast. **Mörkt läge** kan ha egna primär-
+     och rubrikfärger, som kontrolleras mot den mörka panelen; tomma värden
+     återanvänder färgerna för ljust läge. Chattknappen på webbplatsen får
+     widgetens färg, och på en mörk sida färgen för mörkt läge, redan när den
+     visas. Förhandsvisningen följer det tema du använder i Eneo om inte
+     widgeten låser ljust eller mörkt läge.
+   - **Regler**: tillåtna webbplatser (en origin per rad, exempelvis
+     `https://www.kommun.se` eller `https://*.kommun.se`; minst en och högst 20),
+     begränsningar, integritet (lagringstid i dagar och om fritextåterkoppling
+     sparas) och botskydd. Lagringstid `0` innebär att inget sparas efter
+     svaret; chatten besvarar då en fråga i taget, utan följdfrågor eller
+     återkoppling. Organisationens policygränser visas vid de fält de begränsar.
+   - **Publicera**: aktiveringskontroll, vad besökare får tillgång till,
+     installationskod, **Testa i Eneo** och användningsstatistik.
+4. Prova förhandsvisningen (den riktiga chattsidan) och gärna **Testa i Eneo**,
+   som visar den riktiga knappen och chatten på administrationssidan innan
+   något har installerats.
+5. När statusraden inte visar några hinder aktiverar en
+   organisationsadministratör widgeten. Fram till dess är den ett utkast och
+   visas inte på den externa webbplatsen.
+6. Kopiera installationskoden och lämna den till webbansvarig. Den läggs in en
+   gång, helst strax före `</body>`:
+
+```html
+<script
+  async
+  src="https://eneo.example.se/widget/v1/eneo.js"
+  data-widget-id="wgt_…"
+></script>
+```
+
+Installationskoden innehåller inget du kan ändra senare: widgetens sparade
+språk, placering och färger når alla webbplatser där den är installerad inom
+ungefär en minut. Adressen `v1` följer Eneo-utgåvorna. Webbplatser som kräver
+Subresource Integrity (SRI) kan i stället använda den låsta varianten; den
+behöver bara bytas ut när själva laddaren får en ny version (se
+[För webbansvariga](#for-the-website-team)).
+
+Redigeraren kontrollerar varje värde mot serverns regler innan det sparas: en
+tillåten webbplats ska vara en origin, inte en sidadress; namnet får inte vara
+tomt; värden utanför organisationens policy markeras vid fältet. Ett värde som
+servern ändå avvisar ligger kvar vid sitt fält med orsaken och hålls tillbaka
+medan dina övriga ändringar fortsätter att sparas; ändra värdet så skickas det
+igen. Statusraden listar alla ändringar som inte har sparats.
+
+På en aktiv widget går det inte att tömma beskrivningen under titeln eller
+listan över tillåtna webbplatser, så att widgeten fortsätter att fungera. Ett
+fält du tömmer ligger kvar med orsaken och sparas så snart widgeten pausas. En
+tömd lista över tillåtna webbplatser räknas också som en osparad ändring, så du
+får en fråga om du lämnar sidan. Om en aktiv widget slutar fungera som den är
+konfigurerad, till exempel för att assistenten inte längre är publicerad, visar
+statusraden, fliken **Publicera** och organisationens översikt vad som behöver
+åtgärdas. På nyligen inlästa sidor döljs chattknappen. Besökare med en redan
+öppen chatt ser ett kort meddelande om att den inte är tillgänglig när de försöker
+använda den.
+
+Om någon annan ändrar widgeten medan du redigerar stannar det automatiska
+sparandet, och dina osparade värden ligger kvar. Kopiera det du vill behålla
+och välj att ladda om och kasta osparade ändringar innan du fortsätter. En
+inaktuell sparning kan inte upphäva en paus eller arkivering.
+
+En redaktör kan **pausa** widgeten direkt för alla besökare. **Arkivering**
+kräver administratör och är permanent.
+
+### Källor, verktygsaktivitet och återkoppling [#sources-tool-activity-and-feedback]
+
+**Källor.** Med **Visa källor** påslaget (standard) får svaren numrerade
+källhänvisningar och en hopfälld källista ("3 källor") under svaret. Ett
+källnummer öppnar listan vid den källan. Kunskap som lades till frågan kommer
+först, sedan det svaret hänvisar till från verktyg, en post per dokument.
+Kunskap som assistenten sökte i med sitt kunskapsverktyg listas som annan
+kunskap: som det dokument svaret hänvisar till, aldrig som ett textavsnitt. En
+webbsida länkas och öppnas i en ny flik. Ett uppladdat dokument har ingen publik länk:
+besökaren kan välja **Kopiera referens**, som kopierar dokumentets titel och en
+Eneo-adress (`https://<eneo>/documents/<id>`), och uppmanas att skicka den till
+en administratör för chatten. Den som är inloggad i Eneo och öppnar adressen
+ser dokumentet (samling eller webbplats, texten och originalfilen om den finns
+kvar) om hen får läsa det. Alla andra får veta att dokumentet inte är
+tillgängligt för dem, utan att få veta om det finns. Ett verktygsresultat utan
+webblänk visas som hämtat från en tjänst som assistenten använde. Med **Visa
+källor** avstängt visas inga källhänvisningar eller källistor, och ingen
+källtitel, länk eller dokumentreferens lämnar Eneo.
+
+**Verktygsaktivitet.** Med **Visa verktygsaktivitet** påslaget (standard) ser
+besökaren vilka verktyg och MCP-servrar ett svar använder medan det skrivs
+("via TimeMCP"): verktygets katalogtitel, eller dess tekniska namn om titel
+saknas, och ett av värdena som assistenten skickade till verktyget. Eneos egen
+kunskapssökning och webbsökning visas som en mening med söktermerna, till
+exempel "Sökte ”öppettider” i kunskapen", utan servernamn. Flera steg fälls ihop
+till en rad som öppnar listan. Verktygsresultat når aldrig besökaren. Med reglaget avstängt lämnar inga
+verktygsanrop, verktygsnamn eller servernamn Eneo. Verktygen används ändå, och
+källor de returnerar listas fortfarande när källor visas.
+
+**Återkoppling.** När widgeten sparar konversationer (lagringstid över `0`) kan
+besökaren ge konversationen tumme upp eller ner under det senaste svaret och
+ändra sig senare; rösten ligger kvar vid följdfrågor. Rösterna räknas i
+widgetens användningsstatistik och i organisationens översikt på den dag
+konversationen började, även när en röst ändras senare. Med **Spara
+fritextåterkoppling** påslaget (av som standard) följs rösten av en länk ("Vill
+du berätta mer?", efter tumme ner "Berätta gärna vad som saknades") som öppnar
+en dialog med en kommentarsruta (högst 2 000 tecken). Besökaren kan låta bli
+att svara. Kommentaren sparas med konversationen bara så länge inställningen
+är påslagen och tas bort tillsammans med konversationen. Om besökaren ändrar
+sin röst efteråt ligger kommentaren kvar.
+
+### Attribut och API [#optional-attributes-and-api]
+
+Den kopierade installationskoden innehåller bara `data-widget-id`. De här
+valfria attributen är till för webbansvariga:
+
+| Attribut                                   | Funktion                                                                                                                                                   |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data-lang="sv"` eller `"en"`              | Värdsidans språk, som används när widgetens språk är **Automatiskt** (standard: sidans `lang`). En widget inställd på svenska eller engelska behåller det. |
+| `data-position="bottom-left"`              | Bara en reserv när de sparade inställningarna inte går att läsa. Annars gäller widgetens sparade placering.                                                |
+| `data-color-scheme="light"` eller `"dark"` | Värdsidans färgschema, som används när widgetens färgschema är automatiskt (standard: besökarens systeminställning)                                        |
+| `data-launcher="none"`                     | Dölj knappen och öppna chatten med webbplatsens egen kontroll                                                                                              |
+| `data-auto-open="true"`                    | Öppna chatten när sidan laddas                                                                                                                             |
+| `data-label="…"`                           | Knappens tillgängliga namn (standard "Öppna chatt" eller "Open chat")                                                                                      |
+| `data-frame-title="…"`                     | Chattramens tillgängliga namn (standard "Chatt" eller "Chat")                                                                                              |
+
+Skriptet exponerar `window.Eneo` med kommandona `open`, `close`, `toggle`,
+`on(event, listener)` och `off(event, listener)`. Anrop kan köas innan skriptet
+har laddats:
+
+```html
+<script>
+  window.Eneo =
+    window.Eneo ||
+    function () {
+      (window.Eneo.q = window.Eneo.q || []).push(arguments);
+    };
+</script>
+<button onclick="Eneo('open')">Fråga oss</button>
+```
+
+`setContext({ page_url, page_title })` accepteras också, men chatten använder
+ännu inte sidkontext och skickar inte med information om sidan.
+
+För webbplatser som inte kan köra skript finns chatten som fristående sida på
+`/embed/<widget-id>?mode=full`.
+
+## För webbansvariga [#for-the-website-team]
+
+Redaktören i Eneo ger dig installationskoden. Kontrollera följande när den läggs
+in i webbplatsen:
+
+1. **Placering.** Lägg skriptet en gång per sidmall, helst strax före `</body>`.
+   I SiteVision och Optimizely kan du använda mallens plats för skript, i
+   WordPress ett sidfotsskript eller temats `footer.php`, och i Google Tag
+   Manager en anpassad HTML-tagg. `async` gör att hämtningen inte blockerar
+   sidans rendering.
+2. **Exakt webbplatsadress.** Redaktören anger tillåtna webbplatser under
+   _Regler → Tillåtna webbplatser_ i Eneo. En origin består av protokoll och
+   värdnamn: `https://kommun.se` och `https://www.kommun.se` är olika, liksom
+   HTTP och HTTPS. `https://*.kommun.se` tillåter underdomäner. Om adressen
+   saknas kan knappen synas medan panelen förblir tom, eftersom webbläsaren
+   blockerar inramningen.
+3. **Content Security Policy.** Om webbplatsen använder CSP måste Eneos origin
+   tillåtas i `script-src` för skriptet, `connect-src` för widgetens sparade
+   inställningar (som skriptet läser från `/widget/settings/<widget-id>`) och
+   `frame-src` för panelen, till exempel
+   `script-src 'self' https://eneo.kommun.se; connect-src 'self' https://eneo.kommun.se; frame-src https://eneo.kommun.se`.
+   Utan `connect-src` visas knappen ändå, men nere till höger, på sidans språk
+   och i Eneos standardfärg (eller som de valfria `data-*`-attributen anger) i
+   stället för widgetens sparade placering, språk och färger, och webbläsaren
+   rapporterar ett CSP-brott. Chattens egna nätverksanrop sker inne i ramen från
+   Eneos origin.
+4. **Gör chatten lätt att hitta.** Skriptet lägger knappen sist på sidan, så
+   den som använder tangentbord eller skärmläsare når den sist. Lägg en synlig
+   länk som "Chatta med oss" tidigt på sidan, till exempel vid
+   kontaktuppgifterna, som anropar `Eneo('open')` (se
+   [Attribut och API](#optional-attributes-and-api)). Med
+   `data-launcher="none"` ersätter länken den flytande knappen.
+5. **Information till besökare.** Widgeten sätter inga kakor på värdwebbplatsen.
+   Chattramen sparar en pseudonym besökaridentitet och aktuell konversation i
+   sin egen webbläsarlagring. Beskriv användningen i webbplatsens
+   integritetsinformation; se [Personuppgifter och lagring](#personal-data-and-cookies).
+6. **Låst version med SRI.** Om er policy kräver SRI, använd installationskoden
+   med `integrity`. Adressen innehåller laddarens version, och innehållet i en
+   version ändras aldrig, så `integrity`-värdet fortsätter att gälla när Eneo
+   uppgraderas. När en uppgradering ger laddaren en ny version serverar Eneo
+   bara den nya: den gamla låsta koden slutar då att laddas tills du klistrar
+   in den nya från widgetens flik **Publicera**. Kontrollera fliken efter varje
+   Eneo-uppgradering, eller använd den flytande adressen `v1` om SRI inte är
+   ett krav.
+7. **Test före publicering.** Testmiljöns origin måste också vara tillåten.
+   Öppna chatten, skicka en fråga, stäng med Escape och kontrollera att fokus
+   återgår till knappen. Prova med enbart tangentbord, med skärmläsare, på
+   mobil och med webbläsaren förstorad till 200 %. Redaktören kan också prova
+   den riktiga widgeten med _Testa i Eneo_ innan den finns på webbplatsen.
+8. **Om skript inte tillåts.** Länka till den fristående chattsidan:
+   `https://<eneo>/embed/<widget-id>?mode=full`. Samma chatt visas som en hel
+   sida och fungerar även från intranät och innehåll som inte kan köra skript.
+
+## För administratörer: policy, mallar och säkerhet [#for-operators-policy-templates-and-security]
+
+### Organisationens policy [#tenant-policy]
+
+Under **Admin → Webbwidgetar** ser en organisationsadministratör alla
+organisationens widgetar (var de finns, om de är aktiva, frågor och token de
+senaste 7 och 30 dagarna, blockerade anrop och dagens budget). Under fliken
+**Policy** sätter administratören de tak som alla widgetar måste hålla sig inom:
+högsta dagliga tokenbudget (standard 2 000 000, högst 2 000 000 000),
+intervallet för lagringstid (standard 0–365 dagar) och om widgetar får köras
+utan botskydd (av som standard). Bara administratörer ändrar policyn. Alla med
+behörigheten för webbwidgetar kan läsa den, så widgetredigeraren visar gränserna
+under fliken **Regler** och markerar värden utanför dem innan de sparas;
+kvarstående policybrott visas som aktiveringshinder. Antalet widgetar är inte
+begränsat. Varje aktivering är ett administratörsbeslut, och översikten håller
+den publika ytan synlig.
+
+Policyn gäller befintliga widgetar så som den ser ut nu, inte bara vid senare
+ändringar:
+
+- En daglig budget över taket begränsas till taket för besökarna, och
+  användningssiffrorna visar den budget som faktiskt gäller.
+- Den nattliga rensningen håller varje widgets konversationer inom det
+  tillåtna intervallet. En widget med lagringstid `0` sparar fortfarande
+  ingenting, även om minimum är högre.
+- När widgetar inte längre får köras utan botskydd kräver sådana widgetar
+  beräkningsuppgiften igen direkt, och deras utfärdade besökartoken slutar
+  gälla. Redaktörer som har en sådan widget öppen behöver ladda om sidan innan
+  de sparar nästa gång.
+
+Widgeten behåller sina egna sparade värden och visar dem som policybrott som
+behöver åtgärdas.
+
+### Mallar [#templates]
+
+Mallar innehåller organisationens husstil: texter, färger, logotyp, form och
+språk. Administratörer skapar dem under **Admin → Webbwidgetar →
+Widgetmallar** och förhandsvisar dem i ljust och mörkt läge. Högst en mall kan
+vara standard och vara förvald för redaktörer; stängs det av är ingen mall
+förvald.
+
+En mall har ett utkast och en **publicerad** version. Att spara ändrar
+utkastet, som förhandsvisas på mallsidan; **Publicera** gör utkastet till den
+version widgetar kopplas till. En widget **följer** den mall den skapades från
+eller kopplades till: kopplingen kopierar de publicerade texterna, utseendet
+och språket till widgeten en gång. Mallens **låsta delar** hålls sedan i takt:
+varje publicering skriver dem till alla widgetar som följer mallen, i samma
+anrop, och delarna är skrivskyddade i widgetredigeraren. Innan en publicering
+når följande widgetar visas en bekräftelse som listar vilka delar som ersätts,
+vilka lås som tillkommer eller släpps och vilka ändrade delar som är olåsta och
+därför behåller redaktörernas värden. Olåsta delar är startvärden som
+redaktörer får ändra. Delar som kan låsas är utseende, språk, beskrivning och
+sidfot samt formuleringar (titel, välkomsttext, platshållare); nya mallar låser
+utseende och språk. Beskrivningen kan bara låsas om mallen har en, så en aktiv
+widget kan aldrig förlora sin AI-information via en mall. Föreslagna frågor hör
+till den enskilda assistenten och ingår aldrig i mallen. Låst språk och
+utseende når installerade webbplatser som vilken ändring som helst, utan ny
+installationskod.
+
+Mallsidan visar hur många widgetar som följer mallen och om utkastet har
+opublicerade ändringar; mallistan markerar mallar som ännu inte är publicerade.
+Bara publicerade mallar erbjuds när en widget skapas eller kopplas, och
+väljaren förhandsvisar den publicerade versionen, inte ett utkast som kan ligga
+före. En widget kan när som helst **tillämpa mallen igen**, vilket kopierar den
+publicerade versionen på nytt, även olåsta delar, eller **kopplas loss**; en
+lös widget behåller sina värden och alla delar blir redigerbara. En mall som
+widgetar följer kan inte tas bort. Redaktörer med en öppen widgetsida uppmanas
+att ladda om när mallen har ändrat deras widget.
+
+### När assistenten ändras [#when-the-assistant-changes]
+
+- **Verktyg och funktioner.** En ändring av assistentens MCP-servrar eller
+  funktioner når besökarna direkt; se
+  [Vad besökare kommer åt](#what-visitors-can-reach).
+- **Avpublicering** av assistenten tar en aktiv widget offline. Besökare ser
+  meddelandet om att chatten inte är tillgänglig, och widgeten visar vad som
+  behöver åtgärdas.
+- **Flytt** av assistenten till en annan yta arkiverar dess widgetutkast och
+  loggar varje arkivering i granskningsloggen. Flytten nekas så länge en aktiv
+  eller pausad widget visar assistenten, eftersom widgeten hör till
+  assistentens yta; en administratör arkiverar då widgeten först.
+- **Borttagning** av assistenten arkiverar dess widgetar i samma steg och
+  loggar varje arkivering i granskningsloggen. En mall som widgetarna följde
+  kan därefter tas bort.
+
+### Säkerhet [#security-properties]
+
+- **Vem som får rama in chatten** avgörs av besökarens webbläsare utifrån
+  widgetens tillåtna origins. En webbplats som inte är listad får en tom ram.
+  En pausad widget visar ingen chattknapp på nyligen inlästa sidor. En chatt
+  som öppnades före pausen visar ett kort meddelande om att den inte är
+  tillgänglig vid nästa anrop.
+- **Widgetar i en avstängd organisation** behandlas som pausade i hela den
+  publika ytan: nyligen inlästa sidor döljer chattknappen, en redan öppen chatt
+  visar meddelandet om att den inte är tillgänglig vid nästa anrop, och inga
+  utmaningar eller besökartoken lämnas ut.
+- **Svar kan inte föra data vidare.** Chattsidans Content Security Policy
+  tillåter bara bilder från Eneo och logotypens adress samt anslutningar till
+  Eneos API, så en bildlänk som hamnar i ett svar kan inte skicka besökarens
+  fråga vidare till tredje part.
+- **Besökartoken** är JWT:er knutna till en widget och en pseudonym
+  besökaridentitet. De gäller i 15 minuter och förnyas automatiskt. De
+  signeras med en egen nyckel som härleds från backendens `JWT_SECRET`, så en
+  besökartoken godtas aldrig som en användares inloggning. Paus eller
+  ändringar av tillåtna webbplatser, begränsningar, integritetsinställningar
+  eller botskydd gör alla utfärdade token ogiltiga, liksom en policyändring som
+  förbjuder widgetar utan botskydd.
+- **ALTCHA** är en beräkningsuppgift som körs i er egen installation, utan
+  CAPTCHA-leverantör, kakor eller fingeravtryck. En widget utan botskydd kräver
+  att organisationens policy tillåter det. En utmaning signeras för den widget
+  som utfärdade den, och bara den widgeten godtar lösningen.
+- **Begränsningarna stänger vid fel som standard.** Redis skyddar
+  anropsfrekvens och återanvändning av utmaningar. Den dagliga budgeten och
+  pågående reservationer lagras i PostgreSQL, så förlorad Redis-data nollställer
+  inte budgeten.
+- **Budgetavräkning.** Före ett svar reserveras token, och efter svaret ersätts
+  reservationen en gång med den uppmätta användningen, inklusive varje omgång
+  verktygsanrop. Ett fel innan strömningen börjar släpper reservationen. Osäker
+  användning efter ett avbrott förblir debiterad för dagen. Reservationen är en
+  uppskattning för att avgöra om ett anrop kan starta, inte ett hårt tak för
+  modellens svar; den faktiska användningen kan bli högre. En widget vars
+  dagliga budget är mindre än reservationen reserverar i stället hela budgeten
+  och besvarar därför en fråga per dag.
+- **Laddaren** serveras från er Eneo-origin med `nosniff`, öppen CORS (krävs
+  för `integrity`) och en ETag; den låsta varianten ändras aldrig. De sparade
+  inställningar laddaren läser är widgetens publika visningsinställningar och
+  cachas i en minut.
+- Chattsidan skickar `Referrer-Policy: strict-origin-when-cross-origin`, en
+  restriktiv `Permissions-Policy` och en CSP utan `unsafe-inline`-skript.
+
+### Serverinställningar [#server-settings]
+
+Driftsansvariga kan justera den publika widgetytan med miljövariabler på
+backend. Standardvärdena passar de flesta installationer.
+
+| Variabel                                 | Standard           | Betydelse                                                                                                                                                                                                    |
+| ---------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `WIDGET_VISITOR_TOKEN_TTL_SECONDS`       | `900`              | Livslängd för en besökartoken. Chatten förnyar den automatiskt.                                                                                                                                              |
+| `WIDGET_VISITOR_TOKEN_GRACE_SECONDS`     | `3600`             | Hur länge en utgången token fortfarande kan styrka besökarens identitet vid förnyelse, utan ny beräkningsuppgift.                                                                                            |
+| `WIDGET_PREVIEW_TOKEN_TTL_SECONDS`       | `3600`             | Livslängd för token bakom förhandsvisningen och **Testa i Eneo**. Förhandsvisningen får en ny token strax innan den går ut. Det gör inte **Testa i Eneo**, så ta bort widgeten från sidan och visa den igen. |
+| `WIDGET_ALTCHA_COST`                     | `1000`             | Hashiterationer per försök i beräkningsuppgiften (minst 1000). Höj värdet för en widget som missbrukas.                                                                                                      |
+| `WIDGET_ALTCHA_KEY_PREFIX`               | `0`                | Ett till fyra hexadecimala tecken som varje försök måste träffa; varje extra tecken gör uppgiften 16 gånger dyrare.                                                                                          |
+| `WIDGET_ALTCHA_CHALLENGE_TTL_SECONDS`    | `300`              | Hur länge en utmaning gäller.                                                                                                                                                                                |
+| `WIDGET_CHALLENGE_RATE_LIMIT_PER_MINUTE` | `60`               | Anrop efter utmaningar, och separat efter besökartoken, per widget, IP-adress och minut.                                                                                                                     |
+| `WIDGET_RATE_LIMIT_FAIL_OPEN`            | `false`            | Vad som händer när Redis inte svarar: `false` nekar widgettrafik (`503`); `true` hoppar över begränsningarna och kontrollen av återanvända utmaningar, så en löst uppgift kan användas igen under tiden.     |
+| `WIDGET_BUDGET_TIMEZONE`                 | `Europe/Stockholm` | Tidszon vars midnatt startar ett nytt budgetdygn.                                                                                                                                                            |
+| `WIDGET_BUDGET_RESERVATION_TOKENS`       | `8000`             | Token som reserveras mot den dagliga budgeten före varje svar och avräknas mot den uppmätta användningen efteråt. En uppskattning för att släppa in anrop, inte ett tak för ett svar.                        |
+| `WIDGET_RETRIEVAL_CHUNKS`                | `30`               | Antal kunskapsavsnitt som hämtas för varje besökarfråga.                                                                                                                                                     |
+
+Begränsningarna per widget (meddelanden per besökare och per IP-adress,
+frågelängd, konversationslängd och daglig budget) sätts under fliken **Regler**
+för varje widget, inom organisationens policy.
+
+### Bakom en omvänd proxy [#behind-a-reverse-proxy]
+
+De IP-baserade gränserna (meddelanden per IP-adress samt anrop efter utmaningar
+och besökartoken) bygger på klientens IP-adress så som Eneo ser den. Bakom
+Traefik, Dokploy, nginx eller någon annan omvänd proxy är det proxyns adress, om
+inte backend får veta hur många proxyer som står framför den: sätt
+`TRUSTED_PROXY_COUNT` (och `TRUSTED_PROXY_HEADERS` om proxyn använder en annan
+rubrik än `X-Forwarded-For`) på backend. Utan det delar alla besökare på en och
+samma kvot, och hela webbplatsen stryps så snart de första besökarna har
+förbrukat tilldelningen per IP-adress.
+
+De IP-baserade gränserna räknar en IPv4-adress för sig och en IPv6-adress per
+/64-nät, eftersom en anslutning oftast har ett helt /64-nät och annars skulle
+kunna använda en ny adress för varje anrop.
+
+### Personuppgifter och lagring [#personal-data-and-cookies]
+
+Widgeten använder inga kakor. Efter första meddelandet sparar webbläsaren en
+slumpmässig besökaridentitet från Eneo, ett tillhörande bevis, aktuell token och
+senaste konversationens id i ramens lagring. Det gör att samtalet kan fortsätta
+när besökaren byter sida. Webbläsaren håller ramens lagring åtskild mellan
+värdwebbplatser.
+
+Anpassa exempelvis följande information till er faktiska konfiguration:
+
+> Chattassistenten använder inga kakor. Din webbläsare sparar en slumpmässig
+> identifierare och den aktuella konversationen lokalt så att du kan fortsätta
+> samtalet när du besöker andra sidor på webbplatsen. Konversationer sparas av
+> [organisation] i [N] dagar.
+
+### Lagring av konversationer [#conversation-retention]
+
+Workern tar bort utgångna widgetkonversationer dagligen klockan 03:30 UTC,
+inklusive frågor, källreferenser, återkoppling och frågornas modelloggar. Varje
+widgets egen lagringstid gäller, inom intervallet i organisationens policy. Den
+lagringstid som är inställd för assistenten, ytan eller organisationen tar
+aldrig bort widgetkonversationer. Kunskapskällor och granskningsloggar har egna
+livscykler. Med lagringstid `0` sparas inget medan svaret tas fram, och
+konversationen tas bort i slutet av svaret, även om budgetavräkningen
+misslyckas; besökaren erbjuds en ny fråga i stället för följdfråga eller
+återkoppling. Om en befintlig widget ändras till `0` blir tidigare samtal
+möjliga att rensa vid nästa schemalagda körning.
+
+Daglig statistik och budgetkvitton innehåller varken samtalstext eller
+besökaridentitet. Budgetkvitton löper ut efter sju dagar; den dagliga
+statistiken finns kvar.
+
+### Checklista för konsekvensbedömning (DPIA) [#dpia-checklist]
+
+Innan en widget aktiveras på en publik webbplats, kontrollera att:
+
+- beskrivningen under titeln anger att besökaren pratar med en AI-assistent och
+  att sidfoten länkar till er integritetsinformation;
+- lagringstiden stämmer med er informationshanteringsplan (`0` om
+  konversationer inte får sparas);
+- fritextåterkoppling bara sparas om ni har ett beslutat ändamål för den (av
+  som standard);
+- assistentens instruktioner ber besökare att inte skriva personuppgifter och
+  talar om hur de når en människa;
+- assistentens kunskap inte innehåller personuppgifter eller internt material;
+- varje MCP-server och funktion som assistenten använder tål anonym, publik
+  användning: det verktygen kan läsa eller göra kan en besökare be om, och
+  senare ändringar av assistenten gäller direkt
+  ([Vad besökare kommer åt](#what-visitors-can-reach));
+- namnen på assistentens MCP-servrar tål att visas offentligt: besökaren ser
+  dem som källa till verktygsaktiviteten ("via TimeMCP"), och verktyg utan
+  katalogtitel visas med sitt tekniska namn. Stäng av _Visa
+  verktygsaktivitet_ för att hålla verktygs- och servernamn interna; verktygen
+  används ändå;
+- den dagliga tokenbudgeten motsvarar den kostnad ni accepterar och att
+  användningen följs upp regelbundet;
+- granskningsloggning är påslagen: skapande, ändringar, aktivering, paus,
+  arkivering och förbrukad budget loggas.
+
+## Tillgänglighet [#accessibility]
+
+Widgeten är byggd för WCAG 2.2 AA:
+
+- Knappen är en riktig knapp med tillgängligt namn och synlig fokusmarkering,
+  och alla kontroller i chatten har synlig fokusmarkering. Panelen är en
+  namngiven dialogruta, och chattramen har widgetens namn.
+- När chatten öppnas flyttas fokus in i den. Escape stänger den, även när
+  fokus har flyttats vidare till sidan. Fokus återgår då till knappen eller
+  stannar där besökaren befinner sig.
+- Skärmläsare meddelar att en fråga har skickats och läser sedan upp det
+  färdiga svaret en gång, och de meddelar när en referens har kopierats. Svaret
+  läses aldrig upp ord för ord medan det skrivs.
+- Bredvid sidan är panelen en icke-modal dialogruta, så sidan går att använda
+  under tiden. På små skärmar och i låga fönster, till exempel en bärbar dator
+  med 200 % förstoring, fyller den skärmen som en modal dialogruta: resten av
+  sidan döljs för skärmläsare och tangentbord tills chatten stängs.
+- Texten går att förstora: när panelen är låg rullar hela chatten i stället
+  för att konversationen trycks ihop.
+- Allt fungerar med tangentbord, färgerna uppfyller kontrastkraven och chatten
+  följer webbläsarens inställningar för färgschema och minskad rörelse.
+  Redaktörer får en kontrastkontroll av färgen de väljer.
+
+Kontrollera helheten på den webbplats där den installeras, inklusive era egna
+texter, färger och länkar.
+
+### Exempel för tillgänglighetsredogörelsen [#accessibility-statement-template]
+
+**Chattassistent**
+
+Webbplatsen innehåller en chattassistent som drivs av [organisationens namn]s
+AI-plattform. Chatten öppnas som en dialogruta med en knapp som går att nå med
+tangentbord och skärmläsare. Den kan stängas med Escape-tangenten, och fokus
+återvänder då till knappen. Skärmläsare meddelar när en fråga har skickats och
+läser upp varje svar när det är klart. Chatten följer webbläsarens
+inställningar för ljust och mörkt läge och för minskad rörelse. På små skärmar,
+och när sidan förstoras så mycket att panelen inte får plats, fyller chatten
+hela skärmen, och resten av sidan döljs för skärmläsare tills chatten stängs.
+
+Kända begränsningar: svaren skapas av en AI-modell och kan vara felaktiga. Svar
+kan innehålla länkar till källor som öppnas i en ny flik.
+
+Om du inte kan använda chatten kan du kontakta oss på [alternativ kontaktväg].
+Rapportera brister i tillgängligheten till [kontaktuppgift].

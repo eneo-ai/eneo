@@ -1,0 +1,32 @@
+{
+  "name": "@eneo/widget-loader",
+  "version": "1.0.3",
+  "eneoWidgetChannel": "v1",
+  "private": true,
+  "type": "module",
+  "description": "Loader script that embeds an Eneo assistant as a chat widget on a host website.",
+  "scripts": {
+    "build": "vite build && node scripts/manifest.mjs",
+    "build:dev": "vite build && node scripts/manifest.mjs --dev",
+    "lock": "vite build && node scripts/manifest.mjs --lock",
+    "check": "tsc --noEmit",
+    "lint": "prettier --check . && eslint .",
+    "format": "prettier --write .",
+    "pretest": "bun run build",
+    "test": "vitest run && node --test scripts/release.test.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@vitest/browser": "4.1.11",
+    "@vitest/browser-playwright": "4.1.11",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.2",
+    "globals": "^16.5.0",
+    "playwright": "1.61.1",
+    "prettier": "3.9.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.62.1",
+    "vite": "^6.4.3",
+    "vitest": "4.1.11"
+  }
+}

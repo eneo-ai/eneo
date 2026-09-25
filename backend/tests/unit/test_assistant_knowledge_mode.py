@@ -357,3 +357,36 @@ class TestKnowledgeServerCollisionDefense:
         ]
         assert len(surviving) == 1
         assert surviving[0]["function"]["description"] == "Built-in knowledge search"
+
+
+@pytest.mark.asyncio
+async def test_tool_mode_without_server_falls_back_to_injected_retrieval():
+    """A TOOL-mode assistant without a loopback server, as for a model without
+    tool calling. Retrieved content must still reach the completion."""
+    chunk = InfoBlobChunkInDBWithScore(
+        id=uuid4(),
+        text="Retrieved passage",
+        chunk_no=0,
+        info_blob_id=uuid4(),
+        tenant_id=uuid4(),
+        info_blob_title="Source",
+        score=0.9,
+    )
+    assistant = _assistant(knowledge_mode=KnowledgeMode.TOOL)
+    references_service = _references_service(
+        DatastoreResult(chunks=[chunk], no_duplicate_chunks=[chunk], info_blobs=[])
+    )
+    completion_service = _completion_service()
+
+    await assistant.ask(
+        question="Hello",
+        completion_service=completion_service,
+        references_service=references_service,
+        knowledge_mcp_server=None,
+    )
+
+    references_service.get_references.assert_awaited_once()
+    kwargs = completion_service.get_response.await_args.kwargs
+    assert kwargs["info_blob_chunks"] == [chunk]
+    assert kwargs["mcp_servers"] == []
+    assert kwargs["knowledge_catalog"] == ""

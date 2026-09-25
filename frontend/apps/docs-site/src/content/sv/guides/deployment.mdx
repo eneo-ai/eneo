@@ -1,0 +1,185 @@
+---
+title: Driftsätt Eneo
+translationSource: guides/deployment.mdx@35b1e3f6d811
+---
+
+import { Callout } from "nextra/components";
+
+# Driftsätt Eneo
+
+Den här guiden hjälper dig att installera en ny Eneo-instans med Docker Compose
+på en egen server. Referenskonfigurationen använder Traefik för HTTPS,
+PostgreSQL med pgvector för databasen, Redis för köer och en separat worker för
+bakgrundsjobb.
+
+<Callout type="warning">
+  Exempelfilerna måste anpassas. Ersätt alla förekomster av `your-domain.com`,
+  `changeme` och `CHANGEME`. Använd filer från samma release som dina
+  containeravbildningar. `develop` beskriver nästa utgåva.
+</Callout>
+
+## Förberedelser
+
+Du behöver Docker med Compose v2 eller senare, ett domännamn med DNS till
+servern, öppna portar 80 och 443 och en API-nyckel till minst en AI-leverantör.
+Referensinstallationen använder Let's Encrypt. En egen reverse proxy och egna
+certifikat går också bra om routningen nedan bevaras.
+
+Räkna med minst 2 CPU-kärnor, 4 GB RAM och 20 GB disk för att utvärdera
+referensinstallationen. Anpassa kapaciteten efter belastning och datamängd.
+
+Du behöver inte en S3-tjänst för att börja. Standardinställningen lagrar
+varaktigt innehåll inom storleksgränser i PostgreSQL. Välj SeaweedFS, MinIO eller
+annan S3-kompatibel lagring först när kapacitet och återställningskrav motiverar
+det. Följ då [lagringsguiden](/guides/object-content-storage).
+
+## Installera en ny instans
+
+### Hämta rätt installationsfiler
+
+```bash
+git clone https://github.com/eneo-ai/eneo.git
+cd eneo
+# Checka ut taggen för den release du ska köra innan du fortsätter.
+cd docs/deployment
+cp env_backend.template env_backend.env
+cp env_frontend.template env_frontend.env
+cp env_db.template env_db.env
+cp .env.template .env
+chmod 600 .env env_backend.env env_frontend.env env_db.env
+```
+
+Lås avbildningarna för `frontend`, `backend`, `worker` och `db-init` till samma
+release i `docker-compose.yml`, till exempel
+`ghcr.io/eneo-ai/eneo-backend:2.2.0`. Eneos image-taggar har inget `v`-prefix.
+Undvik den föränderliga taggen `latest` i produktion. Tillgängliga taggar finns i
+[GitHub Releases](https://github.com/eneo-ai/eneo/releases).
+
+### Skapa hemligheter
+
+Generera separata värden och spara dem i miljöfilerna:
+
+```bash
+openssl rand -hex 32     # JWT_SECRET i env_backend.env
+openssl rand -hex 32     # URL_SIGNING_KEY i env_backend.env
+openssl rand -base64 24  # POSTGRES_PASSWORD i env_backend.env OCH env_db.env
+```
+
+Databaslösenordet måste vara identiskt i backendens och databasens miljöfiler.
+Behåll mallarnas `POSTGRES_USER=postgres` och `POSTGRES_DB=eneo` om du inte också
+anpassar alla anslutningar.
+
+För att spara AI-leverantörernas autentiseringsuppgifter krävs en
+`ENCRYPTION_KEY`. Backend-containern ansluter till det externa nätverket
+`proxy_tier`, så skapa nätverket först och generera sedan nyckeln med samma
+backendavbildning som ska köras. Kommandot kräver att avbildningarna är låsta
+till den release guiden beskriver; `latest` pekar på den senaste slutliga
+utgåvan och kan vara äldre:
+
+```bash
+docker network create proxy_tier
+docker compose run --rm --no-deps backend python -m eneo.cli.generate_encryption_key
+```
+
+Spara resultatet som `ENCRYPTION_KEY` i `env_backend.env` och behåll en säker
+kopia för återställning. Nyckeln används också för andra krypterade
+integrationshemligheter.
+
+### Ställ in adresser och TLS
+
+I `env_backend.env`, sätt `PUBLIC_ORIGIN` till den externa adressen, exempelvis
+`https://eneo.example.se`.
+
+I `env_frontend.env`:
+
+| Variabel                     | Värde i referensinstallationen |
+| ---------------------------- | ------------------------------ |
+| `PUBLIC_ORIGIN` och `ORIGIN` | `https://eneo.example.se`      |
+| `ENEO_BACKEND_URL`           | `https://eneo.example.se`      |
+| `ENEO_BACKEND_SERVER_URL`    | `http://backend:8000`          |
+| `PUBLIC_ENEO_BACKEND_URL`    | `https://eneo.example.se`      |
+
+Lägg inte till `/api` i `PUBLIC_ENEO_BACKEND_URL`: klienten lägger till API-sökvägen.
+Byt alla fyra förekomster av `your-domain.com` i Compose-filen och ersätt
+`your-email@domain.com` med adressen för Let's Encrypt.
+
+Lämna det valfria objektlagringsblocket i `.env` utkommenterat om du använder
+PostgreSQL. För inbyggd objektlagring krävs både profil och overlay enligt
+[lagringsguiden](/guides/object-content-storage); använd samma Compose-val vid
+start, stopp, uppgradering och återställning.
+
+### Starta och kontrollera
+
+```bash
+docker compose up -d
+docker compose ps
+docker compose logs --tail=100 backend worker db-init
+curl -fsS https://eneo.example.se/api/livez
+curl -fsS https://eneo.example.se/api/healthz
+curl -fsS https://eneo.example.se/version
+```
+
+`/api/livez` visar att API-processen svarar. `/api/healthz` kontrollerar också
+worker och innehållslagring. På aktuella avbildningar finns `/api/readyz` som
+alias; äldre utgåvor har bara `/api/healthz`.
+
+Om objektlagring är konfigurerad ska du även kontrollera att
+`detail.object_content.code` är `ready`. Enbart HTTP 200 kan betyda att inline-
+innehåll fungerar medan objektlagringen är degraderad.
+
+Öppna den domän du har konfigurerat. Referensstacken har ingen localhost-route.
+Standardkontot är `user@example.com` med lösenordet `ChangeMePassword1!`.
+**Byt lösenord omedelbart efter första inloggningen.**
+
+Lägg sedan till en leverantör och aktivera modeller under **Admin → Modeller**.
+Se [Konfigurera AI-leverantörer](/guides/ai-providers). Skapa därefter en yta och
+en assistent.
+
+## Reverse proxy och nätverk
+
+En egen reverse proxy behöver vidarebefordra `/api/*`, `/scim/*`, `/version`,
+`/openapi.json` och `/docs` till backend. Övrig webbtrafik går till frontend. Bevara
+strömmande svar; buffring kan hindra att chattsvaren visas löpande. Läs den
+engelska versionens avsnitt _Reverse Proxy Requirements_ för detaljer och
+konfigurationsexempel.
+
+Databas och Redis ligger på det interna nätverket `data_net`. Frontend och
+Traefik har ingen direkt åtkomst dit. Moduler använder `module_net` och
+valfri objektlagring använder `object_content_net`. Externa backupjobb som
+förut anslöt till databasen via `proxy_tier` behöver köras genom `docker exec`
+eller anslutas till `eneo_data_net`.
+
+## Uppgradera och återställ
+
+Ta databasbackup och, om objektlagrade poster finns, en matchande ögonblicksbild
+av objektlagringen medan skrivningar är stoppade. Behandla dem som en gemensam
+återställningspunkt. Inline-innehåll följer med PostgreSQL-backupen.
+
+```bash
+docker compose exec -T db pg_dump -U postgres eneo | gzip > eneo-backup.sql.gz
+```
+
+En uppgradering som inför varaktiga kunskapsoriginal och äldre fil-/ikonlagring
+kräver en kontrollerad dränering av jobb och stopp av gamla skrivare före
+migrering. Kör inte en rullande uppdatering för den övergången. Följ
+[uppgraderingsguiden för filer och ikoner](/guides/file-icon-storage-upgrade)
+och [backup- och återställningsrutinen](/guides/object-content-storage#back-up-and-restore).
+
+Behåll en kopia av miljöfiler, krypteringsnyckel, image-taggar och exakt
+Compose-kommando. Vid återställning ska databasen och objektlagringen höra
+till samma återställningspunkt, och avbildningarna ska matcha databasschemat.
+
+## Felsökning och nästa steg
+
+- **502 från proxyn:** kontrollera domänen, containrarnas status och backendloggar.
+- **Inloggning misslyckas:** kontrollera `PUBLIC_ORIGIN` och identitetsleverantörens
+  callback-adress. Se [OIDC-guiderna](/guides/oidc-federation).
+- **Modell saknas eller kan inte sparas:** kontrollera leverantörens uppgifter,
+  att modellen är aktiverad och att `ENCRYPTION_KEY` är satt.
+- **Jobb fastnar:** läs workerloggarna och `/api/healthz/crawler`. Kontrollera
+  kapacitet och anslutning till databas och Redis.
+
+För fler konfigurationstabeller, proxyexempel och driftsrutiner, byt till
+**English** på den här sidan. Andra fördjupningar finns i guiderna om
+[SCIM](/guides/scim-provisioning), [SharePoint](/guides/sharepoint-integration)
+och [modulinloggning](/docs/module-authentication).
