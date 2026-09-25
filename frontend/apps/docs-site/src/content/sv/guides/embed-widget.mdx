@@ -80,7 +80,7 @@ Reglagen **Visa källor** och **Visa verktygsaktivitet** styr resten; se
 
 ## För redigerare: publicera en widget [#for-editors-publish-a-widget]
 
-Du behöver behörigheten för webbwidgetar och rätt att redigera assistenten.
+Du behöver behörigheten **Widgetar** och rätt att redigera assistenten.
 
 1. Publicera assistenten i dess yta under **Publicering**.
 2. Öppna **Webbwidget** på samma sida och skapa en widget, eventuellt från en
@@ -332,7 +332,7 @@ Under fliken **Policy** sätter administratören de tak som alla widgetar måste
 hålla sig inom: högsta dagliga tokenbudget (standard 2 000 000, högst
 2 000 000 000), intervallet för lagringstid (standard 0–365 dagar) och om
 widgetar får köras utan botskydd (av som standard). Bara administratörer ändrar policyn. Alla
-med behörigheten för webbwidgetar kan läsa den, så widgetredigeraren visar
+med behörigheten **Widgetar** kan läsa den, så widgetredigeraren visar
 gränserna under fliken **Regler** och markerar värden utanför dem innan de
 sparas; kvarstående policybrott visas som aktiveringshinder. Antalet widgetar är
 inte begränsat. Varje aktivering är ett administratörsbeslut, och översikten
@@ -394,7 +394,7 @@ Granskningssidan visar:
   publicerad startar **Testa svaren** den riktiga widgeten; testfrågorna sparas
   som besökarsamtal och räknas in i widgetens användning. Medlemskapet
   kontrolleras varje gång testet får en token. Om du inte också är redigerare
-  eller administratör i ytan med behörigheten för webbwidgetar gäller en token
+  eller administratör i ytan med behörigheten **Widgetar** gäller en token
   i 10 minuter, så ett pågående test slutar fungera inom 10 minuter efter att
   du har lämnat ytan eller tagits bort. Om du inte är medlem kan du gå med i
   ytan härifrån (se [Gå med i en yta](/guides/space-oversight#join-a-space)).
@@ -411,13 +411,13 @@ besökarna direkt. Du kan också aktivera en widget som ingen har begärt
 aktivering för. **Skicka tillbaka…** returnerar en väntande begäran med ett
 meddelande om vad som behöver ändras (minst 10 synliga tecken, högst 500).
 Widgeten förblir ett utkast eller pausad, och meddelandet visas i
-widgetredigeraren. Alla i ytan som har behörigheten för webbwidgetar kan läsa
+widgetredigeraren. Alla i ytan som har behörigheten **Widgetar** kan läsa
 det, oavsett roll, och det kan även organisationsadministratörer och
 API-nycklar med omfånget Organisation och behörigheten `admin`. Meddelandet
 sparas också i granskningsloggen, så skriv det för redigerarna och utan
 personuppgifter. **Pausa…** och **Arkivera…** finns på samma sida, och **Öppna
 i widgetredigeraren** visas när du är redigerare eller administratör i ytan och
-har behörigheten för webbwidgetar. När en widget
+har behörigheten **Widgetar**. När en widget
 aktiveras eller arkiveras tas en väntande begäran och ett eventuellt
 tillbakaskickat meddelande bort.
 

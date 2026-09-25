@@ -4324,7 +4324,7 @@
   "widget_review_return_body_draft": "Widgeten förblir ett utkast. Redigerarna ser ditt meddelande i widgetredigeraren och kan begära aktivering igen.",
   "widget_review_return_body_paused": "Widgeten förblir pausad. Redigerarna ser ditt meddelande i widgetredigeraren och kan begära aktivering igen.",
   "widget_review_return_label": "Vad behöver ändras?",
-  "widget_review_return_help": "Kan läsas av alla i ytan som har behörigheten för webbwidgetar, av organisationsadministratörer och av API-nycklar med admin-behörighet för hela organisationen, och sparas i granskningsloggen.",
+  "widget_review_return_help": "Kan läsas av alla i ytan som har behörigheten Widgetar, av organisationsadministratörer och av API-nycklar med admin-behörighet för hela organisationen, och sparas i granskningsloggen.",
   "widget_review_return_confirm": "Skicka tillbaka",
   "widget_review_returned_toast": "Begäran har skickats tillbaka.",
   "widget_review_return_failed": "Begäran kunde inte skickas tillbaka",
