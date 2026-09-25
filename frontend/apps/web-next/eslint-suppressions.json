@@ -42,11 +42,6 @@
       "count": 1
     }
   },
-  "src/features/admin/api-keys/org-api-keys.tsx": {
-    "jsx-a11y/no-autofocus": {
-      "count": 1
-    }
-  },
   "src/features/admin/api-keys/policy-panel.tsx": {
     "eneo/no-literal-accessible-name": {
       "count": 1
@@ -62,28 +57,8 @@
       "count": 3
     }
   },
-  "src/features/admin/security-classifications/classification-dialog.tsx": {
-    "jsx-a11y/no-autofocus": {
-      "count": 1
-    }
-  },
   "src/features/admin/storage/storage-connection-section.tsx": {
     "eneo/no-literal-accessible-name": {
-      "count": 1
-    }
-  },
-  "src/features/api-keys/account-api-keys.tsx": {
-    "jsx-a11y/no-autofocus": {
-      "count": 1
-    }
-  },
-  "src/features/api-keys/resource-api-keys-section.tsx": {
-    "jsx-a11y/no-autofocus": {
-      "count": 1
-    }
-  },
-  "src/features/apps/create-app.tsx": {
-    "jsx-a11y/no-autofocus": {
       "count": 1
     }
   },
@@ -99,11 +74,6 @@
   },
   "src/features/apps/run/audio-recorder-input.tsx": {
     "jsx-a11y/media-has-caption": {
-      "count": 1
-    }
-  },
-  "src/features/assistants/create-menu.tsx": {
-    "jsx-a11y/no-autofocus": {
       "count": 1
     }
   },
@@ -132,20 +102,12 @@
       "count": 2
     }
   },
-  "src/features/services/create-service.tsx": {
-    "jsx-a11y/no-autofocus": {
-      "count": 1
-    }
-  },
   "src/features/services/editor/service-editor.tsx": {
     "eneo/no-literal-accessible-name": {
       "count": 1
     }
   },
   "src/features/templates/template-gallery-dialog.tsx": {
-    "jsx-a11y/no-autofocus": {
-      "count": 1
-    },
     "jsx-a11y/no-static-element-interactions": {
       "count": 1
     }

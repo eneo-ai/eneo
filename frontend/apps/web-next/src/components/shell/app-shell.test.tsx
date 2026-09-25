@@ -109,9 +109,9 @@ describe("AppShellFrame", () => {
 
   it("does not open the palette over another dialog", () => {
     renderShellWith(
-      <div role="dialog" aria-label="Bekräfta" data-state="open">
+      <dialog open aria-label="Bekräfta">
         …
-      </div>
+      </dialog>
     );
     act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));

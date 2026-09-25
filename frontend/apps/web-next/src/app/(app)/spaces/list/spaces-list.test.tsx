@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Suspense } from "react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { installAstryxDomStubs, renderInApp } from "@/features/spaces/testing/render";
+import { renderInApp } from "@/test/render";
 
 const api = vi.hoisted(() => ({
   spaces: [] as unknown[],
@@ -39,8 +39,6 @@ vi.mock("@/lib/api/browser", () => ({
 }));
 
 import { SpacesList } from "./spaces-list.client";
-
-beforeAll(installAstryxDomStubs);
 
 afterEach(() => {
   cleanup();

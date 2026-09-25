@@ -277,11 +277,16 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 
 ### 14. Dialogs, menus and popovers (1.4.13, 2.1.2, 2.4.3, 4.1.2)
 
-- Use Astryx `Dialog` (or Radix for legacy screens): focus is trapped inside,
-  Esc closes (except `purpose="required"`), focus returns to the trigger, and
-  the visible title is the dialog's name.
-- Let the dialog place initial focus (Astryx: the title; Radix: the first
-  focusable element). No `autoFocus`.
+- Every dialog is an Astryx `Dialog`, a native modal `<dialog>`: the browser
+  makes the rest of the page inert, Esc closes (except `purpose="required"`),
+  focus returns to the trigger, and the visible title is the dialog's name.
+  The legacy shadcn `Dialog` and `AlertDialog` in `src/components/ui` keep
+  their API but render Astryx Dialog, and return focus to the menu button
+  when a menu item opened them; the legacy Radix popups inside them (Select,
+  DropdownMenu, Popover, Tooltip) portal into the dialog. Toasts shown while
+  any modal is open appear inside it, so they stay visible and announced.
+- Let the dialog place initial focus: the title (alert dialogs: Cancel). No
+  `autoFocus`; it runs before `showModal()` and does nothing.
 - Menus that select something use radio or checkbox items so the state is
   announced (see `ThemeSwitcher`).
 - Tooltips only repeat or supplement; essential information is never only in

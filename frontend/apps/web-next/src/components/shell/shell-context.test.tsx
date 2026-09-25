@@ -12,17 +12,17 @@ function add(tag: string, attributes: Record<string, string>) {
   return element;
 }
 
-it("sees open legacy and native modal dialogs, but not the nav drawer", () => {
+it("sees open modal dialogs, but not the nav drawer", () => {
   expect(isOtherDialogOpen()).toBe(false);
 
   add("dialog", { [DRAWER_MARKER]: "", open: "" });
   expect(isOtherDialogOpen()).toBe(false);
 
-  const radix = add("div", { role: "dialog", "data-state": "open" });
-  expect(isOtherDialogOpen()).toBe(true);
-  radix.remove();
+  // A Radix popover is not a dialog the palette would fight with.
+  add("div", { role: "dialog", "data-state": "open" });
+  expect(isOtherDialogOpen()).toBe(false);
 
-  add("div", { role: "dialog", "data-state": "closed" });
+  add("dialog", {});
   expect(isOtherDialogOpen()).toBe(false);
 
   add("dialog", { open: "" });

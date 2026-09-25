@@ -111,7 +111,6 @@ export function CreateAppButton() {
               id="app-name"
               value={name}
               placeholder={`${t("name")}...`}
-              autoFocus
               onChange={(event) => setName(event.target.value)}
             />
           </form>

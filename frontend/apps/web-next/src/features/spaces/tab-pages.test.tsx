@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { installAstryxDomStubs, renderInApp } from "./testing/render";
+import { renderInApp } from "@/test/render";
 import {
   spaceHasPermission,
   type ResourcePermission,
@@ -41,8 +41,6 @@ vi.mock("@/components/providers/app-context", () => ({
 import { AppsPage } from "@/features/apps/apps-page";
 import { AssistantsPage } from "@/features/assistants/assistants-page";
 import { ServicesPage } from "@/features/services/services-page";
-
-beforeAll(installAstryxDomStubs);
 
 afterEach(cleanup);
 
