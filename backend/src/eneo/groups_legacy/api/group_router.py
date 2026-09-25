@@ -443,7 +443,30 @@ async def transfer_group_to_space(
     transfer_req: TransferRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
+    from eneo.audit.application.audit_metadata import AuditMetadata
+    from eneo.audit.domain.action_types import ActionType
+    from eneo.audit.domain.entity_types import EntityType
+
     service = container.resource_mover_service()
     await service.move_collection_to_space(
         collection_id=id, space_id=transfer_req.target_space_id
+    )
+
+    user = container.user()
+    collection_service = container.collection_crud_service()
+    collection = await collection_service.get_collection(id)
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.COLLECTION_TRANSFERRED,
+        entity_type=EntityType.COLLECTION,
+        entity_id=id,
+        description=f"Transferred collection '{collection.name}' to new space",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=collection,
+            extra={"target_space_id": str(transfer_req.target_space_id)},
+        ),
     )

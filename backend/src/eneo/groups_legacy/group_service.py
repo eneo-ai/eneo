@@ -14,7 +14,11 @@ from eneo.groups_legacy.api.group_models import (
 )
 from eneo.groups_legacy.group_repo import GroupRepository
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
-from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from eneo.roles.permissions import Permission, validate_permissions
 from eneo.spaces.space_service import SpaceService
 from eneo.tenants.tenant_repo import TenantRepository
@@ -262,17 +266,8 @@ class GroupService:
         self,
         group_id: UUID,
         space_id: UUID,
-        assistant_ids: list[UUID] | None = None,
-        service_ids: list[UUID] | None = None,
     ):
-        if assistant_ids is None:
-            assistant_ids = []
-        if service_ids is None:
-            service_ids = []
-        source_space = await self.space_repo.get_space_by_collection(
-            collection_id=group_id
-        )
-        group = source_space.get_collection(collection_id=group_id)
+        source_space = await self.space_service.get_space_by_collection(group_id)
         source_actor = self.actor_manager.get_space_actor_from_space(source_space)
         target_space = await self.space_service.get_space(space_id)
         target_actor = self.actor_manager.get_space_actor_from_space(target_space)
@@ -297,6 +292,23 @@ class GroupService:
                     "auth_layer": "domain_policy",
                 },
             )
+        source_space_id = await self.repo.lock_group_space_for_update(group_id)
+        if source_space_id is None:
+            raise NotFoundException()
+        source_space = await self.space_service.get_space(source_space_id)
+        source_actor = self.actor_manager.get_space_actor_from_space(source_space)
+        if not source_actor.can_delete_collections():
+            raise UnauthorizedException(
+                "User does not have permissions to move group from space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "move",
+                    "auth_layer": "domain_policy",
+                },
+            )
+
+        group = source_space.get_collection(collection_id=group_id)
         if not target_space.is_embedding_model_in_space(group.embedding_model.id):
             raise BadRequestException(
                 f"Space does not have embedding model {group.embedding_model.name} enabled."
@@ -308,15 +320,10 @@ class GroupService:
             group_id=group_id, new_owner_space_id=space_id
         )
 
-        await self.repo.unlink_group_from_all_spaces(group_id=group_id)
+        await self.repo.unlink_group_from_space(
+            group_id=group_id, space_id=source_space_id
+        )
         await self.repo.link_group_to_space(group_id=group_id, space_id=space_id)
-
-        await self.repo.remove_group_from_all_assistants(
-            group_id=group_id, assistant_ids=assistant_ids
-        )
-        await self.repo.remove_group_from_all_services(
-            group_id=group_id, service_ids=service_ids
-        )
 
         return group_in_db
 

@@ -381,6 +381,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_collection_deleted,
     description: m.audit_action_collection_deleted_description
   },
+  collection_transferred: {
+    name: m.audit_action_collection_transferred,
+    description: m.audit_action_collection_transferred_description
+  },
   integration_added: {
     name: m.audit_action_integration_added,
     description: m.audit_action_integration_added_description

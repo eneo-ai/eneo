@@ -8693,6 +8693,7 @@ export interface components {
       | "website_deleted"
       | "website_crawled"
       | "website_transferred"
+      | "collection_transferred"
       | "group_chat_created"
       | "collection_created"
       | "collection_updated"
