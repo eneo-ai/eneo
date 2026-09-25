@@ -1,6 +1,7 @@
 "use client";
 
 import { BottomSheet } from "@astryxdesign/core/BottomSheet";
+import { ChatToolCalls, type ChatToolCallStatus } from "@astryxdesign/core/Chat";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
@@ -155,14 +156,26 @@ function StatusCircle({ status }: { status: StepStatus }) {
 const PANEL_COLLAPSIBLE_CLASS =
   "[&_.astryx-collapsible-trigger]:text-ax-text-secondary [&_.astryx-collapsible-trigger]:min-h-8 [&_.astryx-collapsible-trigger]:text-[12.5px] [&_.astryx-collapsible-trigger]:font-medium";
 
-function ToolResult({ part, sessionId }: { part: ToolPart; sessionId: string | null }) {
+const CALL_STATUS: Record<StepStatus, ChatToolCallStatus> = {
+  waiting: "pending",
+  running: "running",
+  done: "complete",
+  error: "error",
+  denied: "error",
+  stopped: "error"
+};
+
+/**
+ * A tool call's arguments and (loaded when the row is expanded) its result.
+ * Mounted by ChatToolCalls only while the row is open.
+ */
+function ToolCallDetail({ part, sessionId }: { part: ToolPart; sessionId: string | null }) {
   const t = useTranslations();
-  const [open, setOpen] = useState(false);
   const finished = part.state === "output-available" || part.state === "output-error";
   const canLoad = Boolean(sessionId && part.toolCallId && finished);
   const result = useQuery({
     queryKey: ["conversations", "tool-call-result", sessionId, part.toolCallId],
-    enabled: open && canLoad,
+    enabled: canLoad,
     staleTime: Infinity,
     queryFn: async () => {
       const response = await unwrap(
@@ -173,43 +186,43 @@ function ToolResult({ part, sessionId }: { part: ToolPart; sessionId: string | n
       return response.result ?? null;
     }
   });
-
-  if (!finished) return null;
   const errorText = part.state === "output-error" ? part.errorText : undefined;
-  if (!canLoad) {
-    return errorText ? (
-      <p className="text-ax-error border-ax-border border-t px-2.5 py-1.5 text-[12.5px]">
-        {errorText}
-      </p>
-    ) : null;
-  }
-
-  const body = result.isPending
-    ? t("loading_ellipsis")
-    : result.isError
-      ? t("mcp_tool_response_load_error")
-      : typeof result.data === "string" && result.data.trim()
-        ? result.data
-        : (errorText ?? t("mcp_tool_response_empty"));
+  const hasInput =
+    part.input != null && typeof part.input === "object" && Object.keys(part.input).length > 0;
+  const body = !canLoad
+    ? null
+    : result.isPending
+      ? t("loading_ellipsis")
+      : result.isError
+        ? t("mcp_tool_response_load_error")
+        : typeof result.data === "string" && result.data.trim()
+          ? result.data
+          : (errorText ?? t("mcp_tool_response_empty"));
+  const label = "text-ax-text-secondary text-[11px] font-semibold";
+  const pre = "font-mono text-[11.5px] break-words whitespace-pre-wrap";
 
   return (
-    <div className={cn("border-ax-border border-t px-2.5", PANEL_COLLAPSIBLE_CLASS)}>
-      <Collapsible
-        trigger={t("chat_tool_result")}
-        chevronPosition="start"
-        isOpen={open}
-        onOpenChange={setOpen}
-      >
-        <ScrollableArea
-          axis="both"
-          label={t("chat_tool_result")}
-          className="focus-visible:outline-ring max-h-48 focus-visible:outline-2 focus-visible:-outline-offset-2"
-        >
-          <pre className="text-ax-text pb-2 font-mono text-[11.5px] break-words whitespace-pre-wrap">
-            {body}
-          </pre>
-        </ScrollableArea>
-      </Collapsible>
+    <div className="flex flex-col gap-2 pb-1">
+      {hasInput && (
+        <div>
+          <p className={label}>{t("chat_tool_arguments")}</p>
+          <pre className={pre}>{JSON.stringify(part.input, null, 2)}</pre>
+        </div>
+      )}
+      {body !== null ? (
+        <div>
+          <p className={label}>{t("chat_tool_result")}</p>
+          <ScrollableArea
+            axis="block"
+            label={t("chat_tool_result")}
+            className="focus-visible:outline-ring max-h-48 focus-visible:outline-2 focus-visible:-outline-offset-2"
+          >
+            <pre className={pre}>{body}</pre>
+          </ScrollableArea>
+        </div>
+      ) : (
+        errorText && <p className="text-ax-error text-[12.5px]">{errorText}</p>
+      )}
     </div>
   );
 }
@@ -260,21 +273,28 @@ function StepDetails({ step, sessionId }: { step: ActivityStep; sessionId: strin
     case "tool": {
       const server = toolServer(step.part);
       const args = toolArguments(step.part);
+      const problem =
+        step.status === "error"
+          ? (step.part.errorText ?? t("chat_step_status_error"))
+          : step.status === "denied" || step.status === "stopped"
+            ? t(STATUS_KEY[step.status])
+            : undefined;
       return (
         <div className="flex flex-col gap-1.5">
-          <div className="bg-ax-card border-ax-border rounded-ax-element overflow-hidden border">
-            <ScrollableArea
-              axis="inline"
-              label={t("chat_tool_call_label")}
-              className="focus-visible:outline-ring focus-visible:outline-2 focus-visible:-outline-offset-2"
-            >
-              <code className="block px-2.5 py-1.5 font-mono text-[11.5px] whitespace-nowrap">
-                {server ? `${server}/` : ""}
-                {step.part.toolName}({args})
-              </code>
-            </ScrollableArea>
-            <ToolResult part={step.part} sessionId={sessionId} />
-          </div>
+          <ChatToolCalls
+            className="bg-ax-card border-ax-border rounded-ax-element border px-1"
+            calls={[
+              {
+                key: step.part.toolCallId,
+                name: step.part.toolName,
+                node: server ?? undefined,
+                target: args || undefined,
+                status: CALL_STATUS[step.status],
+                errorMessage: problem,
+                resultDetail: <ToolCallDetail part={step.part} sessionId={sessionId} />
+              }
+            ]}
+          />
           {step.references.length > 0 && (
             <ul className="flex flex-col gap-1 text-[12.5px]">
               {step.references.map((reference) => {

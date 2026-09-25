@@ -4841,7 +4841,6 @@
   "chat_activity_knowledge_title": "Searched knowledge",
   "chat_activity_knowledge_hits": "{count, plural, one {# hit} other {# hits}}",
   "chat_activity_answer_done": "Wrote the answer",
-  "chat_tool_call_label": "Tool call",
   "chat_tool_approved": "Approved",
   "chat_tool_denied": "Denied",
   "chat_activity_tokens": "{count, plural, one {# token} other {# tokens}}",
@@ -4920,5 +4919,6 @@
   "chat_previous_branch": "Previous version",
   "chat_next_branch": "Next version",
   "chat_conversation_load_failed": "The conversation could not be loaded.",
-  "chat_activity_reasoning": "Reasoning"
+  "chat_activity_reasoning": "Reasoning",
+  "chat_tool_arguments": "Arguments"
 }

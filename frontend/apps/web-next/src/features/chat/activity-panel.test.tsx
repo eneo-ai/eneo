@@ -148,7 +148,7 @@ describe("ActivityPanel", () => {
     expect(pill.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("keeps reasoning behind a collapsible disclosure and names the tool call region", () => {
+  it("keeps reasoning and tool call details behind disclosures", () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: /aktivitet:/i }));
     const reasoning = screen.getByRole("button", { name: "Resonemang" });
@@ -156,9 +156,14 @@ describe("ActivityPanel", () => {
     fireEvent.click(reasoning);
     expect(reasoning.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Jämför policyn mot LOU.")).toBeTruthy();
-    expect(screen.getByRole("group", { name: "Verktygsanrop" }).textContent).toBe(
-      "lou/lou_troskelvarden(ar: 2026)"
-    );
+    // The tool call (Astryx ChatToolCalls): name, server and arguments; the
+    // row expands to the full arguments.
+    const call = screen.getByRole("button", { name: /lou_troskelvarden/ });
+    expect(call.textContent).toContain("ar: 2026");
+    expect(call.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(call);
+    expect(call.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Argument")).toBeTruthy();
   });
 
   it("switches to numbered sources with where they come from", () => {

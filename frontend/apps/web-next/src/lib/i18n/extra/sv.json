@@ -325,7 +325,6 @@
   "chat_activity_knowledge_title": "Sökte i kunskap",
   "chat_activity_knowledge_hits": "{count, plural, one {# träff} other {# träffar}}",
   "chat_activity_answer_done": "Skrev svaret",
-  "chat_tool_call_label": "Verktygsanrop",
   "chat_tool_approved": "Godkänt",
   "chat_tool_denied": "Nekat",
   "chat_activity_tokens": "{count, plural, one {# token} other {# tokens}}",
@@ -404,5 +403,6 @@
   "chat_previous_branch": "Föregående version",
   "chat_next_branch": "Nästa version",
   "chat_conversation_load_failed": "Konversationen kunde inte laddas.",
-  "chat_activity_reasoning": "Resonemang"
+  "chat_activity_reasoning": "Resonemang",
+  "chat_tool_arguments": "Argument"
 }
