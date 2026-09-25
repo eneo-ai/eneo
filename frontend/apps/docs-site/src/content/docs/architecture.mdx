@@ -436,6 +436,30 @@ There is no separate CSRF token or refresh-token mechanism.
 - **Resource checks**: every space action goes through a space actor that
   answers questions such as "can this user create websites here" based on the
   member's role and the resource type.
+- **Tenant admin oversight**: tenant admins see every shared space's
+  metadata, members and usage, manage its members and review its web widgets
+  under `/api/v1/admin/spaces` and `/api/v1/admin/widgets` without being
+  members. These routes use a separate, column-only read model filtered by
+  tenant; they never go through the space actor, which keeps no admin bypass,
+  so content permissions are not widened. Documents, questions, answers and
+  conversations stay behind membership. One tenant admin cannot give another
+  content access directly: adding a tenant admin as a user, or raising a
+  tenant admin's direct role, is refused with `400` and error code `9068`, so
+  admins join a space themselves with a role and a written reason.
+  Members see the join until 90 days after it ends (table
+  `space_oversight_visits`, whose row a daily worker job then deletes), and
+  the audit log always records it under its own retention. Deleting the
+  admin's account, through the API or SCIM, ends the join and removes the
+  membership it gave. Two routes
+  reach content without a join: user groups, since a group's role in a space
+  applies to everyone in it (a group that contains tenant admins can still be
+  added to a space), and tenant-scoped service keys; see
+  [API Key Management](/docs/api-key-management#how-service-keys-derive-space-roles)
+  and [Space Oversight](/guides/space-oversight#content-requires-membership).
+  Every user added to or removed from a group under **Admin → User Groups** or
+  through `/api/v1/user-groups` is always logged; group changes that an
+  identity provider syncs through SCIM are logged as `scim_group_updated`,
+  which follows the audit configuration.
 
 ### Data Security
 

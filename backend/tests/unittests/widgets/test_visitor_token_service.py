@@ -26,6 +26,7 @@ def _settings(ttl: int = 900) -> SimpleNamespace:
         widget_visitor_token_ttl_seconds=ttl,
         widget_visitor_token_grace_seconds=3600,
         widget_preview_token_ttl_seconds=3600,
+        widget_admin_preview_token_ttl_seconds=600,
     )
 
 
@@ -80,6 +81,17 @@ def test_preview_tokens_are_flagged_and_live_longer():
     assert service.verify(ordinary, widget).preview is False
     # A forged flag with the wrong type never counts as a preview.
     assert service.verify(_encode(widget, preview="yes"), widget).preview is False
+
+
+def test_an_admins_preview_token_lives_ten_minutes():
+    widget = _widget()
+    service = VisitorTokenService(settings=_settings())
+
+    token, expires_in = service.mint(widget, uuid4(), admin_preview=True)
+    assert expires_in == 600
+    claims = service.verify(token, widget)
+    assert claims.preview is True
+    assert claims.expires_at <= datetime.now(timezone.utc) + timedelta(seconds=601)
 
 
 def test_token_is_bound_to_one_widget():

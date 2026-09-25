@@ -5,11 +5,24 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import get_args
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 from eneo.widgets.domain.widget import Widget
+
+# What a widget visitor can run. A visitor is a synthetic principal with no
+# users row. Loopback servers accept its widget-scoped token, but a generated
+# image is a file owned by a user, so a visitor gets no image generation and
+# no built-in provider, and images other MCP tools return are dropped. The
+# assistant's knowledge, its own MCP servers and an external web search
+# provider serve visitors as configured. A new purpose reaches visitors unless
+# it is excluded here.
+VISITOR_CAPABILITY_PURPOSES: frozenset[CapabilityPurpose] = frozenset(
+    purpose for purpose in get_args(CapabilityPurpose) if purpose != "image_generation"
+)
 
 
 class WidgetVisitorContext(BaseModel):

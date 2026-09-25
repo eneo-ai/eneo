@@ -171,7 +171,8 @@ class AuditLogRepository(ABC):
         Permanently delete logs older than retention period.
 
         This is a HARD delete - logs are permanently removed and cannot be recovered.
-        Ensures compliance with data retention regulations.
+        Ensures compliance with data retention regulations. Mandatory actions
+        younger than MANDATORY_AUDIT_MIN_RETENTION_DAYS are always kept.
 
         Returns:
             Number of logs deleted

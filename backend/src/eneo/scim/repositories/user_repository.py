@@ -9,6 +9,8 @@ from eneo.database.tables.users_table import Users, users_roles_table
 from eneo.main.logging import get_logger
 from eneo.scim.domain.errors import ScimInvalidFilterError
 from eneo.scim.schemas.common import ScimFilter, ScimSort
+from eneo.scim.schemas.user import ScimUserState
+from eneo.spaces.oversight.account_deletion import end_oversight_of_deleted_user
 
 logger = get_logger(__name__)
 
@@ -191,6 +193,11 @@ class ScimUserRepository:
         return list(result.scalars().all())
 
     async def update(self, model: UserModel) -> UserModel:
+        # Every SCIM deprovisioning (DELETE, PUT or PATCH active=false) saves here.
+        if model.state == ScimUserState.DELETED and model.deleted_at is not None:
+            await end_oversight_of_deleted_user(
+                self._session, model.id, at=model.deleted_at
+            )
         await self._session.flush()
         await self._session.refresh(model)
         return model

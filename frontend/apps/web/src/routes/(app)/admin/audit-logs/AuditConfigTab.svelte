@@ -8,12 +8,13 @@
   import type { components } from "@eneo/eneo-js";
   import { getActionLabel, getActionDescription } from "./audit-action-labels";
   import { getCategoryLabel, getCategoryDescription } from "./audit-category-labels";
-  import { ChevronRight, Search, Check, X } from "@lucide/svelte";
+  import { ChevronRight, Search, Check, X, Lock } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { slide, fly } from "svelte/transition";
   import { SvelteSet } from "svelte/reactivity";
 
   const eneo = getEneo();
+  const uid = $props.id();
 
   // Display text is resolved from translation keys, not the API payload.
   type CategoryConfigItem = components["schemas"]["CategoryConfig"];
@@ -85,7 +86,7 @@
   function toggleAllInCategory(category: string, enabled: boolean) {
     // Create new array with updated actions
     actionConfig = actionConfig.map((action) => {
-      if (action.category === category) {
+      if (action.category === category && !action.mandatory) {
         return { ...action, enabled };
       }
       return action;
@@ -106,7 +107,7 @@
   function toggleAction(actionId: string, categoryId: string) {
     // Find the current action to get its state
     const currentAction = actionConfig.find((a) => a.action === actionId);
-    if (!currentAction) return;
+    if (!currentAction || currentAction.mandatory) return;
 
     const newEnabledState = !currentAction.enabled;
 
@@ -118,8 +119,8 @@
       return a;
     });
 
-    // Check if all actions in the category have the same state
-    const categoryActions = actionConfig.filter((a) => a.category === categoryId);
+    // Always-logged actions never turn off, so only the changeable ones decide the category state.
+    const categoryActions = actionConfig.filter((a) => a.category === categoryId && !a.mandatory);
     const allEnabled = categoryActions.every((a) => a.enabled);
     const allDisabled = categoryActions.every((a) => !a.enabled);
 
@@ -151,7 +152,8 @@
   function countEnabledInCategory(category: string) {
     const actions = actionConfig.filter((a) => a.category === category);
     const enabled = actions.filter((a) => a.enabled).length;
-    return { enabled, total: actions.length };
+    const locked = actions.filter((a) => a.mandatory).length;
+    return { enabled, total: actions.length, locked };
   }
 
   // Load configuration
@@ -300,9 +302,12 @@
   <div class="space-y-3">
     {#each categoryConfig as category (category.category)}
       {@const actions = filteredActionsByCategory[category.category] || []}
-      {@const { enabled: enabledCount, total: totalCount } = countEnabledInCategory(
-        category.category
-      )}
+      {@const {
+        enabled: enabledCount,
+        total: totalCount,
+        locked: lockedCount
+      } = countEnabledInCategory(category.category)}
+      {@const lockedNoteId = `${uid}-${category.category}-always-logged`}
       {@const isExpanded = expandedCategories.has(category.category)}
 
       {#if actions.length > 0 || !searchQuery}
@@ -339,6 +344,7 @@
                   checked={category.enabled}
                   onCheckedChange={(next) => toggleAllInCategory(category.category, next)}
                   aria-label={getCategoryLabel(category.category)}
+                  aria-describedby={lockedCount > 0 ? lockedNoteId : undefined}
                 />
               </div>
             </div>
@@ -347,12 +353,27 @@
                 {getCategoryDescription(category.category)}
               </p>
             {/if}
+            {#if lockedCount > 0}
+              <p
+                id={lockedNoteId}
+                class="text-muted mt-2 ml-9 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm leading-relaxed"
+              >
+                <span
+                  class="bg-primary text-default border-default inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold"
+                >
+                  <Lock class="h-3.5 w-3.5" aria-hidden="true" />
+                  {m.audit_config_always_logged_count({ count: lockedCount })}
+                </span>
+                <span>{m.audit_config_always_logged_help()}</span>
+              </p>
+            {/if}
           </div>
 
           <!-- Actions List with improved styling -->
           {#if isExpanded && actions.length > 0}
             <div transition:slide={{ duration: 200 }} class="divide-default bg-primary divide-y">
               {#each actions as action (action.action)}
+                {@const lockedId = `${uid}-${action.action}-always-logged`}
                 <div class="hover:bg-hover-default/50 px-6 py-5 transition-colors duration-150">
                   <div class="flex items-start justify-between gap-6">
                     <div class="min-w-0 flex-1">
@@ -360,7 +381,15 @@
                         <span class="text-default text-sm font-semibold">
                           {getActionLabel(action.action)}
                         </span>
-                        {#if !action.enabled}
+                        {#if action.mandatory}
+                          <span
+                            id={lockedId}
+                            class="bg-secondary text-default border-default inline-flex flex-shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold"
+                          >
+                            <Lock class="h-3.5 w-3.5" aria-hidden="true" />
+                            {m.audit_config_always_logged()}
+                          </span>
+                        {:else if !action.enabled}
                           <span
                             class="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
                           >
@@ -375,19 +404,23 @@
                         </p>
                       {/if}
                       <code
-                        class="bg-accent-default/5 text-accent-default/90 dark:bg-accent-default/10 dark:text-accent-default border-accent-default/20 inline-block rounded-md border px-2.5 py-1 font-mono text-xs"
+                        class="bg-accent-default/10 text-accent-stronger border-accent-default/20 inline-block rounded-md border px-2.5 py-1 font-mono text-xs"
                         >{action.action}</code
                       >
                     </div>
                     <div class="flex-shrink-0 pt-0.5">
                       <Checkbox
                         checked={action.enabled}
+                        readonly={action.mandatory}
                         onCheckedChange={(next) => {
                           if (next !== action.enabled) {
                             toggleAction(action.action, action.category);
                           }
                         }}
                         aria-label={getActionLabel(action.action)}
+                        aria-disabled={action.mandatory ? "true" : undefined}
+                        aria-describedby={action.mandatory ? lockedId : undefined}
+                        class="aria-disabled:cursor-not-allowed"
                       />
                     </div>
                   </div>

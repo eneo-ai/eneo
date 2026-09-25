@@ -18,6 +18,7 @@
     History,
     KeyRound,
     Landmark,
+    LayoutGrid,
     LayoutTemplate,
     Lightbulb,
     MessageSquareText,
@@ -65,6 +66,7 @@
     {
       label: m.admin_section_governance(),
       items: [
+        navItem("/admin/spaces", LayoutGrid, m.admin_spaces_nav()),
         navItem("/admin/personal-assistant", MessageSquareText, m.governance_title()),
         navItem("/admin/prompt-library", BookText, m.governance_tab_prompts()),
         navItem("/admin/security-classifications", ShieldCheck, m.security_classifications())

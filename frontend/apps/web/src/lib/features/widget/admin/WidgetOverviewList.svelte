@@ -7,12 +7,15 @@
 <script lang="ts">
   import type { Eneo, WidgetOverview, WidgetOverviewItem } from "@eneo/eneo-js";
   import { invalidateAll } from "$app/navigation";
-  import { ArrowRight, Pause, Play } from "@lucide/svelte";
+  import { ArrowRight, Clock, Pause } from "@lucide/svelte";
+  import { settleDialog } from "$lib/components/settleDialog";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import { blockerLabel } from "./blockers";
+  import { widgetStatusLabel } from "./status";
+  import TimedText from "./TimedText.svelte";
   import { toastWidgetError } from "./errors";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
@@ -27,26 +30,35 @@
 
   let { overview, eneo }: Props = $props();
 
-  // Pausing a live widget is the kill switch, so it asks first; resuming and
-  // activating are safe to do straight away. The list is reloaded afterwards.
+  // Pausing a live widget is the kill switch, so it asks first. Activating
+  // and resuming only happen after a review on the widget's own page.
   let toPause = $state<WidgetOverviewItem | null>(null);
   let busyId = $state<string | null>(null);
+  let pausedId: string | null = null;
+  const reviewLinks: Record<string, HTMLElement | null> = $state({});
+  let onlyActiveSwitch = $state<HTMLElement | null>(null);
 
-  async function run(item: WidgetOverviewItem, action: "pause" | "activate") {
+  // The Pause button goes away with the reload, so focus moves to the
+  // paused widget's review link, or above the list once it is filtered out.
+  const settler = settleDialog({
+    close: () => (toPause = null),
+    reload: invalidateAll,
+    focusAfter: () => (pausedId ? reviewLinks[pausedId] : null) ?? onlyActiveSwitch
+  });
+
+  async function pause(item: WidgetOverviewItem) {
+    if (busyId) return;
     busyId = item.id;
     try {
-      if (action === "pause") await eneo.widgets.pause({ id: item.id });
-      else await eneo.widgets.activate({ id: item.id });
-      toPause = null;
-      await invalidateAll();
+      await eneo.widgets.pause({ id: item.id });
     } catch (error) {
-      toastWidgetError(
-        error,
-        action === "pause" ? m.widget_admin_could_not_pause() : m.widget_admin_could_not_activate()
-      );
+      toastWidgetError(error, m.widget_admin_could_not_pause());
+      return;
     } finally {
       busyId = null;
     }
+    pausedId = item.id;
+    await settler.settle();
   }
 
   let onlyActive = $state(false);
@@ -59,26 +71,15 @@
     onlyActive ? overview.items.filter((item) => item.status === "active") : overview.items
   );
 
-  function statusLabel(item: WidgetOverviewItem) {
-    switch (item.status) {
-      case "active":
-        return m.widget_admin_status_active();
-      case "paused":
-        return m.widget_admin_status_paused();
-      case "archived":
-        return m.widget_admin_status_archived();
-      default:
-        return m.widget_admin_status_draft();
-    }
-  }
-
+  // The review works whether or not the administrator is a member of the space.
   function widgetHref(item: WidgetOverviewItem) {
-    return localizeHref(`/spaces/${item.space_id}/assistants/${item.target_id}/widget`);
+    return localizeHref(`/admin/widgets/${item.id}`);
   }
 
   function blockedReason(item: WidgetOverviewItem): string {
     const blockers = item.activation_blockers ?? [];
-    return blockers.length ? blockers.map(blockerLabel).join(", ") : "";
+    // Each label is a sentence of its own.
+    return blockers.length ? blockers.map(blockerLabel).join(" ") : "";
   }
 
   function budgetPercent(item: WidgetOverviewItem) {
@@ -91,7 +92,11 @@
   {#if overview.items.length > 0}
     <div class="flex items-center justify-end gap-2">
       <Label for="widget-overview-only-active">{m.widget_admin_overview_only_active()}</Label>
-      <Switch id="widget-overview-only-active" bind:checked={onlyActive} />
+      <Switch
+        id="widget-overview-only-active"
+        bind:ref={onlyActiveSwitch}
+        bind:checked={onlyActive}
+      />
     </div>
   {/if}
 
@@ -115,8 +120,14 @@
                       ? "default"
                       : item.status === "paused"
                         ? "destructive"
-                        : "outline"}>{statusLabel(item)}</Badge
+                        : "outline"}>{widgetStatusLabel(item.status)}</Badge
                   >
+                  {#if item.activation_requested_at}
+                    <Badge variant="outline">
+                      <Clock aria-hidden="true" />
+                      {m.widget_request_badge()}
+                    </Badge>
+                  {/if}
                 </h2>
               </Card.Title>
               <Card.Description>
@@ -130,17 +141,35 @@
               <Card.Action>
                 <!-- eslint-disable svelte/no-navigation-without-resolve -- localized href built from typed route segments -->
                 <a
-                  class="text-accent-default inline-flex items-center gap-1 text-sm underline-offset-2 hover:underline"
+                  bind:this={reviewLinks[item.id]}
+                  class="text-accent-stronger inline-flex min-h-6 items-center gap-1 text-sm underline-offset-2 hover:underline max-md:min-h-11"
                   href={widgetHref(item)}
-                  aria-label={m.widget_admin_overview_open({ name: item.name })}
+                  aria-label={m.widget_admin_overview_review_named({ name: item.name })}
                 >
-                  {m.widget_admin_open()}
+                  {m.widget_admin_overview_review()}
                   <ArrowRight class="size-4" aria-hidden="true" />
                 </a>
                 <!-- eslint-enable svelte/no-navigation-without-resolve -->
               </Card.Action>
             </Card.Header>
             <Card.Content class="flex flex-col gap-4">
+              {#if item.activation_requested_at}
+                <p class="flex items-start gap-2 text-sm">
+                  <Clock class="text-secondary mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                  <span>
+                    <TimedText
+                      message={(date) =>
+                        item.activation_requested_by
+                          ? m.widget_admin_overview_awaiting_requested_line({
+                              date,
+                              name: item.activation_requested_by.name
+                            })
+                          : m.widget_admin_overview_awaiting_requested_line_unknown({ date })}
+                      value={item.activation_requested_at}
+                    />
+                  </span>
+                </p>
+              {/if}
               {#if item.status === "active" && blockedReason(item)}
                 <!-- Live, but not serving as configured: say so where the badge says "Aktiv". -->
                 <p class="bg-warning-dimmer text-warning-stronger rounded-lg px-3 py-2 text-sm">
@@ -230,45 +259,26 @@
                     ? day.format(new Date(item.last_activity))
                     : m.widget_admin_overview_never()}
                 </p>
-                {#if item.status !== "archived"}
+                {#if item.status === "active"}
                   <div
                     role="group"
                     aria-label={m.widget_admin_overview_actions({ name: item.name })}
                   >
-                    {#if item.status === "active"}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={busyId === item.id}
-                        onclick={() => (toPause = item)}
-                      >
-                        <Pause aria-hidden="true" data-icon="inline-start" />
-                        {m.widget_admin_pause()}
-                      </Button>
-                    {:else}
-                      {@const reason = blockedReason(item)}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={busyId === item.id || reason !== ""}
-                        aria-describedby={reason ? `widget-overview-blocked-${item.id}` : undefined}
-                        onclick={() => run(item, "activate")}
-                      >
-                        <Play aria-hidden="true" data-icon="inline-start" />
-                        {item.status === "paused"
-                          ? m.widget_admin_resume()
-                          : m.widget_admin_activate()}
-                      </Button>
-                      {#if reason}
-                        <p
-                          id={`widget-overview-blocked-${item.id}`}
-                          class="text-warning-stronger mt-1 text-xs"
-                        >
-                          {m.widget_admin_overview_blocked({ reasons: reason })}
-                        </p>
-                      {/if}
-                    {/if}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="max-md:min-h-11"
+                      disabled={busyId === item.id}
+                      onclick={() => (toPause = item)}
+                    >
+                      <Pause aria-hidden="true" data-icon="inline-start" />
+                      {m.widget_admin_pause()}
+                    </Button>
                   </div>
+                {:else if item.status !== "archived" && blockedReason(item)}
+                  <p class="text-warning-stronger text-xs">
+                    {m.widget_admin_overview_blocked({ reasons: blockedReason(item) })}
+                  </p>
                 {/if}
               </div>
             </Card.Content>
@@ -279,8 +289,18 @@
   {/if}
 </div>
 
-<AlertDialog.Root open={toPause !== null} onOpenChange={(open) => !open && (toPause = null)}>
-  <AlertDialog.Content>
+<AlertDialog.Root
+  bind:open={
+    () => toPause !== null,
+    (open) => {
+      if (!open && busyId === null) toPause = null;
+    }
+  }
+>
+  <AlertDialog.Content
+    onOpenAutoFocus={() => settler.reset()}
+    onCloseAutoFocus={settler.onCloseAutoFocus}
+  >
     <AlertDialog.Header>
       <AlertDialog.Title>
         {m.widget_admin_overview_pause_title({ name: toPause?.name ?? "" })}
@@ -290,13 +310,22 @@
       >
     </AlertDialog.Header>
     <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={busyId !== null}>{m.cancel()}</AlertDialog.Cancel>
+      <!-- bits' Cancel ignores `disabled`; the open setter above refuses to close while pausing. -->
+      <AlertDialog.Cancel
+        aria-disabled={busyId !== null}
+        class={busyId !== null ? "pointer-events-none opacity-50" : undefined}
+        >{m.cancel()}</AlertDialog.Cancel
+      >
+      <!-- aria-disabled, not disabled, while pausing: a focused button that becomes disabled drops focus. -->
       <AlertDialog.Action
-        disabled={busyId !== null}
+        aria-disabled={busyId !== null}
+        aria-busy={busyId !== null}
+        class={busyId !== null ? "pointer-events-none opacity-50" : undefined}
         onclick={(event) => {
           event.preventDefault();
-          if (toPause) void run(toPause, "pause");
-        }}>{m.widget_admin_pause()}</AlertDialog.Action
+          if (toPause) void pause(toPause);
+        }}
+        >{busyId !== null ? m.widget_review_pausing() : m.widget_admin_pause()}</AlertDialog.Action
       >
     </AlertDialog.Footer>
   </AlertDialog.Content>

@@ -195,6 +195,8 @@ Service keys are not space members, so `SpaceActor` derives a synthetic role:
 
 This means a service key with `scope: space, permission: write` gets `EDITOR` access to exactly one space, and no access to any other space.
 
+The oversight routes return no content. A tenant admin reaches a space's content only as a member: by joining it through oversight with a recorded reason, by being added by the space's own administrators, or through a user group that has a role in the space ([Space Oversight](/guides/space-oversight#content-requires-membership)). A tenant-scoped service key already reaches every space's content without joining and without the space's members seeing it, so create tenant-scoped service keys only for vetted integrations. API keys cannot join a space or change its members through oversight (`403`, `session_auth_required`), but a key with tenant scope and `admin` permission can change user groups; every user it adds to or removes from a group is always recorded in the audit log.
+
 ### Scope Enforcement Details
 
 Scope enforcement distinguishes between **list endpoints** (no resource ID in URL) and **single-resource endpoints** (resource ID in URL):

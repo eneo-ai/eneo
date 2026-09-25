@@ -108,8 +108,14 @@ class ApiKeyScopeRevoker:
         reason_code: ApiKeyStateReasonCode,
         reason_text: str | None = None,
         actor: "UserInDB | None" = None,
+        audit_in_transaction: bool = False,
     ) -> int:
-        """Revoke a list of keys with audit logging. Shared helper."""
+        """Revoke a list of keys with audit logging. Shared helper.
+
+        ``audit_in_transaction`` writes the revocation entries on the
+        caller's session instead of queueing them, so they roll back with a
+        change that fails after the keys were revoked.
+        """
         actor = actor or self.user
         if actor is None:
             return 0
@@ -131,7 +137,12 @@ class ApiKeyScopeRevoker:
             revoked += 1
 
             if self.audit_service is not None:
-                await self.audit_service.log_async(
+                log = (
+                    self.audit_service.log
+                    if audit_in_transaction
+                    else self.audit_service.log_async
+                )
+                await log(
                     tenant_id=actor.tenant_id,
                     actor_id=actor.id,
                     action=ActionType.API_KEY_REVOKED,
@@ -187,6 +198,7 @@ class ApiKeyScopeRevoker:
         app_ids: list[UUID] | None = None,
         reason_code: ApiKeyStateReasonCode,
         reason_text: str | None = None,
+        audit_in_transaction: bool = False,
     ) -> int:
         """Revoke all keys a user owns that are scoped to a space or its resources."""
         all_keys: list[ApiKeyV2InDB] = []
@@ -229,5 +241,8 @@ class ApiKeyScopeRevoker:
         if not all_keys:
             return 0
         return await self._revoke_keys(
-            all_keys, reason_code=reason_code, reason_text=reason_text
+            all_keys,
+            reason_code=reason_code,
+            reason_text=reason_text,
+            audit_in_transaction=audit_in_transaction,
         )

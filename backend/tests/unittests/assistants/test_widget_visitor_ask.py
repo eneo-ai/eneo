@@ -11,13 +11,13 @@ from uuid import uuid4
 
 from eneo.ai_models.completion_models.completion_model import GeneratedImage
 from eneo.assistants.api.assistant_models import KnowledgeMode
-from eneo.assistants.assistant_service import VISITOR_CAPABILITY_PURPOSES
 from eneo.mcp_servers.application.capability_resolver import CapabilityResolution
 from eneo.mcp_servers.domain.entities.mcp_server import (
     INTERNAL_AUTH_TYPE,
     MCPServer,
 )
 from eneo.widgets.application.visitor_user import build_visitor_user
+from eneo.widgets.domain.visitor import VISITOR_CAPABILITY_PURPOSES
 from eneo.widgets.domain.widget import Widget
 from tests.fixtures import TEST_MODEL_CHATGPT, TEST_TENANT, TEST_USER
 from tests.unittests.assistants.test_governance_policy_runtime import (

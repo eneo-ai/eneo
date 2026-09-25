@@ -77,7 +77,6 @@ from eneo.mcp_servers.domain.capabilities import (
     CapabilityPurpose,
 )
 from eneo.mcp_servers.domain.entities.mcp_server import (
-    CAPABILITY_PURPOSES,
     GENERAL_PURPOSE,
     allowed_capability_purposes,
     duplicate_capability_purposes,
@@ -125,19 +124,10 @@ from eneo.templates.assistant_template.assistant_template_service import (
 )
 from eneo.tokens.token_utils import log_token_count_drift, measure_provider_input_tokens
 from eneo.users.user import UserInDB
+from eneo.widgets.domain.visitor import VISITOR_CAPABILITY_PURPOSES
 from eneo.workflows.step_repo import StepRepository
 
 logger = get_logger(__name__)
-
-# What a widget visitor can run. A visitor is a synthetic principal with no
-# users row. Loopback servers accept its widget-scoped token, but a generated
-# image is a file owned by a user, so a visitor gets no image generation and
-# no built-in provider, and images other MCP tools return are dropped. The
-# assistant's knowledge, its own MCP servers and an external web search
-# provider serve visitors as configured.
-VISITOR_CAPABILITY_PURPOSES: frozenset[str] = frozenset(CAPABILITY_PURPOSES) - {
-    "image_generation"
-}
 
 _IMAGE_EXTENSIONS = {
     "image/jpeg": "jpeg",

@@ -509,7 +509,10 @@ class TestGetActionConfig:
         result = await config_service.get_action_config(tenant_id)
 
         for action_config in result.actions:
-            if action_config.category == "admin_actions":
+            if action_config.mandatory:
+                # Mandatory actions ignore the category toggle.
+                assert action_config.enabled is True
+            elif action_config.category == "admin_actions":
                 assert action_config.enabled is False
             elif action_config.category == "user_actions":
                 assert action_config.enabled is True

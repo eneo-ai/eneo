@@ -5,6 +5,7 @@
 /** @typedef {import('../types/resources').WidgetPreviewToken} WidgetPreviewToken */
 /** @typedef {import('../types/resources').WidgetTemplate} WidgetTemplate */
 /** @typedef {import('../types/resources').WidgetOverview} WidgetOverview */
+/** @typedef {import('../types/resources').AdminWidgetReview} AdminWidgetReview */
 
 /**
  * Admin side of embeddable widgets: the objects editors configure in a space
@@ -75,14 +76,89 @@ export function initWidgets(client) {
     },
 
     /**
-     * Tenant admins only; fails with the blockers when configuration is incomplete.
+     * Tenant admins only, member of the space or not; fails with the blockers
+     * when configuration is incomplete. Pass the reviewed `revision` to be
+     * refused with `widget_revision_conflict` if the widget changed since.
+     * @param {{id: string, revision?: number}} params
+     * @returns {Promise<Widget>}
+     * @throws {EneoError}
+     */
+    activate: async ({ id, revision }) => {
+      if (revision === undefined) {
+        const res = await client.fetch("/api/v1/widgets/{id}/activate/", {
+          method: "post",
+          params: { path: { id } }
+        });
+        return res;
+      }
+      // The typed fetch cannot express an optional request body.
+      const options = /** @type {any} */ ({
+        method: "post",
+        params: { path: { id } },
+        requestBody: { "application/json": { revision } }
+      });
+      return await client.fetch("/api/v1/widgets/{id}/activate/", options);
+    },
+
+    /**
+     * Ask a tenant admin to review and activate a draft or paused widget.
+     * Asking again while a request is pending changes nothing.
      * @param {{id: string}} widget
      * @returns {Promise<Widget>}
      * @throws {EneoError}
      */
-    activate: async ({ id }) => {
-      const res = await client.fetch("/api/v1/widgets/{id}/activate/", {
+    requestActivation: async ({ id }) => {
+      const res = await client.fetch("/api/v1/widgets/{id}/activation-request/", {
         method: "post",
+        params: { path: { id } }
+      });
+      return res;
+    },
+
+    /**
+     * @param {{id: string}} widget
+     * @returns {Promise<Widget>}
+     * @throws {EneoError}
+     */
+    withdrawActivationRequest: async ({ id }) => {
+      const res = await client.fetch("/api/v1/widgets/{id}/activation-request/", {
+        method: "delete",
+        params: { path: { id } }
+      });
+      return res;
+    },
+
+    /**
+     * Send a pending request back to the editors with what needs to change
+     * (tenant admins only); fails with `widget_activation_request_missing`
+     * when nothing is pending. The API normalises the reason (see
+     * `WidgetActivationDecline.reason`) and needs at least 10 visible
+     * characters.
+     * @param {{id: string, reason: string}} params
+     * @returns {Promise<Widget>}
+     * @throws {EneoError}
+     */
+    declineActivationRequest: async ({ id, reason }) => {
+      const res = await client.fetch("/api/v1/widgets/{id}/activation-request/decline/", {
+        method: "post",
+        params: { path: { id } },
+        requestBody: { "application/json": { reason } }
+      });
+      return res;
+    },
+
+    /**
+     * Everything an admin reviews before activating: the visitor-facing
+     * settings, the target assistant with its instructions, knowledge and
+     * every widget serving it, the capabilities visitors reach and recent
+     * usage (admins only).
+     * @param {{id: string}} widget
+     * @returns {Promise<AdminWidgetReview>}
+     * @throws {EneoError}
+     */
+    review: async ({ id }) => {
+      const res = await client.fetch("/api/v1/admin/widgets/{id}/", {
+        method: "get",
         params: { path: { id } }
       });
       return res;
@@ -130,7 +206,11 @@ export function initWidgets(client) {
     },
 
     /**
-     * Token that lets the admin page frame the real embed page of a draft or paused widget.
+     * Token that lets a live test frame the real embed page of a draft or paused widget.
+     * A tenant admin needs to be a member of the space, and the assistant published;
+     * their token expires sooner (`expires_in`, 10 minutes by default) than an
+     * editor's, since membership is only checked here. Without the widgets or
+     * admin permission the call is refused before the widget is looked up.
      * @param {{id: string}} widget
      * @returns {Promise<WidgetPreviewToken>}
      * @throws {EneoError}
@@ -176,6 +256,8 @@ export function initWidgets(client) {
 
     /**
      * Every widget in the organisation with its recent usage (admins only).
+     * `space_kind` says whether the widget's space opens in space oversight
+     * (only `shared` does).
      * @returns {Promise<WidgetOverview>}
      * @throws {EneoError}
      */

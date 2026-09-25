@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
@@ -33,6 +34,8 @@ from eneo.spaces.api.space_models import (
     SpaceDashboard,
     SpaceGroupMember,
     SpaceMember,
+    SpaceOversightVisit,
+    SpaceOversightVisitor,
     SpacePublic,
     SpaceRole,
     SpaceRoleValue,
@@ -58,6 +61,46 @@ if TYPE_CHECKING:
     from eneo.assistants.assistant import Assistant
     from eneo.completion_models.presentation import CompletionModelAssembler
     from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
+    from eneo.spaces.oversight.visit_repo import OversightVisitRow
+
+
+def _without_oversight_join_reasons(members: list[SpaceMember]) -> list[SpaceMember]:
+    """Members still see who joined through oversight, and when; the reason
+    can name the subject of an investigation, so only readers of the member
+    list get it. Copies: the domain members are saved back as they are."""
+    return [
+        member.model_copy(
+            update={
+                "oversight_join": member.oversight_join.model_copy(
+                    update={"reason": None}
+                )
+            }
+        )
+        if member.oversight_join is not None
+        else member
+        for member in members
+    ]
+
+
+def _oversight_visits(
+    visits: "Sequence[OversightVisitRow]", *, with_reasons: bool
+) -> list[SpaceOversightVisit]:
+    """The reason follows the join marker's rule: only for readers of the
+    member list."""
+    return [
+        SpaceOversightVisit(
+            person=(
+                SpaceOversightVisitor(id=visit.user_id, name=visit.name)
+                if visit.user_id is not None and visit.name is not None
+                else None
+            ),
+            role=visit.role,
+            joined_at=visit.joined_at,
+            left_at=visit.left_at,
+            reason=visit.reason if with_reasons else None,
+        )
+        for visit in visits
+    ]
 
 
 class SpaceAssembler:
@@ -662,6 +705,7 @@ class SpaceAssembler:
         self,
         space: Space,
         default_assistant_effective_config: "EffectiveConfig | None" = None,
+        oversight_visits: "Sequence[OversightVisitRow]" = (),
     ) -> SpacePublic:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         self._set_permissions_on_resources(space)
@@ -670,8 +714,11 @@ class SpaceAssembler:
         )
         knowledge = self._get_knowledge_model(space)
         self._apply_api_key_resource_caps(applications, knowledge)
+        member_items = self._sort_members(space)
+        if not actor.can_read_members():
+            member_items = _without_oversight_join_reasons(member_items)
         members = PaginatedPermissions[SpaceMember](
-            items=self._sort_members(space),
+            items=member_items,
             permissions=self._cap_space_permissions(
                 self._get_member_permissions(space)
             ),
@@ -753,6 +800,9 @@ class SpaceAssembler:
             knowledge=knowledge,
             members=members,
             group_members=group_members,
+            oversight_visits=_oversight_visits(
+                oversight_visits, with_reasons=actor.can_read_members()
+            ),
             skill_permissions=self._get_skill_permissions(space),
             personal=space.is_personal(),
             organization=space.is_organization(),

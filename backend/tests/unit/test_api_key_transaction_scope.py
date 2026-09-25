@@ -34,6 +34,8 @@ INDIRECT_API_KEY_REVOCATION_ROUTES = [
     ("DELETE", "/assistants/{id}/"),
     ("DELETE", "/spaces/{id}/"),
     ("DELETE", "/spaces/{id}/members/{user_id}/"),
+    ("DELETE", "/admin/spaces/{space_id}/members/{user_id}/"),
+    ("POST", "/admin/spaces/{space_id}/leave/"),
     ("DELETE", "/admin/help-assistants/roles/{kind}/"),
 ]
 

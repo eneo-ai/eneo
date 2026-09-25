@@ -13,11 +13,14 @@
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { invalidate, invalidateAll } from "$app/navigation";
+  import { Lock } from "@lucide/svelte";
 
   const { tenant, updateTenant } = getAppContext();
   const { setEnabled: setWhatsNewEnabled } = getWhatsNewStore();
   const eneo = getEneo();
   let { data } = $props();
+  const uid = $props.id();
+  const auditNoteId = `${uid}-audit-always-logged`;
 
   // Initialize from server data, re-sync after invalidateAll() refreshes props
   let usingTemplates = $state<boolean | undefined>(undefined);
@@ -173,10 +176,16 @@
         <Settings.Row
           title={m.enable_audit_logging()}
           description={m.enable_audit_logging_description()}
-          let:aria
+          let:labelId
+          let:descriptionId
         >
+          <p slot="description" id={auditNoteId} class="text-secondary flex items-start gap-2">
+            <Lock class="mt-1 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+            <span>{m.admin_audit_always_logged_note()}</span>
+          </p>
           <Switch
-            {...aria}
+            aria-labelledby={labelId}
+            aria-describedby="{descriptionId} {auditNoteId}"
             checked={auditLoggingEnabled}
             onCheckedChange={(next) => handleToggleAuditLogging({ current: !next, next })}
           />

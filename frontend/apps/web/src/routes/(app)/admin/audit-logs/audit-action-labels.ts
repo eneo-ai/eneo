@@ -249,6 +249,26 @@ const ACTION_MESSAGES = {
     name: m.audit_action_space_member_removed,
     description: m.audit_action_space_member_removed_description
   },
+  space_oversight_joined: {
+    name: m.audit_action_space_oversight_joined,
+    description: m.audit_action_space_oversight_joined_description
+  },
+  space_oversight_left: {
+    name: m.audit_action_space_oversight_left,
+    description: m.audit_action_space_oversight_left_description
+  },
+  space_oversight_member_added: {
+    name: m.audit_action_space_oversight_member_added,
+    description: m.audit_action_space_oversight_member_added_description
+  },
+  space_oversight_member_role_changed: {
+    name: m.audit_action_space_oversight_member_role_changed,
+    description: m.audit_action_space_oversight_member_role_changed_description
+  },
+  space_oversight_member_removed: {
+    name: m.audit_action_space_oversight_member_removed,
+    description: m.audit_action_space_oversight_member_removed_description
+  },
   app_created: {
     name: m.audit_action_app_created,
     description: m.audit_action_app_created_description
@@ -620,6 +640,26 @@ const ACTION_MESSAGES = {
   widget_template_deleted: {
     name: m.audit_action_widget_template_deleted,
     description: m.audit_action_widget_template_deleted_description
+  },
+  widget_activation_requested: {
+    name: m.audit_action_widget_activation_requested,
+    description: m.audit_action_widget_activation_requested_description
+  },
+  widget_activation_request_withdrawn: {
+    name: m.audit_action_widget_activation_request_withdrawn,
+    description: m.audit_action_widget_activation_request_withdrawn_description
+  },
+  widget_activation_request_declined: {
+    name: m.audit_action_widget_activation_request_declined,
+    description: m.audit_action_widget_activation_request_declined_description
+  },
+  user_group_member_added: {
+    name: m.audit_action_user_group_member_added,
+    description: m.audit_action_user_group_member_added_description
+  },
+  user_group_member_removed: {
+    name: m.audit_action_user_group_member_removed,
+    description: m.audit_action_user_group_member_removed_description
   }
 } satisfies Record<ActionType, { name: MessageFn; description: MessageFn }>;
 

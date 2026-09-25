@@ -84,7 +84,13 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9062: () => m.eneo_error_9062(), // SKILL_REMOVAL_BUSY
 
   // --- Widgets ---
-  9063: () => m.eneo_error_9063() // ASSISTANT_PUBLISHED_AS_WIDGET
+  9063: () => m.eneo_error_9063(), // ASSISTANT_PUBLISHED_AS_WIDGET
+
+  // --- Space oversight ---
+  9065: () => m.eneo_error_9065(), // SPACE_LAST_ADMIN
+  9066: () => m.eneo_error_9066(), // SPACE_ALREADY_MEMBER
+  9067: () => m.eneo_error_9067(), // SPACE_SELF_ACCESS_REQUIRES_JOIN
+  9068: () => m.eneo_error_9068() // SPACE_ADMIN_MUST_JOIN
 };
 
 /**
@@ -114,6 +120,17 @@ export function getErrorMessage(error: unknown, fallback?: string): string {
     }
   }
   return fallback ?? m.request_failed();
+}
+
+/**
+ * The error message after what failed: "Could not delete assistant: You do not
+ * have permission". A context written as a sentence drops its full stop, so
+ * every caller joins the two the same way. An ellipsis ("..." or "…"), e.g. at
+ * the end of a file name, is kept.
+ */
+export function getErrorMessageWithContext(error: unknown, context?: string): string {
+  const message = getErrorMessage(error);
+  return context ? `${context.replace(/:\s*$|(^|[^.])\.\s*$/, "$1")}: ${message}` : message;
 }
 
 /**

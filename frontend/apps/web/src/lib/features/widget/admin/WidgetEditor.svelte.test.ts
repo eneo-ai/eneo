@@ -83,6 +83,7 @@ function renderEditor(current: Widget, assistant: Partial<Assistant> = {}) {
     } as unknown as Assistant,
     eneo,
     isAdmin: true,
+    currentUserId: "u1",
     policy: null,
     release: null
   });
@@ -273,6 +274,7 @@ describe("WidgetEditor", () => {
       assistant: { id: "a1", published: true, mcp_servers: [] } as unknown as Assistant,
       eneo,
       isAdmin: true,
+      currentUserId: "u1",
       policy: null,
       release: null
     });

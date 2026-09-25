@@ -459,6 +459,9 @@ class Settings(BaseSettings):
     widget_visitor_token_ttl_seconds: int = Field(default=900, gt=0)
     widget_visitor_token_grace_seconds: int = Field(default=3600, ge=0)
     widget_preview_token_ttl_seconds: int = Field(default=3600, gt=0)
+    # A tenant admin's preview from the review page: membership is checked
+    # only when the token is minted, so it must not outlast a leave by long.
+    widget_admin_preview_token_ttl_seconds: int = Field(default=600, gt=0)
     # ALTCHA v2 proof of work: each attempt derives a key with `cost` hash
     # iterations and must land on `key_prefix`, so the expected work is
     # 16**len(key_prefix) * cost iterations and the attempt count is

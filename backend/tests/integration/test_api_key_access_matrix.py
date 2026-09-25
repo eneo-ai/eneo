@@ -1152,6 +1152,30 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
+        # --- Space oversight: reads take tenant admin keys, changes are
+        # session-only (a key must never make its owner a content reader) ---
+        {
+            "name": "admin-list-spaces",
+            "method": "GET",
+            "path": "/api/v1/admin/spaces/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "admin-join-space-a",
+            "method": "POST",
+            "path": f"/api/v1/admin/spaces/{space_a}/join/",
+            "body": {"role": "viewer", "reason": "Granskning av ytans innehåll"},
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+            "session_only": True,
+        },
         # =================================================================
         # TENANT_ADMIN_SCOPE_GUARDS (admin scope, NO admin perm)
         # These allow tenant keys with any permission (read/write/admin)

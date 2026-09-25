@@ -18,6 +18,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.mandatory_actions import MANDATORY_AUDIT_ACTIONS
 from eneo.audit.domain.outcome import Outcome
 from eneo.audit.domain.repositories.audit_log_repository import AuditLogRepository
 from eneo.jobs.job_manager import job_manager
@@ -72,7 +73,8 @@ class AuditService:
         """
         Check if an action should be logged based on audit configuration.
 
-        Implements 2-stage filtering:
+        Mandatory actions (MANDATORY_AUDIT_ACTIONS) are always logged. Every
+        other action goes through 2-stage filtering:
         1. Global audit_logging_enabled feature flag (kill switch)
         2. Action-level configuration (3-level: global → category → action override)
 
@@ -83,6 +85,9 @@ class AuditService:
         Returns:
             True if action should be logged, False otherwise
         """
+        if action in MANDATORY_AUDIT_ACTIONS:
+            return True
+
         # Stage 1: Check global feature flag
         if self.feature_flag_service:
             try:
@@ -192,6 +197,61 @@ class AuditService:
 
         return await self.repository.create(audit_log)
 
+    async def log_required(
+        self,
+        *,
+        tenant_id: UUID,
+        action: ActionType,
+        entity_type: EntityType,
+        entity_id: UUID,
+        description: str,
+        metadata: dict[str, Any],
+        user: Optional["UserInDB"] = None,
+        actor_id: Optional[UUID] = None,
+        actor_type: ActorType = ActorType.USER,
+        outcome: Outcome = Outcome.SUCCESS,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        request_id: Optional[UUID] = None,
+        error_message: Optional[str] = None,
+    ) -> AuditLog:
+        """Write a mandatory audit entry, failing closed.
+
+        The entry is inserted on the caller's session, so it commits or rolls
+        back together with the change it records. Any failure propagates and
+        must abort that change: an oversight action is never left unrecorded.
+
+        Raises:
+            ValueError: If ``action`` is not in MANDATORY_AUDIT_ACTIONS.
+            RuntimeError: If no entry was written.
+        """
+        if action not in MANDATORY_AUDIT_ACTIONS:
+            raise ValueError(
+                f"'{action.value}' is not a mandatory audit action;"
+                " use log() or log_async()."
+            )
+        audit_log = await self.log(
+            tenant_id=tenant_id,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            description=description,
+            metadata=metadata,
+            user=user,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            outcome=outcome,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            request_id=request_id,
+            error_message=error_message,
+        )
+        if audit_log is None:
+            raise RuntimeError(
+                f"The mandatory audit entry '{action.value}' was not written."
+            )
+        return audit_log
+
     async def get_logs(
         self,
         tenant_id: UUID,
@@ -292,6 +352,10 @@ class AuditService:
         returning immediately (<10ms latency). The ARQ worker will persist
         the log to PostgreSQL in the background.
 
+        A mandatory action (MANDATORY_AUDIT_ACTIONS) is never queued: it is
+        written like ``log_required``, on the caller's session and failing
+        closed, and the id of the written entry is returned.
+
         NOTE: If audit logging is globally disabled or the action is disabled
         (by category or action override), returns None and skips logging.
 
@@ -316,6 +380,25 @@ class AuditService:
         Raises:
             ValueError: If outcome is failure but no error_message provided
         """
+        if action in MANDATORY_AUDIT_ACTIONS:
+            written = await self.log_required(
+                tenant_id=tenant_id,
+                action=action,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                description=description,
+                metadata=metadata,
+                user=user,
+                actor_id=actor_id,
+                actor_type=actor_type,
+                outcome=outcome,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                request_id=request_id,
+                error_message=error_message,
+            )
+            return written.id
+
         # Check if action should be logged based on configuration
         should_log = await self._should_log_action(tenant_id, action)
         if not should_log:

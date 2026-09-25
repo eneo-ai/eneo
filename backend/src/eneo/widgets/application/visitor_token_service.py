@@ -48,14 +48,23 @@ class VisitorTokenService:
         self.settings = settings or get_settings()
 
     def mint(
-        self, widget: Widget, visitor_id: UUID, *, preview: bool = False
+        self,
+        widget: Widget,
+        visitor_id: UUID,
+        *,
+        preview: bool = False,
+        admin_preview: bool = False,
     ) -> tuple[str, int]:
+        """``admin_preview`` is a preview for a tenant admin who tests as a
+        member of the space; it gets the shorter admin TTL."""
         assert widget.id is not None
-        ttl = (
-            self.settings.widget_preview_token_ttl_seconds
-            if preview
-            else self.settings.widget_visitor_token_ttl_seconds
-        )
+        preview = preview or admin_preview
+        if admin_preview:
+            ttl = self.settings.widget_admin_preview_token_ttl_seconds
+        elif preview:
+            ttl = self.settings.widget_preview_token_ttl_seconds
+        else:
+            ttl = self.settings.widget_visitor_token_ttl_seconds
         now = datetime.now(timezone.utc)
         payload: dict[str, Any] = {
             "token_use": TOKEN_USE,

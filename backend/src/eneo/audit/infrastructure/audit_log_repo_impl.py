@@ -15,6 +15,10 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.mandatory_actions import (
+    MANDATORY_AUDIT_ACTIONS,
+    MANDATORY_AUDIT_MIN_RETENTION_DAYS,
+)
 from eneo.audit.domain.outcome import Outcome
 from eneo.audit.domain.repositories.audit_log_repository import (
     AuditLogRawRow,
@@ -334,17 +338,31 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         and cannot be recovered. This ensures compliance with data retention regulations
         that require true deletion after the retention period expires.
 
+        Mandatory actions are kept for at least MANDATORY_AUDIT_MIN_RETENTION_DAYS
+        whatever the tenant's retention: the administrators they record can
+        change the retention.
+
         Uses batch deletion to prevent transaction timeouts on large datasets.
         """
-        # Use DB time (sa.func.now()) for consistency with all deletion logic
-        # make_interval signature: (years, months, weeks, days, hours, mins, secs)
-        cutoff_expr = sa.func.now() - sa.func.make_interval(0, 0, 0, retention_days)
+
+        def cutoff(days: int) -> sa.ColumnElement[datetime]:
+            # Use DB time (sa.func.now()) for consistency with all deletion logic
+            # make_interval signature: (years, months, weeks, days, hours, mins, secs)
+            return sa.func.now() - sa.func.make_interval(0, 0, 0, days)
+
+        mandatory_days = max(retention_days, MANDATORY_AUDIT_MIN_RETENTION_DAYS)
 
         # Build base subquery to identify logs to delete (will be limited per batch)
         base_subquery = sa.select(AuditLogTable.id).where(
             sa.and_(
                 AuditLogTable.tenant_id == tenant_id,
-                AuditLogTable.timestamp < cutoff_expr,
+                AuditLogTable.timestamp < cutoff(retention_days),
+                sa.or_(
+                    AuditLogTable.action.not_in(
+                        sorted(action.value for action in MANDATORY_AUDIT_ACTIONS)
+                    ),
+                    AuditLogTable.timestamp < cutoff(mandatory_days),
+                ),
             )
         )
 

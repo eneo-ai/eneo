@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Union, cast
 from uuid import UUID
 
@@ -67,6 +68,7 @@ if TYPE_CHECKING:
         SecurityClassification,
     )
     from eneo.services.service import Service
+    from eneo.spaces.oversight.visit_repo import OversightVisitRepo
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
@@ -109,6 +111,7 @@ class SpaceService:
         actor_manager: "ActorManager",
         security_classification_service: "SecurityClassificationService",
         icon_repo: IconRepository,
+        oversight_visit_repo: "OversightVisitRepo",
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
         super().__init__()
@@ -125,6 +128,7 @@ class SpaceService:
         self.actor_manager = actor_manager
         self.security_classification_service = security_classification_service
         self.icon_repo = icon_repo
+        self.oversight_visit_repo = oversight_visit_repo
         self.api_key_scope_revoker = api_key_scope_revoker
         self._logger = get_logger(__name__)
 
@@ -253,8 +257,10 @@ class SpaceService:
 
         return await self.repo.add(space)
 
-    async def get_space(self, id: UUID) -> Space:
-        space = await self.repo.one(id)
+    async def get_space(self, id: UUID, *, lock: bool = False) -> Space:
+        """``lock`` loads the space for a member change; see
+        SpaceRepository.one_or_none."""
+        space = await self.repo.one(id, lock=lock)
 
         actor = self._get_actor(space)
         if not actor.can_read_space():
@@ -748,7 +754,7 @@ class SpaceService:
         return spaces
 
     async def add_member(self, id: UUID, member_id: UUID, role: SpaceRoleValue):
-        space = await self.get_space(id)
+        space = await self.get_space(id, lock=True)
         actor = self._get_actor(space)
 
         if not actor.can_edit_space():
@@ -777,7 +783,7 @@ class SpaceService:
         if user_id == self.user.id:
             raise BadRequestException("Can not remove yourself")
 
-        space = await self.get_space(id)
+        space = await self.get_space(id, lock=True)
         actor = self._get_actor(space)
 
         if not actor.can_edit_space():
@@ -786,6 +792,10 @@ class SpaceService:
         space.remove_member(user_id)
 
         await self.repo.update(space)
+        # A tenant admin who joined through oversight: the visit ends here.
+        await self.oversight_visit_repo.close(
+            id, user_id, left_at=datetime.now(timezone.utc)
+        )
 
         # Revoke all API keys the removed user owns for this space and its resources
         if self.api_key_scope_revoker is not None:
@@ -839,7 +849,7 @@ class SpaceService:
         if user_id == self.user.id:
             raise BadRequestException("Can not change role of yourself")
 
-        space = await self.get_space(id)
+        space = await self.get_space(id, lock=True)
         actor = self._get_actor(space)
 
         if not actor.can_edit_space():
@@ -857,7 +867,7 @@ class SpaceService:
     async def add_group_member(
         self, space_id: UUID, group_id: UUID, role: SpaceRoleValue
     ) -> SpaceGroupMember:
-        space = await self.get_space(space_id)
+        space = await self.get_space(space_id, lock=True)
         actor = self._get_actor(space)
 
         if not actor.can_add_group_members():
@@ -895,7 +905,7 @@ class SpaceService:
             UnauthorizedException: If user doesn't have permission to remove group members
             BadRequestException: If group is not a member of the space
         """
-        space = await self.get_space(space_id)
+        space = await self.get_space(space_id, lock=True)
         actor = self._get_actor(space)
 
         if not actor.can_delete_group_members():
@@ -923,7 +933,7 @@ class SpaceService:
             UnauthorizedException: If user doesn't have permission to edit group members
             BadRequestException: If group is not a member of the space
         """
-        space = await self.get_space(space_id)
+        space = await self.get_space(space_id, lock=True)
         actor = self._get_actor(space)
 
         if not actor.can_edit_group_members():
@@ -1034,17 +1044,22 @@ class SpaceService:
 
     async def ensure_org_admin_members(self, hub: "Space") -> "Space":
         admins = await self.user_repo.list_tenant_admins(self.user.tenant_id)
-        added = False
+        if all(u.id in hub.members for u in admins):
+            return hub
+        # The member rows are rewritten from the aggregate: reload it locked.
+        assert hub.id is not None
+        hub = await self.repo.one(hub.id, lock=True)
         for u in admins:
             if u.id not in hub.members:
-                hub.members[u.id] = SpaceMember(
-                    id=u.id,
-                    username=u.username,
-                    email=u.email,
-                    role=SpaceRoleValue.ADMIN,
+                hub.add_member(
+                    SpaceMember(
+                        id=u.id,
+                        username=u.username,
+                        email=u.email,
+                        role=SpaceRoleValue.ADMIN,
+                    )
                 )
-                added = True
-        if added:
+        if hub.members_changed:
             hub = await self.repo.update(hub)
         return hub
 

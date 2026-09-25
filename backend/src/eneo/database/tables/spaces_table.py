@@ -1,7 +1,8 @@
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index
+from sqlalchemy import TIMESTAMP, CheckConstraint, ForeignKey, Index, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.ai_models_table import (
@@ -9,7 +10,12 @@ from eneo.database.tables.ai_models_table import (
     EmbeddingModels,
     TranscriptionModels,
 )
-from eneo.database.tables.base_class import BaseCrossReference, BasePublic
+from eneo.database.tables.base_class import (
+    BaseCrossReference,
+    BasePublic,
+    BaseWithTableName,
+    IdMixin,
+)
 from eneo.database.tables.capabilities_table import SpaceCapabilities
 from eneo.database.tables.icons_table import Icons
 from eneo.database.tables.mcp_server_table import MCPServers
@@ -149,9 +155,70 @@ class SpacesUsers(BaseCrossReference):
         ForeignKey(Users.id, ondelete="CASCADE"), primary_key=True
     )
     role: Mapped[str] = mapped_column()
+    # Set when a tenant administrator joined through oversight. The row is
+    # rewritten on every space save, so SpaceMember must carry both values.
+    oversight_joined_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    oversight_join_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
     user: Mapped["Users"] = relationship()
+
+    __table_args__ = (
+        CheckConstraint(
+            "(oversight_joined_at IS NULL) = (oversight_join_reason IS NULL)",
+            name="ck_spaces_users_oversight_join_pair",
+        ),
+        CheckConstraint(
+            "oversight_join_reason IS NULL"
+            " OR char_length(oversight_join_reason) BETWEEN 10 AND 500",
+            name="ck_spaces_users_oversight_join_reason_length",
+        ),
+    )
+
+
+class SpaceOversightVisits(IdMixin, BaseWithTableName):
+    """A tenant administrator's join through oversight and when it ended.
+
+    Kept apart from spaces_users, whose row goes when the administrator
+    leaves: members see these visits for a fixed period after that, then a
+    daily job deletes them (visit_retention). The audit log keeps the full
+    record under its own retention.
+    """
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
+    space_id: Mapped[UUID] = mapped_column(ForeignKey(Spaces.id, ondelete="CASCADE"))
+    # NULL once the user is deleted: the visit stays, without the person.
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
+    )
+    role: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str] = mapped_column(Text)
+    joined_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True))
+    left_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(reason) BETWEEN 10 AND 500",
+            name="ck_space_oversight_visits_reason_length",
+        ),
+        CheckConstraint(
+            "left_at IS NULL OR left_at >= joined_at",
+            name="ck_space_oversight_visits_left_after_joined",
+        ),
+        Index("ix_space_oversight_visits_space_id_joined_at", "space_id", "joined_at"),
+        # One open visit per person and space: the one a leave closes.
+        Index(
+            "uq_space_oversight_visits_open",
+            "space_id",
+            "user_id",
+            unique=True,
+            postgresql_where=text("left_at IS NULL"),
+        ),
+    )
 
 
 class SpacesUserGroups(BaseCrossReference):

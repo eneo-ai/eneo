@@ -267,7 +267,9 @@ jobs:
           uv run pytest -v --durations=25 -m migration_isolation \
             tests/integration/migrations/test_file_icon_preflight.py \
             tests/integration/migrations/test_file_icon_legacy_cleanup.py \
-            tests/integration/migrations/test_widget_migrations.py
+            tests/integration/migrations/test_widget_migrations.py \
+            tests/integration/migrations/test_admin_space_oversight_migration.py \
+            tests/integration/migrations/test_space_oversight_visits_migration.py
           uv run pytest -v --durations=25 -o faulthandler_timeout=180 -m migration_isolation \
             tests/integration/migrations/test_file_icon_bridge_rehearsal.py
         env:

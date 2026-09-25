@@ -18,5 +18,8 @@ describe("docs links", () => {
     expect(docsUrl("guides/object-content-storage", "en")).toBe(
       `https://docs.eneo.ai${version}/guides/object-content-storage`
     );
+    expect(docsUrl("guides/space-oversight", "en", "join-a-space")).toBe(
+      `https://docs.eneo.ai${version}/guides/space-oversight#join-a-space`
+    );
   });
 });

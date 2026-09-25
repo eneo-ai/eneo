@@ -8,8 +8,8 @@ For admin-facing guidance, see the [Audit Logging Guide](/guides/audit-logging).
 
 Audit events are created through the `AuditService` application layer:
 
-1. API routes/services call `log_async` (preferred) or `log` (synchronous).
-2. `log_async` enqueues a background job in ARQ (Redis-backed).
+1. API routes/services call `log_async` (preferred) or `log` (synchronous). Mandatory actions use `log_required` and are never queued (see [Mandatory actions](#mandatory-actions)).
+2. For every other action, `log_async` enqueues a background job in ARQ (Redis-backed).
 3. The worker persists the audit log in PostgreSQL.
 4. Retention is enforced by a scheduled purge job.
 5. Exports are generated via the `AuditExportService` (sync or async job).
@@ -18,6 +18,8 @@ Audit logging is gated by:
 
 - The `audit_logging_enabled` feature flag (a kill switch, evaluated per tenant).
 - Per-tenant audit configuration (category-level and action-level overrides).
+
+Mandatory actions bypass both gates.
 
 ## Storage model
 
@@ -43,6 +45,63 @@ Configuration is layered to allow broad and precise control:
 
 Changes apply immediately for new audit events; historical logs are not modified.
 
+## Mandatory actions
+
+`MANDATORY_AUDIT_ACTIONS` in `eneo.audit.domain.mandatory_actions` lists the actions that are always logged. All of them belong to the `admin_actions` category.
+
+| Action | Entity | Written when |
+|--------|--------|--------------|
+| `space_oversight_joined` | space | A tenant admin joins a shared space through oversight, with a role and a reason |
+| `space_oversight_left` | space | A tenant admin leaves a space through oversight |
+| `space_oversight_member_added` | space | A user or group is added through oversight |
+| `space_oversight_member_role_changed` | space | A user's or group's role is changed through oversight |
+| `space_oversight_member_removed` | space | A user or group is removed through oversight |
+| `user_group_member_added` | user_group | A user is added to a user group |
+| `user_group_member_removed` | user_group | A user is removed from a user group |
+| `widget_activation_request_declined` | widget | A tenant admin sends a widget activation request back, with a message |
+| `widget_activated`, `widget_paused`, `widget_archived` | widget | A widget is activated, paused or archived |
+
+For these actions:
+
+- `AuditService._should_log_action` returns true before it evaluates the `audit_logging_enabled` kill switch or the category and action configuration.
+- Request handlers write them with `AuditService.log_required()`. It inserts the row on the request's own database session, inside the function-scoped transaction that makes the change, so the change and its audit row commit together and a failed insert rolls the change back (fail-closed). It raises `ValueError` when called with an action that is not mandatory.
+- `AuditService.log_async()` never queues a mandatory action: it writes it the way `log_required()` does and returns the id of the written entry. A call site cannot make a mandatory entry best-effort.
+- `GET /api/v1/audit/config/actions` reports them with `enabled: true` and `mandatory: true`. `PATCH /api/v1/audit/config/actions` returns `400` for any attempt to disable one, and the configuration UI shows them as checked, read-only checkboxes marked **Always logged**.
+- The purge job keeps them for at least `MANDATORY_AUDIT_MIN_RETENTION_DAYS` (365 days), whatever the tenant's retention: it deletes a mandatory entry only once it is older than both the tenant's retention and that minimum. The administrators these entries record can change the retention. Exports include them as any other log.
+
+When an assistant is deleted or moved, the widgets archived with it get their `widget_archived` entries in the same transaction, so the deletion or move fails if an entry cannot be written.
+
+`widget_activation_requested` and `widget_activation_request_withdrawn`, written when an editor requests or withdraws activation, are ordinary `admin_actions` entries written with `log_async` and follow the tenant configuration. Oversight reads (`GET /api/v1/admin/spaces/`, `GET /api/v1/admin/spaces/{space_id}/` and `GET /api/v1/admin/widgets/{id}/`) are not audited.
+
+### Oversight metadata
+
+Oversight entries use the standard `AuditMetadata` shape:
+
+```json
+{
+  "actor": { "type": "user", "id": "…", "name": "…", "email": "…" },
+  "target": { "id": "…", "name": "…", "space_id": "…", "space_name": "…" },
+  "changes": { "role": { "old": "editor", "new": "viewer" } },
+  "extra": {
+    "oversight": { "actor_is_member": false, "actor_role": null },
+    "member": { "id": "…", "name": "…", "email": "…" },
+    "role": "viewer",
+    "reason": "Case 2026/123: checking the source documents"
+  }
+}
+```
+
+- `target` is the space. `changes.role` appears only on `space_oversight_member_role_changed`.
+- `extra.oversight` records the administrator's effective role in the space before the action (`actor_role` is `null` when they were not a member).
+- `extra.member` (user variants) and `extra.group` (`id`, `name` and `user_count`, the group's live users; group variants) are mutually exclusive.
+- `extra.role` is the new role on `space_oversight_member_added` and `space_oversight_joined`. A join also records `extra.prior_group_role`, and a leave records `extra.was_oversight_join` and `extra.remaining_group_role`.
+- `extra.api_keys_revoked` counts the space-scoped API keys revoked when a user is removed or leaves. Each revoked key also gets an `api_key_revoked` entry, which follows the tenant configuration and is written in the same transaction, so a failed removal or leave leaves no revocation entry behind.
+- `extra.reason` holds the join reason and, on `widget_activation_request_declined`, the message sent back. It is normalised once, before it is validated and stored: invisible characters are removed (format and control characters, lone surrogates, default-ignorable code points such as zero-width spaces, variation selectors, tag characters and Hangul fillers, and U+2800), the text is NFC-composed, and every run of Unicode whitespace (line breaks included) becomes one space. The result needs at least 10 visible characters (code points that are neither whitespace nor combining marks) and at most 500 code points; otherwise the request returns `422`. The reason is never part of `description`, so free-text search does not match it. `eneo.audit.application.free_text` holds the rule.
+
+`user_group_member_added` and `user_group_member_removed` use the same shape with the group as `target`. `extra.member` holds the user's `id`, `name` and `email`, and `extra.spaces` lists `id`, `name` and `role` for every space where the group holds a role when the change is made. `POST /api/v1/user-groups/{id}/users/{user_id}/`, `DELETE` on the same path and `POST /api/v1/user-groups/{id}/` (whose `users` list, when given, replaces the members) write one entry per user added or removed, in the request's transaction; a request that leaves the members unchanged writes none. Group changes made through SCIM are logged as `scim_group_updated`, which follows the tenant configuration.
+
+Widget entries keep `extra.public_id` and `extra.space_id`, and `changes.new` holds the widget snapshot on activate, pause and archive. They add `extra.actor_is_space_member`. Activate and send-back add `extra.activation_request` (`requested_at` and `requested_by_user_id`, or `null` when nobody requested activation), activate adds `extra.reviewed_revision`, and send-back adds `extra.reason`.
+
 ## Access model and justification
 
 Viewing audit logs requires an access justification session, created with `POST /api/v1/audit/access-session`. The access event itself is logged, including:
@@ -51,7 +110,7 @@ Viewing audit logs requires an access justification session, created with `POST 
 - justification text
 - access time and actor
 
-This provides traceability for who accessed audit logs and why.
+This provides traceability for who accessed audit logs and why. Joining a space through oversight follows the same principle: the tenant admin states a reason, which is stored with the always-logged `space_oversight_joined` entry (see [Mandatory actions](#mandatory-actions)).
 
 The justification is stored server-side (Redis) and referenced by an HTTP-only cookie; it is never carried in URLs. A session lasts one hour, and each user can create at most five sessions per hour (`429` when exceeded).
 
@@ -71,7 +130,7 @@ For data subject access requests, `GET /api/v1/audit/logs/user/{user_id}` return
 
 ### Audit log retention
 
-Audit log retention is tenant-specific. A daily purge job hard-deletes logs older than the configured retention period. This is independent from conversation retention.
+Audit log retention is tenant-specific. A daily purge job hard-deletes logs older than the configured retention period; [mandatory actions](#mandatory-actions) are kept for at least 365 days. This is independent from conversation retention.
 
 The policy is read and updated with `GET`/`PUT /api/v1/audit/retention-policy`. Retention is expressed in days: minimum 1, maximum 2555 (about seven years), default 365.
 

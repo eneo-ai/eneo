@@ -204,6 +204,7 @@ test("app docs links use the reader locale and preserve English URLs and anchors
   for (const page of [
     "guides/object-content-storage",
     "guides/embed-widget",
+    "guides/space-oversight",
   ] as const) {
     assert.equal(docsUrl(page, "en"), `https://docs.eneo.ai${version}/${page}`);
     assert.equal(
@@ -235,6 +236,11 @@ test("translated MDX and historical JSX links compile through the language adapt
     "utf8",
   );
   assert.match(await compileMdx(widget), /id: "for-the-website-team"/);
+  const oversight = readFileSync(
+    new URL("../src/content/sv/guides/space-oversight.mdx", import.meta.url),
+    "utf8",
+  );
+  assert.match(await compileMdx(oversight), /id: "join-a-space"/);
   const translations = new URL("../src/content/sv/", import.meta.url);
   for (const file of readdirSync(translations, { recursive: true }).filter(
     (file) => file.toString().endsWith(".mdx"),

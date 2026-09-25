@@ -22,6 +22,7 @@ from eneo.authentication.auth_dependencies import (
     require_api_key_permission,
     require_api_key_scope_check,
     require_file_delete_scope_guard,
+    require_permission,
     require_resource_permission_for_method,
     require_session_auth,
 )
@@ -99,6 +100,7 @@ from eneo.prompt_library.presentation.prompt_library_router import (
     router as prompt_library_router,
 )
 from eneo.prompts.api.prompt_router import router as prompt_router
+from eneo.roles.permissions import Permission
 from eneo.security_classifications.presentation.security_classification_router import (
     router as security_classifications_router,
 )
@@ -115,6 +117,12 @@ from eneo.skills.presentation.organization_skill_router import (
 )
 from eneo.skills.presentation.skill_router import router as skill_router
 from eneo.spaces.api.space_router import router as space_router
+from eneo.spaces.oversight.oversight_router import (
+    manage_router as space_oversight_manage_router,
+)
+from eneo.spaces.oversight.oversight_router import (
+    read_router as space_oversight_read_router,
+)
 from eneo.storage.presentation.storage_router import router as storage_router
 from eneo.sysadmin.sysadmin_router import router as sysadmin_router
 from eneo.templates.api.templates_router import router as template_router
@@ -353,6 +361,24 @@ router.include_router(
     prefix="/admin",
     tags=["admin"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    space_oversight_read_router,
+    prefix="/admin/spaces",
+    tags=["admin", "spaces"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+# Oversight changes are session-only: an API key must never make itself a
+# content reader, and service keys have no users row to join with.
+router.include_router(
+    space_oversight_manage_router,
+    prefix="/admin/spaces",
+    tags=["admin", "spaces"],
+    dependencies=[
+        *TENANT_ADMIN_API_KEY_GUARDS,
+        Depends(require_session_auth),
+        Depends(require_permission(Permission.ADMIN)),
+    ],
 )
 router.include_router(
     tenant_self_credentials_router,

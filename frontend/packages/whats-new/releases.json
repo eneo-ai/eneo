@@ -13,8 +13,26 @@
             "sv": "Publicera en assistent som webbwidget"
           },
           "body": {
-            "en": "Editors create a chat widget for a published assistant under Publishing, preview it, test it inside Eneo and copy the install snippet for the organisation's website. Administrators set the policy, activate widgets and keep house-style templates. Visitors chat anonymously without cookies, with citations, bot protection, limits and a daily budget built in.",
-            "sv": "Redaktörer skapar en chattwidget för en publicerad assistent under Publicering, förhandsgranskar den, testar den i Eneo och kopierar installationskoden till organisationens webbplats. Administratörer sätter policyn, aktiverar widgetar och underhåller mallar för husstilen. Besökare chattar anonymt utan kakor och ser källorna i svaren; botskydd, begränsningar och en daglig budget ingår."
+            "en": "Editors create a chat widget for a published assistant under Publishing, preview it, test it inside Eneo, copy the install snippet and request activation. Administrators review the settings and activate the widget or send it back, set the policy and keep house-style templates. Visitors chat anonymously without cookies, with citations, bot protection, limits and a daily budget built in.",
+            "sv": "Redigerare skapar en chattwidget för en publicerad assistent under Publicering, förhandsgranskar den, testar den i Eneo, kopierar installationskoden och begär aktivering. Administratörer granskar inställningarna och aktiverar widgeten eller skickar tillbaka den, sätter policyn och underhåller mallar för husstilen. Besökare chattar anonymt utan kakor och ser källorna i svaren; botskydd, begränsningar och en daglig budget ingår."
+          }
+        },
+        {
+          "id": "space-oversight",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "See and manage every space in your organisation",
+            "sv": "Se och förvalta alla ytor i organisationen"
+          },
+          "body": {
+            "en": "Administrators get a Spaces page that lists every shared space with its settings, members and activity, and shows what needs attention. You can fix membership and review web widgets without joining; to see a space's documents and conversations you join it yourself with a written reason. Its members see the join until 90 days after you leave, and the audit log always records it, as it does every change made in Eneo to who is in a user group.",
+            "sv": "Administratörer får sidan Ytor med alla delade ytor, deras inställningar, medlemmar och aktivitet, och ser vad som behöver åtgärdas. Du kan rätta medlemskap och granska webbwidgetar utan att gå med; för att se en ytas dokument och samtal går du själv med i ytan med en skriven anledning. Ytans medlemmar ser att du har gått med fram till 90 dagar efter att du har lämnat ytan, och granskningsloggen sparar det alltid, precis som varje ändring i Eneo av vilka som ingår i en användargrupp."
+          },
+          "showMe": {
+            "href": "/admin/spaces",
+            "anchor": "admin-spaces"
           }
         }
       ]

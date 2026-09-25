@@ -25,6 +25,7 @@ from pydantic import (
 
 from eneo.allowed_origins.origin_matching import normalize_origin_pattern
 from eneo.main.exceptions import BadRequestException
+from eneo.widgets.domain.exceptions import WidgetActivationRequestMissingError
 
 PUBLIC_ID_PREFIX = "wgt_"
 _PUBLIC_ID_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -56,9 +57,23 @@ TOKEN_GENERATION_FIELDS = frozenset(
     {"allowed_origins", "limits", "privacy", "bot_protection"}
 )
 
+# A pending activation request and the last send-back. The request commands
+# write only these; activate and archive clear them.
+ACTIVATION_REVIEW_FIELDS = frozenset(
+    {
+        "activation_requested_at",
+        "activation_requested_by_user_id",
+        "activation_declined_at",
+        "activation_declined_by_user_id",
+        "activation_decline_reason",
+    }
+)
+
 # The columns pause and archive write. They never touch configuration, so
 # they bypass the revision check: a kill switch must not lose to an autosave.
-LIFECYCLE_FIELDS = frozenset({"status", "paused_at", "token_generation"})
+LIFECYCLE_FIELDS = (
+    frozenset({"status", "paused_at", "token_generation"}) | ACTIVATION_REVIEW_FIELDS
+)
 
 
 # What each configuration blocker is about: the widget cannot serve while the
@@ -325,6 +340,11 @@ class Widget(BaseModel):
     activated_by_user_id: Optional[UUID] = None
     activated_at: Optional[datetime] = None
     paused_at: Optional[datetime] = None
+    activation_requested_at: Optional[datetime] = None
+    activation_requested_by_user_id: Optional[UUID] = None
+    activation_declined_at: Optional[datetime] = None
+    activation_declined_by_user_id: Optional[UUID] = None
+    activation_decline_reason: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     _serving_view: bool = PrivateAttr(default=False)
@@ -364,6 +384,13 @@ class Widget(BaseModel):
     def _status_consistency(self) -> "Widget":
         if self.status == WidgetStatus.ACTIVE and self.activated_at is None:
             raise ValueError("An active widget must record activated_at.")
+        if self.activation_requested_at is not None:
+            if self.status not in (WidgetStatus.DRAFT, WidgetStatus.PAUSED):
+                raise ValueError("Only a draft or paused widget can await activation.")
+            if self.activation_declined_at is not None:
+                raise ValueError(
+                    "A widget cannot await activation and be sent back at once."
+                )
         return self
 
     @classmethod
@@ -424,11 +451,60 @@ class Widget(BaseModel):
             if _SERVING_REQUIREMENTS[code](self) != _SERVING_REQUIREMENTS[code](before)
         ]
 
+    def request_activation(self, *, by: UUID, now: Optional[datetime] = None) -> bool:
+        """Ask an administrator to activate the widget. Returns False when a
+        request is already pending, so a repeated click changes nothing."""
+        if self.status not in (WidgetStatus.DRAFT, WidgetStatus.PAUSED):
+            raise BadRequestException(
+                f"Cannot request activation of a widget in status"
+                f" '{self.status.value}'."
+            )
+        if self.activation_requested_at is not None:
+            return False
+        # The send-back goes first: the validator rejects both at once.
+        self._clear_activation_decline()
+        self.activation_requested_by_user_id = by
+        self.activation_requested_at = now or datetime.now(timezone.utc)
+        return True
+
+    def withdraw_activation_request(self) -> bool:
+        """Returns False when no request is pending."""
+        if self.activation_requested_at is None:
+            return False
+        self.activation_requested_at = None
+        self.activation_requested_by_user_id = None
+        return True
+
+    def decline_activation_request(
+        self, *, by: UUID, reason: str, now: Optional[datetime] = None
+    ) -> None:
+        """Send a pending request back to the space with a reason."""
+        if self.activation_requested_at is None:
+            raise WidgetActivationRequestMissingError()
+        self.activation_requested_at = None
+        self.activation_requested_by_user_id = None
+        self.activation_decline_reason = reason
+        self.activation_declined_by_user_id = by
+        self.activation_declined_at = now or datetime.now(timezone.utc)
+
+    def _clear_activation_decline(self) -> None:
+        self.activation_declined_at = None
+        self.activation_declined_by_user_id = None
+        self.activation_decline_reason = None
+
+    def _clear_activation_review(self) -> None:
+        self.activation_requested_at = None
+        self.activation_requested_by_user_id = None
+        self._clear_activation_decline()
+
     def activate(self, *, by: UUID, now: Optional[datetime] = None) -> None:
         if self.status not in (WidgetStatus.DRAFT, WidgetStatus.PAUSED):
             raise BadRequestException(
                 f"Cannot activate a widget in status '{self.status.value}'."
             )
+        # Before the status: validate_assignment rejects an active widget
+        # that still awaits activation.
+        self._clear_activation_review()
         self.activated_at = now or datetime.now(timezone.utc)
         self.activated_by_user_id = by
         self.paused_at = None
@@ -446,6 +522,7 @@ class Widget(BaseModel):
     def archive(self) -> None:
         if self.status == WidgetStatus.ARCHIVED:
             raise BadRequestException("Widget is already archived.")
+        self._clear_activation_review()
         self.status = WidgetStatus.ARCHIVED
         self.token_generation += 1
 

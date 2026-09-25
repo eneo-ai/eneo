@@ -13,7 +13,7 @@ from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.service_table import Services
-from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.database.tables.users_table import Users
 from eneo.files.file_models import File
 from eneo.group_chat.domain.factories.group_chat_factory import GroupChatFactory
@@ -25,7 +25,12 @@ from eneo.security_classifications.domain.entities.security_classification impor
     SecurityClassification,
 )
 from eneo.services.service import Service
-from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
+from eneo.spaces.api.space_models import (
+    SpaceGroupMember,
+    SpaceMember,
+    SpaceMemberOversightJoin,
+    SpaceRoleValue,
+)
 from eneo.spaces.space import Space
 from eneo.spaces.space_applications_projection import (
     AppApplicationsProjection,
@@ -83,6 +88,15 @@ def _build_or_skip(
                 },
             )
     return built
+
+
+def _oversight_join(space_user: SpacesUsers) -> Optional[SpaceMemberOversightJoin]:
+    if space_user.oversight_joined_at is None:
+        return None
+    return SpaceMemberOversightJoin(
+        joined_at=space_user.oversight_joined_at,
+        reason=space_user.oversight_join_reason,
+    )
 
 
 if TYPE_CHECKING:
@@ -387,6 +401,7 @@ class SpaceFactory:
             space_user.user_id: SpaceMember(
                 **UserSparse.model_validate(space_user.user).model_dump(),
                 role=cast(SpaceRoleValue, space_user.role),
+                oversight_join=_oversight_join(space_user),
             )
             for space_user in space_in_db.members
             if space_user.user.deleted_at is None

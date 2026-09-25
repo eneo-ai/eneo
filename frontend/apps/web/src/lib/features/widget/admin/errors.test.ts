@@ -48,6 +48,12 @@ describe("widget admin errors", () => {
     expect(widgetErrorMessage(apiError(500, "other"))).toBeNull();
   });
 
+  it("explains a send-back that found no pending request", () => {
+    expect(widgetErrorMessage(apiError(409, "widget_activation_request_missing"))).toBe(
+      "widget_request_error_missing"
+    );
+  });
+
   it("treats a published lock like a revision conflict", () => {
     expect(isStaleEditorError(apiError(409, "widget_revision_conflict"))).toBe(true);
     expect(isStaleEditorError(apiError(400, "field_locked_by_template"))).toBe(true);

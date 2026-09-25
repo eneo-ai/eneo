@@ -75,6 +75,7 @@
             assistant={data.assistant}
             eneo={data.eneo}
             isAdmin={data.isAdmin}
+            currentUserId={data.user.id}
             policy={data.policy}
             release={data.release}
             {templates}
@@ -94,7 +95,11 @@
         <Card.Root class="mx-auto w-full max-w-3xl">
           <Card.Header>
             <Card.Title><h2>{m.widget_admin_create_title()}</h2></Card.Title>
-            <Card.Description>{m.widget_admin_create_description()}</Card.Description>
+            <Card.Description
+              >{data.isAdmin
+                ? m.widget_admin_create_description_admin()
+                : m.widget_admin_create_description()}</Card.Description
+            >
           </Card.Header>
           <Card.Content>
             <form

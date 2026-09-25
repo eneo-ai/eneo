@@ -49,8 +49,9 @@ async def archive_widgets_of_deleted_assistant(
     """Archive the widgets serving an assistant that is being deleted.
 
     Widgets reference their assistant without a foreign key. Run in the
-    deletion's transaction, so the widgets go with it or not at all; archived,
-    they stop serving and no longer hold their template.
+    deletion's transaction, so the widgets and their mandatory audit entries
+    go with it or not at all; archived, they stop serving and no longer hold
+    their template.
     """
     repo = WidgetRepoImpl(session)
     return await _archive(
@@ -99,7 +100,7 @@ async def _archive(
     audit = _audit_service(session)
     for widget in archived:
         assert widget.id is not None
-        await audit.log_async(
+        await audit.log_required(
             tenant_id=widget.tenant_id,
             user=user,
             action=ActionType.WIDGET_ARCHIVED,

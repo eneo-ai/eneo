@@ -558,11 +558,21 @@ class SpaceRepository:
 
         # Add members
         if members:
+            # Every row carries the marker columns so the bulk insert keeps one
+            # shape, and a normal save never drops an oversight join.
             spaces_users = [
                 dict(
                     space_id=space_in_db.id,
                     user_id=member.id,
                     role=member.role.value,
+                    oversight_joined_at=(
+                        member.oversight_join.joined_at
+                        if member.oversight_join
+                        else None
+                    ),
+                    oversight_join_reason=(
+                        member.oversight_join.reason if member.oversight_join else None
+                    ),
                 )
                 for member in members.values()
             ]
@@ -1674,13 +1684,26 @@ class SpaceRepository:
         await self._set_group_chats(entry_in_db, space.group_chats)
         return await self.one(id=entry_in_db.id)
 
-    async def one_or_none(self, id: UUID) -> Optional[Space]:
+    async def one_or_none(self, id: UUID, *, lock: bool = False) -> Optional[Space]:
+        """``lock`` is for loading a space whose members are about to change:
+        ``FOR NO KEY UPDATE`` on the space row is taken before anything is
+        read, so the change is made on members no concurrent member change
+        can alter until this transaction ends. Oversight member changes take
+        the same lock. Never for plain reads."""
         query = sa.select(Spaces).where(Spaces.id == id)
+        if lock:
+            await self.session.execute(
+                sa.select(Spaces.id)
+                .where(Spaces.id == id)
+                .with_for_update(key_share=True)
+            )
+            # Rows this session loaded before the lock may be stale.
+            query = query.execution_options(populate_existing=True)
 
         return await self._get_from_query(query)
 
-    async def one(self, id: UUID) -> Space:
-        space = await self.one_or_none(id=id)
+    async def one(self, id: UUID, *, lock: bool = False) -> Space:
+        space = await self.one_or_none(id=id, lock=lock)
 
         if space is None:
             raise NotFoundException()
@@ -1802,8 +1825,13 @@ class SpaceRepository:
                 mcp_tool_settings,
                 valid_server_ids=[s.id for s in space.mcp_servers],
             )
-        await self._set_members(entry_in_db, space.members)
-        await self._set_group_members(entry_in_db, space.group_members)
+        # Member rows are rewritten from this aggregate only when it changed
+        # them: a save loaded before another request changed the members
+        # would otherwise write the old ones back.
+        if space.members_changed:
+            await self._set_members(entry_in_db, space.members)
+        if space.group_members_changed:
+            await self._set_group_members(entry_in_db, space.group_members)
         await self._set_default_assistant(entry_in_db, space.default_assistant)
         await self._set_collections(entry_in_db, space.collections)
         await self._set_websites(entry_in_db, space.websites)

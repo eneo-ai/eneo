@@ -30,6 +30,7 @@ from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.logging.logging import LoggingDetails
 from eneo.logging.logging_repo import LoggingRepository
+from eneo.widgets.domain.widget import generate_public_id
 
 
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
@@ -942,3 +943,161 @@ async def test_super_admin_endpoints_require_authentication(
         headers={"X-API-Key": super_admin_token},
     )
     assert legit_response.status_code == 200, "Legitimate admin request should succeed"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_space_oversight_refuses_another_tenants_ids(
+    client: AsyncClient,
+    super_admin_token: str,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+):
+    """Verify tenant-admin space oversight never reaches another tenant.
+
+    Attack Scenario:
+    - Tenant A's administrator knows the UUIDs of Tenant B's space, one of
+      its members, one of its user groups and one of its widgets
+    - They read and change that space, add Tenant B's user and group to
+      their own space, and review and settle Tenant B's widget
+    - Verify 404 everywhere, nothing written in either tenant, and Tenant
+      B's space absent from Tenant A's list
+
+    This test exposes:
+    - Oversight queries missing the tenant filter
+    - The user group lookup, which has no tenant filter of its own
+    - Widget lifecycle commands reached by UUID alone
+    """
+    tenant_a = await _create_tenant(
+        client, super_admin_token, f"tenant-oversight-a-{uuid4().hex[:6]}"
+    )
+    tenant_b = await _create_tenant(
+        client, super_admin_token, f"tenant-oversight-b-{uuid4().hex[:6]}"
+    )
+    admin_a = await _create_user(
+        client,
+        super_admin_token,
+        tenant_a["id"],
+        f"overseer-a-{uuid4().hex[:6]}@tenant-a.example.com",
+        "OversightAPassword123!",
+        is_admin=True,
+    )
+    admin_b = await _create_user(
+        client,
+        super_admin_token,
+        tenant_b["id"],
+        f"space-admin-b-{uuid4().hex[:6]}@tenant-b.example.com",
+        "OversightBPassword123!",
+        is_admin=True,
+    )
+    token_a = await _login_user(client, admin_a["email"], "OversightAPassword123!")
+    token_b = await _login_user(client, admin_b["email"], "OversightBPassword123!")
+    space_a = (await _create_space(client, token_a, f"space-a-{uuid4().hex[:6]}"))["id"]
+    space_b = (await _create_space(client, token_b, f"space-b-{uuid4().hex[:6]}"))["id"]
+
+    group_b, widget_b = uuid4(), uuid4()
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.text(
+                "INSERT INTO user_groups (id, name, tenant_id) VALUES (:id, 'B', :t)"
+            ),
+            {"id": group_b, "t": tenant_b["id"]},
+        )
+        await session.execute(
+            sa.text(
+                "INSERT INTO usergroups_users (user_id, user_group_id) VALUES (:u, :g)"
+            ),
+            {"u": admin_b["id"], "g": group_b},
+        )
+        await session.execute(
+            sa.text(
+                "INSERT INTO widgets (id, public_id, tenant_id, space_id, target_type,"
+                " target_id, name, activation_requested_at,"
+                " activation_requested_by_user_id)"
+                " VALUES (:id, :p, :t, :s, 'assistant', :a, 'B', now(), :u)"
+            ),
+            {
+                "id": widget_b,
+                "p": generate_public_id(),
+                "t": tenant_b["id"],
+                "s": space_b,
+                "a": uuid4(),
+                "u": admin_b["id"],
+            },
+        )
+
+    headers = {"Authorization": f"Bearer {token_a}"}
+    b = f"/api/v1/admin/spaces/{space_b}"
+    a = f"/api/v1/admin/spaces/{space_a}"
+    attacks = [
+        ("GET", f"{b}/", None),
+        ("POST", f"{b}/members/", {"user_id": admin_a["id"], "role": "viewer"}),
+        ("PATCH", f"{b}/members/{admin_b['id']}/", {"role": "viewer"}),
+        ("DELETE", f"{b}/members/{admin_b['id']}/", None),
+        ("POST", f"{b}/group-members/", {"group_id": str(group_b), "role": "viewer"}),
+        ("PATCH", f"{b}/group-members/{group_b}/", {"role": "viewer"}),
+        ("DELETE", f"{b}/group-members/{group_b}/", None),
+        ("POST", f"{b}/join/", {"role": "admin", "reason": "Granskning av ytan"}),
+        ("POST", f"{b}/leave/", None),
+        # Tenant B's user and group, added to Tenant A's own space.
+        ("POST", f"{a}/members/", {"user_id": admin_b["id"], "role": "admin"}),
+        ("PATCH", f"{a}/members/{admin_b['id']}/", {"role": "viewer"}),
+        ("POST", f"{a}/group-members/", {"group_id": str(group_b), "role": "admin"}),
+        ("GET", f"/api/v1/admin/widgets/{widget_b}/", None),
+        (
+            "POST",
+            f"/api/v1/widgets/{widget_b}/activation-request/decline/",
+            {"reason": "Skickas tillbaka av angriparen"},
+        ),
+        ("POST", f"/api/v1/widgets/{widget_b}/activate/", None),
+    ]
+    for method, path, body in attacks:
+        response = await client.request(method, path, json=body, headers=headers)
+        assert response.status_code == 404, (
+            f"SECURITY BREACH: {method} {path} reached Tenant B's data! "
+            f"Status: {response.status_code}, Body: {response.text}"
+        )
+
+    listing = await client.get("/api/v1/admin/spaces/", headers=headers)
+    assert listing.status_code == 200, listing.text
+    listed = {item["id"] for item in listing.json()["items"]}
+    assert space_a in listed
+    assert space_b not in listed, "SECURITY BREACH: Tenant B's space listed for A"
+
+    async with sessionmanager.session() as session, session.begin():
+        members_b = (
+            await session.execute(
+                sa.text("SELECT user_id, role FROM spaces_users WHERE space_id = :s"),
+                {"s": space_b},
+            )
+        ).all()
+        groups_a = (
+            await session.execute(
+                sa.text("SELECT count(*) FROM spaces_user_groups WHERE space_id = :s"),
+                {"s": space_a},
+            )
+        ).scalar_one()
+        widget = (
+            await session.execute(
+                sa.text(
+                    "SELECT status, activation_requested_at IS NOT NULL"
+                    " FROM widgets WHERE id = :id"
+                ),
+                {"id": widget_b},
+            )
+        ).one()
+        oversight_entries = (
+            await session.execute(
+                sa.text(
+                    "SELECT count(*) FROM audit_logs WHERE action LIKE"
+                    " 'space_oversight_%' OR action LIKE 'widget_activation_%'"
+                    " OR action = 'widget_activated'"
+                )
+            )
+        ).scalar_one()
+    assert [(str(user_id), role) for user_id, role in members_b] == [
+        (admin_b["id"], "admin")
+    ]
+    assert groups_a == 0
+    assert tuple(widget) == ("draft", True)
+    assert oversight_entries == 0

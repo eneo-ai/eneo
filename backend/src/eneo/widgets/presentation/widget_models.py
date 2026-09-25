@@ -10,6 +10,18 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
+from eneo.audit.application.free_text import AuditedReason
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
+from eneo.spaces.api.space_models import SpaceRoleValue
+from eneo.spaces.oversight.oversight_models import (
+    AdminSpaceAssistant,
+    AdminSpaceKnowledgeSource,
+    AdminSpaceViewerMembership,
+    OversightClassification,
+    OversightPersonRef,
+    OversightRef,
+)
+from eneo.spaces.space_reads import SpaceKind
 from eneo.widgets.domain.widget import (
     MAX_DAILY_TOKEN_BUDGET,
     BotProtection,
@@ -53,6 +65,35 @@ class WidgetDetachTemplate(BaseModel):
     revision: int = Field(ge=0)
 
 
+class WidgetActivate(BaseModel):
+    """Optional body of the activate command."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int | SkipJsonSchema[None] = Field(
+        default=None,
+        ge=0,
+        description=(
+            "The revision that was reviewed. When set, activation is refused"
+            " with `widget_revision_conflict` if the widget changed since."
+        ),
+    )
+
+
+class WidgetActivationDecline(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: AuditedReason = Field(
+        description=(
+            "What needs to change: at least 10 visible characters and at most"
+            " 500 once invisible and control characters are removed, the text"
+            " is NFC-composed and every whitespace run, line breaks included,"
+            " is one space. Shown to the space's editors and stored in the"
+            " audit log."
+        )
+    )
+
+
 class WidgetTemplateLinkPublic(BaseModel):
     """The template a widget follows and which parts it governs."""
 
@@ -75,6 +116,15 @@ class WidgetConflictDetail(BaseModel):
 
 class WidgetConflictResponse(BaseModel):
     detail: WidgetConflictDetail
+
+
+class WidgetActivationRequestMissingDetail(BaseModel):
+    code: Literal["widget_activation_request_missing"]
+    message: str
+
+
+class WidgetActivationRequestMissingResponse(BaseModel):
+    detail: WidgetActivationRequestMissingDetail
 
 
 class WidgetTemplateInUseDetail(BaseModel):
@@ -175,6 +225,17 @@ class WidgetPublic(BaseModel):
     activated_by_user_id: Optional[UUID] = None
     activated_at: Optional[datetime] = None
     paused_at: Optional[datetime] = None
+    activation_requested_at: Optional[datetime] = Field(
+        default=None,
+        description="Set while an editor's request for activation is pending.",
+    )
+    activation_requested_by_user_id: Optional[UUID] = None
+    activation_declined_at: Optional[datetime] = Field(
+        default=None,
+        description="Set when an administrator sent the last request back.",
+    )
+    activation_declined_by_user_id: Optional[UUID] = None
+    activation_decline_reason: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -255,6 +316,12 @@ class WidgetOverviewItem(BaseModel):
     status: WidgetStatus
     space_id: UUID
     space_name: Optional[str] = None
+    space_kind: SpaceKind = Field(
+        description=(
+            "Only a shared space opens in space oversight; the organisation"
+            " space and personal spaces do not."
+        )
+    )
     target_id: UUID
     assistant_name: Optional[str] = None
     allowed_origins: list[str]
@@ -287,11 +354,17 @@ class WidgetOverviewItem(BaseModel):
             " served within the policy."
         ),
     )
+    activation_requested_at: Optional[datetime] = None
+    activation_requested_by: Optional[OversightPersonRef] = Field(
+        default=None,
+        description="Who asked for activation; None when that user was deleted.",
+    )
 
 
 class WidgetOverviewTotals(BaseModel):
     widgets: int
     active: int
+    awaiting_activation: int
     questions_7d: int
     questions_30d: int
     tokens_30d: int
@@ -303,6 +376,59 @@ class WidgetOverviewTotals(BaseModel):
 class WidgetOverviewPublic(BaseModel):
     items: list[WidgetOverviewItem]
     totals: WidgetOverviewTotals
+
+
+class AdminWidgetReviewTarget(BaseModel):
+    assistant: AdminSpaceAssistant
+    knowledge: list[AdminSpaceKnowledgeSource] = Field(
+        description="The sources the assistant uses, with document counts."
+    )
+    visitor_mcp_servers: list[OversightRef] = Field(
+        description="The assistant's general MCP servers that are switched on."
+    )
+    visitor_capabilities: list[CapabilityPurpose] = Field(
+        description=(
+            "The assistant's capabilities a visitor reaches; never image generation."
+        )
+    )
+
+
+class AdminWidgetReviewUsage(BaseModel):
+    questions_7d: int
+    questions_30d: int
+    blocked_30d: int
+    helpful_30d: int
+    unhelpful_30d: int
+    last_activity: Optional[date] = Field(
+        default=None, description="The last day with visitor traffic."
+    )
+
+
+class AdminWidgetReview(BaseModel):
+    """What an administrator reviews before a widget faces the public."""
+
+    widget: WidgetPublic
+    space: OversightRef
+    space_kind: SpaceKind
+    space_security_classification: Optional[OversightClassification] = None
+    target: Optional[AdminWidgetReviewTarget] = Field(
+        default=None,
+        description=(
+            "None for a personal space's assistant, or when the assistant no"
+            " longer exists."
+        ),
+    )
+    created_by: Optional[OversightPersonRef] = None
+    activated_by: Optional[OversightPersonRef] = None
+    activation_requested_by: Optional[OversightPersonRef] = None
+    activation_declined_by: Optional[OversightPersonRef] = None
+    viewer_role: Optional[SpaceRoleValue] = Field(
+        default=None, description="Your effective role in the widget's space."
+    )
+    viewer_membership: Optional[AdminSpaceViewerMembership] = Field(
+        default=None, description="Shared spaces only."
+    )
+    usage: AdminWidgetReviewUsage
 
 
 class WidgetPreviewToken(BaseModel):

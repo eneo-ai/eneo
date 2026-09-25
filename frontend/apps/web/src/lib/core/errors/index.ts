@@ -31,6 +31,7 @@
  */
 export {
   getErrorMessage,
+  getErrorMessageWithContext,
   getErrorCodeMessage,
   SKILL_EXECUTION_BLOCK_CONFLICT,
   SKILL_STILL_ATTACHED

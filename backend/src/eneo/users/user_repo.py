@@ -17,6 +17,7 @@ from eneo.database.tables.users_table import Users
 from eneo.main.exceptions import SystemUserProtected, UniqueException
 from eneo.main.logging import get_logger
 from eneo.main.models import ModelId
+from eneo.spaces.oversight.account_deletion import end_oversight_of_deleted_user
 from eneo.users.user import (
     PaginatedResult,
     PaginationParams,
@@ -31,6 +32,22 @@ from eneo.users.user import (
 )
 
 logger = get_logger(__name__)
+
+
+def tenant_admin_user_ids_select(tenant_id: UUID) -> sa.Select[tuple[UUID]]:
+    """Ids of the tenant's administrators: live users in an active or invited
+    state holding the 'admin' permission through one of their roles. The one
+    definition of "tenant admin" for queries."""
+    return (
+        sa.select(Users.id)
+        .join(Users.roles)
+        .where(
+            Users.deleted_at.is_(None),
+            Users.state.in_(["active", "invited"]),
+            Users.tenant_id == tenant_id,
+            Roles.permissions.contains(["admin"]),
+        )
+    )
 
 
 class UsersRepository:
@@ -270,17 +287,22 @@ class UsersRepository:
 
     async def hard_delete(self, id: UUID):
         await self._raise_if_system_user(id)
+        await end_oversight_of_deleted_user(
+            self.session, id, at=datetime.now(timezone.utc)
+        )
         return await self.delegate.delete(id)
 
     async def soft_delete(self, id: UUID):
         await self._raise_if_system_user(id)
+        deleted_at = datetime.now(timezone.utc)
         # Cleanup personal space
         stmt = sa.delete(Spaces).where(Spaces.user_id == id)
         await self.session.execute(stmt)
+        await end_oversight_of_deleted_user(self.session, id, at=deleted_at)
 
         stmt = (
             sa.update(Users)
-            .values(deleted_at=datetime.now(timezone.utc), state=UserState.DELETED)
+            .values(deleted_at=deleted_at, state=UserState.DELETED)
             .where(Users.id == id)
             .returning(Users)
         )
@@ -455,14 +477,7 @@ class UsersRepository:
         Returns active, loginable users in tenant that have the 'admin' permission
         via any of their roles. Excludes inactive and deleted users.
         """
-        q = (
-            sa.select(Users)
-            .join(Users.roles)
-            .where(
-                Users.deleted_at.is_(None),
-                Users.state.in_(["active", "invited"]),
-                Users.tenant_id == tenant_id,
-                Roles.permissions.contains(["admin"]),
-            )
+        q = sa.select(Users).where(
+            Users.id.in_(tenant_admin_user_ids_select(tenant_id))
         )
         return await self._get_models_from_query(q, with_deleted=False)

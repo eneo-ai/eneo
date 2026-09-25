@@ -18,11 +18,18 @@ from eneo.roles.permissions import Permission, validate_permission
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.spaces.oversight.oversight_models import OversightRef
 from eneo.widgets.application.widget_service import WidgetView
 from eneo.widgets.application.widget_target_lifecycle import audit_snapshot
 from eneo.widgets.domain.widget import WidgetStatus
 from eneo.widgets.domain.widget_template import WidgetTemplate
 from eneo.widgets.presentation.widget_models import (
+    AdminWidgetReview,
+    AdminWidgetReviewTarget,
+    AdminWidgetReviewUsage,
+    WidgetActivate,
+    WidgetActivationDecline,
+    WidgetActivationRequestMissingResponse,
     WidgetConflictResponse,
     WidgetCreate,
     WidgetDetachTemplate,
@@ -58,6 +65,11 @@ _CONFLICT_RESPONSE = {
     "description": "Widget changed since it was read. Reload before saving.",
 }
 
+_REQUEST_MISSING_RESPONSE = {
+    "model": WidgetActivationRequestMissingResponse,
+    "description": "No activation request is pending.",
+}
+
 _ContainerWithUser = Annotated[
     Container, Depends(get_container(with_user=True, transaction_scope="function"))
 ]
@@ -74,7 +86,10 @@ async def _audit(
     view: WidgetView,
     description: str,
     changes: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> None:
+    """Queued, except mandatory actions: AuditService writes those in the
+    request's transaction and fails it when they cannot be written."""
     user = container.user()
     widget = view.widget
     assert widget.id is not None
@@ -89,9 +104,25 @@ async def _audit(
             actor=user,
             target=widget,
             changes=changes,
-            extra={"public_id": widget.public_id, "space_id": str(widget.space_id)},
+            extra={
+                "public_id": widget.public_id,
+                "space_id": str(widget.space_id),
+                **(extra or {}),
+            },
         ),
     )
+
+
+def _settled_request(view: WidgetView) -> dict[str, Any] | None:
+    request = view.settled_request
+    if request is None:
+        return None
+    return {
+        "requested_at": request.requested_at.isoformat(),
+        "requested_by_user_id": (
+            str(request.requested_by_user_id) if request.requested_by_user_id else None
+        ),
+    }
 
 
 @space_widgets_router.get(
@@ -282,43 +313,138 @@ async def get_widget_usage(
     "/{id}/preview-token/",
     response_model=WidgetPreviewToken,
     description=(
-        "Mint a visitor token for the live preview on the admin page. Admits"
-        " the embed page for draft and paused widgets; each call is a fresh"
-        " pseudonymous visitor."
+        "Mint a visitor token for a live preview. Admits the embed page for"
+        " draft and paused widgets; each call is a fresh pseudonymous visitor."
+        " Editors with the widgets permission test from the widget editor. A"
+        " tenant admin needs to be a member of the space, and the assistant"
+        " must be published (`widget_serving_blocked` otherwise): the answers"
+        " come from the space's knowledge. Membership is checked only here,"
+        " so an admin's token lives for WIDGET_ADMIN_PREVIEW_TOKEN_TTL_SECONDS"
+        " (10 minutes by default) and an editor's for"
+        " WIDGET_PREVIEW_TOKEN_TTL_SECONDS. Callers with neither the widgets"
+        " nor the admin permission get 403 before the widget is looked up."
     ),
     responses=responses.get_responses([400, 403, 404]),
 )
 async def create_widget_preview_token(id: UUID, container: _ContainerWithUser):
-    service = container.widget_service()
-    view = await service.get_widget(id)
-    token, expires_in = await service.preview_token(id)
-    return WidgetPreviewToken(
-        token=token, expires_in=expires_in, public_id=view.widget.public_id
+    token, expires_in, public_id = await container.widget_service().preview_token(id)
+    return WidgetPreviewToken(token=token, expires_in=expires_in, public_id=public_id)
+
+
+@router.post(
+    "/{id}/activation-request/",
+    response_model=WidgetPublic,
+    description=(
+        "Ask a tenant admin to activate the widget. Requires the `widgets`"
+        " permission and edit rights in the space. Refused with"
+        " `widget_policy_violation` or `widget_serving_blocked` like"
+        " activation itself; a repeated request changes nothing. Editing"
+        " stays open: the admin reviews and activates the latest revision."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def request_widget_activation(id: UUID, container: _ContainerWithUser):
+    view, changed = await container.widget_service().request_activation(id)
+    if changed:
+        await _audit(
+            container,
+            action=ActionType.WIDGET_ACTIVATION_REQUESTED,
+            view=view,
+            description=f"Requested activation of widget '{view.widget.name}'",
+        )
+    return container.widget_assembler().from_view(view)
+
+
+@router.delete(
+    "/{id}/activation-request/",
+    response_model=WidgetPublic,
+    description=(
+        "Withdraw a pending activation request. Nothing changes when no"
+        " request is pending."
+    ),
+    responses=responses.get_responses([403, 404]),
+)
+async def withdraw_widget_activation_request(id: UUID, container: _ContainerWithUser):
+    view, changed = await container.widget_service().withdraw_activation_request(id)
+    if changed:
+        await _audit(
+            container,
+            action=ActionType.WIDGET_ACTIVATION_REQUEST_WITHDRAWN,
+            view=view,
+            description=(
+                f"Withdrew the activation request for widget '{view.widget.name}'"
+            ),
+        )
+    return container.widget_assembler().from_view(view)
+
+
+@router.post(
+    "/{id}/activation-request/decline/",
+    response_model=WidgetPublic,
+    description=(
+        "Send a pending activation request back to the space's editors with"
+        " what needs to change. Tenant admins only, member or not. Refused"
+        " with `widget_activation_request_missing` when no request is"
+        " pending. Always recorded in the audit log."
+    ),
+    responses={
+        **responses.get_responses([403, 404]),
+        409: _REQUEST_MISSING_RESPONSE,
+    },
+)
+async def decline_widget_activation_request(
+    id: UUID, body: WidgetActivationDecline, container: _ContainerWithUser
+):
+    view = await container.widget_service().decline_activation_request(id, body.reason)
+    await _audit(
+        container,
+        action=ActionType.WIDGET_ACTIVATION_REQUEST_DECLINED,
+        view=view,
+        description=(
+            f"Sent back the activation request for widget '{view.widget.name}'"
+        ),
+        extra={
+            "actor_is_space_member": view.actor_is_space_member,
+            "activation_request": _settled_request(view),
+            "reason": view.widget.activation_decline_reason,
+        },
     )
+    return container.widget_assembler().from_view(view)
 
 
 @router.post(
     "/{id}/activate/",
     response_model=WidgetPublic,
     description=(
-        "Activate a widget so it serves visitors. Tenant admins only. Fails"
+        "Activate a widget so it serves visitors. Tenant admins only, member"
+        " or not. Pass the reviewed `revision` to be refused with"
+        " `widget_revision_conflict` when the widget changed since. Fails"
         " with `widget_policy_violation` (listing `violations`) when settings"
         " are outside the tenant's widget policy and with"
         " `widget_serving_blocked` (listing `blockers`) when the configuration"
-        " is incomplete."
+        " is incomplete. A pending activation request is settled. Always"
+        " recorded in the audit log."
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
-async def activate_widget(id: UUID, container: _ContainerWithUser):
+async def activate_widget(
+    id: UUID, container: _ContainerWithUser, body: WidgetActivate | None = None
+):
     service = container.widget_service()
     assembler = container.widget_assembler()
-    view = await service.activate_widget(id)
+    revision = body.revision if body is not None else None
+    view = await service.activate_widget(id, revision=revision)
     await _audit(
         container,
         action=ActionType.WIDGET_ACTIVATED,
         view=view,
         description=f"Activated widget '{view.widget.name}'",
         changes={"new": _widget_snapshot(view)},
+        extra={
+            "actor_is_space_member": view.actor_is_space_member,
+            "activation_request": _settled_request(view),
+            "reviewed_revision": revision,
+        },
     )
     return assembler.from_view(view)
 
@@ -342,6 +468,7 @@ async def pause_widget(id: UUID, container: _ContainerWithUser):
         view=view,
         description=f"Paused widget '{view.widget.name}'",
         changes={"new": _widget_snapshot(view)},
+        extra={"actor_is_space_member": view.actor_is_space_member},
     )
     return assembler.from_view(view)
 
@@ -362,6 +489,7 @@ async def archive_widget(id: UUID, container: _ContainerWithUser):
         view=view,
         description=f"Archived widget '{view.widget.name}'",
         changes={"new": _widget_snapshot(view)},
+        extra={"actor_is_space_member": view.actor_is_space_member},
     )
     return assembler.from_view(view)
 
@@ -448,6 +576,7 @@ async def get_widget_overview(container: _ContainerWithUser):
                 status=WidgetStatus(row.status),
                 space_id=row.space_id,
                 space_name=row.space_name,
+                space_kind=row.space_kind,
                 target_id=row.target_id,
                 assistant_name=row.assistant_name,
                 allowed_origins=row.allowed_origins,
@@ -465,11 +594,16 @@ async def get_widget_overview(container: _ContainerWithUser):
                 daily_token_budget=policy.daily_token_budget_for(row.widget),
                 budget_used_today=row.budget_used_today,
                 activation_blockers=blockers,
+                activation_requested_at=row.activation_requested_at,
+                activation_requested_by=row.activation_requested_by,
             )
         )
     totals = WidgetOverviewTotals(
         widgets=len(items),
         active=sum(1 for i in items if i.status == WidgetStatus.ACTIVE),
+        awaiting_activation=sum(
+            1 for i in items if i.activation_requested_at is not None
+        ),
         questions_7d=sum(i.questions_7d for i in items),
         questions_30d=sum(i.questions_30d for i in items),
         tokens_30d=sum(i.input_tokens_30d + i.output_tokens_30d for i in items),
@@ -478,6 +612,54 @@ async def get_widget_overview(container: _ContainerWithUser):
         unhelpful_30d=sum(i.unhelpful_30d for i in items),
     )
     return WidgetOverviewPublic(items=items, totals=totals)
+
+
+@overview_router.get(
+    "/{id}/",
+    response_model=AdminWidgetReview,
+    description=(
+        "Everything an administrator reviews before a widget faces the"
+        " public, without being a member of its space: the configuration,"
+        " the assistant it exposes with its instructions, knowledge and"
+        " visitor tools, who asked for activation and the widget's usage."
+        " Documents and conversations are never returned. Tenant admins only."
+    ),
+    responses=responses.get_responses([403, 404]),
+)
+async def get_widget_review(id: UUID, container: _ContainerWithUser):
+    facts = await container.widget_service().review_widget(
+        id, today=container.widget_budget().today()
+    )
+    row = facts.record.overview
+    target = None
+    if facts.target is not None:
+        target = AdminWidgetReviewTarget(
+            assistant=facts.target.assistant,
+            knowledge=facts.knowledge,
+            visitor_mcp_servers=facts.target.visitor_mcp_servers,
+            visitor_capabilities=facts.visitor_capabilities,
+        )
+    return AdminWidgetReview(
+        widget=container.widget_assembler().from_view(facts.view),
+        space=OversightRef(id=facts.space.id, name=facts.space.name),
+        space_kind=facts.space.kind,
+        space_security_classification=facts.space.security_classification,
+        target=target,
+        created_by=facts.record.created_by,
+        activated_by=facts.record.activated_by,
+        activation_requested_by=row.activation_requested_by,
+        activation_declined_by=facts.record.activation_declined_by,
+        viewer_role=facts.viewer_role,
+        viewer_membership=facts.viewer_membership,
+        usage=AdminWidgetReviewUsage(
+            questions_7d=row.questions_7d,
+            questions_30d=row.questions_30d,
+            blocked_30d=row.blocked_30d,
+            helpful_30d=row.helpful_30d,
+            unhelpful_30d=row.unhelpful_30d,
+            last_activity=row.last_activity,
+        ),
+    )
 
 
 # --- templates -------------------------------------------------------------

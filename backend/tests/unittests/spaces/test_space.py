@@ -345,3 +345,64 @@ def test_get_group_member(space: Space):
     result = space.get_group_member(group_id)
 
     assert result == group
+
+
+def _shared_space(*, members=None, group_members=None) -> Space:
+    return Space(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        tenant_space_id=uuid4(),
+        user_id=None,
+        name="Socialtjänsten",
+        description=None,
+        embedding_models=[],
+        completion_models=[],
+        transcription_models=[],
+        mcp_servers=[],
+        default_assistant=None,
+        assistants=[],
+        apps=[],
+        services=[],
+        websites=[],
+        collections=[],
+        integration_knowledge_list=[],
+        members=members or {},
+        group_members=group_members or {},
+    )
+
+
+def test_a_loaded_space_has_no_member_changes():
+    member = SimpleNamespace(id=uuid4(), role=SpaceRoleValue.ADMIN)
+    space = _shared_space(members={member.id: member})
+    space.description = "Ny beskrivning"
+    assert (space.members_changed, space.group_members_changed) == (False, False)
+
+
+@pytest.mark.parametrize("change", ["add", "remove", "change_role", "replace"])
+def test_every_member_change_is_tracked(change: str):
+    member = SimpleNamespace(id=uuid4(), role=SpaceRoleValue.VIEWER)
+    space = _shared_space(members={} if change == "add" else {member.id: member})
+    {
+        "add": lambda: space.add_member(member),
+        "remove": lambda: space.remove_member(member.id),
+        "change_role": lambda: space.change_member_role(
+            member.id, SpaceRoleValue.EDITOR
+        ),
+        "replace": lambda: setattr(space, "members", {}),
+    }[change]()
+    assert (space.members_changed, space.group_members_changed) == (True, False)
+
+
+@pytest.mark.parametrize("change", ["add", "remove", "change_role", "replace"])
+def test_every_group_member_change_is_tracked(change: str):
+    group = SimpleNamespace(id=uuid4(), role=SpaceRoleValue.VIEWER)
+    space = _shared_space(group_members={} if change == "add" else {group.id: group})
+    {
+        "add": lambda: space.add_group_member(group),
+        "remove": lambda: space.remove_group_member(group.id),
+        "change_role": lambda: space.change_group_member_role(
+            group.id, SpaceRoleValue.EDITOR
+        ),
+        "replace": lambda: setattr(space, "group_members", {}),
+    }[change]()
+    assert (space.members_changed, space.group_members_changed) == (False, True)

@@ -26,12 +26,12 @@
   },
   "src/lib/components/ui/badge/badge.svelte": {
     "eneo/no-raw-color": {
-      "count": 4
+      "count": 2
     }
   },
   "src/lib/components/ui/button/button.svelte": {
     "eneo/no-raw-color": {
-      "count": 9
+      "count": 6
     }
   },
   "src/lib/components/ui/calendar/calendar-month-select.svelte": {
@@ -186,7 +186,7 @@
   },
   "src/routes/(app)/admin/audit-logs/AuditConfigTab.svelte": {
     "eneo/no-raw-color": {
-      "count": 11
+      "count": 9
     }
   },
   "src/routes/(app)/admin/insights/InteractiveGraph.svelte": {

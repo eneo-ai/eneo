@@ -88,6 +88,9 @@ class AppRuns(BasePublic):
     job: Mapped[Jobs] = relationship()
 
     __table_args__ = (
+        # Created by revision ba700144afe5; oversight reads each app's latest
+        # run from it.
+        Index("ix_app_runs_app_created", "app_id", "created_at"),
         Index(
             "ix_app_runs_skill_provenance_gin",
             "skill_provenance",

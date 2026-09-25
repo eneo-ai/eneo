@@ -3,7 +3,8 @@
 # Licensed under the MIT License.
 
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID, uuid4
 
@@ -14,7 +15,20 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 from eneo.roles.permissions import Permission, validate_permission
+from eneo.spaces.api.space_models import SpaceRoleValue
+from eneo.spaces.oversight.oversight_models import (
+    AdminSpaceKnowledgeSource,
+    AdminSpaceViewerMembership,
+)
+from eneo.spaces.oversight.oversight_repo import (
+    AssistantConfig,
+    SpaceOversightRepo,
+    SpaceSummaryRow,
+)
+from eneo.spaces.oversight.oversight_service import viewer_membership_of
+from eneo.spaces.space_reads import SpaceRoleReader
 from eneo.users.user import UserInDB
 from eneo.widgets.application.visitor_token_service import VisitorTokenService
 from eneo.widgets.domain.exceptions import (
@@ -24,7 +38,9 @@ from eneo.widgets.domain.exceptions import (
     WidgetServingBlockedError,
     WidgetTemplateNotPublishedError,
 )
+from eneo.widgets.domain.visitor import VISITOR_CAPABILITY_PURPOSES
 from eneo.widgets.domain.widget import (
+    ACTIVATION_REVIEW_FIELDS,
     LIFECYCLE_FIELDS,
     BotProtection,
     Widget,
@@ -43,6 +59,25 @@ if TYPE_CHECKING:
     from eneo.spaces.space import Space
     from eneo.spaces.space_service import SpaceService
     from eneo.tenants.tenant_service import TenantService
+    from eneo.widgets.infrastructure.widget_overview_repo_impl import (
+        WidgetOverviewRepoImpl,
+        WidgetReviewRow,
+    )
+
+
+@dataclass(frozen=True)
+class ActivationRequestRef:
+    requested_at: datetime
+    requested_by_user_id: Optional[UUID]
+
+    @classmethod
+    def pending_on(cls, widget: Widget) -> Optional["ActivationRequestRef"]:
+        if widget.activation_requested_at is None:
+            return None
+        return cls(
+            requested_at=widget.activation_requested_at,
+            requested_by_user_id=widget.activation_requested_by_user_id,
+        )
 
 
 @dataclass(frozen=True)
@@ -52,6 +87,28 @@ class WidgetView:
     # The template the widget follows, when any; carries the lock groups the
     # editor must show as read-only.
     template: Optional[WidgetTemplate] = None
+    # The pending request an activate or send-back settled, for its audit
+    # entry: the command clears it from the widget.
+    settled_request: Optional[ActivationRequestRef] = None
+    # Set by the lifecycle commands a tenant admin may run without being a
+    # member of the space, for their audit entries.
+    actor_is_space_member: Optional[bool] = None
+
+
+@dataclass(frozen=True)
+class WidgetReviewFacts:
+    view: WidgetView
+    # The people behind the widget's lifecycle and its usage, from the same
+    # read as the widget.
+    record: "WidgetReviewRow"
+    space: SpaceSummaryRow
+    # None for a personal space's assistant or a deleted one.
+    target: Optional[AssistantConfig]
+    knowledge: list[AdminSpaceKnowledgeSource]
+    visitor_capabilities: list[CapabilityPurpose]
+    viewer_role: Optional[SpaceRoleValue]
+    # Shared spaces only: the others cannot be joined through oversight.
+    viewer_membership: Optional[AdminSpaceViewerMembership]
 
 
 class WidgetService:
@@ -63,6 +120,9 @@ class WidgetService:
         space_service: "SpaceService",
         actor_manager: "ActorManager",
         tenant_service: "TenantService",
+        oversight_repo: SpaceOversightRepo,
+        overview_repo: "WidgetOverviewRepoImpl",
+        space_roles: SpaceRoleReader,
         token_service: Optional[VisitorTokenService] = None,
     ) -> None:
         self.user = user
@@ -71,6 +131,9 @@ class WidgetService:
         self.space_service = space_service
         self.actor_manager = actor_manager
         self.tenant_service = tenant_service
+        self.oversight_repo = oversight_repo
+        self.overview_repo = overview_repo
+        self.space_roles = space_roles
         self.token_service = token_service or VisitorTokenService()
 
     # --- policy -----------------------------------------------------------
@@ -125,10 +188,17 @@ class WidgetService:
             )
         return space
 
-    async def _space_as_admin(self, space_id: UUID) -> "Space":
-        # Tenant admins run the lifecycle from the admin page, also for widgets
-        # in spaces they are not members of, so no space-level read check.
-        return await self.space_service.repo.one(space_id)
+    async def _role_in(self, space_id: UUID) -> Optional[SpaceRoleValue]:
+        return await self.space_roles.role_in_space(
+            self.user.tenant_id,
+            space_id,
+            user_id=self.user.id,
+            group_ids=self.user.user_groups_ids,
+        )
+
+    async def _with_actor_relation(self, view: WidgetView) -> WidgetView:
+        role = await self._role_in(view.widget.space_id)
+        return replace(view, actor_is_space_member=role is not None)
 
     async def _owned_widget(
         self, widget_id: UUID, *, for_update: bool = False
@@ -158,13 +228,12 @@ class WidgetService:
 
     def _view(
         self,
-        space: "Space",
         widget: Widget,
+        *,
+        target_published: bool,
         template: Optional[WidgetTemplate] = None,
     ) -> WidgetView:
-        blockers = widget.activation_blockers(
-            target_published=self._target_published(space, widget)
-        )
+        blockers = widget.activation_blockers(target_published=target_published)
         blockers.extend(self.get_policy().violations(widget))
         return WidgetView(
             widget=widget, activation_blockers=blockers, template=template
@@ -175,8 +244,19 @@ class WidgetService:
             return None
         return await self.template_repo.get(widget.template_id)
 
-    async def _view_with_template(self, space: "Space", widget: Widget) -> WidgetView:
-        return self._view(space, widget, await self._template_of(widget))
+    async def _view_with_template(
+        self, widget: Widget, *, target_published: bool
+    ) -> WidgetView:
+        return self._view(
+            widget,
+            target_published=target_published,
+            template=await self._template_of(widget),
+        )
+
+    async def _member_view(self, space: "Space", widget: Widget) -> WidgetView:
+        return await self._view_with_template(
+            widget, target_published=self._target_published(space, widget)
+        )
 
     # --- queries ----------------------------------------------------------
 
@@ -189,7 +269,11 @@ class WidgetService:
             for template in await self.template_repo.list_by_tenant(self.user.tenant_id)
         }
         return [
-            self._view(space, widget, templates.get(widget.template_id))
+            self._view(
+                widget,
+                target_published=self._target_published(space, widget),
+                template=templates.get(widget.template_id),
+            )
             for widget in widgets
         ]
 
@@ -197,7 +281,7 @@ class WidgetService:
         self._require_reader()
         widget = await self._owned_widget(widget_id)
         space = await self.space_service.get_space(widget.space_id)
-        return await self._view_with_template(space, widget)
+        return await self._member_view(space, widget)
 
     # --- commands ---------------------------------------------------------
 
@@ -234,7 +318,11 @@ class WidgetService:
         if template is not None:
             self._link(widget, template)
         widget = await self.repo.add(widget)
-        return self._view(space, widget, template)
+        return self._view(
+            widget,
+            target_published=self._target_published(space, widget),
+            template=template,
+        )
 
     @staticmethod
     def _link(widget: Widget, template: WidgetTemplate) -> None:
@@ -282,7 +370,11 @@ class WidgetService:
         self._link(widget, template)
         self._hold_to_rules(before, widget)
         widget = await self.repo.update(widget)
-        return self._view(space, widget, template)
+        return self._view(
+            widget,
+            target_published=self._target_published(space, widget),
+            template=template,
+        )
 
     async def detach_template(self, widget_id: UUID, *, revision: int) -> WidgetView:
         """Stop following the template; the widget keeps its current values."""
@@ -290,7 +382,7 @@ class WidgetService:
         widget, space = await self._widget_for_change(widget_id, revision)
         widget.template_id = None
         widget = await self.repo.update(widget)
-        return await self._view_with_template(space, widget)
+        return await self._member_view(space, widget)
 
     async def update_widget(
         self, widget_id: UUID, changes: dict[str, Any]
@@ -313,37 +405,79 @@ class WidgetService:
         widget.apply_update(changes)
         self._hold_to_rules(before, widget)
         widget = await self.repo.update(widget)
-        return self._view(space, widget, template)
+        return self._view(
+            widget,
+            target_published=self._target_published(space, widget),
+            template=template,
+        )
 
-    async def activate_widget(self, widget_id: UUID) -> WidgetView:
+    async def activate_widget(
+        self, widget_id: UUID, *, revision: Optional[int] = None
+    ) -> WidgetView:
+        """Activate the widget; tenant admins only, member or not.
+
+        ``revision`` pins activation to the widget's own settings as the admin
+        reviewed them: an edit to the widget in between is refused. The
+        assistant it serves is not pinned; its changes apply at once, before
+        and after activation.
+        """
         validate_permission(self.user, Permission.ADMIN)
         widget = await self._owned_widget(widget_id)
-        space = await self._space_as_admin(widget.space_id)
+        if revision is not None and widget.revision != revision:
+            raise WidgetRevisionConflictError()
         violations = self.get_policy().violations(widget)
         if violations:
             raise WidgetPolicyViolationError(violations)
-        blockers = widget.activation_blockers(
-            target_published=self._target_published(space, widget)
-        )
+        target_published = await self.repo.is_target_published(widget)
+        blockers = widget.activation_blockers(target_published=target_published)
         if blockers:
             raise WidgetServingBlockedError(blockers)
+        settled = ActivationRequestRef.pending_on(widget)
         widget.activate(by=self.user.id)
         widget = await self.repo.update(widget)
-        return await self._view_with_template(space, widget)
+        view = await self._view_with_template(widget, target_published=True)
+        return await self._with_actor_relation(replace(view, settled_request=settled))
 
-    async def preview_token(self, widget_id: UUID) -> tuple[str, int]:
-        """A visitor token for the editor's live preview.
+    async def preview_token(self, widget_id: UUID) -> tuple[str, int, str]:
+        """A visitor token for a live preview: (token, expires_in, public_id).
 
-        Works for draft and paused widgets, so editors can see the embed page
-        before an admin activates it. Each call is a fresh pseudonymous
-        visitor; nothing about the editor is put in the token.
+        Editors of the space with the widgets permission test drafts and
+        paused widgets in the widget editor; the space's own edit check
+        decides. A tenant admin tests from the review page only as a member
+        of the space and only for a published assistant: answers come from
+        the space's knowledge, which is content. Membership is checked only
+        here, so an admin's token is short-lived: it must not outlast a leave
+        or a removal by long. Each call is a fresh pseudonymous visitor;
+        nothing about the caller is put in the token.
         """
-        validate_permission(self.user, Permission.WIDGETS)
+        permissions = self.user.permissions
+        if (
+            Permission.WIDGETS not in permissions
+            and Permission.ADMIN not in permissions
+        ):
+            raise UnauthorizedException("You may not test widgets.")
         widget = await self._owned_widget(widget_id)
-        await self._space_for_edit(widget.space_id)
+        role = await self._role_in(widget.space_id)
+        through_oversight = False
+        if Permission.WIDGETS in permissions and role in (
+            SpaceRoleValue.ADMIN,
+            SpaceRoleValue.EDITOR,
+        ):
+            await self._space_for_edit(widget.space_id)
+        elif Permission.ADMIN in permissions and role is not None:
+            if not await self.repo.is_target_published(widget):
+                raise WidgetServingBlockedError(["target_not_published"])
+            through_oversight = True
+        else:
+            raise UnauthorizedException(
+                "You need to be a member of the space to test the widget."
+            )
         if widget.status == WidgetStatus.ARCHIVED:
             raise BadRequestException("Archived widgets cannot be previewed.")
-        return self.token_service.mint(widget, uuid4(), preview=True)
+        token, expires_in = self.token_service.mint(
+            widget, uuid4(), preview=True, admin_preview=through_oversight
+        )
+        return token, expires_in, widget.public_id
 
     async def pause_widget(self, widget_id: UUID) -> WidgetView:
         # Read locked: the write below skips the revision check, so the
@@ -352,22 +486,148 @@ class WidgetService:
         # Pausing is the kill switch: any space editor with the widgets
         # permission may stop a widget, not only tenant admins.
         if Permission.ADMIN in self.user.permissions:
-            space = await self._space_as_admin(widget.space_id)
+            target_published = await self.repo.is_target_published(widget)
         else:
             validate_permission(self.user, Permission.WIDGETS)
             space = await self._space_for_edit(widget.space_id)
+            target_published = self._target_published(space, widget)
         widget.pause()
         widget = await self.repo.update(
             widget, check_revision=False, only=LIFECYCLE_FIELDS
         )
-        return await self._view_with_template(space, widget)
+        return await self._with_actor_relation(
+            await self._view_with_template(widget, target_published=target_published)
+        )
 
     async def archive_widget(self, widget_id: UUID) -> WidgetView:
         validate_permission(self.user, Permission.ADMIN)
         widget = await self._owned_widget(widget_id, for_update=True)
-        space = await self._space_as_admin(widget.space_id)
         widget.archive()
         widget = await self.repo.update(
             widget, check_revision=False, only=LIFECYCLE_FIELDS
         )
-        return await self._view_with_template(space, widget)
+        return await self._with_actor_relation(
+            await self._view_with_template(
+                widget, target_published=await self.repo.is_target_published(widget)
+            )
+        )
+
+    # --- activation requests ------------------------------------------------
+
+    async def _widget_to_request(self, widget_id: UUID) -> tuple[Widget, "Space"]:
+        validate_permission(self.user, Permission.WIDGETS)
+        # Read locked: the write skips the revision check, so the request
+        # never loses to an autosave and never overwrites one.
+        widget = await self._owned_widget(widget_id, for_update=True)
+        space = await self._space_for_edit(widget.space_id)
+        return widget, space
+
+    async def request_activation(self, widget_id: UUID) -> tuple[WidgetView, bool]:
+        """Ask a tenant admin to activate the widget. Refused while settings
+        break the policy or block serving; a repeated request changes
+        nothing. Returns the view and whether anything changed."""
+        widget, space = await self._widget_to_request(widget_id)
+        violations = self.get_policy().violations(widget)
+        if violations:
+            raise WidgetPolicyViolationError(violations)
+        blockers = widget.activation_blockers(
+            target_published=self._target_published(space, widget)
+        )
+        if blockers:
+            raise WidgetServingBlockedError(blockers)
+        changed = widget.request_activation(by=self.user.id)
+        if changed:
+            widget = await self.repo.update(
+                widget, check_revision=False, only=ACTIVATION_REVIEW_FIELDS
+            )
+        return await self._member_view(space, widget), changed
+
+    async def withdraw_activation_request(
+        self, widget_id: UUID
+    ) -> tuple[WidgetView, bool]:
+        """Withdraw a pending request; nothing changes when none is pending."""
+        widget, space = await self._widget_to_request(widget_id)
+        changed = widget.withdraw_activation_request()
+        if changed:
+            widget = await self.repo.update(
+                widget, check_revision=False, only=ACTIVATION_REVIEW_FIELDS
+            )
+        return await self._member_view(space, widget), changed
+
+    async def decline_activation_request(
+        self, widget_id: UUID, reason: str
+    ) -> WidgetView:
+        """Send a pending request back to the space's editors with what
+        needs to change. Tenant admins only, member or not."""
+        validate_permission(self.user, Permission.ADMIN)
+        widget = await self._owned_widget(widget_id, for_update=True)
+        settled = ActivationRequestRef.pending_on(widget)
+        widget.decline_activation_request(by=self.user.id, reason=reason)
+        widget = await self.repo.update(
+            widget, check_revision=False, only=ACTIVATION_REVIEW_FIELDS
+        )
+        view = await self._view_with_template(
+            widget, target_published=await self.repo.is_target_published(widget)
+        )
+        return await self._with_actor_relation(replace(view, settled_request=settled))
+
+    async def review_widget(self, widget_id: UUID, *, today: date) -> WidgetReviewFacts:
+        """What a tenant admin reviews before activating, without being a
+        member: the widget, its space, and the assistant it exposes with its
+        instructions, knowledge and visitor tools. Never documents or
+        conversations. ``today`` is the budget day the usage counts up to."""
+        validate_permission(self.user, Permission.ADMIN)
+        tenant_id = self.user.tenant_id
+        record = await self.overview_repo.get_one(tenant_id, widget_id, today=today)
+        if record is None:
+            raise NotFoundException("Widget not found.")
+        widget = record.overview.widget
+        view = await self._view_with_template(
+            widget, target_published=await self.repo.is_target_published(widget)
+        )
+        space = await self.oversight_repo.space_summary(tenant_id, widget.space_id)
+        if space is None:
+            raise NotFoundException("Widget not found.")
+        target: Optional[AssistantConfig] = None
+        knowledge: list[AdminSpaceKnowledgeSource] = []
+        if space.kind != "personal":
+            links = await self.oversight_repo.knowledge_links(
+                tenant_id, widget.space_id
+            )
+            configs = await self.oversight_repo.assistant_configs(
+                tenant_id,
+                widget.space_id,
+                assistant_ids=[widget.target_id],
+                links=links,
+            )
+            if configs:
+                target = configs[0]
+                knowledge = await self.oversight_repo.knowledge_sources(
+                    tenant_id,
+                    widget.space_id,
+                    source_ids=[ref.id for ref in target.assistant.knowledge],
+                    links=links,
+                )
+        viewer_role = await self._role_in(widget.space_id)
+        viewer_membership: Optional[AdminSpaceViewerMembership] = None
+        if space.kind == "shared":
+            membership = await self.oversight_repo.membership(
+                tenant_id, widget.space_id
+            )
+            viewer_membership = viewer_membership_of(
+                membership, self.user.id, self.user.user_groups_ids
+            )
+        return WidgetReviewFacts(
+            view=view,
+            record=record,
+            space=space,
+            target=target,
+            knowledge=knowledge,
+            visitor_capabilities=[
+                purpose
+                for purpose in (target.assistant.capabilities if target else [])
+                if purpose in VISITOR_CAPABILITY_PURPOSES
+            ],
+            viewer_role=viewer_role,
+            viewer_membership=viewer_membership,
+        )
