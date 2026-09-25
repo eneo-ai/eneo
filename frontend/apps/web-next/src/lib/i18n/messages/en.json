@@ -4648,5 +4648,10 @@
   "skills_slug_description": "Derived from the name. You can adjust it before creation, but not afterwards. The server performs the final validation.",
   "skills_required_field": "This field is required.",
   "skills_create_action": "Create Skill",
-  "skills_creating": "Creating…"
+  "skills_creating": "Creating…",
+  "eneo_error_9048": "A Skill with this identifier already exists in this scope. Choose a different identifier.",
+  "eneo_error_9049": "Published Skills are kept in the audit log and can never be deleted. Unpublish the Skill to stop new attachments; existing attachments keep working until they are removed.",
+  "eneo_error_9050": "A selected Skill is used by an App run that is queued or in progress. Wait for the run to finish, then try removing it again.",
+  "eneo_error_9051": "A selected Skill is still attached. Remove its bindings from Assistants, Apps and Personal Chat before removing it.",
+  "eneo_error_9052": "The execution block changed after you reviewed it. Review the block state below before trying again."
 }

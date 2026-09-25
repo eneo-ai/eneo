@@ -421,7 +421,7 @@ export function OrganizationSkillsPage() {
   );
 }
 
-function SkillRemovalDialog({
+export function SkillRemovalDialog({
   skills,
   onClose,
   onRemoved,

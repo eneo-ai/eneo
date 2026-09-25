@@ -157,7 +157,13 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9024: "eneo_error_9024", // INTERNAL_SERVER_ERROR
   9038: "eneo_error_9038", // RESOURCE_NOT_READY
   // Model lifecycle
-  9039: "eneo_error_9039" // MODEL_IN_USE
+  9039: "eneo_error_9039", // MODEL_IN_USE
+  // Skill lifecycle
+  9048: "eneo_error_9048", // SKILL_SLUG_CONFLICT
+  9049: "eneo_error_9049", // SKILL_PUBLISHED_DELETE_FORBIDDEN
+  9050: "eneo_error_9050", // SKILL_USED_BY_APP_RUN
+  9051: "eneo_error_9051", // SKILL_STILL_ATTACHED
+  9052: "eneo_error_9052" // SKILL_EXECUTION_BLOCK_CONFLICT
 };
 
 /**

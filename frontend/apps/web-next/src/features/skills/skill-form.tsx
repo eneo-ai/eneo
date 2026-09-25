@@ -20,15 +20,18 @@ type Props =
       mode: "create";
       onSubmit: (value: SkillCreation) => Promise<void>;
       initialValue?: never;
+      onDirtyChange?: (dirty: boolean) => void;
     }
   | {
       mode: "revision";
       onSubmit: (value: SkillContent) => Promise<void>;
       initialValue: SkillContent;
+      onDirtyChange?: (dirty: boolean) => void;
     };
 
 export function SkillForm(props: Props) {
   const t = useTranslations();
+  const onDirtyChange = props.onDirtyChange;
   const id = useId();
   const initial = props.mode === "revision" ? props.initialValue : null;
   const [name, setName] = useState(initial?.display_name ?? "");
@@ -65,6 +68,8 @@ export function SkillForm(props: Props) {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
+
+  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
