@@ -29,9 +29,14 @@ export function settleDialog({ close, reload, focusAfter }: Options) {
       // The close hands focus back through onCloseAutoFocus; if that never
       // comes, the page must not wait for it.
       const timeout = new Promise<void>((resolve) => setTimeout(resolve, 1000));
-      await Promise.all([reload(), Promise.race([dialogClosed, timeout])]);
+      const [reloaded] = await Promise.allSettled([
+        reload(),
+        Promise.race([dialogClosed, timeout])
+      ]);
       await tick();
+      // The close already kept focus from the opener, so it must land somewhere.
       focusAfter()?.focus();
+      if (reloaded.status === "rejected") throw reloaded.reason;
     },
     onCloseAutoFocus(event: Event) {
       if (!settling) return;

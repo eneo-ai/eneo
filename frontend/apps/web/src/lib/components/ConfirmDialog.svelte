@@ -103,8 +103,17 @@
     } finally {
       pending = false;
     }
-    if (focusAfter) await settler.settle();
-    else open = false;
+    try {
+      if (focusAfter) {
+        await settler.settle();
+      } else {
+        open = false;
+        await reload?.();
+      }
+    } catch (error) {
+      // The action went through; only loading its result failed.
+      toastError(error);
+    }
   }
 </script>
 

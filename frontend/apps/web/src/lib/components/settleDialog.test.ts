@@ -79,6 +79,21 @@ describe("settleDialog", () => {
     expect(target.focus).toHaveBeenCalledTimes(1);
   });
 
+  it("still moves focus when the reload fails, then reports the failure", async () => {
+    const target = focusable();
+    const failure = new Error("offline");
+    const settler = settleDialog({
+      close: vi.fn(),
+      reload: () => Promise.reject(failure),
+      focusAfter: () => target
+    });
+
+    const settled = settler.settle();
+    settler.onCloseAutoFocus(closeEvent());
+    await expect(settled).rejects.toBe(failure);
+    expect(target.focus).toHaveBeenCalledTimes(1);
+  });
+
   it("leaves a plain close alone, also after reset following an earlier settle", async () => {
     const settler = settleDialog({
       close: vi.fn(),

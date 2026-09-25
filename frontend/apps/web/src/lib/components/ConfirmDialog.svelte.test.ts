@@ -158,6 +158,56 @@ describe("ConfirmDialog", () => {
     after.remove();
   });
 
+  it("reloads without focusAfter and leaves focus to the usual return to the opener", async () => {
+    const reloaded = held();
+    const reload = vi.fn(() => reloaded.promise);
+    render(ConfirmDialog, {
+      ...baseProps,
+      open: false,
+      onConfirm: vi.fn(),
+      reload,
+      trigger: createRawSnippet((args: () => { props: Record<string, unknown> }) => ({
+        render: () => `<button type="button">Open</button>`,
+        setup: (button) => {
+          for (const [name, value] of Object.entries(args().props)) {
+            if (name.startsWith("on") && typeof value === "function") {
+              button.addEventListener(name.slice(2), value as EventListener);
+            } else if (value !== undefined && typeof value !== "function") {
+              button.setAttribute(name, String(value));
+            }
+          }
+        }
+      }))
+    });
+
+    const opener = page.getByRole("button", { name: "Open" });
+    await opener.click();
+    await page.getByRole("button", { name: "Delete" }).click();
+    await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+    expect(reload).toHaveBeenCalledTimes(1);
+    await expect.element(opener).toHaveFocus();
+    reloaded.resolve();
+  });
+
+  it("reports a failed reload after a successful action without reopening", async () => {
+    const after = document.createElement("h2");
+    after.tabIndex = -1;
+    document.body.append(after);
+    const failure = new Error("offline");
+    render(ConfirmDialog, {
+      ...baseProps,
+      onConfirm: vi.fn(),
+      reload: () => Promise.reject(failure),
+      focusAfter: () => after
+    });
+
+    await page.getByRole("button", { name: "Delete" }).click();
+    await vi.waitFor(() => expect(toastError).toHaveBeenCalledWith(failure));
+    await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+    await expect.element(after).toHaveFocus();
+    after.remove();
+  });
+
   it("can leave only Cancel and offer the way forward in its alert", async () => {
     const after = document.createElement("h2");
     after.tabIndex = -1;
