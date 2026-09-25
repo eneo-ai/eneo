@@ -1,6 +1,6 @@
 ---
 title: Tillsyn över ytor
-translationSource: guides/space-oversight.mdx@bdfdd668214d
+translationSource: guides/space-oversight.mdx@784177e40b67
 ---
 
 # Tillsyn över ytor
@@ -103,7 +103,8 @@ Tillsynssidorna visar aldrig:
   eller mapp därifrån. En integrationskälla visas med namn bara när den
   omfattar en hel SharePoint- eller Confluence-webbplats. En SharePoint-fil
   eller SharePoint-mapp, eller ett SharePoint-objekt som inte har synkats än,
-  visas bara med sin typ; en OneDrive-källa visas som
+  visas bara med sin typ, som **SharePoint-fil**, **SharePoint-mapp** eller
+  **SharePoint-innehåll**; en OneDrive-källa visas som
   **OneDrive (personlig mapp)**;
 - vem som skapade en assistent, app eller kunskapskälla;
 - den exakta tidpunkten för den senaste aktiviteten, eller vilken tid på dagen
@@ -165,9 +166,9 @@ och sparas alltid i granskningsloggen.
   där personen fortfarande är medlem.
 
 Varje person visas med namn, e-postadress och roll, och med markeringar för
-**Organisationsadministratör**, **Gick med via tillsyn** (med datum och
-anledning), **Inaktivt konto** och **Inbjuden**. För varje grupp visas hur många
-personer den har.
+**Organisationsadministratör**, **Gick med via tillsyn** följt av datumet (med
+anledningen under markeringarna), **Inaktivt konto** och **Inbjuden**. För varje
+grupp visas hur många personer den har.
 
 De här reglerna gäller för ändringarna:
 
@@ -217,8 +218,8 @@ förhandsgranskning på en webbwidgets granskningssida.
 När du har gått med finns ytan i ytväljaren, och du arbetar i den som andra
 medlemmar med samma roll. Alla som kan öppna ytan ser att du har gått med, när
 och med vilken roll, på ytans översiktssida, som listar de
-organisationsadministratörer som har gått med via tillsyn. Medlemssidan
-markerar dig också som organisationsadministratör med datumet då du gick med.
+organisationsadministratörer som har gått med via tillsyn. På ytans medlemssida
+står också **Organisationsadministratör · gick med** och datumet vid ditt namn.
 När ditt medlemskap upphör, för att du lämnar ytan eller tas bort, visar
 översiktssidan fortfarande att du gick med, med datumet då medlemskapet
 upphörde, i 90 dagar. På de här sidorna är det bara ytans administratörer som
@@ -235,7 +236,7 @@ anledning.
 
 Markeringen hör till medlemskapet. Om du senare förlorar behörigheten
 **Administratör** är du kvar som vanlig medlem, och fliken **Medlemmar** visar
-fortfarande **Gick med via tillsyn** men inte längre
+fortfarande **Gick med via tillsyn** och datumet men inte längre
 **Organisationsadministratör**. Sådana medlemskap är därför lätta att hitta, och
 en annan organisationsadministratör kan ta bort dem. Om ytans egna
 administratörer tar bort dig och lägger till dig igen har det nya medlemskapet
@@ -288,18 +289,18 @@ i guiden om webbwidgetar.
 
 Följande händelser sparas i granskningsloggen:
 
-| Händelse i granskningsloggen                   | Sparas när                                                                           | Loggas alltid |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------ | ------------- |
-| Gick med i yta via tillsyn                     | En organisationsadministratör går med i en yta, med roll och anledning               | Ja            |
-| Lämnade yta (tillsyn)                          | En organisationsadministratör lämnar en yta                                          | Ja            |
-| Medlem tillagd av organisationsadministratör   | En person eller grupp läggs till via tillsynen                                       | Ja            |
-| Roll ändrad av organisationsadministratör      | En persons eller grupps roll ändras via tillsynen                                    | Ja            |
-| Medlem borttagen av organisationsadministratör | En person eller grupp tas bort via tillsynen                                         | Ja            |
-| Användare tillagd i användargrupp              | En användare läggs till i en användargrupp, med de ytor där gruppen har en roll      | Ja            |
-| Användare borttagen från användargrupp         | En användare tas bort från en användargrupp, med de ytor där gruppen har en roll     | Ja            |
-| Begäran om widgetaktivering tillbakaskickad    | En administratör skickar tillbaka en begäran om aktivering, med meddelande           | Ja            |
-| Widgetaktivering begärd                        | En redigerare begär aktivering av en webbwidget                                      | Nej           |
-| Begäran om widgetaktivering tillbakadragen     | En redigerare drar tillbaka en begäran                                               | Nej           |
+| Händelse i granskningsloggen                 | Sparas när                                                                       | Loggas alltid |
+| -------------------------------------------- | -------------------------------------------------------------------------------- | ------------- |
+| Medlemskap i delad yta påbörjat (tillsyn)    | En organisationsadministratör går med i en yta, med roll och anledning           | Ja            |
+| Medlemskap i delad yta avslutat (tillsyn)    | En organisationsadministratör lämnar en yta                                      | Ja            |
+| Användare tillagd i delad yta (tillsyn)      | En person eller grupp läggs till via tillsynen                                   | Ja            |
+| Roll ändrad i delad yta (tillsyn)            | En persons eller grupps roll ändras via tillsynen                                | Ja            |
+| Användare borttagen från delad yta (tillsyn) | En person eller grupp tas bort via tillsynen                                     | Ja            |
+| Användare tillagd i användargrupp            | En användare läggs till i en användargrupp, med de ytor där gruppen har en roll  | Ja            |
+| Användare borttagen från användargrupp       | En användare tas bort från en användargrupp, med de ytor där gruppen har en roll | Ja            |
+| Begäran om widgetaktivering tillbakaskickad  | En administratör skickar tillbaka en begäran om aktivering, med meddelande       | Ja            |
+| Widgetaktivering begärd                      | En redigerare begär aktivering av en webbwidget                                  | Nej           |
+| Begäran om widgetaktivering tillbakadragen   | En redigerare drar tillbaka en begäran                                           | Nej           |
 
 Aktivering, paus och arkivering av en webbwidget (**Widget aktiverad**,
 **Widget pausad** och **Widget arkiverad**) loggas också alltid, även när
@@ -329,10 +330,10 @@ som läser inställningar, medlemmar, instruktioner eller användning lämnar in
 spår i loggen.
 
 Gå igenom tillsynsmedlemskapen regelbundet, till exempel en gång i månaden.
-Filtrera granskningsloggen på händelsen **Gick med i yta via tillsyn** och
-kontrollera att varje medlemskap fortfarande behövs. Filtrera också på
-**Användare tillagd i användargrupp** och kontrollera varje person som har
-lagts till i en grupp som har en roll i en yta. Medlemskapsfiltret på
+Filtrera granskningsloggen på händelsen **Medlemskap i delad yta påbörjat
+(tillsyn)** och kontrollera att varje medlemskap fortfarande behövs. Filtrera
+också på **Användare tillagd i användargrupp** och kontrollera varje person som
+har lagts till i en grupp som har en roll i en yta. Medlemskapsfiltret på
 **Admin → Ytor** visar de ytor där du är medlem.
 
 ## Åtkomst via API [#api-access]

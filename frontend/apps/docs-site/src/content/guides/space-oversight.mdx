@@ -48,7 +48,7 @@ The oversight pages never show:
 - questions, answers, conversation names, feedback, or the input and output of app runs;
 - the names of attached files, only how many there are;
 - website sign-in details or tool server secrets;
-- the folders and paths behind an integration, or the name of a single file or folder from it. An integration source is named only when it covers a whole SharePoint or Confluence site. A SharePoint file or folder, or a SharePoint item that has not been synced yet, is shown by its type only; a OneDrive source is shown as **OneDrive (personal folder)**;
+- the folders and paths behind an integration, or the name of a single file or folder from it. An integration source is named only when it covers a whole SharePoint or Confluence site. A SharePoint file or folder, or a SharePoint item that has not been synced yet, is shown by its type only, as **SharePoint file**, **SharePoint folder** or **SharePoint content**; a OneDrive source is shown as **OneDrive (personal folder)**;
 - who created an assistant, app or knowledge source;
 - the exact time of the last activity, or the time of day when an assistant or knowledge source was last changed.
 
@@ -73,7 +73,7 @@ On the **Members** tab you add people and groups, change their roles and remove 
 - Change a role with the role menu on the member's row. **Viewer** reads the knowledge and chats with published assistants. **Editor** can also change assistants and knowledge, and sees insights about users' questions where insights are on. **Administrator** can also manage the space's members and settings.
 - Remove a member from the member's row. Removing a person also revokes the API keys that person has for the space. Removing a group revokes no API keys; a person's own API keys only work in spaces where the person is still a member.
 
-Each person is listed with name, email and role, and with badges for **Organisation administrator**, **Joined through oversight** (with the date and the reason), **Inactive account** and **Invited**. Each group shows how many people it has.
+Each person is listed with name, email and role, and with badges for **Organisation administrator**, **Joined through oversight on** followed by the date (with the reason under the badges), **Inactive account** and **Invited**. Each group shows how many people it has.
 
 These rules apply to the changes:
 
@@ -91,11 +91,11 @@ Join a space when you need its content, for example to investigate a report, che
 2. Write a reason, at least 10 visible characters and at most 500 characters. Refer to a case number instead of writing personal data: several people and integrations can read the reason (see [Privacy](#privacy)), and it is stored in the audit log. Line breaks are saved as spaces, and invisible characters are removed and do not count.
 3. Choose **Join as** followed by the role, for example **Join as Viewer**.
 
-After joining, the space is in your space selector and you work in it like any other member with the same role. Everyone who can open the space sees that you joined, when and with which role, on the space's overview page, which lists the organisation administrators who joined through oversight. The members page also marks you as an organisation administrator with the date you joined. When your membership ends, because you leave or are removed, the overview page keeps showing your join, with the date it ended, for 90 days. On these pages only the space's administrators see your reason. The join is always recorded in the audit log, with the role and the reason, and the audit log keeps it after the notice is gone.
+After joining, the space is in your space selector and you work in it like any other member with the same role. Everyone who can open the space sees that you joined, when and with which role, on the space's overview page, which lists the organisation administrators who joined through oversight. The space's members page also shows **Organisation administrator · joined** and the date next to your name. When your membership ends, because you leave or are removed, the overview page keeps showing your join, with the date it ended, for 90 days. On these pages only the space's administrators see your reason. The join is always recorded in the audit log, with the role and the reason, and the audit log keeps it after the notice is gone.
 
 If you are already a member through a group, joining adds a direct membership with a higher role, and the higher role applies. When a group already gives you **Administrator**, there is nothing to join. If you already have a direct membership, you cannot join again or change your own role. Another organisation administrator can lower your role or remove you, but not raise it; for a higher role, leave and join again with that role and a new reason.
 
-The join record belongs to the membership. If you later lose the **Admin** permission you stay an ordinary member, and the **Members** tab still shows **Joined through oversight** but no longer **Organisation administrator**, which makes such memberships easy to find; another organisation administrator can remove them. If the space's own administrators remove you and add you again, the new membership has no join record.
+The join record belongs to the membership. If you later lose the **Admin** permission you stay an ordinary member, and the **Members** tab still shows **Joined through oversight on** and the date but no longer **Organisation administrator**, which makes such memberships easy to find; another organisation administrator can remove them. If the space's own administrators remove you and add you again, the new membership has no join record.
 
 ## Leave a space
 
@@ -122,18 +122,18 @@ Editors cannot activate a web widget themselves. They request activation in the 
 
 These actions are recorded in the audit log:
 
-| Action in the audit log                      | Recorded when                                                                   | Always logged |
-| -------------------------------------------- | ------------------------------------------------------------------------------- | ------------- |
-| Joined Space Through Oversight               | An organisation administrator joins a space, with role and reason               | Yes           |
-| Left Space (Oversight)                       | An organisation administrator leaves a space                                    | Yes           |
-| Member Added by Organisation Administrator   | A person or group is added through oversight                                    | Yes           |
-| Role Changed by Organisation Administrator   | A person's or group's role is changed through oversight                         | Yes           |
-| Member Removed by Organisation Administrator | A person or group is removed through oversight                                  | Yes           |
-| User Group Member Added                      | A user is added to a user group, with the spaces where the group has a role     | Yes           |
-| User Group Member Removed                    | A user is removed from a user group, with the spaces where the group has a role | Yes           |
-| Widget Activation Request Sent Back          | An administrator sends an activation request back, with the message             | Yes           |
-| Widget Activation Requested                  | An editor requests activation of a web widget                                   | No            |
-| Widget Activation Request Withdrawn          | An editor withdraws a request                                                   | No            |
+| Action in the audit log               | Recorded when                                                                   | Always logged |
+| ------------------------------------- | ------------------------------------------------------------------------------- | ------------- |
+| Space Joined (Oversight)              | An organisation administrator joins a space, with role and reason               | Yes           |
+| Space Left (Oversight)                | An organisation administrator leaves a space                                    | Yes           |
+| Space Member Added (Oversight)        | A person or group is added through oversight                                    | Yes           |
+| Space Member Role Changed (Oversight) | A person's or group's role is changed through oversight                         | Yes           |
+| Space Member Removed (Oversight)      | A person or group is removed through oversight                                  | Yes           |
+| User Group Member Added               | A user is added to a user group, with the spaces where the group has a role     | Yes           |
+| User Group Member Removed             | A user is removed from a user group, with the spaces where the group has a role | Yes           |
+| Widget Activation Request Sent Back   | An administrator sends an activation request back, with the message             | Yes           |
+| Widget Activation Requested           | An editor requests activation of a web widget                                   | No            |
+| Widget Activation Request Withdrawn   | An editor withdraws a request                                                   | No            |
 
 Activating, pausing and archiving a web widget (**Widget Activated**, **Widget Paused** and **Widget Archived**) are always logged too, also when widgets are archived because their assistant is deleted or moved.
 
@@ -143,7 +143,7 @@ An organisation may reduce the logging of ordinary activity, but not of access a
 
 Each entry names the administrator, the space and, where they apply, the member or group and the roles. A user group entry names the group, the user and each space where the group has a role, with that role. A join reason or a send-back message is kept in the entry's details (its metadata), never in its description. Opening the oversight pages is not logged: reading settings, members, instructions or usage leaves no entry.
 
-Review joins regularly, for example once a month. Filter the audit log on the action **Joined Space Through Oversight**, and check that each membership is still needed. Filter on **User Group Member Added** as well, and check each person added to a group that has a role in a space. The membership filter on **Admin → Spaces** shows the spaces you are a member of.
+Review joins regularly, for example once a month. Filter the audit log on the action **Space Joined (Oversight)**, and check that each membership is still needed. Filter on **User Group Member Added** as well, and check each person added to a group that has a role in a space. The membership filter on **Admin → Spaces** shows the spaces you are a member of.
 
 ## API access
 

@@ -71,9 +71,9 @@ If another editor changes the widget while you edit, autosave stops and keeps yo
 
 ### Request activation
 
-An organisation administrator decides whether a widget goes live. When the status bar shows no blockers and every change is saved, choose **Request activation** in the status bar, or **Request reactivation** for a paused widget. The button is unavailable while there are blockers or unsaved changes, and the list of blockers says what to fix.
+An organisation administrator decides whether a widget goes live. When the status bar shows no blockers, choose **Request activation** in the status bar, or **Request reactivation** for a paused widget. A change that is still waiting to be saved is saved first; if it cannot be saved, the request is not sent and the status bar lists the change. The button is unavailable while there are blockers, and the list of blockers says what to fix.
 
-While the request is pending, the status bar shows **Waiting for activation** and when activation was requested. You can keep editing: the administrator reviews the latest saved version, and if the widget changes while they have it open, they are asked to review it again before they can activate it. Changes to the assistant the widget serves are not part of the request: they apply at once, before and after activation. **Withdraw request** cancels the request; anyone who can edit the widget can withdraw it. Eneo sends no email or other notification about requests. Administrators find them under **Admin → Web widgets** and **Admin → Spaces**.
+While the request is pending, the status bar shows **Waiting for activation** and when activation was requested. You can keep editing: the organisation administrator reviews the latest saved version, and if the widget changes while they have it open, they are asked to review it again before they can activate it. Changes to the assistant the widget serves are not part of the request: they apply at once, before and after activation. **Withdraw request** cancels the request; anyone who can edit the widget can withdraw it. Eneo sends no email or other notification about requests. Administrators find them under **Admin → Web widgets** and **Admin → Spaces**.
 
 If the administrator sends the request back, the status bar says when, together with the administrator's message about what needs to change. Make the changes and choose **Request activation** again. A widget that is sent back stays a draft, or paused.
 
@@ -158,9 +158,9 @@ The review page shows:
 
 - **Status**: who requested activation and when, a message from an earlier send-back, and any blockers or policy violations.
 - **Where the widget appears**: the websites allowed to show it.
-- **What visitors see**: title, AI disclosure, welcome message, suggested questions, footer, language and template.
-- **What visitors get access to**: the assistant with its model and instructions, its knowledge sources with document counts, and the tools visitors reach (see [What visitors can reach](#what-visitors-can-reach)).
-- **Privacy and protection**: retention within the policy range, bot protection, daily token budget, limits, and whether free-text feedback is stored.
+- **What visitors see**: title, description (the text under the title, where the AI disclosure goes), welcome message, suggested questions, footer, language and template.
+- **What visitors get access to**: the assistant with its model, its instructions and how long it keeps staff conversations, its knowledge sources with document counts, and the tools visitors reach (see [What visitors can reach](#what-visitors-can-reach)).
+- **Privacy and protection**: how long visitor conversations are kept, within the policy range, bot protection, daily token budget, limits, and whether free-text feedback is stored.
 - **Preview**: how the widget looks to visitors. This preview does not answer questions, because answers draw on the space's knowledge, which only members may see. If you are a member of the space and the assistant is published, **Test the answers** starts the real widget; test questions are stored as visitor conversations and count toward the widget's usage. Membership is checked each time the test gets a token. Unless you are also an editor or administrator of the space with the **widgets** permission, a token lasts 10 minutes, so a running test stops working within 10 minutes after you leave the space or are removed. If you are not a member, you can join the space from here (see [Join a space](/guides/space-oversight#join-a-space)).
 - **Usage**, once the widget has been active.
 

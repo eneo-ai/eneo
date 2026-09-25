@@ -43,7 +43,7 @@ Changes apply immediately for new events. Historical logs remain unchanged.
 
 Some actions are always logged and cannot be turned off:
 
-- **Space oversight**: Joined Space Through Oversight, Left Space (Oversight), Member Added by Organisation Administrator, Role Changed by Organisation Administrator, and Member Removed by Organisation Administrator.
+- **Space oversight**: Space Joined (Oversight), Space Left (Oversight), Space Member Added (Oversight), Space Member Role Changed (Oversight) and Space Member Removed (Oversight).
 - **User groups**: User Group Member Added and User Group Member Removed. A user group's role in a space gives its members that space's content, so each entry lists the spaces where the group has a role.
 - **Web widget publishing**: Widget Activation Request Sent Back, Widget Activated, Widget Paused and Widget Archived.
 
@@ -51,7 +51,7 @@ These actions are recorded even when audit logging is turned off, whatever the c
 
 An organisation may reduce the logging of ordinary activity, but not of access and changes made without membership, of changes to who is in a user group, or of publishing to the open web. The administrators who could make such changes can also change the audit settings, so a record they could switch off would not be a control.
 
-The reason an administrator gives for joining a space, and the message sent back with a widget request, are stored in the entry's JSON metadata, not in its description. To review who has joined which spaces, filter on the action **Joined Space Through Oversight**. See [Space Oversight](/guides/space-oversight#what-the-audit-log-records) for what each entry records.
+The reason an administrator gives for joining a space, and the message sent back with a widget request, are stored in the entry's JSON metadata, not in its description. To review who has joined which spaces, filter on the action **Space Joined (Oversight)**. See [Space Oversight](/guides/space-oversight#what-the-audit-log-records) for what each entry records.
 
 ## Viewing audit logs
 
