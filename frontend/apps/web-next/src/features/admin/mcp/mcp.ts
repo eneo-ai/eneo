@@ -75,6 +75,13 @@ export function setMcpOrgEnabled(api: EneoClient, serverId: string, enabled: boo
       );
 }
 
+/** Dispatch activation to the contract owned by this server's purpose. */
+export function setServerActivation(api: EneoClient, server: McpServer, active: boolean) {
+  return server.purpose && server.purpose !== "general"
+    ? setCapabilityProviderActive(api, server.id, active)
+    : setMcpOrgEnabled(api, server.id, active);
+}
+
 /** Delete a global MCP server from the catalog. */
 export function deleteMcpServer(api: EneoClient, id: string) {
   return unwrap(api.DELETE("/api/v1/mcp-servers/{id}/", { params: { path: { id } } }));

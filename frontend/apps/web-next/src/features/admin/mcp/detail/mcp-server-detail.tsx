@@ -28,10 +28,11 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
+import { readinessKey } from "@/features/capabilities/capabilities";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
-import { deleteMcpServer, MCP_KEY, mcpServersQueryOptions, setMcpOrgEnabled } from "../mcp";
-import { isQuarantined } from "../mcp-helpers";
+import { deleteMcpServer, MCP_KEY, mcpServersQueryOptions, setServerActivation } from "../mcp";
+import { activationState } from "../mcp-helpers";
 import { CredentialsTab } from "./credentials-tab";
 import { OverviewTab } from "./overview-tab";
 import { SecurityTab } from "./security-tab";
@@ -71,7 +72,10 @@ export function McpServerDetail({
   const invalidate = () => queryClient.invalidateQueries({ queryKey: MCP_KEY });
 
   const setEnabled = useMutation({
-    mutationFn: (next: boolean) => setMcpOrgEnabled(browserApi, serverId, next),
+    mutationFn: async (next: boolean) => {
+      if (!server) throw new Error("MCP server no longer exists");
+      await setServerActivation(browserApi, server, next);
+    },
     onSuccess: invalidate,
     onError: (error) => toastApiError(error, t)
   });
@@ -92,8 +96,7 @@ export function McpServerDetail({
     server.purpose && server.purpose !== "general" ? "/admin/tools" : "/admin/mcp-servers";
 
   const securityEnabled = security.security_enabled;
-  const quarantined = isQuarantined(server, securityEnabled);
-  const toggleBlocked = quarantined && !server.is_org_enabled;
+  const { capability, active, blocked } = activationState(server, securityEnabled);
   // The security tab only exists when classifications are enforced; a deep link
   // to it otherwise falls back to overview so the page never renders blank.
   const activeTab = tab === "security" && !securityEnabled ? "overview" : tab;
@@ -121,17 +124,19 @@ export function McpServerDetail({
               <TooltipTrigger asChild>
                 <span className="inline-flex">
                   <Switch
-                    checked={server.is_org_enabled}
-                    disabled={setEnabled.isPending || toggleBlocked}
+                    checked={active}
+                    disabled={setEnabled.isPending || blocked}
                     aria-label={t("mcp_toggle_server", { name: server.name })}
                     onCheckedChange={(checked) => setEnabled.mutate(checked)}
                   />
                 </span>
               </TooltipTrigger>
               <TooltipContent>
-                {toggleBlocked
-                  ? t("mcp_quarantine_blocks_enable")
-                  : server.is_org_enabled
+                {blocked
+                  ? capability
+                    ? t(readinessKey(server.readiness_reason))
+                    : t("mcp_quarantine_blocks_enable")
+                  : active
                     ? t("mcp_toggle_to_disable")
                     : t("mcp_toggle_to_enable")}
               </TooltipContent>

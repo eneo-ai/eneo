@@ -1,5 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { hostFromUrl, initials, readableParams, toolRisk } from "./mcp-helpers";
+import type { McpServer } from "./mcp";
+import { activationState, hostFromUrl, initials, readableParams, toolRisk } from "./mcp-helpers";
+
+describe("server activation", () => {
+  const base = {
+    purpose: "general",
+    is_org_enabled: false,
+    is_enabled: false,
+    readiness_reason: null,
+    security_classification: { id: "classified" }
+  } as McpServer;
+
+  it("uses tenant enablement for general MCP servers", () => {
+    expect(activationState({ ...base, is_org_enabled: true }, true)).toEqual({
+      capability: false,
+      active: true,
+      blocked: false
+    });
+    expect(activationState({ ...base, security_classification: null }, true).blocked).toBe(true);
+  });
+
+  it("uses provider activation and readiness for function sources", () => {
+    const source = {
+      ...base,
+      purpose: "image_generation" as const,
+      readiness_reason: "model_missing"
+    };
+    expect(activationState(source, false)).toEqual({
+      capability: true,
+      active: false,
+      blocked: true
+    });
+    expect(activationState({ ...source, is_enabled: true }, false).active).toBe(true);
+  });
+});
 
 describe("hostFromUrl", () => {
   it("extracts the host from a valid url", () => {

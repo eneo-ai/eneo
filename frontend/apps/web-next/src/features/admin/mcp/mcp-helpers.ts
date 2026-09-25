@@ -37,6 +37,16 @@ export function isQuarantined(server: McpServer, securityEnabled: boolean): bool
   return securityEnabled && !server.security_classification;
 }
 
+/** Activation state differs between general MCP servers and function sources. */
+export function activationState(server: McpServer, securityEnabled: boolean) {
+  const capability = server.purpose !== undefined && server.purpose !== "general";
+  const active = capability ? server.is_enabled === true : server.is_org_enabled;
+  const blocked =
+    !active &&
+    (capability ? Boolean(server.readiness_reason) : isQuarantined(server, securityEnabled));
+  return { capability, active, blocked };
+}
+
 export type ToolRisk = "read" | "write";
 
 // Verb tokens that imply a tool can change state. The signal is a heuristic over
