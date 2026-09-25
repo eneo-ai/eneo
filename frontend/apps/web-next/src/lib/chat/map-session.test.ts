@@ -66,6 +66,14 @@ describe("mapSessionMessages", () => {
             tool_name: "write_file",
             tool_call_id: "call-2",
             result_status: "failed"
+          },
+          {
+            server_name: "Image Inc",
+            tool_name: "draw",
+            title: "Draw an image",
+            purpose: "image_generation",
+            tool_call_id: "call-3",
+            result_status: "succeeded"
           }
         ]
       }
@@ -76,6 +84,7 @@ describe("mapSessionMessages", () => {
       type: "dynamic-tool",
       toolName: "read_file",
       toolCallId: "call-1",
+      providerMetadata: { eneo: { server_name: "files" } },
       state: "output-available"
     });
     expect(parts[1]).toMatchObject({
@@ -83,6 +92,12 @@ describe("mapSessionMessages", () => {
       toolCallId: "call-2",
       state: "output-error",
       errorText: "failed"
+    });
+    expect(parts[2]).toMatchObject({
+      type: "dynamic-tool",
+      providerMetadata: {
+        eneo: { server_name: "Image Inc", title: "Draw an image", purpose: "image_generation" }
+      }
     });
   });
 

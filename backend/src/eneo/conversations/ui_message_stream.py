@@ -95,6 +95,13 @@ def _tool_chunks(
         base = {
             "toolCallId": tool_call_id,
             "dynamic": True,
+            "providerMetadata": {
+                "eneo": {
+                    "server_name": tool.server_name,
+                    "title": tool.title,
+                    "purpose": tool.purpose,
+                }
+            },
         }
         status = tool.result_status
         if status == "succeeded":
@@ -109,7 +116,6 @@ def _tool_chunks(
                     "type": "tool-input-available",
                     "toolName": tool.tool_name,
                     "input": tool.arguments or {},
-                    "providerMetadata": {"eneo": {"server_name": tool.server_name}},
                     **base,
                 }
             )
@@ -197,10 +203,8 @@ async def _ui_message_chunks(
                 json.loads(FilePublic(**file.model_dump()).model_dump_json())
                 for file in response.files
             ],
-            "web_search_references": [
-                {"id": str(result.id), "title": result.title, "url": result.url}
-                for result in response.web_search_results
-            ],
+            # Web search now arrives through capability MCP references.
+            "web_search_references": [],
             "mcp_tool_references": [
                 {
                     "id": str(ref.id),

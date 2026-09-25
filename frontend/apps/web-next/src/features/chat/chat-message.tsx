@@ -21,6 +21,10 @@ import { resolveInrefs, trimPartialInref } from "@/lib/chat/inref";
 import type { EneoUIMessage } from "@/lib/chat/types";
 
 import { ActivityTimeline } from "./activity-timeline";
+import { SkillActivationStep } from "./skill-activation-step";
+import { isSkillCall } from "./tool-presentation";
+
+type ToolPart = Extract<EneoUIMessage["parts"][number], { type: "dynamic-tool" }>;
 import { copyAssistantAnswer, getPreferredAssistantCopyFormat } from "./copy-assistant-answer";
 import {
   GeneratedFile,
@@ -80,6 +84,10 @@ export function ChatMessage({
         {isAssistant && (
           <ActivityTimeline parts={message.parts} isStreaming={isStreaming} sessionId={sessionId} />
         )}
+        {isAssistant &&
+          message.parts
+            .filter((part): part is ToolPart => part.type === "dynamic-tool" && isSkillCall(part))
+            .map((part) => <SkillActivationStep key={part.toolCallId} part={part} />)}
         {message.parts.map((part, index) => {
           // Reasoning and tool calls are grouped into ActivityTimeline above.
           if (part.type === "reasoning" || part.type === "dynamic-tool") {

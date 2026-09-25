@@ -22,6 +22,7 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.conversations.ui_message_stream import (
     UI_MESSAGE_STREAM_HEADERS,
+    _tool_chunks,
     _ui_message_chunks,
     to_ui_message_stream_response,
 )
@@ -33,6 +34,35 @@ from eneo.sessions.session import SessionInDB
 SESSION_ID = UUID("11111111-1111-1111-1111-111111111111")
 QUESTION_ID = UUID("22222222-2222-2222-2222-222222222222")
 BLOB_ID = UUID("33333333-3333-3333-3333-333333333333")
+
+
+def test_tool_chunks_preserve_display_metadata_for_capability_and_skill_calls():
+    calls = [
+        ToolCallMetadata(
+            server_name="External Images",
+            tool_name="draw",
+            title="Draw an image",
+            purpose="image_generation",
+            arguments={"prompt": "a lighthouse"},
+            tool_call_id="image-call",
+        ),
+        ToolCallMetadata(
+            server_name="skills",
+            tool_name="planning",
+            title="Planning Skill",
+            arguments={"mode": "on_demand"},
+            tool_call_id="skill-call",
+        ),
+    ]
+
+    chunks = _tool_chunks(calls, {})
+
+    assert chunks[0]["providerMetadata"]["eneo"] == {
+        "server_name": "External Images",
+        "title": "Draw an image",
+        "purpose": "image_generation",
+    }
+    assert chunks[1]["providerMetadata"]["eneo"]["title"] == "Planning Skill"
 
 
 def _completion_model() -> CompletionModelPublic:
@@ -53,6 +83,9 @@ def _blob(blob_id: UUID = BLOB_ID) -> InfoBlobInDBWithScore:
         title="Reference title",
         text="reference text",
         embedding_model_id=uuid4(),
+        source_id=uuid4(),
+        version_state="active",
+        original_available=True,
         user_id=uuid4(),
         tenant_id=uuid4(),
         size=42,
@@ -114,7 +147,6 @@ def _response(completions: list[Completion]) -> AssistantResponse:
         info_blobs=[],
         completion_model=_completion_model(),
         tools=UseTools(assistants=[]),
-        web_search_results=[],
     )
 
 
@@ -324,10 +356,16 @@ async def test_tool_calls_and_approval_pause_resume():
     assert tool_input["toolName"] == "read_file"
     assert tool_input["input"] == {"path": "a.txt"}
     assert tool_input["dynamic"] is True
+    assert tool_input["providerMetadata"]["eneo"] == {
+        "server_name": "files",
+        "title": None,
+        "purpose": None,
+    }
 
     tool_output = next(c for c in chunks if c["type"] == "tool-output-available")
     assert tool_output["toolCallId"] == "call-1"
     assert tool_output["output"] == {"status": "succeeded"}
+    assert tool_output["providerMetadata"]["eneo"]["server_name"] == "files"
 
 
 @pytest.mark.asyncio

@@ -50,6 +50,13 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
         type: "dynamic-tool",
         toolName: tool.tool_name ?? "tool",
         toolCallId: tool.tool_call_id ?? `${baseId}-tool-${parts.length}`,
+        providerMetadata: {
+          eneo: {
+            server_name: tool.server_name,
+            title: tool.title ?? null,
+            purpose: tool.purpose ?? null
+          }
+        },
         state:
           tool.result_status && tool.result_status !== "succeeded"
             ? "output-error"

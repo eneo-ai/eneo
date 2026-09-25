@@ -12,7 +12,6 @@ import {
   StatusNode,
   ToolStateIcon,
   ToolStatusBadge,
-  humanizeToolName,
   toolStateTone,
   type ToolState
 } from "@/components/ai-elements/tool-status";
@@ -21,13 +20,14 @@ import { Spinner } from "@/components/ui/spinner";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { EneoUIMessage } from "@/lib/chat/types";
+import { isSkillCall, toolPresentation } from "./tool-presentation";
 
 type Part = EneoUIMessage["parts"][number];
 type ReasoningPart = Extract<Part, { type: "reasoning" }>;
 type ToolPart = Extract<Part, { type: "dynamic-tool" }>;
 
 const isActivityPart = (part: Part): part is ReasoningPart | ToolPart =>
-  part.type === "reasoning" || part.type === "dynamic-tool";
+  part.type === "reasoning" || (part.type === "dynamic-tool" && !isSkillCall(part));
 
 // Tool state → translation key. `as const satisfies` keeps the values a literal
 // union so next-intl still type-checks the lookup.
@@ -86,7 +86,7 @@ export function ActivityTimeline({
   const liveText =
     lastStep.type === "dynamic-tool" &&
     (lastStep.state === "input-available" || lastStep.state === "input-streaming")
-      ? humanizeToolName(lastStep.toolName)
+      ? toolPresentation(lastStep, t, false).label
       : lastStep.type === "reasoning"
         ? t("chat_reasoning_thinking")
         : t("chat_activity_writing");
@@ -183,6 +183,7 @@ function ToolStep({
   sessionId: string | null;
 }) {
   const t = useTranslations();
+  const presentation = toolPresentation(part, t, part.state === "output-available");
   // Keep the active and failed steps open by default; completed steps stay
   // tucked away until the reader dives in.
   const defaultOpen = part.state === "output-error" || part.state === "input-available";
@@ -239,9 +240,15 @@ function ToolStep({
       </StatusNode>
       <Collapsible open={open} onOpenChange={setOpen} className="group/tool min-w-0 flex-1">
         <CollapsibleTrigger className="flex w-full items-center gap-2 py-1 text-left">
-          <span className="text-foreground truncate text-sm font-medium">
-            {humanizeToolName(part.toolName)}
-          </span>
+          <span className="text-foreground truncate text-sm font-medium">{presentation.label}</span>
+          {presentation.provider && (
+            <span
+              className="text-muted-foreground max-w-32 truncate text-xs"
+              title={presentation.provider}
+            >
+              {presentation.provider}
+            </span>
+          )}
           <ToolStatusBadge
             state={part.state}
             label={label}
