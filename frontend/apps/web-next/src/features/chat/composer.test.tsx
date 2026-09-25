@@ -124,10 +124,19 @@ describe("Composer", () => {
     fireEvent.click(web);
     expect(web.getAttribute("aria-pressed")).toBe("false");
 
+    // Unavailable: still focusable (aria-disabled) and described by its reason.
     const image = screen.getByRole("button", { name: "Bildgenerering" });
-    expect(image.hasAttribute("disabled")).toBe(true);
-    const reason = document.getElementById(image.getAttribute("aria-describedby") ?? "");
-    expect(reason?.textContent).toBeTruthy();
+    expect(image.hasAttribute("disabled")).toBe(false);
+    expect(image.getAttribute("aria-disabled")).toBe("true");
+    expect(image.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(image);
+    expect(image.getAttribute("aria-pressed")).toBe("false");
+    const reason = image
+      .getAttribute("aria-describedby")
+      ?.split(" ")
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(reason?.trim()).toBeTruthy();
 
     expect(screen.getByRole("button", { name: /Kunskap: Upphandling/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Bifoga filer" })).toBeTruthy();

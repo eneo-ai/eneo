@@ -78,6 +78,8 @@ function isoNow(): string {
   return new Date().toISOString();
 }
 
+type SentFiles = NonNullable<NonNullable<EneoUIMessage["metadata"]>["files"]>;
+
 /** Which answer's activity is shown, on which tab, and which source to focus. */
 export type ActivityState = { messageId: string; tab: ActivityTab; source: number | null };
 
@@ -264,7 +266,8 @@ export function ChatView({
   const streamErrorCodeRef = useRef<number | null>(null);
   const streamStartedRef = useRef(false);
   const pendingSendRef = useRef<{ text: string } | null>(null);
-  const [lastQuestion, setLastQuestion] = useState<string | null>(null);
+  // The last question and its files, for "Försök igen" after an error.
+  const [lastQuestion, setLastQuestion] = useState<{ text: string; files: SentFiles } | null>(null);
   const isNewSession = useRef(initialSessionId === null);
   const [feedbackValue, setFeedbackValue] = useState<1 | -1 | null>(initialFeedback);
   const { feedback: feedbackMutation } = useSessionMutations(partner);
@@ -424,14 +427,31 @@ export function ChatView({
     }
   }, [started]);
 
-  function sendQuestion(text: string) {
+  /** Sends a question; `resendFiles` repeats a failed question's attachments. */
+  function sendQuestion(text: string, resendFiles?: SentFiles) {
     if (!text || busy || attachments.uploading || usage.willExceedContext) return;
+    // Uploaded attachments travel as file ids; the metadata renders them as
+    // file tokens under the question.
+    const files =
+      resendFiles ??
+      (attachments.attachments.flatMap((attachment) =>
+        attachment.fileId
+          ? [
+              {
+                id: attachment.fileId,
+                name: attachment.name,
+                mimetype: attachment.mimetype,
+                size: attachment.size
+              }
+            ]
+          : []
+      ) as SentFiles);
     clearError();
     setStreamErrorCode(null);
     streamErrorCodeRef.current = null;
     streamStartedRef.current = false;
     pendingSendRef.current = { text };
-    setLastQuestion(text);
+    setLastQuestion({ text, files });
     if (!started) {
       refocusDock.current = Boolean(
         startComposerRef.current?.contains(document.activeElement ?? null)
@@ -457,7 +477,7 @@ export function ChatView({
       session_id: sessionIdRef.current,
       assistant_id: continuing || partner.type === "group-chat" ? null : partner.id,
       group_chat_id: !continuing && partner.type === "group-chat" ? partner.id : null,
-      files: attachments.fileIds.map((id) => ({ id })),
+      files: files.map((file) => ({ id: file.id })),
       tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
       disabled_capabilities: disabledCapabilitiesForRequest(
         partner,
@@ -466,21 +486,6 @@ export function ChatView({
       ),
       ...mcpOptions
     };
-
-    // Uploaded attachments travel as file ids; the metadata renders them as
-    // file tokens under the question.
-    const files = attachments.attachments.flatMap((attachment) =>
-      attachment.fileId
-        ? [
-            {
-              id: attachment.fileId,
-              name: attachment.name,
-              mimetype: attachment.mimetype,
-              size: attachment.size
-            }
-          ]
-        : []
-    ) as NonNullable<NonNullable<EneoUIMessage["metadata"]>["files"]>;
 
     timings.markSent();
     void sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
@@ -616,6 +621,25 @@ export function ChatView({
       />
     ) : null;
 
+  // Generation failed: the error (also announced) and a retry of the same
+  // question. Shown in both layouts: a first question that fails before
+  // streaming starts puts the view back in the start state.
+  const errorNotice = errorText ? (
+    <ChatSystemMessage icon={<CircleAlert aria-hidden="true" className="text-ax-error size-4" />}>
+      <span className="flex flex-wrap items-center justify-center gap-2">
+        <span className="text-ax-error">{errorText}</span>
+        {lastQuestion && !busy && (
+          <Button
+            label={t("chat_retry")}
+            size="sm"
+            variant="secondary"
+            onClick={() => sendQuestion(lastQuestion.text, lastQuestion.files)}
+          />
+        )}
+      </span>
+    </ChatSystemMessage>
+  ) : null;
+
   if (!started) {
     return (
       <>
@@ -627,7 +651,8 @@ export function ChatView({
               startTextareaRef.current?.focus();
             }}
             composer={
-              <div ref={startComposerRef} className="w-full">
+              <div ref={startComposerRef} className="flex w-full flex-col gap-3">
+                {errorNotice}
                 <Composer
                   {...composerProps}
                   variant="start"
@@ -694,23 +719,7 @@ export function ChatView({
               );
             })}
             {status === "submitted" && <PendingAnswer assistant={assistantIdentity} />}
-            {errorText && (
-              <ChatSystemMessage
-                icon={<CircleAlert aria-hidden="true" className="text-ax-error size-4" />}
-              >
-                <span className="flex flex-wrap items-center justify-center gap-2">
-                  <span className="text-ax-error">{errorText}</span>
-                  {lastQuestion && !busy && (
-                    <Button
-                      label={t("chat_retry")}
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => sendQuestion(lastQuestion)}
-                    />
-                  )}
-                </span>
-              </ChatSystemMessage>
-            )}
+            {errorNotice}
           </ChatMessageList>
         </ChatLayout>
         {activity && activityMessage && activityForPanel && (

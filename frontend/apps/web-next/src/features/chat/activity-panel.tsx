@@ -504,14 +504,12 @@ export function ActivityPill({
   activity,
   durations,
   expanded,
-  onToggle,
-  ref
+  onToggle
 }: {
   activity: Activity;
   durations: TurnDurations | null;
   expanded: boolean;
   onToggle: (trigger: HTMLButtonElement) => void;
-  ref?: Ref<HTMLButtonElement>;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -533,7 +531,6 @@ export function ActivityPill({
 
   return (
     <button
-      ref={ref}
       type="button"
       aria-expanded={expanded}
       aria-controls={expanded ? ACTIVITY_PANEL_ID : undefined}

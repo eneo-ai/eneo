@@ -3,6 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { ChatComposer, ChatComposerDrawer, useChatComposerContext } from "@astryxdesign/core/Chat";
 import { Popover } from "@astryxdesign/core/Popover";
+import { Tooltip } from "@astryxdesign/core/Tooltip";
 import {
   ArrowUp,
   BookOpen,
@@ -161,29 +162,36 @@ function CapabilityPill({
   onToggle: () => void;
 }) {
   const t = useTranslations();
+  const ref = useRef<HTMLButtonElement>(null);
   const descriptor = CAPABILITIES.find((item) => item.purpose === capability.purpose);
-  const reasonId = useId();
   if (!descriptor) return null;
   const Icon: LucideIcon = descriptor.icon;
   const unavailable = !capability.available;
   return (
     <>
+      {/* aria-disabled (not disabled) keeps an unavailable capability focusable,
+          so its reason (tooltip, also the description) reaches keyboard users. */}
       <button
+        ref={ref}
         type="button"
         aria-pressed={enabled}
-        aria-describedby={unavailable ? reasonId : undefined}
-        disabled={unavailable}
-        onClick={onToggle}
-        className={cn(PILL_CLASS, enabled ? PILL_ACTIVE_CLASS : PILL_IDLE_CLASS)}
+        aria-disabled={unavailable || undefined}
+        onClick={() => {
+          if (!unavailable) onToggle();
+        }}
+        className={cn(
+          PILL_CLASS,
+          unavailable
+            ? "text-ax-text-disabled cursor-not-allowed"
+            : enabled
+              ? PILL_ACTIVE_CLASS
+              : PILL_IDLE_CLASS
+        )}
       >
         <Icon aria-hidden="true" className="size-[15px]" />
         <span className="max-sm:sr-only">{t(capability.purpose)}</span>
       </button>
-      {unavailable && (
-        <span id={reasonId} className="sr-only">
-          {t(readinessKey(capability.reason))}
-        </span>
-      )}
+      {unavailable && <Tooltip anchorRef={ref} content={t(readinessKey(capability.reason))} />}
     </>
   );
 }

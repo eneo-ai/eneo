@@ -7,7 +7,7 @@ import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { Copy, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useId, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { toast } from "sonner";
 
 import {
@@ -21,7 +21,6 @@ import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
 import { resolveInrefs, trimPartialInref } from "@/lib/chat/inref";
 import type { EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
-import { cn } from "@/lib/utils";
 
 import { deriveActivity } from "./activity";
 import { ActivityPill, type ActivityTab } from "./activity-panel";
@@ -52,6 +51,8 @@ export type AnswerFeedback = {
 };
 
 export type ActivityRequest = { tab?: ActivityTab; source?: number };
+
+const NO_KNOWLEDGE: KnowledgeOrigin[] = [];
 
 function messageText(message: EneoUIMessage): string {
   return message.parts
@@ -89,6 +90,20 @@ function UserMessage({ message }: { message: EneoUIMessage }) {
         </div>
       )}
     </AxChatMessage>
+  );
+}
+
+/** "Assistenten tänker…" before any step or text has streamed in. */
+function ThinkingStatus() {
+  const t = useTranslations();
+  return (
+    <span className="bg-ax-accent-muted text-ax-text-accent inline-flex min-h-[30px] items-center gap-1.5 self-start rounded-full ps-2 pe-3 text-[12.5px] font-semibold">
+      <span
+        aria-hidden="true"
+        className="border-ax-accent size-3.5 animate-spin rounded-full border-2 border-t-transparent"
+      />
+      {t("assistant_is_thinking")}…
+    </span>
   );
 }
 
@@ -210,7 +225,8 @@ function AnswerActions({
         onClick={() => void copy(preferred)}
       />
       {feedback && (
-        <>
+        // ToggleButton takes no className: size its buttons for touch from here.
+        <span className="contents pointer-coarse:[&>button]:size-11">
           <ToggleButton
             label={t("chat_feedback_good")}
             isIconOnly
@@ -219,7 +235,6 @@ function AnswerActions({
             isDisabled={feedback.pending}
             onPressedChange={() => feedback.onChange(1)}
             size="sm"
-            className={iconClass}
           />
           <ToggleButton
             label={t("chat_feedback_bad")}
@@ -229,12 +244,17 @@ function AnswerActions({
             isDisabled={feedback.pending}
             onPressedChange={() => feedback.onChange(-1)}
             size="sm"
-            className={iconClass}
           />
-        </>
+        </span>
       )}
       <div ref={moreRef} className="contents">
-        <MoreMenu label={t("chat_more_actions")} items={moreItems} size="sm" placement="below" />
+        <MoreMenu
+          label={t("chat_more_actions")}
+          items={moreItems}
+          size="sm"
+          placement="below"
+          className={iconClass}
+        />
       </div>
       <span className="flex-1" />
       {timestamp && <Timestamp value={timestamp} format="date_time" />}
@@ -265,8 +285,6 @@ function AssistantMessage({
   onActivityToggle?: (trigger: HTMLElement, request?: ActivityRequest) => void;
   feedback: AnswerFeedback | null;
 }) {
-  const answerId = useId();
-  const pillRef = useRef<HTMLButtonElement>(null);
   const text = messageText(message);
   const answering =
     message.metadata?.answeringAssistant ??
@@ -305,16 +323,16 @@ function AssistantMessage({
       }
       className="w-full"
     >
-      <div id={answerId} className="flex w-full min-w-0 flex-col gap-3 pt-1">
+      <div className="flex w-full min-w-0 flex-col gap-3 pt-1">
         {activity.hasActivity && (
           <ActivityPill
-            ref={pillRef}
             activity={activity}
             durations={durations}
             expanded={activityExpanded}
             onToggle={(trigger) => onActivityToggle?.(trigger)}
           />
         )}
+        {isStreaming && !hasText && !activity.hasActivity && <ThinkingStatus />}
         {isStreaming && !hasText && <AnswerSkeleton />}
         {message.parts.map((part, index) => {
           if (part.type === "text") {
@@ -376,7 +394,7 @@ export function ChatMessage({
   isStreaming = false,
   showResponseLabel = false,
   liveAnswering = null,
-  knowledge = [],
+  knowledge = NO_KNOWLEDGE,
   durations = null,
   activityExpanded = false,
   onActivityToggle,
@@ -417,7 +435,6 @@ export function ChatMessage({
  * live region announces the finished answer instead).
  */
 export function PendingAnswer({ assistant }: { assistant: AssistantIdentity }) {
-  const t = useTranslations();
   return (
     <AxChatMessage
       sender="assistant"
@@ -425,17 +442,7 @@ export function PendingAnswer({ assistant }: { assistant: AssistantIdentity }) {
       className="w-full"
     >
       <div className="flex w-full flex-col gap-3 pt-1">
-        <span
-          className={cn(
-            "bg-ax-accent-muted text-ax-text-accent inline-flex min-h-[30px] items-center gap-1.5 self-start rounded-full ps-2 pe-3 text-[12.5px] font-semibold"
-          )}
-        >
-          <span
-            aria-hidden="true"
-            className="border-ax-accent size-3.5 animate-spin rounded-full border-2 border-t-transparent"
-          />
-          {t("assistant_is_thinking")}…
-        </span>
+        <ThinkingStatus />
         <AnswerSkeleton />
       </div>
     </AxChatMessage>
