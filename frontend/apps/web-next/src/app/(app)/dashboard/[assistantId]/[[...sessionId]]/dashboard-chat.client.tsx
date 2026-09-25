@@ -1,11 +1,12 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Skeleton } from "@/components/ui/skeleton";
+import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { ChatPartner } from "@/lib/chat/types";
 import { ChatPage } from "@/features/chat/chat-page";
+import { partnerKnowledge } from "@/features/chat/partner-knowledge";
 
 export function DashboardChat({
   assistantId,
@@ -22,9 +23,8 @@ export function DashboardChat({
 
   if (!assistant) {
     return (
-      <div className="flex flex-1 flex-col gap-3 p-6">
-        <Skeleton className="h-10 w-1/3" />
-        <Skeleton className="h-32 w-full" />
+      <div className="mx-auto w-full max-w-[712px] p-6">
+        <LoadingState rows={4} />
       </div>
     );
   }
@@ -35,6 +35,9 @@ export function DashboardChat({
     name: assistant.name,
     allowedAttachments: assistant.allowed_attachments,
     insightEnabled: assistant.insight_enabled,
+    description: assistant.description ?? null,
+    iconId: assistant.icon_id ?? null,
+    knowledge: partnerKnowledge(assistant),
     mcpServers: assistant.mcp_servers ?? [],
     enabledCapabilities: assistant.enabled_capabilities,
     availableCapabilities: assistant.available_capabilities,

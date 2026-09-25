@@ -1,50 +1,98 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, ThumbsDown, ThumbsUp } from "lucide-react";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
+import { X } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
-import { ConfirmDialog } from "@/components/composites/confirm-dialog";
+import { useEffect, useId, useRef, useState, type Ref } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { toastApiError } from "@/lib/api/toast";
+import type { ChatPartner } from "@/lib/chat/types";
 import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
 import { cn } from "@/lib/utils";
-import type { ChatPartner } from "@/lib/chat/types";
+import { historyBucket, type HistoryBucket } from "./format";
+import {
+  DeleteSessionDialog,
+  historyQueryKey,
+  RenameSessionDialog,
+  useSessionMutations
+} from "./session-actions";
+import { useNow } from "./use-now";
 
-export function historyQueryKey(partner: ChatPartner) {
-  return ["conversations", partner.type === "group-chat" ? "group-chat" : "assistant", partner.id];
+export { historyQueryKey } from "./session-actions";
+
+type SessionRow = {
+  id: string;
+  name: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+const BUCKET_KEY = {
+  today: "chat_history_today",
+  yesterday: "chat_history_yesterday",
+  week: "chat_history_week",
+  month: "chat_history_month",
+  older: "chat_history_older"
+} as const satisfies Record<HistoryBucket, string>;
+
+/** Consecutive date groups of a newest-first session list. */
+export function groupSessions<T extends SessionRow>(
+  sessions: T[],
+  now: number | null
+): { bucket: HistoryBucket | null; sessions: T[] }[] {
+  if (now === null) return sessions.length > 0 ? [{ bucket: null, sessions }] : [];
+  const today = new Date(now);
+  const groups: { bucket: HistoryBucket | null; sessions: T[] }[] = [];
+  for (const session of sessions) {
+    const stamp = session.updated_at ?? session.created_at;
+    const date = stamp ? new Date(stamp) : null;
+    const bucket = date && !Number.isNaN(date.getTime()) ? historyBucket(date, today) : "older";
+    const last = groups.at(-1);
+    if (last && last.bucket === bucket) last.sessions.push(session);
+    else groups.push({ bucket, sessions: [session] });
+  }
+  return groups;
 }
 
+/**
+ * The partner's conversation history, grouped by date (Idag, Igår, …). Each
+ * row opens the conversation; its menu renames, rates or deletes it.
+ */
 export function HistoryPanel({
   partner,
   activeSessionId,
   onSelect,
-  onDeleted
+  onDeleted,
+  onRenamed,
+  onClose,
+  headingRef
 }: {
   partner: ChatPartner;
   activeSessionId: string | null;
   onSelect: (sessionId: string) => void;
   onDeleted: (sessionId: string) => void;
+  onRenamed?: (sessionId: string, name: string) => void;
+  onClose: () => void;
+  headingRef?: Ref<HTMLHeadingElement>;
 }) {
   const t = useTranslations();
-  const queryClient = useQueryClient();
+  const titleId = useId();
+  const now = useNow();
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+  const { rename, remove, feedback } = useSessionMutations(partner, {
+    onRenamed: (id, name) => {
+      setRenaming(null);
+      onRenamed?.(id, name);
+    },
+    onDeleted: (id) => {
+      setDeleting(null);
+      onDeleted(id);
+    }
+  });
 
   const isGroupChat = partner.type === "group-chat";
   const history = usePaginatedQuery({
@@ -65,145 +113,179 @@ export function HistoryPanel({
       )
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: historyQueryKey(partner) });
-
-  const renameSession = useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) =>
-      unwrap(
-        browserApi.PATCH("/api/v1/conversations/{session_id}/name/", {
-          params: { path: { session_id: id } },
-          body: { name }
-        })
-      ),
-    onSuccess: () => {
-      invalidate();
-      setRenaming(null);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const deleteSession = useMutation({
-    mutationFn: (id: string) =>
-      unwrap(
-        browserApi.DELETE("/api/v1/conversations/{session_id}/", {
-          params: { path: { session_id: id } }
-        })
-      ),
-    onSuccess: (_, id) => {
-      invalidate();
-      onDeleted(id);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const feedback = useMutation({
-    mutationFn: ({ id, value }: { id: string; value: 1 | -1 }) =>
-      unwrap(
-        browserApi.POST("/api/v1/conversations/{session_id}/feedback/", {
-          params: { path: { session_id: id } },
-          body: { value }
-        })
-      ),
-    onError: (error) => toastApiError(error, t)
-  });
+  const groups = groupSessions(history.items, now);
 
   return (
-    <div className="flex h-full flex-col gap-2">
-      <div className="text-muted-foreground px-2 pb-1 text-[11px] font-semibold tracking-wider uppercase">
-        {t("conversations")}
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="border-ax-border flex min-h-[52px] shrink-0 items-center justify-between gap-2 border-b ps-3.5 pe-2.5">
+        <h2
+          id={titleId}
+          ref={headingRef}
+          tabIndex={-1}
+          className="text-[13px] font-semibold focus:outline-none"
+        >
+          {t("history")}
+        </h2>
+        <IconButton
+          label={t("chat_history_close")}
+          icon={<X className="size-4" />}
+          variant="ghost"
+          size="sm"
+          onClick={onClose}
+        />
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
-        {history.items.map((session) => (
-          <div
-            key={session.id}
-            className={cn(
-              "group hover:bg-sidebar-accent/60 focus-within:bg-sidebar-accent/60 flex items-center rounded-lg transition-colors",
-              session.id === activeSessionId &&
-                "bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent font-medium"
-            )}
-          >
-            <button
-              type="button"
-              onClick={() => onSelect(session.id)}
-              className="min-w-0 flex-1 truncate px-2.5 py-2 text-left text-[13px]"
-              title={session.name}
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {history.isPending ? (
+          <LoadingState rows={6} className="p-2" />
+        ) : history.items.length === 0 ? (
+          <p className="text-ax-text-secondary p-2 text-[13px]">{t("chat_history_empty")}</p>
+        ) : (
+          groups.map((group, index) => (
+            <section
+              key={`${group.bucket}-${index}`}
+              aria-label={group.bucket ? t(BUCKET_KEY[group.bucket]) : t("history")}
+              className="flex flex-col"
             >
-              {session.name}
-            </button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
-                  aria-label={t("actions")}
-                >
-                  <MoreHorizontal className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onClick={() => setRenaming({ id: session.id, name: session.name })}
-                >
-                  {t("rename")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => feedback.mutate({ id: session.id, value: 1 })}>
-                  <ThumbsUp /> +1
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => feedback.mutate({ id: session.id, value: -1 })}>
-                  <ThumbsDown /> -1
-                </DropdownMenuItem>
-                <ConfirmDialog
-                  trigger={
-                    <DropdownMenuItem
-                      variant="destructive"
-                      onSelect={(event) => event.preventDefault()}
+              {group.bucket && (
+                <h3 className="text-ax-text-secondary px-2 pt-3 pb-1 text-xs font-semibold first:pt-1">
+                  {t(BUCKET_KEY[group.bucket])}
+                </h3>
+              )}
+              <ul className="flex flex-col gap-0.5">
+                {group.sessions.map((session) => {
+                  const active = session.id === activeSessionId;
+                  return (
+                    <li
+                      key={session.id}
+                      className={cn(
+                        "rounded-ax-element flex items-center transition-colors",
+                        active ? "bg-ax-selected" : "hover:bg-ax-hover"
+                      )}
                     >
-                      {t("delete")}
-                    </DropdownMenuItem>
-                  }
-                  title={t("delete")}
-                  description={session.name}
-                  confirmLabel={t("confirm_deletion")}
-                  pending={deleteSession.isPending}
-                  onConfirm={() => deleteSession.mutateAsync(session.id).then(() => undefined)}
-                />
-              </DropdownMenuContent>
-            </DropdownMenu>
+                      <button
+                        type="button"
+                        aria-current={active ? "true" : undefined}
+                        onClick={() => onSelect(session.id)}
+                        className={cn(
+                          "focus-visible:outline-ring rounded-ax-element min-h-9 min-w-0 flex-1 truncate px-2.5 text-start text-[13px] focus-visible:outline-2 focus-visible:-outline-offset-2 pointer-coarse:min-h-11",
+                          active ? "font-semibold" : "text-ax-text-secondary hover:text-ax-text"
+                        )}
+                      >
+                        {session.name || t("chat_history_untitled")}
+                      </button>
+                      <MoreMenu
+                        label={t("chat_history_actions", { name: session.name })}
+                        size="sm"
+                        alignment="end"
+                        items={[
+                          {
+                            label: t("rename"),
+                            onClick: () => setRenaming({ id: session.id, name: session.name })
+                          },
+                          {
+                            label: t("chat_history_rate_good"),
+                            onClick: () => feedback.mutate({ id: session.id, value: 1 })
+                          },
+                          {
+                            label: t("chat_history_rate_bad"),
+                            onClick: () => feedback.mutate({ id: session.id, value: -1 })
+                          },
+                          { type: "divider" },
+                          {
+                            label: t("delete"),
+                            variant: "destructive",
+                            onClick: () => setDeleting({ id: session.id, name: session.name })
+                          }
+                        ]}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))
+        )}
+        {(history.hasPreviousPage || history.hasNextPage) && (
+          <div className="flex justify-between gap-2 p-2">
+            {history.hasPreviousPage ? (
+              <Button variant="ghost" size="sm" onClick={history.previousPage}>
+                {t("chat_history_newer")}
+              </Button>
+            ) : (
+              <span />
+            )}
+            {history.hasNextPage && (
+              <Button variant="ghost" size="sm" onClick={history.nextPage}>
+                {t("load_more")}
+              </Button>
+            )}
           </div>
-        ))}
-        {history.hasNextPage && (
-          <Button variant="ghost" size="sm" onClick={history.nextPage}>
-            {t("load_more")}
-          </Button>
         )}
       </div>
 
-      <Dialog open={renaming !== null} onOpenChange={(open) => !open && setRenaming(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("rename")}</DialogTitle>
-          </DialogHeader>
-          <Input
-            aria-label={t("rename")}
-            value={renaming?.name ?? ""}
-            onChange={(event) =>
-              setRenaming((current) => current && { ...current, name: event.target.value })
-            }
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenaming(null)}>
-              {t("cancel")}
-            </Button>
-            <Button
-              disabled={!renaming?.name.trim() || renameSession.isPending}
-              onClick={() => renaming && renameSession.mutate(renaming)}
-            >
-              {t("save")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <RenameSessionDialog
+        session={renaming}
+        pending={rename.isPending}
+        onCancel={() => setRenaming(null)}
+        onSave={(name) => renaming && rename.mutate({ id: renaming.id, name })}
+      />
+      <DeleteSessionDialog
+        session={deleting}
+        pending={remove.isPending}
+        onCancel={() => setDeleting(null)}
+        onConfirm={() => deleting && remove.mutate(deleting.id)}
+      />
     </div>
+  );
+}
+
+/**
+ * History as a side panel (≥768px) or an overlay drawer (phones). Focus moves
+ * to its heading when it opens; Escape closes it (the caller returns focus to
+ * the history button).
+ */
+export function HistoryAside({
+  onClose,
+  ...props
+}: Omit<Parameters<typeof HistoryPanel>[0], "headingRef">) {
+  const t = useTranslations();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const aside = asideRef.current;
+    if (!aside) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      onClose();
+    };
+    aside.addEventListener("keydown", onKeyDown);
+    return () => aside.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <>
+      {/* Phones: dim the chat; a tap outside closes the drawer. */}
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={t("chat_history_close")}
+        onClick={onClose}
+        className="bg-ax-scrim fixed inset-0 z-20 md:hidden"
+      />
+      <aside
+        ref={asideRef}
+        id="chat-history"
+        aria-label={t("history")}
+        className="bg-ax-sunken border-ax-border fixed inset-y-0 end-0 z-30 flex w-72 max-w-[85vw] shrink-0 flex-col border-s md:static md:z-auto md:max-w-none"
+      >
+        <HistoryPanel {...props} onClose={onClose} headingRef={headingRef} />
+      </aside>
+    </>
   );
 }

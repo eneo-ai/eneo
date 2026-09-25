@@ -3,9 +3,10 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { SendHorizontal } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -74,6 +75,7 @@ async function resolveInsightAnswer(response: unknown): Promise<string> {
 
 export function InsightsPanel({ partner }: { partner: ChatPartner & { type: InsightPartner } }) {
   const t = useTranslations();
+  const questionId = useId();
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const range = insightRange();
@@ -116,35 +118,30 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
   });
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-4 py-6">
-      <div className="grid gap-3 sm:grid-cols-2">
-        {stats.isPending ? (
-          <>
-            <Skeleton className="h-24 w-full" />
-            <Skeleton className="h-24 w-full" />
-          </>
-        ) : stats.isError ? (
-          <p className="text-destructive text-sm">{t("request_failed")}</p>
-        ) : (
-          <>
-            <div className="rounded-lg border p-4">
-              <p className="text-muted-foreground text-sm">{t("total_conversations")}</p>
-              <p className="mt-1 text-3xl font-semibold tabular-nums">
-                {stats.data.total_conversations}
-              </p>
-            </div>
-            <div className="rounded-lg border p-4">
-              <p className="text-muted-foreground text-sm">{t("total_questions")}</p>
-              <p className="mt-1 text-3xl font-semibold tabular-nums">
-                {stats.data.total_questions}
-              </p>
-            </div>
-          </>
-        )}
-      </div>
+    <div className="mx-auto flex w-full max-w-[712px] flex-1 flex-col gap-5 overflow-y-auto px-4 py-6">
+      {stats.isPending ? (
+        <LoadingState rows={2} />
+      ) : stats.isError ? (
+        <p className="text-ax-error text-sm">{t("request_failed")}</p>
+      ) : (
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <div className="border-ax-border rounded-ax-container border p-4">
+            <dt className="text-ax-text-secondary text-sm">{t("total_conversations")}</dt>
+            <dd className="mt-1 text-3xl font-semibold tabular-nums">
+              {stats.data.total_conversations}
+            </dd>
+          </div>
+          <div className="border-ax-border rounded-ax-container border p-4">
+            <dt className="text-ax-text-secondary text-sm">{t("total_questions")}</dt>
+            <dd className="mt-1 text-3xl font-semibold tabular-nums">
+              {stats.data.total_questions}
+            </dd>
+          </div>
+        </dl>
+      )}
 
       <form
-        className="flex flex-col gap-3"
+        className="flex flex-col gap-2"
         onSubmit={(event) => {
           event.preventDefault();
           const text = question.trim();
@@ -153,10 +150,11 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
           ask.mutate(text);
         }}
       >
+        <Label htmlFor={questionId}>{t("ask_about_insights")}</Label>
         <Textarea
+          id={questionId}
           value={question}
           rows={3}
-          placeholder={t("ask_about_insights")}
           onChange={(event) => setQuestion(event.target.value)}
         />
         <Button
@@ -164,19 +162,22 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
           className="w-fit self-end"
           disabled={!question.trim() || ask.isPending}
         >
-          <SendHorizontal className="size-4" />
+          <SendHorizontal className="size-4" aria-hidden="true" />
           {ask.isPending ? t("loading") : t("generate_insights")}
         </Button>
       </form>
 
-      {(answer || ask.isError || ask.isPending) && (
-        <div className="bg-muted/30 min-h-32 rounded-lg border p-4">
-          <p className="text-sm font-medium">{t("answer")}</p>
-          <div className="text-muted-foreground mt-2 text-sm whitespace-pre-wrap">
-            {ask.isPending ? t("loading") : ask.isError ? t("request_failed") : answer}
+      {/* Always mounted so the finished answer is announced politely. */}
+      <div role="status" className="flex flex-col">
+        {(answer || ask.isError || ask.isPending) && (
+          <div className="bg-ax-sunken border-ax-border rounded-ax-container min-h-32 border p-4">
+            <p className="text-sm font-medium">{t("answer")}</p>
+            <div className="text-ax-text-secondary mt-2 text-sm whitespace-pre-wrap">
+              {ask.isPending ? t("loading") : ask.isError ? t("request_failed") : answer}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

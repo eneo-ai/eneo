@@ -54,3 +54,42 @@ export function ChatTestProviders({
     </NextIntlClientProvider>
   );
 }
+
+/**
+ * jsdom lacks matchMedia, ResizeObserver and <dialog> modality, which Astryx
+ * layout hooks and sheets use. `desktop` decides what "(min-width: …)"
+ * queries answer.
+ */
+export function installDomPolyfills({ desktop = true }: { desktop?: boolean } = {}) {
+  window.matchMedia = ((query: string) => ({
+    matches: /min-width/.test(query) ? desktop : !desktop && /max-width/.test(query),
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false
+  })) as unknown as typeof window.matchMedia;
+  if (typeof globalThis.ResizeObserver === "undefined") {
+    globalThis.ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+  }
+  if (typeof HTMLDialogElement !== "undefined" && !HTMLDialogElement.prototype.showModal) {
+    HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
+      this.setAttribute("open", "");
+    };
+    HTMLDialogElement.prototype.show = function show(this: HTMLDialogElement) {
+      this.setAttribute("open", "");
+    };
+    HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) {
+      this.removeAttribute("open");
+    };
+  }
+  if (!Element.prototype.scrollIntoView) {
+    Element.prototype.scrollIntoView = () => undefined;
+  }
+}

@@ -33,7 +33,11 @@ const ANSWER = [
   "```"
 ].join("\n");
 
-function Answer({ onOpenSource }: { onOpenSource?: (index: number) => void }) {
+function Answer({
+  onOpenSource
+}: {
+  onOpenSource?: (index: number, trigger: HTMLElement) => void;
+}) {
   // Memoized like the chat does, so blocks are not re-parsed every render.
   const remarkPlugins = useMemo(() => [remarkCitations(SOURCES.length, "msg-1")], []);
   return (
@@ -45,7 +49,7 @@ function Answer({ onOpenSource }: { onOpenSource?: (index: number) => void }) {
   );
 }
 
-function renderAnswer(onOpenSource?: (index: number) => void) {
+function renderAnswer(onOpenSource?: (index: number, trigger: HTMLElement) => void) {
   return render(
     <ChatTestProviders>
       <Answer onOpenSource={onOpenSource} />
@@ -98,8 +102,9 @@ describe("MessageResponse", () => {
   it("opens the cited source instead of following the in-page link", () => {
     const onOpenSource = vi.fn();
     renderAnswer(onOpenSource);
-    fireEvent.click(screen.getByRole("link", { name: "Källa 2: LOU 19 kap." }));
-    expect(onOpenSource).toHaveBeenCalledWith(1);
+    const link = screen.getByRole("link", { name: "Källa 2: LOU 19 kap." });
+    fireEvent.click(link);
+    expect(onOpenSource).toHaveBeenCalledWith(1, link);
   });
 
   it("has no axe violations", async () => {

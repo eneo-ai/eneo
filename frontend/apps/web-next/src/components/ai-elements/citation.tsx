@@ -96,8 +96,11 @@ export type CitationSource = { title: string; url?: string };
 
 type CitationContextValue = {
   sources: CitationSource[];
-  /** Opens source `index` (0-based), e.g. in the activity panel's source list. */
-  onOpenSource?: (index: number) => void;
+  /**
+   * Opens source `index` (0-based), e.g. in the activity panel's source list.
+   * `trigger` is the citation link, for returning focus when that view closes.
+   */
+  onOpenSource?: (index: number, trigger: HTMLElement) => void;
 };
 
 const CitationSourcesContext = createContext<CitationContextValue>({ sources: [] });
@@ -109,7 +112,7 @@ export function CitationSourcesProvider({
   children
 }: {
   value: CitationSource[];
-  onOpenSource?: (index: number) => void;
+  onOpenSource?: (index: number, trigger: HTMLElement) => void;
   children: ReactNode;
 }) {
   const context = useMemo(() => ({ sources: value, onOpenSource }), [value, onOpenSource]);
@@ -149,7 +152,7 @@ function CitationChip({
   const open = (event: MouseEvent<HTMLAnchorElement>) => {
     if (!onOpenSource || !source) return;
     event.preventDefault();
-    onOpenSource(number - 1);
+    onOpenSource(number - 1, event.currentTarget);
   };
   return (
     <>

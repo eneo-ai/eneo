@@ -4,6 +4,9 @@ import type { Schema } from "@/lib/api/models";
 /** Chat partner discriminator; mirrors the Svelte app's URL contract. */
 export type ChatPartnerType = "default-assistant" | "assistant" | "group-chat";
 
+/** A knowledge source attached to a partner (collection or crawled website). */
+export type KnowledgeOrigin = { id: string; name: string; kind: "collection" | "website" };
+
 export type ChatPartner = {
   type: ChatPartnerType;
   id: string;
@@ -28,6 +31,16 @@ export type ChatPartner = {
   effectiveConfig?: Schema<"EffectiveConfigPublic"> | null;
   /** Whether the partner exposes the conversation insights tab. */
   insightEnabled?: boolean;
+  /** Short description shown on the start screen (assistants, group chats). */
+  description?: string | null;
+  /** Uploaded icon id (tile image), when the partner has one. */
+  iconId?: string | null;
+  /** Name of the space the partner lives in (header subtitle). */
+  spaceName?: string | null;
+  /** The space's security classification label, when it has one. */
+  securityClassification?: string | null;
+  /** Collections and websites the partner searches (named activity steps and sources). */
+  knowledge?: KnowledgeOrigin[];
 };
 
 export type CompletionModelInfo = {
@@ -92,6 +105,8 @@ export type EneoMessageMetadata = {
   completionModel?: CompletionModelInfo | null;
   /** Group chats: which member assistant answered this message. */
   answeringAssistant?: { id: string; handle: string } | null;
+  /** When the message was created (ISO 8601), for the timestamp under answers. */
+  createdAt?: string | null;
 };
 
 export type EneoUIMessage = UIMessage<EneoMessageMetadata, EneoDataParts>;

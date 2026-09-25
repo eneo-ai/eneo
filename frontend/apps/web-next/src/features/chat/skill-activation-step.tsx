@@ -2,9 +2,9 @@
 
 import { BookOpenCheck, ChevronRight, X } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
+import { useId, useState } from "react";
 import type { EneoUIMessage } from "@/lib/chat/types";
+import { cn } from "@/lib/utils";
 import { skillName } from "./tool-presentation";
 
 type ToolPart = Extract<EneoUIMessage["parts"][number], { type: "dynamic-tool" }>;
@@ -24,6 +24,7 @@ const FAILURE_REASONS: Record<string, string> = {
 export function SkillActivationStep({ part }: { part: ToolPart }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
+  const detailId = useId();
   const name = skillName(part);
   const failed = part.state === "output-error" || part.state === "output-denied";
   const args =
@@ -37,41 +38,49 @@ export function SkillActivationStep({ part }: { part: ToolPart }) {
     : t(always ? "skill_step_always_detail" : "skill_step_on_demand_detail");
 
   return (
-    <div className="max-w-full">
+    <div className="max-w-full font-sans">
       <button
         type="button"
-        className={`inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-          failed
-            ? "border-destructive/30 bg-destructive/10 text-destructive"
-            : "border-primary/30 bg-primary/10 text-primary"
-        }`}
+        className={cn(
+          "focus-visible:outline-ring inline-flex min-h-7 max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11",
+          failed ? "bg-ax-error-muted text-ax-error" : "bg-ax-accent-muted text-ax-text-accent"
+        )}
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
+        aria-controls={open ? detailId : undefined}
       >
         {failed ? (
-          <X aria-hidden="true" className="size-3.5" />
+          <X aria-hidden="true" className="size-3.5 shrink-0" />
         ) : (
-          <BookOpenCheck aria-hidden="true" className="size-3.5" />
+          <BookOpenCheck aria-hidden="true" className="size-3.5 shrink-0" />
         )}
         <span className="truncate">
           {t(failed ? "tool_activate_skill_failed" : "skill_used_in_reply", { name })}
         </span>
         <ChevronRight
           aria-hidden="true"
-          className={`size-3 transition-transform ${open ? "rotate-90" : ""}`}
+          className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")}
         />
       </button>
       {open && (
-        <div className="bg-muted/40 mt-1.5 max-w-prose space-y-1.5 rounded-lg border px-3 py-2.5 text-sm">
+        <div
+          id={detailId}
+          className="bg-ax-sunken border-ax-border rounded-ax-element mt-1.5 max-w-prose space-y-1.5 border px-3 py-2.5 text-sm"
+        >
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium">{name}</span>
-            <Badge variant={failed ? "destructive" : "outline"}>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-xs font-medium",
+                failed ? "bg-ax-error-muted text-ax-error" : "bg-ax-muted text-ax-text-secondary"
+              )}
+            >
               {failed
                 ? t("chat_tool_status_error")
                 : t(always ? "skills_activation_mode_always" : "skills_activation_mode_on_demand")}
-            </Badge>
+            </span>
           </div>
-          <p className="text-muted-foreground text-[13px] leading-5">{detail}</p>
+          <p className="text-ax-text-secondary text-[13px] leading-5">{detail}</p>
         </div>
       )}
     </div>

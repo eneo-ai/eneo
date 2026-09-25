@@ -2,8 +2,6 @@
 
 import { Plug, ShieldCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
@@ -102,24 +100,20 @@ export function ChatMcpServers({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button
+        <button
           type="button"
-          variant={activeCount > 0 ? "secondary" : "ghost"}
-          size="sm"
-          className="h-8 gap-1.5"
-          title={t("mcp_servers")}
-          aria-label={t("mcp_servers_status_aria", { active: activeCount, total })}
+          aria-label={`${t("chat_tools")}: ${t("mcp_servers_active_count", { active: activeCount, total })}`}
+          className="text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text focus-visible:outline-ring aria-expanded:bg-ax-hover inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:h-11 pointer-coarse:min-w-11"
         >
-          <Plug aria-hidden="true" className="size-4" />
-          <span className="hidden sm:inline">{t("mcp_servers")}</span>
-          <Badge
-            variant={activeCount > 0 ? "default" : "outline"}
-            className="ml-0.5 px-1.5 tabular-nums"
+          <Plug aria-hidden="true" className="size-[15px]" />
+          <span className="max-sm:sr-only">{t("chat_tools")}</span>
+          <span
             aria-hidden="true"
+            className="bg-ax-muted text-ax-text flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5 text-[11px] tabular-nums"
           >
             {activeCount}
-          </Badge>
-        </Button>
+          </span>
+        </button>
       </PopoverTrigger>
 
       <PopoverContent side="top" align="start" className="w-80 gap-0 p-0">
@@ -167,9 +161,7 @@ export function ChatMcpServers({
                 className="hover:bg-muted flex items-center gap-2.5 rounded-md px-2 py-2 transition-colors"
               >
                 <span
-                  className={`bg-muted text-muted-foreground flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md text-xs font-semibold ${
-                    enabled ? "" : "opacity-50"
-                  }`}
+                  className="bg-ax-muted text-ax-text-secondary rounded-ax-inner flex size-7 shrink-0 items-center justify-center overflow-hidden text-xs font-semibold"
                   aria-hidden="true"
                 >
                   {server.icon_url ? (
@@ -180,8 +172,10 @@ export function ChatMcpServers({
                     server.name.charAt(0).toUpperCase()
                   )}
                 </span>
-                <span className={`min-w-0 flex-1 ${enabled ? "" : "opacity-60"}`}>
-                  <span className="text-foreground block truncate text-sm font-medium">
+                <span className="min-w-0 flex-1">
+                  <span
+                    className={`block truncate text-sm font-medium ${enabled ? "text-ax-text" : "text-ax-text-secondary"}`}
+                  >
                     {server.name}
                   </span>
                   {server.description && (

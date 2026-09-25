@@ -44,11 +44,14 @@ function writeVisibility(next: boolean) {
  *   pending files → amber  (locally estimated multimodal/file tokens)
  */
 const SEGMENT_CLASS: Record<string, string> = {
-  lockedInput: "bg-muted-foreground/70",
-  lockedOutput: "bg-chart-3",
-  pendingText: "bg-chart-1",
-  pendingFiles: "bg-chart-4"
+  lockedInput: "bg-ax-text-secondary",
+  lockedOutput: "bg-ax-purple",
+  pendingText: "bg-ax-blue",
+  pendingFiles: "bg-ax-orange"
 };
+
+/** Below this share of the context window the bar stays out of the way (shown on composer focus). */
+const QUIET_BELOW_PERCENT = 70;
 
 /**
  * Context-usage bar ported from the Svelte `ContextUsageBar`: a segmented
@@ -125,23 +128,26 @@ export function ContextUsageBar({
   const averagePerTurn = turnCount > 0 ? Math.round(cumulativeTokens / turnCount) : 0;
 
   function segmentClass(key: string) {
-    if (willExceed && (key === "pendingText" || key === "pendingFiles")) return "bg-destructive";
-    return SEGMENT_CLASS[key] ?? "bg-muted-foreground/70";
+    if (willExceed && (key === "pendingText" || key === "pendingFiles")) return "bg-ax-error";
+    return SEGMENT_CLASS[key] ?? "bg-ax-text-secondary";
   }
 
   if (!hasUsage) return null;
 
+  const quiet = projectedPercent < QUIET_BELOW_PERCENT && !willExceed;
+  // Quiet: keeps its space but only shows while the composer has focus.
+  const quietClass = quiet ? "invisible group-focus-within/composer:visible" : undefined;
+
   if (!isVisible) {
     return (
-      <div className="flex w-full justify-end px-1 pt-1 pb-3">
+      <div className={cn("flex w-full justify-end px-1", quietClass)}>
         <button
           type="button"
           onClick={() => writeVisibility(true)}
           aria-label={t("context_usage_show_bar")}
-          title={t("context_usage_show_bar")}
-          className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[11px] leading-none transition-colors"
+          className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex size-6 items-center justify-center focus-visible:outline-2 focus-visible:outline-offset-2"
         >
-          <Eye className="size-3" aria-hidden />
+          <Eye className="size-3.5" aria-hidden />
         </button>
       </div>
     );
@@ -152,15 +158,15 @@ export function ContextUsageBar({
   return (
     <Popover>
       <PopoverTrigger
-        aria-label={t("context_usage")}
-        className="text-muted-foreground hover:text-foreground flex w-full items-center gap-3 px-1 pt-1 pb-3 text-[11px] leading-none transition-colors"
+        className={cn(
+          "text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-h-6 w-full items-center gap-3 px-1 text-[11px] leading-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2",
+          quietClass
+        )}
       >
+        <span className="sr-only">{t("context_usage")}: </span>
         <div
-          className="bg-muted relative h-2.5 flex-1 overflow-hidden rounded-full border"
-          role="progressbar"
-          aria-valuenow={projectedTotal}
-          aria-valuemin={0}
-          aria-valuemax={contextLimit}
+          aria-hidden="true"
+          className="bg-ax-muted border-ax-border relative h-1.5 flex-1 overflow-hidden rounded-full border"
         >
           {segments.map((seg) =>
             seg.widthPct > 0 ? (
@@ -182,19 +188,19 @@ export function ContextUsageBar({
         <span
           className={cn(
             "flex items-center gap-1.5 whitespace-nowrap tabular-nums",
-            willExceed ? "text-destructive" : "text-muted-foreground"
+            willExceed ? "text-ax-error" : "text-ax-text-secondary"
           )}
         >
           {willExceed && <TriangleAlert className="size-3" aria-hidden />}≈ {fmt(projectedTotal)} /{" "}
           {fmt(contextLimit)} ({percentLabel}%)
-          <Info className="size-3 opacity-70" aria-hidden />
+          <Info className="size-3" aria-hidden />
         </span>
       </PopoverTrigger>
 
       <PopoverContent side="top" align="end" className="w-[340px] p-0">
         <div className="border-b px-4 py-3">
           <p className="text-sm font-medium">{t("context_usage_estimate")}</p>
-          <p className="text-muted-foreground mt-0.5 text-xs tabular-nums">
+          <p className="text-ax-text-secondary mt-0.5 text-xs tabular-nums">
             ≈ {fmt(projectedTotal)} / {fmt(contextLimit)} {t("chat_tokens_separator")}{" "}
             {percentLabel}%
           </p>
@@ -203,25 +209,27 @@ export function ContextUsageBar({
         <div className="space-y-3 px-4 py-3 text-xs">
           {(lockedInputTokens > 0 || lockedOutputTokens > 0) && (
             <div className="space-y-1.5">
-              <p className="text-muted-foreground text-[10px] font-medium tracking-wide uppercase">
+              <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
                 {t("context_usage_section_locked")}
               </p>
               <div className="flex items-baseline justify-between gap-3">
                 <span className="flex items-center gap-2">
-                  <span className="bg-muted-foreground/70 inline-block size-2.5 rounded-full" />
+                  <span className="bg-ax-text-secondary inline-block size-2.5 rounded-full" />
                   {t("context_usage_label_input")}
                 </span>
-                <span className="text-muted-foreground tabular-nums">{fmt(lockedInputTokens)}</span>
+                <span className="text-ax-text-secondary tabular-nums">
+                  {fmt(lockedInputTokens)}
+                </span>
               </div>
-              <p className="text-muted-foreground pl-[18px] text-[10px] leading-snug">
+              <p className="text-ax-text-secondary pl-[18px] text-[10px] leading-snug">
                 {t("context_usage_label_input_hint")}
               </p>
               <div className="flex items-baseline justify-between gap-3">
                 <span className="flex items-center gap-2">
-                  <span className="bg-chart-3 inline-block size-2.5 rounded-full" />
+                  <span className="bg-ax-purple inline-block size-2.5 rounded-full" />
                   {t("context_usage_label_output")}
                 </span>
-                <span className="text-muted-foreground tabular-nums">
+                <span className="text-ax-text-secondary tabular-nums">
                   {fmt(lockedOutputTokens)}
                 </span>
               </div>
@@ -230,16 +238,16 @@ export function ContextUsageBar({
 
           {pendingTotal > 0 && (
             <div className="space-y-1.5 border-t pt-3">
-              <p className="text-muted-foreground text-[10px] font-medium tracking-wide uppercase">
+              <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
                 {t("context_usage_section_pending")}
               </p>
               {pendingTextTokens > 0 && (
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="flex items-center gap-2">
-                    <span className="bg-chart-1 inline-block size-2.5 rounded-full" />
+                    <span className="bg-ax-blue inline-block size-2.5 rounded-full" />
                     {t("context_usage_label_your_text")}
                   </span>
-                  <span className="text-muted-foreground tabular-nums">
+                  <span className="text-ax-text-secondary tabular-nums">
                     {fmt(pendingTextTokens)}
                   </span>
                 </div>
@@ -247,10 +255,10 @@ export function ContextUsageBar({
               {pendingFileTokens > 0 && (
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="flex items-center gap-2">
-                    <span className="bg-chart-4 inline-block size-2.5 rounded-full" />
+                    <span className="bg-ax-orange inline-block size-2.5 rounded-full" />
                     {t("context_usage_label_files")}
                   </span>
-                  <span className="text-muted-foreground tabular-nums">
+                  <span className="text-ax-text-secondary tabular-nums">
                     {fmt(pendingFileTokens)}
                   </span>
                 </div>
@@ -260,10 +268,10 @@ export function ContextUsageBar({
 
           {pendingTotal > 0 && (
             <div className="space-y-1.5 border-t pt-3">
-              <p className="text-muted-foreground text-[10px] font-medium tracking-wide uppercase">
+              <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
                 {t("context_usage_section_excluded")}
               </p>
-              <p className="text-muted-foreground leading-snug">
+              <p className="text-ax-text-secondary leading-snug">
                 {t("context_usage_excluded_hint")}
               </p>
             </div>
@@ -271,26 +279,26 @@ export function ContextUsageBar({
 
           {hasCumulative && (
             <div className="space-y-1.5 border-t pt-3">
-              <p className="text-muted-foreground text-[10px] font-medium tracking-wide uppercase">
+              <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
                 {t("context_usage_section_cumulative")}
               </p>
               <div className="flex items-baseline justify-between gap-3">
                 <span>{t("context_usage_cumulative_label")}</span>
-                <span className="text-muted-foreground tabular-nums">{cumulativeSummary}</span>
+                <span className="text-ax-text-secondary tabular-nums">{cumulativeSummary}</span>
               </div>
               {turnCount > 1 && (
-                <p className="text-muted-foreground text-[10px] leading-snug tabular-nums">
+                <p className="text-ax-text-secondary text-[10px] leading-snug tabular-nums">
                   {t("context_usage_cumulative_average", { average: fmt(averagePerTurn) })}
                 </p>
               )}
-              <p className="text-muted-foreground leading-snug">
+              <p className="text-ax-text-secondary leading-snug">
                 {t("context_usage_cumulative_hint")}
               </p>
             </div>
           )}
 
           {willExceed && (
-            <div className="bg-destructive/10 text-destructive flex flex-col gap-2 rounded-md px-2 py-1.5">
+            <div className="bg-ax-error-muted text-ax-error rounded-ax-inner flex flex-col gap-2 px-2 py-1.5">
               <div className="flex items-start gap-2">
                 <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
                 <span className="text-[11px] leading-snug">
@@ -301,7 +309,7 @@ export function ContextUsageBar({
                 <button
                   type="button"
                   onClick={onNewConversation}
-                  className="border-destructive/40 hover:bg-destructive/10 self-start rounded-md border px-2 py-1 text-[11px] font-medium transition-colors"
+                  className="border-ax-error hover:bg-ax-hover focus-visible:outline-ring rounded-ax-inner self-start border px-2 py-1 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2"
                 >
                   {t("new_conversation")}
                 </button>
@@ -310,10 +318,10 @@ export function ContextUsageBar({
           )}
         </div>
 
-        <div className="bg-muted/40 flex items-center justify-between gap-2 border-t px-4 py-2">
+        <div className="bg-ax-sunken border-ax-border flex items-center justify-between gap-2 border-t px-4 py-2">
           {modelName ? (
-            <p className="text-muted-foreground text-[10px]">
-              {t("context_usage_model_label")}: <span className="text-foreground">{modelName}</span>
+            <p className="text-ax-text-secondary text-[10px]">
+              {t("context_usage_model_label")}: <span className="text-ax-text">{modelName}</span>
             </p>
           ) : (
             <span />
@@ -321,7 +329,7 @@ export function ContextUsageBar({
           <button
             type="button"
             onClick={() => writeVisibility(false)}
-            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[10px] transition-colors"
+            className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-h-6 items-center gap-1 text-[10px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2"
           >
             <EyeOff className="size-3" aria-hidden />
             {t("context_usage_hide_bar")}

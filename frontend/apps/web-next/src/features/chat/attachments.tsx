@@ -10,7 +10,7 @@ import {
   Paperclip,
   X
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import {
   Dialog,
@@ -21,7 +21,8 @@ import {
 } from "@/components/ui/dialog";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { formatBytes } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { formatFileSize } from "./format";
 import type { Attachment } from "./use-attachments";
 
 /** A representative icon for an attachment, chosen from its mime type. */
@@ -120,10 +121,77 @@ export function AttachmentPreviewDialog({
 
 type PendingPreview = { name: string; mimetype: string; url: string };
 
+type FileKind = "pdf" | "doc" | "sheet" | "image" | "other";
+
+export function fileKind(mimetype: string): FileKind {
+  if (mimetype.startsWith("image/")) return "image";
+  if (mimetype === "application/pdf") return "pdf";
+  if (mimetype.includes("sheet") || mimetype.includes("csv") || mimetype.includes("excel")) {
+    return "sheet";
+  }
+  if (mimetype.includes("word") || mimetype.includes("document") || mimetype.startsWith("text/")) {
+    return "doc";
+  }
+  return "other";
+}
+
+// Full static class strings so Tailwind keeps them.
+const FILE_TONE: Record<FileKind, string> = {
+  pdf: "bg-ax-pink-muted text-ax-pink",
+  doc: "bg-ax-blue-muted text-ax-blue",
+  sheet: "bg-ax-green-muted text-ax-green",
+  image: "bg-ax-purple-muted text-ax-purple",
+  other: "bg-ax-muted text-ax-text-secondary"
+};
+
+function extensionOf(name: string): string | null {
+  const match = /\.([a-z0-9]{1,5})$/i.exec(name);
+  return match ? match[1]!.toUpperCase() : null;
+}
+
 /**
- * Composer attachment tray: uniform file cards in a capped, scrollable grid
- * (ported from the Svelte ConversationAttachments). Each card opens a preview;
- * a "remove all" affordance appears once there is more than one.
+ * Decorative file-type tile: a coloured square with the type icon (small) or
+ * the file extension (large). The file name next to it carries the meaning.
+ */
+export function FileTypeTile({
+  mimetype,
+  name,
+  size = "sm",
+  uploading = false
+}: {
+  mimetype: string;
+  name?: string;
+  size?: "sm" | "lg";
+  uploading?: boolean;
+}) {
+  const kind = fileKind(mimetype);
+  const extension = size === "lg" && name ? extensionOf(name) : null;
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "flex shrink-0 items-center justify-center font-bold",
+        FILE_TONE[kind],
+        size === "lg"
+          ? "rounded-ax-inner size-9 text-[10px] tracking-wide"
+          : "rounded-ax-inner size-[22px]"
+      )}
+    >
+      {uploading ? (
+        <Loader2 className={cn("animate-spin", size === "lg" ? "size-4" : "size-3")} />
+      ) : extension ? (
+        extension
+      ) : (
+        <FileKindIcon mimetype={mimetype} className={size === "lg" ? "size-4" : "size-[13px]"} />
+      )}
+    </span>
+  );
+}
+
+/**
+ * Composer attachment cards (inside the composer drawer): type tile, name,
+ * size and upload status, a preview on click and a named remove button. A
+ * "remove all" action appears once there is more than one.
  */
 export function ComposerAttachments({
   attachments
@@ -134,79 +202,76 @@ export function ComposerAttachments({
   };
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const [preview, setPreview] = useState<PendingPreview | null>(null);
   const items = attachments.attachments;
 
   if (items.length === 0) return null;
 
   return (
-    <div className="flex w-full flex-col gap-2 pb-2">
+    <div className="flex w-full flex-col gap-2">
       {items.length > 1 && (
-        <div className="flex items-center justify-between px-0.5">
-          <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
-            <Paperclip className="size-3.5" aria-hidden />
-            <span className="tabular-nums">
-              {t("attachments_count_other", { count: items.length })}
-            </span>
-          </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-ax-text-secondary flex items-center gap-1.5 text-xs tabular-nums">
+            <Paperclip className="size-3.5" aria-hidden="true" />
+            {t("attachments_count_other", { count: items.length })}
+          </span>
           <button
             type="button"
             onClick={() => items.forEach((item) => attachments.removeAttachment(item.key))}
-            className="text-muted-foreground hover:text-foreground -mr-1 rounded px-1.5 py-0.5 text-xs transition-colors"
+            className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner min-h-6 px-1.5 text-xs font-medium focus-visible:outline-2 focus-visible:outline-offset-2"
           >
             {t("remove_all_attachments")}
           </button>
         </div>
       )}
 
-      <div
-        role="list"
-        aria-label={t("attachments_count_other", { count: items.length })}
-        className="grid max-h-[200px] [scrollbar-width:thin] auto-rows-max grid-cols-1 gap-2 overflow-y-auto pr-0.5 sm:grid-cols-2"
+      <ul
+        aria-label={t("attachments")}
+        className="flex max-h-[200px] [scrollbar-width:thin] flex-wrap gap-2 overflow-y-auto"
       >
-        {items.map((item) => {
-          return (
-            <div
-              key={item.key}
-              role="listitem"
-              className="group bg-card hover:bg-accent relative flex h-11 min-w-0 items-center gap-2 rounded-lg border py-1.5 pr-2 pl-1.5 shadow-sm transition-colors"
+        {items.map((item) => (
+          <li
+            key={item.key}
+            className="bg-ax-muted rounded-ax-container flex min-h-[50px] max-w-full min-w-0 items-center gap-1 ps-1.5 pe-1"
+          >
+            <button
+              type="button"
+              disabled={!item.previewUrl}
+              onClick={() =>
+                item.previewUrl &&
+                setPreview({ name: item.name, mimetype: item.mimetype, url: item.previewUrl })
+              }
+              className="focus-visible:outline-ring rounded-ax-element flex min-w-0 items-center gap-2.5 py-1.5 pe-1 text-start focus-visible:outline-2 focus-visible:outline-offset-2"
             >
-              <button
-                type="button"
-                aria-label={item.name}
-                disabled={!item.previewUrl}
-                onClick={() =>
-                  item.previewUrl &&
-                  setPreview({ name: item.name, mimetype: item.mimetype, url: item.previewUrl })
-                }
-                className="flex min-w-0 flex-1 items-center gap-2 text-left"
-              >
-                <span className="bg-muted text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md">
-                  {item.uploading ? (
-                    <Loader2 className="size-4 animate-spin" aria-hidden />
-                  ) : (
-                    <FileKindIcon mimetype={item.mimetype} className="size-4" />
-                  )}
+              <FileTypeTile
+                mimetype={item.mimetype}
+                name={item.name}
+                size="lg"
+                uploading={item.uploading}
+              />
+              <span className="flex min-w-0 flex-col leading-tight">
+                <span className="max-w-[16rem] truncate text-[13px] font-semibold">
+                  <span className="sr-only">{t("preview")}: </span>
+                  {item.name}
                 </span>
-                <span className="flex min-w-0 flex-1 flex-col leading-tight">
-                  <span className="truncate text-sm font-medium">{item.name}</span>
-                  <span className="text-muted-foreground truncate text-[11px] tabular-nums">
-                    {formatBytes(item.size)}
-                  </span>
+                <span className="text-ax-text-secondary text-xs tabular-nums">
+                  {formatFileSize(item.size, locale)} ·{" "}
+                  {item.uploading ? t("chat_attachment_uploading") : t("chat_attachment_ready")}
                 </span>
-              </button>
-              <button
-                type="button"
-                aria-label={t("remove_this_attachment")}
-                onClick={() => attachments.removeAttachment(item.key)}
-                className="text-muted-foreground hover:bg-destructive hover:text-destructive-foreground size-5 shrink-0 rounded-full opacity-60 transition-all group-hover:opacity-100"
-              >
-                <X className="size-3" aria-hidden />
-              </button>
-            </div>
-          );
-        })}
-      </div>
+              </span>
+            </button>
+            <button
+              type="button"
+              aria-label={t("chat_attachment_remove", { name: item.name })}
+              onClick={() => attachments.removeAttachment(item.key)}
+              className="text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text focus-visible:outline-ring rounded-ax-element flex size-7 shrink-0 items-center justify-center focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:size-11"
+            >
+              <X className="size-3.5" aria-hidden="true" />
+            </button>
+          </li>
+        ))}
+      </ul>
 
       <AttachmentPreviewDialog
         open={preview !== null}
