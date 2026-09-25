@@ -9657,7 +9657,8 @@ export interface components {
       created_at: string;
       /**
        * Updated At
-       * Format: date-time
+       * Format: date
+       * @description The day (UTC) of the last change.
        */
       updated_at: string;
       security_classification?: components["schemas"]["OversightClassification"] | null;
