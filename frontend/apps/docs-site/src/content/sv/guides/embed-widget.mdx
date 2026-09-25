@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@fa1ef7522e16
+translationSource: guides/embed-widget.mdx@bc561acec346
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -172,8 +172,10 @@ osparade ändringar, och listan över hinder visar vad som behöver åtgärdas.
 Medan begäran väntar visar statusraden **Väntar på aktivering** och när
 aktiveringen begärdes. Du kan fortsätta ändra: administratören granskar den
 senast sparade versionen, och om widgeten ändras medan administratören har den
-öppen behöver hen granska den igen innan den kan aktiveras. **Dra tillbaka
-begäran** tar tillbaka begäran; alla som kan redigera widgeten kan göra det.
+öppen behöver hen granska den igen innan den kan aktiveras. Ändringar i
+assistenten som widgeten visar ingår inte i begäran: de gäller direkt, både
+före och efter aktiveringen. **Dra tillbaka begäran** tar tillbaka begäran;
+alla som kan redigera widgeten kan göra det.
 Eneo skickar inget e-postmeddelande eller någon annan avisering om begäranden.
 Administratörer hittar dem under **Admin → Webbwidgetar** och **Admin → Ytor**.
 
@@ -324,16 +326,16 @@ in i webbplatsen:
 
 Under **Admin → Webbwidgetar** ser en organisationsadministratör alla
 organisationens widgetar (var de finns, om de är aktiva, frågor och token de
-senaste 7 och 30 dagarna, blockerade anrop och dagens budget). Under fliken
-**Policy** sätter administratören de tak som alla widgetar måste hålla sig inom:
-högsta dagliga tokenbudget (standard 2 000 000, högst 2 000 000 000),
-intervallet för lagringstid (standard 0–365 dagar) och om widgetar får köras
-utan botskydd (av som standard). Bara administratörer ändrar policyn. Alla med
-behörigheten för webbwidgetar kan läsa den, så widgetredigeraren visar gränserna
-under fliken **Regler** och markerar värden utanför dem innan de sparas;
-kvarstående policybrott visas som aktiveringshinder. Antalet widgetar är inte
-begränsat. Varje aktivering är ett administratörsbeslut, och översikten håller
-den publika ytan synlig.
+senaste 7 och 30 dagarna inklusive tester, blockerade anrop och dagens budget).
+Under fliken **Policy** sätter administratören de tak som alla widgetar måste
+hålla sig inom: högsta dagliga tokenbudget (standard 2 000 000, högst
+2 000 000 000), intervallet för lagringstid (standard 0–365 dagar) och om
+widgetar får köras utan botskydd (av som standard). Bara administratörer ändrar policyn. Alla
+med behörigheten för webbwidgetar kan läsa den, så widgetredigeraren visar
+gränserna under fliken **Regler** och markerar värden utanför dem innan de
+sparas; kvarstående policybrott visas som aktiveringshinder. Antalet widgetar är
+inte begränsat. Varje aktivering är ett administratörsbeslut, och översikten
+håller den publika ytan synlig.
 
 Policyn gäller befintliga widgetar så som den ser ut nu, inte bara vid senare
 ändringar:
@@ -386,22 +388,32 @@ Granskningssidan visar:
   förhandsgranskningen svarar inte på frågor, eftersom svaren bygger på ytans
   kunskap, som bara medlemmar får se. Om du är medlem i ytan och assistenten är
   publicerad startar **Testa svaren** den riktiga widgeten; testfrågorna sparas
-  som besökarsamtal och räknas in i widgetens användning. Om du inte är medlem
-  kan du gå med i ytan härifrån (se
-  [Gå med i en yta](/guides/space-oversight#join-a-space)).
+  som besökarsamtal och räknas in i widgetens användning. Medlemskapet
+  kontrolleras varje gång testet får en token. Om du inte också är redigerare
+  eller administratör i ytan med behörigheten för webbwidgetar gäller en token
+  i 10 minuter, så ett pågående test slutar fungera inom 10 minuter efter att
+  du har lämnat ytan eller tagits bort. Om du inte är medlem kan du gå med i
+  ytan härifrån (se [Gå med i en yta](/guides/space-oversight#join-a-space)).
 - **Användning**, när widgeten har varit aktiv.
 
 **Aktivera…**, eller **Återuppta…** för en pausad widget, publicerar widgeten
-exakt som du granskade den: om en redigerare har ändrat widgeten efter att du
-öppnade sidan nekas aktiveringen, och **Visa senaste versionen** läser in sidan
-igen så att du kan granska ändringen först. Du kan också aktivera en widget som
-ingen har begärt aktivering för. **Skicka tillbaka…** returnerar en väntande
-begäran med ett meddelande om vad som behöver ändras (10–500 tecken). Widgeten
-förblir ett utkast eller pausad, och ytans redigerare ser ditt meddelande i
-widgetredigeraren. Meddelandet sparas också i granskningsloggen, så skriv det
-för redigerarna och utan personuppgifter. **Pausa…** och **Arkivera…** finns
-på samma sida, och **Öppna i widgetredigeraren** visas när du är redigerare
-eller administratör i ytan och har behörigheten för webbwidgetar. När en widget
+med de widgetinställningar som du granskade: om en redigerare har ändrat
+widgeten efter att du öppnade sidan nekas aktiveringen, och **Visa senaste
+versionen** läser in sidan igen så att du kan granska ändringen först.
+Kontrollen gäller bara widgetens egna inställningar. Assistentens instruktioner,
+modell, kunskap och verktyg visas för granskning men låses inte: redigerare kan
+ändra dem när som helst, före och efter aktiveringen, och ändringarna når
+besökarna direkt. Du kan också aktivera en widget som ingen har begärt
+aktivering för. **Skicka tillbaka…** returnerar en väntande begäran med ett
+meddelande om vad som behöver ändras (minst 10 synliga tecken, högst 500).
+Widgeten förblir ett utkast eller pausad, och meddelandet visas i
+widgetredigeraren. Alla i ytan som har behörigheten för webbwidgetar kan läsa
+det, oavsett roll, och det kan även organisationsadministratörer och
+API-nycklar med omfånget Organisation och behörigheten `admin`. Meddelandet
+sparas också i granskningsloggen, så skriv det för redigerarna och utan
+personuppgifter. **Pausa…** och **Arkivera…** finns på samma sida, och **Öppna
+i widgetredigeraren** visas när du är redigerare eller administratör i ytan och
+har behörigheten för webbwidgetar. När en widget
 aktiveras eller arkiveras tas en väntande begäran och ett eventuellt
 tillbakaskickat meddelande bort.
 
@@ -454,13 +466,15 @@ att ladda om när mallen har ändrat deras widget.
   meddelandet om att chatten inte är tillgänglig, och widgeten visar vad som
   behöver åtgärdas.
 - **Flytt** av assistenten till en annan yta arkiverar dess widgetutkast och
-  loggar varje arkivering i granskningsloggen. Flytten nekas så länge en aktiv
-  eller pausad widget visar assistenten, eftersom widgeten hör till
-  assistentens yta; en organisationsadministratör arkiverar då widgeten först
-  under **Admin → Webbwidgetar**, utan att gå med i ytan.
+  loggar alltid varje arkivering i granskningsloggen; om en post inte kan
+  sparas blir flytten inte av. Flytten nekas så länge en aktiv eller pausad
+  widget visar assistenten, eftersom widgeten hör till assistentens yta; en
+  organisationsadministratör arkiverar då widgeten först under
+  **Admin → Webbwidgetar**, utan att gå med i ytan.
 - **Borttagning** av assistenten arkiverar dess widgetar i samma steg och
-  loggar varje arkivering i granskningsloggen. En mall som widgetarna följde
-  kan därefter tas bort.
+  loggar alltid varje arkivering i granskningsloggen; om en post inte kan
+  sparas tas assistenten inte bort. En mall som widgetarna följde kan därefter
+  tas bort.
 
 ### Säkerhet [#security-properties]
 
@@ -517,6 +531,7 @@ backend. Standardvärdena passar de flesta installationer.
 | `WIDGET_VISITOR_TOKEN_TTL_SECONDS`       | `900`              | Livslängd för en besökartoken. Chatten förnyar den automatiskt.                                                                                                                                              |
 | `WIDGET_VISITOR_TOKEN_GRACE_SECONDS`     | `3600`             | Hur länge en utgången token fortfarande kan styrka besökarens identitet vid förnyelse, utan ny beräkningsuppgift.                                                                                            |
 | `WIDGET_PREVIEW_TOKEN_TTL_SECONDS`       | `3600`             | Livslängd för token bakom förhandsvisningen och **Testa i Eneo**. Förhandsvisningen får en ny token strax innan den går ut. Det gör inte **Testa i Eneo**, så ta bort widgeten från sidan och visa den igen. |
+| `WIDGET_ADMIN_PREVIEW_TOKEN_TTL_SECONDS` | `600`              | Livslängd för token bakom **Testa svaren** när en organisationsadministratör testar från granskningssidan. Medlemskapet kontrolleras bara när en token utfärdas, så håll den kort.                           |
 | `WIDGET_ALTCHA_COST`                     | `1000`             | Hashiterationer per försök i beräkningsuppgiften (minst 1000). Höj värdet för en widget som missbrukas.                                                                                                      |
 | `WIDGET_ALTCHA_KEY_PREFIX`               | `0`                | Ett till fyra hexadecimala tecken som varje försök måste träffa; varje extra tecken gör uppgiften 16 gånger dyrare.                                                                                          |
 | `WIDGET_ALTCHA_CHALLENGE_TTL_SECONDS`    | `300`              | Hur länge en utmaning gäller.                                                                                                                                                                                |
