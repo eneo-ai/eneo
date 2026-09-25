@@ -449,11 +449,14 @@ There is no separate CSRF token or refresh-token mechanism.
   Members see the join until 90 days after it ends (table
   `space_oversight_visits`), and the audit log always records it. Two routes
   reach content without a join: user groups, since a group's role in a space
-  applies to everyone in it (every user added to or removed from a group is
-  always logged, and a group that contains tenant admins can still be added to
-  a space), and tenant-scoped service keys; see
+  applies to everyone in it (a group that contains tenant admins can still be
+  added to a space), and tenant-scoped service keys; see
   [API Key Management](/docs/api-key-management#how-service-keys-derive-space-roles)
   and [Space Oversight](/guides/space-oversight#content-requires-membership).
+  Every user added to or removed from a group under **Admin → User Groups** or
+  through `/api/v1/user-groups` is always logged; group changes that an
+  identity provider syncs through SCIM are logged as `scim_group_updated`,
+  which follows the audit configuration.
 
 ### Data Security
 
