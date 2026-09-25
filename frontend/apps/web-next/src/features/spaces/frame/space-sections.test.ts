@@ -119,26 +119,15 @@ describe("spaceRoute", () => {
 });
 
 describe("spaceNameIsPageHeading", () => {
-  const shared = { organization: false };
-
-  it("is the h1 on a tab's own page only", () => {
+  it("is the h1 on a tab's own page only, the organization's Skills tab included", () => {
+    expect(spaceNameIsPageHeading({ kind: "page", section: "overview", isSectionRoot: true })).toBe(
+      true
+    );
+    expect(spaceNameIsPageHeading({ kind: "page", section: "skills", isSectionRoot: true })).toBe(
+      true
+    );
     expect(
-      spaceNameIsPageHeading({ kind: "page", section: "overview", isSectionRoot: true }, shared)
-    ).toBe(true);
-    expect(
-      spaceNameIsPageHeading({ kind: "page", section: "knowledge", isSectionRoot: false }, shared)
+      spaceNameIsPageHeading({ kind: "page", section: "knowledge", isSectionRoot: false })
     ).toBe(false);
-  });
-
-  it("leaves the h1 to the organization Skills page", () => {
-    expect(
-      spaceNameIsPageHeading(
-        { kind: "page", section: "skills", isSectionRoot: true },
-        { organization: true }
-      )
-    ).toBe(false);
-    expect(
-      spaceNameIsPageHeading({ kind: "page", section: "skills", isSectionRoot: true }, shared)
-    ).toBe(true);
   });
 });

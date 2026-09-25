@@ -19,7 +19,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PageHeader } from "@/components/composites/page-header";
+import { SpaceSectionHeader } from "@/features/spaces/frame/space-section-header";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
 import {
@@ -148,16 +148,20 @@ export function OrganizationSkillsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
-      <PageHeader title={t("skills")}>
-        {!removed && (
-          <Button asChild>
-            <Link href={`${LIST_PATH}/new`}>
-              <Plus className="size-4" />
-              {t("skills_library_create")}
-            </Link>
-          </Button>
-        )}
-      </PageHeader>
+      {/* A tab of the organization space: the space header holds the h1. */}
+      <SpaceSectionHeader
+        title={t("skills")}
+        actions={
+          removed ? undefined : (
+            <Button asChild>
+              <Link href={`${LIST_PATH}/new`}>
+                <Plus className="size-4" />
+                {t("skills_library_create")}
+              </Link>
+            </Button>
+          )
+        }
+      />
       <p className="text-muted-foreground max-w-3xl text-sm">
         {t("organization_skills_manage_intro")}
       </p>

@@ -158,10 +158,11 @@ describe("SpaceFrame", () => {
     expect(within(tabs).queryByRole("link", { name: "Inställningar" })).toBeNull();
   });
 
-  it("keeps the organization space to its four tabs and its Skills page's own h1", () => {
+  it("keeps the organization space to its four tabs, named by the h1 on its Skills tab", () => {
     show(makeSpace({ overrides: { organization: true } }), ["skills"], "organization");
 
-    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    // The Skills page is a tab like any other: its own title is an h2.
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.queryByRole("link", { name: "Ny chatt" })).toBeNull();
     const tabs = screen.getByRole("navigation", { name: "Ytans innehåll" });
     expect(
