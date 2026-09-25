@@ -281,6 +281,22 @@ describe("widget review page", () => {
     await expect.element(page.getByText(/^Anna Svensson|^widget_review_requested\(/)).toBeVisible();
   });
 
+  test("each capability visitors reach is named by its purpose", async () => {
+    const base = review();
+    renderPage({
+      review: review({
+        target: { ...base.target!, visitor_capabilities: ["web_search", "image_generation"] }
+      })
+    });
+    await expect
+      .element(
+        page.getByText("Kartverktyget, widget_review_web_search och image_generation", {
+          exact: true
+        })
+      )
+      .toBeVisible();
+  });
+
   test("the assistant's instructions are behind a disclosure", async () => {
     renderPage({ review: review() });
     const toggle = page.getByRole("button", {

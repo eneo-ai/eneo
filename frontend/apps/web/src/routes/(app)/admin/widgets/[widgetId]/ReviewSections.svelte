@@ -10,6 +10,7 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import { formatDayMedium, intlLocale } from "$lib/core/formatting/dateTime";
   import { formatList } from "$lib/core/formatting/formatList";
+  import { getCapability } from "$lib/features/mcp/capabilities";
   import AssistantConfigCard from "$lib/features/spaces/oversight/AssistantConfigCard.svelte";
   import { retentionLabel } from "$lib/features/spaces/oversight/labels";
   import { m } from "$lib/paraglide/messages";
@@ -40,7 +41,11 @@
 
   const visitorTools = $derived([
     ...(review.target?.visitor_mcp_servers ?? []).map((server) => server.name),
-    ...(review.target?.visitor_capabilities ?? []).map(() => m.widget_review_web_search())
+    ...(review.target?.visitor_capabilities ?? []).map((purpose) =>
+      purpose === "web_search"
+        ? m.widget_review_web_search()
+        : (getCapability(purpose)?.label() ?? purpose)
+    )
   ]);
 
   const shown = $derived.by(() => {
