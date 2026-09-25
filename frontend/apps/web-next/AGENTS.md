@@ -17,6 +17,8 @@ changes).
 - **Every UI string goes through next-intl** (Swedish is the default locale).
 - **Accessibility is a requirement: WCAG 2.2 AA.** Follow the section below
   and [ACCESSIBILITY.md](ACCESSIBILITY.md).
+- **Reuse before you build.** If an Astryx component or hook already does it,
+  use it and delete our version. See [Reuse before you build](#reuse-before-you-build).
 - Before you finish: `bun run check && bun run lint && bun run test`.
 
 ## Accessibility (required)
@@ -72,6 +74,35 @@ Run from `frontend/apps/web-next` (docs ship offline with `@astryxdesign/cli`):
 
 Do not run `astryx init`: it rewrites the ASTRYX block at the end of this file
 with generic advice (unprefixed Tailwind names) that conflicts with ours.
+
+## Reuse before you build
+
+We are a small team, so every line we own is a line we maintain. Code that
+ships must be release-ready: correct, accessible, tested and without dead ends.
+
+- **Search Astryx first** (`bunx astryx search "<behaviour>" --type hook`, then
+  `--type component`) before writing behaviour yourself: focus handling
+  (`useFocusTrap`, `useFocusReturnVisibility`, `useListFocus`), shortcuts
+  (`useHotkeys`), breakpoints (`useMediaQuery`), announcements (`useAnnounce`),
+  copying (`useClipboard`), clickable cards with nested actions
+  (`useClickableContainer`), truncation and overflow (`useTruncation`,
+  `useOverflow`), table sorting, filtering, pagination and selection (the
+  `Table` plugins), and the chat hooks (`useChatStreamScroll`,
+  `useChatNewMessages`, `useStreamingText`, `useChatComposerTokens`,
+  `useTriggerMenu`).
+- **One implementation per behaviour.** When an Astryx hook or component
+  replaces ours, delete our version and its tests in the same change instead
+  of keeping both.
+- **Keep ours only for a reason** — a CSP, accessibility or product constraint
+  Astryx doesn't meet — and say why in a comment next to it. Known gaps in
+  Astryx 0.6.3: `Switch` hard-codes the English busy label "Loading" (don't use
+  `isLoading`/`changeAction` on it), `CodeBlock`/`CodeEditor` inject runtime
+  styles the CSP blocks (use our shiki code block), and dictation hooks
+  (`useChatDictation`, `useSpeechRecognition`) send audio to the browser
+  vendor, so we don't use them.
+- **Quality bar for every change:** small focused modules, typed APIs, no dead
+  or duplicated code, tests for behaviour (including keyboard and axe), and
+  `bun run check && bun run lint && bun run test` green.
 
 ## How it is wired
 
