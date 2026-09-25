@@ -8,9 +8,9 @@ recognise a deployment that still uses an old name.
 import { Callout } from 'nextra/components'
 
 <Callout type="warning">
-  **Rename environment variables before you deploy 2.2.** The backend, the
-  worker and the web app refuse to start while a renamed variable is set
-  without its replacement.
+  **Rename environment variables before you deploy 2.2.** `db-init`, the
+  backend, the worker and the web app refuse to start while a renamed variable
+  is set without its replacement.
 </Callout>
 
 For the rest of the procedure (backups, draining work, File and Icon storage),
@@ -47,23 +47,29 @@ secret store, check there too.
 
 ### What you see at startup
 
-| Situation                                         | Backend and worker                               | Web app                                  |
-| ------------------------------------------------- | ------------------------------------------------ | ---------------------------------------- |
-| An old name is set and its new name is not        | Stops and names the replacement                  | Stops and names the replacement          |
-| Both the old and the new name are set             | Starts; warns that the old name is ignored       | Starts; warns that the old name is ignored |
-| `ENEO_SUPER_DUPER_API_KEY` or its old name is set | Starts; logs an error that it is no longer read  | —                                        |
-| `ENEO_BACKEND_URL` is not set                     | —                                                | Stops and says that it is required       |
+| Situation                                         | `db-init`, backend and worker                   | Web app                                    |
+| ------------------------------------------------- | ----------------------------------------------- | ------------------------------------------ |
+| An old name is set and its new name is not        | Does not start; names the replacement           | Does not start; names the replacement      |
+| Both the old and the new name are set             | Starts; warns that the old name is ignored      | Starts; warns that the old name is ignored |
+| `ENEO_SUPER_DUPER_API_KEY` or its old name is set | Starts; logs an error that it is no longer read | —                                          |
+| `ENEO_BACKEND_URL` is not set                     | —                                               | Does not start; says that it is required   |
 
-A stopped service logs, for example:
+A service that does not start logs, for example:
 
 ```text
-INTRIC_SUPER_API_KEY is no longer read (removed in Eneo 2.2). Rename it to ENEO_SUPER_API_KEY.
+Eneo cannot start while removed environment variables are set:
+  INTRIC_SUPER_API_KEY is no longer read (removed in Eneo 2.2). Rename it to ENEO_SUPER_API_KEY.
 ```
 
-To check a running deployment for leftovers:
+`db-init` runs the migrations, so it is usually the first to stop. With
+`docker compose run --rm db-init`, the message appears directly above
+`Error running alembic migrations`. Services that restart automatically keep
+restarting until the variable is renamed.
+
+To check a deployment for leftovers:
 
 ```bash
-docker compose logs backend worker frontend | grep -E 'no longer read|is ignored|cannot start'
+docker compose logs db-init backend worker frontend | grep -E 'no longer read|is ignored|cannot start'
 ```
 
 ---
