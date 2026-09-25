@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { installAstryxDomStubs, renderInApp } from "../testing/render";
+import { renderInApp } from "@/test/render";
 import {
   spaceHasPermission,
   type ResourcePermission,
@@ -51,8 +51,6 @@ vi.mock("@/features/jobs/use-jobs", () => ({
 }));
 
 import { SpaceOverview } from "@/app/(app)/spaces/[spaceId]/overview/space-overview.client";
-
-beforeAll(installAstryxDomStubs);
 
 afterEach(cleanup);
 

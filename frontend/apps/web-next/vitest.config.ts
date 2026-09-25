@@ -14,6 +14,8 @@ export default defineConfig({
     // cross-realm Uint8Array); component tests opt into jsdom per file.
     environment: "node",
     include: ["src/**/*.test.{ts,tsx}"],
+    // What jsdom lacks and Astryx needs (modal <dialog>, CSS.escape, …).
+    setupFiles: ["./src/test/setup-dom.ts"],
     env: {
       // env.ts validates at import time; give tests a valid baseline
       ENEO_BACKEND_URL: "http://localhost:8123",

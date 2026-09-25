@@ -7,7 +7,12 @@ import { AppShellFrame } from "./app-shell";
 import { conversationHref, OPEN_NAV_EVENT } from "./routes";
 import { useShell } from "./shell-context";
 import { resetSideNavCollapsedForTest } from "./shell-state";
-import { installBrowserMocks, renderWithProviders, testQueryClient } from "./test-support";
+import {
+  appContext,
+  installBrowserMocks,
+  renderWithProviders,
+  testQueryClient
+} from "./test-support";
 
 const nav = vi.hoisted(() => ({ pathname: "/spaces/list", search: "" }));
 
@@ -16,7 +21,10 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(nav.search),
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() })
 }));
-vi.mock("@/features/jobs/job-indicator", () => ({ JobIndicator: () => null }));
+// Stand-ins that show where the bells are placed (they have their own tests).
+vi.mock("@/features/jobs/job-indicator", () => ({
+  JobIndicator: () => <button type="button">Jobbklockan</button>
+}));
 vi.mock("@/features/api-keys/expiring-keys-notification", () => ({
   ExpiringKeysNotification: () => null
 }));
@@ -25,11 +33,11 @@ vi.mock("@/features/whats-new/whats-new-provider", () => ({
 }));
 vi.mock("@/lib/i18n/actions", () => ({ setLocale: vi.fn() }));
 
-function renderShellWith(page: React.ReactNode) {
+function renderShellWith(page: React.ReactNode, context = appContext()) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(["spaces"], []);
   queryClient.setQueryData(["dashboard"], { spaces: { items: [] } });
-  return renderWithProviders(<AppShellFrame>{page}</AppShellFrame>, { queryClient });
+  return renderWithProviders(<AppShellFrame>{page}</AppShellFrame>, { queryClient, context });
 }
 
 function renderShell() {
@@ -107,11 +115,22 @@ describe("AppShellFrame", () => {
     expect(screen.queryByRole("dialog", { name: "Sök i Eneo" })).toBeNull();
   });
 
+  it("opens the app's one create-space dialog from the SideNav", async () => {
+    renderShellWith(<h1>Sidinnehåll</h1>, appContext({ permissions: ["shared_spaces"] }));
+    // The form exists only while the dialog is open: no stray Namn field.
+    expect(screen.queryByLabelText(/Namn/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Skapa yta" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Skapa en ny yta" });
+    expect(within(dialog).getByLabelText(/Namn/)).toBeTruthy();
+  });
+
   it("does not open the palette over another dialog", () => {
     renderShellWith(
-      <div role="dialog" aria-label="Bekräfta" data-state="open">
+      <dialog open aria-label="Bekräfta">
         …
-      </div>
+      </dialog>
     );
     act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
@@ -149,15 +168,18 @@ describe("AppShellFrame on a phone", () => {
     await waitFor(() => expect(menuButton.getAttribute("aria-expanded")).toBe("false"));
   });
 
-  it("opens the drawer when the chat's header asks for it", async () => {
+  it("opens the drawer when the chat's header asks for it, with the bells in it", async () => {
     nav.pathname = "/spaces/s1/chat";
     renderShell();
+    // Chat routes have no top bar: the drawer is where the bells are.
     act(() => {
       window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT));
     });
     await waitFor(() =>
       expect(screen.getByRole("dialog", { name: "Meny" }).hasAttribute("open")).toBe(true)
     );
+    const drawer = screen.getByRole("dialog", { name: "Meny" });
+    expect(within(drawer).getByRole("button", { name: "Jobbklockan" })).toBeTruthy();
   });
 });
 

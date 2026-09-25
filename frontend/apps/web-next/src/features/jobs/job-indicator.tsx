@@ -1,12 +1,14 @@
 "use client";
 
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Popover } from "@astryxdesign/core/Popover";
+import { ProgressBar } from "@astryxdesign/core/ProgressBar";
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { Bell, BellDot, ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Progress } from "@/components/ui/progress";
-import { Spinner } from "@/components/ui/spinner";
+import { useId, useState } from "react";
+import { cn } from "@/lib/utils";
 import { isJobActive, useJobs, type Job, type Upload } from "./use-jobs";
 
 /** Job task → i18n key for the panel section heading. */
@@ -19,39 +21,51 @@ const TASK_SECTIONS: [Job["task"], string][] = [
   ["crawl", "crawling"]
 ];
 
+const ROW_CLASSES =
+  "border-ax-border flex items-center justify-between gap-x-3 border-b px-2 py-1.5 last-of-type:border-b-0";
+
 function ExpandableErrorRow({ label, message }: { label: string; message: string }) {
-  const [expanded, setExpanded] = useState(false);
   const t = useTranslations();
+  const [expanded, setExpanded] = useState(false);
+  const messageId = useId();
   return (
-    <div className="border-border flex flex-col border-b px-2 py-1.5 last-of-type:border-b-0">
+    <div className="border-ax-border flex flex-col border-b px-2 py-1.5 last-of-type:border-b-0">
       <button
         type="button"
         onClick={() => setExpanded((current) => !current)}
-        className="flex w-full items-center justify-between gap-x-3 text-left"
+        className="rounded-ax-inner focus-visible:outline-ring flex min-h-6 w-full items-center justify-between gap-x-3 text-start focus-visible:outline-2 focus-visible:outline-offset-2"
         aria-expanded={expanded}
+        aria-controls={messageId}
       >
-        <span className="truncate pr-4" title={label}>
+        <span className="truncate pe-4" title={label}>
           {label}
         </span>
-        <span className="text-destructive flex min-w-fit items-center gap-1 font-medium">
+        <span className="text-ax-error flex min-w-fit items-center gap-1 font-medium">
           {t("failed")}
-          <ChevronDown className={`size-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
+          <ChevronDown
+            aria-hidden="true"
+            className={cn("size-4 transition-transform", expanded && "rotate-180")}
+          />
         </span>
       </button>
-      {expanded && (
-        <p className="text-muted-foreground py-1 text-sm break-words whitespace-normal">
-          {message}
-        </p>
-      )}
+      <p
+        id={messageId}
+        hidden={!expanded}
+        className="text-ax-text-secondary py-1 text-sm break-words whitespace-normal"
+      >
+        {message}
+      </p>
     </div>
   );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-1 px-2 py-2">
-      <span className="pl-1 text-sm font-medium">{title}</span>
-      <div className="rounded-lg border px-3 py-1 text-sm shadow-sm">{children}</div>
+    <div className="flex flex-col gap-1">
+      <span className="ps-1 text-sm font-medium">{title}</span>
+      <div className="border-ax-border rounded-ax-container border px-3 py-1 text-sm">
+        {children}
+      </div>
     </div>
   );
 }
@@ -62,16 +76,20 @@ function UploadRow({ upload }: { upload: Upload }) {
     return <ExpandableErrorRow label={upload.file.name} message={upload.errorMessage} />;
   }
   return (
-    <div className="border-border flex items-center justify-between gap-x-3 border-b px-2 py-1.5 whitespace-nowrap last-of-type:border-b-0">
-      <span className="truncate pr-4" title={upload.file.name}>
+    <div className={cn(ROW_CLASSES, "whitespace-nowrap")}>
+      <span className="truncate pe-4" title={upload.file.name}>
         {upload.file.name}
       </span>
       {upload.status === "queued" ? (
-        <span className="text-muted-foreground min-w-fit">{t("waiting")}</span>
+        <span className="text-ax-text-secondary min-w-fit">{t("waiting")}</span>
       ) : (
-        <span className="flex w-40 min-w-40 items-center gap-x-3">
-          <Progress value={upload.progress} />
-          <span className="w-10 text-end text-sm">{upload.progress}%</span>
+        <span className="w-40 min-w-40">
+          <ProgressBar
+            label={upload.file.name}
+            isLabelHidden
+            value={upload.progress}
+            hasValueLabel
+          />
         </span>
       )}
     </div>
@@ -85,22 +103,27 @@ function JobRow({ job }: { job: Job }) {
     return <ExpandableErrorRow label={label} message={job.result_location} />;
   }
   return (
-    <div className="border-border flex items-center justify-between gap-x-3 border-b px-2 py-1.5 whitespace-nowrap last-of-type:border-b-0">
-      <span className="truncate pr-4" title={label}>
+    <div className={cn(ROW_CLASSES, "whitespace-nowrap")}>
+      <span className="truncate pe-4" title={label}>
         {label}
       </span>
       {isJobActive(job) ? (
-        <Spinner className="size-4" />
+        <Spinner size="sm" aria-label={t("in_progress")} />
       ) : job.status === "failed" ? (
-        <span className="text-destructive min-w-fit font-medium">{t("failed")}</span>
+        <span className="text-ax-error min-w-fit font-medium">{t("failed")}</span>
       ) : (
-        <span className="text-success min-w-fit font-medium">{t("done")}</span>
+        <span className="text-ax-success min-w-fit font-medium">{t("done")}</span>
       )}
     </div>
   );
 }
 
-export function JobIndicator() {
+/**
+ * The bell for uploads and background jobs, with their progress in a popover.
+ * An Astryx Popover lives in the top layer next to its trigger, so it also
+ * opens from inside the modal navigation drawer on phones.
+ */
+export function JobIndicator({ alignment = "end" }: { alignment?: "start" | "end" }) {
   const t = useTranslations();
   const { jobs, uploads, runningCount } = useJobs();
 
@@ -108,23 +131,20 @@ export function JobIndicator() {
     titleKey,
     jobs: jobs.filter((job) => job.task === task)
   })).filter((section) => section.jobs.length > 0);
+  const label =
+    runningCount > 0 ? t("fix_notifications_running", { count: runningCount }) : t("notifications");
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label={t("notifications")}>
-          {runningCount === 0 ? (
-            <Bell className="size-5" />
-          ) : (
-            <BellDot className="text-primary size-5" />
-          )}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="flex max-h-[70vh] w-96 flex-col overflow-y-auto p-0">
-        <p className="text-muted-foreground border-b px-4 pt-2 pb-2.5 font-mono text-sm font-medium">
-          {t("notifications_and_jobs")}
-        </p>
-        <div className="p-2">
+    <Popover
+      label={t("notifications_and_jobs")}
+      placement="below"
+      alignment={alignment}
+      width={384}
+      content={
+        <div className="flex flex-col gap-3">
+          <p className="text-ax-text-secondary font-mono text-sm font-medium">
+            {t("notifications_and_jobs")}
+          </p>
           {uploads.length > 0 && (
             <Section title={t("uploading")}>
               {uploads.map((upload) => (
@@ -140,12 +160,24 @@ export function JobIndicator() {
             </Section>
           ))}
           {runningCount === 0 && sections.length === 0 && uploads.length === 0 && (
-            <div className="text-muted-foreground flex h-24 w-full items-center justify-center text-sm">
+            <p className="text-ax-text-secondary flex min-h-24 items-center justify-center text-sm">
               {t("everything_up_to_date")}
-            </div>
+            </p>
           )}
         </div>
-      </PopoverContent>
+      }
+    >
+      <IconButton
+        variant="ghost"
+        label={label}
+        tooltip={label}
+        icon={
+          <Icon
+            icon={runningCount === 0 ? Bell : BellDot}
+            color={runningCount === 0 ? "inherit" : "accent"}
+          />
+        }
+      />
     </Popover>
   );
 }

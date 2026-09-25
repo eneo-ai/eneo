@@ -468,7 +468,6 @@ export function TemplateGalleryDialog({
                 <Input
                   id="template-create-name"
                   value={name}
-                  autoFocus
                   onChange={(event) => setName(event.target.value)}
                 />
               </div>

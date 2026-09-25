@@ -106,14 +106,10 @@ export function spaceRoute(segments: readonly string[]): SpaceRoute {
 /**
  * Whether the space name is the page's h1. Tab pages are sections of the space
  * (their own title is an h2); detail pages and editors below a tab have an h1
- * of their own, and so does the organization Skills page.
+ * of their own.
  */
-export function spaceNameIsPageHeading(
-  route: Extract<SpaceRoute, { kind: "page" }>,
-  space: Pick<Space, "organization">
-): boolean {
-  if (!route.isSectionRoot) return false;
-  return !(space.organization && route.section === "skills");
+export function spaceNameIsPageHeading(route: Extract<SpaceRoute, { kind: "page" }>): boolean {
+  return route.isSectionRoot;
 }
 
 /** Where the space crumb in the breadcrumbs points: the overview, or the first tab. */

@@ -5,8 +5,10 @@ import { cn } from "@/lib/utils";
 
 export type PageHeaderCrumb = {
   label: string;
-  /** Link target. Omit only for a trailing current-page crumb (plain text). */
+  /** Link target. Without one the crumb is plain text, such as an admin section. */
   href?: string;
+  /** The crumb is this page (`aria-current="page"`, never a link). */
+  current?: boolean;
 };
 
 export type PageHeaderProps = {
@@ -15,9 +17,9 @@ export type PageHeaderProps = {
   /** One-line summary under the title. */
   description?: string;
   /**
-   * Ancestor trail above the title, root first. Crumbs with `href` are links;
-   * a trailing crumb without one is marked as the current page. Skip on
-   * top-level pages.
+   * Ancestor trail above the title, root first. Crumbs with `href` are links,
+   * crumbs without one are plain labels; only a crumb with `current` is
+   * announced as the current page. Skip on top-level pages.
    */
   breadcrumbs?: readonly PageHeaderCrumb[];
   /** Page-level actions (buttons, save status), right-aligned; wraps on narrow screens. */
@@ -59,8 +61,9 @@ export function PageHeader({
           {breadcrumbs.map((crumb, index) => (
             <BreadcrumbItem
               key={`${index}-${crumb.href ?? crumb.label}`}
-              href={crumb.href}
-              isCurrent={!crumb.href}
+              href={crumb.current ? undefined : crumb.href}
+              // Explicit false: Astryx would otherwise mark the last crumb current.
+              isCurrent={crumb.current ?? false}
             >
               {crumb.label}
             </BreadcrumbItem>

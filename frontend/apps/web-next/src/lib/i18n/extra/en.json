@@ -560,5 +560,9 @@
   "chat_next_branch": "Next version",
   "chat_conversation_load_failed": "The conversation could not be loaded.",
   "chat_activity_reasoning": "Reasoning",
-  "chat_tool_arguments": "Arguments"
+  "chat_tool_arguments": "Arguments",
+  "fix_notifications_running": "Notifications, {count} in progress",
+  "fix_crawl_started_column": "Started",
+  "fix_crawls_filter_label": "Filter crawls",
+  "fix_integrations_empty_title": "No integrations yet"
 }

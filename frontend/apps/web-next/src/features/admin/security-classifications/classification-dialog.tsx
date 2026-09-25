@@ -88,7 +88,6 @@ export function ClassificationDialog({
             <Input
               id="classification-name"
               value={name}
-              autoFocus
               placeholder={t("recognisable_display_name")}
               onChange={(event) => setName(event.target.value)}
             />

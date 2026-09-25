@@ -1,5 +1,6 @@
 "use client";
 
+import { useCollator } from "@astryxdesign/core/i18n";
 import { AppWindow, SearchX } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -29,9 +30,10 @@ function TileGrid({ items, showStatus }: { items: AppSparse[]; showStatus: boole
 export function AppsPage() {
   const t = useTranslations();
   const { space, can } = useSpace();
+  const collator = useCollator();
   const [filter, setFilter] = useState("");
 
-  const items = spaceApps(space);
+  const items = spaceApps(space, collator.compare);
   const filteredItems = filterSpaceResources(items, filter);
   const showStatus = !space.personal;
   const groupByStatus = can("publish", "app");

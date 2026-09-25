@@ -1,10 +1,10 @@
 "use client";
 
-import Link from "next/link";
+import { Button } from "@astryxdesign/core/Button";
+import { Plug } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
-import { Button } from "@/components/ui/button";
 import { useAppContext } from "@/components/providers/app-context";
 import { useSpace } from "@/features/spaces/use-space";
 import { embeddingModelsInUse } from "../knowledge";
@@ -15,7 +15,8 @@ import { ImportKnowledgeDialog, useImportableIntegrations } from "./import/impor
 import { integrationSetupAction } from "./setup-action";
 import { IntegrationItemsTable } from "./table";
 
-function ImportToolbar() {
+/** Import from a connected integration, or where to connect one first. */
+function ImportAction() {
   const t = useTranslations();
   const { space } = useSpace();
   const { can } = useAppContext();
@@ -28,22 +29,22 @@ function ImportToolbar() {
     isAdmin: can("admin")
   });
 
-  return (
-    <div className="flex justify-end gap-2">
-      {action.kind === "import" ? (
-        <>
-          <Button onClick={() => setShowImport(true)}>{t("import_knowledge")}</Button>
-          {showImport && <ImportKnowledgeDialog open={showImport} onOpenChange={setShowImport} />}
-        </>
-      ) : action.kind === "link" ? (
-        <Button asChild>
-          <Link href={action.href}>{t("configure_integrations")}</Link>
-        </Button>
-      ) : (
-        <p className="text-muted-foreground self-center text-sm">{t(action.messageKey)}</p>
-      )}
-    </div>
-  );
+  if (action.kind === "import") {
+    return (
+      <>
+        <Button
+          label={t("import_knowledge")}
+          variant="primary"
+          onClick={() => setShowImport(true)}
+        />
+        {showImport && <ImportKnowledgeDialog open={showImport} onOpenChange={setShowImport} />}
+      </>
+    );
+  }
+  if (action.kind === "link") {
+    return <Button label={t("configure_integrations")} href={action.href} />;
+  }
+  return <p className="text-ax-text-secondary text-sm">{t(action.messageKey)}</p>;
 }
 
 export function IntegrationsTab({
@@ -65,37 +66,46 @@ export function IntegrationsTab({
     models.length > 1 ||
     space.embedding_models.length > 1 ||
     models.some((model) => !model.inSpace);
+  const action = canCreate ? (
+    <ImportAction />
+  ) : (
+    <NoCreatePermissionInfo resourceType={t("resource_integrations")} />
+  );
 
   return (
     <div className="flex flex-col gap-4">
       {integrationRequestFormUrl ? (
         <IntegrationsBetaNotice integrationRequestFormUrl={integrationRequestFormUrl} />
       ) : null}
-      {canCreate ? (
-        <ImportToolbar />
-      ) : (
-        <div className="flex justify-end">
-          <NoCreatePermissionInfo resourceType={t("resource_integrations")} />
-        </div>
-      )}
       {items.length === 0 ? (
-        <EmptyState title={t("no_results")} />
+        // Nothing to list yet: the empty state carries the one action.
+        <EmptyState
+          icon={<Plug />}
+          title={t("fix_integrations_empty_title")}
+          headingLevel={3}
+          actions={action}
+        />
       ) : (
-        (grouped ? models : [null]).map((model) => {
-          const modelRows = model ? rows.filter((row) => row.embeddingModelId === model.id) : rows;
-          if (modelRows.length === 0) return null;
-          return (
-            <div key={model?.id ?? "all"} className="flex flex-col gap-1">
-              {model && (
-                <h3 className="text-muted-foreground text-sm font-medium">
-                  {model.name}
-                  {model.inSpace ? "" : ` (${t("disabled")})`}
-                </h3>
-              )}
-              <IntegrationItemsTable rows={modelRows} />
-            </div>
-          );
-        })
+        <>
+          <div className="flex flex-wrap justify-end gap-2">{action}</div>
+          {(grouped ? models : [null]).map((model) => {
+            const modelRows = model
+              ? rows.filter((row) => row.embeddingModelId === model.id)
+              : rows;
+            if (modelRows.length === 0) return null;
+            return (
+              <div key={model?.id ?? "all"} className="flex flex-col gap-2">
+                {model && (
+                  <h3 className="text-ax-text-secondary text-sm font-semibold">
+                    {model.name}
+                    {model.inSpace ? "" : ` (${t("disabled")})`}
+                  </h3>
+                )}
+                <IntegrationItemsTable rows={modelRows} />
+              </div>
+            );
+          })}
+        </>
       )}
     </div>
   );

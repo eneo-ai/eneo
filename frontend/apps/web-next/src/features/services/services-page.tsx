@@ -1,5 +1,6 @@
 "use client";
 
+import { useCollator } from "@astryxdesign/core/i18n";
 import { SearchX, Wrench } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -17,8 +18,9 @@ import { ServiceTile } from "./tile";
 export function ServicesPage() {
   const t = useTranslations();
   const { space, can } = useSpace();
+  const collator = useCollator();
   const [filter, setFilter] = useState("");
-  const services = spaceServices(space);
+  const services = spaceServices(space, collator.compare);
   const filteredServices = filterSpaceResources(services, filter);
   const canCreate = can("create", "service");
 

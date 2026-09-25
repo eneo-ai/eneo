@@ -28,14 +28,9 @@ export function useShell(): ShellContextValue {
 export const DRAWER_MARKER = "data-shell-drawer";
 
 /**
- * Another dialog is open: a legacy (Radix) dialog, which traps focus, or a
- * native modal dialog. The ⌘K shortcut must not open the palette over it and
- * fight its focus trap.
+ * Another modal dialog is open (every dialog in the app is a native modal
+ * <dialog>). The ⌘K shortcut must not open the palette over it.
  */
 export function isOtherDialogOpen(): boolean {
-  return (
-    document.querySelector(
-      `[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], dialog[open]:not([${DRAWER_MARKER}])`
-    ) !== null
-  );
+  return document.querySelector(`dialog[open]:not([${DRAWER_MARKER}])`) !== null;
 }

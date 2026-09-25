@@ -9,7 +9,7 @@ import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Fragment, useCallback, useEffect, useId, useMemo, useState } from "react";
-import { CreateSpaceDialog } from "./create-space-dialog";
+import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { MobileTopBar } from "./mobile-top-bar";
 import { isAdminRoute, isChatRoute, OPEN_NAV_EVENT, type NavVariant } from "./routes";
 import { isOtherDialogOpen, ShellContext, type ShellContextValue } from "./shell-context";
@@ -138,7 +138,7 @@ export function AppShellFrame({ children }: { children: React.ReactNode }) {
               onCreateSpace={openCreateSpace}
             />
           )}
-          <CreateSpaceDialog isOpen={createSpaceOpen} onOpenChange={setCreateSpaceOpen} />
+          <CreateSpaceDialog open={createSpaceOpen} onOpenChange={setCreateSpaceOpen} />
         </div>
       </AppShellMobileContext>
     </ShellContext>

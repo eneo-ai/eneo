@@ -72,7 +72,7 @@ export function SpaceHeader({
   const { space, routeId, can } = useSpace();
   const name = useSpaceDisplayName();
   const sections = spaceSections(space, can, routeId);
-  const isHeading = spaceNameIsPageHeading(route, space);
+  const isHeading = spaceNameIsPageHeading(route);
   const isShared = !space.personal && !space.organization;
   const description = space.personal
     ? t("personal_space_description")

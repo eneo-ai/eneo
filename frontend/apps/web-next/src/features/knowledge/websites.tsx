@@ -46,65 +46,34 @@ import { filterWebsites } from "./table-controls";
 import { WebsiteDialog } from "./website-dialog";
 import { isSkippedCrawl, websiteStatus } from "./website-status";
 
-export type LabelColor = "green" | "yellow" | "orange" | "blue" | "gray";
-
-const LABEL_TONES: Record<LabelColor, StatusTone> = {
-  green: "success",
-  yellow: "warning",
-  orange: "error",
-  blue: "accent",
-  gray: "neutral"
-};
-
 /**
  * Status dot plus label for knowledge tables (crawl state, update interval).
- * The optional tooltip is extra detail: a `title` for pointer users and a
- * screen-reader description, never the only place information lives.
+ * The optional tooltip is extra detail: a `title` for pointer users and text
+ * screen readers read with the label, never the only place information lives.
  */
 export function KnowledgeLabel({
-  label,
-  color,
-  tooltip,
-  isPulsing
-}: {
-  label: string;
-  color: LabelColor;
-  tooltip?: string;
-  /** Pulse the dot for work in progress (respects reduced motion). */
-  isPulsing?: boolean;
-}) {
-  return (
-    <StatusWithDetail
-      tone={LABEL_TONES[color]}
-      label={label}
-      detail={tooltip}
-      isPulsing={isPulsing}
-    />
-  );
-}
-
-function StatusWithDetail({
   tone,
   label,
-  detail,
+  tooltip,
   isPulsing
 }: {
   tone: StatusTone;
   label: string;
-  detail?: string;
+  tooltip?: string;
+  /** Pulse the dot for work in progress (respects reduced motion). */
   isPulsing?: boolean;
 }) {
   const detailId = useId();
   return (
     <span
-      title={detail}
-      aria-describedby={detail ? detailId : undefined}
+      title={tooltip}
+      aria-describedby={tooltip ? detailId : undefined}
       className="inline-flex whitespace-nowrap"
     >
       <StatusLabel status={tone} label={label} isPulsing={isPulsing} />
-      {detail ? (
+      {tooltip ? (
         <span id={detailId} className="sr-only">
-          {detail}
+          {tooltip}
         </span>
       ) : null}
     </span>
@@ -120,7 +89,7 @@ function WebsiteStatusCell({ website }: { website: Website }) {
   const filesFailed = crawl?.files_failed ?? 0;
 
   let detail: string | undefined;
-  if (isSkippedCrawl(website)) {
+  if (isSkippedCrawl(crawl)) {
     detail = t("crawl_skipped_duplicate");
   } else if (status.tone === "warning") {
     detail =
@@ -134,20 +103,20 @@ function WebsiteStatusCell({ website }: { website: Website }) {
   }
 
   return (
-    <StatusWithDetail
+    <KnowledgeLabel
       tone={status.tone}
       label={t(status.labelKey)}
-      detail={detail}
+      tooltip={detail}
       isPulsing={status.isPulsing}
     />
   );
 }
 
-const INTERVAL_LABELS: Record<Website["update_interval"], { key: string; color: LabelColor }> = {
-  daily: { key: "every_day", color: "green" },
-  every_other_day: { key: "every_other_day", color: "green" },
-  weekly: { key: "weekly", color: "green" },
-  never: { key: "never", color: "gray" }
+const INTERVAL_LABELS: Record<Website["update_interval"], { key: string; tone: StatusTone }> = {
+  daily: { key: "every_day", tone: "success" },
+  every_other_day: { key: "every_other_day", tone: "success" },
+  weekly: { key: "weekly", tone: "success" },
+  never: { key: "never", tone: "neutral" }
 };
 
 /** Automatic re-crawl interval: on (green) or off (grey), in words. */
@@ -155,9 +124,9 @@ function WebsiteIntervalLabel({ website }: { website: Website }) {
   const t = useTranslations();
   const item = INTERVAL_LABELS[website.update_interval] ?? {
     key: "not_found",
-    color: "orange" as const
+    tone: "error" as const
   };
-  return <KnowledgeLabel color={item.color} label={t(item.key)} />;
+  return <KnowledgeLabel tone={item.tone} label={t(item.key)} />;
 }
 
 /** Row menu for a website: edit, move to another space, delete. */

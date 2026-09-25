@@ -50,10 +50,7 @@ function NewConversationButton() {
         prepareNavigation(NEW_CONVERSATION_HREF);
         closeMobileNav();
       }}
-      className={cn(
-        "bg-ax-surface font-semibold pointer-coarse:min-h-11",
-        !isCollapsed && "justify-start px-3"
-      )}
+      className={cn("bg-ax-surface font-semibold", !isCollapsed && "justify-start px-3")}
     />
   );
 }
@@ -141,7 +138,6 @@ function SpacesSection() {
             label={t("create_space")}
             tooltip={t("create_space")}
             onClick={() => openCreateSpace()}
-            className="pointer-coarse:size-11"
           />
         ) : undefined
       }

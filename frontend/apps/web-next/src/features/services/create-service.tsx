@@ -73,7 +73,6 @@ export function CreateServiceButton() {
               id="service-name"
               value={name}
               placeholder={`${t("name")}...`}
-              autoFocus
               onChange={(event) => setName(event.target.value)}
             />
           </form>

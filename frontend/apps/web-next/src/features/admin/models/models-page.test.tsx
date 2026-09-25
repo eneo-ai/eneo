@@ -150,6 +150,8 @@ describe("ModelsPage", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Modeller" })).toBeTruthy();
     const trail = screen.getByRole("navigation");
     expect(within(trail).getByRole("link", { name: "Administration" })).toBeTruthy();
+    // "Konfiguration" is the menu section, not this page.
+    expect(within(trail).getByText("Konfiguration").closest("[aria-current]")).toBeNull();
     expect(screen.getByRole("button", { name: "Lägg till leverantör" })).toBeTruthy();
 
     // The smoke e2e looks this tab up by role and name.

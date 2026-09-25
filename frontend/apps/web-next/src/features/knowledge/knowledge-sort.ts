@@ -1,5 +1,5 @@
 import type { TableSortComparator, TableSortState } from "@astryxdesign/core/Table";
-import { formatWebsiteName, type Collection, type Website } from "./knowledge";
+import { formatWebsiteName, type Collection, type CrawlRun, type Website } from "./knowledge";
 
 /**
  * Column comparators for the knowledge tables, fed to Astryx Table's
@@ -36,8 +36,7 @@ export const WEBSITE_DEFAULT_SORT: TableSortState<WebsiteSortKey> = [
 ];
 
 /** Problems first: failed, then warnings, running, queued, never crawled, done. */
-export function websiteStatusRank(website: Website): number {
-  const crawl = website.latest_crawl;
+function crawlStatusRank(crawl: CrawlRun | null | undefined): number {
   if (!crawl) return 4;
   switch (crawl.status) {
     case "complete":
@@ -49,6 +48,10 @@ export function websiteStatusRank(website: Website): number {
     default:
       return 0;
   }
+}
+
+export function websiteStatusRank(website: Website): number {
+  return crawlStatusRank(website.latest_crawl);
 }
 
 /** When the latest crawl finished (or started, while it runs). */
@@ -73,3 +76,29 @@ export function websiteComparators(
     interval: (a, b) => INTERVAL_ORDER[a.update_interval] - INTERVAL_ORDER[b.update_interval]
   };
 }
+
+export type CrawlRunSortKey = "started" | "status" | "results" | "duration";
+
+/** Newest crawl first. */
+export const CRAWL_RUN_DEFAULT_SORT: TableSortState<CrawlRunSortKey> = [
+  { sortKey: "started", direction: "descending" }
+];
+
+/** Pages and files the crawl fetched. */
+export function crawlRunResultCount(crawl: CrawlRun): number {
+  return (crawl.pages_crawled ?? 0) + (crawl.files_downloaded ?? 0);
+}
+
+/** How long a finished crawl took; 0 while it runs. */
+function crawlRunDurationMs(crawl: CrawlRun): number {
+  const started = time(crawl.created_at);
+  const finished = time(crawl.finished_at);
+  return started && finished ? Math.max(0, finished - started) : 0;
+}
+
+export const CRAWL_RUN_COMPARATORS: Record<CrawlRunSortKey, TableSortComparator<CrawlRun>> = {
+  started: (a, b) => time(a.created_at) - time(b.created_at),
+  status: (a, b) => crawlStatusRank(a) - crawlStatusRank(b),
+  results: (a, b) => crawlRunResultCount(a) - crawlRunResultCount(b),
+  duration: (a, b) => crawlRunDurationMs(a) - crawlRunDurationMs(b)
+};

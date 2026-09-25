@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { rescueFocus } from "./focus-rescue";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isFocusLost, rescueFocus } from "./focus-rescue";
 
 let panel: HTMLDivElement;
 
@@ -38,4 +38,21 @@ it("leaves focus alone when it is still on something", () => {
   vi.advanceTimersByTime(500);
 
   expect(document.activeElement).toBe(other);
+});
+
+describe("isFocusLost", () => {
+  it("is lost on the body, in a closed dialog or on a menu item, not on a button", () => {
+    document.body.innerHTML = `
+      <button id="page">Sida</button>
+      <dialog id="dialog"><button id="inside">Stäng</button></dialog>
+      <div role="menu"><div id="item" role="menuitem" tabindex="-1">Byt namn</div></div>
+    `;
+    expect(isFocusLost()).toBe(true);
+    document.getElementById("inside")!.focus();
+    expect(isFocusLost()).toBe(true);
+    document.getElementById("item")!.focus();
+    expect(isFocusLost()).toBe(true);
+    document.getElementById("page")!.focus();
+    expect(isFocusLost()).toBe(false);
+  });
 });

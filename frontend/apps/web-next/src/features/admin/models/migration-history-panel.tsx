@@ -58,6 +58,8 @@ export function MigrationHistoryPanel() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const baseId = useId();
 
+  // Not Astryx's filtering plugin: it filters one column from its header,
+  // while this toolbar searches three columns at once next to two selects.
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
     return (data ?? []).filter((row) => {
@@ -75,6 +77,9 @@ export function MigrationHistoryPanel() {
     });
   }, [data, search, type, status]);
 
+  // Not useTableRowExpansion: its chevron is named "Expandera rad" on every
+  // row, while these disclosures name the migration they open and point at
+  // their detail row (aria-controls).
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);

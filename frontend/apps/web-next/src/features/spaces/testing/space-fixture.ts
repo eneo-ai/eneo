@@ -114,6 +114,28 @@ export function makeWebsite(overrides: Record<string, unknown> = {}) {
   };
 }
 
+export function makeIntegration(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "integration-1",
+    name: "Avtalsmallar",
+    original_name: null,
+    url: "https://kommun.sharepoint.com/sites/avtal",
+    space_id: "space-1",
+    permissions: ["read", "edit", "delete"],
+    integration_type: "sharepoint",
+    embedding_model: { id: "embed-1", name: "multilingual-e5-large" },
+    metadata: {
+      size: 1000,
+      last_synced_at: "2026-09-20T08:00:00Z",
+      sharepoint_subscription_expires_at: null
+    },
+    wrapper_id: null,
+    wrapper_name: null,
+    selected_item_type: "folder",
+    ...overrides
+  };
+}
+
 export function makeAssistant(overrides: Record<string, unknown> = {}) {
   return {
     id: "assistant-1",

@@ -9,11 +9,9 @@ export type ServiceSparse = Schema<"ServiceSparse">;
 export type ServiceUpdate = Schema<"PartialServiceUpdatePublic">;
 export type ServiceOutputFormat = "json" | "list" | "boolean";
 
-/** Services configured in a space, name-sorted. */
-export function spaceServices(space: Space): ServiceSparse[] {
-  return [...(space.applications?.services.items ?? [])].sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
+/** Services configured in a space, name-sorted with the locale's collator (Astryx `useCollator().compare`). */
+export function spaceServices(space: Space, compare: Intl.Collator["compare"]): ServiceSparse[] {
+  return [...(space.applications?.services.items ?? [])].sort((a, b) => compare(a.name, b.name));
 }
 
 export function serviceQueryOptions(api: EneoClient, serviceId: string) {

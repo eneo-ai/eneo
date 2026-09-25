@@ -41,8 +41,9 @@ export function wrapperDisplayName(item: IntegrationKnowledge): string {
 
 /**
  * SharePoint items sharing a wrapper_id collapse into one folder row once the
- * wrapper holds at least two items; everything else stays a plain row. Rows
- * come back sorted alphabetically. Ported from IntegrationsTable.svelte.
+ * wrapper holds at least two items; everything else stays a plain row. The
+ * table sorts the rows (by name, with the locale's collator). Ported from
+ * IntegrationsTable.svelte.
  */
 export function groupIntegrationRows(items: IntegrationKnowledge[]): IntegrationRow[] {
   const wrappers = new Map<string, IntegrationKnowledge[]>();
@@ -58,22 +59,18 @@ export function groupIntegrationRows(items: IntegrationKnowledge[]): Integration
     }
   }
 
-  const rows: { sortKey: string; row: IntegrationRow }[] = [];
+  const rows: IntegrationRow[] = [];
 
   for (const [wrapperId, wrapperItems] of wrappers) {
     const first = wrapperItems[0];
     if (first && wrapperItems.length >= 2) {
-      const wrapperName = wrapperDisplayName(first);
       rows.push({
-        sortKey: wrapperName.toLowerCase(),
-        row: {
-          kind: "wrapper",
-          wrapperId,
-          wrapperName,
-          items: wrapperItems,
-          counts: countSharePointItemTypes(wrapperItems),
-          embeddingModelId: first.embedding_model.id
-        }
+        kind: "wrapper",
+        wrapperId,
+        wrapperName: wrapperDisplayName(first),
+        items: wrapperItems,
+        counts: countSharePointItemTypes(wrapperItems),
+        embeddingModelId: first.embedding_model.id
       });
     } else {
       for (const item of wrapperItems) standalone.push(item);
@@ -81,12 +78,8 @@ export function groupIntegrationRows(items: IntegrationKnowledge[]): Integration
   }
 
   for (const item of standalone) {
-    rows.push({
-      sortKey: item.name.toLowerCase(),
-      row: { kind: "item", item, embeddingModelId: item.embedding_model.id }
-    });
+    rows.push({ kind: "item", item, embeddingModelId: item.embedding_model.id });
   }
 
-  rows.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-  return rows.map((entry) => entry.row);
+  return rows;
 }

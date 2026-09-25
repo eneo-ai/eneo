@@ -245,6 +245,23 @@
   overflow-anchor: none !important;
 }
 
+/*
+ * 7. Touch targets the theme cannot reach (ACCESSIBILITY.md → Target size).
+ *    On a coarse pointer the Eneo theme makes Astryx controls 44 px high
+ *    (eneo-theme.ts → adaptations). Checkbox, radio and switch take input on a
+ *    transparent native <input> centred on their indicator, which Astryx sizes
+ *    to 24 px: grow it to 44 × 44. The theme gives their rows 44 px, so the
+ *    enlarged inputs of neighbouring rows never overlap.
+ */
+@layer components {
+  @media (pointer: coarse) {
+    :where(.astryx-checkbox-input, .astryx-radio-list-item, .astryx-switch-field) input {
+      min-inline-size: 44px;
+      min-block-size: 44px;
+    }
+  }
+}
+
 @layer base {
   /* Full-strength ring colour for any outline an element draws without its own
      colour: a 50% ring is ~2:1 on white, below the 3:1 a focus indicator needs

@@ -19,7 +19,10 @@ describe("PageHeader", () => {
       <PageHeader
         title="Medlemmar"
         description="Vilka som har tillgång"
-        breadcrumbs={[{ label: "Ytor", href: "/spaces" }, { label: "Min yta" }]}
+        breadcrumbs={[
+          { label: "Ytor", href: "/spaces" },
+          { label: "Min yta", current: true }
+        ]}
         actions={<button type="button">Lägg till</button>}
       />
     );
@@ -29,6 +32,18 @@ describe("PageHeader", () => {
     expect(within(trail).getByRole("link", { name: "Ytor" }).getAttribute("href")).toBe("/spaces");
     expect(within(trail).getByText("Min yta").closest("[aria-current='page']")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Lägg till" })).toBeTruthy();
+  });
+
+  it("keeps a section label without a link out of aria-current", () => {
+    render(
+      <PageHeader
+        title="Modeller"
+        breadcrumbs={[{ label: "Administration", href: "/admin" }, { label: "Konfiguration" }]}
+      />
+    );
+    const trail = screen.getByRole("navigation");
+    expect(within(trail).getByText("Konfiguration").closest("a")).toBeNull();
+    expect(trail.querySelector("[aria-current]")).toBeNull();
   });
 
   it("keeps the legacy children actions slot", () => {
@@ -114,7 +129,11 @@ describe("accessibility", () => {
       <PageHeader
         title="Medlemmar"
         description="Vilka som har tillgång"
-        breadcrumbs={[{ label: "Ytor", href: "/spaces" }, { label: "Min yta" }]}
+        breadcrumbs={[
+          { label: "Ytor", href: "/spaces" },
+          { label: "Upphandling" },
+          { label: "Min yta", current: true }
+        ]}
         actions={<button type="button">Lägg till</button>}
       />
     );

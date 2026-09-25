@@ -19,9 +19,12 @@ export const UPLOAD_INPUT_TYPES: InputFieldType[] = [
   "audio-recorder"
 ];
 
-/** Apps configured in a space, name-sorted (matching the Svelte SpacesManager). */
-export function spaceApps(space: Space): AppSparse[] {
-  return [...(space.applications?.apps.items ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+/**
+ * Apps configured in a space, name-sorted (matching the Svelte SpacesManager)
+ * with the locale's collator (Astryx `useCollator().compare`).
+ */
+export function spaceApps(space: Space, compare: Intl.Collator["compare"]): AppSparse[] {
+  return [...(space.applications?.apps.items ?? [])].sort((a, b) => compare(a.name, b.name));
 }
 
 /** A run is still producing output while queued or in progress. */

@@ -182,8 +182,9 @@ shadcn names (`bg-background`, `text-muted-foreground`, `border-input`,
 
 ## Shared building blocks (`src/components/composites`)
 
-- `PageHeader` — `title`, `description?`, `breadcrumbs?: {label, href?}[]`,
-  `actions?` (legacy `children` still work), `tour?`.
+- `PageHeader` — `title`, `description?`, `breadcrumbs?: {label, href?, current?}[]`
+  (only `current` marks a crumb as this page; a crumb without `href` is a plain
+  label), `actions?` (legacy `children` still work), `tour?`.
 - `EmptyState` — `title`, `description?`, `icon?`, `actions?` (or `children`),
   `headingLevel?` (2), `isCompact?`, `framed?` (dashed frame, default on).
 - `LoadingState` — skeleton status region: `label?`, `rows?`,
@@ -226,9 +227,13 @@ loosen the policy.
 - `bun run check` — route typegen and `tsc`.
 - `bun run lint` — i18n drift, theme staleness, Prettier, ESLint.
 - `bun run test` — Vitest. `src/app/globals-css.test.ts` compiles `globals.css`
-  and guards the layer order, the theme import and the Streamdown `@source`
-  paths; `src/theme/eneo-theme.contrast.test.ts` checks the colour pairs; axe
-  tests check component markup.
+  and guards the layer order, the theme import, the Streamdown `@source`
+  paths and the touch-target rules; `src/theme/eneo-theme.contrast.test.ts`
+  checks the colour pairs; axe tests check component markup. Component tests
+  opt into jsdom (`// @vitest-environment jsdom`), render with the app's
+  providers through `renderInApp` (`src/test/render.tsx`) and get what jsdom
+  lacks for Astryx (modal `<dialog>`, `CSS.escape`, …) from
+  `src/test/setup-dom.ts`.
 - `bun run test:e2e` — Playwright against a running backend, including the
   axe page scans in `tests/a11y.spec.ts` (CI: "Frontend E2E (web-next)").
 - Check new UI in light and dark mode, with the keyboard, and at phone width

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { installAstryxDomStubs, renderInApp } from "@/features/spaces/testing/render";
+import { renderInApp } from "@/test/render";
 import type { InfoBlob } from "./knowledge";
 
 vi.mock("@/lib/api/browser", () => ({
@@ -13,7 +13,6 @@ vi.mock("@/lib/api/browser", () => ({
 
 import { BlobTable } from "./blobs";
 
-beforeAll(installAstryxDomStubs);
 afterEach(cleanup);
 
 const blob = (id: string, title: string, size: number) =>

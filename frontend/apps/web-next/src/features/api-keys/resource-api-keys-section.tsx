@@ -126,7 +126,6 @@ function CreateScopedKeyDialog({
               placeholder={t("api_keys_name_placeholder")}
               onChange={(event) => setName(event.target.value)}
               required
-              autoFocus
             />
           </div>
           <div className="flex flex-col gap-2">

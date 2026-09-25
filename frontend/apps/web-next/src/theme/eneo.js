@@ -609,7 +609,42 @@ export const eneoTheme = {
       "xl": 1280,
       "2xl": 1536
     },
-    "rules": []
+    "rules": [
+      {
+        "when": {
+          "pointer": "coarse"
+        },
+        "value": {
+          "tokens": {
+            "--size-element-sm": "44px",
+            "--size-element-md": "44px",
+            "--size-element-lg": "44px"
+          },
+          "components": {
+            "segmented-control-item": {
+              "base": {
+                "minHeight": "44px"
+              }
+            },
+            "checkbox-input": {
+              "base": {
+                "minHeight": "44px"
+              }
+            },
+            "radio-list-item": {
+              "base": {
+                "minHeight": "44px"
+              }
+            },
+            "switch-field": {
+              "base": {
+                "minHeight": "44px"
+              }
+            }
+          }
+        }
+      }
+    ]
   },
   __axes: {
     "typography": {

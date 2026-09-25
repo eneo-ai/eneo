@@ -1,24 +1,26 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Popover } from "@astryxdesign/core/Popover";
 import { useQuery } from "@tanstack/react-query";
 import { Bell, ChevronRight } from "lucide-react";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useAppContext } from "@/components/providers/app-context";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { cn } from "@/lib/utils";
 import { summaryToDisplayItems, type ExpiringKeyDisplayItem } from "./expiration-utils";
 
 const MAX_VISIBLE = 5;
 
 function hasDuplicateName(name: string, items: ExpiringKeyDisplayItem[]): boolean {
   return items.filter((item) => item.name === name).length > 1;
+}
+
+function isUrgent(item: ExpiringKeyDisplayItem): boolean {
+  return item.level === "expired" || item.level === "urgent";
 }
 
 function itemExpiryText(
@@ -31,7 +33,12 @@ function itemExpiryText(
   return t("api_keys_expiring_item_days", { days: item.daysRemaining });
 }
 
-export function ExpiringKeysNotification() {
+/**
+ * The bell for API keys the user follows that expire soon (shown only when
+ * there are any), with the list in a popover. An Astryx Popover lives in the
+ * top layer next to its trigger, so it also opens inside the navigation drawer.
+ */
+export function ExpiringKeysNotification({ alignment = "end" }: { alignment?: "start" | "end" }) {
   const t = useTranslations();
   const { settings } = useAppContext();
   const featureEnabled = settings.api_key_expiry_notifications !== false;
@@ -73,95 +80,96 @@ export function ExpiringKeysNotification() {
   const hasUrgent = expiredCount + urgentCount > 0;
   const visibleItems = items.slice(0, MAX_VISIBLE);
   const overflowCount = items.length - MAX_VISIBLE;
+  const summaryParts = [
+    expiredCount > 0 ? t("api_keys_expiring_bell_summary_expired", { count: expiredCount }) : null,
+    urgentCount > 0 ? t("api_keys_expiring_bell_summary_urgent", { count: urgentCount }) : null,
+    warningCount > 0 ? t("api_keys_expiring_bell_summary_warning", { count: warningCount }) : null
+  ].filter((part): part is string => part !== null);
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t("api_keys_expiring_bell_title")}
-          className="relative"
-        >
-          <Bell className="size-4" />
-          <span
-            className={`absolute top-1.5 right-1.5 size-2 rounded-full ${
-              hasUrgent ? "bg-destructive" : "bg-warning"
-            }`}
-          />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-96 p-2">
-        <div className="flex flex-col gap-2" role="status">
+    <Popover
+      label={t("api_keys_expiring_bell_title")}
+      placement="below"
+      alignment={alignment}
+      width={384}
+      content={
+        <div className="flex flex-col gap-2">
           <div className="px-2">
             <p className="font-medium">{t("api_keys_expiring_bell_title")}</p>
-            <p className="text-muted-foreground text-xs">
-              {expiredCount > 0
-                ? t("api_keys_expiring_bell_summary_expired", { count: expiredCount })
-                : null}
-              {expiredCount > 0 && urgentCount > 0 ? ", " : null}
-              {urgentCount > 0
-                ? t("api_keys_expiring_bell_summary_urgent", { count: urgentCount })
-                : null}
-              {(expiredCount > 0 || urgentCount > 0) && warningCount > 0 ? ", " : null}
-              {warningCount > 0
-                ? t("api_keys_expiring_bell_summary_warning", { count: warningCount })
-                : null}
-            </p>
+            <p className="text-ax-text-secondary text-xs">{summaryParts.join(", ")}</p>
           </div>
-          <div
-            className={`rounded-lg border px-2 py-1 shadow-sm ${
-              hasUrgent ? "bg-destructive/5" : warningCount > 0 ? "bg-warning/5" : "bg-card"
-            }`}
+          <ul
+            className={cn(
+              "border-ax-border rounded-ax-container border px-2 py-1",
+              hasUrgent ? "bg-ax-error-muted" : warningCount > 0 ? "bg-ax-warning-muted" : ""
+            )}
           >
             {visibleItems.map((item) => (
-              <div
+              <li
                 key={item.id}
-                className="flex items-center justify-between gap-3 border-b px-1 py-2 last:border-b-0"
+                className="border-ax-border flex items-center justify-between gap-3 border-b px-1 py-2 last:border-b-0"
               >
-                <div className="flex min-w-0 items-center gap-2">
+                <span className="flex min-w-0 items-center gap-2">
                   <span
                     aria-hidden="true"
-                    className={`shrink-0 rounded-full ${
-                      item.level === "expired" || item.level === "urgent"
-                        ? "bg-destructive size-2.5"
-                        : "bg-warning size-2"
-                    }`}
+                    className={cn(
+                      "shrink-0 rounded-full",
+                      isUrgent(item) ? "bg-ax-error size-2.5" : "bg-ax-warning size-2"
+                    )}
                   />
                   <span className="truncate text-sm" title={item.name}>
                     {item.name}
                   </span>
                   {item.keySuffix && hasDuplicateName(item.name, items) ? (
-                    <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                    <span className="text-ax-text-secondary shrink-0 font-mono text-xs">
                       ...{item.keySuffix}
                     </span>
                   ) : null}
-                </div>
+                </span>
                 <span
-                  className={`shrink-0 text-xs ${
-                    item.level === "expired" || item.level === "urgent"
-                      ? "text-destructive"
-                      : "text-warning"
-                  }`}
+                  className={cn(
+                    "shrink-0 text-xs",
+                    isUrgent(item) ? "text-ax-error" : "text-ax-warning"
+                  )}
                 >
                   {itemExpiryText(item, t)}
                 </span>
-              </div>
+              </li>
             ))}
             {overflowCount > 0 ? (
-              <div className="text-muted-foreground px-1 py-2 text-xs">
+              <li className="text-ax-text-secondary px-1 py-2 text-xs">
                 {t("api_keys_expiring_bell_more", { count: overflowCount })}
-              </div>
+              </li>
             ) : null}
-          </div>
-          <Button asChild variant="ghost" className="justify-between">
-            <Link href="/account/api-keys">
-              {t("api_keys_expiring_bell_manage")}
-              <ChevronRight className="size-4" />
-            </Link>
-          </Button>
+          </ul>
+          <Button
+            href="/account/api-keys"
+            variant="ghost"
+            label={t("api_keys_expiring_bell_manage")}
+            endContent={<Icon icon={ChevronRight} />}
+            width="100%"
+            className="justify-between"
+          />
         </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      }
+    >
+      <IconButton
+        variant="ghost"
+        label={t("api_keys_expiring_bell_title")}
+        tooltip={t("api_keys_expiring_bell_title")}
+        icon={
+          <span className="relative inline-flex">
+            <Icon icon={Bell} />
+            <span
+              aria-hidden="true"
+              className={cn(
+                "absolute -end-0.5 -top-0.5 size-2 rounded-full",
+                hasUrgent ? "bg-ax-error" : "bg-ax-warning"
+              )}
+            />
+          </span>
+        }
+      />
+    </Popover>
   );
 }

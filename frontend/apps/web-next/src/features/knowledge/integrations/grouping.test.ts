@@ -72,20 +72,6 @@ describe("groupIntegrationRows", () => {
     expect(rows.map((row) => row.kind)).toEqual(["item", "item"]);
   });
 
-  it("sorts wrapper and item rows together, case-insensitively", () => {
-    const rows = groupIntegrationRows([
-      makeItem({ id: "a", name: "zebra" }),
-      makeItem({ id: "b", name: "B1", wrapper_id: "w1", wrapper_name: "Middle" }),
-      makeItem({ id: "c", name: "B2", wrapper_id: "w1", wrapper_name: "Middle" }),
-      makeItem({ id: "d", name: "Apple" })
-    ]);
-    expect(rows.map((row) => (row.kind === "wrapper" ? row.wrapperName : row.item.name))).toEqual([
-      "Apple",
-      "Middle",
-      "zebra"
-    ]);
-  });
-
   it("takes the embedding model from the wrapper's first item", () => {
     const rows = groupIntegrationRows([
       makeItem({ id: "a", wrapper_id: "w1", embedding_model: { id: "model-x" } as never }),

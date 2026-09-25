@@ -111,20 +111,18 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   around it (the spacing exception). Inline links in running text are exempt.
   Astryx element sizes (28/32/36 px) and shadcn `size="icon"` (36 px) pass;
   never go below `size-6` for an icon button.
-- **Design standard: 44×44 px on touch layouts.** Custom targets use
-  Tailwind's `pointer-coarse:` variant (`pointer-coarse:size-11`). Astryx
-  controls get it from a theme adaptation in `eneo-theme.ts`, added with the
-  first touch layout:
-
-  ```ts
-  export const eneoTheme = defineTheme({
-    // …
-    adaptations: {
-      rules: [{ when: { pointer: "coarse" }, value: { tokens: { "--size-element-md": "44px" } } }]
-    }
-  });
-  ```
-
+- **Design standard: 44×44 px on touch layouts** (`pointer: coarse`).
+  Astryx controls get it centrally; don't add sizes for them:
+  - `eneo-theme.ts` → `adaptations` sets the element sizes
+    (`--size-element-sm/md/lg`) to 44 px: buttons (icon-only ones are
+    square), menu triggers, tabs, nav items, inputs and selectors. Segmented
+    control items and checkbox, radio and switch rows get `min-height: 44px`.
+  - `globals.css` (section 7) grows the transparent native input of checkboxes,
+    radios and switches to 44 × 44; the theme cannot reach it.
+  - A class that fixes a size (`size-10`, `h-8`) overrides the theme; give it
+    `pointer-coarse:size-11` or drop it. Custom targets (links styled as
+    buttons, legacy shadcn controls) use Tailwind's `pointer-coarse:` variant
+    (`pointer-coarse:min-h-11`).
 - Measured on real pages by axe (`target-size`) in `tests/a11y.spec.ts`.
 
 ### 5. Colour and contrast (1.4.1, 1.4.3, 1.4.11)
@@ -277,13 +275,20 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 
 ### 14. Dialogs, menus and popovers (1.4.13, 2.1.2, 2.4.3, 4.1.2)
 
-- Use Astryx `Dialog` (or Radix for legacy screens): focus is trapped inside,
-  Esc closes (except `purpose="required"`), focus returns to the trigger, and
-  the visible title is the dialog's name.
-- Let the dialog place initial focus (Astryx: the title; Radix: the first
-  focusable element). No `autoFocus`.
-- Menus that select something use radio or checkbox items so the state is
-  announced (see `ThemeSwitcher`).
+- Every dialog is an Astryx `Dialog`, a native modal `<dialog>`: the browser
+  makes the rest of the page inert, Esc closes (except `purpose="required"`),
+  focus returns to the trigger, and the visible title is the dialog's name.
+  The legacy shadcn `Dialog` and `AlertDialog` in `src/components/ui` keep
+  their API but render Astryx Dialog, and return focus to the menu button
+  when a menu item opened them; the legacy Radix popups inside them (Select,
+  DropdownMenu, Popover, Tooltip) portal into the dialog. Toasts shown while
+  any modal is open appear inside it, so they stay visible and announced.
+- Let the dialog place initial focus: the title (alert dialogs: Cancel). No
+  `autoFocus`; it runs before `showModal()` and does nothing.
+- Menus are non-modal, the legacy shadcn `DropdownMenu` included (a modal
+  Radix menu hides the page with `aria-hidden`, which strips Astryx buttons of
+  their names). Menus that select something use radio or checkbox items so
+  the state is announced (see `ThemeSwitcher`).
 - Tooltips only repeat or supplement; essential information is never only in
   a tooltip. Hover and focus content can be dismissed with Esc and hovered.
 

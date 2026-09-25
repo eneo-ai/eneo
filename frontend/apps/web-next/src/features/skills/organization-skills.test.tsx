@@ -70,6 +70,9 @@ describe("organisation skill catalogue", () => {
   it("sends search terms as a query and requests the removed view separately", async () => {
     show("list");
     await screen.findByText("Search reports");
+    // A tab of the organization space, whose header holds the page's h1.
+    expect(screen.getByRole("heading", { level: 2, name: "skills" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Reports" } });
     fireEvent.submit(screen.getByRole("search"));
     expect(push).toHaveBeenCalledWith("/spaces/organization/skills?search=Reports");
