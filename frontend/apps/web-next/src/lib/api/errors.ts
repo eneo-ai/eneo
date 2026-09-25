@@ -17,6 +17,8 @@ export class EneoApiError extends Error {
   readonly status: number;
   /** Backend error code (`eneo_error_code`, see backend ErrorCodes enum). */
   readonly code?: number;
+  /** Specific backend failure identifier (`code` on GeneralError). */
+  readonly reason?: string;
   /** Trace id of the failing request, for correlation with backend logs. */
   readonly traceId?: string;
   /** Structured error payload (`details` on GeneralError), when present. */
@@ -24,12 +26,13 @@ export class EneoApiError extends Error {
 
   constructor(
     message: string,
-    options: { status: number; code?: number; traceId?: string; details?: unknown }
+    options: { status: number; code?: number; reason?: string; traceId?: string; details?: unknown }
   ) {
     super(message);
     this.name = "EneoApiError";
     this.status = options.status;
     this.code = options.code;
+    this.reason = options.reason;
     this.traceId = options.traceId;
     this.details = options.details;
   }
@@ -50,13 +53,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  *  2. HTTPException: `{ detail: string }` or `{ detail: { message?, code? } }`
  *  3. FastAPI validation (422): `{ detail: [{ loc, msg, type }, ...] }`
  */
-function parseErrorBody(body: unknown): { message?: string; code?: number; details?: unknown } {
+function parseErrorBody(body: unknown): {
+  message?: string;
+  code?: number;
+  reason?: string;
+  details?: unknown;
+} {
   if (!isRecord(body)) return {};
 
   if (typeof body.message === "string") {
     return {
       message: body.message,
       code: typeof body.eneo_error_code === "number" ? body.eneo_error_code : undefined,
+      reason: typeof body.code === "string" ? body.code : undefined,
       details: body.details ?? undefined
     };
   }
@@ -92,10 +101,11 @@ export async function errorCodeFromResponse(response: Response): Promise<number 
 }
 
 export function apiErrorFromResponse(response: Response, body: unknown): EneoApiError {
-  const { message, code, details } = parseErrorBody(body);
+  const { message, code, reason, details } = parseErrorBody(body);
   return new EneoApiError(message ?? `Request failed with status ${response.status}`, {
     status: response.status,
     code,
+    reason,
     traceId: extractTraceId(response.headers),
     details
   });

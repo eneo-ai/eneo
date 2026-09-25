@@ -16,12 +16,14 @@ describe("apiErrorFromResponse", () => {
     const error = apiErrorFromResponse(errorResponse(403, { "x-trace-id": "abc123" }), {
       message: "Quota exceeded",
       eneo_error_code: 9008,
+      code: "quota_exceeded",
       details: { quota: 100 }
     });
 
     expect(error).toBeInstanceOf(EneoApiError);
     expect(error.status).toBe(403);
     expect(error.code).toBe(9008);
+    expect(error.reason).toBe("quota_exceeded");
     expect(error.message).toBe("Quota exceeded");
     expect(error.traceId).toBe("abc123");
     expect(error.details).toEqual({ quota: 100 });

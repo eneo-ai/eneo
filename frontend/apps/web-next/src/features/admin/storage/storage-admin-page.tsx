@@ -3,7 +3,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Database, HardDrive, Info, RefreshCw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
@@ -16,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { ByteLimitField } from "./byte-limit-field";
+import { StorageConnectionSection } from "./storage-connection-section";
 import { StorageContent } from "./storage-content";
 import {
   classifyPolicyRefresh,
@@ -99,6 +101,7 @@ function StoragePolicyEditor({
   canEdit: boolean;
 }) {
   const t = useTranslations();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const locale = useLocale();
   const [baseline, setBaseline] = useState(initialPolicy);
@@ -112,6 +115,7 @@ function StoragePolicyEditor({
   const [authorityRevoked, setAuthorityRevoked] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [showTechnical, setShowTechnical] = useState(false);
+  const revokeAuthority = useCallback(() => setAuthorityRevoked(true), []);
 
   const canEdit = allowed && !authorityRevoked;
   const dirty = isDirtyPolicyDraft(draft, baseline);
@@ -271,6 +275,16 @@ function StoragePolicyEditor({
           onRefreshPolicy={reload}
         />
       )}
+
+      <StorageConnectionSection
+        capability={objectStoreCapability}
+        canEdit={canEdit}
+        onAuthorityRevoked={revokeAuthority}
+        onConnectionChanged={async () => {
+          await reload(dirty);
+          router.refresh();
+        }}
+      />
 
       {(stale || loadError || targetUnavailable || saveOutcomeUnknown) && (
         <Alert variant="destructive" role="alert" aria-live="assertive">
