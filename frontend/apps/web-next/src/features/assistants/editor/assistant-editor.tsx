@@ -3,6 +3,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   BookOpen,
+  BookOpenCheck,
   ChevronLeft,
   KeyRound,
   type LucideIcon,
@@ -24,6 +25,7 @@ import { browserApi } from "@/lib/api/browser";
 import { cn } from "@/lib/utils";
 import { ResourceApiKeysSection } from "@/features/api-keys/resource-api-keys-section";
 import { useSpace } from "@/features/spaces/use-space";
+import { SkillBindingsSection } from "@/features/skills/skill-bindings-section";
 import { chatPartnerHref } from "../assistants";
 import { AiSection } from "./ai-section";
 import { GeneralSection } from "./general-section";
@@ -33,7 +35,7 @@ import { KnowledgeSection } from "./knowledge-section";
 import { McpSection } from "./mcp-section";
 import { PublishingSection } from "./publishing-section";
 import { SecuritySection } from "./security-section";
-import { assistantQueryOptions, type Assistant } from "./use-assistant";
+import { assistantQueryOptions, type Assistant, useUpdateAssistant } from "./use-assistant";
 
 /** Highlights the section currently in view as the user scrolls. */
 function useActiveSection(ids: string[]) {
@@ -69,8 +71,9 @@ function useActiveSection(ids: string[]) {
  */
 export function AssistantEditor({ assistantId }: { assistantId: string }) {
   const t = useTranslations();
-  const { space, routeId } = useSpace();
+  const { space, routeId, can } = useSpace();
   const { data: assistant } = useSuspenseQuery(assistantQueryOptions(browserApi, assistantId));
+  const update = useUpdateAssistant(assistantId);
 
   const chatHref = chatPartnerHref(routeId, { ...assistant, type: "assistant" as const });
 
@@ -98,6 +101,23 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
       icon: BookOpen,
       node: <KnowledgeSection assistant={assistant} />
     },
+    ...(can("read", "skill") && (!space.personal || space.default_assistant?.id !== assistant.id)
+      ? [
+          {
+            id: "skills",
+            label: t("skills"),
+            icon: BookOpenCheck,
+            node: (
+              <SkillBindingsSection
+                resource="assistant"
+                resourceId={assistant.id}
+                canEdit={permissions.includes("edit")}
+                save={(bindings) => update.mutateAsync({ skill_bindings: bindings })}
+              />
+            )
+          }
+        ]
+      : []),
     ...(hasMcp
       ? [
           {

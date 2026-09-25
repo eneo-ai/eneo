@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
 import { ResourceApiKeysSection } from "@/features/api-keys/resource-api-keys-section";
 import { useSpace } from "@/features/spaces/use-space";
+import { SkillBindingsSection } from "@/features/skills/skill-bindings-section";
 import { appQueryOptions } from "../apps";
 import { AttachmentsSection } from "./attachments-section";
 import { AiSection } from "./ai-section";
@@ -18,12 +19,14 @@ import { InputSection } from "./input-section";
 import { InstructionsSection } from "./instructions-section";
 import { PublishingSection } from "./publishing-section";
 import { SecuritySection } from "./security-section";
+import { useUpdateApp } from "./use-app";
 
 /** App settings, saved per section (web-next pattern). */
 export function AppEditor({ appId }: { appId: string }) {
   const t = useTranslations();
-  const { routeId } = useSpace();
+  const { routeId, can } = useSpace();
   const { data: app } = useSuspenseQuery(appQueryOptions(browserApi, appId));
+  const update = useUpdateApp(appId);
 
   return (
     <SaveStatusProvider>
@@ -46,6 +49,14 @@ export function AppEditor({ appId }: { appId: string }) {
         <GeneralSection app={app} />
         <InputSection app={app} />
         <InstructionsSection app={app} />
+        {can("read", "skill") && (
+          <SkillBindingsSection
+            resource="app"
+            resourceId={app.id}
+            canEdit={app.permissions?.includes("edit") ?? false}
+            save={(bindings) => update.mutateAsync({ skill_bindings: bindings })}
+          />
+        )}
         <AttachmentsSection app={app} />
         <AiSection app={app} />
         <SecuritySection app={app} />
