@@ -98,6 +98,8 @@ class TestCategoryMappings:
             ActionType.SPACE_OVERSIGHT_MEMBER_ADDED,
             ActionType.SPACE_OVERSIGHT_MEMBER_ROLE_CHANGED,
             ActionType.SPACE_OVERSIGHT_MEMBER_REMOVED,
+            ActionType.USER_GROUP_MEMBER_ADDED,
+            ActionType.USER_GROUP_MEMBER_REMOVED,
         ]
 
         for action_type in admin_action_types:

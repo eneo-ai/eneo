@@ -1,10 +1,13 @@
 """Mandatory audit actions: always logged, written in the caller's
 transaction, and locked in the tenant's audit configuration."""
 
+from collections.abc import Iterator
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from fastapi.dependencies.models import Dependant
 
 from eneo.audit.application.audit_config_service import AuditConfigService
 from eneo.audit.application.audit_service import AuditService
@@ -14,18 +17,22 @@ from eneo.audit.domain.category_mappings import CATEGORY_MAPPINGS
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.mandatory_actions import MANDATORY_AUDIT_ACTIONS
 from eneo.audit.schemas.audit_config_schemas import ActionUpdate
+from eneo.database.database import get_session_with_transaction
 from eneo.main.exceptions import BadRequestException
+from tests.unit.api_key_test_utils import runtime_router_routes
 
 MANDATORY = sorted(MANDATORY_AUDIT_ACTIONS, key=lambda action: action.value)
 
 
-def test_the_mandatory_set_is_the_oversight_and_widget_publishing_actions():
+def test_the_mandatory_set_is_oversight_group_membership_and_widget_publishing():
     assert MANDATORY_AUDIT_ACTIONS == {
         ActionType.SPACE_OVERSIGHT_JOINED,
         ActionType.SPACE_OVERSIGHT_LEFT,
         ActionType.SPACE_OVERSIGHT_MEMBER_ADDED,
         ActionType.SPACE_OVERSIGHT_MEMBER_ROLE_CHANGED,
         ActionType.SPACE_OVERSIGHT_MEMBER_REMOVED,
+        ActionType.USER_GROUP_MEMBER_ADDED,
+        ActionType.USER_GROUP_MEMBER_REMOVED,
         ActionType.WIDGET_ACTIVATION_REQUEST_DECLINED,
         ActionType.WIDGET_ACTIVATED,
         ActionType.WIDGET_PAUSED,
@@ -247,3 +254,45 @@ async def test_turning_a_mandatory_action_on_is_harmless(
     )
 
     config_repository.update.assert_awaited_once()
+
+
+# Routes that write a mandatory entry: the change and its entry commit
+# together, before the response says it was made.
+MANDATORY_AUDIT_ROUTES = [
+    ("POST", "/admin/spaces/{space_id}/members/"),
+    ("PATCH", "/admin/spaces/{space_id}/members/{user_id}/"),
+    ("DELETE", "/admin/spaces/{space_id}/members/{user_id}/"),
+    ("POST", "/admin/spaces/{space_id}/group-members/"),
+    ("PATCH", "/admin/spaces/{space_id}/group-members/{group_id}/"),
+    ("DELETE", "/admin/spaces/{space_id}/group-members/{group_id}/"),
+    ("POST", "/admin/spaces/{space_id}/join/"),
+    ("POST", "/admin/spaces/{space_id}/leave/"),
+    ("POST", "/user-groups/{id}/"),
+    ("POST", "/user-groups/{id}/users/{user_id}/"),
+    ("DELETE", "/user-groups/{id}/users/{user_id}/"),
+    ("POST", "/widgets/{id}/activation-request/decline/"),
+    ("POST", "/widgets/{id}/activate/"),
+    ("POST", "/widgets/{id}/pause/"),
+    ("POST", "/widgets/{id}/archive/"),
+]
+
+
+def _walk_dependencies(dependant: Dependant) -> Iterator[Dependant]:
+    yield dependant
+    for child in dependant.dependencies:
+        yield from _walk_dependencies(child)
+
+
+@pytest.mark.parametrize(("method", "path"), MANDATORY_AUDIT_ROUTES)
+def test_mandatory_audit_routes_commit_before_the_response(method: str, path: str):
+    (route,) = [
+        route
+        for route in runtime_router_routes()
+        if route.path == path and method in (route.methods or set())
+    ]
+    transactions = [
+        dependency
+        for dependency in _walk_dependencies(cast(Dependant, route.dependant))
+        if dependency.call is get_session_with_transaction
+    ]
+    assert [dependency.scope for dependency in transactions] == ["function"]

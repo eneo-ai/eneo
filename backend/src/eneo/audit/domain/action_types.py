@@ -187,3 +187,7 @@ class ActionType(str, Enum):
     SPACE_OVERSIGHT_MEMBER_ADDED = "space_oversight_member_added"
     SPACE_OVERSIGHT_MEMBER_ROLE_CHANGED = "space_oversight_member_role_changed"
     SPACE_OVERSIGHT_MEMBER_REMOVED = "space_oversight_member_removed"
+
+    # User group membership: a group's role in a space reaches its content
+    USER_GROUP_MEMBER_ADDED = "user_group_member_added"
+    USER_GROUP_MEMBER_REMOVED = "user_group_member_removed"

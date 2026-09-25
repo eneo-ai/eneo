@@ -1411,7 +1411,10 @@ class Container(containers.DeclarativeContainer):
         space_repo=space_repo,
     )
     user_group_service = providers.Factory(
-        UserGroupsService, user=user, repo=user_groups_repo
+        UserGroupsService,
+        user=user,
+        repo=user_groups_repo,
+        audit_service=audit_service,
     )
     user_service = providers.Factory(
         UserService,

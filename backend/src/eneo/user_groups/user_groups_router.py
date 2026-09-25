@@ -17,6 +17,12 @@ from eneo.user_groups.user_group import (
 
 router = APIRouter()
 
+# Membership changes write a mandatory audit entry in their transaction; it
+# commits before the response, so the change and its entry go together.
+_MembershipContainer = Annotated[
+    Container, Depends(get_container(with_user=True, transaction_scope="function"))
+]
+
 
 @router.get(
     "/",
@@ -64,13 +70,16 @@ async def create_user_group(
 @router.post(
     "/{id}/",
     response_model=UserGroupPublic,
-    description="Update an existing user group by id.",
+    description=(
+        "Update an existing user group by id. Every user added to or removed"
+        " from the group is always recorded in the audit log."
+    ),
     responses=responses.get_responses([400, 401, 403, 404]),
 )
 async def update_user_group(
     id: UUID,
     user_group: UserGroupUpdateRequest,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: _MembershipContainer,
 ):
     service = container.user_group_service()
     return await service.update_user_group(
@@ -95,13 +104,16 @@ async def delete_user_group_by_uuid(
 @router.post(
     "/{id}/users/{user_id}/",
     response_model=UserGroupPublic,
-    description="Add a user to a user group.",
+    description=(
+        "Add a user to a user group. The user gets the group's role in every"
+        " space the group belongs to. Always recorded in the audit log."
+    ),
     responses=responses.get_responses([401, 403, 404]),
 )
 async def add_user_to_user_group(
     id: UUID,
     user_id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: _MembershipContainer,
 ):
     service = container.user_group_service()
     return await service.add_user(user_group_uuid=id, user_id=user_id)
@@ -110,13 +122,13 @@ async def add_user_to_user_group(
 @router.delete(
     "/{id}/users/{user_id}/",
     response_model=UserGroupPublic,
-    description="Remove a user from a user group.",
+    description=("Remove a user from a user group. Always recorded in the audit log."),
     responses=responses.get_responses([403, 404]),
 )
 async def delete_user_from_user_group(
     id: UUID,
     user_id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: _MembershipContainer,
 ):
     service = container.user_group_service()
     return await service.remove_user(user_group_uuid=id, user_id=user_id)

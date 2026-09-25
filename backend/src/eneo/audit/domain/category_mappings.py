@@ -49,6 +49,8 @@ CATEGORY_MAPPINGS = {
     ActionType.SPACE_OVERSIGHT_MEMBER_ADDED.value: "admin_actions",
     ActionType.SPACE_OVERSIGHT_MEMBER_ROLE_CHANGED.value: "admin_actions",
     ActionType.SPACE_OVERSIGHT_MEMBER_REMOVED.value: "admin_actions",
+    ActionType.USER_GROUP_MEMBER_ADDED.value: "admin_actions",
+    ActionType.USER_GROUP_MEMBER_REMOVED.value: "admin_actions",
     ActionType.CREDENTIALS_UPDATED.value: "admin_actions",
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",

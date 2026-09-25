@@ -12,6 +12,7 @@ from eneo.database.repositories.base import (
     BaseRepositoryDelegate,
     RelationshipOption,
 )
+from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import Users
@@ -33,6 +34,7 @@ class UserGroupsRepository:
 
     def __init__(self, session: AsyncSession):
         super().__init__()
+        self.session = session
         self.delegate: BaseRepositoryDelegate[UserGroupInDB] = BaseRepositoryDelegate(
             session,
             UserGroups,
@@ -86,6 +88,21 @@ class UserGroupsRepository:
 
         except IntegrityError as e:
             raise UniqueException(self.UNIQUE_EXCEPTION_MSG) from e
+
+    async def space_roles(
+        self, group_id: UUID, tenant_id: UUID
+    ) -> list[tuple[UUID, str, str]]:
+        """(id, name, role) of every space where the group holds a role."""
+        stmt = (
+            sa.select(Spaces.id, Spaces.name, SpacesUserGroups.role)
+            .join(SpacesUserGroups, SpacesUserGroups.space_id == Spaces.id)
+            .where(
+                SpacesUserGroups.user_group_id == group_id,
+                Spaces.tenant_id == tenant_id,
+            )
+            .order_by(sa.func.lower(Spaces.name), Spaces.id)
+        )
+        return list((await self.session.execute(stmt)).tuples())
 
     async def delete_user_group(self, id: UUID) -> UserGroupInDB | None:
         return await self.delegate.delete(id)
