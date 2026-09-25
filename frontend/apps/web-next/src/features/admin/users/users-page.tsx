@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
+import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -147,7 +148,7 @@ export function AdminUsersPage() {
 
       <div className={cn(isPlaceholderData && "opacity-60 transition-opacity")}>
         {isPending ? (
-          <EmptyState title={t("loading")} />
+          <LoadingState rows={5} />
         ) : users.length === 0 ? (
           <EmptyState title={t("no_users_found")} />
         ) : (

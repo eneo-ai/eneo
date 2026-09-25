@@ -1,14 +1,18 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono, Source_Serif_4 } from "next/font/google";
+import { Figtree, JetBrains_Mono, Source_Serif_4 } from "next/font/google";
+import { headers } from "next/headers";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { ThemeProvider } from "next-themes";
 import { Providers } from "@/components/providers";
 import { Toaster } from "@/components/ui/sonner";
+import { eneoTheme } from "@/theme/eneo";
 import "./globals.css";
 
-const inter = Inter({
-  variable: "--font-inter",
+// UI font. The Eneo Astryx theme reads it through --font-figtree
+// (src/theme/eneo-theme.ts), and Tailwind's font-sans follows the theme.
+const figtree = Figtree({
+  variable: "--font-figtree",
   subsets: ["latin"]
 });
 
@@ -40,20 +44,30 @@ export default async function RootLayout({
 }>) {
   const locale = await getLocale();
   const messages = await getMessages();
+  // Per-request CSP nonce from src/proxy.ts. next-themes needs it for its
+  // blocking colour-mode script (and its transition-suppressing <style>), which
+  // the nonce-only CSP would otherwise block.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
 
   return (
     <html
       lang={locale}
-      className={`${inter.variable} ${jetbrainsMono.variable} ${sourceSerif.variable} antialiased`}
+      // The Astryx theme scope, server-rendered so tokens exist on <html> (and
+      // in portals) from first paint; the root <Theme> keeps it in sync.
+      data-astryx-theme={eneoTheme.name}
+      className={`${figtree.variable} ${jetbrainsMono.variable} ${sourceSerif.variable} antialiased`}
       suppressHydrationWarning
     >
       <body className="min-h-svh">
         <NextIntlClientProvider messages={messages}>
+          {/* .light/.dark drive the legacy `dark:` variant and color-scheme
+              (globals.css); data-theme is the attribute Astryx reads. */}
           <ThemeProvider
-            attribute="class"
+            attribute={["class", "data-theme"]}
             defaultTheme="system"
             enableSystem
             disableTransitionOnChange
+            nonce={nonce}
           >
             <Providers>{children}</Providers>
             <Toaster />

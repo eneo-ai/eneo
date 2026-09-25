@@ -1,16 +1,85 @@
+import { BreadcrumbItem, Breadcrumbs } from "@astryxdesign/core/Breadcrumbs";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Text } from "@astryxdesign/core/Text";
+import { cn } from "@/lib/utils";
+
+export type PageHeaderCrumb = {
+  label: string;
+  /** Link target. Omit only for a trailing current-page crumb (plain text). */
+  href?: string;
+};
+
+export type PageHeaderProps = {
+  /** The page's h1. */
+  title: string;
+  /** One-line summary under the title. */
+  description?: string;
+  /**
+   * Ancestor trail above the title, root first. Crumbs with `href` are links;
+   * a trailing crumb without one is marked as the current page. Skip on
+   * top-level pages.
+   */
+  breadcrumbs?: readonly PageHeaderCrumb[];
+  /** Page-level actions (buttons, save status), right-aligned; wraps on narrow screens. */
+  actions?: React.ReactNode;
+  /** Legacy actions slot — same as `actions`, which wins when both are set. */
+  children?: React.ReactNode;
+  /** `data-tour` anchor for the guided tour. */
+  tour?: string;
+  className?: string;
+};
+
+/**
+ * Page title block: optional breadcrumbs, h1, optional description and an
+ * actions slot. Server-component safe (Astryx parts are client components).
+ *
+ * @example
+ * <PageHeader
+ *   title={membersTitle}
+ *   breadcrumbs={[{ label: spacesLabel, href: "/spaces" }, { label: space.name, href: spaceHref }]}
+ *   description={membersIntro}
+ *   actions={<AddMemberDialog />}
+ * />
+ */
 export function PageHeader({
   title,
+  description,
+  breadcrumbs,
+  actions,
+  children,
   tour,
-  children
-}: {
-  title: string;
-  tour?: string;
-  children?: React.ReactNode;
-}) {
+  className
+}: PageHeaderProps) {
+  const actionSlot = actions ?? children;
+
   return (
-    <div data-tour={tour} className="flex min-h-9 items-center justify-between gap-4">
-      <h1 className="text-2xl font-semibold">{title}</h1>
-      {children ? <div className="flex items-center gap-2">{children}</div> : null}
+    <div data-tour={tour} className={cn("flex flex-col gap-2", className)}>
+      {breadcrumbs && breadcrumbs.length > 0 ? (
+        <Breadcrumbs variant="supporting">
+          {breadcrumbs.map((crumb, index) => (
+            <BreadcrumbItem
+              key={`${index}-${crumb.href ?? crumb.label}`}
+              href={crumb.href}
+              isCurrent={!crumb.href}
+            >
+              {crumb.label}
+            </BreadcrumbItem>
+          ))}
+        </Breadcrumbs>
+      ) : null}
+      <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-0 flex-col gap-1">
+          <Heading level={1} className="break-words">
+            {title}
+          </Heading>
+          {description ? (
+            <Text as="p" type="body" color="secondary">
+              {description}
+            </Text>
+          ) : null}
+        </div>
+        {actionSlot ? <div className="flex flex-wrap items-center gap-2">{actionSlot}</div> : null}
+      </div>
     </div>
   );
 }

@@ -12,8 +12,9 @@ bun run dev      # next dev -p 3100
 bun run dev:clean # clear .next/node cache, then start next dev -p 3100
 bun run build    # production build
 bun run check    # tsc --noEmit
-bun run lint     # prettier --check + eslint
+bun run lint     # i18n + theme staleness + prettier --check + eslint
 bun run test     # vitest run
+bun run theme:build # compile src/theme/eneo-theme.ts after editing it
 ```
 
 ## Environment
@@ -62,18 +63,18 @@ Two login modes (see `docs/migration/02-auth-oidc.md`):
 
 ## UI components
 
-shadcn/ui (new-york style, zinc base, CSS variables) installed into
-`src/components/ui` via the CLI:
+New UI is built with [Astryx](https://github.com/facebook/astryx)
+(`@astryxdesign/core`) and the Eneo theme (`src/theme/eneo-theme.ts`, compiled
+to static CSS with `bun run theme:build`). **Read [AGENTS.md](AGENTS.md) before
+building UI**: it covers the offline component docs (`bunx astryx component
+<Name>`), tokens and the `ax-*` Tailwind bridge, the shared composites, and the
+CSP and i18n rules.
 
-```bash
-bunx shadcn@latest add <component>
-```
-
-The theme uses shadcn's semantic token contract (`background`, `primary`,
-`muted`, `sidebar`, chart tokens, etc.) but the token values are an intentional
-Eneo palette, not stock shadcn. The implemented palette and its rationale are
-documented at the top of `src/app/globals.css`; keep all feature styling on
-semantic tokens instead of hard-coded colors.
+The shadcn/ui components in `src/components/ui` are legacy: don't add new ones,
+and replace them as screens migrate. Their semantic variables (`--background`,
+`--primary`, `--muted`, …) are mapped onto the Eneo tokens in
+`src/app/globals.css`, so keep all feature styling on tokens instead of
+hard-coded colours.
 
 ## i18n
 

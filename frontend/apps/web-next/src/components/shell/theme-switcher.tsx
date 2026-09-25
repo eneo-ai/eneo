@@ -10,11 +10,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
+import { useHydrated } from "@/lib/hooks/use-hydrated";
 
 export function ThemeSwitcher() {
   const t = useTranslations();
   const { resolvedTheme, setTheme } = useTheme();
-  const ThemeIcon = resolvedTheme === "dark" ? Moon : Sun;
+  // resolvedTheme is only known on the client; render the server's icon until
+  // hydrated so the trigger never mismatches.
+  const hydrated = useHydrated();
+  const ThemeIcon = hydrated && resolvedTheme === "dark" ? Moon : Sun;
 
   return (
     <DropdownMenu>

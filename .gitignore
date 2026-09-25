@@ -66,6 +66,8 @@ specs/
 AGENTS.md
 # Shared documentation placement rules; other agent files stay local.
 !/AGENTS.md
+# Shared UI rules for web-next (Astryx, tokens, CSP, i18n), linked from its README.
+!/frontend/apps/web-next/AGENTS.md
 
 # ── GSD baseline (auto-generated) ──
 .gsd
