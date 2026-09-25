@@ -224,6 +224,7 @@
     "unrs-resolver",
   ],
   "patchedDependencies": {
+    "sonner@2.0.8": "patches/sonner@2.0.8.patch",
     "nextra-theme-docs@4.6.1": "patches/nextra-theme-docs@4.6.1.patch",
   },
   "overrides": {

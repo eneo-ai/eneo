@@ -9,6 +9,10 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
+// Sonner's styles ship as a same-origin stylesheet (allowed by style-src 'self').
+// Its runtime <style> injection carries no CSP nonce, so it is patched out in
+// frontend/patches/sonner@*.patch.
+import "sonner/dist/styles.css";
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme();
