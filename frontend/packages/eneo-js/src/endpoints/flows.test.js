@@ -72,6 +72,23 @@ describe("flows templates endpoint", () => {
     ]);
   });
 
+  it("names the recording in the ticket request, so a clean session's text is kept", async () => {
+    const fetch = vi.fn(async () => ({ ticket: "ticket-1" }));
+    const flows = initFlows({ fetch });
+
+    await flows.liveTranscription.createSession({
+      id: "flow-1",
+      stepId: "step-1",
+      recordingId: "recording_123"
+    });
+
+    expect(fetch.mock.calls[0][1]).toEqual({
+      method: "post",
+      params: { path: { id: "flow-1", step_id: "step-1" } },
+      requestBody: { "application/json": { recording_id: "recording_123" } }
+    });
+  });
+
   it("loads the published runtime projection from the canonical route", async () => {
     const fetch = vi.fn(async () => ({
       id: "flow-1",
