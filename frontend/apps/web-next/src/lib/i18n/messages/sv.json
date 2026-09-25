@@ -4706,4 +4706,13 @@
   "skills_unavailable_binding_explanation": "Skillen kan inte läggas till på fler ställen, men den valda versionen gäller fortfarande här.",
   "skills_unknown_skill": "Okänd skill",
   "skills_use_latest_revision": "Använd senaste versionen"
+,
+  "governance_skills_heading": "Organisationens skills",
+  "governance_skills_scope_description": "Skills läggs till efter den personliga assistentens instruktioner. Kopplingar till assistenter och appar hanteras på respektive resurs.",
+  "governance_skills_section_description": "Välj vilka publicerade skillversioner som ska gälla i alla användares Personlig chatt.",
+  "governance_skills_summary_count": "{count} valda",
+  "governance_skills_summary_none": "Inga valda",
+  "skills_activation_runtime_policy_selective": "Läget Vid behov kan väljas för Personlig chatt. Modellen som används för meddelandet avgör om en skill kan aktiveras. Modeller utan stöd för verktygsanrop använder bara skills med läget Alltid.",
+  "skills_activation_runtime_policy_validation_hint": "Tokenutrymme och MCP-konfiguration kontrolleras när du sparar.",
+  "skills_binding_personal_chat_draft_description": "Välj vilka skills som alltid ska ingå i Personlig chatt och vilka som bara läses in vid behov. När du sparar gäller ändringarna alla användares nya meddelanden."
 }

@@ -4706,4 +4706,13 @@
   "skills_unavailable_binding_explanation": "This Skill cannot be added elsewhere, but the selected version still applies here.",
   "skills_unknown_skill": "Unknown Skill",
   "skills_use_latest_revision": "Use latest version"
+,
+  "governance_skills_heading": "Organisation Skills",
+  "governance_skills_scope_description": "Skills are added after the personal assistant's instructions. Assistant and App attachments are managed on those resources.",
+  "governance_skills_section_description": "Choose published Skill versions for every user's personal chat.",
+  "governance_skills_summary_count": "{count} selected",
+  "governance_skills_summary_none": "None selected",
+  "skills_activation_runtime_policy_selective": "On demand can be selected for Personal Chat. The model used for each message determines whether a Skill can activate; models without tool calling use only Skills set to Always.",
+  "skills_activation_runtime_policy_validation_hint": "Token allowance and MCP configuration are checked when you save.",
+  "skills_binding_personal_chat_draft_description": "Choose which Skills are always available in Personal Chat and which load only when needed. Changes apply to every user's new messages when you save."
 }

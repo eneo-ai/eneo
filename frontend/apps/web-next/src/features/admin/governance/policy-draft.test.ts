@@ -4,6 +4,7 @@ import {
   type CompletionModel,
   type McpServer,
   availableServers,
+  buildConfirmations,
   buildUpdate,
   canSave,
   defaultModelId,
@@ -16,7 +17,9 @@ import {
   promptDirty,
   seedEditable,
   selectableServerIdSet,
-  selectableToolIdSet
+  selectableToolIdSet,
+  skillsDirty,
+  skillsValid
 } from "./policy-draft";
 import { EMPTY_POLICY } from "./policy-draft";
 
@@ -156,5 +159,59 @@ describe("reducer + derived", () => {
 
     expect(state.modelSelections.m1).toEqual({ selected: false, isDefault: false });
     expect(defaultModelId(state)).toBe(null);
+  });
+});
+
+describe("personal chat Skills", () => {
+  const saved = policy({
+    skills: {
+      bindings: [
+        {
+          skill_id: "skill",
+          skill_revision_id: "revision-1",
+          attachable_revision_id: "revision-2",
+          slug: "skill",
+          revision_number: 1,
+          attachable_revision_number: 2,
+          display_name: "Skill",
+          description: "Description",
+          content_digest: "digest",
+          position: 0,
+          is_active: true,
+          source: "organization",
+          execution_blocked: false,
+          activation_mode: "always"
+        }
+      ]
+    }
+  });
+
+  it("keeps the exact saved revision until the policy draft is changed", () => {
+    const state = seedEditable(saved, [], []);
+    expect(state.skillBindings).toEqual([
+      { skill_id: "skill", skill_revision_id: "revision-1", activation_mode: "always" }
+    ]);
+    expect(skillsDirty(state, saved)).toBe(false);
+    const revised = draftReducer(state, {
+      type: "setSkillBindings",
+      bindings: [{ skill_id: "skill", skill_revision_id: "revision-2", activation_mode: "always" }]
+    });
+    expect(skillsDirty(revised, saved)).toBe(true);
+    expect(
+      buildUpdate(revised, { models: false, mcp: false, prompt: false, skills: true }, [])
+    ).toEqual({ skills: { bindings: revised.skillBindings } });
+    expect(buildConfirmations(revised, saved, 0)).toContain("governance_confirm_skills_changed");
+  });
+
+  it("rejects on-demand bindings while selective activation is disabled", () => {
+    const state = draftReducer(seedEditable(saved, [], []), {
+      type: "setSkillBindings",
+      bindings: [
+        { skill_id: "skill", skill_revision_id: "revision-1", activation_mode: "on_demand" }
+      ]
+    });
+    expect(skillsValid(state, false)).toBe(false);
+    expect(canSave(state, true, new Set(), false)).toBe(false);
+    expect(skillsValid(state, true)).toBe(true);
   });
 });

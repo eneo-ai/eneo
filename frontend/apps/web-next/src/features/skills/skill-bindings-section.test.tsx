@@ -10,7 +10,7 @@ vi.mock("@/features/spaces/use-space", () => ({
 }));
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
 
-import { SkillBindingsSection } from "./skill-bindings-section";
+import { SkillBindingsEditor, SkillBindingsSection } from "./skill-bindings-section";
 
 const ok = (data: unknown) =>
   Promise.resolve({ data, response: new Response("{}", { status: 200 }) });
@@ -23,11 +23,12 @@ const summary = (id: string, position: number) => ({
   display_name: `Skill ${id}`,
   description: `Description ${id}`,
   slug: id,
-  source: "space",
+  source: "space" as const,
   position,
   is_active: true,
   execution_blocked: false,
-  activation_mode: "always"
+  activation_mode: "always" as const,
+  content_digest: "digest"
 });
 
 beforeEach(() => get.mockReset());
@@ -148,5 +149,33 @@ describe("resource Skill bindings", () => {
     expect(
       screen.getByRole("button", { name: "skills_bindings_save" }).hasAttribute("disabled")
     ).toBe(false);
+  });
+
+  it("edits Personal Chat bindings inside the policy draft without saving separately", async () => {
+    const onChange = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <SkillBindingsEditor
+          resource="personal_chat"
+          spaceId="organization"
+          organizationSpace
+          canEdit
+          canCreate={false}
+          bindings={[{ skill_id: "a", skill_revision_id: "revision-a", activation_mode: "always" }]}
+          summaries={[summary("a", 0)]}
+          onChange={onChange}
+          selectiveActivationEnabled
+        />
+      </QueryClientProvider>
+    );
+    fireEvent.change(screen.getByLabelText("skills_activation_mode_label"), {
+      target: { value: "on_demand" }
+    });
+    expect(onChange).toHaveBeenCalledWith([
+      { skill_id: "a", skill_revision_id: "revision-a", activation_mode: "on_demand" }
+    ]);
+    expect(screen.queryByRole("button", { name: "skills_bindings_save" })).toBeNull();
+    expect(get).not.toHaveBeenCalled();
   });
 });

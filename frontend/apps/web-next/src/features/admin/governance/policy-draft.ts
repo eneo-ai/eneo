@@ -9,6 +9,7 @@
  */
 import type { GovernancePolicy, GovernancePolicyUpdate } from "./governance";
 import { disabledToolIdsForSelectedServers } from "./mcp-policy";
+import { bindingsFromSummaries, type Binding } from "@/features/skills/skill-bindings";
 
 export type CompletionModel = {
   id: string;
@@ -49,6 +50,7 @@ export type EditableState = {
   disabledMcpToolIds: string[];
   promptEnabled: boolean;
   selectedPromptId: string | null;
+  skillBindings: Binding[];
 };
 
 export type SelectedModel = { completion_model_id: string; is_default: boolean };
@@ -142,7 +144,8 @@ export function seedEditable(
       toolIds.has(id)
     ),
     promptEnabled: policy.prompt_enforcement.enabled,
-    selectedPromptId: policy.prompt_enforcement.prompt_library_id ?? null
+    selectedPromptId: policy.prompt_enforcement.prompt_library_id ?? null,
+    skillBindings: bindingsFromSummaries(policy.skills.bindings)
   };
 }
 
@@ -238,6 +241,20 @@ export function promptDirty(state: EditableState, policy: GovernancePolicy): boo
   );
 }
 
+export function skillsDirty(state: EditableState, policy: GovernancePolicy): boolean {
+  return (
+    JSON.stringify(state.skillBindings) !==
+    JSON.stringify(bindingsFromSummaries(policy.skills.bindings))
+  );
+}
+
+export function skillsValid(state: EditableState, selectiveActivationEnabled: boolean): boolean {
+  return (
+    selectiveActivationEnabled ||
+    state.skillBindings.every((binding) => binding.activation_mode !== "on_demand")
+  );
+}
+
 // ---- Validation ------------------------------------------------------------
 
 export function defaultValid(state: EditableState, effective: Set<string>): boolean {
@@ -249,19 +266,25 @@ export function mcpValid(state: EditableState): boolean {
   return !state.mcpEnabled || Object.keys(state.mcpSelections).length > 0;
 }
 
-export function canSave(state: EditableState, dirty: boolean, effective: Set<string>): boolean {
+export function canSave(
+  state: EditableState,
+  dirty: boolean,
+  effective: Set<string>,
+  selectiveActivationEnabled = true
+): boolean {
   return (
     dirty &&
     (!state.modelsEnabled || effective.size > 0) &&
     defaultValid(state, effective) &&
     mcpValid(state) &&
-    (!state.promptEnabled || state.selectedPromptId !== null)
+    (!state.promptEnabled || state.selectedPromptId !== null) &&
+    skillsValid(state, selectiveActivationEnabled)
   );
 }
 
 // ---- Save payload + confirmations ------------------------------------------
 
-export type DirtyFlags = { models: boolean; mcp: boolean; prompt: boolean };
+export type DirtyFlags = { models: boolean; mcp: boolean; prompt: boolean; skills?: boolean };
 
 export function buildUpdate(
   state: EditableState,
@@ -296,13 +319,15 @@ export function buildUpdate(
       prompt_library_id: state.promptEnabled ? state.selectedPromptId : null
     };
   }
+  if (flags.skills) update.skills = { bindings: state.skillBindings };
   return update;
 }
 
 export type ConfirmKey =
   | "governance_confirm_models_hidden"
   | "governance_confirm_mcp_disabled"
-  | "governance_confirm_prompt_forced";
+  | "governance_confirm_prompt_forced"
+  | "governance_confirm_skills_changed";
 
 export function buildConfirmations(
   state: EditableState,
@@ -328,6 +353,7 @@ export function buildConfirmations(
   if (state.promptEnabled && !policy.prompt_enforcement.enabled) {
     out.push("governance_confirm_prompt_forced");
   }
+  if (skillsDirty(state, policy)) out.push("governance_confirm_skills_changed");
   return out;
 }
 
@@ -344,7 +370,8 @@ export type DraftAction =
   | { type: "toggleMcpDefault"; id: string; on: boolean }
   | { type: "toggleMcpTool"; toolId: string; on: boolean }
   | { type: "setPromptEnabled"; on: boolean }
-  | { type: "setPrompt"; id: string | null };
+  | { type: "setPrompt"; id: string | null }
+  | { type: "setSkillBindings"; bindings: Binding[] };
 
 export function draftReducer(state: EditableState, action: DraftAction): EditableState {
   switch (action.type) {
@@ -453,6 +480,9 @@ export function draftReducer(state: EditableState, action: DraftAction): Editabl
 
     case "setPrompt":
       return { ...state, selectedPromptId: action.id };
+
+    case "setSkillBindings":
+      return { ...state, skillBindings: action.bindings };
 
     default:
       return state;

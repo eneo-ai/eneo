@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import type { Binding } from "@/features/skills/skill-bindings";
 import { GOVERNANCE_POLICY_KEY, type GovernancePolicy } from "./governance";
 import {
   activeProviders,
@@ -30,7 +31,9 @@ import {
   seedEditable,
   selectableModels,
   selectableServerIdSet,
-  selectableToolIdSet
+  selectableToolIdSet,
+  skillsDirty,
+  skillsValid as skillsValidOf
 } from "./policy-draft";
 
 export type BadgeVariant = "default" | "outline" | "destructive";
@@ -41,6 +44,7 @@ export type PolicyDraftInput = {
   providers: ModelProviderLite[];
   servers: McpServer[];
   prompts: PromptOption[];
+  selectiveActivationEnabled: boolean;
 };
 
 const badgeVariant = (enabled: boolean, valid: boolean): BadgeVariant =>
@@ -94,11 +98,13 @@ export function usePolicyDraft(input: PolicyDraftInput) {
     [state, policy, serverIds, toolIds]
   );
   const pDirty = useMemo(() => promptDirty(state, policy), [state, policy]);
-  const dirty = mDirty || cDirty || pDirty;
+  const sDirty = useMemo(() => skillsDirty(state, policy), [state, policy]);
+  const dirty = mDirty || cDirty || pDirty || sDirty;
 
   const defaultValid = defaultValidOf(state, effectiveModelIds);
   const mcpValid = mcpValidOf(state);
-  const canSave = canSaveOf(state, dirty, effectiveModelIds);
+  const skillsValid = skillsValidOf(state, input.selectiveActivationEnabled);
+  const canSave = canSaveOf(state, dirty, effectiveModelIds, input.selectiveActivationEnabled);
 
   // ---- Summaries -----------------------------------------------------------
   const modelsSummary = useMemo(() => {
@@ -134,6 +140,10 @@ export function usePolicyDraft(input: PolicyDraftInput) {
       t("governance_prompt_unknown");
     return t("governance_prompt_summary_selected", { name });
   }, [state.promptEnabled, state.selectedPromptId, prompts, t]);
+  const skillsSummary =
+    state.skillBindings.length === 0
+      ? t("governance_skills_summary_none")
+      : t("governance_skills_summary_count", { count: String(state.skillBindings.length) });
 
   const providerName = (pid: string | null): string =>
     pid === null
@@ -152,7 +162,11 @@ export function usePolicyDraft(input: PolicyDraftInput) {
     setSaveError(null);
     setSaveAnnouncement("");
     try {
-      const update = buildUpdate(state, { models: mDirty, mcp: cDirty, prompt: pDirty }, available);
+      const update = buildUpdate(
+        state,
+        { models: mDirty, mcp: cDirty, prompt: pDirty, skills: sDirty },
+        available
+      );
       await unwrap(browserApi.PUT("/api/v1/admin/governance-policy/", { body: update }));
       await queryClient.invalidateQueries({ queryKey: GOVERNANCE_POLICY_KEY });
       setPendingConfirm(null);
@@ -215,6 +229,11 @@ export function usePolicyDraft(input: PolicyDraftInput) {
     setSelectedPromptId: (id: string | null) => dispatch({ type: "setPrompt", id }),
     promptOptions: prompts,
     promptSummary,
+    // personal-chat Skills
+    skillBindings: state.skillBindings,
+    setSkillBindings: (bindings: Binding[]) => dispatch({ type: "setSkillBindings", bindings }),
+    skillsSummary,
+    skillsValid,
     // shared
     badgeVariant,
     providerName,

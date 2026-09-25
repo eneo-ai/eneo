@@ -2,6 +2,7 @@
 
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Plus, RefreshCw, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 import { SettingsGroup } from "@/components/composites/settings-rows";
@@ -44,11 +45,25 @@ import {
 import { SkillForm } from "./skill-form";
 import { skillQueryKey } from "./skill-revisions";
 
-type Props = {
+type ResourceProps = {
   resource: "assistant" | "app";
   resourceId: string;
   canEdit: boolean;
   save: (bindings: Binding[]) => Promise<unknown>;
+};
+
+type EditorProps = {
+  resource: "assistant" | "app" | "personal_chat";
+  resourceId?: string;
+  spaceId: string;
+  organizationSpace: boolean;
+  canEdit: boolean;
+  canCreate: boolean;
+  save?: (bindings: Binding[]) => Promise<unknown>;
+  bindings?: Binding[];
+  summaries?: BindingSummary[];
+  onChange?: (bindings: Binding[]) => void;
+  selectiveActivationEnabled?: boolean;
 };
 
 type Preview = Awaited<ReturnType<typeof getSkillPreview>>;
@@ -79,33 +94,62 @@ function runtimeMessage(
   }
 }
 
-/** The same ordered, version-pinned binding editor for assistants and apps. */
-export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Props) {
-  const t = useTranslations();
+/** Resource adapter: keeps space permissions and resource save ownership outside the editor. */
+export function SkillBindingsSection(props: ResourceProps) {
   const { space, can } = useSpace();
+  return (
+    <SkillBindingsEditor
+      {...props}
+      spaceId={space.id}
+      organizationSpace={space.organization}
+      canCreate={can("create", "skill") && !space.organization}
+    />
+  );
+}
+
+/** Shared ordered, version-pinned editor, also used by the Personal Chat policy draft. */
+export function SkillBindingsEditor({
+  resource,
+  resourceId = "",
+  spaceId,
+  organizationSpace,
+  canEdit,
+  canCreate,
+  save,
+  bindings,
+  summaries: controlledSummaries,
+  onChange,
+  selectiveActivationEnabled
+}: EditorProps) {
+  const t = useTranslations();
   const queryClient = useQueryClient();
   const setSaveStatus = useSetSaveStatus();
   const key = [resource, resourceId, "skills"] as const;
   const configuration = useQuery({
     queryKey: key,
     queryFn: async () => {
+      if (resource === "personal_chat") return { bindings: [], runtime: null };
       if (resource === "assistant")
         return unwrap(
           browserApi.GET(
             "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/",
-            { params: { path: { space_id: space.id, assistant_id: resourceId } } }
+            { params: { path: { space_id: spaceId, assistant_id: resourceId } } }
           )
         );
       const bindings = await unwrap(
         browserApi.GET("/api/v1/spaces/{space_id}/apps/{app_id}/skills/", {
-          params: { path: { space_id: space.id, app_id: resourceId } }
+          params: { path: { space_id: spaceId, app_id: resourceId } }
         })
       );
       return { bindings, runtime: null };
     },
+    enabled: resource !== "personal_chat",
     retry: false
   });
-  const summaries: BindingSummary[] = configuration.data?.bindings ?? [];
+  const summaries: BindingSummary[] =
+    resource === "personal_chat"
+      ? (controlledSummaries ?? [])
+      : (configuration.data?.bindings ?? []);
   const runtime = configuration.data?.runtime ?? null;
   const loaded = useMemo(
     () => bindingsFromSummaries(configuration.data?.bindings ?? []),
@@ -116,8 +160,9 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
     editing !== null && JSON.stringify(editing.draft) !== JSON.stringify(editing.baseline);
   const activeEdit = editing !== null && (editing.source === configuration.data || editingDirty);
   const baseline = activeEdit ? editing.baseline : loaded;
-  const draft = activeEdit ? editing.draft : loaded;
-  const dirty = JSON.stringify(draft) !== JSON.stringify(baseline);
+  const draft =
+    resource === "personal_chat" ? (bindings ?? []) : activeEdit ? editing.draft : loaded;
+  const dirty = resource !== "personal_chat" && JSON.stringify(draft) !== JSON.stringify(baseline);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -136,6 +181,10 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
   const [revisionMetadata, setRevisionMetadata] = useState<Preview[]>([]);
 
   function setDraft(next: Binding[] | ((current: Binding[]) => Binding[])) {
+    if (resource === "personal_chat") {
+      onChange?.(typeof next === "function" ? next(bindings ?? []) : next);
+      return;
+    }
     setEditing((current) => {
       const currentDirty =
         current !== null && JSON.stringify(current.draft) !== JSON.stringify(current.baseline);
@@ -152,9 +201,20 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
 
   useEffect(() => {
     if (!setSaveStatus) return;
-    setSaveStatus("skills", saving ? "saving" : saveError ? "error" : dirty ? "dirty" : null);
+    setSaveStatus(
+      "skills",
+      resource === "personal_chat"
+        ? null
+        : saving
+          ? "saving"
+          : saveError
+            ? "error"
+            : dirty
+              ? "dirty"
+              : null
+    );
     return () => setSaveStatus("skills", null);
-  }, [dirty, saveError, saving, setSaveStatus]);
+  }, [dirty, resource, saveError, saving, setSaveStatus]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearch(searchInput.trim()), 250);
@@ -162,12 +222,12 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
   }, [searchInput]);
 
   const catalogue = useInfiniteQuery({
-    queryKey: ["skill-binding-catalogue", space.id, search],
+    queryKey: ["skill-binding-catalogue", spaceId, search],
     initialPageParam: null as string | null,
     queryFn: ({ pageParam }) =>
       loadSkillBindingCatalog({
-        spaceId: space.id,
-        organizationSpace: space.organization,
+        spaceId,
+        organizationSpace,
         cursor: pageParam,
         search
       }),
@@ -185,8 +245,10 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
   const choices = catalogItems.filter(
     (skill) => isAttachable(skill) && !draft.some((binding) => binding.skill_id === skill.id)
   );
-  const canCreate = can("create", "skill") && !space.organization;
-  const canChooseOnDemand = resource === "assistant" && runtime?.fallback_reason === null;
+  const canChooseOnDemand =
+    resource === "personal_chat"
+      ? selectiveActivationEnabled === true
+      : resource === "assistant" && runtime?.fallback_reason === null;
 
   async function openPreview(skill: SkillCandidate) {
     setPreviewCandidate(skill);
@@ -194,7 +256,7 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
     setPreviewError(null);
     setPreviewLoading(true);
     try {
-      setPreview(await getSkillPreview(space.id, skill));
+      setPreview(await getSkillPreview(spaceId, skill));
     } catch {
       setPreviewError(t("skills_preview_load_error"));
     } finally {
@@ -209,7 +271,7 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
       preview.revisionId !== candidateRevisionId(previewCandidate)
     )
       return;
-    setDraft((value) => appendBinding(value, previewCandidate, resource === "assistant"));
+    setDraft((value) => appendBinding(value, previewCandidate, resource !== "app"));
     setAnnouncement(t("skills_added_to_draft_announcement", { name: preview.displayName }));
     setPreviewCandidate(null);
     setPreview(null);
@@ -220,7 +282,7 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
     setUpgradeBusy(summary.skill_id);
     setUpgradeError(null);
     try {
-      const exact = await getSkillPreviewForRevision(space.id, {
+      const exact = await getSkillPreviewForRevision(spaceId, {
         id: summary.skill_id,
         source: summary.source,
         revisionId
@@ -241,7 +303,7 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
   }
 
   async function saveDraft() {
-    if (!dirty || saving) return;
+    if (!dirty || saving || !save) return;
     setSaving(true);
     setSaveError(null);
     const submitted = draft.map((binding) => ({ ...binding }));
@@ -260,30 +322,30 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
   async function createSkill(value: Schema<"SkillCreateRequest">) {
     const skill = await unwrap(
       browserApi.POST("/api/v1/spaces/{space_id}/skills/", {
-        params: { path: { space_id: space.id } },
+        params: { path: { space_id: spaceId } },
         body: value
       })
     );
     const candidate = { ...skill, source: "space" as const };
     setCreated((current) => [...current.filter((item) => item.id !== skill.id), candidate]);
-    setDraft((current) => appendBinding(current, candidate, resource === "assistant"));
+    setDraft((current) => appendBinding(current, candidate, resource !== "app"));
     setCreateDirty(false);
     setCreateOpen(false);
     setAnnouncement(
       t("skills_created_and_added_to_draft_announcement", { name: skill.display_name })
     );
     void queryClient.invalidateQueries({
-      queryKey: skillQueryKey({ type: "space", spaceId: space.id })
+      queryKey: skillQueryKey({ type: "space", spaceId })
     });
   }
 
-  if (configuration.isPending)
+  if (resource !== "personal_chat" && configuration.isPending)
     return (
       <SettingsGroup title={t("skills")}>
         <p role="status">{t("loading")}</p>
       </SettingsGroup>
     );
-  if (configuration.isError)
+  if (resource !== "personal_chat" && configuration.isError)
     return (
       <SettingsGroup title={t("skills")}>
         <Alert variant="destructive" role="alert">
@@ -299,8 +361,12 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
 
   return (
     <SettingsGroup
-      title={t("skills")}
-      description={t("skills_editor_description")}
+      title={t(resource === "personal_chat" ? "governance_skills_heading" : "skills")}
+      description={t(
+        resource === "personal_chat"
+          ? "governance_skills_section_description"
+          : "skills_editor_description"
+      )}
       headerEnd={
         <Badge variant="outline">
           {t("skills_binding_count", { count: String(draft.length) })}
@@ -309,11 +375,23 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
     >
       <p className="text-muted-foreground text-sm">
         {t(
-          resource === "assistant"
-            ? "skills_binding_assistant_draft_description"
-            : "skills_binding_draft_description"
+          resource === "personal_chat"
+            ? "skills_binding_personal_chat_draft_description"
+            : resource === "assistant"
+              ? "skills_binding_assistant_draft_description"
+              : "skills_binding_draft_description"
         )}
       </p>
+      {resource === "personal_chat" && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-muted-foreground text-sm">
+            {t("governance_skills_scope_description")}
+          </p>
+          <Button asChild variant="outline">
+            <Link href="/spaces/organization/skills">{t("governance_manage_skills_action")}</Link>
+          </Button>
+        </div>
+      )}
       {resource === "assistant" && (
         <Alert role="status">
           <AlertTitle>{runtimeMessage(runtime, t)}</AlertTitle>
@@ -327,6 +405,20 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
                 })}
               </span>
             )}
+          </AlertDescription>
+        </Alert>
+      )}
+      {resource === "personal_chat" && (
+        <Alert role="status">
+          <AlertTitle>
+            {t(
+              selectiveActivationEnabled
+                ? "skills_activation_runtime_policy_selective"
+                : "skills_activation_runtime_disabled"
+            )}
+          </AlertTitle>
+          <AlertDescription>
+            {t("skills_activation_runtime_policy_validation_hint")}
           </AlertDescription>
         </Alert>
       )}
@@ -416,7 +508,7 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
                       {t("skills_unavailable_binding_explanation")}
                     </p>
                   )}
-                  {resource === "assistant" && (
+                  {resource !== "app" && (
                     <label className="flex max-w-xs flex-col gap-1 text-sm">
                       {t("skills_activation_mode_label", { name })}
                       <select
@@ -566,25 +658,27 @@ export function SkillBindingsSection({ resource, resourceId, canEdit, save }: Pr
           )}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-        <Button disabled={!dirty || saving || !canEdit} onClick={() => void saveDraft()}>
-          {saving ? t("saving") : t("skills_bindings_save")}
-        </Button>
-        <Button
-          variant="ghost"
-          disabled={!dirty || saving}
-          onClick={() => {
-            setEditing(null);
-            setSaveError(null);
-          }}
-        >
-          {t("discard_changes")}
-        </Button>
-        {dirty && (
-          <span className="text-muted-foreground text-sm">{t("skills_form_unsaved_status")}</span>
-        )}
-      </div>
-      {saveError && (
+      {resource !== "personal_chat" && (
+        <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+          <Button disabled={!dirty || saving || !canEdit} onClick={() => void saveDraft()}>
+            {saving ? t("saving") : t("skills_bindings_save")}
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={!dirty || saving}
+            onClick={() => {
+              setEditing(null);
+              setSaveError(null);
+            }}
+          >
+            {t("discard_changes")}
+          </Button>
+          {dirty && (
+            <span className="text-muted-foreground text-sm">{t("skills_form_unsaved_status")}</span>
+          )}
+        </div>
+      )}
+      {resource !== "personal_chat" && saveError && (
         <p role="alert" className="text-destructive text-sm">
           {saveError}
         </p>
