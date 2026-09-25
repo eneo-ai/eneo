@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from eneo.main.removed_env import check_removed_variables
+
 # Version manifest lookup:
 # - Docker: Package is installed with --no-editable, so __file__ points to site-packages.
 #   The manifest is placed at /app/.release-please-manifest.json by inject-backend-version.sh
@@ -663,6 +665,12 @@ class Settings(BaseSettings):
                     f"Legacy variables will be removed in v3.0"
                 )
 
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_variables(cls, values: dict[str, object]) -> dict[str, object]:
+        check_removed_variables(os.environ, values)
         return values
 
     @model_validator(mode="after")
