@@ -40,7 +40,6 @@ import {
   type PalettePermissions
 } from "./palette-items";
 import { spaceRouteIdFromPath } from "./routes";
-import { useShell } from "./shell-context";
 
 type PaletteItem = SearchableItem<{ group: string; entry: PaletteEntry }>;
 
@@ -182,7 +181,6 @@ export default function ShellCommandPalette({
   const pathname = usePathname();
   const queryClient = useQueryClient();
   const { can, settings } = useAppContext();
-  const { prepareNavigation } = useShell();
   const entriesById = useRef(new Map<string, PaletteEntry>());
   const currentSpaceRouteId = spaceRouteIdFromPath(pathname);
 
@@ -238,7 +236,6 @@ export default function ShellCommandPalette({
       window.setTimeout(onCreateSpace, 0);
       return;
     }
-    prepareNavigation(entry.action.href);
     router.push(entry.action.href);
   }
 

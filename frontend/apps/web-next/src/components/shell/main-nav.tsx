@@ -32,7 +32,6 @@ function NewConversationButton() {
   const isCurrent = useNavTarget().kind === "new-conversation";
   const { isCollapsed } = useSideNavCollapse();
   const { closeMobileNav } = useAppShellMobile();
-  const { prepareNavigation } = useShell();
 
   return (
     <Button
@@ -46,10 +45,7 @@ function NewConversationButton() {
       elevation="low"
       width={isCollapsed ? undefined : "100%"}
       aria-current={isCurrent ? "page" : undefined}
-      onClick={() => {
-        prepareNavigation(NEW_CONVERSATION_HREF);
-        closeMobileNav();
-      }}
+      onClick={closeMobileNav}
       className={cn("bg-ax-surface font-semibold", !isCollapsed && "justify-start px-3")}
     />
   );
@@ -177,7 +173,6 @@ function RecentSection() {
   const t = useTranslations();
   const target = useNavTarget();
   const { isCollapsed } = useSideNavCollapse();
-  const { prepareNavigation } = useShell();
   const { conversations } = useRecentConversations();
 
   // Titles only (no icons): nothing to show in the icon rail.
@@ -193,7 +188,6 @@ function RecentSection() {
           key={conversation.id}
           label={conversation.name.trim() || t("shell_untitled_conversation")}
           href={conversationHref(conversation.id)}
-          onClick={() => prepareNavigation(conversationHref(conversation.id))}
           isSelected={target.kind === "conversation" && target.sessionId === conversation.id}
         />
       ))}

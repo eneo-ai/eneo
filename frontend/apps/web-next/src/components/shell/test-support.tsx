@@ -101,8 +101,7 @@ export function appContext({
 
 export const noopShell: ShellContextValue = {
   openPalette: () => {},
-  openCreateSpace: () => {},
-  prepareNavigation: () => {}
+  openCreateSpace: () => {}
 };
 
 export function renderWithProviders(

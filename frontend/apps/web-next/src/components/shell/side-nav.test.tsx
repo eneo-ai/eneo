@@ -61,7 +61,7 @@ function renderNav({
   variant = "main" as NavVariant,
   permissions = [] as Permission[],
   conversations = true,
-  shell = { openPalette: vi.fn(), openCreateSpace: vi.fn(), prepareNavigation: vi.fn() }
+  shell = { openPalette: vi.fn(), openCreateSpace: vi.fn() }
 } = {}) {
   const utils = renderWithProviders(<DesktopSideNav variant={variant} navId="side-nav" />, {
     queryClient: seededClient({ conversations }),

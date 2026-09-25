@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { AppShellFrame } from "./app-shell";
-import { conversationHref, OPEN_NAV_EVENT } from "./routes";
-import { useShell } from "./shell-context";
+import { OPEN_NAV_EVENT } from "./routes";
 import { resetSideNavCollapsedForTest } from "./shell-state";
 import {
   appContext,
@@ -180,50 +178,5 @@ describe("AppShellFrame on a phone", () => {
     );
     const drawer = screen.getByRole("dialog", { name: "Meny" });
     expect(within(drawer).getByRole("button", { name: "Jobbklockan" })).toBeTruthy();
-  });
-});
-
-describe("page remount for same-page conversation links", () => {
-  beforeEach(() => installBrowserMocks());
-
-  let mounts = 0;
-  function ChatProbe() {
-    const [mount] = useState(() => ++mounts);
-    const { prepareNavigation } = useShell();
-    return (
-      <button type="button" onClick={() => prepareNavigation(conversationHref("b"))}>
-        {`mount ${mount}`}
-      </button>
-    );
-  }
-
-  function goTo(search: string) {
-    nav.search = search;
-    window.history.replaceState(null, "", `${nav.pathname}?${search}`);
-  }
-
-  it("starts the page afresh when a shell link opens another conversation here", () => {
-    mounts = 0;
-    nav.pathname = "/spaces/personal/chat";
-    goTo("session_id=a");
-    // A new element each time, so the frame re-reads the (mocked) router.
-    const shell = () => (
-      <AppShellFrame>
-        <ChatProbe />
-      </AppShellFrame>
-    );
-    const { rerender } = renderWithProviders(shell());
-    expect(screen.getByRole("button", { name: "mount 1" })).toBeTruthy();
-
-    // The chat updating its own URL keeps the page mounted.
-    goTo("session_id=a2");
-    rerender(shell());
-    expect(screen.getByRole("button", { name: "mount 1" })).toBeTruthy();
-
-    // A shell link to another conversation remounts once the URL arrives.
-    fireEvent.click(screen.getByRole("button", { name: "mount 1" }));
-    goTo("session_id=b");
-    rerender(shell());
-    expect(screen.getByRole("button", { name: "mount 2" })).toBeTruthy();
   });
 });

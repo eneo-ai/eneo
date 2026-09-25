@@ -7,13 +7,6 @@ export type ShellContextValue = {
   openPalette: () => void;
   /** Opens the "Skapa yta" dialog (the create-space flow of /spaces/list). */
   openCreateSpace: () => void;
-  /**
-   * Call before navigating to `href` from a shell link. When it opens another
-   * conversation on the page that is already showing (only the query
-   * changes), the shell remounts the page once the URL arrives, so the chat
-   * starts from the URL instead of keeping its current conversation.
-   */
-  prepareNavigation: (href: string) => void;
 };
 
 export const ShellContext = createContext<ShellContextValue | null>(null);

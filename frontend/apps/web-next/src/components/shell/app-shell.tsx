@@ -8,13 +8,12 @@ import { useHotkeys, useMediaQuery } from "@astryxdesign/core/hooks";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Fragment, useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { MobileTopBar } from "./mobile-top-bar";
 import { isAdminRoute, isChatRoute, OPEN_NAV_EVENT, type NavVariant } from "./routes";
 import { isOtherDialogOpen, ShellContext, type ShellContextValue } from "./shell-context";
 import { DesktopSideNav, MobileNavDrawer } from "./side-nav";
-import { usePageRemount } from "./use-page-remount";
 
 // Loaded the first time the palette opens: nothing of it ships with page loads.
 const ShellCommandPalette = dynamic(() => import("./command-palette"), { ssr: false });
@@ -48,7 +47,6 @@ export function AppShellFrame({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteMounted, setPaletteMounted] = useState(false);
   const [createSpaceOpen, setCreateSpaceOpen] = useState(false);
-  const { pageKey, prepareNavigation } = usePageRemount();
 
   // Navigating (from any link, not only nav items) or leaving the phone
   // layout closes the drawer.
@@ -85,8 +83,8 @@ export function AppShellFrame({ children }: { children: React.ReactNode }) {
 
   const openCreateSpace = useCallback(() => setCreateSpaceOpen(true), []);
   const shell = useMemo<ShellContextValue>(
-    () => ({ openPalette, openCreateSpace, prepareNavigation }),
-    [openPalette, openCreateSpace, prepareNavigation]
+    () => ({ openPalette, openCreateSpace }),
+    [openPalette, openCreateSpace]
   );
 
   // Astryx's mobile-nav context: MobileNavToggle opens the drawer, SideNavItems
@@ -126,7 +124,7 @@ export function AppShellFrame({ children }: { children: React.ReactNode }) {
             tabIndex={-1}
             className="bg-ax-surface md:rounded-ax-page md:shadow-ax-low flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto focus:outline-none"
           >
-            <Fragment key={pageKey}>{children}</Fragment>
+            {children}
           </main>
           {isMobile && (
             <MobileNavDrawer variant={variant} isOpen={drawerOpen} onOpenChange={setNavOpen} />
