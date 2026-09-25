@@ -186,31 +186,25 @@ export default function ShellCommandPalette({
   const entriesById = useRef(new Map<string, PaletteEntry>());
   const currentSpaceRouteId = spaceRouteIdFromPath(pathname);
 
-  const groupLabels: Record<PaletteGroup, string> = {
-    assistants: t("assistants"),
-    spaces: t("shell_spaces"),
-    conversations: t("shell_conversations"),
-    knowledge: t("knowledge"),
-    actions: t("actions")
-  };
+  const canCreateSpace = can("shared_spaces");
+  const isAdmin = can("admin");
+  const canManageModules = can("modules");
+  const usingTemplates = Boolean(settings.using_templates);
 
-  const permissions: PalettePermissions = {
-    canCreateSpace: can("shared_spaces"),
-    isAdmin: can("admin"),
-    adminGroups: adminNavGroups({
-      usingTemplates: Boolean(settings.using_templates),
-      canManageModules: can("modules")
-    })
-  };
-  // Rebuilt when these change; the data itself comes from the query cache.
-  const permissionsKey = JSON.stringify([
-    permissions.canCreateSpace,
-    permissions.isAdmin,
-    settings.using_templates,
-    can("modules")
-  ]);
-
+  // Loads (from the query cache) when the palette opens and on every query.
   const searchSource = useMemo<SearchSource<PaletteItem>>(() => {
+    const groupLabels: Record<PaletteGroup, string> = {
+      assistants: t("assistants"),
+      spaces: t("shell_spaces"),
+      conversations: t("shell_conversations"),
+      knowledge: t("knowledge"),
+      actions: t("actions")
+    };
+    const permissions: PalettePermissions = {
+      canCreateSpace,
+      isAdmin,
+      adminGroups: adminNavGroups({ usingTemplates, canManageModules })
+    };
     const toItems = (entries: PaletteEntry[]): PaletteItem[] => {
       for (const entry of entries) entriesById.current.set(entry.id, entry);
       return entries.map((entry) => ({
@@ -225,9 +219,15 @@ export default function ShellCommandPalette({
       bootstrap: async () => toItems(bootstrapEntries(await load())),
       search: async (query: string) => toItems(await searchEntries(await load(), query))
     };
-    // groupLabels/permissions/t are derived from the listed inputs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queryClient, currentSpaceRouteId, permissionsKey, t]);
+  }, [
+    t,
+    queryClient,
+    currentSpaceRouteId,
+    canCreateSpace,
+    isAdmin,
+    canManageModules,
+    usingTemplates
+  ]);
 
   function run(id: string) {
     const entry = entriesById.current.get(id);

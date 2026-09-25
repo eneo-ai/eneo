@@ -10,7 +10,7 @@ import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Bot, LayoutGrid, Plus, Search, SquarePen, User } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Suspense, useMemo } from "react";
+import { useMemo } from "react";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
 import { cn } from "@/lib/utils";
@@ -22,31 +22,14 @@ import { useShell } from "./shell-context";
 /** Shared spaces shown before "Alla ytor" takes over. */
 const MAX_SPACES_IN_NAV = 8;
 
-type NavTargetChildren = { children: (target: NavTarget) => React.ReactNode };
-
-function PathOnlyTarget({ children }: NavTargetChildren) {
-  return children(navTarget(usePathname(), null));
+/** The main-navigation destination the current URL belongs to (for aria-current). */
+function useNavTarget(): NavTarget {
+  return navTarget(usePathname(), useSearchParams());
 }
 
-function SearchAwareTarget({ children }: NavTargetChildren) {
-  return children(navTarget(usePathname(), useSearchParams()));
-}
-
-/**
- * The current destination. Reading search params needs a Suspense boundary;
- * until they are known the path alone decides (same items, no conversation
- * selected), so the nav never renders empty.
- */
-function WithNavTarget({ children }: NavTargetChildren) {
-  return (
-    <Suspense fallback={<PathOnlyTarget>{children}</PathOnlyTarget>}>
-      <SearchAwareTarget>{children}</SearchAwareTarget>
-    </Suspense>
-  );
-}
-
-function NewConversationButton({ isCurrent }: { isCurrent: boolean }) {
+function NewConversationButton() {
   const t = useTranslations();
+  const isCurrent = useNavTarget().kind === "new-conversation";
   const { isCollapsed } = useSideNavCollapse();
   const { closeMobileNav } = useAppShellMobile();
   const { prepareNavigation } = useShell();
@@ -94,9 +77,7 @@ export function MainTopContent() {
         "[&_button.astryx-side-nav-item]:text-ax-text-secondary"
       )}
     >
-      <WithNavTarget>
-        {(target) => <NewConversationButton isCurrent={target.kind === "new-conversation"} />}
-      </WithNavTarget>
+      <NewConversationButton />
       <AppShellMobileContext value={keepDrawerOpen}>
         <SideNavItem
           label={t("search")}
@@ -133,8 +114,9 @@ function PersonalTile() {
   );
 }
 
-function SpacesSection({ target }: { target: NavTarget }) {
+function SpacesSection() {
   const t = useTranslations();
+  const target = useNavTarget();
   const { can } = useAppContext();
   const { openCreateSpace } = useShell();
   const { isCollapsed } = useSideNavCollapse();
@@ -195,8 +177,9 @@ function SpacesSection({ target }: { target: NavTarget }) {
   );
 }
 
-function RecentSection({ target }: { target: NavTarget }) {
+function RecentSection() {
   const t = useTranslations();
+  const target = useNavTarget();
   const { isCollapsed } = useSideNavCollapse();
   const { prepareNavigation } = useShell();
   const { conversations } = useRecentConversations();
@@ -225,14 +208,8 @@ function RecentSection({ target }: { target: NavTarget }) {
 export function MainSections() {
   return (
     <div className="flex flex-col gap-3">
-      <WithNavTarget>
-        {(target) => (
-          <>
-            <SpacesSection target={target} />
-            <RecentSection target={target} />
-          </>
-        )}
-      </WithNavTarget>
+      <SpacesSection />
+      <RecentSection />
     </div>
   );
 }

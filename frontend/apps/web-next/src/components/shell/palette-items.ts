@@ -3,15 +3,8 @@ import type { Schema } from "@/lib/api/models";
 import type { AdminNavGroup } from "./admin-nav-items";
 import { conversationHref, NEW_CONVERSATION_HREF } from "./routes";
 
-/** Result groups, in the order the palette shows them. */
-export const PALETTE_GROUPS = [
-  "assistants",
-  "spaces",
-  "conversations",
-  "knowledge",
-  "actions"
-] as const;
-export type PaletteGroup = (typeof PALETTE_GROUPS)[number];
+/** Result groups; buildPaletteEntries emits them in this order, which the palette keeps. */
+export type PaletteGroup = "assistants" | "spaces" | "conversations" | "knowledge" | "actions";
 
 export type PaletteVisual =
   | { type: "entity"; id: string; name: string }

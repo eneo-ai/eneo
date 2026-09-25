@@ -8,7 +8,9 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { ExpiringKeysNotification } from "@/features/api-keys/expiring-keys-notification";
 import { JobIndicator } from "@/features/jobs/job-indicator";
+import { cn } from "@/lib/utils";
 import { EneoWordMark } from "./eneo-logo";
+import { LEGACY_BUTTON_FOCUS_CLASSES } from "./nav-styles";
 import { NEW_CONVERSATION_HREF } from "./routes";
 
 /**
@@ -33,7 +35,12 @@ export function MobileTopBar() {
         <EneoWordMark decorative className="h-5 w-auto" />
       </Link>
       <div className="flex-1" />
-      <div className="flex items-center pointer-coarse:[&_button]:size-11">
+      <div
+        className={cn(
+          "flex items-center pointer-coarse:[&_button]:size-11",
+          LEGACY_BUTTON_FOCUS_CLASSES
+        )}
+      >
         <JobIndicator />
         <ExpiringKeysNotification />
       </div>
