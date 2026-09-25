@@ -43,8 +43,7 @@ export class Autosave<Resource extends object, Update extends object> {
   #baseline: Resource;
   #replacement = 0;
   #delay: number;
-  // Raw state: always replaced whole, and read by the UI through hasPending.
-  #pending = $state.raw<Update>({} as Update);
+  #pending: Update = {} as Update;
   #refused: Update = {} as Update;
   #timer: ReturnType<typeof setTimeout> | null = null;
   #inflight: Promise<void> | null = null;

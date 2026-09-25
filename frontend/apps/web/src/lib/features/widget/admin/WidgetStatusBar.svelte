@@ -16,7 +16,7 @@
   import { localizeHref } from "$lib/paraglide/runtime";
   import { blockerLabel } from "./blockers";
   import { toastWidgetError, widgetErrorMessage } from "./errors";
-  import { widgetStatusLabel } from "./status";
+  import { activationRequestState, widgetStatusLabel } from "./status";
   import TimedText from "./TimedText.svelte";
   import type { WidgetAutosave } from "./widgetAutosave.svelte";
 
@@ -48,21 +48,12 @@
   const blockers = $derived(widget.activation_blockers ?? []);
   const refusals = $derived([...new Set(Object.values(autosave.refusals))]);
   const inactive = $derived(widget.status === "draft" || widget.status === "paused");
-  const requestedAt = $derived(inactive ? (widget.activation_requested_at ?? null) : null);
-  // A new request clears the send-back, so both are never shown together.
-  const returnedAt = $derived(
-    inactive && !requestedAt ? (widget.activation_declined_at ?? null) : null
-  );
-  // What the server would check is the saved widget, so unsaved edits hold
-  // activation and requests back until they are saved.
-  const blocked = $derived(blockers.length > 0 || autosave.hasPending);
-  const blockedReasonId = $derived(
-    blockers.length > 0
-      ? "widget-status-blockers"
-      : autosave.hasPending
-        ? "widget-status-save"
-        : null
-  );
+  const requestState = $derived(activationRequestState(widget));
+  const requestedAt = $derived(requestState.kind === "requested" ? requestState.at : null);
+  const returnedAt = $derived(requestState.kind === "returned" ? requestState.at : null);
+  // Unsaved edits do not block: activating and requesting save them first,
+  // and the server checks the saved widget.
+  const blocked = $derived(blockers.length > 0);
 
   let archiveOpen = $state(false);
   let announcement = $state("");
@@ -207,7 +198,7 @@
         <Button
           variant="default"
           aria-disabled={blocked || activate.isLoading}
-          aria-describedby={blocked ? (blockedReasonId ?? undefined) : undefined}
+          aria-describedby={blocked ? "widget-status-blockers" : undefined}
           class={blocked || activate.isLoading ? "opacity-50" : undefined}
           onclick={() => {
             if (!blocked && !activate.isLoading) void activate();
@@ -234,7 +225,7 @@
           aria-disabled={blocked || request.isLoading}
           aria-busy={request.isLoading}
           aria-describedby={blocked
-            ? (blockedReasonId ?? undefined)
+            ? "widget-status-blockers"
             : returnedAt
               ? "widget-status-returned"
               : "widget-status-request-note"}
@@ -355,7 +346,7 @@
     <AlertDialog.Footer>
       <AlertDialog.Cancel disabled={archive.isLoading}>{m.cancel()}</AlertDialog.Cancel>
       <AlertDialog.Action
-        class="bg-negative-default text-on-fill"
+        variant="destructive"
         disabled={archive.isLoading}
         onclick={(event) => {
           event.preventDefault();

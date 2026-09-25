@@ -18,7 +18,12 @@ vi.mock("$lib/paraglide/runtime", () => ({
   getLocale: () => "sv",
   localizeHref: (href: string) => href
 }));
+vi.mock("./errors", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./errors")>()),
+  toastWidgetError: vi.fn()
+}));
 
+import { toastWidgetError } from "./errors";
 import WidgetStatusBar from "./WidgetStatusBar.svelte";
 import { WidgetAutosave } from "./widgetAutosave.svelte";
 
@@ -92,6 +97,7 @@ const requestButton = () => page.getByRole("button", { name: /^widget_request_bu
 const withdrawButton = () => page.getByRole("button", { name: "widget_request_withdraw" });
 
 beforeEach(() => {
+  vi.mocked(toastWidgetError).mockReset();
   document.body.classList.add("bg-primary");
 });
 
@@ -210,16 +216,27 @@ describe("WidgetStatusBar for an editor who is not an administrator", () => {
     expect(onRequestActivation).not.toHaveBeenCalled();
   });
 
-  test("an unsaved edit holds the request back and names the save state", async () => {
-    const save = vi.fn(() => new Promise<Widget>(() => {}));
+  test("an unsaved edit does not hold the request back: requesting saves it first", async () => {
+    let saved!: () => void;
+    const save = vi.fn(
+      (update: Partial<Widget>) =>
+        new Promise<Widget>((resolve) => (saved = () => resolve(draft({ ...update, revision: 1 }))))
+    );
+    const onRequestActivation = vi.fn(async () => {});
     // A long delay keeps the edit pending instead of handing it to a save.
     const autosave = new WidgetAutosave(draft(), save, { delay: 60_000 });
-    renderBar(autosave, false);
+    renderBar(autosave, false, { onRequestActivation });
 
     autosave.patch({ name: "Ny" });
     const request = requestButton();
-    await expect.element(request).toHaveAttribute("aria-disabled", "true");
-    await expect.element(request).toHaveAttribute("aria-describedby", "widget-status-save");
+    await expect.element(request).not.toHaveAttribute("aria-disabled", "true");
+    await expect.element(request).toHaveAccessibleDescription("widget_request_note");
+
+    await userEvent.click(request);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(onRequestActivation).not.toHaveBeenCalled();
+    saved();
+    await vi.waitFor(() => expect(onRequestActivation).toHaveBeenCalledTimes(1));
   });
 
   test("a pending request can be withdrawn, and both steps are announced", async () => {
@@ -284,14 +301,18 @@ describe("WidgetStatusBar for an editor who is not an administrator", () => {
   });
 
   test("a failed request is explained and nothing is announced", async () => {
+    const refusal = new EneoError("blocked", "RESPONSE", 400, 0, {
+      detail: { code: "widget_serving_blocked", message: "raw", blockers: ["subtitle_empty"] }
+    });
     const onRequestActivation = vi.fn(async () => {
-      throw new EneoError("blocked", "RESPONSE", 400, 0, {
-        detail: { code: "widget_serving_blocked", message: "raw", blockers: ["subtitle_empty"] }
-      });
+      throw refusal;
     });
     renderBar(new WidgetAutosave(draft(), vi.fn()), false, { onRequestActivation });
     await userEvent.click(requestButton());
-    await vi.waitFor(() => expect(onRequestActivation).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(toastWidgetError).toHaveBeenCalledWith(refusal, "widget_request_could_not")
+    );
+    expect(toastWidgetError).toHaveBeenCalledTimes(1);
     await expect.element(page.getByRole("status")).toHaveTextContent("");
     await expect.element(requestButton()).toBeVisible();
   });
@@ -335,6 +356,12 @@ describe.each(["light", "dark"])("WidgetStatusBar accessibility (%s)", (theme) =
       false
     );
     await expect.element(page.getByRole("heading", { level: 3 })).toBeVisible();
+    expect(await axeViolations()).toEqual([]);
+  });
+
+  test("a paused widget has no violations", async () => {
+    renderBar(new WidgetAutosave(widget({ status: "paused" }), vi.fn()));
+    await expect.element(page.getByText("widget_admin_status_paused")).toBeVisible();
     expect(await axeViolations()).toEqual([]);
   });
 

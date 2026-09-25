@@ -48,6 +48,7 @@ function item(overrides: Partial<WidgetOverviewItem>): WidgetOverviewItem {
     status: "active",
     space_id: "s1",
     space_name: "Kundtjänst",
+    space_kind: "shared",
     target_id: "a1",
     assistant_name: "Kontakt",
     allowed_origins: ["https://www.kommun.se"],
@@ -175,6 +176,33 @@ describe("WidgetOverviewList", () => {
     expect(navigation.invalidateAll).toHaveBeenCalled();
   });
 
+  test("after pausing, focus lands on the widget's review instead of the page", async () => {
+    let paused!: () => void;
+    const pause = vi.fn(() => new Promise<void>((resolve) => (paused = resolve)));
+    renderList([item({}), item({ id: "w2", name: "Bygglov" })], { pause } as never);
+    await userEvent.click(
+      page
+        .getByRole("group", { name: "widget_admin_overview_actions(Kontaktchatt)" })
+        .getByRole("button")
+    );
+    const dialog = page.getByRole("alertdialog");
+    const confirm = dialog.getByRole("button", { name: "widget_admin_pause" });
+    await userEvent.click(confirm);
+
+    // Still focused while it works: aria-disabled keeps the focus a disabled button would drop.
+    const busy = dialog.getByRole("button", { name: "widget_review_pausing" });
+    await expect.element(busy).toHaveAttribute("aria-disabled", "true");
+    await expect.element(busy).toHaveFocus();
+    expect((busy.element() as HTMLButtonElement).disabled).toBe(false);
+
+    paused();
+    await vi.waitFor(() => expect(navigation.invalidateAll).toHaveBeenCalled());
+    await expect
+      .element(page.getByRole("link", { name: "widget_admin_overview_review_named(Kontaktchatt)" }))
+      .toHaveFocus();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+
   test("a requested widget carries a badge and who asked when", async () => {
     renderList([
       item({
@@ -233,6 +261,25 @@ describe("ActivationRequestsTable", () => {
     await expect
       .element(page.getByRole("link", { name: "Samhällsbyggnad" }))
       .toHaveAttribute("href", "/admin/spaces/s2");
+  });
+
+  test("names the organisation space without linking to a page it does not have", async () => {
+    await page.viewport(1440, 900);
+    render(ActivationRequestsTable, {
+      items: [
+        item({
+          status: "draft",
+          space_id: "org",
+          space_name: "Organisationens yta",
+          space_kind: "organization",
+          activation_requested_at: "2026-09-24T08:30:00Z"
+        })
+      ]
+    });
+    await expect
+      .element(page.getByRole("cell").filter({ hasText: "Organisationens yta" }))
+      .toBeVisible();
+    expect(page.getByRole("link", { name: "Organisationens yta" }).query()).toBeNull();
   });
 
   test("says whether each request is ready or what blocks it, in text", async () => {

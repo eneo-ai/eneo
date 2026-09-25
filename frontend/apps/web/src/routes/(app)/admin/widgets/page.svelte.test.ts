@@ -232,6 +232,7 @@ describe("widget activation requests", () => {
     status: "draft",
     space_id: "s1",
     space_name: "Samhällsbyggnad",
+    space_kind: "shared",
     target_id: "a1",
     assistant_name: "Bygglov",
     allowed_origins: ["https://www.kommun.se"],

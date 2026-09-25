@@ -90,7 +90,7 @@
             </span>
           </th>
           <Table.Cell class="hidden px-4 py-3 align-top whitespace-normal md:table-cell">
-            {#if item.space_name}
+            {#if item.space_name && item.space_kind === "shared"}
               <!-- eslint-disable svelte/no-navigation-without-resolve -- localized href built from a typed id -->
               <a
                 class="text-accent-stronger break-words underline underline-offset-2"
@@ -98,7 +98,8 @@
               >
               <!-- eslint-enable svelte/no-navigation-without-resolve -->
             {:else}
-              –
+              <!-- Admin → Ytor shows shared spaces only; the organisation space has no page there. -->
+              <span class="break-words">{item.space_name ?? "–"}</span>
             {/if}
           </Table.Cell>
           <Table.Cell class="hidden px-4 py-3 align-top whitespace-normal lg:table-cell">

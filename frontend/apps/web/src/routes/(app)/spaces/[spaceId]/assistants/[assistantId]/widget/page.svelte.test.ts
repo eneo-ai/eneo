@@ -90,4 +90,30 @@ describe("assistant widget page", () => {
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
     expect(update).not.toHaveBeenCalled();
   });
+
+  test.each([
+    [false, "widget_admin_create_description"],
+    [true, "widget_admin_create_description_admin"]
+  ])(
+    "a new widget says how it goes live: by a request, or by activating it (admin %s)",
+    async (isAdmin, description) => {
+      render(WidgetPage, {
+        data: {
+          widget: null,
+          assistant: { id: "a1", name: "Kontakt", published: true, mcp_servers: [] },
+          currentSpace: { id: "s1" },
+          eneo: { widgets: {} },
+          isAdmin,
+          user: { id: "u1" },
+          policy: null,
+          release: null,
+          templates: []
+        } as never
+      });
+      await expect
+        .element(page.getByRole("heading", { name: "widget_admin_create_title" }))
+        .toBeVisible();
+      await expect.element(page.getByText(description, { exact: true })).toBeVisible();
+    }
+  );
 });

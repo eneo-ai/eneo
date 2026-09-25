@@ -8,6 +8,7 @@
   import type { Eneo, WidgetOverview, WidgetOverviewItem } from "@eneo/eneo-js";
   import { invalidateAll } from "$app/navigation";
   import { ArrowRight, Clock, Pause } from "@lucide/svelte";
+  import { settleDialog } from "$lib/components/settleDialog";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -33,18 +34,31 @@
   // and resuming only happen after a review on the widget's own page.
   let toPause = $state<WidgetOverviewItem | null>(null);
   let busyId = $state<string | null>(null);
+  let pausedId: string | null = null;
+  const reviewLinks: Record<string, HTMLElement | null> = $state({});
+  let onlyActiveSwitch = $state<HTMLElement | null>(null);
+
+  // The Pause button goes away with the reload, so focus moves to the
+  // paused widget's review link, or above the list once it is filtered out.
+  const settler = settleDialog({
+    close: () => (toPause = null),
+    reload: invalidateAll,
+    focusAfter: () => (pausedId ? reviewLinks[pausedId] : null) ?? onlyActiveSwitch
+  });
 
   async function pause(item: WidgetOverviewItem) {
+    if (busyId) return;
     busyId = item.id;
     try {
       await eneo.widgets.pause({ id: item.id });
-      toPause = null;
-      await invalidateAll();
     } catch (error) {
       toastWidgetError(error, m.widget_admin_could_not_pause());
+      return;
     } finally {
       busyId = null;
     }
+    pausedId = item.id;
+    await settler.settle();
   }
 
   let onlyActive = $state(false);
@@ -78,7 +92,11 @@
   {#if overview.items.length > 0}
     <div class="flex items-center justify-end gap-2">
       <Label for="widget-overview-only-active">{m.widget_admin_overview_only_active()}</Label>
-      <Switch id="widget-overview-only-active" bind:checked={onlyActive} />
+      <Switch
+        id="widget-overview-only-active"
+        bind:ref={onlyActiveSwitch}
+        bind:checked={onlyActive}
+      />
     </div>
   {/if}
 
@@ -123,6 +141,7 @@
               <Card.Action>
                 <!-- eslint-disable svelte/no-navigation-without-resolve -- localized href built from typed route segments -->
                 <a
+                  bind:this={reviewLinks[item.id]}
                   class="text-accent-stronger inline-flex min-h-6 items-center gap-1 text-sm underline-offset-2 hover:underline max-md:min-h-11"
                   href={widgetHref(item)}
                   aria-label={m.widget_admin_overview_review_named({ name: item.name })}
@@ -270,8 +289,18 @@
   {/if}
 </div>
 
-<AlertDialog.Root open={toPause !== null} onOpenChange={(open) => !open && (toPause = null)}>
-  <AlertDialog.Content>
+<AlertDialog.Root
+  bind:open={
+    () => toPause !== null,
+    (open) => {
+      if (!open && busyId === null) toPause = null;
+    }
+  }
+>
+  <AlertDialog.Content
+    onOpenAutoFocus={() => settler.reset()}
+    onCloseAutoFocus={settler.onCloseAutoFocus}
+  >
     <AlertDialog.Header>
       <AlertDialog.Title>
         {m.widget_admin_overview_pause_title({ name: toPause?.name ?? "" })}
@@ -281,13 +310,22 @@
       >
     </AlertDialog.Header>
     <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={busyId !== null}>{m.cancel()}</AlertDialog.Cancel>
+      <!-- bits' Cancel ignores `disabled`; the open setter above refuses to close while pausing. -->
+      <AlertDialog.Cancel
+        aria-disabled={busyId !== null}
+        class={busyId !== null ? "pointer-events-none opacity-50" : undefined}
+        >{m.cancel()}</AlertDialog.Cancel
+      >
+      <!-- aria-disabled, not disabled, while pausing: a focused button that becomes disabled drops focus. -->
       <AlertDialog.Action
-        disabled={busyId !== null}
+        aria-disabled={busyId !== null}
+        aria-busy={busyId !== null}
+        class={busyId !== null ? "pointer-events-none opacity-50" : undefined}
         onclick={(event) => {
           event.preventDefault();
           if (toPause) void pause(toPause);
-        }}>{m.widget_admin_pause()}</AlertDialog.Action
+        }}
+        >{busyId !== null ? m.widget_review_pausing() : m.widget_admin_pause()}</AlertDialog.Action
       >
     </AlertDialog.Footer>
   </AlertDialog.Content>
