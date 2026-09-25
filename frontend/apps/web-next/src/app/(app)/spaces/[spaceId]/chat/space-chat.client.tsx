@@ -212,7 +212,7 @@ export function SpaceChat() {
       // Remount when the partner changes so chat state never leaks across.
       key={`${partner.type}:${partner.id}`}
       partner={partner}
-      initialSessionId={sessionId}
+      sessionId={sessionId}
       switcherItems={chatPartnerSwitcherItems({
         space,
         routeId,

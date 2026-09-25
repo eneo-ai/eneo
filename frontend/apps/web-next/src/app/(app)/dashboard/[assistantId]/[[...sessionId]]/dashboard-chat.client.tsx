@@ -56,7 +56,7 @@ export function DashboardChat({
   return (
     <ChatPage
       partner={partner}
-      initialSessionId={sessionId}
+      sessionId={sessionId}
       buildSessionUrl={(nextSessionId) =>
         nextSessionId ? `/dashboard/${assistantId}/${nextSessionId}` : `/dashboard/${assistantId}`
       }

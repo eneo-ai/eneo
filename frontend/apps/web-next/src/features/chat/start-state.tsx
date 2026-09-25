@@ -167,8 +167,10 @@ export function StartState({
     now === null ? null : t(`chat_greeting_${greetingFor(new Date(now).getHours())}`, { name });
 
   return (
-    <div className="flex min-h-full w-full flex-1 flex-col items-center justify-center px-4 py-8 sm:py-10">
-      <div className="flex w-full max-w-[720px] flex-col items-center gap-7">
+    // Auto margins centre the content vertically but, unlike justify-center,
+    // never push it above the scroll edge when it is taller (zoom, short phones).
+    <div className="flex w-full flex-1 flex-col items-center px-4 py-8 sm:py-10">
+      <div className="my-auto flex w-full max-w-[720px] flex-col items-center gap-7">
         <div className="flex flex-col items-center gap-2.5 text-center">
           {personal ? (
             <BrandMark className="size-[38px]" />

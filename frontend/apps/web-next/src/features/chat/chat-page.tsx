@@ -36,9 +36,13 @@ function hasInsights(partner: ChatPartner): partner is ChatPartner & {
   return Boolean(partner.insightEnabled && partner.type !== "default-assistant");
 }
 
+let conversationCounter = 0;
+
+/** A fresh, unsent conversation (a new remount key each time). */
 function newConversationState(): ActiveConversation {
+  conversationCounter += 1;
   return {
-    key: `new-${Date.now()}`,
+    key: `new-${conversationCounter}`,
     sessionId: null,
     messages: [],
     title: null,
@@ -56,14 +60,19 @@ function newConversationState(): ActiveConversation {
  */
 export function ChatPage({
   partner,
-  initialSessionId,
+  sessionId: urlSessionId = null,
   buildSessionUrl,
   modelSelector,
   switcherItems,
   editHref
 }: {
   partner: ChatPartner;
-  initialSessionId?: string | null;
+  /**
+   * The conversation in the URL (`?session_id=` or the route segment). Followed
+   * when it changes on the same route: a different id opens that conversation,
+   * none starts a new one. URL updates made by this page itself are ignored.
+   */
+  sessionId?: string | null;
   /** Builds the shareable URL for a session id (kept in the address bar). */
   buildSessionUrl?: (sessionId: string | null) => string;
   /** Interactive model picker rendered in the composer (default-assistant). */
@@ -78,16 +87,34 @@ export function ChatPage({
   // History is an inline panel from 768px up, an overlay drawer below.
   const historyInline = useMediaQuery("(min-width: 768px)");
   const [active, setActive] = useState<ActiveConversation | null>(() =>
-    initialSessionId
+    urlSessionId
       ? null
       : { key: "new", sessionId: null, messages: [], title: null, feedback: null, started: false }
   );
-  const [pendingSessionId, setPendingSessionId] = useState<string | null>(initialSessionId ?? null);
+  const [pendingSessionId, setPendingSessionId] = useState<string | null>(urlSessionId);
+  const [followedUrlSession, setFollowedUrlSession] = useState<string | null>(urlSessionId);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [activity, setActivity] = useState<ActivityState | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const historyTrigger = useRef<HTMLElement | null>(null);
+
+  // Follow the URL (SideNav "Senaste", "Ny konversation", back/forward) on the
+  // same route. The page writes its own URL with replaceState too; those
+  // changes already match what it shows, so they are no-ops here.
+  if (urlSessionId !== followedUrlSession) {
+    setFollowedUrlSession(urlSessionId);
+    const showing = pendingSessionId ?? active?.sessionId ?? null;
+    if (urlSessionId !== showing) {
+      setActivity(null);
+      if (urlSessionId) {
+        setPendingSessionId(urlSessionId);
+      } else {
+        setPendingSessionId(null);
+        setActive(newConversationState());
+      }
+    }
+  }
   const [tab, setTab] = useState<"chat" | "insights">(() =>
     typeof window !== "undefined" &&
     window.location.search.includes("tab=insights") &&
