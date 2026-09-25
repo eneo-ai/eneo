@@ -182,8 +182,9 @@ shadcn names (`bg-background`, `text-muted-foreground`, `border-input`,
 
 ## Shared building blocks (`src/components/composites`)
 
-- `PageHeader` — `title`, `description?`, `breadcrumbs?: {label, href?}[]`,
-  `actions?` (legacy `children` still work), `tour?`.
+- `PageHeader` — `title`, `description?`, `breadcrumbs?: {label, href?, current?}[]`
+  (only `current` marks a crumb as this page; a crumb without `href` is a plain
+  label), `actions?` (legacy `children` still work), `tour?`.
 - `EmptyState` — `title`, `description?`, `icon?`, `actions?` (or `children`),
   `headingLevel?` (2), `isCompact?`, `framed?` (dashed frame, default on).
 - `LoadingState` — skeleton status region: `label?`, `rows?`,
