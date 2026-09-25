@@ -85,7 +85,8 @@ _MutationContainer = Annotated[
     status_code=201,
     description=(
         "Add a person to a shared space without being a member yourself."
-        " Refused for yourself (join instead) and for an existing member."
+        " Refused for yourself and for another organisation administrator"
+        " (they join themselves, with a reason), and for an existing member."
         " Always recorded in the audit log."
     ),
     responses=responses.get_responses([400, 403, 404, 409]),
@@ -102,9 +103,10 @@ async def add_admin_space_member(
     "/{space_id}/members/{user_id}/",
     response_model=AdminSpaceMembers,
     description=(
-        "Change a member's role. Refused for yourself and when it would leave"
-        " the space without an administrator who can manage it. Always"
-        " recorded in the audit log."
+        "Change a member's role. Refused for yourself, for raising another"
+        " organisation administrator's role (they join themselves, with a"
+        " reason) and when it would leave the space without an administrator"
+        " who can manage it. Always recorded in the audit log."
     ),
     responses=responses.get_responses([400, 403, 404, 409]),
 )

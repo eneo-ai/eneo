@@ -25,6 +25,7 @@ from eneo.spaces.oversight.domain import (
     MembershipSnapshot,
 )
 from eneo.spaces.oversight.exceptions import (
+    SpaceAdminMustJoinError,
     SpaceAlreadyMemberError,
     SpaceLastAdminError,
     SpaceSelfAccessError,
@@ -65,6 +66,7 @@ class _FakeRepo:
             security_classification=None,
         )
         self.people: dict[UUID, tuple[str, str]] = {}
+        self.tenant_admins: set[UUID] = set()
         self.users: dict[UUID, DirectMemberRow] = {}
         self.groups: dict[UUID, GroupMemberRow] = {}
         self.group_users: dict[UUID, frozenset[UUID]] = {}
@@ -91,7 +93,7 @@ class _FakeRepo:
             email=f"{username}@kommun.se",
             state=state,
             role=role,
-            is_tenant_admin=False,
+            is_tenant_admin=user_id in self.tenant_admins,
             oversight_joined_at=kwargs.get("joined_at"),
             oversight_join_reason=kwargs.get("reason"),
         )
@@ -157,6 +159,9 @@ class _FakeRepo:
                 group_count=len(self.groups),
             )
         }
+
+    async def is_tenant_admin(self, tenant_id, user_id):
+        return tenant_id == self.tenant_id and user_id in self.tenant_admins
 
     async def insert_member(
         self,
@@ -419,6 +424,33 @@ async def test_a_group_containing_you_can_be_added_below_your_role_lowered_or_re
 
 
 # --- duplicates and missing rows -----------------------------------------------
+
+
+async def test_another_tenant_admin_is_not_added_or_promoted():
+    h = _Harness()
+    h.with_admin()
+    colleague = h.repo.person()
+    h.repo.tenant_admins.add(colleague)
+    for role in (VIEWER, ADMIN):
+        with pytest.raises(SpaceAdminMustJoinError):
+            await h.service.add_member(h.space_id, colleague, role)
+
+    h.repo.member(colleague, EDITOR)
+    with pytest.raises(SpaceAdminMustJoinError):
+        await h.service.change_member_role(h.space_id, colleague, ADMIN)
+    assert h.repo.writes == []
+    h.audit_service.log_required.assert_not_awaited()
+
+    # Taking access away, or adding a group that contains one, is allowed.
+    await h.service.change_member_role(h.space_id, colleague, VIEWER)
+    await h.service.remove_member(h.space_id, colleague)
+    group = h.repo.group(EDITOR, colleague, h.repo.person(), member=False)
+    await h.service.add_group(h.space_id, group, EDITOR)
+    assert [w[0] for w in h.repo.writes] == [
+        "update_member_role",
+        "delete_member",
+        "insert_group",
+    ]
 
 
 async def test_adding_an_existing_member_or_group_conflicts():

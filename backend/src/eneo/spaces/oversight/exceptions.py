@@ -20,3 +20,8 @@ class SpaceAlreadyMemberError(Exception):
 
 class SpaceSelfAccessError(Exception):
     """An administrator targeted their own access outside join and leave."""
+
+
+class SpaceAdminMustJoinError(Exception):
+    """Another tenant administrator would be given content access, or more
+    of it, without joining: they join themselves, with a reason."""

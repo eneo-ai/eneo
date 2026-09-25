@@ -1092,6 +1092,17 @@ class SpaceOversightRepo:
             manageable_by_group=manageable_by_group,
         )
 
+    async def is_tenant_admin(self, tenant_id: UUID, user_id: UUID) -> bool:
+        return bool(
+            await self.session.scalar(
+                sa.select(
+                    tenant_admin_user_ids_select(tenant_id)
+                    .where(Users.id == user_id)
+                    .exists()
+                )
+            )
+        )
+
     async def insert_member(
         self,
         space_id: UUID,

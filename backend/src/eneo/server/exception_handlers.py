@@ -69,6 +69,7 @@ from eneo.skills.domain.skill import (
     SkillSlugConflictError,
 )
 from eneo.spaces.oversight.exceptions import (
+    SpaceAdminMustJoinError,
     SpaceAlreadyMemberError,
     SpaceLastAdminError,
     SpaceSelfAccessError,
@@ -356,6 +357,12 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "You can't change your own access here. Join or leave the space "
         "instead, so the change is recorded with a reason.",
         ErrorCodes.SPACE_SELF_ACCESS_REQUIRES_JOIN,
+    ),
+    SpaceAdminMustJoinError: (
+        400,
+        "Organisation administrators join a space themselves, so the join is "
+        "recorded with a reason.",
+        ErrorCodes.SPACE_ADMIN_MUST_JOIN,
     ),
 }
 

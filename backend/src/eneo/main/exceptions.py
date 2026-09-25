@@ -95,6 +95,7 @@ class ErrorCodes(int, Enum):
     SPACE_LAST_ADMIN = 9064
     SPACE_ALREADY_MEMBER = 9065
     SPACE_SELF_ACCESS_REQUIRES_JOIN = 9066
+    SPACE_ADMIN_MUST_JOIN = 9067
 
 
 class NotFoundException(Exception):

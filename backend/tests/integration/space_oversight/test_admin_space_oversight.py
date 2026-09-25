@@ -883,6 +883,61 @@ async def test_self_and_group_self_escalation_are_refused(client, admin, oversee
     assert resp.status_code == 201, resp.text
 
 
+async def test_another_tenant_admin_reaches_content_only_by_joining(
+    client, admin, overseer, make_person
+):
+    """Adding or promoting a tenant admin would give them content without the
+    reason and marker a join records; lowering or removing takes access away,
+    and a group that contains one stays the group's business."""
+    _, tenant_id = await admin_row()
+    colleague = await make_person([Permission.ADMIN], label="kollega-admin")
+    space_id = await create_space(client, admin.token)
+    base = f"/api/v1/admin/spaces/{space_id}"
+
+    for role in ("viewer", "admin"):
+        resp = await client.post(
+            f"{base}/members/",
+            json={"user_id": str(colleague.id), "role": role},
+            headers=overseer.headers,
+        )
+        assert (resp.status_code, error_code(resp)) == (400, 9067), resp.text
+    assert await member_row(space_id, colleague.id) is None
+
+    # Already a member (added by the space itself): raising is refused.
+    await add_member(space_id, colleague.id, "editor")
+    resp = await client.patch(
+        f"{base}/members/{colleague.id}/",
+        json={"role": "admin"},
+        headers=overseer.headers,
+    )
+    assert (resp.status_code, error_code(resp)) == (400, 9067), resp.text
+    assert (await member_row(space_id, colleague.id)).role == "editor"
+    resp = await client.patch(
+        f"{base}/members/{colleague.id}/",
+        json={"role": "viewer"},
+        headers=overseer.headers,
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.delete(
+        f"{base}/members/{colleague.id}/", headers=overseer.headers
+    )
+    assert resp.status_code == 200, resp.text
+
+    group = await insert_group(tenant_id, [colleague.id, await insert_user(tenant_id)])
+    resp = await client.post(
+        f"{base}/group-members/",
+        json={"group_id": str(group), "role": "editor"},
+        headers=overseer.headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+    assert [row["action"] for row in await audit_rows(entity_id=space_id)] == [
+        "space_oversight_member_role_changed",
+        "space_oversight_member_removed",
+        "space_oversight_member_added",
+    ]
+
+
 async def test_last_admin_is_protected(client, admin, overseer):
     _, tenant_id = await admin_row()
     only_admin = await create_space(client, admin.token)
@@ -921,11 +976,12 @@ async def test_last_admin_is_protected(client, admin, overseer):
     )
 
 
-async def test_zero_admin_space_can_still_be_fixed(client, admin, overseer):
+async def test_zero_admin_space_can_still_be_fixed(client, overseer):
     _, tenant_id = await admin_row()
     space_id = await insert_space(tenant_id)
     stranded = await insert_user(tenant_id, state="inactive")
     viewer = await insert_user(tenant_id)
+    colleague = await insert_user(tenant_id)
     await add_member(space_id, stranded, "admin")
     await add_member(space_id, viewer, "viewer")
     base = f"/api/v1/admin/spaces/{space_id}"
@@ -944,7 +1000,7 @@ async def test_zero_admin_space_can_still_be_fixed(client, admin, overseer):
     assert resp.json()["admins"]["manageable"] is True
     resp = await client.post(
         f"{base}/members/",
-        json={"user_id": str(admin.id), "role": "admin"},
+        json={"user_id": str(colleague), "role": "admin"},
         headers=overseer.headers,
     )
     assert resp.status_code == 201, resp.text

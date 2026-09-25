@@ -44,6 +44,7 @@ from eneo.spaces.oversight.domain import (
     raises_role,
 )
 from eneo.spaces.oversight.exceptions import (
+    SpaceAdminMustJoinError,
     SpaceAlreadyMemberError,
     SpaceLastAdminError,
     SpaceSelfAccessError,
@@ -451,6 +452,13 @@ class SpaceOversightService:
         if target is None:
             raise NotFoundException("User not found")
         membership = await self.repo.membership(self._tenant_id, space_id)
+        if membership.user(user_id) is not None:
+            raise SpaceAlreadyMemberError()
+        # Content access for a tenant admin goes through their own join, with
+        # its reason and the marker members see. A group that contains one is
+        # still allowed: the group's other members are why it is added.
+        if await self.repo.is_tenant_admin(self._tenant_id, user_id):
+            raise SpaceAdminMustJoinError()
         if not await self.repo.insert_member(space_id, user_id, role):
             raise SpaceAlreadyMemberError()
         name = target.username or target.email
@@ -482,6 +490,8 @@ class SpaceOversightService:
             raise NotFoundException("Member not found")
         if current.role == role:
             return await self._members_from(space_id, membership)
+        if member.is_tenant_admin and raises_role(current.role, role):
+            raise SpaceAdminMustJoinError()
         before = membership.snapshot
         after = before.with_direct(
             user_id, DirectMembership(role=role, manageable=current.manageable)
