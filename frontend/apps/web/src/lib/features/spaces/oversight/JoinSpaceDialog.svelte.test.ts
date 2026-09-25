@@ -241,13 +241,13 @@ describe("JoinSpaceDialog", () => {
   });
 
   test("shows the server's refusal inline, in an alert, and stays open", async () => {
-    admin.join.mockRejectedValue(new EneoError("Already a member", "RESPONSE", 409, 9065, {}));
+    admin.join.mockRejectedValue(new EneoError("Already a member", "RESPONSE", 409, 9066, {}));
     await openDialog();
 
     await reason().fill(REASON);
     await submit().click();
 
-    await expect.element(page.getByRole("alert")).toHaveTextContent("eneo_error_9065");
+    await expect.element(page.getByRole("alert")).toHaveTextContent("eneo_error_9066");
     await expect.element(dialog()).toBeVisible();
     expect(navigation.invalidateAll).not.toHaveBeenCalled();
     expect(toast.success).not.toHaveBeenCalled();
@@ -383,7 +383,7 @@ describe("JoinSpaceDialog", () => {
     "passes every WCAG 2.2 A and AA rule while open, with each kind of error (%s)",
     async (scheme) => {
       document.documentElement.dataset.theme = scheme;
-      admin.join.mockRejectedValue(new EneoError("Already a member", "RESPONSE", 409, 9065, {}));
+      admin.join.mockRejectedValue(new EneoError("Already a member", "RESPONSE", 409, 9066, {}));
       await openDialog({ membership: groupMember });
 
       // Scoped to the dialog: the page behind the modal is inert and dimmed.

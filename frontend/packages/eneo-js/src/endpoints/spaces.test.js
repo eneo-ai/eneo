@@ -234,7 +234,7 @@ test("the schema carries the oversight fields the web app reads", () => {
   assert.match(schemaEntry("SpaceOversightVisit"), /\n {6}left_at\?: string \| null;/);
 
   // Another tenant admin must join; group membership changes are always logged.
-  assert.match(schemaEntry("ErrorCodes"), /\| 9067/);
+  assert.match(schemaEntry("ErrorCodes"), /\| 9068/);
   assert.match(schemaEntry("ActionType"), /\| "user_group_member_added"/);
   assert.match(schemaEntry("ActionType"), /\| "user_group_member_removed"/);
 });

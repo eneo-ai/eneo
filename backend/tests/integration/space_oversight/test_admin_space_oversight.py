@@ -1099,7 +1099,7 @@ async def test_self_and_group_self_escalation_are_refused(client, admin, oversee
         json={"user_id": str(overseer.id), "role": "admin"},
         headers=overseer.headers,
     )
-    assert (resp.status_code, error_code(resp)) == (400, 9066), resp.text
+    assert (resp.status_code, error_code(resp)) == (400, 9067), resp.text
 
     await add_member(base_space, overseer.id, "viewer")
     for method, body in (("PATCH", {"role": "admin"}), ("DELETE", None)):
@@ -1109,7 +1109,7 @@ async def test_self_and_group_self_escalation_are_refused(client, admin, oversee
             json=body,
             headers=overseer.headers,
         )
-        assert (resp.status_code, error_code(resp)) == (400, 9066), resp.text
+        assert (resp.status_code, error_code(resp)) == (400, 9067), resp.text
     assert (await member_row(base_space, overseer.id)).role == "viewer"
 
     group_space = await create_space(client, admin.token)
@@ -1120,13 +1120,13 @@ async def test_self_and_group_self_escalation_are_refused(client, admin, oversee
         json={"group_id": str(own_group), "role": "viewer"},
         headers=overseer.headers,
     )
-    assert (resp.status_code, error_code(resp)) == (400, 9066), resp.text
+    assert (resp.status_code, error_code(resp)) == (400, 9067), resp.text
 
     await add_group(group_space, own_group, "editor")
     resp = await client.patch(
         f"{groups}/{own_group}/", json={"role": "admin"}, headers=overseer.headers
     )
-    assert (resp.status_code, error_code(resp)) == (400, 9066), resp.text
+    assert (resp.status_code, error_code(resp)) == (400, 9067), resp.text
     # Lowering or removing a group you belong to takes access away: allowed.
     resp = await client.patch(
         f"{groups}/{own_group}/", json={"role": "viewer"}, headers=overseer.headers
@@ -1162,7 +1162,7 @@ async def test_another_tenant_admin_reaches_content_only_by_joining(
             json={"user_id": str(colleague.id), "role": role},
             headers=overseer.headers,
         )
-        assert (resp.status_code, error_code(resp)) == (400, 9067), resp.text
+        assert (resp.status_code, error_code(resp)) == (400, 9068), resp.text
     assert await member_row(space_id, colleague.id) is None
 
     # Already a member (added by the space itself): raising is refused.
@@ -1172,7 +1172,7 @@ async def test_another_tenant_admin_reaches_content_only_by_joining(
         json={"role": "admin"},
         headers=overseer.headers,
     )
-    assert (resp.status_code, error_code(resp)) == (400, 9067), resp.text
+    assert (resp.status_code, error_code(resp)) == (400, 9068), resp.text
     assert (await member_row(space_id, colleague.id)).role == "editor"
     resp = await client.patch(
         f"{base}/members/{colleague.id}/",
@@ -1208,7 +1208,7 @@ async def test_last_admin_is_protected(client, admin, overseer):
         resp = await client.request(
             method, f"{base}/members/{admin.id}/", json=body, headers=overseer.headers
         )
-        assert (resp.status_code, error_code(resp)) == (409, 9064), resp.text
+        assert (resp.status_code, error_code(resp)) == (409, 9065), resp.text
 
     group_space = await insert_space(tenant_id)
     admin_group = await insert_group(tenant_id, [admin.id])
@@ -1216,7 +1216,7 @@ async def test_last_admin_is_protected(client, admin, overseer):
     groups = f"/api/v1/admin/spaces/{group_space}/group-members/{admin_group}/"
     for method, body in (("PATCH", {"role": "viewer"}), ("DELETE", None)):
         resp = await client.request(method, groups, json=body, headers=overseer.headers)
-        assert (resp.status_code, error_code(resp)) == (409, 9064), resp.text
+        assert (resp.status_code, error_code(resp)) == (409, 9065), resp.text
 
     # Leave: the overseer joins as admin, the creator steps down, and the
     # overseer is now the last one.
@@ -1226,7 +1226,7 @@ async def test_last_admin_is_protected(client, admin, overseer):
     )
     assert resp.status_code == 200, resp.text
     resp = await client.post(f"{base}/leave/", headers=overseer.headers)
-    assert (resp.status_code, error_code(resp)) == (409, 9064), resp.text
+    assert (resp.status_code, error_code(resp)) == (409, 9065), resp.text
 
     assert await _space_roles(only_admin) == {admin.id: "viewer", overseer.id: "admin"}
     assert (
@@ -1846,7 +1846,7 @@ async def test_group_only_member_joining_below_is_refused(client, admin, oversee
 
     await add_member(space_id, overseer.id, "viewer")
     resp = await _join(client, overseer, space_id, "admin")
-    assert (resp.status_code, error_code(resp)) == (409, 9065), resp.text
+    assert (resp.status_code, error_code(resp)) == (409, 9066), resp.text
     assert await member_row(space_id, overseer.id) is not None
     assert await audit_rows() == []
 

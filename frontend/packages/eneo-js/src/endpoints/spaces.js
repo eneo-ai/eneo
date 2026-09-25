@@ -333,7 +333,7 @@ export function initSpaces(client) {
         /**
          * Add a user without joining the space. Adding yourself is refused;
          * use `join`. Adding another organisation administrator is refused
-         * with error code 9067: they join themselves, with a reason.
+         * with error code 9068: they join themselves, with a reason.
          * @param {{spaceId: string, userId: string, role: SpaceRoleValue}} params
          * @returns {Promise<AdminSpaceMembers>}
          * @throws {EneoError}
@@ -349,7 +349,7 @@ export function initSpaces(client) {
 
         /**
          * Raising another organisation administrator's role is refused with
-         * error code 9067; lowering it is allowed.
+         * error code 9068; lowering it is allowed.
          * @param {{spaceId: string, userId: string, role: SpaceRoleValue}} params
          * @returns {Promise<AdminSpaceMembers>}
          * @throws {EneoError}
@@ -380,7 +380,7 @@ export function initSpaces(client) {
 
       groupMembers: {
         /**
-         * A group already in the space is refused with 9065 before anything
+         * A group already in the space is refused with 9066 before anything
          * else is checked.
          * @param {{spaceId: string, groupId: string, role: SpaceRoleValue}} params
          * @returns {Promise<AdminSpaceMembers>}

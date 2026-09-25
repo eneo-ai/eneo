@@ -142,7 +142,7 @@ describe("a space's members page", () => {
   });
 
   test("a refused role change is reported, puts the old role back and reloads nothing", async () => {
-    const refusal = new EneoError("Last admin", "RESPONSE", 409, 9064, {});
+    const refusal = new EneoError("Last admin", "RESPONSE", 409, 9065, {});
     api.groupMembers.update.mockRejectedValue(refusal);
     renderPage();
 

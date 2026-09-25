@@ -247,14 +247,14 @@ describe("MembersTab", () => {
 
   test("a refused change puts the old role back and says why", async () => {
     api.groupMembers.update.mockRejectedValue(
-      new EneoError("Last admin", "RESPONSE", 409, 9064, {})
+      new EneoError("Last admin", "RESPONSE", 409, 9065, {})
     );
     renderTab();
 
     await role("Ekonomistöd").click();
     await page.getByRole("option", { name: "space_role_editor" }).click();
 
-    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith("eneo_error_9064"));
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith("eneo_error_9065"));
     await expect
       .element(role("Ekonomistöd"))
       .toHaveAccessibleName("admin_spaces_role_for(Ekonomistöd) space_role_viewer");
@@ -361,7 +361,7 @@ describe("MembersTab", () => {
   });
 
   test("adding an organisation administrator explains that they join themselves", async () => {
-    api.members.add.mockRejectedValue(new EneoError("Must join", "RESPONSE", 400, 9067, {}));
+    api.members.add.mockRejectedValue(new EneoError("Must join", "RESPONSE", 400, 9068, {}));
     renderTab();
 
     await page.getByRole("button", { name: "admin_spaces_add_person" }).click();
@@ -371,7 +371,7 @@ describe("MembersTab", () => {
 
     await expect
       .element(page.getByRole("alert"))
-      .toHaveTextContent("admin_spaces_add_person_failed: eneo_error_9067");
+      .toHaveTextContent("admin_spaces_add_person_failed: eneo_error_9068");
     await expect.element(page.getByRole("dialog")).toBeVisible();
   });
 
@@ -443,7 +443,7 @@ describe("MembersTab", () => {
   });
 
   test("a refused addition stays in the dialog with the reason", async () => {
-    api.groupMembers.add.mockRejectedValue(new EneoError("Self", "RESPONSE", 400, 9066, {}));
+    api.groupMembers.add.mockRejectedValue(new EneoError("Self", "RESPONSE", 400, 9067, {}));
     renderTab();
 
     await page.getByRole("button", { name: "admin_spaces_add_group" }).click();
@@ -453,7 +453,7 @@ describe("MembersTab", () => {
 
     await expect
       .element(page.getByRole("alert"))
-      .toHaveTextContent("admin_spaces_add_group_failed: eneo_error_9066");
+      .toHaveTextContent("admin_spaces_add_group_failed: eneo_error_9067");
     await expect.element(page.getByRole("dialog")).toBeVisible();
     expect(toast.success).not.toHaveBeenCalled();
   });

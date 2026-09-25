@@ -444,7 +444,7 @@ There is no separate CSRF token or refresh-token mechanism.
   so content permissions are not widened. Documents, questions, answers and
   conversations stay behind membership. One tenant admin cannot give another
   content access directly: adding a tenant admin as a user, or raising a
-  tenant admin's direct role, is refused with `400` and error code `9067`, so
+  tenant admin's direct role, is refused with `400` and error code `9068`, so
   admins join a space themselves with a role and a written reason.
   Members see the join until 90 days after it ends (table
   `space_oversight_visits`, whose row a daily worker job then deletes), and

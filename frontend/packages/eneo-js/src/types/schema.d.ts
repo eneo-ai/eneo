@@ -14092,10 +14092,10 @@ export interface components {
       | 9061
       | 9062
       | 9063
-      | 9064
       | 9065
       | 9066
-      | 9067;
+      | 9067
+      | 9068;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
