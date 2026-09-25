@@ -23,7 +23,8 @@ import { resolveInrefs, trimPartialInref } from "@/lib/chat/inref";
 import type { EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
 
 import { deriveActivity } from "./activity";
-import { ActivityPill, type ActivityTab } from "./activity-panel";
+import type { ActivityTab } from "./activity-panel";
+import { ActivityPill } from "./activity-pill";
 import type { TurnDurations } from "./activity-timings";
 import {
   copyAssistantAnswer,

@@ -5,7 +5,9 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { deriveActivity } from "./activity";
-import { ActivityPanel, ActivityPill, sourceAnchorId, type ActivityTab } from "./activity-panel";
+import { ActivityPanel, type ActivityTab } from "./activity-panel";
+import { ActivityPill } from "./activity-pill";
+import { sourceAnchorId } from "./activity-sources";
 import type { TurnDurations } from "./activity-timings";
 import { ChatTestProviders, installDomPolyfills } from "./testing";
 
