@@ -416,8 +416,10 @@ class WidgetService:
     ) -> WidgetView:
         """Activate the widget; tenant admins only, member or not.
 
-        ``revision`` pins activation to the configuration the admin
-        reviewed: an edit in between is refused, never published unseen.
+        ``revision`` pins activation to the widget's own settings as the admin
+        reviewed them: an edit to the widget in between is refused. The
+        assistant it serves is not pinned; its changes apply at once, before
+        and after activation.
         """
         validate_permission(self.user, Permission.ADMIN)
         widget = await self._owned_widget(widget_id)
