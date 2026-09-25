@@ -652,6 +652,14 @@ const ACTION_MESSAGES = {
   widget_activation_request_declined: {
     name: m.audit_action_widget_activation_request_declined,
     description: m.audit_action_widget_activation_request_declined_description
+  },
+  user_group_member_added: {
+    name: m.audit_action_user_group_member_added,
+    description: m.audit_action_user_group_member_added_description
+  },
+  user_group_member_removed: {
+    name: m.audit_action_user_group_member_removed,
+    description: m.audit_action_user_group_member_removed_description
   }
 } satisfies Record<ActionType, { name: MessageFn; description: MessageFn }>;
 

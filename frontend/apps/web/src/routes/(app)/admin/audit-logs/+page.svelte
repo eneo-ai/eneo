@@ -37,6 +37,7 @@
   import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
   import { getLocale } from "$lib/paraglide/runtime";
   import AuditConfigTab from "./AuditConfigTab.svelte";
+  import { ALWAYS_LOGGED_ACTIONS } from "./always-logged-actions";
   import AccessJustificationForm from "./AccessJustificationForm.svelte";
   import { getActionLabel, getActionOptions } from "./audit-action-labels";
   import { escapeHtml } from "$lib/core/formatting/escapeHtml";
@@ -365,19 +366,14 @@
 
   function getActionBadgeClass(action: string): string {
     // Admin/security actions (critical - needs attention) - RED
-    const adminActions = [
+    const adminActions: readonly string[] = [
       "user_created",
       "user_updated",
       "user_deleted",
       "role_modified",
       "permission_changed",
       "tenant_settings_updated",
-      "space_oversight_joined",
-      "space_oversight_left",
-      "space_oversight_member_added",
-      "space_oversight_member_role_changed",
-      "space_oversight_member_removed",
-      "widget_activation_request_declined"
+      ...ALWAYS_LOGGED_ACTIONS
     ];
 
     // System actions - GRAY
