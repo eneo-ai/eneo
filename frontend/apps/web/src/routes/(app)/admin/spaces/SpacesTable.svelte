@@ -20,7 +20,8 @@
     adminNames,
     groupCount,
     listMembershipLabel,
-    resourceSummary
+    resourceSummary,
+    sortColumnLabel
   } from "./labels";
   import { isMember, type SortColumn, type SpaceListQuery } from "./space-list-query";
 
@@ -39,19 +40,6 @@
   const number = new Intl.NumberFormat(intlLocale());
   const format = (value: number) => number.format(value);
 
-  function columnLabel(column: SortColumn) {
-    switch (column) {
-      case "name":
-        return m.admin_spaces_col_space();
-      case "members":
-        return m.members();
-      case "activity":
-        return m.admin_spaces_col_last_active();
-      default:
-        return column satisfies never;
-    }
-  }
-
   function ariaSort(column: SortColumn) {
     if (query.sort !== column) return undefined;
     return query.dir === "asc" ? "ascending" : "descending";
@@ -66,10 +54,10 @@
       "hover:text-primary focus-visible:ring-ring/50 -mx-1.5 inline-flex min-h-8 items-center gap-1 rounded-md px-1.5 font-medium outline-none focus-visible:ring-3",
       align === "end" && "flex-row-reverse"
     ]}
-    aria-label={m.admin_spaces_sort_by({ column: columnLabel(column) })}
+    aria-label={m.admin_spaces_sort_by({ column: sortColumnLabel(column) })}
     onclick={() => onSort(column)}
   >
-    {columnLabel(column)}
+    {sortColumnLabel(column)}
     {#if !active}
       <ArrowUpDown class="text-secondary size-3.5" aria-hidden="true" />
     {:else if query.dir === "asc"}
@@ -144,8 +132,9 @@
               </span>
               <div class="flex min-w-0 flex-1 flex-col gap-1">
                 <!-- eslint-disable svelte/no-navigation-without-resolve -- localized href built from a typed id -->
+                <!-- A name breaks between words, hyphenated where the language allows. -->
                 <a
-                  class="w-fit font-medium wrap-anywhere underline-offset-2 hover:underline"
+                  class="w-fit font-medium break-words hyphens-auto underline-offset-2 hover:underline"
                   href={localizeHref(`/admin/spaces/${item.id}`)}>{item.name}</a
                 >
                 <!-- eslint-enable svelte/no-navigation-without-resolve -->
@@ -184,15 +173,19 @@
                       {/if}
                     </span>
                   {/if}
-                  <span class="@3xl:hidden">
-                    {#if admins}
-                      {m.admin_spaces_meta_admins({ names: admins })}
-                    {:else}
-                      {@render noAdmin()}
-                    {/if}
-                  </span>
+                  <!-- The badge above already says when there is no administrator. -->
+                  {#if admins || !noAdminFlag}
+                    <span class="@3xl:hidden">
+                      {m.admin_spaces_meta_admins({
+                        names: admins ?? m.admin_spaces_admins_missing()
+                      })}
+                    </span>
+                  {/if}
                   <span>
                     {resourceSummary(item.resources, format)}
+                    {#if item.widgets.active > 0}
+                      · {activeWidgetCount(item.widgets.active, format)}
+                    {/if}
                     · {m.admin_spaces_meta_last_active({
                       activity: activityLabel(item.last_activity)
                     })}

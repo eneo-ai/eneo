@@ -3,6 +3,41 @@ import { findHostingLabel } from "$lib/features/ai-models/hosting/hostingOptions
 import { formatList } from "$lib/features/spaces/oversight/format";
 import { spaceRoleLabel } from "$lib/features/spaces/roles";
 import { m } from "$lib/paraglide/messages";
+import type { SortColumn, SpaceListQuery } from "./space-list-query";
+
+/** A sortable column's name, as its header and the caption say it. */
+export function sortColumnLabel(column: SortColumn): string {
+  switch (column) {
+    case "name":
+      return m.admin_spaces_col_space();
+    case "members":
+      return m.members();
+    case "activity":
+      return m.admin_spaces_col_last_active();
+    default:
+      return column satisfies never;
+  }
+}
+
+/** "Sorted by Space, ascending", plus the page when there is more than one. */
+export function listOrderLabel(
+  query: Pick<SpaceListQuery, "sort" | "dir">,
+  page: number,
+  pages: number,
+  format: (value: number) => string
+): string {
+  const column = sortColumnLabel(query.sort);
+  const direction =
+    query.dir === "asc" ? m.admin_spaces_sort_ascending() : m.admin_spaces_sort_descending();
+  return pages > 1
+    ? m.admin_spaces_order_status_page({
+        column,
+        direction,
+        page: format(page),
+        pages: format(pages)
+      })
+    : m.admin_spaces_order_status({ column, direction });
+}
 
 /** "Ada och Bo", or "Ada, Bo och 3 till" past `max` names; null when the space has none. */
 export function adminNames(admins: Pick<AdminSpaceAdmins, "principals">, max = 2): string | null {
@@ -59,7 +94,8 @@ export function resourceSummary(
         : m.admin_spaces_count_knowledge({ count: format(knowledge_sources) })
     );
   }
-  return parts.length > 0 ? parts.join(" · ") : m.admin_spaces_none();
+  // The counts leave out the default assistant, so "none" would be wrong.
+  return parts.length > 0 ? parts.join(" · ") : m.admin_spaces_only_default_assistant();
 }
 
 /** "{n} grupper" / "1 grupp". */

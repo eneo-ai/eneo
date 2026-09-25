@@ -17,6 +17,7 @@
   import SpacesAttention from "./SpacesAttention.svelte";
   import SpacesFilters from "./SpacesFilters.svelte";
   import SpacesTable from "./SpacesTable.svelte";
+  import { listOrderLabel, sortColumnLabel } from "./labels";
   import {
     DEFAULT_QUERY,
     PAGE_SIZE,
@@ -30,7 +31,6 @@
     readSpaceListQuery,
     sortSpaces,
     spaceListQueryString,
-    type SortColumn,
     type SpaceListQuery
   } from "./space-list-query";
 
@@ -43,7 +43,15 @@
   const number = new Intl.NumberFormat(locale);
   const collator = new Intl.Collator(locale);
 
-  let query = $state<SpaceListQuery>(untrack(() => readSpaceListQuery(page.url)));
+  // Back/Forward bring back the history entry's shallow state, while `page.url`
+  // is the URL the page first loaded with.
+  let query = $state<SpaceListQuery>(
+    untrack(() => {
+      const restored = page.state.search;
+      if (restored === undefined) return readSpaceListQuery(page.url);
+      return readSpaceListQuery(new URL(`${page.url.pathname}${restored}`, page.url.origin));
+    })
+  );
   let allHeading = $state<HTMLHeadingElement | null>(null);
   let searchInput = $state<HTMLInputElement | null>(null);
   let retrying = $state(false);
@@ -67,9 +75,13 @@
           total: number.format(items.length)
         })
   );
-  let announced = $state(untrack(() => results));
+  // Sorting and paging change no count, so the order is read out with it.
+  const order = $derived(
+    listOrderLabel(query, currentPage, pages, (value) => number.format(value))
+  );
+  let announced = $state(untrack(() => ({ results, order })));
   $effect(() => {
-    const text = results;
+    const text = { results, order };
     const timer = setTimeout(() => (announced = text), SETTLE_MS);
     return () => clearTimeout(timer);
   });
@@ -84,7 +96,7 @@
       written = search;
       // Same page, only the query changes: nothing to resolve.
       // eslint-disable-next-line svelte/no-navigation-without-resolve
-      replaceState(`${page.url.pathname}${search}${page.url.hash}`, page.state);
+      replaceState(`${page.url.pathname}${search}${page.url.hash}`, { ...page.state, search });
     }, SETTLE_MS);
     return () => clearTimeout(timer);
   });
@@ -98,19 +110,6 @@
     allHeading?.focus();
   }
 
-  function sortLabel(column: SortColumn) {
-    switch (column) {
-      case "name":
-        return m.admin_spaces_col_space();
-      case "members":
-        return m.members();
-      case "activity":
-        return m.admin_spaces_col_last_active();
-      default:
-        return column satisfies never;
-    }
-  }
-
   async function clearFilters() {
     update({ q: DEFAULT_QUERY.q, membership: DEFAULT_QUERY.membership, show: DEFAULT_QUERY.show });
     // The button goes away with the filters; the search field is where they start again.
@@ -119,6 +118,7 @@
   }
 
   async function retry() {
+    if (retrying) return;
     retrying = true;
     try {
       await invalidate("admin:spaces");
@@ -192,7 +192,8 @@
           {items}
           {requests}
           onShowNoAdmin={() => {
-            update({ show: "no_admin" });
+            // The count above covers every space, so no other filter may hide one.
+            update({ q: "", membership: DEFAULT_QUERY.membership, show: "no_admin" });
             void focusList();
           }}
         />
@@ -219,13 +220,15 @@
               bind:searchInput
             />
 
-            <p role="status" class="text-secondary text-sm">{announced}</p>
+            <p role="status" class="text-secondary text-sm">
+              {announced.results}<span class="sr-only">. {announced.order}</span>
+            </p>
 
             <SpacesTable
               items={visible}
               {query}
               securityEnabled={data.securityEnabled}
-              caption={m.admin_spaces_table_caption({ column: sortLabel(query.sort) })}
+              caption={m.admin_spaces_table_caption({ column: sortColumnLabel(query.sort) })}
               onSort={(column) => update(nextSort(query, column))}
               onClearFilters={clearFilters}
             />

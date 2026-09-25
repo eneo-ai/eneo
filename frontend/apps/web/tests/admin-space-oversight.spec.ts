@@ -143,12 +143,27 @@ test("an organisation administrator oversees a space, joins it with a reason and
   await page.getByRole("link", { name: "Ytor", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/spaces$/);
   await expect(page.getByRole("heading", { level: 1, name: "Ytor" })).toBeVisible();
+  // A reused stack holds more spaces than one page of the list; the search finds this one.
+  await page.goto(`/admin/spaces?q=${encodeURIComponent(spaceName)}`);
+  const search = page.getByRole("searchbox", { name: "Sök bland ytor" });
+  await expect(search).toHaveValue(spaceName);
   const spaceLink = page.getByRole("link", { name: spaceName, exact: true });
   const row = page.getByRole("row").filter({ has: spaceLink });
   await expect(
     row.getByText("Inte medlem", { exact: true }).filter({ visible: true })
   ).toBeVisible();
   expect(await wcagViolations(page)).toEqual([]);
+
+  // A filter chosen on the page survives a visit to a space and Back.
+  const notMember = page.getByRole("radio", { name: /^Där du inte är medlem/ });
+  await notMember.click();
+  await expect(page).toHaveURL(/membership=not_member/);
+  await spaceLink.click();
+  await expect(page).toHaveURL(new RegExp(`/admin/spaces/${space.id}$`));
+  await page.goBack();
+  await expect(search).toHaveValue(spaceName);
+  await expect(notMember).toBeChecked();
+  await expect(page).toHaveURL(/membership=not_member/);
 
   // The oversight page shows the space without its content.
   await spaceLink.click();

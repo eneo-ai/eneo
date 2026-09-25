@@ -30,6 +30,11 @@ declare global {
       /** Selected session in an assistant, useful for keeping history with pushState */
       conversation?: { id: string };
       tab?: string;
+      /**
+       * A list's own query string (`?q=…&show=…`) when the list filters on the
+       * client. Back/Forward restore it; `page.url` keeps the URL the page loaded with.
+       */
+      search?: string;
     }
     // interface Platform {}
   }

@@ -7,7 +7,10 @@ import sv from "../../../../../messages/sv.json";
 import "../../../../app.css";
 
 const navigation = vi.hoisted(() => ({ invalidate: vi.fn(), replaceState: vi.fn() }));
-const route = vi.hoisted(() => ({ url: new URL("http://localhost/admin/spaces") }));
+const route = vi.hoisted(() => ({
+  url: new URL("http://localhost/admin/spaces"),
+  state: {} as App.PageState
+}));
 // Messages read as their keys, or as the real Swedish text where length matters.
 const i18n = vi.hoisted(() => ({ catalog: null as Record<string, string> | null }));
 
@@ -27,7 +30,9 @@ vi.mock("$app/state", () => ({
     get url() {
       return route.url;
     },
-    state: {}
+    get state() {
+      return route.state;
+    }
   },
   navigating: { to: null }
 }));
@@ -166,10 +171,37 @@ function horizontalOverflow() {
   ];
 }
 
+/** The opaque colour of `layers` painted in order, bottom first. */
+function paint(...layers: string[]): [number, number, number] {
+  const context = document.createElement("canvas").getContext("2d")!;
+  for (const layer of layers) {
+    context.fillStyle = layer;
+    context.fillRect(0, 0, 1, 1);
+  }
+  const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+  return [r, g, b];
+}
+
+function contrast(a: [number, number, number], b: [number, number, number]) {
+  const luminance = (rgb: [number, number, number]) => {
+    const [r, g, b] = rgb.map((channel) => {
+      const c = channel / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (light + 0.05) / (dark + 0.05);
+}
+
+const order = (column: string, direction: "ascending" | "descending") =>
+  `admin_spaces_order_status(${column}|admin_spaces_sort_${direction})`;
+
 beforeEach(() => {
   vi.clearAllMocks();
   navigation.invalidate.mockResolvedValue(undefined);
   route.url = new URL("http://localhost/admin/spaces");
+  route.state = {};
   i18n.catalog = null;
   delete document.documentElement.dataset.theme;
   document.body.classList.add("bg-primary");
@@ -218,20 +250,31 @@ describe("Admin → Ytor", () => {
       .toHaveAttribute("href", "/admin/widgets?tab=widgets#activation-requests");
   });
 
-  test("'Visa ytorna' narrows the list, moves focus to it and announces the new count", async () => {
+  test("'Visa ytorna' shows every space without an administrator, whatever was filtered before", async () => {
     renderPage();
     await expect.element(status()).toHaveTextContent("admin_spaces_results(3|3)");
+    // The attention count covers every space, so these must not hide one.
+    const search = page.getByRole("searchbox", { name: "admin_spaces_search_label" });
+    await search.fill("webb");
+    await page.getByRole("radio", { name: /^admin_spaces_membership_member/ }).click();
+    expect(rows()).toEqual(["Webb och kommunikation"]);
 
     await page.getByRole("button", { name: "admin_spaces_attention_show" }).click();
 
     await expect.element(heading()).toHaveFocus();
     expect(rows()).toEqual(["HR"]);
+    await expect.element(search).toHaveValue("");
+    await expect
+      .element(page.getByRole("radio", { name: /^admin_spaces_membership_all/ }))
+      .toHaveAttribute("aria-checked", "true");
     await expect
       .element(page.getByRole("button", { name: /^show admin_spaces_show_no_admin$/ }))
       .toBeVisible();
     await expect.element(status()).toHaveTextContent("admin_spaces_results(1|3)");
     await vi.waitFor(() =>
-      expect(navigation.replaceState).toHaveBeenLastCalledWith("/admin/spaces?show=no_admin", {})
+      expect(navigation.replaceState).toHaveBeenLastCalledWith("/admin/spaces?show=no_admin", {
+        search: "?show=no_admin"
+      })
     );
   });
 
@@ -241,7 +284,9 @@ describe("Admin → Ytor", () => {
     await page.getByRole("searchbox", { name: "admin_spaces_search_label" }).fill("webb");
     expect(rows()).toEqual(["Webb och kommunikation"]);
     // Still the old count right after the keystrokes; the new one follows the pause.
-    expect(status().element().textContent).toBe("admin_spaces_results(3|3)");
+    expect(status().element().textContent).toBe(
+      `admin_spaces_results(3|3). ${order("admin_spaces_col_space", "ascending")}`
+    );
     await expect.element(status()).toHaveTextContent("admin_spaces_results(1|3)");
 
     await page.getByRole("searchbox", { name: "admin_spaces_search_label" }).fill("");
@@ -260,7 +305,7 @@ describe("Admin → Ytor", () => {
     await vi.waitFor(() =>
       expect(navigation.replaceState).toHaveBeenLastCalledWith(
         "/admin/spaces?show=widget_request",
-        {}
+        { search: "?show=widget_request" }
       )
     );
   });
@@ -303,6 +348,8 @@ describe("Admin → Ytor", () => {
     expect(document.querySelector("caption")?.textContent).toBe(
       "admin_spaces_table_caption(members)"
     );
+    // The count does not change, so the status says what did.
+    await expect.element(status()).toHaveTextContent(order("members", "descending"));
   });
 
   test("links each space by name and gives every 'Öppna ytan' a unique name", async () => {
@@ -361,13 +408,24 @@ describe("Admin → Ytor", () => {
     await expect.element(pagination).toHaveTextContent("admin_spaces_page_of(1|2)");
     expect(rows()).toHaveLength(50);
 
+    await expect
+      .element(status())
+      .toHaveTextContent(
+        "admin_spaces_order_status_page(admin_spaces_col_space|admin_spaces_sort_ascending|1|2)"
+      );
+
     await page.getByRole("button", { name: "next" }).click();
     await expect.element(pagination).toHaveTextContent("admin_spaces_page_of(2|2)");
     expect(rows()).toEqual(["Yta 51", "Yta 52", "Yta 53", "Yta 54", "Yta 55"]);
     await expect.element(heading()).toHaveFocus();
     await expect.element(page.getByRole("button", { name: "next" })).toBeDisabled();
-    // The page is not a live region; the status keeps the total.
+    // The page is not a live region; the status says which page is shown.
     expect(pagination.element().closest("[aria-live], [role=status]")).toBeNull();
+    await expect
+      .element(status())
+      .toHaveTextContent(
+        "admin_spaces_order_status_page(admin_spaces_col_space|admin_spaces_sort_ascending|2|2)"
+      );
   });
 
   test("reads the list's state from the URL", async () => {
@@ -381,6 +439,30 @@ describe("Admin → Ytor", () => {
       .toHaveAttribute("aria-sort", "descending");
   });
 
+  test("Back and Forward bring back the filters the history entry was left with", async () => {
+    // SvelteKit restores the entry's shallow state but loads the page's first URL.
+    route.state = { search: "?q=hr&show=no_admin" };
+    renderPage();
+
+    await expect.element(page.getByRole("searchbox")).toHaveValue("hr");
+    expect(rows()).toEqual(["HR"]);
+    await expect
+      .element(page.getByRole("button", { name: /^show admin_spaces_show_no_admin$/ }))
+      .toBeVisible();
+    // The address bar already shows this state.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(navigation.replaceState).not.toHaveBeenCalled();
+  });
+
+  test("a history entry left without filters shows none, whatever the page loaded with", async () => {
+    route.url = new URL("http://localhost/admin/spaces?q=ekonomi");
+    route.state = { search: "" };
+    renderPage();
+
+    await expect.element(page.getByRole("searchbox")).toHaveValue("");
+    expect(rows()).toHaveLength(3);
+  });
+
   test("offers another try when the spaces could not be loaded", async () => {
     renderPage(null);
 
@@ -388,6 +470,72 @@ describe("Admin → Ytor", () => {
     await page.getByRole("button", { name: "retry" }).click();
     expect(navigation.invalidate).toHaveBeenCalledWith("admin:spaces");
   });
+
+  test("a retry already under way is not started again from the keyboard", async () => {
+    navigation.invalidate.mockReturnValue(new Promise(() => {}));
+    renderPage(null);
+    const retry = page.getByRole("button", { name: "retry" });
+
+    await retry.click();
+    await expect.element(retry).toHaveAttribute("aria-disabled", "true");
+    (retry.element() as HTMLElement).focus();
+    await userEvent.keyboard("{Enter}");
+    await userEvent.keyboard("{Enter}");
+    expect(navigation.invalidate).toHaveBeenCalledTimes(1);
+  });
+
+  test("on a narrow screen each row still names its widgets, resources and administrators", async () => {
+    await page.viewport(320, 720);
+    const bare = space("Arkiv", {
+      resources: { assistants: 0, apps: 0, group_chats: 0, knowledge_sources: 0 },
+      widgets: { active: 0, paused: 0, draft: 0, awaiting_activation: 0 }
+    });
+    renderPage({ items: [ekonomi, hr, bare], widget_requests: [] });
+    await expect.element(page.getByRole("table")).toBeVisible();
+
+    const visibleText = (name: RegExp) =>
+      (page.getByRole("rowheader", { name }).element() as HTMLElement).innerText;
+    expect(visibleText(/^Ekonomi/)).toContain("admin_spaces_count_active_widgets_one");
+    expect(visibleText(/^Ekonomi/)).toContain("admin_spaces_meta_admins(");
+    expect(visibleText(/^Arkiv/)).toContain("admin_spaces_only_default_assistant");
+    // The badge already says HR has no administrator; the line does not repeat it.
+    expect(visibleText(/^HR/)).toContain("admin_spaces_badge_no_admin");
+    expect(visibleText(/^HR/)).not.toContain("admin_spaces_meta_admins(");
+    expect(visibleText(/^HR/)).not.toContain("admin_spaces_admins_missing");
+  });
+
+  test("a space's name breaks between words, not inside one", async () => {
+    renderPage();
+    const link = page.getByRole("link", { name: "Webb och kommunikation", exact: true }).element();
+    expect(getComputedStyle(link).overflowWrap).toBe("break-word");
+    expect(getComputedStyle(link).hyphens).toBe("auto");
+  });
+
+  test.each(["light", "dark"] as const)(
+    "the chosen membership filter stands out by more than colour (%s)",
+    async (scheme) => {
+      document.documentElement.dataset.theme = scheme;
+      renderPage();
+      await userEvent.unhover(document.body);
+      await vi.waitFor(() => expect(document.getAnimations()).toHaveLength(0));
+
+      const checked = page.getByRole("radio", { name: /^admin_spaces_membership_all/ }).element();
+      const unchecked = page
+        .getByRole("radio", { name: /^admin_spaces_membership_member/ })
+        .element();
+      expect(checked.querySelector("svg")).not.toBeNull();
+      expect(unchecked.querySelector("svg")).toBeNull();
+
+      const track = getComputedStyle(page.getByRole("radiogroup").element()).backgroundColor;
+      const surface = getComputedStyle(
+        page.getByRole("search", { name: "admin_spaces_filters_label" }).element()
+      ).backgroundColor;
+      const style = getComputedStyle(checked);
+      const border = paint(surface, track, style.backgroundColor, style.borderTopColor);
+      // WCAG 1.4.11: 3:1 against the track it sits on.
+      expect(contrast(border, paint(surface, track))).toBeGreaterThanOrEqual(3);
+    }
+  );
 
   test("leaves out the classification when the organisation does not use it", async () => {
     await page.viewport(1440, 900);
@@ -420,8 +568,8 @@ describe("Admin → Ytor", () => {
     expect(horizontalOverflow()).toEqual([]);
     // What the hidden columns hold stays on the page.
     const hrRow = page.getByRole("row", { name: /^HR/ });
-    await expect.element(hrRow).toHaveTextContent("Saknas");
-    await expect.element(hrRow).toHaveTextContent("Ingen aktivitet");
+    await expect.element(hrRow).toHaveTextContent("Saknar administratör");
+    await expect.element(hrRow).toHaveTextContent("Ingen registrerad aktivitet");
   });
 
   test.each(["light", "dark"] as const)(

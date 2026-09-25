@@ -3,7 +3,7 @@
   the client as you type or choose; the page announces the new count.
 -->
 <script lang="ts">
-  import { X } from "@lucide/svelte";
+  import { Check, X } from "@lucide/svelte";
   import { RadioGroup as RadioGroupPrimitive } from "bits-ui";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -128,11 +128,17 @@
         class="bg-secondary flex flex-col gap-1 rounded-lg p-1 @2xl:flex-row @2xl:flex-wrap"
       >
         {#each MEMBERSHIP_FILTERS as option (option)}
+          <!-- The choice shows by a 3:1 border and a check mark, not by colour alone. -->
           <RadioGroupPrimitive.Item
             value={option}
-            class="text-secondary hover:text-primary data-[state=checked]:border-strongest data-[state=checked]:bg-primary data-[state=checked]:text-primary focus-visible:ring-ring/50 rounded-md border border-transparent px-3 py-1.5 text-left text-sm font-medium outline-none focus-visible:ring-3 data-[state=checked]:shadow-sm max-md:min-h-12"
+            class="text-secondary hover:text-primary data-[state=checked]:border-muted-foreground data-[state=checked]:bg-primary data-[state=checked]:text-primary focus-visible:ring-ring/50 inline-flex items-center gap-1.5 rounded-md border border-transparent px-3 py-1.5 text-left text-sm font-medium outline-none focus-visible:ring-3 data-[state=checked]:shadow-sm max-md:min-h-12"
           >
-            {membershipLabel(option)}
+            {#snippet children({ checked })}
+              {#if checked}
+                <Check class="size-4 shrink-0" aria-hidden="true" />
+              {/if}
+              {membershipLabel(option)}
+            {/snippet}
           </RadioGroupPrimitive.Item>
         {/each}
       </RadioGroupPrimitive.Root>
