@@ -1,10 +1,13 @@
 "use client";
 
-import Link from "next/link";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { cn } from "@/lib/utils";
 
+/**
+ * Account sub-pages as Astryx tabs in their navigation pattern: a named `nav`
+ * landmark of links with the current page marked `aria-current`.
+ */
 export function AccountNav() {
   const t = useTranslations();
   const pathname = usePathname();
@@ -14,25 +17,19 @@ export function AccountNav() {
     { href: "/account/api-keys", label: t("api_keys") },
     { href: "/account/integrations", label: t("integrations") }
   ];
+  const current = items.find((item) => item.href === pathname)?.href ?? "";
 
   return (
-    <nav className="flex gap-1 border-b pb-2">
-      {items.map((item) => {
-        const active = pathname === item.href;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "text-muted-foreground hover:bg-muted hover:text-foreground flex h-9 items-center rounded-lg px-3 text-sm font-medium transition-colors",
-              active && "bg-muted text-foreground"
-            )}
-          >
-            {item.label}
-          </Link>
-        );
-      })}
-    </nav>
+    <TabList
+      value={current}
+      // The tabs are links; navigating to them is what selects them.
+      onChange={() => {}}
+      hasDivider
+      aria-label={t("shell_account_nav_label")}
+    >
+      {items.map((item) => (
+        <Tab key={item.href} value={item.href} label={item.label} href={item.href} />
+      ))}
+    </TabList>
   );
 }

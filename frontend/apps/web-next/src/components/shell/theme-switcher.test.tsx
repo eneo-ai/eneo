@@ -1,61 +1,54 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { ThemeProvider } from "next-themes";
-import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { ThemeSwitcher } from "./theme-switcher";
+import { installBrowserMocks } from "./test-support";
+import { ThemeSubMenu } from "./theme-switcher";
 
 const messages = { theme: "Tema", light: "Ljust", dark: "Mörkt", system: "System" };
 
-beforeAll(() => {
-  // Radix positions the menu with ResizeObserver, which jsdom lacks.
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-  );
-  // next-themes reads the system preference.
-  vi.stubGlobal("matchMedia", (query: string) => ({
-    matches: false,
-    media: query,
-    addEventListener() {},
-    removeEventListener() {},
-    addListener() {},
-    removeListener() {}
-  }));
+beforeEach(() => installBrowserMocks());
+afterEach(() => {
+  cleanup();
+  window.localStorage.clear();
 });
 
-afterEach(cleanup);
-
-function renderSwitcher() {
+function renderMenu() {
   return render(
     <NextIntlClientProvider locale="sv" messages={messages}>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-        <ThemeSwitcher />
+        <DropdownMenu button={{ label: "Meny" }}>
+          <ThemeSubMenu />
+        </DropdownMenu>
       </ThemeProvider>
     </NextIntlClientProvider>
   );
 }
 
-it("renders the theme menu trigger", async () => {
-  const { container } = renderSwitcher();
-  expect(screen.getByRole("button", { name: "Tema" })).toBeDefined();
-  await expectNoAxeViolations(container);
+async function openThemeSubMenu() {
+  fireEvent.click(screen.getByRole("button", { name: "Meny" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: /Tema/ }));
+  return screen.findAllByRole("menuitemradio");
+}
+
+it("exposes the colour modes as radio items with the current one checked", async () => {
+  renderMenu();
+  const options = await openThemeSubMenu();
+  expect(options.map((option) => option.textContent)).toEqual(["Ljust", "Mörkt", "System"]);
+  await waitFor(() =>
+    expect(screen.getByRole("menuitemradio", { name: "System" }).getAttribute("aria-checked")).toBe(
+      "true"
+    )
+  );
+  await expectNoAxeViolations(document.body);
 });
 
-it("opens from the keyboard and exposes the current theme as a checked radio item", async () => {
-  renderSwitcher();
-  fireEvent.keyDown(screen.getByRole("button", { name: "Tema" }), { key: "Enter" });
-
-  const options = await screen.findAllByRole("menuitemradio");
-  expect(options.map((option) => option.textContent)).toEqual(["Ljust", "Mörkt", "System"]);
-  expect(screen.getByRole("menuitemradio", { name: "System" }).getAttribute("aria-checked")).toBe(
-    "true"
-  );
-  // The menu is portalled to <body>, outside the render container.
-  await expectNoAxeViolations(document.body);
+it("switches the colour mode", async () => {
+  renderMenu();
+  await openThemeSubMenu();
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "Mörkt" }));
+  await waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(true));
 });

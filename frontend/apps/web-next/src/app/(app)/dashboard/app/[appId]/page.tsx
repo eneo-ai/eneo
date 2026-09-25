@@ -23,7 +23,10 @@ export default async function DashboardAppPage({ params }: { params: Promise<{ a
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
-      <DashboardApp appId={appId} />
+      {/* Page padding inside the shell's page panel. */}
+      <div className="flex flex-col p-4 sm:p-6">
+        <DashboardApp appId={appId} />
+      </div>
     </HydrationBoundary>
   );
 }
