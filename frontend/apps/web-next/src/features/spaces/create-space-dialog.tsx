@@ -7,16 +7,18 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 
 /**
- * "Skapa yta": asks for a name, creates the space and opens its overview.
- * Controlled by the caller, which renders its own trigger. The form (and its
- * Namn field) only exists while the dialog is open; the header stays mounted
- * because Astryx names the dialog from the title present when it mounts.
+ * "Skapa yta", the one create-space flow (the spaces list, the SideNav "+"
+ * and the ⌘K palette): asks for a name, creates the space, refreshes the
+ * spaces queries and opens the new space's overview. Controlled by the
+ * caller, which renders its own trigger. The form (and its Namn field) only
+ * exists while the dialog is open; the header stays mounted because Astryx
+ * names the dialog from the title present when it mounts.
  */
 export function CreateSpaceDialog({
   open,
@@ -29,7 +31,9 @@ export function CreateSpaceDialog({
   const router = useRouter();
   const queryClient = useQueryClient();
   const formId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
+  const [showError, setShowError] = useState(false);
 
   const createSpace = useMutation({
     mutationFn: (body: { name: string }) => unwrap(browserApi.POST("/api/v1/spaces/", { body })),
@@ -43,6 +47,7 @@ export function CreateSpaceDialog({
 
   function close() {
     setName("");
+    setShowError(false);
     onOpenChange(false);
   }
 
@@ -50,7 +55,18 @@ export function CreateSpaceDialog({
     if (!next && !createSpace.isPending) close();
   }
 
-  const trimmed = name.trim();
+  // An empty name is explained at the field (WCAG 3.3.1, 3.3.3), not
+  // prevented with a disabled button that says nothing.
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setShowError(true);
+      inputRef.current?.focus();
+      return;
+    }
+    createSpace.mutate({ name: trimmed });
+  }
 
   return (
     <Dialog isOpen={open} onOpenChange={requestOpenChange} purpose="form" width={440}>
@@ -60,19 +76,23 @@ export function CreateSpaceDialog({
         content={
           open ? (
             <LayoutContent>
-              <form
-                id={formId}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (trimmed) createSpace.mutate({ name: trimmed });
-                }}
-              >
+              <form id={formId} onSubmit={submit} noValidate>
                 <TextInput
+                  ref={inputRef}
                   label={t("name")}
                   value={name}
-                  onChange={setName}
+                  onChange={(value) => {
+                    setName(value);
+                    if (value.trim()) setShowError(false);
+                  }}
                   isRequired
+                  htmlName="name"
                   autoComplete="off"
+                  status={
+                    showError
+                      ? { type: "error", message: t("shell_create_space_name_required") }
+                      : undefined
+                  }
                 />
               </form>
             </LayoutContent>
@@ -91,8 +111,8 @@ export function CreateSpaceDialog({
                   type="submit"
                   form={formId}
                   variant="primary"
-                  label={createSpace.isPending ? t("loading") : t("create_space")}
-                  isDisabled={!trimmed || createSpace.isPending}
+                  label={t("create_space")}
+                  isLoading={createSpace.isPending}
                 />
               </div>
             </LayoutFooter>

@@ -7,7 +7,12 @@ import { AppShellFrame } from "./app-shell";
 import { conversationHref, OPEN_NAV_EVENT } from "./routes";
 import { useShell } from "./shell-context";
 import { resetSideNavCollapsedForTest } from "./shell-state";
-import { installBrowserMocks, renderWithProviders, testQueryClient } from "./test-support";
+import {
+  appContext,
+  installBrowserMocks,
+  renderWithProviders,
+  testQueryClient
+} from "./test-support";
 
 const nav = vi.hoisted(() => ({ pathname: "/spaces/list", search: "" }));
 
@@ -25,11 +30,11 @@ vi.mock("@/features/whats-new/whats-new-provider", () => ({
 }));
 vi.mock("@/lib/i18n/actions", () => ({ setLocale: vi.fn() }));
 
-function renderShellWith(page: React.ReactNode) {
+function renderShellWith(page: React.ReactNode, context = appContext()) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(["spaces"], []);
   queryClient.setQueryData(["dashboard"], { spaces: { items: [] } });
-  return renderWithProviders(<AppShellFrame>{page}</AppShellFrame>, { queryClient });
+  return renderWithProviders(<AppShellFrame>{page}</AppShellFrame>, { queryClient, context });
 }
 
 function renderShell() {
@@ -105,6 +110,17 @@ describe("AppShellFrame", () => {
     });
     expect(event.defaultPrevented).toBe(false);
     expect(screen.queryByRole("dialog", { name: "Sök i Eneo" })).toBeNull();
+  });
+
+  it("opens the app's one create-space dialog from the SideNav", async () => {
+    renderShellWith(<h1>Sidinnehåll</h1>, appContext({ permissions: ["shared_spaces"] }));
+    // The form exists only while the dialog is open: no stray Namn field.
+    expect(screen.queryByLabelText(/Namn/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Skapa yta" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Skapa en ny yta" });
+    expect(within(dialog).getByLabelText(/Namn/)).toBeTruthy();
   });
 
   it("does not open the palette over another dialog", () => {
