@@ -193,8 +193,10 @@ image is stored as a file owned by a user, and a service key has no user.
   group chats use the responding assistant's settings. Group chats do not
   offer per-call tool approval.
 - Switching models after a conversation has messages asks for confirmation and
-  offers a new conversation as an option. The new model may fit less history or support
-  different tools and images. Messages remain stored; the backend prepares
+  recommends starting a new conversation to avoid mixing replies from different
+  models. You can still choose to change models and continue in the same
+  conversation. The new model may fit less history or support different tools
+  and images. Messages remain stored; the backend prepares
   context for the selected model on each request. Changing the completion
   model does not reindex knowledge sources, which use a separate embedding
   model. Provider prompt caching can affect response time and cost, but a cache
