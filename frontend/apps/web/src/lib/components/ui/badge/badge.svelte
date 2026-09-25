@@ -11,9 +11,9 @@
         // actually paints. Same workaround applied to button/switch/etc.
         default: "bg-accent-default text-on-fill [a]:hover:bg-accent-default/90",
         secondary: "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
-        // Same pairing as the destructive button: 4.5:1 in both themes.
+        // Same pairing and focus ring as the destructive button.
         destructive:
-          "bg-negative-dimmer text-negative-stronger [a]:hover:bg-negative-default [a]:hover:text-on-fill focus-visible:ring-destructive/20",
+          "bg-negative-dimmer text-negative-stronger [a]:hover:bg-negative-default [a]:hover:text-on-fill focus-visible:ring-negative-stronger focus-visible:border-negative-stronger",
         // `border-strongest` (45% / 55% ink) is the only border token that clears
         // the 3:1 non-text contrast bar for a status pill; `border-border` is 1.4:1.
         outline:
