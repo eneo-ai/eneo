@@ -28,6 +28,7 @@
   import { toastError } from "$lib/core/errors";
   import { toastWidgetError } from "$lib/features/widget/admin/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
+  import ActivationRequestsTable from "$lib/features/widget/admin/ActivationRequestsTable.svelte";
   import WidgetOverviewList from "$lib/features/widget/admin/WidgetOverviewList.svelte";
   import { MAX_DAILY_TOKEN_BUDGET } from "$lib/features/widget/admin/limits";
   import { urlTab } from "$lib/features/widget/admin/tabState.svelte";
@@ -223,6 +224,7 @@
   }
 
   const totals = $derived(data.overview.totals);
+  const hasRequests = $derived(data.overview.items.some((item) => item.activation_requested_at));
   const tab = urlTab(["widgets", "policy", "templates"] as const, "widgets");
 </script>
 
@@ -269,8 +271,26 @@
 
         <Tabs.Content value="widgets" class="flex flex-col gap-6">
           <p class="text-secondary max-w-[72ch] text-sm">{m.widget_admin_overview_description()}</p>
+          {#if hasRequests}
+            <!-- Linked from Admin → Ytor, so the id is part of the page's contract. -->
+            <section
+              id="activation-requests"
+              aria-labelledby="activation-requests-title"
+              class="flex scroll-mt-4 flex-col gap-3"
+            >
+              <div class="flex flex-col gap-1">
+                <h2 id="activation-requests-title" class="text-base font-semibold">
+                  {m.widget_admin_overview_awaiting_title()}
+                </h2>
+                <p class="text-secondary max-w-[72ch] text-sm">
+                  {m.widget_admin_overview_awaiting_help()}
+                </p>
+              </div>
+              <ActivationRequestsTable items={data.overview.items} />
+            </section>
+          {/if}
           <!-- Plain list: a dl may only wrap dt/dd in a single div, which the cards are not. -->
-          <ul class="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <ul class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
             <li>
               <Card.Root size="sm" class="h-full">
                 <Card.Content>
@@ -282,6 +302,16 @@
                         ? m.widget_admin_stat_active_one()
                         : m.widget_admin_stat_active({ count: number.format(totals.active) })}
                     </span>
+                  </p>
+                </Card.Content>
+              </Card.Root>
+            </li>
+            <li>
+              <Card.Root size="sm" class="h-full">
+                <Card.Content>
+                  <p class="text-secondary text-xs">{m.widget_admin_overview_awaiting_title()}</p>
+                  <p class="text-2xl font-semibold tabular-nums">
+                    {number.format(totals.awaiting_activation)}
                   </p>
                 </Card.Content>
               </Card.Root>
