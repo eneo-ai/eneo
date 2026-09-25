@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getResultTitle, isRunActive } from "./apps";
+import { makeSpace } from "@/features/spaces/testing/space-fixture";
+import { getResultTitle, isRunActive, spaceApps } from "./apps";
 
 describe("getResultTitle", () => {
   it("prefixes text input and joins file names", () => {
@@ -32,5 +33,31 @@ describe("isRunActive", () => {
   it("is inactive once complete or failed", () => {
     expect(isRunActive("complete")).toBe(false);
     expect(isRunActive("failed")).toBe(false);
+  });
+});
+
+describe("spaceApps", () => {
+  it("sorts by name with the collator it is given (å, ä, ö after z in Swedish)", () => {
+    const space = makeSpace({
+      apps: ["Översätt", "Avtal", "Ärendestöd", "Zon"].map((name, index) => ({
+        id: `app-${index}`,
+        name
+      }))
+    });
+    const names = (compare: Intl.Collator["compare"]) =>
+      spaceApps(space, compare).map((app) => app.name);
+
+    expect(names(new Intl.Collator("sv").compare)).toEqual([
+      "Avtal",
+      "Zon",
+      "Ärendestöd",
+      "Översätt"
+    ]);
+    expect(names(new Intl.Collator("en").compare)).toEqual([
+      "Ärendestöd",
+      "Avtal",
+      "Översätt",
+      "Zon"
+    ]);
   });
 });

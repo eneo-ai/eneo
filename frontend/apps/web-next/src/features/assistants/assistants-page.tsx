@@ -1,5 +1,6 @@
 "use client";
 
+import { useCollator } from "@astryxdesign/core/i18n";
 import { Bot, SearchX } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -32,9 +33,10 @@ function TileGrid({ items, showStatus }: { items: ChatAppItem[]; showStatus: boo
 export function AssistantsPage() {
   const t = useTranslations();
   const { space, can } = useSpace();
+  const collator = useCollator();
   const [filter, setFilter] = useState("");
 
-  const items = spaceChatItems(space);
+  const items = spaceChatItems(space, collator.compare);
   const filteredItems = filterSpaceResources(items, filter);
   const showStatus = !space.personal;
   const groupByStatus = can("publish", "assistant");
