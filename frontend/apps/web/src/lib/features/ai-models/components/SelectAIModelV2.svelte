@@ -7,8 +7,7 @@
 -->
 <script lang="ts" generics="T extends TranscriptionModel | CompletionModel">
   import type { CompletionModel, TranscriptionModel } from "@eneo/eneo-js";
-  import { uid } from "uid";
-  import { Ban, ChevronsUpDown } from "lucide-svelte";
+  import { Ban, ChevronsUpDown } from "@lucide/svelte";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";
   import { sortModels } from "../sortModels";
@@ -37,7 +36,7 @@
   );
 
   let open = $state(false);
-  const valueId = uid(8);
+  const valueId = $props.id();
   // Compose the accessible name so screen readers announce the *selected* model,
   // not only the field label a surface supplies via aria-labelledby.
   const labelledBy = $derived([aria["aria-labelledby"], valueId].filter(Boolean).join(" "));
@@ -97,13 +96,11 @@
 
   <ModelSelector.Content
     align="start"
-    class="w-auto max-w-[calc(100vw-1rem)] border-0 bg-transparent p-0 shadow-none ring-0"
+    class="w-auto max-w-[calc(100vw-1rem)] gap-0 overflow-hidden rounded-xl p-0 shadow-lg"
     commandClass="size-auto overflow-visible rounded-none! bg-transparent p-0"
   >
-    <div class="flex items-start gap-2">
-      <div
-        class="bg-popover/95 ring-foreground/10 w-72 shrink-0 overflow-hidden rounded-xl shadow-lg ring-1 backdrop-blur-xl"
-      >
+    <div class="flex items-stretch">
+      <div class="w-72 shrink-0">
         <ModelSelector.Input placeholder={m.search_models()} />
         <ModelSelector.List class="max-h-[20rem] p-1 pt-0">
           <ModelSelector.Empty>{m.no_models_found()}</ModelSelector.Empty>
@@ -126,7 +123,7 @@
         </ModelSelector.List>
       </div>
       {#if detailModel}
-        <ChatModelDetails model={detailModel} />
+        <ChatModelDetails model={detailModel} class="border-border border-l" />
       {/if}
     </div>
   </ModelSelector.Content>

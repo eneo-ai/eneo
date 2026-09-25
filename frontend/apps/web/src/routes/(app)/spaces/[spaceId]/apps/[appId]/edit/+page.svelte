@@ -1,14 +1,12 @@
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { Page, Settings } from "$lib/components/layout";
+  import EditorPageHeader from "$lib/components/settings/EditorPageHeader.svelte";
+  import { guardUnsavedChanges } from "$lib/core/editing/guardUnsavedChanges";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
-
-  import { Button } from "@eneo/ui";
   import AppSettingsInput from "./AppSettingsInput.svelte";
-  import { afterNavigate, beforeNavigate } from "$app/navigation";
-
-  import { fade } from "svelte/transition";
   import { initAppEditor } from "$lib/features/apps/AppEditor";
-  import AppSettingsAttachments from "./AppSettingsAttachments.svelte";
+  import AttachmentsEditor from "$lib/features/attachments/components/AttachmentsEditor.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
@@ -17,13 +15,18 @@
     hasModelSpecificSettings
   } from "$lib/features/ai-models/ModelKwargCapabilities";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
-  import dayjs from "dayjs";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
-  import { page } from "$app/state";
   import { m } from "$lib/paraglide/messages";
   import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import { createIconEditor } from "$lib/features/icons/createIconEditor.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
+  import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
+  import {
+    loadSkillBindingCatalogPage,
+    loadSkillBindingPreview
+  } from "$lib/features/skills/skillBindingCatalog";
+  import type { SkillFormValue } from "$lib/features/skills/skillBindings";
   import { untrack } from "svelte";
 
   let { data } = $props();
@@ -32,21 +35,30 @@
     refreshCurrentSpace
   } = getSpacesManager();
 
-  const {
-    state: { resource, update, currentChanges, isSaving },
-    saveChanges,
-    discardChanges
-  } = untrack(() =>
+  const editor = untrack(() =>
     initAppEditor({
       app: data.app,
+      skillBindings: data.skillBindings.map((binding) => ({
+        skill_id: binding.skill_id,
+        skill_revision_id: binding.skill_revision_id
+      })),
       eneo: data.eneo,
       onUpdateDone() {
         refreshCurrentSpace("applications");
       }
     })
   );
+  const {
+    state: { resource, update, currentChanges },
+    discardChanges
+  } = editor;
+  guardUnsavedChanges(editor);
 
   let cancelUploadsAndClearQueue = $state<() => void>(() => {});
+
+  async function createSkill(value: SkillFormValue) {
+    return data.eneo.skills.create({ spaceId: $currentSpace.id, ...value });
+  }
 
   let hasBehaviorChanges = $derived.by(() => {
     if (!$currentChanges.diff.completion_model_kwargs) return false;
@@ -61,72 +73,15 @@
     return true;
   });
 
-  // Icon state
-  let currentIconId = $state<string | null>($resource.icon_id ?? null);
-  let iconUploading = $state(false);
-  let iconError = $state<string | null>(null);
-
-  function getIconUrl(id: string | null): string | null {
-    return id ? data.eneo.icons.url({ id }) : null;
-  }
-
-  let iconUrl = $derived(getIconUrl(currentIconId));
-
-  async function handleIconUpload(event: CustomEvent<File>) {
-    const file = event.detail;
-    iconUploading = true;
-    iconError = null;
-    try {
-      const newIcon = await data.eneo.icons.upload({ file });
-      await data.eneo.apps.update({
-        app: { id: $resource.id },
-        update: { icon_id: newIcon.id }
-      });
-      currentIconId = newIcon.id;
+  let iconId = $state<string | null>($resource.icon_id ?? null);
+  const icon = createIconEditor({
+    iconId: () => iconId,
+    async setIconId(id) {
+      await data.eneo.apps.update({ app: { id: $resource.id }, update: { icon_id: id } });
+      iconId = id;
       await refreshCurrentSpace("applications");
-    } catch (error) {
-      console.error("Failed to upload icon:", error);
-      iconError = m.avatar_upload_failed();
-    } finally {
-      iconUploading = false;
     }
-  }
-
-  async function handleIconDelete() {
-    iconError = null;
-    try {
-      if (currentIconId) {
-        await data.eneo.icons.delete({ id: currentIconId });
-      }
-      await data.eneo.apps.update({
-        app: { id: $resource.id },
-        update: { icon_id: null }
-      });
-      currentIconId = null;
-      await refreshCurrentSpace("applications");
-    } catch (error) {
-      console.error("Failed to delete icon:", error);
-      iconError = m.avatar_delete_failed();
-    }
-  }
-
-  beforeNavigate((navigate) => {
-    if ($currentChanges.hasUnsavedChanges && !confirm(m.confirm_discard())) {
-      navigate.cancel();
-      return;
-    }
-    // Discard changes that have been made, this is only important so we delete uploaded
-    // files that have not been saved to the app
-    discardChanges();
   });
-
-  let previousRoute = $state(untrack(() => `/spaces/${$currentSpace.routeId}/apps/${data.app.id}`));
-  afterNavigate(({ from }) => {
-    if (page.url.searchParams.get("next") === "default") return;
-    if (from) previousRoute = from.url.toString();
-  });
-
-  let showSavesChangedNotice = $state(false);
 </script>
 
 <svelte:head>
@@ -136,48 +91,19 @@
 </svelte:head>
 
 <Page.Root>
-  <Page.Header>
-    <Page.Title
-      parent={{
-        title: $resource.name,
-        href: `/spaces/${$currentSpace.routeId}/apps/${data.app.id}`
-      }}
-      title={m.edit()}
-    ></Page.Title>
-    <Page.Flex>
-      {#if $currentChanges.hasUnsavedChanges}
-        <Button
-          variant="destructive"
-          disabled={$isSaving}
-          on:click={() => {
-            cancelUploadsAndClearQueue();
-            discardChanges();
-          }}>{m.discard_all_changes()}</Button
-        >
-        <Button
-          variant="positive"
-          class="w-32"
-          on:click={async () => {
-            cancelUploadsAndClearQueue();
-            $update.completion_model_kwargs = filterSupportedModelKwargs(
-              $update.completion_model_kwargs,
-              $update.completion_model
-            );
-            await saveChanges();
-            showSavesChangedNotice = true;
-            setTimeout(() => {
-              showSavesChangedNotice = false;
-            }, 5000);
-          }}>{$isSaving ? m.saving() : m.save_changes()}</Button
-        >
-      {:else}
-        {#if showSavesChangedNotice}
-          <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
-        {/if}
-        <Button variant="primary" class="w-32" href={previousRoute}>{m.done()}</Button>
-      {/if}
-    </Page.Flex>
-  </Page.Header>
+  <EditorPageHeader
+    {editor}
+    resourceName={$resource.name}
+    backHref={`/spaces/${$currentSpace.routeId}/apps/${data.app.id}`}
+    beforeDiscard={cancelUploadsAndClearQueue}
+    beforeSave={() => {
+      cancelUploadsAndClearQueue();
+      $update.completion_model_kwargs = filterSupportedModelKwargs(
+        $update.completion_model_kwargs,
+        $update.completion_model
+      );
+    }}
+  />
 
   <Page.Main>
     <Settings.Page>
@@ -217,11 +143,11 @@
 
         <Settings.Row title={m.avatar()} description={m.avatar_description()}>
           <IconUpload
-            {iconUrl}
-            uploading={iconUploading}
-            error={iconError}
-            on:upload={handleIconUpload}
-            on:delete={handleIconDelete}
+            iconUrl={icon.url}
+            uploading={icon.uploading}
+            error={icon.error}
+            on:upload={(event) => icon.upload(event.detail)}
+            on:delete={icon.remove}
           />
         </Settings.Row>
 
@@ -258,7 +184,7 @@
                 return data.eneo.apps.listPrompts({ id: data.app.id });
               }}
               onPromptSelected={(prompt) => {
-                const restoredDate = dayjs(prompt.created_at).format("YYYY-MM-DD HH:mm");
+                const restoredDate = formatDateTime(prompt.created_at);
                 $update.prompt.text = prompt.text;
                 $update.prompt.description = `Restored prompt from ${restoredDate}`;
               }}
@@ -275,6 +201,40 @@
           ></textarea>
         </Settings.Row>
 
+        {#if $currentSpace.hasPermission("read", "skill")}
+          <div id="skills" class="scroll-mt-20">
+            <Settings.Row
+              title={m.skills()}
+              description={m.skills_editor_description()}
+              hasChanges={$currentChanges.diff.skill_bindings !== undefined}
+              revertFn={() => discardChanges("skill_bindings")}
+            >
+              <SkillBindingsEditor
+                bind:bindings={$update.skill_bindings}
+                initialCatalogPage={data.skills}
+                bindingSummaries={data.skillBindings}
+                canEditBindings={data.app.permissions?.includes("edit") ?? false}
+                canCreateSkills={$currentSpace.organization !== true &&
+                  $currentSpace.hasPermission("create", "skill")}
+                onListCatalog={(params) =>
+                  loadSkillBindingCatalogPage({
+                    eneo: data.eneo,
+                    spaceId: data.currentSpace.id,
+                    organizationSpace: data.currentSpace.organization === true,
+                    ...params
+                  })}
+                onGetSkillPreview={(target) =>
+                  loadSkillBindingPreview({
+                    eneo: data.eneo,
+                    spaceId: data.currentSpace.id,
+                    target
+                  })}
+                onCreateSkill={createSkill}
+              />
+            </Settings.Row>
+          </div>
+        {/if}
+
         <Settings.Row
           title={m.attachments()}
           description={m.app_attachments_description()}
@@ -284,7 +244,11 @@
             discardChanges("attachments");
           }}
         >
-          <AppSettingsAttachments bind:cancelUploadsAndClearQueue></AppSettingsAttachments>
+          <AttachmentsEditor
+            bind:attachments={$update.attachments}
+            allowedAttachments={$update.allowed_attachments}
+            bind:cancelUploadsAndClearQueue
+          />
         </Settings.Row>
       </Settings.Group>
 

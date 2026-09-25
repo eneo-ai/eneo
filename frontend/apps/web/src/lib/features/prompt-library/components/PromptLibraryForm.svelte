@@ -10,6 +10,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
+  import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
@@ -62,9 +63,8 @@
         description: description.trim() === "" ? null : description.trim(),
         text
       });
-    } catch (e) {
-      const err = e as { message?: string };
-      error = err.message ?? m.governance_prompt_form_save_error();
+    } catch (failure) {
+      error = getErrorMessage(failure, m.governance_prompt_form_save_error());
     } finally {
       saving = false;
     }

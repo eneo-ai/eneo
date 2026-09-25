@@ -1,7 +1,8 @@
 """Integration tests for audit log pagination and filtering."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from datetime import datetime, timezone, timedelta
 
 pytestmark = pytest.mark.integration
 
@@ -186,6 +187,7 @@ class TestFilteringByAction:
         assert response.status_code == 200
         data = response.json()
 
+        assert data["logs"], "The filter must return the seeded user_created events"
         for log in data["logs"]:
             assert log["action"] == "user_created"
 

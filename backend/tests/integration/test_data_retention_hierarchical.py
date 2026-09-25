@@ -15,15 +15,15 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.infrastructure.data_retention_service import (
+    DataRetentionService,
+)
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
 
 
 @pytest.fixture

@@ -9,7 +9,7 @@ import { defineConfig, devices } from "@playwright/test";
 // (SVELTE_KIT_OUT_DIR=.svelte-kit-e2e, see below), so it no longer touches a live
 // `vite dev`'s `.svelte-kit` — you can run the E2E suite while developing.
 const PORT = 4173;
-const BACKEND_URL = process.env.E2E_BACKEND_URL ?? "http://localhost:8124";
+const BACKEND_URL = process.env.E2E_BACKEND_URL ?? "http://127.0.0.1:8124";
 
 // Reused login session, produced once by auth.setup.ts.
 export const STORAGE_STATE = "playwright/.auth/user.json";
@@ -31,7 +31,9 @@ export default defineConfig({
     : [["list"], ["html", { open: "never" }]],
   use: {
     baseURL: `http://localhost:${PORT}`,
-    trace: "on-first-retry"
+    // There are no automatic E2E retries. Retain the original failure trace so
+    // backend connectivity and response failures remain diagnosable.
+    trace: "retain-on-failure"
   },
   projects: [
     // 1) Authenticate once and persist the session.

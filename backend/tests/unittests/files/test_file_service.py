@@ -1,136 +1,361 @@
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from hashlib import sha256
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from fastapi import UploadFile
 
-from eneo.files.file_models import FileBaseWithContent, FileType
+from eneo.files.file_models import FileContentVariant, FileMetadata, FileType
+from eneo.files.file_repo import (
+    FileContentReferenceRecord,
+    LegacyAudioSlice,
+    LegacyFileContentRecord,
+    LegacyFileInfoRecord,
+)
 from eneo.files.file_service import FileService
+from eneo.object_content.content import ContentAccessClass, StorageKind
+from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 
 
 @pytest.fixture
-def user():
-    return MagicMock(id=uuid4(), tenant_id=uuid4())
-
-
-@pytest.fixture
-def protocol():
-    return AsyncMock()
-
-
-@pytest.fixture
-def repo():
-    mock = AsyncMock()
-    # session.in_transaction() is sync — keep it a MagicMock so it doesn't return a coroutine
-    mock.session = MagicMock()
-    return mock
-
-
-@pytest.fixture
-def service(user, repo, protocol):
-    return FileService(user=user, repo=repo, protocol=protocol)
-
-
-@pytest.mark.asyncio
-async def test_save_file_delegates_to_protocol_without_max_size(service, protocol):
-    """save_file() must NOT pass explicit max_size so each type handler uses its own default."""
-    upload = MagicMock(spec=UploadFile)
-    protocol.to_domain_with_derivatives.return_value = (
-        FileBaseWithContent(
-            name="test.mp3",
-            checksum="abc123",
-            size=100,
-            file_type=FileType.AUDIO,
-            blob=b"audio-data",
-        ),
-        [],
+def service() -> FileService:
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    repo = AsyncMock()
+    repo.session = MagicMock()
+    return FileService(
+        user=user,
+        repo=repo,
+        protocol=AsyncMock(),
+        object_content=AsyncMock(),
     )
 
-    await service.save_file(upload)
-
-    protocol.to_domain_with_derivatives.assert_called_once_with(upload)
-
 
 @pytest.mark.asyncio
-async def test_save_file_passes_result_to_repo(service, protocol, repo, user):
-    """save_file() passes the domain object from protocol to repo.add()."""
-    upload = MagicMock(spec=UploadFile)
-    protocol.to_domain_with_derivatives.return_value = (
-        FileBaseWithContent(
-            name="test.txt",
-            checksum="abc123",
-            size=50,
-            file_type=FileType.TEXT,
-            text="hello",
-        ),
-        [],
-    )
-
-    await service.save_file(upload)
-
-    repo.add.assert_called_once()
-    create_arg = repo.add.call_args[0][0]
-    assert create_arg.user_id == user.id
-    assert create_arg.tenant_id == user.tenant_id
-    assert create_arg.name == "test.txt"
-
-
-@pytest.mark.asyncio
-async def test_save_file_persists_pdf_derived_images_with_parent_id(
-    service, protocol, repo, user
-):
-    upload = MagicMock(spec=UploadFile)
-    protocol.to_domain_with_derivatives.return_value = (
-        FileBaseWithContent(
-            name="report.pdf",
-            checksum="abc123",
-            size=1000,
-            file_type=FileType.TEXT,
-            text="report text",
-        ),
-        [
-            FileBaseWithContent(
-                name="report.pdf (image 1)",
-                checksum="img1",
-                size=10,
-                file_type=FileType.IMAGE,
-                mimetype="image/jpeg",
-                blob=b"jpeg-bytes",
-            )
-        ],
-    )
-    parent_id = uuid4()
-    repo.add.side_effect = [MagicMock(id=parent_id), MagicMock(id=uuid4())]
-
-    await service.save_file(upload)
-
-    assert repo.add.call_count == 2
-    child_create = repo.add.call_args_list[1][0][0]
-    assert child_create.parent_file_id == parent_id
-    assert child_create.file_type == FileType.IMAGE
-    assert child_create.name == "report.pdf (image 1)"
-
-
-@pytest.mark.asyncio
-async def test_with_derived_images_appends_and_dedupes(service, repo, user):
+async def test_with_derived_images_appends_new_images_once(
+    service: FileService,
+) -> None:
     parent = MagicMock(id=uuid4(), file_type=FileType.TEXT)
     already_attached = MagicMock(id=uuid4(), file_type=FileType.IMAGE)
     new_derived = MagicMock(id=uuid4(), file_type=FileType.IMAGE)
-    repo.get_by_parent_ids.return_value = [already_attached, new_derived]
+    service.get_derived_images = AsyncMock(return_value=[already_attached, new_derived])
 
     result = await service.with_derived_images([parent, already_attached])
 
     assert result == [parent, already_attached, new_derived]
-    repo.get_by_parent_ids.assert_awaited_once_with(
-        parent_ids=[parent.id], user_id=user.id
-    )
+    service.get_derived_images.assert_awaited_once_with(parent_ids=[parent.id])
 
 
 @pytest.mark.asyncio
-async def test_with_derived_images_skips_lookup_without_text_files(service, repo):
+async def test_with_derived_images_skips_lookup_without_text_files(
+    service: FileService,
+) -> None:
     image = MagicMock(id=uuid4(), file_type=FileType.IMAGE)
+    service.get_derived_images = AsyncMock()
 
     result = await service.with_derived_images([image])
 
     assert result == [image]
-    repo.get_by_parent_ids.assert_not_awaited()
+    service.get_derived_images.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_object_store_save_rejects_ambient_transaction_before_external_work() -> (
+    None
+):
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    repo = MagicMock()
+    repo.session.in_transaction.return_value = True
+    protocol = MagicMock()
+    object_content = MagicMock()
+    object_content.ensure_target_ready = AsyncMock(
+        side_effect=AssertionError("readiness must not start")
+    )
+    service = FileService(
+        user=user,
+        repo=repo,
+        protocol=protocol,
+        object_content=object_content,
+        upload_admission=UploadAdmissionSnapshot(
+            policy_revision=7,
+            new_write_storage_target=StorageKind.OBJECT_STORE,
+            session_file_maximum_bytes=10_000,
+            session_image_maximum_bytes=10_000,
+            session_audio_maximum_bytes=10_000,
+            knowledge_file_maximum_bytes=10_000,
+            knowledge_audio_maximum_bytes=10_000,
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="requires a non-ambient transaction",
+    ):
+        await service.save_file(MagicMock())
+
+    object_content.ensure_target_ready.assert_not_awaited()
+    protocol.prepare_upload.assert_not_called()
+    object_content.capture_for_target.assert_not_called()
+    object_content.upload_for_publication.assert_not_called()
+
+
+def _legacy_metadata(*, file_type: FileType = FileType.TEXT) -> FileMetadata:
+    return FileMetadata(
+        id=uuid4(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        name="legacy.pdf" if file_type is FileType.TEXT else "legacy.mp3",
+        mimetype=("application/pdf" if file_type is FileType.TEXT else "audio/mpeg"),
+        file_type=file_type,
+        user_id=uuid4(),
+        tenant_id=uuid4(),
+        parent_file_id=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_file_info_and_original_availability_fall_back_to_legacy() -> None:
+    metadata = _legacy_metadata()
+    user = SimpleNamespace(id=metadata.user_id, tenant_id=metadata.tenant_id)
+    extracted = LegacyFileContentRecord(
+        file_id=metadata.id,
+        variant=FileContentVariant.EXTRACTED_TEXT,
+        payload=b"legacy text",
+        media_type="text/plain",
+    )
+    original = LegacyFileContentRecord(
+        file_id=metadata.id,
+        variant=FileContentVariant.ORIGINAL,
+        payload=b"%PDF legacy",
+        media_type="application/pdf",
+    )
+    repository = AsyncMock()
+    repository.session = MagicMock()
+    repository.get_by_id.return_value = metadata
+    repository.get_content_references.return_value = []
+    repository.get_legacy_infos.return_value = [
+        LegacyFileInfoRecord(
+            file_id=metadata.id,
+            variant=FileContentVariant.EXTRACTED_TEXT,
+            checksum=sha256(extracted.payload).hexdigest(),
+            size_bytes=len(extracted.payload),
+            media_type="text/plain",
+            original_available=True,
+            transcription_available=False,
+        )
+    ]
+    repository.get_legacy_content.return_value = [original]
+    service = FileService(
+        user=user,
+        repo=repository,
+        protocol=AsyncMock(),
+        object_content=AsyncMock(),
+    )
+
+    info = await service.get_file_by_id(metadata.id)
+    available = await service.ensure_original_available(metadata.id)
+
+    assert available == metadata
+    assert info.checksum == sha256(extracted.payload).hexdigest()
+    assert info.size == len(extracted.payload)
+    assert info.mimetype == "application/pdf"
+
+
+@pytest.mark.asyncio
+async def test_file_info_does_not_load_legacy_payload_bytes() -> None:
+    metadata = _legacy_metadata()
+    user = SimpleNamespace(id=metadata.user_id, tenant_id=metadata.tenant_id)
+    repository = AsyncMock()
+    repository.session = MagicMock()
+    repository.get_by_id.return_value = metadata
+    repository.get_content_references.return_value = []
+    repository.get_legacy_infos.return_value = [
+        LegacyFileInfoRecord(
+            file_id=metadata.id,
+            variant=FileContentVariant.EXTRACTED_TEXT,
+            checksum=sha256(b"legacy text").hexdigest(),
+            size_bytes=len(b"legacy text"),
+            media_type="text/plain",
+            original_available=True,
+            transcription_available=False,
+        )
+    ]
+    service = FileService(
+        user=user,
+        repo=repository,
+        protocol=AsyncMock(),
+        object_content=AsyncMock(),
+    )
+
+    info = await service.get_file_by_id(metadata.id)
+
+    assert info.size == len(b"legacy text")
+    repository.get_legacy_content.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_legacy_download_streams_without_opening_object_content() -> None:
+    metadata = _legacy_metadata(file_type=FileType.AUDIO)
+    payload = b"legacy audio"
+    legacy_info = LegacyFileInfoRecord(
+        file_id=metadata.id,
+        variant=FileContentVariant.ORIGINAL,
+        checksum=sha256(payload).hexdigest(),
+        size_bytes=len(payload),
+        media_type="audio/mpeg",
+        original_available=False,
+        transcription_available=False,
+    )
+    legacy_slice = LegacyAudioSlice(
+        payload=payload,
+        media_type="audio/mpeg",
+    )
+
+    class Session:
+        def in_transaction(self) -> bool:
+            return False
+
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    repository = AsyncMock()
+    repository.session = Session()
+    repository.get_by_id.return_value = metadata
+    repository.get_content_references.return_value = []
+    repository.get_legacy_infos.return_value = [legacy_info]
+    repository.get_legacy_audio_slice.return_value = legacy_slice
+    object_content = MagicMock()
+    service = FileService(
+        user=None,
+        repo=repository,
+        protocol=AsyncMock(),
+        object_content=object_content,
+    )
+
+    opened = await service.get_download_no_auth(
+        metadata.id,
+        expected_tenant_id=metadata.tenant_id,
+    )
+
+    assert b"".join([chunk async for chunk in opened.chunks]) == payload
+    assert opened.content_length == len(payload)
+    assert opened.sha256 == sha256(payload).digest()
+    assert opened.range_supported is True
+    repository.get_legacy_audio_slice.assert_awaited_once_with(metadata.id, None)
+    repository.get_legacy_content.assert_not_awaited()
+    object_content.open_content.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_text_download_prefers_exact_legacy_text_over_object_original() -> None:
+    metadata = _legacy_metadata()
+    extracted = LegacyFileContentRecord(
+        file_id=metadata.id,
+        variant=FileContentVariant.EXTRACTED_TEXT,
+        payload=b"legacy extracted text",
+        media_type="text/plain",
+    )
+    original = FileContentReferenceRecord(
+        file_id=metadata.id,
+        content_id=uuid4(),
+        variant=FileContentVariant.ORIGINAL,
+        ordinal=0,
+        page_number=None,
+        width=None,
+        height=None,
+        duration_ms=None,
+        sha256=sha256(b"original pdf").digest(),
+        size_bytes=len(b"original pdf"),
+        media_type="application/pdf",
+        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        storage_kind=StorageKind.POSTGRES_INLINE,
+    )
+
+    class Session:
+        def in_transaction(self) -> bool:
+            return False
+
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    repository = AsyncMock()
+    repository.session = Session()
+    repository.get_by_id.return_value = metadata
+    repository.get_content_references.return_value = [original]
+    repository.get_legacy_content.return_value = [extracted]
+    object_content = MagicMock()
+    service = FileService(
+        user=None,
+        repo=repository,
+        protocol=AsyncMock(),
+        object_content=object_content,
+    )
+
+    opened = await service.get_download_no_auth(
+        metadata.id,
+        expected_tenant_id=metadata.tenant_id,
+    )
+
+    assert b"".join([chunk async for chunk in opened.chunks]) == extracted.payload
+    assert opened.filename == "legacy.txt"
+    repository.get_legacy_content.assert_awaited_once_with(
+        {metadata.id: {FileContentVariant.EXTRACTED_TEXT}}
+    )
+    object_content.open_content.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_legacy_audio_range_fetches_only_the_selected_slice() -> None:
+    metadata = _legacy_metadata(file_type=FileType.AUDIO)
+    payload = b"legacy audio payload"
+    selected_payload = payload[2:5]
+
+    class Session:
+        def in_transaction(self) -> bool:
+            return False
+
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    repository = AsyncMock()
+    repository.session = Session()
+    repository.get_by_id.return_value = metadata
+    repository.get_content_references.return_value = []
+    repository.get_legacy_infos.return_value = [
+        LegacyFileInfoRecord(
+            file_id=metadata.id,
+            variant=FileContentVariant.ORIGINAL,
+            checksum=sha256(payload).hexdigest(),
+            size_bytes=len(payload),
+            media_type="audio/mpeg",
+            original_available=False,
+            transcription_available=False,
+        )
+    ]
+    repository.get_legacy_audio_slice.return_value = LegacyAudioSlice(
+        payload=selected_payload,
+        media_type="audio/mpeg",
+    )
+    service = FileService(
+        user=None,
+        repo=repository,
+        protocol=AsyncMock(),
+        object_content=MagicMock(),
+    )
+
+    opened = await service.get_download_no_auth(
+        metadata.id,
+        range_header="bytes=2-4",
+        expected_tenant_id=metadata.tenant_id,
+    )
+
+    assert b"".join([chunk async for chunk in opened.chunks]) == selected_payload
+    assert opened.content_length == len(selected_payload)
+    assert opened.content_range == f"bytes 2-4/{len(payload)}"
+    selected_range = repository.get_legacy_audio_slice.await_args.args[1]
+    assert selected_range.start == 2
+    assert selected_range.end == 4

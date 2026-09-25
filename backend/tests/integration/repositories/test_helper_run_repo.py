@@ -18,13 +18,13 @@ import psycopg2
 import pytest
 import sqlalchemy as sa
 
-from init_db import add_tenant_user
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.help_assistants.domain.helper_kind import HelperKind
 from eneo.help_assistants.domain.helper_run_status import HelperRunStatus
+from init_db import add_tenant_user
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ async def second_tenant_user(db_container, test_settings):
         quota_limit=1_000_000,
         user_name=f"helper_run_repo_user_{suffix}",
         user_email=email,
-        user_password="test_password",
+        user_password="RepositoryTestPass123!",
     )
     conn.close()
 

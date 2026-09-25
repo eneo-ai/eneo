@@ -43,7 +43,7 @@
   --border-on-fill: var(--color-white);
 
   /* Colors */
-  --brand-eneo: var(--color-eneo-500);
+  --brand-eneo: var(--text-primary);
 
   --accent-stronger: var(--color-ui-blue-700);
   --accent-default: var(--color-ui-blue-500);

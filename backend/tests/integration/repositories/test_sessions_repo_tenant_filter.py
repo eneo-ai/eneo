@@ -19,10 +19,10 @@ import psycopg2
 import pytest
 import sqlalchemy as sa
 
-from init_db import add_tenant_user
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.sessions_table import Sessions
+from init_db import add_tenant_user
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ async def second_tenant_user(db_container, test_settings):
         quota_limit=1_000_000,
         user_name=f"sessions_filter_user_{suffix}",
         user_email=email,
-        user_password="test_password",
+        user_password="RepositoryTestPass123!",
     )
     conn.close()
 

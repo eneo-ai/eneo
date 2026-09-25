@@ -18,11 +18,18 @@ Security Model:
 from __future__ import annotations
 
 import asyncio
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+import sqlalchemy as sa
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from eneo.database.database import sessionmanager
+from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.sessions_table import Sessions
+from eneo.logging.logging import LoggingDetails
+from eneo.logging.logging_repo import LoggingRepository
 
 
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
@@ -47,6 +54,8 @@ async def _create_user(
     tenant_id: str,
     email: str,
     password: str,
+    *,
+    is_admin: bool = False,
 ) -> dict:
     """Helper to create a test user."""
     payload = {
@@ -61,7 +70,27 @@ async def _create_user(
         headers={"X-API-Key": super_api_key},
     )
     assert response.status_code == 200, response.text
-    return response.json()
+    user = response.json()
+
+    if is_admin:
+        async with sessionmanager.session() as session, session.begin():
+            role_id = await session.scalar(
+                sa.text(
+                    "SELECT id FROM roles "
+                    "WHERE predefined_source = 'Owner' AND tenant_id = :tenant_id"
+                ),
+                {"tenant_id": tenant_id},
+            )
+            assert role_id is not None
+            await session.execute(
+                sa.text(
+                    "INSERT INTO users_roles (user_id, role_id) "
+                    "VALUES (:user_id, :role_id) ON CONFLICT DO NOTHING"
+                ),
+                {"user_id": user["id"], "role_id": role_id},
+            )
+
+    return user
 
 
 async def _login_user(client: AsyncClient, email: str, password: str) -> str:
@@ -93,6 +122,27 @@ async def _create_space(
     )
     assert response.status_code in (200, 201), response.text
     return response.json()
+
+
+async def _create_assistant(
+    client: AsyncClient,
+    token: str,
+    space_id: str,
+) -> dict:
+    response = await client.post(
+        "/api/v1/assistants/",
+        json={"name": f"insights-assistant-{uuid4().hex[:8]}", "space_id": space_id},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    assistant = response.json()
+    update_response = await client.post(
+        f"/api/v1/assistants/{assistant['id']}/",
+        json={"insight_enabled": True},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert update_response.status_code == 200, update_response.text
+    return update_response.json()
 
 
 async def _put_tenant_credential(
@@ -146,19 +196,19 @@ async def test_user_cannot_access_other_tenant_space_via_id_manipulation(
         super_admin_token,
         tenant_a["id"],
         f"alice@tenant-a-{uuid4().hex[:4]}.example.com",
-        "PasswordA123!",
+        "TenantAPassword123!",
     )
     user_b = await _create_user(
         client,
         super_admin_token,
         tenant_b["id"],
         f"bob@tenant-b-{uuid4().hex[:4]}.example.com",
-        "PasswordB123!",
+        "TenantBPassword123!",
     )
 
     # Login both users
-    token_a = await _login_user(client, user_a["email"], "PasswordA123!")
-    token_b = await _login_user(client, user_b["email"], "PasswordB123!")
+    token_a = await _login_user(client, user_a["email"], "TenantAPassword123!")
+    token_b = await _login_user(client, user_b["email"], "TenantBPassword123!")
 
     # User A creates a space
     space_a = await _create_space(client, token_a, f"space-a-{uuid4().hex[:6]}")
@@ -183,6 +233,90 @@ async def test_user_cannot_access_other_tenant_space_via_id_manipulation(
         assert "tenant" not in error_detail.lower(), (
             "Error message leaks tenant information"
         )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_insights_logging_never_hydrates_another_tenants_message(
+    client: AsyncClient,
+    super_admin_token: str,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+):
+    tenant_a = await _create_tenant(
+        client, super_admin_token, f"logging-tenant-a-{uuid4().hex[:6]}"
+    )
+    tenant_b = await _create_tenant(
+        client, super_admin_token, f"logging-tenant-b-{uuid4().hex[:6]}"
+    )
+    user_a = await _create_user(
+        client,
+        super_admin_token,
+        tenant_a["id"],
+        f"logging-a-{uuid4().hex[:6]}@example.com",
+        "TenantAPassword123!",
+        is_admin=True,
+    )
+    user_b = await _create_user(
+        client,
+        super_admin_token,
+        tenant_b["id"],
+        f"logging-b-{uuid4().hex[:6]}@example.com",
+        "TenantBPassword123!",
+        is_admin=True,
+    )
+    token_a = await _login_user(client, user_a["email"], "TenantAPassword123!")
+    token_b = await _login_user(client, user_b["email"], "TenantBPassword123!")
+    space_b = await _create_space(client, token_b, f"logging-space-{uuid4().hex[:6]}")
+    assistant_b = await _create_assistant(client, token_b, space_b["id"])
+
+    async with sessionmanager.session() as session, session.begin():
+        logging_details = await LoggingRepository(session).add(
+            LoggingDetails(
+                context="tenant-b-private-context",
+                model_kwargs={"model": "private-model"},
+                json_body='{"private":"tenant-b"}',
+            )
+        )
+        chat_session = Sessions(
+            user_id=UUID(user_b["id"]),
+            name="Tenant B private session",
+            assistant_id=UUID(assistant_b["id"]),
+        )
+        session.add(chat_session)
+        await session.flush()
+        question = Questions(
+            question="Tenant B private question",
+            answer="Tenant B private answer",
+            num_tokens_question=5,
+            num_tokens_answer=5,
+            tenant_id=UUID(tenant_b["id"]),
+            session_id=chat_session.id,
+            assistant_id=UUID(assistant_b["id"]),
+            logging_details_id=logging_details.id,
+        )
+        session.add(question)
+        await session.flush()
+        message_id = question.id
+
+    authorized_response = await client.get(
+        f"/api/v1/logging/{message_id}/",
+        headers={"Authorization": f"Bearer {token_b}"},
+    )
+    assert authorized_response.status_code == 200, authorized_response.text
+    assert (
+        authorized_response.json()["logging_details"]["context"]
+        == "tenant-b-private-context"
+    )
+
+    response = await client.get(
+        f"/api/v1/logging/{message_id}/",
+        headers={"Authorization": f"Bearer {token_a}"},
+    )
+
+    assert response.status_code == 404, response.text
+    assert "tenant" not in response.text.lower()
+    assert "private" not in response.text.lower()
 
 
 @pytest.fixture
@@ -325,7 +459,7 @@ async def test_user_login_rejects_wrong_tenant_credentials(
 
     # Create user in Tenant A
     user_a_email = f"alice@tenant-a-{uuid4().hex[:4]}.example.com"
-    user_a_password = "AlicePass123!"
+    user_a_password = "AlicePassword123!"
     await _create_user(
         client,
         super_admin_token,
@@ -349,17 +483,10 @@ async def test_user_login_rejects_wrong_tenant_credentials(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert tenant_info.status_code == 200
-    # Verify user's tenant matches (TenantPublic doesn't include id, so check name/display_name)
+    # Verify user's tenant matches
     tenant_payload = tenant_info.json()
-    tenant_name = tenant_payload.get("name") or tenant_payload.get("display_name")
-    if tenant_name is None and isinstance(tenant_payload.get("tenant"), dict):
-        tenant_name = tenant_payload["tenant"].get("name") or tenant_payload[
-            "tenant"
-        ].get("display_name")
-
-    expected_names = {tenant_a["name"], tenant_a.get("display_name")}
-    expected_names.discard(None)
-    assert tenant_name in expected_names, "User should belong to Tenant A"
+    assert tenant_payload["id"] == tenant_a["id"], "User should belong to Tenant A"
+    assert tenant_payload["name"] == tenant_a["name"]
 
     # IMPORTANT: Current implementation doesn't have tenant-specific login endpoints
     # This test documents the expected behavior: users are bound to their tenant at creation
@@ -489,7 +616,7 @@ async def test_space_deletion_rejects_cross_tenant_operation(
         super_admin_token,
         tenant_a["id"],
         f"owner@tenant-a-{uuid4().hex[:4]}.example.com",
-        "OwnerPass123!",
+        "OwnerPassword123!",
     )
     user_b = await _create_user(
         client,
@@ -500,7 +627,7 @@ async def test_space_deletion_rejects_cross_tenant_operation(
     )
 
     # Login both users
-    token_a = await _login_user(client, user_a["email"], "OwnerPass123!")
+    token_a = await _login_user(client, user_a["email"], "OwnerPassword123!")
     token_b = await _login_user(client, user_b["email"], "AttackerPass123!")
 
     # User A creates a space
@@ -564,19 +691,19 @@ async def test_list_spaces_endpoint_filters_by_tenant(
         super_admin_token,
         tenant_a["id"],
         f"user-a@tenant-a-{uuid4().hex[:4]}.example.com",
-        "UserAPass123!",
+        "UserAPassword123!",
     )
     user_b = await _create_user(
         client,
         super_admin_token,
         tenant_b["id"],
         f"user-b@tenant-b-{uuid4().hex[:4]}.example.com",
-        "UserBPass123!",
+        "UserBPassword123!",
     )
 
     # Login both users
-    token_a = await _login_user(client, user_a["email"], "UserAPass123!")
-    token_b = await _login_user(client, user_b["email"], "UserBPass123!")
+    token_a = await _login_user(client, user_a["email"], "UserAPassword123!")
+    token_b = await _login_user(client, user_b["email"], "UserBPassword123!")
 
     # User A creates 3 spaces
     spaces_a = []
@@ -662,18 +789,18 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
         super_admin_token,
         tenant_a["id"],
         f"user-a@concurrent-{uuid4().hex[:4]}.example.com",
-        "UserAPass123!",
+        "UserAPassword123!",
     )
     user_b = await _create_user(
         client,
         super_admin_token,
         tenant_b["id"],
         f"user-b@concurrent-{uuid4().hex[:4]}.example.com",
-        "UserBPass123!",
+        "UserBPassword123!",
     )
 
-    token_a = await _login_user(client, user_a["email"], "UserAPass123!")
-    token_b = await _login_user(client, user_b["email"], "UserBPass123!")
+    token_a = await _login_user(client, user_a["email"], "UserAPassword123!")
+    token_b = await _login_user(client, user_b["email"], "UserBPassword123!")
 
     # Track results
     results_a = []
@@ -697,9 +824,7 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
         results_a.append(
             {
                 "space_id": space["id"],
-                "tenant_name": tenant_info.json()[
-                    "name"
-                ],  # TenantPublic has name, not id
+                "tenant_name": tenant_info.json()["name"],
             }
         )
 
@@ -717,9 +842,7 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
         results_b.append(
             {
                 "space_id": space["id"],
-                "tenant_name": tenant_info.json()[
-                    "name"
-                ],  # TenantPublic has name, not id
+                "tenant_name": tenant_info.json()["name"],
             }
         )
 

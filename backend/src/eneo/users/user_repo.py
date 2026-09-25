@@ -14,7 +14,6 @@ from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
-from eneo.database.tables.widget_table import Widgets
 from eneo.main.exceptions import SystemUserProtected, UniqueException
 from eneo.main.logging import get_logger
 from eneo.main.models import ModelId
@@ -49,7 +48,6 @@ class UsersRepository:
         return [
             selectinload(Users.roles),
             selectinload(Users.tenant).selectinload(Tenants.modules),
-            selectinload(Users.api_key),
             selectinload(Users.user_groups),
         ]
 
@@ -118,6 +116,21 @@ class UsersRepository:
 
         return await self._get_model_from_query(query, with_deleted=with_deleted)
 
+    async def get_user_by_id_for_update(self, id: UUID) -> UserInDB | None:
+        """Load one active user while serializing credential mutations."""
+
+        # The user may already be present in this session's identity map from
+        # request authentication. Force a refresh after the row lock is
+        # acquired, otherwise a waiter could continue with the password hash
+        # and credential version cached before another request committed.
+        query = (
+            sa.select(Users)
+            .where(Users.id == id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return await self._get_model_from_query(query, with_deleted=False)
+
     async def get_user_by_assistant_id(
         self, assistant_id: UUID, with_deleted: bool = False
     ) -> UserInDB | None:
@@ -133,10 +146,6 @@ class UsersRepository:
         )
 
         return await self._get_model_from_query(query, with_deleted=False)
-
-    async def get_user_by_widget_id(self, widget_id: UUID) -> UserInDB | None:
-        query = sa.select(Users).join(Widgets).where(Widgets.id == widget_id)
-        return await self.delegate.get_model_from_query(query)
 
     async def get_total_count(
         self,
@@ -324,66 +333,48 @@ class UsersRepository:
         # must never appear in admin lists. `is_system_user` is authoritative.
         query = query.where(Users.is_system_user.is_(False))
 
-        # Add state filter if provided
-        # "active" includes both ACTIVE and INVITED states (users who can log in)
-        # "inactive" shows only INACTIVE state (temporary leave)
+        # Share all non-state predicates between rows and tab counts. EXISTS
+        # matches membership without duplicating users who hold several roles.
+        if search.email is not None:
+            query = query.where(
+                sa.func.lower(Users.email).contains(
+                    search.email.lower(), autoescape=True
+                )
+            )
+        if search.name is not None:
+            query = query.where(
+                sa.func.lower(Users.username).contains(
+                    search.name.lower(), autoescape=True
+                )
+            )
+        if search.role_id is not None:
+            query = query.where(Users.roles.any(Roles.id == search.role_id))
+
+        state_counts_query = query.with_only_columns(
+            sa.func.count()
+            .filter(Users.state.in_([UserState.ACTIVE, UserState.INVITED]))
+            .label("active_count"),
+            sa.func.count()
+            .filter(Users.state == UserState.INACTIVE)
+            .label("inactive_count"),
+            sa.func.count().label("total_count"),
+            maintain_column_froms=True,
+        )
+        counts_row = (await self.session.execute(state_counts_query)).one()
+        state_counts = {
+            "active": int(counts_row.active_count),
+            "inactive": int(counts_row.inactive_count),
+        }
+        total_count = (
+            state_counts[search.state_filter]
+            if search.state_filter is not None
+            else int(counts_row.total_count)
+        )
+
         if search.state_filter == "active":
             query = query.where(Users.state.in_([UserState.ACTIVE, UserState.INVITED]))
         elif search.state_filter == "inactive":
             query = query.where(Users.state == UserState.INACTIVE)
-        # If no state_filter, show all non-deleted users (backward compatible)
-
-        # Add email search filter if provided (uses idx_users_email_trgm GIN index)
-        if search.email is not None:
-            query = query.where(
-                sa.func.lower(Users.email).like(f"%{search.email.lower()}%")
-            )
-
-        # Add username search filter if provided (uses idx_users_username_trgm GIN index)
-        if search.name is not None:
-            query = query.where(
-                sa.func.lower(Users.username).like(f"%{search.name.lower()}%")
-            )
-
-        # Execute COUNT query for total_count (separate query for accuracy)
-        count_query = sa.select(sa.func.count()).select_from(query.subquery())
-        total_count = await self.session.scalar(count_query) or 0
-
-        # Get counts for both active and inactive states for tab display
-        # Uses PostgreSQL FILTER clause for efficient conditional aggregation
-        # Single query, single table scan - O(n) where n = users matching filters
-        state_counts_query = (
-            sa.select(
-                sa.func.count(1)
-                .filter(Users.state.in_([UserState.ACTIVE, UserState.INVITED]))
-                .label("active_count"),
-                sa.func.count(1)
-                .filter(Users.state == UserState.INACTIVE)
-                .label("inactive_count"),
-            )
-            .select_from(Users)
-            .where(Users.tenant_id == tenant_id)
-            .where(Users.deleted_at.is_(None))
-            .where(Users.is_system_user.is_(False))
-        )
-
-        # Apply same search filters to counts for consistency
-        if search.email is not None:
-            state_counts_query = state_counts_query.where(
-                sa.func.lower(Users.email).like(f"%{search.email.lower()}%")
-            )
-        if search.name is not None:
-            state_counts_query = state_counts_query.where(
-                sa.func.lower(Users.username).like(f"%{search.name.lower()}%")
-            )
-
-        # Execute counts query
-        counts_result = await self.session.execute(state_counts_query)
-        counts_row = counts_result.one()
-        state_counts = {
-            "active": int(counts_row.active_count or 0),
-            "inactive": int(counts_row.inactive_count or 0),
-        }
 
         # Map SortField enum to SQLAlchemy columns
         sort_column_map = {
@@ -409,7 +400,6 @@ class UsersRepository:
         query = query.options(
             selectinload(Users.roles),
             selectinload(Users.tenant).selectinload(Tenants.modules),
-            selectinload(Users.api_key),
             selectinload(Users.user_groups),
         )
 

@@ -1,9 +1,10 @@
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
+from eneo.files.extensions import MIMETYPE_EXTENSIONS_MAPPER
 from eneo.main.models import InDB
 
 
@@ -16,6 +17,64 @@ class FileType(str, Enum):
     TEXT = "text"
     IMAGE = "image"
     AUDIO = "audio"
+
+
+class FileContentVariant(StrEnum):
+    ORIGINAL = "original"
+    EXTRACTED_TEXT = "extracted_text"
+    TRANSCRIPTION = "transcription"
+    DERIVED_PAGE = "derived_page"
+    MODEL_INPUT = "model_input"
+    GENERATED_ARTIFACT = "generated_artifact"
+    LEGACY_IMAGE = "legacy_image"
+    PREVIEW = "preview"
+
+
+class FileUsageKind(StrEnum):
+    CHAT_ATTACHMENT = "chat_attachment"
+    ASSISTANT_ATTACHMENT = "assistant_attachment"
+    APP_ATTACHMENT = "app_attachment"
+    APP_RUN_INPUT = "app_run_input"
+
+
+class FileUsageSummary(BaseModel):
+    kind: FileUsageKind
+    count: int
+
+
+class FileDeletionPreview(BaseModel):
+    file_id: UUID
+    can_delete: bool
+    affected_file_count: int
+    blockers: list[FileUsageSummary]
+
+
+class FileInUseError(Exception):
+    code = "file_in_use"
+
+    def __init__(self, preview: FileDeletionPreview) -> None:
+        self.preview = preview
+        self.details = preview.model_dump(mode="json")
+        super().__init__(
+            "File is still in use and cannot be deleted. "
+            "See details.blockers for the remaining references; "
+            "retry only after those references have been removed."
+        )
+
+
+class FileOriginalNotFoundError(Exception):
+    code = "file_original_not_found"
+
+    def __init__(self) -> None:
+        super().__init__("The exact original is not available for this file.")
+
+
+class FileContentRangeError(Exception):
+    code = "object_content_range_invalid"
+
+    def __init__(self, message: str, *, total_size: int) -> None:
+        self.total_size = total_size
+        super().__init__(message)
 
 
 class FileBase(BaseModel):
@@ -45,14 +104,28 @@ class FileInfo(InDB, FileBase):
     tenant_id: UUID
 
 
-class FileCreate(FileBaseWithContent):
+class FileMetadataCreate(BaseModel):
+    name: str
+    file_type: FileType
+    mimetype: Optional[str] = None
     user_id: UUID
     tenant_id: UUID
     parent_file_id: Optional[UUID] = None
 
 
-class File(InDB, FileCreate):
+class FileMetadata(InDB, FileMetadataCreate):
     pass
+
+
+class File(InDB, FileBaseWithContent):
+    user_id: UUID
+    tenant_id: UUID
+    parent_file_id: Optional[UUID] = None
+    # True when a signed original-download URL can serve this file: the exact
+    # original upload is durably stored, or (for images) the generated artifact
+    # that is the file's only original. False for rows predating durable
+    # originals and for derived images (rendered pages, embedded images).
+    original_available: bool = False
 
 
 class FilePublic(InDB):
@@ -61,11 +134,27 @@ class FilePublic(InDB):
     size: int
     transcription: Optional[str] = None
     token_count: Optional[int] = None  # Token count for the file's content
+    # Public capability signal only; never expose storage internals. The chat
+    # composer uses this to show the built-in files tool only when a
+    # conversation attachment can actually be represented by a signed URL
+    # (a TEXT file whose exact original is durably stored).
+    has_download_reference: bool = False
 
 
 class AcceptedFileType(BaseModel):
     mimetype: str
     size_limit: int
+    extensions: list[str]
+
+    @classmethod
+    def for_mimetype(cls, mimetype: str, size_limit: int) -> "AcceptedFileType":
+        # Every producer goes through here so the advertised extensions always
+        # match the mimetype; the frontend renders these instead of mimetypes.
+        return cls(
+            mimetype=mimetype,
+            size_limit=size_limit,
+            extensions=list(MIMETYPE_EXTENSIONS_MAPPER.get(mimetype, [])),
+        )
 
 
 class Limit(BaseModel):
@@ -79,8 +168,21 @@ class FileRestrictions(BaseModel):
 
 
 class SignedURLRequest(BaseModel):
-    expires_in: int = 3600  # Default expiration time in seconds (1 hour)
+    # Default 1 hour; capped at 7 days so a leaked URL cannot stay valid
+    # indefinitely (tokens are stateless and cannot be revoked).
+    expires_in: int = Field(default=3600, ge=1, le=604_800)
     content_disposition: ContentDisposition = ContentDisposition.ATTACHMENT
+
+
+FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS = 60 * 60
+
+
+class OriginalSignedURLRequest(SignedURLRequest):
+    expires_in: int = Field(
+        default=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+        ge=1,
+        le=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+    )
 
 
 class SignedURLResponse(BaseModel):

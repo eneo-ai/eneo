@@ -62,6 +62,12 @@ from eneo.settings.settings import SettingsUpsert
 from eneo.settings.settings_repo import SettingsRepository
 from eneo.tenants.tenant import TenantState
 from eneo.tenants.tenant_repo import TenantRepository
+from eneo.users.password import (
+    CurrentPasswordIncorrectError,
+    LocalPasswordChangeUnavailableError,
+    PasswordReuseError,
+    validate_new_local_password,
+)
 from eneo.users.user import (
     PropUserInvite,
     UserAdd,
@@ -108,6 +114,12 @@ _SERVICE_KEY_BASE_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.INTEGRATIONS,
         Permission.SHARED_SPACES,
         Permission.INSIGHTS,
+        # Web search: automations asking an assistant keep the capability the
+        # assistant offers; the route guards and the tenant's providers still
+        # bound what a key can reach. Image generation is deliberately absent:
+        # a generated image is persisted as a file keyed on user_id, and the
+        # synthetic service user has no users row to key it on.
+        Permission.WEB_SEARCH,
     }
 )
 
@@ -692,6 +704,7 @@ class UserService:
             raise BadRequestException(f"Tenant {new_user.tenant_id} does not exist")
 
         if new_user.password is not None:
+            validate_new_local_password(new_user.password)
             salt, hashed_pass = self.auth_service.create_salt_and_hashed_password(
                 new_user.password
             )
@@ -739,19 +752,25 @@ class UserService:
         return user_in_db, access_token
 
     async def _get_user_from_token(self, token: str):
+        settings = get_settings()
         try:
-            username = self.auth_service.get_username_from_token(
-                token, get_settings().jwt_secret
+            payload, claims = self.auth_service.get_jwt_payload_with_claims(
+                token,
+                key=str(settings.jwt_secret),
+                aud=settings.jwt_audience,
+                algs=[settings.jwt_algorithm],
             )
         except AuthenticationException:
-            # Not an Eneo-issued HS256 JWT. In resource-server mode, the
-            # bearer token may instead be an IdP-issued RS256 access token.
-            if not get_settings().oidc_resource_server_enabled:
+            # In resource-server mode, the bearer token may be an IdP token.
+            if not settings.oidc_resource_server_enabled:
                 raise
             return await self._get_user_from_idp_access_token(token)
-        if username is None:
+        if payload.username is None:
             return None
-        return await self.repo.get_user_by_username(username)
+        user = await self.repo.get_user_by_username(payload.username)
+        if user is not None:
+            self.auth_service.validate_credential_version(claims, user)
+        return user
 
     async def _get_user_from_idp_access_token(self, token: str) -> "UserInDB":
         """Validate an IdP access token and resolve the user by email claim.
@@ -1013,6 +1032,21 @@ class UserService:
         # (e.g. SpaceAssembler) can reflect effective permissions accurately.
         user.active_api_key = resolved.key
 
+        # A route can compose multiple authentication dependencies. They all share
+        # one Request, but each dependency may own a separate database session. Do
+        # request-level side effects only on the first successful resolution of a
+        # key; otherwise a later session can wait on the first session's uncommitted
+        # last_used_at row lock and deadlock the request. Authorization checks below
+        # still run on every pass because sibling dependencies may add stricter
+        # route guards to request.state between resolutions.
+        authenticated_request_key = (
+            getattr(request.state, "api_key", None) if request is not None else None
+        )
+        is_repeated_request_authentication = (
+            isinstance(authenticated_request_key, ApiKeyV2InDB)
+            and authenticated_request_key.id == resolved.key.id
+        )
+
         policy_service = ApiKeyPolicyService(
             space_service=self.space_service,
             user=None,
@@ -1029,7 +1063,10 @@ class UserService:
                 origin=origin,
                 client_ip=client_ip,
             )
-            if self.api_key_rate_limiter is not None:
+            if (
+                self.api_key_rate_limiter is not None
+                and not is_repeated_request_authentication
+            ):
                 await self.api_key_rate_limiter.enforce(resolved.key)
         except ApiKeyValidationError as exc:
             await self._log_api_key_auth_failed(
@@ -1040,13 +1077,14 @@ class UserService:
             )
             raise
 
-        settings = get_settings()
-        await self.api_key_v2_repo.update_last_used_at(
-            key_id=resolved.key.id,
-            tenant_id=resolved.key.tenant_id,
-            last_used_at=datetime.now(timezone.utc),
-            min_interval_seconds=settings.api_key_last_used_min_interval_seconds,
-        )
+        if not is_repeated_request_authentication:
+            settings = get_settings()
+            await self.api_key_v2_repo.update_last_used_at(
+                key_id=resolved.key.id,
+                tenant_id=resolved.key.tenant_id,
+                last_used_at=datetime.now(timezone.utc),
+                min_interval_seconds=settings.api_key_last_used_min_interval_seconds,
+            )
 
         if request is None:
             raise ApiKeyValidationError(
@@ -1169,26 +1207,27 @@ class UserService:
                 )
                 raise
 
-        await self._maybe_log_api_key_used(
-            user,
-            resolved.key,
-            request=request,
-        )
+        if not is_repeated_request_authentication:
+            await self._maybe_log_api_key_used(
+                user,
+                resolved.key,
+                request=request,
+            )
 
-        logger.info(
-            "API key authenticated",
-            extra={
-                "tenant_id": str(resolved.key.tenant_id),
-                "user_id": str(user.id),
-                "api_key_id": str(resolved.key.id),
-                "scope_type": resolved.key.scope_type,
-                "scope_id": str(resolved.key.scope_id)
-                if resolved.key.scope_id
-                else None,
-                "permission": resolved.key.permission,
-                "key_type": resolved.key.key_type,
-            },
-        )
+            logger.info(
+                "API key authenticated",
+                extra={
+                    "tenant_id": str(resolved.key.tenant_id),
+                    "user_id": str(user.id),
+                    "api_key_id": str(resolved.key.id),
+                    "scope_type": resolved.key.scope_type,
+                    "scope_id": str(resolved.key.scope_id)
+                    if resolved.key.scope_id
+                    else None,
+                    "permission": resolved.key.permission,
+                    "key_type": resolved.key.key_type,
+                },
+            )
 
         return user, resolved.key
 
@@ -1531,7 +1570,7 @@ class UserService:
                         code="insufficient_scope",
                         message=(
                             f"API key is scoped to space '{key.scope_id}'. "
-                            f"The requested resource belongs to a different scope."
+                            "The requested resource was not found or is outside this key's scope."
                         ),
                     )
                 return
@@ -1542,23 +1581,14 @@ class UserService:
                 target_space_id = await self._resolve_space_id_for_resource(
                     resource_type, resource_id
                 )
-            if target_space_id is None:
-                # Fail-closed: can't prove scope → deny
+            if target_space_id is None or key.scope_id != target_space_id:
+                # Deny without distinguishing missing resources from other scopes.
                 raise ApiKeyValidationError(
                     status_code=403,
                     code="insufficient_scope",
                     message=(
                         f"API key is scoped to space '{key.scope_id}'. "
-                        f"The requested resource belongs to a different scope."
-                    ),
-                )
-            if key.scope_id != target_space_id:
-                raise ApiKeyValidationError(
-                    status_code=403,
-                    code="insufficient_scope",
-                    message=(
-                        f"API key is scoped to space '{key.scope_id}'. "
-                        f"The requested resource belongs to a different scope."
+                        "The requested resource was not found or is outside this key's scope."
                     ),
                 )
             return
@@ -1856,6 +1886,19 @@ class UserService:
             },
         )
 
+    async def validate_active_identity(
+        self, user_in_db: "UserInDB", *, correlation_id: str
+    ) -> None:
+        """Apply the canonical live user and tenant state checks.
+
+        Authentication adapters that validate a non-core token audience, such
+        as the module auth broker, cannot call ``authenticate`` directly. They
+        still need the exact same suspension and inactivity policy as normal
+        API authentication, so this narrow public entry point keeps that policy
+        owned here instead of copying it into each adapter.
+        """
+        await self._check_user_and_tenant_state(user_in_db, correlation_id)
+
     async def authenticate_with_assistant_api_key(
         self,
         api_key: str | None,
@@ -1971,6 +2014,96 @@ class UserService:
 
         return user_in_db
 
+    async def _write_local_password(
+        self,
+        *,
+        user_id: UUID,
+        new_password: str,
+        current_password: str | None,
+        require_current_password: bool,
+    ) -> "UserInDB":
+        """Serialize and persist one local credential mutation.
+
+        Both self-service changes and administrator resets use this path, so
+        hashing, password reuse protection and credential-version increments
+        cannot drift apart.
+        """
+
+        validate_new_local_password(new_password)
+        user = await self.repo.get_user_by_id_for_update(user_id)
+        if user is None:
+            raise NotFoundException("No such user")
+
+        if require_current_password:
+            if user.password is None:
+                raise LocalPasswordChangeUnavailableError(
+                    "This account does not have a local Eneo password."
+                )
+            if current_password is None or not self.auth_service.verify_password(
+                current_password, user.password
+            ):
+                raise CurrentPasswordIncorrectError(
+                    "The current password is incorrect."
+                )
+
+        if user.password is not None and self.auth_service.verify_password(
+            new_password, user.password
+        ):
+            raise PasswordReuseError(
+                "The new password must be different from the current password."
+            )
+
+        salt, hashed_password = self.auth_service.create_salt_and_hashed_password(
+            new_password
+        )
+        updated = await self.repo.update(
+            UserUpdate(
+                id=user.id,
+                password=hashed_password,
+                salt=salt,
+                credential_version=user.credential_version + 1,
+            )
+        )
+        if updated is None:
+            raise NotFoundException("No such user")
+        return updated
+
+    async def change_local_password(
+        self, *, user_id: UUID, current_password: str, new_password: str
+    ) -> "UserInDB":
+        return await self._write_local_password(
+            user_id=user_id,
+            new_password=new_password,
+            current_password=current_password,
+            require_current_password=True,
+        )
+
+    async def reset_local_password(
+        self, *, user_id: UUID, new_password: str
+    ) -> "UserInDB":
+        return await self._write_local_password(
+            user_id=user_id,
+            new_password=new_password,
+            current_password=None,
+            require_current_password=False,
+        )
+
+    async def invalidate_sessions(self, *, user_id: UUID) -> "UserInDB":
+        """Invalidate all Eneo JWTs previously minted for one user."""
+
+        user = await self.repo.get_user_by_id_for_update(user_id)
+        if user is None:
+            raise NotFoundException("No such user")
+        updated = await self.repo.update(
+            UserUpdate(
+                id=user.id,
+                credential_version=user.credential_version + 1,
+            )
+        )
+        if updated is None:
+            raise NotFoundException("No such user")
+        return updated
+
     async def update_user(self, user_id: UUID, user_update_public: UserUpdatePublic):
         await self._validate_email(user_update_public.email)
         await self._validate_username(user_update_public.username)
@@ -2039,50 +2172,26 @@ class UserService:
                         "At least one user must retain admin access."
                     )
 
-        user_update = UserUpdate(
-            id=user_id, **user_update_public.model_dump(exclude_unset=True)
-        )
-
+        password_updated_user: UserInDB | None = None
         if user_update_public.password is not None:
-            salt, hashed_pass = self.auth_service.create_salt_and_hashed_password(
-                user_update_public.password
+            password_updated_user = await self.reset_local_password(
+                user_id=user_id, new_password=user_update_public.password
             )
-            user_update.salt = salt
-            user_update.password = hashed_pass
 
-        user_in_db = await self.repo.update(
-            UserUpdate(**user_update.model_dump(exclude_unset=True))
+        non_password_update = user_update_public.model_dump(
+            exclude_unset=True, exclude={"password"}
         )
+        if non_password_update:
+            user_in_db = await self.repo.update(
+                UserUpdate(id=user_id, **non_password_update)
+            )
+        else:
+            user_in_db = password_updated_user
 
         if user_in_db is None:
             raise NotFoundException("No such user")
 
         return user_in_db
-
-    async def change_own_password(
-        self, user_id: UUID, current_password: str, new_password: str
-    ):
-        """Change the authenticated user's own password (password accounts only)."""
-        user = await self.repo.get_user_by_id(user_id)
-        if user is None:
-            raise NotFoundException("No such user")
-        # Federated (OIDC) accounts have no local password set.
-        if not user.password:
-            raise BadRequestException(
-                "Password change is not available for federated accounts."
-            )
-        if not self.auth_service.verify_password(current_password, user.password):
-            raise AuthenticationException("Current password is incorrect.")
-
-        salt, hashed_pass = self.auth_service.create_salt_and_hashed_password(
-            new_password
-        )
-        updated = await self.repo.update(
-            UserUpdate(id=user_id, password=hashed_pass, salt=salt)
-        )
-        if updated is None:
-            raise NotFoundException("No such user")
-        return updated
 
     async def delete_user(self, user_id: UUID):
         from eneo.roles.permissions import Permission
@@ -2116,6 +2225,3 @@ class UserService:
             user_id=user.id
         )
         return user
-
-    async def generate_api_key(self, user_id: UUID):
-        return await self.auth_service.create_user_api_key("inp", user_id=user_id)

@@ -1,8 +1,9 @@
 """Integration tests for audit logging ARQ worker."""
 
-import pytest
 from datetime import datetime
 from uuid import uuid4
+
+import pytest
 
 from eneo.audit.application.audit_worker_task import log_audit_event_task
 from eneo.audit.domain.action_types import ActionType

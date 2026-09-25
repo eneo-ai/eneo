@@ -11,8 +11,8 @@ from eneo.users.user import UserInDB
 @pytest.fixture
 async def quota_service(user: UserInDB):
     info_blobs_repo = AsyncMock()
-    info_blobs_repo.get_total_size_of_user.return_value = 5
-    info_blobs_repo.get_total_size_of_tenant.return_value = 5
+    info_blobs_repo.get_retained_size_of_user.return_value = 5
+    info_blobs_repo.get_retained_size_of_tenant.return_value = 5
     return QuotaService(user, info_blobs_repo)
 
 

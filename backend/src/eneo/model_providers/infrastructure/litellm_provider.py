@@ -43,11 +43,6 @@ class ResolvedLiteLLMProvider:
         )
 
 
-def build_litellm_model_name(provider_type: str, model_name: str) -> str:
-    """Build the single canonical model route used for all LiteLLM calls."""
-    return f"{provider_type}/{model_name}"
-
-
 def _build_litellm_provider_kwargs(
     credential_resolver: TenantModelCredentialResolver,
 ) -> dict[str, Any]:

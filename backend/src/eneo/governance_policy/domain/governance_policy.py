@@ -9,6 +9,7 @@ from enum import Enum
 from uuid import UUID
 
 from eneo.main.exceptions import BadRequestException
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 
 
 class PolicyScope(str, Enum):
@@ -26,6 +27,12 @@ class PolicyScope(str, Enum):
 class PolicyCompletionModel:
     completion_model_id: UUID
     is_default: bool = False
+
+
+@dataclass
+class PolicyCapability:
+    purpose: CapabilityPurpose
+    is_default_enabled: bool = True
 
 
 @dataclass
@@ -50,6 +57,7 @@ class GovernancePolicy:
 
     models_restriction_enabled: bool = False
     mcp_restriction_enabled: bool = False
+    capabilities: list[PolicyCapability] = field(default_factory=list[PolicyCapability])
     prompt_enforcement_enabled: bool = False
 
     completion_models: list[PolicyCompletionModel] = field(
@@ -65,6 +73,13 @@ class GovernancePolicy:
     # so tools synced onto a server later are allowed automatically.
     disabled_mcp_tool_ids: list[UUID] = field(default_factory=lambda: [])  # noqa: C408
     default_prompt_library_id: UUID | None = None
+    reasoning_policy_configured: bool = False
+    default_reasoning_effort: str | None = None
+    allow_user_reasoning_effort: bool = False
+    # None = not governed (each personal assistant's own flag applies).
+    # True inlines attachment text; False sends signed URLs the model reads
+    # with the files tool, keeping large uploads out of the context window.
+    inline_file_text: bool | None = None
 
     updated_at: datetime | None = None
     updated_by_user_id: UUID | None = None
@@ -100,12 +115,14 @@ class GovernancePolicy:
         *,
         enabled: bool,
         servers: list[PolicyMcpServer],
+        capabilities: list[PolicyCapability] | None = None,
         disabled_tool_ids: list[UUID] | None = None,
     ) -> None:
         disabled_tool_ids = list(disabled_tool_ids or [])
         # Deny-all is expressed by disabling the dimension ("no MCP in the
         # personal assistant"), so an enabled grant must allow something.
-        if enabled and not servers:
+        capabilities = self.capabilities if capabilities is None else capabilities
+        if enabled and not servers and not capabilities:
             raise BadRequestException(
                 "Cannot enable MCP servers without selecting at least one server"
             )
@@ -116,6 +133,7 @@ class GovernancePolicy:
             raise BadRequestException("Duplicate MCP tool IDs")
         self.mcp_restriction_enabled = enabled
         self.mcp_servers = list(servers) if enabled else []
+        self.capabilities = list(capabilities) if enabled else []
         self.disabled_mcp_tool_ids = disabled_tool_ids if enabled else []
 
     def set_prompt_enforcement(
@@ -127,3 +145,17 @@ class GovernancePolicy:
             )
         self.prompt_enforcement_enabled = enabled
         self.default_prompt_library_id = prompt_library_id if enabled else None
+
+    def set_reasoning_policy(
+        self, *, default_effort: str | None, allow_user_override: bool
+    ) -> None:
+        if default_effort is not None and (
+            not default_effort.strip() or len(default_effort) > 32
+        ):
+            raise BadRequestException("Invalid default reasoning effort")
+        self.reasoning_policy_configured = True
+        self.default_reasoning_effort = default_effort
+        self.allow_user_reasoning_effort = allow_user_override
+
+    def set_file_policy(self, *, inline_file_text: bool) -> None:
+        self.inline_file_text = inline_file_text

@@ -2,7 +2,8 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey
+from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from eneo.database.tables.base_class import BasePublic
@@ -14,5 +15,13 @@ class Jobs(BasePublic):
     task: Mapped[str] = mapped_column()
     status: Mapped[str] = mapped_column()
     result_location: Mapped[Optional[str]] = mapped_column()
+    failure_code: Mapped[Optional[str]] = mapped_column(String(64))
     name: Mapped[Optional[str]] = mapped_column()
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    dispatch_envelope: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
+    dispatch_attempted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
+    staging_cleaned_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )

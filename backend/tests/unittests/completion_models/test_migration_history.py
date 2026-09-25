@@ -416,9 +416,7 @@ class TestConvertToPublicModels:
         )
 
         service._get_model_names = AsyncMock(return_value={})
-        service._get_user_names = AsyncMock(
-            return_value={user_id: "admin@test.com"}
-        )
+        service._get_user_names = AsyncMock(return_value={user_id: "admin@test.com"})
 
         result = await service._convert_to_public_models([record1, record2])
 

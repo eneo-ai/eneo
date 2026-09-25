@@ -6,6 +6,7 @@
  * against the same source of truth without triggering a Svelte recompile.
  */
 import type { SecurityClassification } from "@eneo/eneo-js";
+import type { ImageQuality, ImageSize } from "$lib/features/ai-models/imageModelOptions";
 
 export type WizardStepId = "provider" | "credentials" | "models";
 
@@ -27,6 +28,10 @@ export interface WizardModelDraft {
   outputCostPerToken?: number | null;
   /** USD per minute of audio. Used by transcription models. */
   costPerMinute?: number | null;
+  /** Image models only: USD per generated image and the request defaults. */
+  costPerImage?: number | null;
+  defaultSize?: ImageSize;
+  defaultQuality?: ImageQuality;
   securityClassification?: SecurityClassification | null;
 }
 

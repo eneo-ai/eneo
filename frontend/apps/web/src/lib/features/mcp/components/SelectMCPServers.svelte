@@ -7,10 +7,14 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Input, Tooltip } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { ChevronRight } from "lucide-svelte";
+  import { ChevronRight } from "@lucide/svelte";
   import { SvelteSet } from "svelte/reactivity";
+  import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
+  import { readinessMessage } from "$lib/features/mcp/readiness";
 
   interface MCPTool {
     id: string;
@@ -23,6 +27,9 @@
     id: string;
     name: string;
     description?: string;
+    purpose?: string;
+    /** Org-level availability; a deactivated server stays attached but is never called. */
+    is_enabled?: boolean;
     tags?: string[];
     tools?: MCPTool[];
     [key: string]: unknown;
@@ -45,6 +52,7 @@
     selectedModel = null,
     allowedMCPServers = undefined
   }: Props = $props();
+  const uid = $props.id();
 
   /** Type-safe view of selectedMCPServers */
   let servers = $derived((selectedMCPServers ?? []) as unknown as MCPServer[]);
@@ -69,6 +77,23 @@
     }));
   });
 
+  // This picker manages general-purpose servers only; capabilities (web
+  // search, image generation) have their own settings section (CapabilityToggle).
+  // A server an admin deactivated leaves the space's offer but stays on the
+  // assistant; keep it listed as unavailable so the setting survives until
+  // reactivation instead of being silently dropped on the next save.
+  let generalAvailableServers = $derived.by(() => {
+    const offered = availableServers.filter((server) => !isCapabilityPurpose(server.purpose));
+    const offeredIds = new Set(offered.map((server) => server.id));
+    const retained = servers.filter(
+      (server) =>
+        server.is_enabled === false &&
+        !isCapabilityPurpose(server.purpose) &&
+        !offeredIds.has(server.id)
+    );
+    return [...offered, ...retained];
+  });
+
   // Track expanded servers
   const expandedServers = new SvelteSet<string>();
 
@@ -86,6 +111,7 @@
 
   // When the allowed set changes (governance policy, or a server removed from
   // the space), drop any selected server/tool that is no longer available.
+  // A deactivated server is retained: it is unavailable, not removed.
   // Keyed only on `availableServers`; the selection reads + writes are
   // untracked so this never re-triggers on user toggles (which would churn the
   // whole list) or loops on its own writes.
@@ -95,13 +121,20 @@
       availableServers.flatMap((server) => server.tools?.map((tool) => tool.id) ?? [])
     );
     untrack(() => {
-      const filteredSelectedServers = servers.filter((server) => availableServerIds.has(server.id));
+      const retainedToolIds = new Set(
+        servers
+          .filter((server) => server.is_enabled === false)
+          .flatMap((server) => server.tools?.map((tool) => tool.id) ?? [])
+      );
+      const filteredSelectedServers = servers.filter(
+        (server) => availableServerIds.has(server.id) || server.is_enabled === false
+      );
       if (filteredSelectedServers.length !== servers.length) {
         selectedMCPServers = filteredSelectedServers;
       }
 
-      const filteredSelectedTools = selectedMCPTools.filter((tool) =>
-        availableToolIds.has(tool.tool_id)
+      const filteredSelectedTools = selectedMCPTools.filter(
+        (tool) => availableToolIds.has(tool.tool_id) || retainedToolIds.has(tool.tool_id)
       );
       if (filteredSelectedTools.length !== selectedMCPTools.length) {
         selectedMCPTools = filteredSelectedTools;
@@ -232,7 +265,7 @@
       <span class="font-bold">{m.warning()}:&nbsp;</span>{m.model_does_not_support_tools()}
     </p>
   {/if}
-  {#if availableServers.length === 0}
+  {#if generalAvailableServers.length === 0}
     <div
       class="border-dimmer bg-secondary/30 flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-8 text-center"
     >
@@ -259,9 +292,10 @@
     </div>
   {:else}
     <div class="divide-dimmer border-default divide-y overflow-hidden rounded-xl border">
-      {#each availableServers as server (server.id)}
+      {#each generalAvailableServers as server (server.id)}
         {@const isSelected = isServerSelected(server.id)}
-        {@const hasTools = isSelected && server.tools && server.tools.length > 0}
+        {@const unavailable = server.is_enabled === false}
+        {@const hasTools = isSelected && !unavailable && server.tools && server.tools.length > 0}
         {@const isExpanded = expandedServers.has(server.id)}
         {@const toolCount = server.tools?.length ?? 0}
         {@const enabledToolCount =
@@ -285,25 +319,52 @@
 
             <!-- Server Toggle -->
             <div class="flex-1 py-2.5 pr-4">
-              <Input.Switch value={isSelected} sideEffect={() => toggleServer(server)}>
-                <div class="flex flex-col gap-0.5">
-                  <div class="flex items-center gap-2">
+              <Field.Field orientation="horizontal" class="gap-4">
+                <Field.Content>
+                  <Field.Label for={`${uid}-${server.id}`}>
                     <span class="text-default font-medium">{server.name}</span>
+                    {#if unavailable}
+                      <span
+                        class="bg-warning-dimmer text-warning-stronger inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+                        >{m.disabled()}</span
+                      >
+                    {/if}
                     {#if hasTools}
                       <span
                         class="bg-secondary text-muted inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
                       >
                         <span class="text-positive-default">{enabledToolCount}</span>
-                        <span class="text-dimmer">/</span>
+                        <span class="text-muted">/</span>
                         <span>{toolCount}</span>
                       </span>
                     {/if}
-                  </div>
-                  {#if server.description}
-                    <p class="text-muted line-clamp-1 text-xs leading-snug">{server.description}</p>
+                  </Field.Label>
+                  {#if unavailable}
+                    <Field.Description
+                      id={`${uid}-${server.id}-description`}
+                      class="text-muted text-xs leading-snug"
+                    >
+                      {readinessMessage("server_disabled")}
+                    </Field.Description>
+                  {:else if server.description}
+                    <Field.Description
+                      id={`${uid}-${server.id}-description`}
+                      class="text-muted line-clamp-1 text-xs leading-snug"
+                    >
+                      {server.description}
+                    </Field.Description>
                   {/if}
-                </div>
-              </Input.Switch>
+                </Field.Content>
+                <Switch
+                  id={`${uid}-${server.id}`}
+                  checked={isSelected}
+                  disabled={unavailable && !isSelected}
+                  onCheckedChange={() => toggleServer(server)}
+                  aria-describedby={unavailable || server.description
+                    ? `${uid}-${server.id}-description`
+                    : undefined}
+                />
+              </Field.Field>
             </div>
           </div>
 
@@ -331,7 +392,7 @@
                   >
                     {m.mcp_all_on()}
                   </button>
-                  <span class="text-dimmer">|</span>
+                  <span class="text-muted">|</span>
                   <button
                     type="button"
                     class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
@@ -357,20 +418,30 @@
                         : 'opacity-40 grayscale-[30%]'}"
                     >
                       <div class="min-w-0 flex-1">
-                        <span class="text-default block truncate font-mono text-xs font-medium"
+                        <span
+                          id={`${uid}-${server.id}-${tool.id}`}
+                          class="text-default block truncate font-mono text-xs font-medium"
                           >{tool.name}</span
                         >
                         {#if tool.description}
-                          <Tooltip text={tool.description} placement="bottom">
-                            <p class="text-muted cursor-help truncate text-xs leading-snug">
+                          <Tooltip.Root>
+                            <Tooltip.Trigger
+                              id={`${uid}-${server.id}-${tool.id}-description`}
+                              class="text-muted block w-full cursor-help truncate text-left text-xs leading-snug"
+                            >
                               {tool.description}
-                            </p>
-                          </Tooltip>
+                            </Tooltip.Trigger>
+                            <Tooltip.Content side="bottom">{tool.description}</Tooltip.Content>
+                          </Tooltip.Root>
                         {/if}
                       </div>
-                      <Input.Switch
-                        value={toolEnabled}
-                        sideEffect={() => toggleTool(server, tool)}
+                      <Switch
+                        checked={toolEnabled}
+                        onCheckedChange={() => toggleTool(server, tool)}
+                        aria-labelledby={`${uid}-${server.id}-${tool.id}`}
+                        aria-describedby={tool.description
+                          ? `${uid}-${server.id}-${tool.id}-description`
+                          : undefined}
                       />
                     </div>
                   {/each}

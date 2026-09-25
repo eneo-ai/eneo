@@ -1,5 +1,10 @@
 import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
-import { decodeState, type LoginStateParam } from "$lib/features/auth/auth.server.js";
+import {
+  consumeOidcLoginDestination,
+  decodeState,
+  resolveOptionalLoginStateDestination,
+  type LoginStateParam
+} from "$lib/features/auth/auth.server.js";
 import { LoginError } from "$lib/features/auth/LoginError.js";
 import {
   clearMobilityguardCookie,
@@ -14,6 +19,9 @@ export const load = async (event) => {
   const state = event.url.searchParams.get("state");
   const error = event.url.searchParams.get("error");
   const errorDescription = event.url.searchParams.get("error_description");
+  // One-shot fallback for generic OIDC. The helper validates the cookie as a
+  // local-only destination and deletes it before any callback branch returns.
+  const rememberedLoginDestination = await consumeOidcLoginDestination(event.cookies, state);
 
   // Log callback parameters
   console.debug("[OIDC Callback] Received callback", {
@@ -29,7 +37,7 @@ export const load = async (event) => {
     console.error("[OIDC Callback] OAuth error received from identity provider", {
       error,
       errorDescription,
-      state,
+      hasState: !!state,
       origin: event.url.origin
     });
 
@@ -51,7 +59,8 @@ export const load = async (event) => {
     const errorParams = new URLSearchParams({
       message,
       error,
-      ...(errorDescription && { details: errorDescription })
+      ...(errorDescription && { details: errorDescription }),
+      ...(rememberedLoginDestination && { next: rememberedLoginDestination })
     });
 
     return redirect(302, `/login?${errorParams.toString()}`);
@@ -59,23 +68,34 @@ export const load = async (event) => {
 
   if (!code) {
     console.error("[OIDC Callback] No authorization code received");
-    return redirect(302, "/login?message=no_code_received");
+    const params = new URLSearchParams({ message: "no_code_received" });
+    if (rememberedLoginDestination) {
+      params.set("next", rememberedLoginDestination);
+    }
+    return redirect(302, `/login?${params.toString()}`);
   }
 
   if (!state) {
     console.error("[OIDC Callback] No state parameter received");
-    return redirect(302, "/login?message=no_state_received");
+    const params = new URLSearchParams({ message: "no_state_received" });
+    if (rememberedLoginDestination) {
+      params.set("next", rememberedLoginDestination);
+    }
+    return redirect(302, `/login?${params.toString()}`);
   }
 
   let success = false;
   let errorInfo = "";
   let errorDetails = "";
   const decodedState = decodeState<LoginStateParam>(state);
-  const redirectUrl = decodedState?.next ?? DEFAULT_LANDING_PAGE;
+  let redirectUrl =
+    resolveOptionalLoginStateDestination(state) ??
+    rememberedLoginDestination ??
+    DEFAULT_LANDING_PAGE;
 
   console.debug("[OIDC Callback] Processing login", {
     loginMethod: decodedState?.loginMethod ?? "oidc (backend-first)",
-    redirectUrl
+    hasRequestedDestination: decodedState?.next != null
   });
 
   let loginError: LoginError | null = null;
@@ -101,7 +121,14 @@ export const load = async (event) => {
       // Generic OIDC flow (single-tenant or new backend-first flow)
       // loginMethod is undefined when using backend-generated state JWT
       console.debug("[OIDC Callback] Using generic OIDC flow (backend-first)");
-      success = await loginWithOidc(code, state, event.fetch);
+      const oidcResult = await loginWithOidc(code, state, event.fetch);
+      success = oidcResult !== null;
+      if (oidcResult !== null) {
+        redirectUrl =
+          resolveOptionalLoginStateDestination(oidcResult.frontendState) ??
+          rememberedLoginDestination ??
+          DEFAULT_LANDING_PAGE;
+      }
 
       if (!success) {
         errorInfo = "oidc_callback_failed";
@@ -140,8 +167,8 @@ export const load = async (event) => {
   }
 
   if (success) {
-    console.debug("[OIDC Callback] Login successful, redirecting", { redirectUrl });
-    redirect(302, `/${redirectUrl.slice(1)}`);
+    console.debug("[OIDC Callback] Login successful, redirecting");
+    redirect(302, redirectUrl);
   }
 
   console.error("[OIDC Callback] Login failed, redirecting to login page", {
@@ -174,6 +201,10 @@ export const load = async (event) => {
       params.set("rawDetail", loginError.rawDetail);
     }
 
+    if (rememberedLoginDestination) {
+      params.set("next", rememberedLoginDestination);
+    }
+
     // Try to get tenant from cookies (session storage)
     const tenantSlug = event.cookies.get("eneo-last-tenant-slug");
     if (tenantSlug) {
@@ -187,7 +218,8 @@ export const load = async (event) => {
   const loginMethod = decodedState?.loginMethod || "oidc";
   const failedUrl =
     `/login/failed?message=${loginMethod}_login_error&info=${errorInfo}` +
-    (errorDetails ? `&details=${encodeURIComponent(errorDetails)}` : "");
+    (errorDetails ? `&details=${encodeURIComponent(errorDetails)}` : "") +
+    (rememberedLoginDestination ? `&next=${encodeURIComponent(rememberedLoginDestination)}` : "");
 
   redirect(302, failedUrl);
 };

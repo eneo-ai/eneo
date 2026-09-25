@@ -1,8 +1,8 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <!--
-  Generic provider-grouped table used by all three model-type tabs
-  (completion / embedding / transcription). Replaces three near-identical
+  Generic provider-grouped table used by all four model-type tabs
+  (completion / embedding / transcription / image). Replaces three near-identical
   copies that drifted apart over time. Per-type behaviour is limited to:
 
     - the deprecation banner — only completion models carry deprecation_date
@@ -13,18 +13,21 @@
   identical and live here.
 -->
 
-<script lang="ts" generics="M extends CompletionModel | EmbeddingModel | TranscriptionModel">
+<script
+  lang="ts"
+  generics="M extends CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel"
+>
   import type {
     CompletionModel,
     EmbeddingModel,
+    ImageModel,
     ModelProviderPublic,
     TranscriptionModel
   } from "@eneo/eneo-js";
-  import { Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { createRender } from "svelte-headless-table";
   import { writable } from "svelte/store";
-  import { Plus, TriangleAlert, Clock } from "lucide-svelte";
+  import { Plus, TriangleAlert, Clock } from "@lucide/svelte";
 
   import { m } from "$lib/paraglide/messages";
   import {
@@ -46,13 +49,14 @@
   import ProviderEmptyState from "./ProviderEmptyState.svelte";
   import { AddWizard } from "../AddWizard/index.js";
 
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel";
-  type WizardModelType = "completion" | "embedding" | "transcription";
+  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
+  type WizardModelType = "completion" | "embedding" | "transcription" | "image";
 
   const wizardModelTypeFor: Record<ModelTypeKey, WizardModelType> = {
     completionModel: "completion",
     embeddingModel: "embedding",
-    transcriptionModel: "transcription"
+    transcriptionModel: "transcription",
+    imageModel: "image"
   };
 
   export let models: M[];
@@ -103,7 +107,7 @@
       accessor: (model: M) => model,
       header: m.name(),
       cell: (item) =>
-        createRender(ModelNameCell, {
+        Table.renderComponent(ModelNameCell, {
           model: item.value,
           type: modelType,
           completionModels:
@@ -118,7 +122,8 @@
     table.column({
       accessor: (model: M) => model,
       header: m.enabled(),
-      cell: (item) => createRender(ModelEnableSwitch, { model: item.value, type: modelType }),
+      cell: (item) =>
+        Table.renderComponent(ModelEnableSwitch, { model: item.value, type: modelType }),
       plugins: { sort: { getSortValue: (value) => (value.is_org_enabled ? 1 : 0) } }
     }),
 
@@ -127,7 +132,7 @@
           table.column({
             accessor: (model: M) => model,
             header: m.security_classification(),
-            cell: (item) => createRender(ModelClassificationCell, { model: item.value }),
+            cell: (item) => Table.renderComponent(ModelClassificationCell, { model: item.value }),
             plugins: {
               sort: {
                 getSortValue: (value) => value.security_classification?.security_level ?? -1
@@ -143,7 +148,7 @@
     table.column({
       accessor: (model: M) => model,
       header: m.details(),
-      cell: (item) => createRender(ModelStatusIcons, { model: item.value }),
+      cell: (item) => Table.renderComponent(ModelStatusIcons, { model: item.value }),
       plugins: {
         sort: { disable: true },
         tableFilter: {
@@ -157,7 +162,7 @@
 
     table.columnActions({
       cell: (item) =>
-        createRender(ModelActions, {
+        Table.renderComponent(ModelActions, {
           model: item.value,
           type: modelType,
           completionModels:
@@ -279,12 +284,13 @@
         <Table.Group
           filterFn={groupFilterFor(group.key)}
           title=" "
+          toggleLabel={provider?.name ?? group.name}
           open={groupOpenState[group.key] ?? true}
-          on:openChange={(e) => {
-            groupOpenState[group.key] = e.detail.open;
+          onOpenChange={(open) => {
+            groupOpenState[group.key] = open;
           }}
         >
-          <svelte:fragment slot="title-prefix">
+          {#snippet titlePrefix()}
             {#if provider}
               <button
                 class="group focus:ring-accent-default mr-1 flex cursor-pointer items-center gap-3 rounded-lg transition-colors duration-150 focus:ring-2 focus:ring-offset-2 focus:outline-none"
@@ -309,9 +315,9 @@
                 <span class="text-primary font-medium">{group.name}</span>
               </div>
             {/if}
-          </svelte:fragment>
+          {/snippet}
 
-          <svelte:fragment slot="title-suffix">
+          {#snippet titleSuffix()}
             <div class="flex items-center gap-2">
               {#if provider}
                 {@const modelCount = getModelCountForProvider(provider.id)}
@@ -320,7 +326,7 @@
                     ? m.provider_model_count_one({ count: modelCount })
                     : m.provider_model_count_other({ count: modelCount })}
                 </span>
-                <span class="bg-border-dimmer h-4 w-px"></span>
+                <span class="bg-[var(--border-dimmer)] h-4 w-px"></span>
                 <button
                   class="text-muted hover:bg-hover-dimmer hover:text-primary focus:ring-accent-default flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors duration-150 focus:ring-1 focus:outline-none"
                   on:click|stopPropagation={() => handleAddModelToProvider(provider.id)}
@@ -332,19 +338,19 @@
                 <ProviderActions {provider} onEditProvider={handleEditProvider} />
               {/if}
             </div>
-          </svelte:fragment>
+          {/snippet}
 
-          <svelte:fragment slot="empty">
+          {#snippet empty()}
             {#if provider}
               <ProviderEmptyState providerId={provider.id} onAddModel={handleAddModelToProvider} />
             {:else}
               <div
-                class="text-muted/80 bg-surface-dimmer/50 border-dimmer rounded-lg border border-dashed px-4 py-3 text-sm"
+                class="text-muted/80 bg-secondary/50 border-dimmer rounded-lg border border-dashed px-4 py-3 text-sm"
               >
                 {m.no_models_in_provider()}
               </div>
             {/if}
-          </svelte:fragment>
+          {/snippet}
         </Table.Group>
       {/each}
     </Table.Root>

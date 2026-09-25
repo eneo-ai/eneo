@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { writable } from "svelte/store";
-  import { Button, Dialog, Markdown } from "@eneo/ui";
+  import { Markdown } from "$lib/components/markdown/index.js";
+  import { buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
@@ -15,42 +17,46 @@
 
   let { title, uri, content = null, pageRange = null, section = null, children }: Props = $props();
 
-  const openController = writable(false);
+  let isOpen = $state(false);
 
   const showSnippet = () => {
-    openController.set(true);
+    isOpen = true;
   };
 
   const isHttp = $derived(/^https?:\/\//i.test(uri));
 </script>
 
-<Dialog.Root {openController}>
+<Dialog.Root bind:open={isOpen}>
   {@render children({ showSnippet })}
 
-  <Dialog.Content width="medium">
-    <Dialog.Title>{title}</Dialog.Title>
-    <Dialog.Description hidden>
-      {m.mcp_resource_snippet_description({ title })}
-    </Dialog.Description>
+  <Dialog.Content class={dialogLayout.content("medium")} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{title}</Dialog.Title>
+      <Dialog.Description class="sr-only">
+        {m.mcp_resource_snippet_description({ title })}
+      </Dialog.Description>
+    </Dialog.Header>
 
-    <Dialog.Section scrollable>
-      <div class="flex flex-col gap-3 p-4">
-        {#if section || pageRange}
-          <div class="text-muted text-sm">
-            {#if section}<span>{section}</span>{/if}
-            {#if section && pageRange}<span> · </span>{/if}
-            {#if pageRange}<span>{m.mcp_resource_page_range({ pageRange })}</span>{/if}
-          </div>
-        {/if}
-        {#if content}
-          <Markdown source={content} />
-        {:else}
-          <p class="text-muted italic">{m.mcp_resource_unknown_source()}</p>
-        {/if}
+    <div class={dialogLayout.body}>
+      <div class={dialogLayout.section}>
+        <div class="flex flex-col gap-3 p-4">
+          {#if section || pageRange}
+            <div class="text-muted text-sm">
+              {#if section}<span>{section}</span>{/if}
+              {#if section && pageRange}<span> · </span>{/if}
+              {#if pageRange}<span>{m.mcp_resource_page_range({ pageRange })}</span>{/if}
+            </div>
+          {/if}
+          {#if content}
+            <Markdown source={content} />
+          {:else}
+            <p class="text-muted italic">{m.mcp_resource_unknown_source()}</p>
+          {/if}
+        </div>
       </div>
-    </Dialog.Section>
+    </div>
 
-    <Dialog.Controls let:close>
+    <Dialog.Footer class={dialogLayout.footer}>
       {#if isHttp}
         <!-- eslint-disable svelte/no-navigation-without-resolve -- external MCP resource URL from upstream tool -->
         <a
@@ -64,7 +70,7 @@
         <!-- eslint-enable svelte/no-navigation-without-resolve -->
         <div class="flex-grow"></div>
       {/if}
-      <Button variant="primary" is={close}>{m.done()}</Button>
-    </Dialog.Controls>
+      <Dialog.Close class={buttonVariants()}>{m.done()}</Dialog.Close>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

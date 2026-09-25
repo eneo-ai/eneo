@@ -14,14 +14,22 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from eneo.allowed_origins.get_origin_callback import get_origin
+from eneo.internal_mcp import internal_mcp_mounts
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.main.observability import init_observability, instrument_fastapi
 from eneo.main.request_context import get_request_context
+from eneo.object_content.runtime import (
+    ObjectContentReadinessCode,
+    object_content_runtime,
+)
 from eneo.scim.app import scim_app
 from eneo.server import api_documentation
 from eneo.server.dependencies.lifespan import lifespan as app_lifespan
-from eneo.server.exception_handlers import add_exception_handlers
+from eneo.server.exception_handlers import (
+    add_exception_handlers,
+    default_error_code_for_status,
+)
 from eneo.server.middleware.cors import CORSMiddleware
 from eneo.server.middleware.request_context import RequestContextMiddleware
 from eneo.server.middleware.trace_id import (
@@ -249,6 +257,11 @@ def get_application():
 
     app.include_router(api_router, prefix=get_settings().api_prefix)
     app.mount("/scim/v2", scim_app)
+    # Loopback internal-MCP servers (knowledge search, attachment reading;
+    # their session managers are driven by the parent lifespan in
+    # dependencies/lifespan.py).
+    for mount_path, internal_mcp_app in internal_mcp_mounts():
+        app.mount(mount_path, internal_mcp_app)
 
     # Add handlers of all errors except 500
     add_exception_handlers(app)
@@ -269,6 +282,14 @@ def get_application():
             normalized_detail: dict[str, Any] = cast(dict[str, Any], detail)
             if request_id and "request_id" not in normalized_detail:
                 normalized_detail["request_id"] = request_id
+            # Every raiser of this shape means it as the documented error, but
+            # each built the dict by hand and most left the required numeric
+            # category out. Fill it here, where the dict becomes the body, so a
+            # direct `raise HTTPException` cannot bypass the contract.
+            if "eneo_error_code" not in normalized_detail:
+                normalized_detail["eneo_error_code"] = default_error_code_for_status(
+                    exc.status_code
+                ).value
             return JSONResponse(
                 status_code=exc.status_code, content=normalized_detail, headers=headers
             )
@@ -305,9 +326,11 @@ def get_application():
                 if isinstance(operation, dict) and "security" in operation:
                     security = cast(list[dict[str, list[Any]]], operation["security"])
                     operation["security"] = [
-                        {"APIKeyAuth" if k == "default" else k: v}
+                        {
+                            "APIKeyAuth" if k == "default" else k: v
+                            for k, v in sec.items()
+                        }
                         for sec in security
-                        for k, v in sec.items()
                     ]
 
         # WSO2 compatibility: Remove invalid "NOT_PROVIDED" defaults from schemas
@@ -373,7 +396,7 @@ def get_application():
 
         # Build error response
         settings = get_settings()
-        is_dev = settings.environment in ("development", "local", "dev")
+        is_dev = settings.is_development
 
         error_content: dict[str, Any] = {
             "error": "Internal server error",
@@ -425,7 +448,7 @@ def get_application():
                 response.headers["Access-Control-Allow-Origin"] = origin
                 response.headers.add_vary_header("Origin")
             elif not cors.allow_all_origins and await cors.is_allowed_origin(
-                origin=origin
+                origin=origin, request_headers=request.headers, request_url=request.url
             ):
                 response.headers["Access-Control-Allow-Origin"] = origin
                 response.headers.add_vary_header("Origin")
@@ -455,7 +478,7 @@ def get_application():
 
         # Build error response
         settings = get_settings()
-        is_dev = settings.environment in ("development", "local", "dev")
+        is_dev = settings.is_development
 
         error_content: dict[str, Any] = {
             "error": "Internal server error",
@@ -498,12 +521,22 @@ def get_application():
                 response.headers["Access-Control-Allow-Origin"] = origin
                 response.headers.add_vary_header("Origin")
             elif not cors.allow_all_origins and await cors.is_allowed_origin(
-                origin=origin
+                origin=origin, request_headers=request.headers, request_url=request.url
             ):
                 response.headers["Access-Control-Allow-Origin"] = origin
                 response.headers.add_vary_header("Origin")
 
         return response
+
+    @app.get(
+        "/api/livez",
+        include_in_schema=False,
+        description="Report that the API process can serve requests.",
+        responses={200: {"description": "API process is alive"}},
+        response_model=None,
+    )
+    async def get_livez():
+        return {"detail": {"status": "HEALTHY"}}
 
     @app.get(
         "/api/healthz",
@@ -523,18 +556,39 @@ def get_application():
 
         # Get worker health status
         worker_health = await get_worker_health()
+        object_content = await object_content_runtime.readiness()
 
         # Backend is always healthy if we can respond
         backend_status = "HEALTHY"
         backend_timestamp = datetime.now(timezone.utc).isoformat()
 
         # Determine overall system health
-        if worker_health.status == "HEALTHY" and backend_status == "HEALTHY":
-            overall_status = "HEALTHY"
+        if (
+            worker_health.status == "HEALTHY"
+            and backend_status == "HEALTHY"
+            and object_content.ready
+        ):
+            overall_status = (
+                "DEGRADED"
+                if object_content.code is ObjectContentReadinessCode.STORE_DEGRADED
+                else "HEALTHY"
+            )
             status_code = 200
         else:
             overall_status = "UNHEALTHY"
             status_code = 503
+
+        if (
+            object_content.code
+            is ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED
+        ):
+            object_content_status = "NOT_CONFIGURED"
+        elif object_content.code is ObjectContentReadinessCode.STORE_DEGRADED:
+            object_content_status = "DEGRADED"
+        elif object_content.ready:
+            object_content_status = "HEALTHY"
+        else:
+            object_content_status = "UNHEALTHY"
 
         # Assemble health response
         response_data = {
@@ -551,6 +605,10 @@ def get_application():
                     "last_heartbeat": worker_health.last_heartbeat,
                     "details": worker_health.details,
                 },
+                "object_content": {
+                    "status": object_content_status,
+                    "code": object_content.code.value,
+                },
             }
         }
 
@@ -558,6 +616,19 @@ def get_application():
             raise HTTPException(status_code=503, detail=response_data["detail"])
 
         return response_data
+
+    @app.get(
+        "/api/readyz",
+        include_in_schema=False,
+        description="Report readiness of the API and required dependencies.",
+        responses={
+            200: {"description": "API and required dependencies are ready"},
+            503: {"description": "A required dependency is unavailable"},
+        },
+        response_model=None,
+    )
+    async def get_readyz():
+        return await get_healthz()
 
     @app.get(
         "/api/healthz/crawler",
@@ -863,7 +934,9 @@ def get_application():
         http_exception_handler,
         custom_http_500_exception_handler,
         unhandled_exception_handler,
+        get_livez,
         get_healthz,
+        get_readyz,
         crawler_health,
         get_version,
     )

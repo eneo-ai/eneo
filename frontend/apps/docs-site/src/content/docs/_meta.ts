@@ -4,9 +4,15 @@ const meta: MetaRecord = {
   index: "Overview",
   "getting-started": "Getting Started",
   architecture: "Architecture",
+  "authentication-architecture": "Authentication Architecture",
+  "module-authentication": "Module Authentication",
+  "knowledge-retrieval-and-mcp": "Knowledge Retrieval and MCP",
+  "builtin-tool-servers": "Built-in Tool Servers",
+  "object-content-architecture": "Object Content Architecture",
   "audit-logging": "Audit Logging",
   "api-key-management": "API Key Management",
   "release-sboms": "Release SBOMs",
+  "token-counting": "Token Counting",
   api: "API Reference",
 };
 

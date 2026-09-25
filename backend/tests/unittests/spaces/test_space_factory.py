@@ -1,4 +1,5 @@
 import logging
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -6,6 +7,10 @@ from uuid import uuid4
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
 from eneo.spaces import space_factory
 from eneo.spaces.space_factory import SpaceFactory, _build_or_skip
 
@@ -146,6 +151,150 @@ def test_create_space_from_request():
     assert created_space.completion_models == []
     assert created_space.tenant_id is not None
     assert created_space.members == {}
+
+
+def test_create_applications_projection_preserves_sparse_response_contract(factory):
+    now = datetime.now(UTC)
+    space_id = uuid4()
+    user_id = uuid4()
+    member_id = uuid4()
+    group_id = uuid4()
+    completion_model_id = uuid4()
+    default_assistant_id = uuid4()
+    assistant_id = uuid4()
+    missing_model_assistant_id = uuid4()
+    invalid_assistant_id = uuid4()
+    app_id = uuid4()
+    group_chat_ids = [uuid4(), uuid4()]
+    service_ids = [uuid4(), uuid4()]
+
+    space_in_db = MagicMock()
+    space_in_db.id = space_id
+    space_in_db.user_id = None
+    space_in_db.tenant_space_id = uuid4()
+
+    completion_model = MagicMock()
+    completion_model.id = completion_model_id
+    completion_model.is_deprecated = True
+    completion_model.get_supported_model_kwargs.return_value = SupportedModelKwargs(
+        temperature=ModelKwargCapability(supported=True)
+    )
+
+    def assistant(
+        *,
+        id,
+        is_default=False,
+        model_id=completion_model_id,
+        kwargs=None,
+    ):
+        row = MagicMock()
+        row.id = id
+        row.created_at = now
+        row.updated_at = now
+        row.name = f"assistant-{id}"
+        row.completion_model_kwargs = kwargs
+        row.logging_enabled = True
+        row.user_id = user_id
+        row.published = True
+        row.description = None
+        row.metadata_json = None
+        row.icon_id = None
+        row.completion_model_id = model_id
+        row.insight_enabled = False
+        row.is_default = is_default
+        return row
+
+    default_assistant = assistant(id=default_assistant_id, is_default=True)
+    supported_assistant = assistant(
+        id=assistant_id,
+        kwargs={"temperature": 0.4, "top_p": 0.8},
+    )
+    missing_model_assistant = assistant(
+        id=missing_model_assistant_id,
+        model_id=uuid4(),
+        kwargs=None,
+    )
+    invalid_assistant = assistant(
+        id=invalid_assistant_id,
+        kwargs={"temperature": "not-a-number"},
+    )
+
+    app = MagicMock()
+    app.id = app_id
+    app.created_at = now
+    app.updated_at = now
+    app.name = "app"
+    app.description = None
+    app.published = True
+    app.user_id = user_id
+    app.icon_id = None
+    # The Applications response deliberately ignores aggregate-only app state.
+    # Corruption there must not force full-domain hydration or hide metadata.
+    app.completion_model_kwargs = {"temperature": "not-a-number"}
+
+    group_chats = []
+    for group_chat_id in group_chat_ids:
+        group_chat = MagicMock()
+        group_chat.id = group_chat_id
+        group_chat.created_at = now
+        group_chat.updated_at = now
+        group_chat.name = f"group-chat-{group_chat_id}"
+        group_chat.user_id = user_id
+        group_chat.published = True
+        group_chat.metadata_json = None
+        group_chat.icon_id = None
+        group_chat.insight_enabled = False
+        group_chats.append(group_chat)
+
+    services = []
+    for service_id in service_ids:
+        service = MagicMock()
+        service.id = service_id
+        service.created_at = now
+        service.updated_at = now
+        service.name = f"service-{service_id}"
+        service.prompt = ""
+        service.completion_model_kwargs = None
+        service.user_id = user_id
+        services.append(service)
+
+    projection = factory.create_applications_projection(
+        space_in_db=space_in_db,
+        member_roles={member_id: "admin"},
+        group_member_roles={group_id: "viewer"},
+        assistants_in_db=[
+            default_assistant,
+            supported_assistant,
+            missing_model_assistant,
+            invalid_assistant,
+        ],
+        group_chats_in_db=group_chats,
+        apps_in_db=[app],
+        services_in_db=services,
+        completion_models=[completion_model],
+    )
+
+    assert [item.id for item in projection.assistants] == [
+        assistant_id,
+        missing_model_assistant_id,
+    ]
+    assert projection.assistants[0].completion_model_id == completion_model_id
+    assert projection.assistants[0].completion_model_kwargs.temperature == 0.4
+    assert projection.assistants[0].completion_model_kwargs.top_p is None
+    assert projection.assistants[1].completion_model_id is None
+    assert (
+        projection.assistants[1].completion_model_kwargs.model_dump(exclude_none=True)
+        == {}
+    )
+    assert projection.access.default_assistant_id == default_assistant_id
+    assert projection.access.assistant_ids == frozenset(
+        {assistant_id, missing_model_assistant_id}
+    )
+    assert projection.access.app_ids == frozenset({app_id})
+    assert projection.access.members[member_id].role == "admin"
+    assert projection.access.group_members[group_id].role == "viewer"
+    assert [item.id for item in projection.group_chats] == group_chat_ids
+    assert [item.id for item in projection.services] == service_ids
 
 
 def test_create_space_from_db_maps_integration_knowledge_fields(factory):

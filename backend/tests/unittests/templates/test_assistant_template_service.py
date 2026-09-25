@@ -1,21 +1,22 @@
 """Unit tests for AssistantTemplateService tenant-scoped methods."""
 
-import pytest
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
-from eneo.templates.assistant_template.assistant_template_service import (
-    AssistantTemplateService,
+import pytest
+
+from eneo.main.exceptions import (
+    BadRequestException,
+    NameCollisionException,
+    NotFoundException,
 )
 from eneo.templates.assistant_template.api.assistant_template_models import (
     AssistantTemplateCreate,
     AssistantTemplateUpdate,
     AssistantTemplateWizard,
 )
-from eneo.main.exceptions import (
-    NotFoundException,
-    BadRequestException,
-    NameCollisionException,
+from eneo.templates.assistant_template.assistant_template_service import (
+    AssistantTemplateService,
 )
 
 

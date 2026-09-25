@@ -140,7 +140,7 @@ async def test_register_user_creates_a_user_and_settings(service: UserService):
     new_user = UserAddSuperAdmin(
         email="realuser@test.com",
         username="realuser",
-        password="1234asd",
+        password="a sufficiently long password",
         tenant_id=TEST_TENANT.id,
     )
 
@@ -150,9 +150,6 @@ async def test_register_user_creates_a_user_and_settings(service: UserService):
 
     service.repo.add.assert_awaited_with(expected_user_upsert)
     service.settings_repo.add.assert_awaited_with(expected_settings)
-    # Personal API keys are no longer auto-provisioned at user creation —
-    # users mint their own via POST /api/v1/api-keys when they need one.
-    service.auth_service.create_user_api_key_v2.assert_not_called()
 
 
 async def test_update_used_tokens(service: UserService):

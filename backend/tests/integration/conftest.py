@@ -2,13 +2,24 @@
 Integration test fixtures using testcontainers for PostgreSQL and Redis.
 """
 
+import asyncio
 import json
 import os
 import socket
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
+
+@dataclass(frozen=True, slots=True)
+class _DeploymentPolicySeed:
+    new_write_storage_target: str
+    session_file_limit_bytes: int
+    session_image_limit_bytes: int
+    knowledge_file_limit_bytes: int
+    transcription_audio_limit_bytes: int
 
 
 def pytest_collection_modifyitems(config, items):
@@ -76,14 +87,6 @@ if not os.getenv("REDIS_HOST"):
     os.environ["REDIS_HOST"] = "placeholder"
 if not os.getenv("REDIS_PORT"):
     os.environ["REDIS_PORT"] = "6379"
-if not os.getenv("UPLOAD_FILE_TO_SESSION_MAX_SIZE"):
-    os.environ["UPLOAD_FILE_TO_SESSION_MAX_SIZE"] = "10485760"
-if not os.getenv("UPLOAD_IMAGE_TO_SESSION_MAX_SIZE"):
-    os.environ["UPLOAD_IMAGE_TO_SESSION_MAX_SIZE"] = "10485760"
-if not os.getenv("UPLOAD_MAX_FILE_SIZE"):
-    os.environ["UPLOAD_MAX_FILE_SIZE"] = "10485760"
-if not os.getenv("TRANSCRIPTION_MAX_FILE_SIZE"):
-    os.environ["TRANSCRIPTION_MAX_FILE_SIZE"] = "10485760"
 if not os.getenv("MAX_IN_QUESTION"):
     os.environ["MAX_IN_QUESTION"] = "1"
 if not os.getenv("API_PREFIX"):
@@ -120,11 +123,13 @@ if not os.getenv("TENANT_WORKER_SEMAPHORE_TTL_SECONDS"):
 
 import contextlib
 from typing import AsyncGenerator, Generator
+from unittest.mock import patch
 
 import psycopg2
 from cryptography.fernet import Fernet
 from dependency_injector import providers
 from httpx import ASGITransport, AsyncClient
+from psycopg2.extensions import connection as PostgresConnection
 from sqlalchemy import text
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
@@ -135,7 +140,9 @@ from eneo.database.database import sessionmanager
 from eneo.main.config import Settings, reset_settings, set_settings
 from eneo.main.container.container import Container
 from eneo.server.main import get_application
-from init_db import add_tenant_user
+from init_db import add_tenant_user, create_salt_and_hashed_password
+from tests.database_reset import reset_populated_tables
+from tests.fixtures import mint_v2_api_key
 
 # Detect if we're in a devcontainer environment
 # If POSTGRES_HOST is set to 'db', we're likely in the devcontainer
@@ -171,9 +178,8 @@ def postgres_container() -> Generator[PostgresContainer, None, None]:
     """
     Start a PostgreSQL container with pgvector extension for the test session.
     """
-    # Use postgres:16 with pgvector pre-installed
     postgres = PostgresContainer(
-        image="pgvector/pgvector:pg16",
+        image=os.environ.get("ENEO_TEST_POSTGRES_IMAGE", "pgvector/pgvector:pg16"),
         username="integration_test_user",
         password="integration_test_password",
         dbname="integration_test_db",
@@ -251,10 +257,6 @@ def test_settings(
         redis_port=redis_port,
         redis_db=1,  # Use database 1 for tests to avoid collisions with dev data
         # File upload limits
-        upload_file_to_session_max_size=10_000_000,
-        upload_image_to_session_max_size=5_000_000,
-        upload_max_file_size=100_000_000,
-        transcription_max_file_size=25_000_000,
         # API settings
         api_prefix="/api/v1",
         api_key_length=32,
@@ -280,7 +282,6 @@ def test_settings(
         # Feature flags
         using_access_management=False,
         using_iam=False,
-        using_image_generation=False,
         using_crawl=False,
         tenant_credentials_enabled=False,  # Disable for integration tests (tests can override if needed)
         federation_enabled=True,
@@ -343,6 +344,30 @@ async def _force_gc_before_loop_closes():
     gc.collect()
 
 
+@pytest.fixture(autouse=True)
+def settings_singleton_restored(override_settings_for_session):
+    """Fail the test that leaves a replaced Settings object installed.
+
+    Tests may swap the singleton with set_settings(model_copy(...)) as long as
+    they reinstall the original object afterwards. Leaving a copy behind makes
+    every later test in this worker that mutates ``test_settings`` silently
+    ineffective, which surfaced as an order-dependent federation failure.
+
+    ``override_settings_for_session`` yields the object it installed. Isolated
+    migration modules override that fixture with a no-op that yields nothing,
+    so the check does not apply to them.
+    """
+    from eneo.main.config import get_settings
+
+    installed = override_settings_for_session
+    yield
+    if installed is not None:
+        assert get_settings() is installed, (
+            "This test replaced the settings singleton and did not reinstall the "
+            "original object; restore it with set_settings(<original>)."
+        )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def override_settings_for_session(test_settings: Settings):
     """
@@ -383,14 +408,40 @@ def override_settings_for_session(test_settings: Settings):
     print(f"  - Testing mode: {test_settings.testing}")
     print(f"  - API prefix: {test_settings.api_prefix}")
 
-    yield
+    yield test_settings
 
     # Cleanup after all tests
     reset_settings()
 
 
 @pytest.fixture(scope="session")
-async def setup_database(test_settings: Settings):
+def seed_default_tenant_user() -> Callable[[PostgresConnection], None]:
+    """Reuse one real password hash per worker for the fixed baseline user."""
+    password = "IntegrationPass123!"
+    credentials = create_salt_and_hashed_password(password)
+
+    def seed(conn: PostgresConnection) -> None:
+        # Only the synchronous baseline seed uses these credentials. Restore the
+        # real function before returning so password/auth tests still hash their
+        # own inputs with fresh salts and the production bcrypt cost.
+        with patch("init_db.create_salt_and_hashed_password", return_value=credentials):
+            add_tenant_user(
+                conn,
+                tenant_name="test_tenant",
+                quota_limit=1000000,
+                user_name="test_user",
+                user_email="test@example.com",
+                user_password=password,
+            )
+
+    return seed
+
+
+@pytest.fixture(scope="session")
+async def setup_database(
+    test_settings: Settings,
+    seed_default_tenant_user: Callable[[PostgresConnection], None],
+):
     """
     Initialize the database schema and seed test data.
     Runs Alembic migrations and creates a default tenant/user using init_db logic.
@@ -418,14 +469,7 @@ async def setup_database(test_settings: Settings):
         password=test_settings.postgres_password,
     )
 
-    add_tenant_user(
-        conn,
-        tenant_name="test_tenant",
-        quota_limit=1000000,
-        user_name="test_user",
-        user_email="test@example.com",
-        user_password="test_password",
-    )
+    seed_default_tenant_user(conn)
 
     # Create required feature flags for initial setup
     cursor = conn.cursor()
@@ -436,6 +480,16 @@ async def setup_database(test_settings: Settings):
             true, now(), now())
         ON CONFLICT (name) DO NOTHING
     """)
+    cursor.execute("""
+        SELECT new_write_storage_target, session_file_limit_bytes,
+            session_image_limit_bytes, knowledge_file_limit_bytes,
+            transcription_audio_limit_bytes
+        FROM object_content_deployment_policy
+        WHERE id = 1
+    """)
+    policy_row = cursor.fetchone()
+    assert policy_row is not None
+    deployment_policy_seed = _DeploymentPolicySeed(*policy_row)
     conn.commit()
     cursor.close()
 
@@ -480,41 +534,34 @@ async def setup_database(test_settings: Settings):
             assert users[0].tenant_id is not None
             print(f"✓ Test user created: {users[0].email}")
 
-    yield
+    yield deployment_policy_seed
 
     # Cleanup
     await sessionmanager.close()
 
 
 @pytest.fixture(autouse=True)
-async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
+async def cleanup_database(
+    setup_database: _DeploymentPolicySeed,
+    test_settings: Settings,
+    seed_default_tenant_user: Callable[[PostgresConnection], None],
+):
     """
-    Automatically truncate all tables and reseed after each test for full isolation.
+    Automatically empty all tables and reseed after each test.
 
-    Optimized for speed:
-    - Single TRUNCATE statement for all tables (instead of one per table)
-    - Models are NOT seeded here - seed_default_models fixture handles that
+    This isolates row data, not everything: planner statistics survive, so a
+    test that runs ANALYZE hands them to whichever test runs next in the same
+    worker. Tests that assert on a query plan must measure statistics inside a
+    rolled-back savepoint — see
+    tests/integration/skills/test_skill_adoption_projection.py.
+
+    Models are NOT seeded here - seed_default_models fixture handles that.
     """
     yield
 
-    # Clean up after each test - truncate everything in ONE statement
     async with sessionmanager.session() as session:
         async with session.begin():
-            # Get all tables except alembic_version
-            result = await session.execute(
-                text("""
-                SELECT string_agg('"' || tablename || '"', ', ')
-                FROM pg_tables
-                WHERE schemaname = 'public' AND tablename != 'alembic_version'
-            """)
-            )
-            tables_csv = result.scalar()
-
-            if tables_csv:
-                # Single TRUNCATE for all tables - much faster than one-by-one!
-                await session.execute(
-                    text(f"TRUNCATE TABLE {tables_csv} RESTART IDENTITY CASCADE")
-                )
+            await reset_populated_tables(session)
 
     # Reseed tenant/user using existing helper function
     conn = psycopg2.connect(
@@ -525,14 +572,7 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
         password=test_settings.postgres_password,
     )
 
-    add_tenant_user(
-        conn,
-        tenant_name="test_tenant",
-        quota_limit=1000000,
-        user_name="test_user",
-        user_email="test@example.com",
-        user_password="password",
-    )
+    seed_default_tenant_user(conn)
 
     # Add using_templates feature flag (not handled by add_tenant_user)
     cursor = conn.cursor()
@@ -551,6 +591,31 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
             true, now(), now())
         ON CONFLICT (name) DO NOTHING
     """)
+    cursor.execute(
+        """
+        INSERT INTO object_content_deployment_policy (
+            id, revision, new_write_storage_target,
+            session_file_limit_bytes, session_image_limit_bytes,
+            knowledge_file_limit_bytes, transcription_audio_limit_bytes,
+            updated_by_actor
+        )
+        VALUES (1, 1, %s, %s, %s, %s, %s, 'migration')
+        """,
+        (
+            setup_database.new_write_storage_target,
+            setup_database.session_file_limit_bytes,
+            setup_database.session_image_limit_bytes,
+            setup_database.knowledge_file_limit_bytes,
+            setup_database.transcription_audio_limit_bytes,
+        ),
+    )
+    # Migrations seed these singletons once in production. Full test cleanup
+    # truncates every table, so restore the same required control-plane state.
+    cursor.execute("INSERT INTO object_content_reconciliation_state (id) VALUES (1)")
+    cursor.execute(
+        "INSERT INTO file_icon_backfill_admission_state "
+        "(singleton, generation) VALUES (true, 0)"
+    )
     # Add API key scope enforcement feature flags.
     conn.commit()
     cursor.close()
@@ -572,21 +637,26 @@ async def app(setup_database):
 
     # Manually trigger startup only (not shutdown)
     # Import here because it needs to be after settings are configured
+    from eneo.object_content.runtime import object_content_runtime
     from eneo.server.dependencies.lifespan import startup
 
-    await startup()
+    try:
+        await startup()
 
-    # Verify app initialization
-    print("\n=== Application Verification ===")
-    print("✓ FastAPI app initialized")
-    # FastAPI 0.138 keeps included routers as lazy _IncludedRouter entries here.
-    # Endpoint-level route contracts are covered by the route contract tests.
-    print(f"✓ Routes registered: {len(application.routes)} route entries")
-    print("✓ Ready for testing\n")
+        # Verify app initialization
+        print("\n=== Application Verification ===")
+        print("✓ FastAPI app initialized")
+        # FastAPI 0.138 keeps included routers as lazy _IncludedRouter entries here.
+        # Endpoint-level route contracts are covered by the route contract tests.
+        print(f"✓ Routes registered: {len(application.routes)} route entries")
+        print("✓ Ready for testing\n")
 
-    yield application
-
-    # Note: We skip shutdown() to keep sessionmanager open for cleanup
+        yield application
+    finally:
+        # Full shutdown closes the session manager needed by cleanup_database.
+        # Release the new process-owned byte-plane clients independently so
+        # every function-scoped application gets a fresh runtime without leaks.
+        await object_content_runtime.stop()
 
 
 @pytest.fixture
@@ -626,7 +696,7 @@ def db_session(setup_database):
 
 
 @pytest.fixture
-def db_container(setup_database):
+def db_container(setup_database, test_settings: Settings):
     """
     Provide a context manager for a database container with session.
 
@@ -650,30 +720,63 @@ def db_container(setup_database):
             service = container.some_service()
     """
 
+    active_contexts = 0
+    runtime_started_here = False
+    runtime_lock = asyncio.Lock()
+
+    async def acquire_object_content_runtime() -> None:
+        nonlocal active_contexts, runtime_started_here
+        from eneo.object_content.runtime import object_content_runtime
+
+        async with runtime_lock:
+            if active_contexts == 0 and not object_content_runtime.enabled:
+                object_content_runtime.start()
+                try:
+                    await object_content_runtime.validate_configuration()
+                except BaseException:
+                    await object_content_runtime.stop()
+                    raise
+                runtime_started_here = True
+            active_contexts += 1
+
+    async def release_object_content_runtime() -> None:
+        nonlocal active_contexts, runtime_started_here
+        from eneo.object_content.runtime import object_content_runtime
+
+        async with runtime_lock:
+            active_contexts -= 1
+            if active_contexts == 0 and runtime_started_here:
+                runtime_started_here = False
+                await object_content_runtime.stop()
+
     @contextlib.asynccontextmanager
     async def _container(user=None, tenant=None):
-        async with sessionmanager.session() as session, session.begin():
-            # Create container with session first to fetch user and tenant if not provided
-            temp_container = Container(session=providers.Object(session))
+        await acquire_object_content_runtime()
+        try:
+            async with sessionmanager.session() as session, session.begin():
+                # Create container with session first to fetch user and tenant if not provided
+                temp_container = Container(session=providers.Object(session))
 
-            # Fetch default user if not provided
-            if user is None:
-                user_repo = temp_container.user_repo()
-                user = await user_repo.get_user_by_email("test@example.com")
+                # Fetch default user if not provided
+                if user is None:
+                    user_repo = temp_container.user_repo()
+                    user = await user_repo.get_user_by_email("test@example.com")
 
-            # Fetch default tenant if not provided
-            if tenant is None:
-                tenant_repo = temp_container.tenant_repo()
-                tenants = await tenant_repo.get_all_tenants()
-                tenant = tenants[0] if tenants else None
+                # Fetch default tenant if not provided
+                if tenant is None:
+                    tenant_repo = temp_container.tenant_repo()
+                    tenants = await tenant_repo.get_all_tenants()
+                    tenant = tenants[0] if tenants else None
 
-            # Create container with all dependencies
-            container = Container(
-                session=providers.Object(session),
-                user=providers.Object(user),
-                tenant=providers.Object(tenant),
-            )
-            yield container
+                # Create container with all dependencies
+                container = Container(
+                    session=providers.Object(session),
+                    user=providers.Object(user),
+                    tenant=providers.Object(tenant),
+                )
+                yield container
+        finally:
+            await release_object_content_runtime()
 
     return _container
 
@@ -696,13 +799,15 @@ async def admin_user(db_container):
 @pytest.fixture
 async def admin_user_api_key(admin_user, db_container):
     """
-    Create an API key for the admin user.
+    Create a v2 API key for the admin user.
     This fixture creates a fresh API key for each test.
     """
     async with db_container() as container:
-        auth_service = container.auth_service()
-        api_key = await auth_service.create_user_api_key(
-            prefix="test", user_id=admin_user.id, delete_old=True
+        api_key = await mint_v2_api_key(
+            container.api_key_v2_repo(),
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            prefix="test",
         )
     return api_key
 
@@ -857,7 +962,8 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
         user: UserInDB,
         secret_key: str | None = None,
         audience: str | None = None,
-        expires_in: int | None = None,
+        expires_in: float | None = None,
+        extra_claims: dict[str, object] | None = None,
     ) -> str:
         secret = secret_key or test_settings.jwt_secret
         aud = audience or test_settings.jwt_audience
@@ -871,12 +977,19 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
                 datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
             ),
         )
-        jwt_creds = JWTCreds(sub=user.email, username=user.username)
-        payload = JWTPayload(**jwt_meta.model_dump(), **jwt_creds.model_dump())
-
-        return jwt_lib.encode(
-            payload.model_dump(), secret, algorithm=test_settings.jwt_algorithm
+        jwt_creds = JWTCreds(
+            sub=user.email,
+            username=user.username,
+            credential_version=getattr(user, "credential_version", 0),
         )
+        payload = {
+            **JWTPayload(
+                **jwt_meta.model_dump(), **jwt_creds.model_dump()
+            ).model_dump(),
+            **(extra_claims or {}),
+        }
+
+        return jwt_lib.encode(payload, secret, algorithm=test_settings.jwt_algorithm)
 
     def patched_get_jwt_payload(
         self,

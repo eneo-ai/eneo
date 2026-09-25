@@ -9,6 +9,8 @@
   }: CalendarPrimitive.DayProps = $props();
 </script>
 
+<!-- NOTE: `bg-accent-default`/`text-on-fill` instead of upstream's `bg-primary`/`text-primary-foreground`
+  — see app.css `--color-primary` namespace conflict comment. -->
 <CalendarPrimitive.Day
   bind:ref
   class={cn(
@@ -16,7 +18,7 @@
     "[&:last-child[data-selected=true]_button]:rounded-r-(--cell-radius)",
     "not-data-selected:hover:bg-accent/50 not-data-selected:hover:text-accent-foreground",
     "[&[data-today]:not([data-selected])]:bg-accent [&[data-today]:not([data-selected])]:text-accent-foreground [&[data-today][data-disabled]]:text-muted-foreground",
-    "data-[selected]:bg-primary data-[selected]:text-primary-foreground data-[selected]:hover:text-foreground",
+    "data-[selected]:bg-accent-default data-[selected]:text-on-fill data-[selected]:hover:text-on-fill",
     // Outside months
     "[&[data-outside-month]:not([data-selected])]:text-muted-foreground [&[data-outside-month]:not([data-selected])]:hover:text-accent-foreground",
     // Disabled

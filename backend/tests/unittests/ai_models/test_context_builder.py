@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.ai_models.completion_models.completion_model import (
+    FunctionDefinition,
     Message,
     MessageToolCall,
 )
@@ -14,8 +15,10 @@ from eneo.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
 from eneo.completion_models.infrastructure.static_prompts import (
+    ATTACHED_FILE_REFERENCES_INSTRUCTION,
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
+    TOOL_NAMING_INSTRUCTION,
 )
 from eneo.files.file_models import File, FileType
 from eneo.questions.question import ToolCallInfo
@@ -584,7 +587,19 @@ def test_history_images_increase_token_count(context_builder: ContextBuilder):
 def test_tool_definitions_increase_token_count(context_builder: ContextBuilder):
     without_tools = context_builder.build_context(input_str=QUESTION, max_tokens=10000)
     with_function = context_builder.build_context(
-        input_str=QUESTION, max_tokens=10000, use_image_generation=True
+        input_str=QUESTION,
+        max_tokens=10000,
+        mcp_tools=[
+            FunctionDefinition(
+                name="lookup_record",
+                description="Look up a record in the registry by id.",
+                schema={
+                    "type": "object",
+                    "properties": {"record_id": {"type": "string"}},
+                    "required": ["record_id"],
+                },
+            )
+        ],
     )
     with_extra_dicts = context_builder.build_context(
         input_str=QUESTION,
@@ -662,6 +677,94 @@ def test_message_scaffolding_overhead_is_counted(context_builder: ContextBuilder
     assert context.token_count > count_tokens(QUESTION)
 
 
+def test_tool_naming_instruction_is_added_when_tools_are_advertised(
+    context_builder: ContextBuilder,
+):
+    context = context_builder.build_context(
+        input_str=QUESTION,
+        max_tokens=10000,
+        prompt="You are a helpful assistant.",
+        extra_tool_dicts=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "files__ingest_urls",
+                    "description": "Fetch files from HTTPS links.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+    )
+
+    assert TOOL_NAMING_INSTRUCTION in context.prompt
+    assert context.prompt.startswith("You are a helpful assistant.")
+
+
+def test_tool_naming_instruction_is_absent_without_tools(
+    context_builder: ContextBuilder,
+):
+    context = context_builder.build_context(
+        input_str=QUESTION,
+        max_tokens=10000,
+        prompt="You are a helpful assistant.",
+    )
+
+    assert context.prompt == "You are a helpful assistant."
+
+
+_URL_TOOL_DICT = {
+    "type": "function",
+    "function": {
+        "name": "files__read_file",
+        "description": "Read an attached file.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+}
+
+
+def test_file_reference_instruction_requires_references_and_tools(
+    context_builder: ContextBuilder,
+):
+    # The arbitration rule is stated once in the system prompt (the
+    # per-message reference block carries mechanics only), and only when
+    # there is both a reference to arbitrate and a tool to pass it to.
+    file_id = uuid4()
+    file = MagicMock(spec=File)
+    file.id = file_id
+    file.name = "report.csv"
+    file.mimetype = "text/csv"
+    file.size = 10
+    file.file_type = FileType.TEXT
+    file.text = "a,b"
+
+    with_both = context_builder.build_context(
+        input_str=QUESTION,
+        max_tokens=10000,
+        prompt="You are a helpful assistant.",
+        files=[file],
+        file_reference_urls={file_id: "https://x/dl"},
+        extra_tool_dicts=[_URL_TOOL_DICT],
+    )
+    assert ATTACHED_FILE_REFERENCES_INSTRUCTION in with_both.prompt
+
+    without_tools = context_builder.build_context(
+        input_str=QUESTION,
+        max_tokens=10000,
+        prompt="You are a helpful assistant.",
+        files=[file],
+        file_reference_urls={file_id: "https://x/dl"},
+    )
+    assert ATTACHED_FILE_REFERENCES_INSTRUCTION not in without_tools.prompt
+
+    without_references = context_builder.build_context(
+        input_str=QUESTION,
+        max_tokens=10000,
+        prompt="You are a helpful assistant.",
+        extra_tool_dicts=[_URL_TOOL_DICT],
+    )
+    assert ATTACHED_FILE_REFERENCES_INSTRUCTION not in without_references.prompt
+
+
 def test_truncate_knowledge_if_too_many_chunks(context_builder: ContextBuilder):
     info_blob_chunks = [
         MagicMock(
@@ -681,3 +784,26 @@ def test_truncate_knowledge_if_too_many_chunks(context_builder: ContextBuilder):
     )
 
     assert context.token_count < 10000
+
+
+def test_skill_activation_call_is_not_replayed(context_builder: ContextBuilder):
+    # The activation tool is rebuilt per turn from the Skill runtime and may
+    # not be registered later, so a persisted activation step must not become
+    # a tool_use in history.
+    tc = ToolCallInfo(
+        server_name="skills",
+        tool_name="skill-1",
+        arguments={"skill_key": "skill-1"},
+        tool_call_id="activate-1",
+        approved=True,
+        result_status="completed",
+        result='{"activated": true}',
+        mcp_tool_name="eneo_activate_skill",
+    )
+    session = MagicMock(questions=[_question_mock("Q?", "A.", [tc])])
+
+    context = context_builder.build_context(
+        input_str=QUESTION, session=session, max_tokens=10000
+    )
+
+    assert context.messages[0].tool_calls == []

@@ -98,7 +98,7 @@ but into a *separate* SvelteKit output dir (`SVELTE_KIT_OUT_DIR=.svelte-kit-e2e`
 set in `playwright.config.ts` and honoured by `svelte.config.js`). It never writes
 the `.svelte-kit` your dev server uses, so you can keep developing while the suite
 runs — no more blank-page corruption, no need to stop dev first. The seeded login
-is `e2e@example.com` / `E2ePassword1!` in tenant `E2ETenant`.
+is `e2e@example.com` / `E2ePassword123!` in tenant `E2ETenant`.
 
 **Deterministic chat.** The stack includes a tiny OpenAI-compatible **mock model
 server** (`e2e/mock_model_server.py`); `e2e/seed.py` seeds a default completion
@@ -299,27 +299,13 @@ picture you can trust — it needs the Docker socket and runs as root in the
 container (the testcontainers requirement).
 
 These reports are large (~36 MB frontend + ~42 MB backend) and regenerated every
-run, so they're **gitignored — never commit them**. CI keeps the last run's HTML
-as a downloadable artifact (below); for a tracked "what was it last time" number,
-commit a small summary, not the HTML.
+run, so they're **gitignored — never commit them**. For a tracked "what was it
+last time" number, commit a small summary, not the HTML.
 
-**Two kinds of report in CI (both report-only, neither gates the PR):**
-
-- **Whole-project** — the `Frontend` job uploads the Vitest coverage as the
-  `frontend-coverage` artifact; the `Backend tests` job uploads `pytest-cov`'s
-  `coverage.xml` + `htmlcov` as `backend-coverage`. Download from the run page.
-- **Patch coverage** — the `Coverage diff` job runs [`diff-cover`] against the PR's
-  base branch and reports how well tests cover **the lines this PR changed**,
-  frontend and backend separately. It posts/updates a sticky PR comment and writes
-  the same report to the job summary. This is the PR-relevant signal ("did new
-  code arrive untested?"). It is **not** in the aggregate `CI` gate, so it never
-  blocks — set a `--fail-under` threshold later to make it enforcing.
-
-> Note: `diff-cover` matches coverage paths against git paths, which are
-> repo-root-relative. The reports use package-relative paths (`src/…` for lcov,
-> `src/eneo/…` in the cobertura xml), so the `Coverage diff` job rewrites them to
-> repo-root-relative before running. If you move the coverage output, keep that
-> rewrite in sync or patch coverage silently reports "no lines".
+**CI does not collect coverage.** Instrumentation cost ~10% wall time on the
+backend integration suite (the CI critical path), so the `--cov` flags, coverage
+artifacts, and the `Coverage diff` patch-coverage job were dropped for speed.
+Coverage is a local-only tool: run `scripts/coverage.sh` as above.
 
 ## Gotchas / maintenance
 

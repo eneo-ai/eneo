@@ -6,7 +6,13 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
+from eneo.skills.presentation.skill_models import (
+    AssistantSkillBindingInput,
+    AssistantSkillBindingSummary,
+)
 
 
 class PolicyCompletionModelInput(BaseModel):
@@ -30,7 +36,15 @@ class PolicyMcpServerInput(BaseModel):
     is_default_enabled: bool = True
 
 
+class PolicyCapabilityInput(BaseModel):
+    purpose: CapabilityPurpose
+    is_default_enabled: bool = True
+
+
 class McpRestrictionInput(BaseModel):
+    capabilities: list[PolicyCapabilityInput] = Field(
+        default_factory=list[PolicyCapabilityInput]
+    )
     enabled: bool
     servers: list[PolicyMcpServerInput] = []
     # Deny-set of tool IDs switched OFF on allowed servers; new tools synced
@@ -43,10 +57,31 @@ class PromptEnforcementInput(BaseModel):
     prompt_library_id: UUID | None = None
 
 
+class ReasoningPolicyInput(BaseModel):
+    default_effort: str | None = Field(default=None, max_length=32)
+    allow_user_override: bool = False
+
+
+class FilePolicyInput(BaseModel):
+    # True inlines attachment text into the prompt; False sends signed URLs
+    # the model reads with the files tool (keeps large uploads out of the
+    # context window). Saving either value makes the dimension governed.
+    inline_file_text: bool
+
+
+class SkillsPolicyInput(BaseModel):
+    bindings: list[AssistantSkillBindingInput] = Field(
+        default_factory=lambda: list[AssistantSkillBindingInput]()
+    )
+
+
 class GovernancePolicyUpdate(BaseModel):
     models_restriction: ModelsRestrictionInput | None = None
     mcp_restriction: McpRestrictionInput | None = None
     prompt_enforcement: PromptEnforcementInput | None = None
+    reasoning_policy: ReasoningPolicyInput | None = None
+    file_policy: FilePolicyInput | None = None
+    skills: SkillsPolicyInput | None = None
 
 
 # Output models — minimal references. The full completion-model /
@@ -71,6 +106,9 @@ class PolicyMcpServerPublic(BaseModel):
 
 
 class McpRestrictionPublic(BaseModel):
+    capabilities: list[PolicyCapabilityInput] = Field(
+        default_factory=list[PolicyCapabilityInput]
+    )
     enabled: bool
     servers: list[PolicyMcpServerPublic]
     disabled_tool_ids: list[UUID]
@@ -81,9 +119,27 @@ class PromptEnforcementPublic(BaseModel):
     prompt_library_id: UUID | None
 
 
+class ReasoningPolicyPublic(BaseModel):
+    configured: bool
+    default_effort: str | None
+    allow_user_override: bool
+
+
+class FilePolicyPublic(BaseModel):
+    configured: bool
+    inline_file_text: bool | None
+
+
+class SkillsPolicyPublic(BaseModel):
+    bindings: list[AssistantSkillBindingSummary]
+
+
 class GovernancePolicyPublic(BaseModel):
     models_restriction: ModelsRestrictionPublic
     mcp_restriction: McpRestrictionPublic
     prompt_enforcement: PromptEnforcementPublic
+    reasoning_policy: ReasoningPolicyPublic
+    file_policy: FilePolicyPublic
+    skills: SkillsPolicyPublic
     updated_at: datetime | None
     updated_by_user_id: UUID | None

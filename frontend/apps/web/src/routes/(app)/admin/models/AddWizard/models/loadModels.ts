@@ -11,6 +11,7 @@
  *   3. Some providers (Azure) cannot list models at all; we skip both.
  */
 import type { Eneo } from "@eneo/eneo-js";
+import { getErrorMessage } from "$lib/core/errors";
 import {
   NO_SUGGESTIONS_PROVIDERS,
   type ModelProviderCapabilities
@@ -20,7 +21,8 @@ import type { ModelInfo, ModelType } from "./draft";
 const MODE_MAP: Record<ModelType, string> = {
   completion: "completion",
   embedding: "embedding",
-  transcription: "transcription"
+  transcription: "transcription",
+  image: "image"
 };
 
 export interface LoadResult {
@@ -36,7 +38,7 @@ export async function loadLiveModels(
   try {
     const result = (await eneo.modelProviders.listModels({
       id: providerId,
-      mode: MODE_MAP[modelType] as "completion" | "embedding" | "transcription"
+      mode: MODE_MAP[modelType] as "completion" | "embedding" | "transcription" | "image"
     })) as unknown as Record<string, unknown>[];
 
     if (!Array.isArray(result)) {
@@ -62,12 +64,13 @@ export async function loadLiveModels(
       // ModelDraftForm.applyCatalogModelToDraft handles missing values.
       input_cost_per_token: item.input_cost_per_token as number | null | undefined,
       output_cost_per_token: item.output_cost_per_token as number | null | undefined,
-      cost_per_minute: item.cost_per_minute as number | null | undefined
+      cost_per_minute: item.cost_per_minute as number | null | undefined,
+      cost_per_image: item.cost_per_image as number | null | undefined
     }));
 
     return { models, error: null };
-  } catch {
-    return { models: [], error: "Could not fetch models from provider" };
+  } catch (error: unknown) {
+    return { models: [], error: getErrorMessage(error) };
   }
 }
 

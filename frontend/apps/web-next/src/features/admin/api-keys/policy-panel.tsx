@@ -285,17 +285,11 @@ function SuperKeySection({
   status: SuperKeyStatus | undefined;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const rows: { env: string; configured: boolean; legacy: boolean }[] = status
+  const rows: { env: string; configured: boolean }[] = status
     ? [
         {
           env: "ENEO_SUPER_API_KEY",
-          configured: status.super_api_key_configured,
-          legacy: status.super_api_key_using_legacy ?? false
-        },
-        {
-          env: "ENEO_SUPER_DUPER_API_KEY",
-          configured: status.super_duper_api_key_configured,
-          legacy: status.super_duper_api_key_using_legacy ?? false
+          configured: status.super_api_key_configured
         }
       ]
     : [];
@@ -322,11 +316,6 @@ function SuperKeySection({
                     : t("api_keys_admin_status_not_configured")}
                 </Badge>
               </div>
-              {row.legacy && (
-                <span className="text-muted-foreground text-xs italic">
-                  {t("api_keys_admin_status_using_legacy", { newVar: row.env })}
-                </span>
-              )}
             </div>
           ))}
         </div>

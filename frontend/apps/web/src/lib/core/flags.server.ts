@@ -9,8 +9,8 @@ import { getBackendUrl } from "$lib/core/environment.server";
  * @returns The boolean flag value
  *
  * @example
- * getFlagFromEnv("SHOW_WEB_SEARCH", true) // returns boolean based on env.SHOW_WEB_SEARCH
- * getFlagFromEnv("DEBUG_MODE", false)    // returns boolean based on env.DEBUG_MODE
+ * getFlagFromEnv("SHOW_HELP_CENTER", true) // returns boolean based on env.SHOW_HELP_CENTER
+ * getFlagFromEnv("DEBUG_MODE", false)      // returns boolean based on env.DEBUG_MODE
  */
 function getFlagFromEnv(key: string, defaultValue: boolean): boolean {
   return getFlagValue(env[key], defaultValue);
@@ -124,8 +124,6 @@ function isConfigured(value: unknown): boolean {
 }
 
 export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
-  // UI Features (enabled by default)
-  const showWebSearch = getFlagFromEnv("SHOW_WEB_SEARCH", false);
   const showHelpCenter = getFlagFromEnv("SHOW_HELP_CENTER", false);
 
   // Auth
@@ -167,7 +165,6 @@ export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
 
   return Object.freeze({
     newAuth: useNewAuth,
-    showWebSearch,
     showHelpCenter,
     federationStatus
   });

@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { Button, Dialog, Tooltip } from "@eneo/ui";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getAvailableIntegrations } from "../../AvailableIntegrations";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { writable } from "svelte/store";
@@ -38,7 +41,7 @@
     availableIntegrations.length === 0 && $contextIntegrations === undefined
   );
 
-  let showSelectDialog = writable(false);
+  let showSelectDialog = $state(false);
   let showImportDialog = writable(false);
 
   // Reset selected integration when available integrations change
@@ -55,7 +58,7 @@
   });
 
   function goImport() {
-    $showSelectDialog = false;
+    showSelectDialog = false;
     $showImportDialog = true;
     setTimeout(() => {}, 0);
   }
@@ -63,7 +66,7 @@
   function goBack() {
     $showImportDialog = false;
     setTimeout(() => {
-      $showSelectDialog = true;
+      showSelectDialog = true;
     }, 0);
   }
 </script>
@@ -82,7 +85,7 @@
           </span>
         {:else}
           <span
-            class="text-secondary bg-dimmer border-default rounded border px-1.5 py-0.5 text-xs font-semibold"
+            class="text-secondary bg-secondary border-default rounded border px-1.5 py-0.5 text-xs font-semibold"
           >
             {m.personal()}
           </span>
@@ -95,89 +98,104 @@
   </div>
 {/snippet}
 
-<Dialog.Root openController={showSelectDialog}>
-  <Dialog.Trigger asFragment let:trigger>
-    <Button variant="primary" is={trigger}>{m.import_knowledge()}</Button>
+<Dialog.Root bind:open={showSelectDialog}>
+  <Dialog.Trigger>
+    {#snippet child({ props })}
+      <Button {...props}>{m.import_knowledge()}</Button>
+    {/snippet}
   </Dialog.Trigger>
 
-  <Dialog.Content width="dynamic">
-    <Dialog.Section class="relative mt-2 -mb-0.5">
-      <div class="absolute top-0 right-0 h-52 w-72 overflow-hidden">
-        <ImportBackdrop></ImportBackdrop>
-      </div>
-      <div class=" border-default flex w-full flex-col px-10 pt-12 pb-10">
-        <h3 class="px-4 pb-1 text-2xl font-extrabold">{m.import_knowledge()}</h3>
-        <p class="text-secondary max-w-[60ch] pr-48 pl-4">
-          {#if isPersonalSpace}
-            {m.import_knowledge_from_third_party()}
-            <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
-            <a href={localizeHref("/account/integrations?tab=providers")} class="underline"
-              >{m.personal_account()}</a
-            >.
-            <!-- eslint-enable svelte/no-navigation-without-resolve -->
-          {:else}
-            {m.import_knowledge_from_org_integrations()}
-            <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
-            <a href={localizeHref("/admin/integrations?tab=providers")} class="underline"
-              >{m.admin_settings()}</a
-            >.
-            <!-- eslint-enable svelte/no-navigation-without-resolve -->
-          {/if}
-        </p>
-        <!-- <div class="h-8"></div> -->
-        <div class=" border-dimmer mt-14 mb-6 border-t"></div>
+  <Dialog.Content class={dialogLayout.content("dynamic")} closeLabel={m.close()}>
+    <div class={dialogLayout.body}>
+      <div class="{dialogLayout.section} relative overflow-hidden">
+        <div class="absolute top-0 right-0 h-52 w-72 overflow-hidden">
+          <ImportBackdrop></ImportBackdrop>
+        </div>
+        <div class=" border-default flex w-full flex-col px-10 pt-12 pb-10">
+          <Dialog.Title class="px-4 pb-1 text-2xl font-extrabold"
+            >{m.import_knowledge()}</Dialog.Title
+          >
+          <p class="text-secondary max-w-[60ch] pr-48 pl-4">
+            {#if isPersonalSpace}
+              {m.import_knowledge_from_third_party()}
+              <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+              <a href={localizeHref("/account/integrations?tab=providers")} class="underline"
+                >{m.personal_account()}</a
+              >.
+              <!-- eslint-enable svelte/no-navigation-without-resolve -->
+            {:else}
+              {m.import_knowledge_from_org_integrations()}
+              <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+              <a href={localizeHref("/admin/integrations?tab=providers")} class="underline"
+                >{m.admin_settings()}</a
+              >.
+              <!-- eslint-enable svelte/no-navigation-without-resolve -->
+            {/if}
+          </p>
+          <!-- <div class="h-8"></div> -->
+          <div class=" border-dimmer mt-14 mb-6 border-t"></div>
 
-        <div class="flex flex-col gap-2">
-          {#if isLoading}
-            <div class="text-secondary flex items-center justify-center py-8 text-center">
-              <p>{m.loading_integrations()}</p>
-            </div>
-          {:else if availableIntegrations.length === 0}
-            <div class="text-secondary flex flex-col items-center justify-center py-8 text-center">
-              <p class="mb-2">{m.no_integrations_available()}</p>
-              <p class="text-sm">
-                {#if isPersonalSpace}
-                  <a href={resolve("/account/integrations?tab=providers")} class="underline"
-                    >{m.connect_personal_integration()}</a
-                  >
-                  {m.to_get_started()}
+          <div class="flex flex-col gap-2">
+            {#if isLoading}
+              <div class="text-secondary flex items-center justify-center py-8 text-center">
+                <p>{m.loading_integrations()}</p>
+              </div>
+            {:else if availableIntegrations.length === 0}
+              <div
+                class="text-secondary flex flex-col items-center justify-center py-8 text-center"
+              >
+                <p class="mb-2">{m.no_integrations_available()}</p>
+                <p class="text-sm">
+                  {#if isPersonalSpace}
+                    <a href={resolve("/account/integrations?tab=providers")} class="underline"
+                      >{m.connect_personal_integration()}</a
+                    >
+                    {m.to_get_started()}
+                  {:else}
+                    {m.configure_a()}
+                    <a href={resolve("/admin/integrations?tab=providers")} class="underline"
+                      >{m.tenant_app_integration()}</a
+                    >
+                    {m.in_admin_settings()}
+                  {/if}
+                </p>
+              </div>
+            {:else}
+              {#each availableIntegrations as integration (integration.id)}
+                {#if integration.connected}
+                  <button onclick={() => (selectedIntegration = integration)}>
+                    {@render integrationSelector(integration)}
+                  </button>
                 {:else}
-                  {m.configure_a()}
-                  <a href={resolve("/admin/integrations?tab=providers")} class="underline"
-                    >{m.tenant_app_integration()}</a
-                  >
-                  {m.in_admin_settings()}
+                  <Tooltip.Root>
+                    <Tooltip.Trigger>
+                      {#snippet child({ props })}
+                        <div
+                          {...props}
+                          role="button"
+                          aria-disabled="true"
+                          class="cursor-not-allowed opacity-70 *:pointer-events-none"
+                        >
+                          {@render integrationSelector(integration)}
+                        </div>
+                      {/snippet}
+                    </Tooltip.Trigger>
+                    <Tooltip.Content>
+                      {m.enable_integration_in_account_settings({ name: integration.name })}
+                    </Tooltip.Content>
+                  </Tooltip.Root>
                 {/if}
-              </p>
-            </div>
-          {:else}
-            {#each availableIntegrations as integration (integration.id)}
-              {#if integration.connected}
-                <button onclick={() => (selectedIntegration = integration)}>
-                  {@render integrationSelector(integration)}
-                </button>
-              {:else}
-                <Tooltip
-                  text={integration.connected
-                    ? undefined
-                    : m.enable_integration_in_account_settings({ name: integration.name })}
-                  class="cursor-not-allowed opacity-70 *:pointer-events-none"
-                >
-                  {@render integrationSelector(integration)}
-                </Tooltip>
-              {/if}
-            {/each}
-          {/if}
+              {/each}
+            {/if}
+          </div>
         </div>
       </div>
-    </Dialog.Section>
+    </div>
 
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="primary" onclick={goImport} disabled={selectedIntegration === null}
-        >{m.continue()}</Button
-      >
-    </Dialog.Controls>
+    <Dialog.Footer class={dialogLayout.footer}>
+      <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
+      <Button onclick={goImport} disabled={selectedIntegration === null}>{m.continue()}</Button>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
 

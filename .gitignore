@@ -15,6 +15,8 @@
 # .env
 .env
 */**/.env
+# Generated deployment env files may contain database, IdP, and module keys.
+docs/deployment/env_*.env
 
 # docker
 # devcontainer Feature lockfile (auto-generated locally; not tracked by the team)
@@ -35,7 +37,10 @@ REVIEW_*.md
 REVIEW_PLAN.md
 REVIEW_REPORT.md
 chat-*.png
+frontend/apps/web/src/**/__screenshots__/
 notes/
+!docs/goals/*/notes/
+!docs/goals/*/notes/*.md
 
 # claude
 .claude/*.local.json
@@ -59,6 +64,8 @@ specs/
 # OpenAI Codex configuration
 .codex
 AGENTS.md
+# Shared documentation placement rules; other agent files stay local.
+!/AGENTS.md
 
 # ── GSD baseline (auto-generated) ──
 .gsd

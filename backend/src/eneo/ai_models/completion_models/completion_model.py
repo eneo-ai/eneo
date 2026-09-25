@@ -16,6 +16,7 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 from eneo.files.file_models import File
 from eneo.logging.logging import LoggingDetails
 from eneo.main.models import NOT_PROVIDED, InDB, ModelId, NotProvided, partial_model
+from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
 )
@@ -28,11 +29,18 @@ if TYPE_CHECKING:
 
 
 class TokenUsage(BaseModel):
-    """Actual token usage as reported by the LLM provider."""
+    """Provider usage for one logical completion.
+
+    The base fields accumulate reported usage across every provider request made
+    by that completion. The context fields retain only the final provider request
+    and response, which is the snapshot relevant to model headroom.
+    """
 
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     reasoning_tokens: Optional[int] = None
+    context_prompt_tokens: Optional[int] = None
+    context_completion_tokens: Optional[int] = None
 
 
 class ResponseType(str, Enum):
@@ -53,6 +61,22 @@ class FunctionDefinition:
     name: str
     description: str
     schema: dict[str, object]
+
+
+def function_definition_to_tool(
+    definition: FunctionDefinition,
+) -> dict[str, object]:
+    """Serialize one built-in function exactly as it is sent to providers."""
+
+    return {
+        "type": "function",
+        "function": {
+            "name": definition.name,
+            "description": definition.description,
+            "parameters": definition.schema,
+            "strict": True,
+        },
+    }
 
 
 @dataclass
@@ -83,6 +107,15 @@ class ToolCallMetadata:
     # forms used by the UI; this field preserves the exact identifier needed
     # to replay the tool_use so it matches the currently-registered tools.
     mcp_tool_name: Optional[str] = None
+    # Capability the call serves ("web_search", "image_generation") when the
+    # server is a capability provider, whichever server backs it; None for
+    # general MCP servers and Eneo's own loopback servers. Clients render
+    # capability calls by purpose, not by the provider's name.
+    purpose: Optional[str] = None
+    # The tool result's MCP `_meta` (capped by the client). Servers use it for
+    # out-of-band facts about the call, e.g. OpenTelemetry GenAI usage
+    # attributes (`gen_ai.usage.input_tokens`) from a model-backed tool.
+    meta: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -105,6 +138,20 @@ class McpToolReference:
 
 
 @dataclass
+class GeneratedImage:
+    """An image produced by a tool call (an MCP ``image`` content block).
+
+    Carried out of the model adapter as raw bytes; the ask path persists it as
+    a generated file. The model itself only ever sees a text placeholder.
+    """
+
+    data: bytes
+    mime_type: str
+    tool_call_id: Optional[str] = None
+    mcp_tool_name: Optional[str] = None
+
+
+@dataclass
 class Completion:
     reasoning_token_count: Optional[int] = 0
     text: Optional[str] = None
@@ -114,13 +161,28 @@ class Completion:
     tool_calls_metadata: Optional[list[ToolCallMetadata]] = None  # For TOOL_CALL events
     mcp_tool_references: Optional[list[McpToolReference]] = None
     approval_id: Optional[str] = None  # For TOOL_APPROVAL_REQUIRED events
-    image_data: Optional[bytes] = None
+    image: Optional[GeneratedImage] = None  # For FILES events (streaming)
+    generated_images: Optional[list[GeneratedImage]] = None  # Non-streaming
     response_type: Optional[ResponseType] = None
     generated_file: Optional[File] = None
     stop: bool = False
     error: Optional[str] = None
     error_code: Optional[int] = None
     usage: Optional[TokenUsage] = None
+    # Cumulative request-payload count when at least one provider round omitted
+    # prompt usage. Provider-reported usage remains separate and authoritative.
+    input_token_estimate: Optional[int] = None
+    # Final request only, for context-window headroom when the provider omits
+    # prompt usage.
+    context_input_token_estimate: Optional[int] = None
+    # Cumulative generated-output count when at least one provider round omitted
+    # completion usage. Provider-reported usage remains separate and authoritative.
+    output_token_estimate: Optional[int] = None
+    # Final response only, for context-window headroom when the provider omits
+    # completion usage.
+    context_output_token_estimate: Optional[int] = None
+    # LiteLLM-measured Skill-owned subset of the final provider prompt.
+    skill_context_tokens: Optional[int] = None
 
 
 class CompletionModelBase(BaseModel):
@@ -195,6 +257,14 @@ class CompletionModelBase(BaseModel):
         # Keep provider_type out of create/update schemas; response projections
         # that know the provider override this method.
         return None
+
+    def get_model_route(self, *, provider_type: str | None = None) -> str:
+        """Return the provider route used for both requests and tokenization."""
+        return resolve_model_route(
+            model_name=self.name,
+            provider_type=provider_type or self._provider_type(),
+            litellm_model_name=self.litellm_model_name,
+        )
 
 
 class CompletionModelCreate(CompletionModelBase):
@@ -371,7 +441,8 @@ class ModelKwargs(BaseModel):
             "top_k",
         ):
             capability = getattr(supported, field_name)
-            if not capability.supported and getattr(self, field_name) is not None:
+            value = getattr(self, field_name)
+            if not capability.accepts(value):
                 updates[field_name] = None
         if not updates:
             return self

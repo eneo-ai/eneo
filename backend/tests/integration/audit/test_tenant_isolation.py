@@ -1,7 +1,8 @@
 """Integration tests for multi-tenant isolation in audit logging."""
 
-import pytest
 from uuid import uuid4
+
+import pytest
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType

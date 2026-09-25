@@ -10,7 +10,6 @@ Runtime credential validation still occurs when models are actually used.
 from datetime import datetime
 from uuid import uuid4
 
-
 from eneo.completion_models.domain.completion_model import CompletionModel
 
 
@@ -33,11 +32,10 @@ class MockTenant:
 class MockUser:
     """Mock UserInDB object for testing."""
 
-    def __init__(self, tenant: MockTenant | None = None, modules: list = None):
+    def __init__(self, tenant: MockTenant | None = None):
         self.id = uuid4()
         self.tenant = tenant
         self.tenant_id = tenant.id if tenant else None
-        self.modules = modules or []
 
 
 class TestModelCredentialLocking:

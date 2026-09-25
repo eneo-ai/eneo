@@ -10,11 +10,11 @@ Marked with pytest.mark.integration to be run separately if needed.
 import pytest
 from sqlalchemy import select
 
-from eneo.database.tables.spaces_table import Spaces
-from eneo.database.tables.integration_table import IntegrationKnowledge
 from eneo.database.tables.integration_knowledge_spaces_table import (
     IntegrationKnowledgesSpaces,
 )
+from eneo.database.tables.integration_table import IntegrationKnowledge
+from eneo.database.tables.spaces_table import Spaces
 
 
 @pytest.mark.integration

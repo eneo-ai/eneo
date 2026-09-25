@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 import aiohttp
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,19 +17,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.authentication import auth_dependencies
-from eneo.authentication.api_key_router_helpers import (
-    error_responses as api_key_error_responses,
+from eneo.audit.domain.outcome import Outcome
+from eneo.audit.infrastructure.rate_limiting import (
+    RateLimitConfig,
+    RateLimitExceededError,
+    RateLimitServiceUnavailableError,
+    enforce_rate_limit,
 )
+from eneo.authentication import auth_dependencies
 from eneo.authentication.auth_dependencies import (
     require_api_key_permission,
     require_api_key_scope_check,
     require_permission,
+    require_session_auth,
     require_user_identity,
 )
 from eneo.authentication.auth_models import (
     AccessToken,
-    ApiKey,
     ApiKeyPermission,
     OpenIdConnectLogin,
 )
@@ -45,11 +49,18 @@ from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.tenants.tenant import TenantPublic
+from eneo.users.password import (
+    LOCAL_PASSWORD_POLICY,
+    LocalPasswordPolicy,
+    PasswordChangeError,
+)
 from eneo.users.user import (
+    EneoPasswordChangeCapabilityPublic,
+    ExternalPasswordChangeCapabilityPublic,
+    PasswordChangeRequest,
     PropUserInvite,
     PropUserUpdate,
     UserAdminView,
-    UserChangePassword,
     UserInDB,
     UserLogin,
     UserProvision,
@@ -63,17 +74,17 @@ logger = get_logger(__name__)
 router = APIRouter()
 users_admin_router = APIRouter()
 
+_PASSWORD_CHANGE_RATE_LIMIT = RateLimitConfig(
+    max_requests=5,
+    window_seconds=15 * 60,
+    key_prefix="rate_limit:password_change",
+)
+
 
 class _ProvisioningService(Protocol):
     """Minimal protocol for the user provisioning service (container.user_creation_service)."""
 
     async def provision_user(self, *, access_token: str) -> None: ...
-
-
-_LEGACY_USER_API_KEY_EXAMPLE = {
-    "key": "inp_3f5f2f7f7f...d9a1",
-    "truncated_key": "d9a1",
-}
 
 
 async def _load_single_tenant_allowed_origins(
@@ -753,6 +764,23 @@ async def get_tenant_users(
 
 
 @router.get(
+    "/password-policy/",
+    response_model=LocalPasswordPolicy,
+    summary="Get the local password policy",
+    description=(
+        "Return the policy enforced when creating or changing passwords stored in Eneo. "
+        "Available to authenticated users regardless of their own login provider, "
+        "so administrators can manage local accounts. Provider-managed passwords "
+        "use their provider's policy instead."
+    ),
+    responses=responses.get_responses([401, 403]),
+    dependencies=[Depends(auth_dependencies.get_current_active_user)],
+)
+async def get_local_password_policy() -> LocalPasswordPolicy:
+    return LOCAL_PASSWORD_POLICY
+
+
+@router.get(
     "/me/",
     response_model=UserPublic,
     name="Get current user",
@@ -770,164 +798,169 @@ async def get_currently_authenticated_user(
         tenant_id=current_user.tenant_id, owner_user_id=current_user.id
     )
     truncated_key = latest_key.key_suffix if latest_key is not None else None
-    if truncated_key is None and current_user.api_key is not None:
-        truncated_key = current_user.api_key.truncated_key
-    legacy_suffix = (
-        current_user.api_key.truncated_key if current_user.api_key is not None else None
+    password_change = (
+        EneoPasswordChangeCapabilityPublic()
+        if current_user.password is not None
+        else ExternalPasswordChangeCapabilityPublic()
     )
     return UserPublic(
         **current_user.model_dump(),
         truncated_api_key=truncated_key,
-        legacy_api_key_suffix=legacy_suffix,
+        password_change=password_change,
+    )
+
+
+async def _audit_password_change(
+    *,
+    container: Container,
+    user: UserInDB,
+    success: bool,
+    failure_reason: str | None = None,
+) -> None:
+    action = (
+        ActionType.PASSWORD_CHANGED if success else ActionType.PASSWORD_CHANGE_FAILED
+    )
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=action,
+        entity_type=EntityType.USER,
+        entity_id=user.id,
+        description=(
+            "Changed local Eneo password"
+            if success
+            else "Local Eneo password change failed"
+        ),
+        metadata=AuditMetadata.authentication(
+            actor=user,
+            method="local_password_change",
+            success=success,
+            failure_reason=failure_reason,
+        ),
+        outcome=Outcome.SUCCESS if success else Outcome.FAILURE,
+        error_message=failure_reason if not success else None,
     )
 
 
 @router.post(
-    "/me/change-password/",
-    status_code=204,
-    description="Change the authenticated user's password (password accounts only).",
-    responses=responses.get_responses([400, 401, 403]),
-)
-async def change_own_password(
-    change: UserChangePassword,
-    current_user: Annotated[
-        UserInDB, Depends(auth_dependencies.get_current_active_user)
-    ],
-    container: Annotated[Container, Depends(get_container())],
-    _user_identity_guard: None = Depends(require_user_identity),
-):
-    await container.user_service().change_own_password(
-        user_id=current_user.id,
-        current_password=change.current_password,
-        new_password=change.new_password,
-    )
-
-
-@users_admin_router.post(
-    "/api-keys/",
-    response_model=ApiKey,
-    tags=["Legacy API Keys"],
-    summary="Generate legacy user API key",
-    deprecated=True,
+    "/me/password/",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
+    name="Change current user's local password",
     description=(
-        "Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. "
-        "This endpoint rotates the old legacy key immediately."
+        "Change the authenticated user's local Eneo password and invalidate "
+        "previously issued Eneo sessions."
     ),
-    responses={
-        200: {
-            "description": "Legacy API key created and returned once.",
-            "content": {"application/json": {"example": _LEGACY_USER_API_KEY_EXAMPLE}},
-        },
-        410: {
-            "description": "Legacy endpoint disabled. Migrate to v2 endpoint.",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "code": "deprecated_endpoint",
-                        "message": "Legacy API key endpoint is disabled. Use /api/v1/api-keys.",
-                    }
-                }
-            },
-        },
-        **api_key_error_responses([401, 403]),
-    },
+    responses=responses.get_responses([400, 403, 404, 409, 429, 503]),
 )
-async def generate_api_key(
-    current_user: Annotated[
-        UserInDB, Depends(auth_dependencies.get_current_active_user)
+async def change_current_user_password(
+    password_change: PasswordChangeRequest,
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, transaction_scope="function")),
     ],
-    container: Annotated[Container, Depends(get_container())],
-    _user_identity_guard: None = Depends(require_user_identity),
-):
-    """Generating a new api key will delete the old key.
-    Make sure to copy the key since it will only be showed once,
-    after which only the truncated key will be shown."""
-    validate_permission(current_user, Permission.ADMIN)
-    settings = config.get_settings()
-    if not settings.api_key_legacy_endpoints_enabled:
-        raise HTTPException(
-            status_code=410,
-            detail={
-                "code": "deprecated_endpoint",
-                "message": "Legacy API key endpoint is disabled. Use /api/v1/api-keys.",
-            },
+    _session_guard: None = Depends(require_session_auth),
+) -> Response:
+    """Change the caller's local Eneo password and revoke older Eneo JWTs."""
+
+    current_user = container.user()
+    try:
+        await enforce_rate_limit(
+            redis_client=container.redis_client(),
+            user_id=current_user.id,
+            tenant_id=current_user.tenant_id,
+            config=_PASSWORD_CHANGE_RATE_LIMIT,
         )
-    service = container.user_service()
-
-    # Generate API key
-    api_key = await service.generate_api_key(current_user.id)
-
-    # Build extra context for API key generation
-    extra = {
-        "truncated_key": api_key.truncated_key,
-        "key_type": "user",
-        "tenant_id": str(current_user.tenant_id),
-        "tenant_name": current_user.tenant.display_name or current_user.tenant.name
-        if current_user.tenant
-        else None,
-    }
-
-    # Audit logging for API key generation
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=current_user.tenant_id,
-        user=current_user,
-        action=ActionType.API_KEY_GENERATED,
-        entity_type=EntityType.API_KEY,
-        entity_id=current_user.id,  # Use user ID as entity ID for user API keys
-        description=f"Generated new API key for user '{current_user.email}'",
-        metadata=AuditMetadata.standard(
-            actor=current_user,
-            target=current_user,  # Self-action: user is both actor and target
-            extra=extra,
-        ),
-    )
-
-    return api_key
-
-
-@users_admin_router.delete(
-    "/api-keys/legacy",
-    status_code=204,
-    tags=["Legacy API Keys"],
-    summary="Revoke legacy user API key",
-    description="Permanently revokes the caller's legacy (v1) API key.",
-    responses={
-        404: {"description": "No legacy API key found."},
-        **api_key_error_responses([401, 403]),
-    },
-)
-async def revoke_legacy_api_key(
-    current_user: Annotated[
-        UserInDB, Depends(auth_dependencies.get_current_active_user)
-    ],
-    container: Annotated[Container, Depends(get_container())],
-    _user_identity_guard: None = Depends(require_user_identity),
-):
-    if current_user.api_key is None:
-        raise HTTPException(status_code=404, detail="No legacy API key found.")
-
-    api_key_repo = container.api_key_repo()
-    await api_key_repo.delete_by_user(current_user.id)
-
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=current_user.tenant_id,
-        user=current_user,
-        action=ActionType.API_KEY_REVOKED,
-        entity_type=EntityType.API_KEY,
-        entity_id=current_user.id,
-        description=f"Revoked legacy API key for user '{current_user.email}'",
-        metadata=AuditMetadata.standard(
-            actor=current_user,
-            target=current_user,
-            extra={
-                "key_type": "legacy",
-                "truncated_key": current_user.api_key.truncated_key,
-                "tenant_id": str(current_user.tenant_id),
+    except RateLimitExceededError as exc:
+        await _audit_password_change(
+            container=container,
+            user=current_user,
+            success=False,
+            failure_reason="rate_limit_exceeded",
+        )
+        retry_after = exc.result.window_seconds
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "code": "rate_limit_exceeded",
+                "message": "Too many password change attempts. Try again later.",
+                "retry_after_seconds": retry_after,
             },
+            headers={"Retry-After": str(retry_after)},
+        ) from exc
+    except RateLimitServiceUnavailableError as exc:
+        logger.warning("Password-change rate limiter unavailable", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "rate_limit_unavailable",
+                "message": "Password changes are temporarily unavailable.",
+            },
+        ) from exc
+
+    try:
+        updated_user = await container.user_service().change_local_password(
+            user_id=current_user.id,
+            current_password=password_change.current_password.get_secret_value(),
+            new_password=password_change.new_password.get_secret_value(),
+        )
+    except PasswordChangeError as exc:
+        await _audit_password_change(
+            container=container,
+            user=current_user,
+            success=False,
+            failure_reason=exc.code,
+        )
+        raise
+
+    await _audit_password_change(
+        container=container,
+        user=updated_user,
+        success=True,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/me/sessions/invalidate/",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
+    name="Invalidate current user's Eneo sessions",
+    description=(
+        "Invalidate previously issued Eneo sessions at the authenticated "
+        "user's request."
+    ),
+    responses=responses.get_responses([403, 404]),
+)
+async def invalidate_current_user_sessions(
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, transaction_scope="function")),
+    ],
+    _session_guard: None = Depends(require_session_auth),
+) -> Response:
+    """Invalidate previously issued Eneo sessions at the user's request."""
+
+    current_user = container.user()
+    updated_user = await container.user_service().invalidate_sessions(
+        user_id=current_user.id
+    )
+    await container.audit_service().log_async(
+        tenant_id=updated_user.tenant_id,
+        user=updated_user,
+        action=ActionType.SESSIONS_INVALIDATED,
+        entity_type=EntityType.USER,
+        entity_id=updated_user.id,
+        description="Invalidated Eneo sessions at the user's request",
+        metadata=AuditMetadata.authentication(
+            actor=updated_user,
+            method="user_session_invalidation",
+            success=True,
         ),
     )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(

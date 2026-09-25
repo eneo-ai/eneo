@@ -1,8 +1,7 @@
 <script lang="ts">
   import placeholderImageUrl from "$lib/assets/GeneratedImagePlaceholder.svg";
   import { IconDownload } from "@eneo/icons/download";
-  import { Button } from "@eneo/ui";
-  import { sanitizeImageSrc, sanitizeLinkHref } from "@eneo/ui/components/markdown";
+  import { sanitizeImageSrc, sanitizeLinkHref } from "$lib/components/markdown/index.js";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
@@ -13,17 +12,23 @@
   const { url, fixedAspectRatio = "800 / 608" }: Props = $props();
   const safeImageUrl = $derived(sanitizeImageSrc(url));
   const safeDownloadUrl = $derived(sanitizeLinkHref(url));
+  // The reserved aspect ratio only holds space while loading. Once the real
+  // image is in, the box follows the image: a wider image than the reserved
+  // ratio would otherwise leave the placeholder showing beneath it.
+  let loaded = $state(false);
 </script>
 
 <div
   class="group relative overflow-clip rounded-lg"
-  style={fixedAspectRatio ? `aspect-ratio: ${fixedAspectRatio};` : undefined}
+  style={fixedAspectRatio && !loaded ? `aspect-ratio: ${fixedAspectRatio};` : undefined}
 >
-  <img
-    src={placeholderImageUrl}
-    class=" bg-secondary absolute m-0 animate-pulse p-0"
-    alt={m.placeholder()}
-  />
+  {#if !loaded}
+    <img
+      src={placeholderImageUrl}
+      class=" bg-secondary absolute m-0 animate-pulse p-0"
+      alt={m.placeholder()}
+    />
+  {/if}
   {#if safeImageUrl}
     <img
       src={safeImageUrl}
@@ -34,17 +39,18 @@
         if (target) {
           target.style.opacity = "1";
         }
+        loaded = true;
       }}
       alt={m.generated_file()}
     />
     {#if safeDownloadUrl}
-      <Button
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- sanitized external file URL -->
+      <a
         href={safeDownloadUrl}
-        unstyled
-        variant="outlined"
         class="border-stronger bg-secondary hover:bg-tertiary absolute top-2 right-2 hidden gap-1 rounded-md border px-2 py-1 no-underline shadow group-hover:flex"
-        ><IconDownload></IconDownload>{m.download_file()}</Button
+        ><IconDownload></IconDownload>{m.download_file()}</a
       >
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
     {/if}
   {/if}
 </div>

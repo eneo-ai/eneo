@@ -78,7 +78,12 @@ from eneo.tenants.tenant import (
     TenantUpdatePublic,
     TenantWithMaskedCredentials,
 )
-from eneo.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
+from eneo.users.user import (
+    UserAddSuperAdmin,
+    UserCreated,
+    UserInDB,
+    UserUpdatePublic,
+)
 from eneo.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
 
 logger = get_logger(__name__)

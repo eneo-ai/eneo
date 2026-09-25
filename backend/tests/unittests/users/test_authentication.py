@@ -1,5 +1,3 @@
-from unittest.mock import AsyncMock
-
 import jwt
 import pytest
 from pydantic import ValidationError
@@ -17,7 +15,7 @@ JWT_SECRET = "unit-test-secret-padded-to-the-hs256-minimum"
 
 @pytest.fixture
 def auth_service():
-    return AuthService(AsyncMock())
+    return AuthService()
 
 
 async def test_can_create_access_token_successfully(auth_service: AuthService):
@@ -82,14 +80,6 @@ async def test_invalid_token_content_raises_error(
             algorithms=[JWT_ALGORITHM],
         )
 
-        token = auth_service.create_access_token_for_user(
-            user=TEST_USER, secret_key=str(JWT_SECRET)
-        )
-        username = auth_service.get_username_from_token(
-            token=token, secret_key=str(JWT_SECRET)
-        )
-        assert username == TEST_USER.username
-
 
 @pytest.mark.parametrize(
     "secret, wrong_token",
@@ -114,12 +104,10 @@ async def test_error_when_token_or_secret_is_wrong(
     with pytest.raises(
         AuthenticationException, match="Could not validate token credentials."
     ):
-        auth_service.get_username_from_token(token=wrong_token, secret_key=str(secret))
-
-
-def test_can_create_api_key_successfully(auth_service: AuthService):
-    api_key = auth_service._generate_api_key()
-    assert len(api_key) != 0
+        auth_service.get_jwt_payload_with_claims(
+            token=wrong_token,
+            key=str(secret),
+        )
 
 
 def test_validate_openid_jwt(auth_service: AuthService):

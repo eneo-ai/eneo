@@ -3,7 +3,6 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-
 from eneo.worker.redis.client import parse_arq_health_string
 
 

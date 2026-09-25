@@ -207,11 +207,7 @@ class HelperRunService:
             # assistant's stored ``logging_enabled`` / ``insight_enabled``.
             extended_logging=False,
             model_kwargs=helper_assistant.completion_model_kwargs,
-            mcp_servers=(
-                []
-                if helper_assistant.has_knowledge()
-                else list(helper_assistant.mcp_servers)
-            ),
+            mcp_servers=list(helper_assistant.mcp_servers),
         )
 
         if stream:
@@ -308,11 +304,7 @@ class HelperRunService:
             # PRD §6 + Critical test #3: same hard-coded gate as run().
             extended_logging=False,
             model_kwargs=helper_assistant.completion_model_kwargs,
-            mcp_servers=(
-                []
-                if helper_assistant.has_knowledge()
-                else list(helper_assistant.mcp_servers)
-            ),
+            mcp_servers=list(helper_assistant.mcp_servers),
         )
 
         if stream:
@@ -524,8 +516,8 @@ class HelperRunService:
         ``questions_repo`` with ``logging_details=None`` so no row reaches
         the ``logging`` table (PRD §6 + Critical test #3). Token counts
         prefer provider-reported values from the final ``TokenUsage`` chunk
-        and fall back to ``response.total_token_count`` if absent —
-        matching the assistant-service pattern.
+        and fall back to the adapter's cumulative request estimate, then the
+        initial context estimate, if provider usage is absent.
 
         The persistence call wraps a defensive ``session.begin()`` when the
         request-scoped transaction has already committed — same idiom as
@@ -541,10 +533,13 @@ class HelperRunService:
 
         response_string = ""
         stream_usage: TokenUsage | None = None
+        stream_input_token_estimate: int | None = None
 
         async for chunk in completion:
             if chunk.usage is not None:
                 stream_usage = chunk.usage
+            if chunk.input_token_estimate is not None:
+                stream_input_token_estimate = chunk.input_token_estimate
             if chunk.response_type == ResponseType.TEXT and chunk.text is not None:
                 response_string = f"{response_string}{chunk.text}"
             yield chunk
@@ -552,7 +547,11 @@ class HelperRunService:
         if stream_usage is not None and stream_usage.prompt_tokens is not None:
             num_tokens_question = stream_usage.prompt_tokens
         else:
-            num_tokens_question = response.total_token_count
+            num_tokens_question = (
+                stream_input_token_estimate
+                if stream_input_token_estimate is not None
+                else response.total_token_count
+            )
 
         if stream_usage is not None and stream_usage.completion_tokens is not None:
             num_tokens_answer = stream_usage.completion_tokens

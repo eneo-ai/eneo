@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -238,5 +238,29 @@ def test_input_text_validation(
     app: App, type: InputFieldType, text: str, is_valid_input: bool
 ):
     app.input_fields = [MagicMock(type=type)]
-
     assert app.is_valid_input([], text) is is_valid_input
+
+
+@pytest.mark.parametrize(
+    ("prompt_override", "expected_prompt"),
+    [(None, "Stored prompt"), ("", "")],
+)
+async def test_run_uses_explicit_prompt_override(
+    app: App,
+    prompt_override: str | None,
+    expected_prompt: str,
+):
+    app.prompt = MagicMock(text="Stored prompt")
+    completion_service = AsyncMock()
+
+    await app.run(
+        files=[],
+        text="input",
+        completion_service=completion_service,
+        transcriber=AsyncMock(),
+        prompt_override=prompt_override,
+    )
+
+    assert (
+        completion_service.get_response.await_args.kwargs["prompt"] == expected_prompt
+    )

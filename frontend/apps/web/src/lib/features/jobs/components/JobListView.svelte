@@ -2,11 +2,19 @@
   import type { Job } from "@eneo/eneo-js";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { m } from "$lib/paraglide/messages";
+  import { getJobFailureMessage } from "../getJobFailureMessage";
   import ExpandableErrorRow from "./ExpandableErrorRow.svelte";
 
   export let jobs: Job[];
   export let title: string;
   export let prefix: string | undefined = undefined;
+
+  function failureMessage(job: Job): string | null {
+    if (job.task === "upload_info_blob" || job.task === "transcription") {
+      return getJobFailureMessage(job.failure_code, job.task);
+    }
+    return job.result_location ?? null;
+  }
 </script>
 
 {#if jobs.length > 0}
@@ -16,11 +24,12 @@
       class="border-default bg-primary ring-default min-h-10 items-center justify-between rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
     >
       {#each jobs as job (job.id)}
-        {#if job.status === "failed" && job.result_location}
+        {@const message = failureMessage(job)}
+        {#if job.status === "failed" && message}
           <ExpandableErrorRow
             label={`${prefix ? prefix + " " : ""}${job.name ?? job.id}`}
             tooltip={job.name ?? job.id}
-            message={job.result_location}
+            {message}
             borderClass="border-dimmer"
           />
         {:else}

@@ -14,12 +14,16 @@ async def test_service_provider_config_returns_200(client, bypass_scim_auth):
     response = await client.get("/scim/v2/ServiceProviderConfig")
     assert response.status_code == 200
     body = response.json()
-    assert "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig" in body["schemas"]
+    assert (
+        "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig" in body["schemas"]
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_service_provider_config_advertises_patch_support(client, bypass_scim_auth):
+async def test_service_provider_config_advertises_patch_support(
+    client, bypass_scim_auth
+):
     """ServiceProviderConfig reports that PATCH is supported."""
     response = await client.get("/scim/v2/ServiceProviderConfig")
     body = response.json()
@@ -28,7 +32,9 @@ async def test_service_provider_config_advertises_patch_support(client, bypass_s
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_service_provider_config_advertises_bulk_support(client, bypass_scim_auth):
+async def test_service_provider_config_advertises_bulk_support(
+    client, bypass_scim_auth
+):
     """ServiceProviderConfig reports bulk operations are supported with configured limits."""
     response = await client.get("/scim/v2/ServiceProviderConfig")
     body = response.json()
@@ -49,7 +55,9 @@ async def test_service_provider_config_reports_filter_support(client, bypass_sci
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_service_provider_config_reports_no_password_change(client, bypass_scim_auth):
+async def test_service_provider_config_reports_no_password_change(
+    client, bypass_scim_auth
+):
     """ServiceProviderConfig reports changePassword is not supported (SSO-only tenants)."""
     response = await client.get("/scim/v2/ServiceProviderConfig")
     body = response.json()

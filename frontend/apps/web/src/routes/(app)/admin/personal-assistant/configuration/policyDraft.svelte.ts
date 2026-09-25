@@ -19,10 +19,14 @@
  */
 
 import { invalidate } from "$app/navigation";
+import { getErrorMessage } from "$lib/core/errors";
+import { getModelKwargOptionLabel } from "$lib/features/ai-models/ModelKwargCapabilities";
 import { m } from "$lib/paraglide/messages";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import type { Eneo } from "@eneo/eneo-js";
+import type { AssistantSkillBindingInput, AssistantSkillBindingSummary, Eneo } from "@eneo/eneo-js";
+import type { SkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
 import { disabledToolIdsForSelectedServers } from "./mcpPolicy";
+import { CAPABILITIES, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
 
 type ModelSelection = { selected: boolean; isDefault: boolean };
 type CompletionModel = {
@@ -30,10 +34,18 @@ type CompletionModel = {
   provider_id?: string | null;
   nickname?: string | null;
   name: string;
+  supports_tool_calling?: boolean;
   // Mirrors the backend's accept set: the policy PUT rejects any model whose
   // `can_access` is false (effectively-deprecated, locked, not org-enabled, …),
   // so the picker must only offer accessible models.
   can_access?: boolean;
+  supported_model_kwargs?: {
+    reasoning_effort?: {
+      supported?: boolean;
+      control?: string | null;
+      options?: string[] | null;
+    };
+  } | null;
 };
 type ModelProvider = { id: string; name: string; is_active?: boolean };
 type McpTool = {
@@ -47,21 +59,40 @@ type McpServer = {
   id: string;
   name: string;
   description?: string | null;
+  purpose?: string | null;
   is_available?: boolean;
+  is_enabled?: boolean;
+  readiness_reason?: string | null;
+  audience?: string | null;
   tools?: McpTool[] | null;
 };
 type PromptOption = { id: string; name: string; description?: string | null };
 
 type PolicyModel = { completion_model_id: string; is_default: boolean };
 type PolicyMcpServer = { mcp_server_id: string; is_default_enabled: boolean };
+type PolicyCapability = {
+  purpose: "web_search" | "image_generation";
+  is_default_enabled?: boolean;
+};
 type Policy = {
   models_restriction: { enabled: boolean; models: PolicyModel[]; provider_ids?: string[] | null };
   mcp_restriction: {
     enabled: boolean;
     servers: PolicyMcpServer[];
+    capabilities?: PolicyCapability[];
     disabled_tool_ids?: string[] | null;
   };
   prompt_enforcement: { enabled: boolean; prompt_library_id?: string | null };
+  reasoning_policy?: {
+    configured?: boolean;
+    default_effort?: string | null;
+    allow_user_override?: boolean;
+  } | null;
+  file_policy?: {
+    configured?: boolean;
+    inline_file_text?: boolean | null;
+  } | null;
+  skills: { bindings: AssistantSkillBindingSummary[] };
 };
 
 type PolicyUpdate = {
@@ -73,11 +104,22 @@ type PolicyUpdate = {
   mcp_restriction?: {
     enabled: boolean;
     servers: PolicyMcpServer[];
+    capabilities?: PolicyCapability[];
     disabled_tool_ids: string[];
   };
   prompt_enforcement?: {
     enabled: boolean;
     prompt_library_id: string | null;
+  };
+  reasoning_policy?: {
+    default_effort: string | null;
+    allow_user_override: boolean;
+  };
+  file_policy?: {
+    inline_file_text: boolean;
+  };
+  skills?: {
+    bindings: AssistantSkillBindingInput[];
   };
 };
 
@@ -88,6 +130,8 @@ export type PolicyPageData = {
   modelProviders?: ModelProvider[] | null;
   mcpSettings?: { items?: McpServer[] | null } | null;
   promptLibrary: { items: PromptOption[] };
+  skills: SkillBindingCatalogPage;
+  skillRuntimePolicy: { selective_activation_enabled: boolean };
 };
 
 export type BadgeVariant = "default" | "outline" | "destructive";
@@ -95,7 +139,10 @@ export type BadgeVariant = "default" | "outline" | "destructive";
 const EMPTY_POLICY: Policy = {
   models_restriction: { enabled: false, models: [], provider_ids: [] },
   mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
-  prompt_enforcement: { enabled: false, prompt_library_id: null }
+  prompt_enforcement: { enabled: false, prompt_library_id: null },
+  reasoning_policy: { default_effort: null, allow_user_override: false },
+  file_policy: { configured: false, inline_file_text: null },
+  skills: { bindings: [] }
 };
 
 export class PolicyDraft {
@@ -110,6 +157,16 @@ export class PolicyDraft {
   #allProviders = $state<ModelProvider[]>([]);
   #allMcpServers = $state<McpServer[]>([]);
   promptOptions = $state<PromptOption[]>([]);
+  skillCatalogPage = $state<SkillBindingCatalogPage>({
+    items: [],
+    count: 0,
+    limit: 25,
+    next_cursor: null
+  });
+  skillBindingSummaries = $state<AssistantSkillBindingSummary[]>([]);
+  // Tenant runtime prerequisite for On demand: with selective activation off the
+  // backend rejects every on-demand candidate, so the picker must too.
+  selectiveActivationEnabled = $state(false);
 
   // ---- Editable state ------------------------------------------------------
   modelsEnabled = $state(false);
@@ -122,6 +179,16 @@ export class PolicyDraft {
   disabledMcpToolIds = new SvelteSet<string>();
   promptEnabled = $state(false);
   selectedPromptId = $state<string | null>(null);
+  reasoningPolicyConfigured = $state(false);
+  defaultReasoningEffort = $state<string | null>(null);
+  allowUserReasoningEffort = $state(false);
+  // Whether personal assistants hand large attachments to the model as file
+  // references it reads with a tool (backend: inline_file_text = false) instead
+  // of inlining the whole text. The switch is phrased positively — "on" grants
+  // the capability. Ungoverned policies seed as off (the assistant default);
+  // flipping the switch governs the dimension on save.
+  openFilesEnabled = $state(false);
+  skillBindings = $state<AssistantSkillBindingInput[]>([]);
 
   // ---- Save lifecycle ------------------------------------------------------
   saving = $state(false);
@@ -139,8 +206,27 @@ export class PolicyDraft {
     const selectableModels = data.models.completionModels.filter((m) => m.can_access);
     this.#allModels = selectableModels;
     this.#allProviders = (data.modelProviders ?? []).filter((p) => p.is_active);
-    this.#allMcpServers = (data.mcpSettings?.items ?? []).filter((s) => s.is_available);
+    // Capability servers (web search, image generation) stay selectable even
+    // when deactivated: the policy holds a capability marker that the ask
+    // path resolves to the user's provider, so a marker for a since-replaced
+    // server must keep the capability on rather than vanish from the draft.
+    this.#allMcpServers = [
+      ...(data.mcpSettings?.items ?? []).filter(
+        (s) => s.is_available && !isCapabilityPurpose(s.purpose)
+      ),
+      ...CAPABILITIES.map((c) => ({
+        id: "capability:" + c.purpose,
+        name: c.label(),
+        purpose: c.purpose,
+        is_available: (data.mcpSettings?.items ?? []).some(
+          (s) => s.purpose === c.purpose && s.is_enabled && !s.readiness_reason
+        ),
+        tools: []
+      }))
+    ];
     this.promptOptions = data.promptLibrary.items;
+    this.skillCatalogPage = data.skills;
+    this.selectiveActivationEnabled = data.skillRuntimePolicy.selective_activation_enabled;
     this.#seed(data.policy, selectableModels);
   }
 
@@ -171,6 +257,11 @@ export class PolicyDraft {
         isDefaultEnabled: server.is_default_enabled
       });
     }
+    for (const c of policy.mcp_restriction.capabilities ?? []) {
+      this.mcpSelections.set("capability:" + c.purpose, {
+        isDefaultEnabled: c.is_default_enabled ?? true
+      });
+    }
     this.disabledMcpToolIds.clear();
     for (const id of policy.mcp_restriction.disabled_tool_ids ?? []) {
       if (!this.#selectableToolIds.has(id)) continue;
@@ -178,6 +269,16 @@ export class PolicyDraft {
     }
     this.promptEnabled = policy.prompt_enforcement.enabled;
     this.selectedPromptId = policy.prompt_enforcement.prompt_library_id ?? null;
+    this.reasoningPolicyConfigured = policy.reasoning_policy?.configured ?? false;
+    this.defaultReasoningEffort = policy.reasoning_policy?.default_effort ?? null;
+    this.allowUserReasoningEffort = policy.reasoning_policy?.allow_user_override ?? false;
+    this.openFilesEnabled = policy.file_policy?.inline_file_text === false;
+    this.skillBindingSummaries = policy.skills.bindings;
+    this.skillBindings = policy.skills.bindings.map((binding) => ({
+      skill_id: binding.skill_id,
+      skill_revision_id: binding.skill_revision_id,
+      activation_mode: binding.activation_mode
+    }));
     this.saveError = null;
   }
 
@@ -233,7 +334,17 @@ export class PolicyDraft {
   defaultModelId = $derived(
     this.selectedModels.find((entry) => entry.is_default)?.completion_model_id ?? null
   );
-
+  reasoningOptions = $derived.by(() => {
+    const options = new SvelteSet<string>();
+    for (const model of this.#allModels) {
+      if (model.can_access === false) continue;
+      if (this.modelsEnabled && !this.effectiveModelIds.has(model.id)) continue;
+      const capability = model.supported_model_kwargs?.reasoning_effort;
+      if (!capability?.supported || capability.control !== "select") continue;
+      for (const option of capability.options ?? []) options.add(option);
+    }
+    return Array.from(options);
+  });
   // ---- Dirty tracking (against the last-saved baseline) --------------------
   #initialModelIds = $derived(
     new SvelteSet(this.#policy.models_restriction.models.map((entry) => entry.completion_model_id))
@@ -247,11 +358,14 @@ export class PolicyDraft {
   // an orphaned (since-disabled) server in the saved policy must not register
   // as a pending change on a pristine load.
   #initialMcpServers = $derived(
-    new SvelteMap(
-      this.#policy.mcp_restriction.servers
+    new SvelteMap([
+      ...this.#policy.mcp_restriction.servers
         .filter((server) => this.#selectableServerIds.has(server.mcp_server_id))
-        .map((server) => [server.mcp_server_id, server.is_default_enabled])
-    )
+        .map((server) => [server.mcp_server_id, server.is_default_enabled] as const),
+      ...(this.#policy.mcp_restriction.capabilities ?? []).map(
+        (c) => ["capability:" + c.purpose, c.is_default_enabled ?? true] as const
+      )
+    ])
   );
   #initialDisabledToolIds = $derived(
     new SvelteSet(
@@ -284,7 +398,41 @@ export class PolicyDraft {
         ? this.selectedPromptId !== (this.#policy.prompt_enforcement.prompt_library_id ?? null)
         : false)
   );
-  dirty = $derived(this.#modelsDirty || this.#mcpDirty || this.#promptDirty);
+  #reasoningDirty = $derived(
+    this.reasoningPolicyConfigured !== (this.#policy.reasoning_policy?.configured ?? false) ||
+      this.defaultReasoningEffort !== (this.#policy.reasoning_policy?.default_effort ?? null) ||
+      this.allowUserReasoningEffort !==
+        (this.#policy.reasoning_policy?.allow_user_override ?? false)
+  );
+  #fileDirty = $derived(
+    this.openFilesEnabled !== (this.#policy.file_policy?.inline_file_text === false)
+  );
+  #initialSkillBindings = $derived(
+    this.#policy.skills.bindings.map((binding) => ({
+      skill_id: binding.skill_id,
+      skill_revision_id: binding.skill_revision_id,
+      activation_mode: binding.activation_mode
+    }))
+  );
+  #skillsDirty = $derived(
+    this.skillBindings.length !== this.#initialSkillBindings.length ||
+      this.skillBindings.some((binding, index) => {
+        const initial = this.#initialSkillBindings[index];
+        return (
+          initial?.skill_id !== binding.skill_id ||
+          initial.skill_revision_id !== binding.skill_revision_id ||
+          initial.activation_mode !== binding.activation_mode
+        );
+      })
+  );
+  dirty = $derived(
+    this.#modelsDirty ||
+      this.#reasoningDirty ||
+      this.#mcpDirty ||
+      this.#promptDirty ||
+      this.#fileDirty ||
+      this.#skillsDirty
+  );
 
   // ---- Validation ----------------------------------------------------------
   defaultValid = $derived(
@@ -293,12 +441,22 @@ export class PolicyDraft {
       this.effectiveModelIds.has(this.defaultModelId)
   );
   mcpValid = $derived(!this.mcpEnabled || this.mcpSelections.size > 0);
+  reasoningValid = $derived(
+    this.defaultReasoningEffort === null ||
+      this.reasoningOptions.includes(this.defaultReasoningEffort)
+  );
+  skillsValid = $derived(
+    this.skillBindings.every((binding) => binding.activation_mode !== "on_demand") ||
+      this.selectiveActivationEnabled
+  );
   canSave = $derived(
     this.dirty &&
       (!this.modelsEnabled || this.effectiveModelIds.size > 0) &&
       this.defaultValid &&
+      this.reasoningValid &&
       this.mcpValid &&
-      (!this.promptEnabled || this.selectedPromptId !== null)
+      (!this.promptEnabled || this.selectedPromptId !== null) &&
+      this.skillsValid
   );
 
   // ---- Summaries -----------------------------------------------------------
@@ -316,15 +474,48 @@ export class PolicyDraft {
           providers: providerCount
         });
   });
+  // Capability servers collapse into one row per capability in the UI, so
+  // the summary counts rows (general servers + capabilities), not markers.
+  #mcpRowCounts = $derived.by(() => {
+    const general = this.#allMcpServers.filter((s) => !isCapabilityPurpose(s.purpose));
+    const purposes = new SvelteSet(
+      this.#allMcpServers
+        .filter((s) => isCapabilityPurpose(s.purpose))
+        .map((s) => s.purpose as string)
+    );
+    const selectedGeneral = general.filter((s) => this.mcpSelections.has(s.id)).length;
+    const selectedPurposes = Array.from(purposes).filter((purpose) =>
+      this.#allMcpServers.some((s) => s.purpose === purpose && this.mcpSelections.has(s.id))
+    ).length;
+    return {
+      selected: selectedGeneral + selectedPurposes,
+      total: general.length + purposes.size
+    };
+  });
   mcpSummary = $derived(
     !this.mcpEnabled
       ? m.governance_mcp_summary_inactive()
       : this.mcpSelections.size === 0
         ? m.governance_mcp_summary_none()
-        : m.governance_mcp_summary_count({
-            selected: this.mcpSelections.size,
-            total: this.#allMcpServers.length
-          })
+        : m.governance_mcp_summary_count(this.#mcpRowCounts)
+  );
+  reasoningSummary = $derived.by(() => {
+    if (!this.reasoningPolicyConfigured) return m.governance_reasoning_summary_inactive();
+    const defaultLabel = this.defaultReasoningEffort
+      ? this.reasoningOptionLabel(this.defaultReasoningEffort)
+      : m.default_behavior();
+    return this.allowUserReasoningEffort
+      ? m.governance_reasoning_summary_user_choice({ effort: defaultLabel })
+      : m.governance_reasoning_summary_fixed({ effort: defaultLabel });
+  });
+  // Governed once saved with either value; a pristine ungoverned policy reads
+  // as inactive even though the switch shows the "off" default.
+  filesSummary = $derived(
+    !(this.#policy.file_policy?.configured || this.#fileDirty)
+      ? m.governance_files_summary_inactive()
+      : this.openFilesEnabled
+        ? m.governance_files_summary_open_files()
+        : m.governance_files_summary_inline()
   );
   promptSummary = $derived(
     !this.promptEnabled
@@ -337,6 +528,11 @@ export class PolicyDraft {
               m.governance_prompt_unknown()
           })
   );
+  skillsSummary = $derived(
+    this.skillBindings.length === 0
+      ? m.governance_skills_summary_none()
+      : m.governance_skills_summary_count({ count: this.skillBindings.length })
+  );
 
   // ---- Helpers (arrow fields → safe to pass as props) ----------------------
   badgeVariant = (enabled: boolean, valid: boolean): BadgeVariant =>
@@ -347,7 +543,13 @@ export class PolicyDraft {
       ? m.governance_provider_other_models()
       : (this.#allProviders.find((p) => p.id === pid)?.name ?? m.governance_provider_unknown());
 
+  reasoningOptionLabel = getModelKwargOptionLabel;
+
   // ---- Mutations -----------------------------------------------------------
+  activateReasoningPolicy = () => {
+    this.reasoningPolicyConfigured = true;
+  };
+
   setSingleDefault = (id: string) => {
     // The default flag must travel on a row in `governance_policy_completion_models`,
     // so if the target is allowed only via a whitelisted provider, also flip its
@@ -387,6 +589,20 @@ export class PolicyDraft {
   toggleMcpDefault = (id: string, on: boolean) => {
     if (this.mcpSelections.has(id)) this.mcpSelections.set(id, { isDefaultEnabled: on });
   };
+
+  toggleCapability = (purpose: string, on: boolean) => {
+    const id = "capability:" + purpose;
+    if (on) {
+      if (!this.#allMcpServers.find((s) => s.id === id)?.is_available) return;
+      this.mcpSelections.set(id, { isDefaultEnabled: true });
+    } else this.mcpSelections.delete(id);
+  };
+
+  toggleCapabilityDefault = (purpose: string, on: boolean) => {
+    this.toggleMcpDefault("capability:" + purpose, on);
+  };
+
+  capabilityRows = CAPABILITIES;
 
   toggleMcpTool = (toolId: string, on: boolean) => {
     if (on) this.disabledMcpToolIds.delete(toolId);
@@ -430,6 +646,9 @@ export class PolicyDraft {
     if (this.promptEnabled && !initial.prompt_enforcement.enabled) {
       out.push(m.governance_confirm_prompt_forced());
     }
+    if (this.#skillsDirty) {
+      out.push(m.governance_confirm_skills_changed());
+    }
     return out;
   };
 
@@ -449,10 +668,18 @@ export class PolicyDraft {
       if (this.#mcpDirty) {
         update.mcp_restriction = {
           enabled: this.mcpEnabled,
-          servers: Array.from(this.mcpSelections.entries()).map(([id, v]) => ({
-            mcp_server_id: id,
-            is_default_enabled: v.isDefaultEnabled
-          })),
+          servers: Array.from(this.mcpSelections.entries())
+            .filter(([id]) => !id.startsWith("capability:"))
+            .map(([id, v]) => ({
+              mcp_server_id: id,
+              is_default_enabled: v.isDefaultEnabled
+            })),
+          capabilities: Array.from(this.mcpSelections.entries())
+            .filter(([id]) => id.startsWith("capability:"))
+            .map(([id, v]) => ({
+              purpose: id.slice("capability:".length) as PolicyCapability["purpose"],
+              is_default_enabled: v.isDefaultEnabled
+            })),
           disabled_tool_ids: disabledToolIdsForSelectedServers(
             this.#allMcpServers,
             this.mcpSelections.keys(),
@@ -466,13 +693,26 @@ export class PolicyDraft {
           prompt_library_id: this.promptEnabled ? this.selectedPromptId : null
         };
       }
+      if (this.#reasoningDirty) {
+        update.reasoning_policy = {
+          default_effort: this.defaultReasoningEffort,
+          allow_user_override: this.allowUserReasoningEffort
+        };
+      }
+      if (this.#fileDirty) {
+        update.file_policy = { inline_file_text: !this.openFilesEnabled };
+      }
+      if (this.#skillsDirty) {
+        update.skills = {
+          bindings: this.skillBindings
+        };
+      }
       await this.#eneo.governancePolicy.update(update);
       await invalidate("admin:governance-policy");
       this.pendingConfirm = null;
       this.saveAnnouncement = m.governance_save_success();
-    } catch (e) {
-      const err = e as { message?: string };
-      this.saveError = err.message ?? m.governance_save_error();
+    } catch (error) {
+      this.saveError = getErrorMessage(error, m.governance_save_error());
       this.saveAnnouncement = m.governance_save_failure();
     } finally {
       this.saving = false;

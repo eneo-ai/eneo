@@ -13,8 +13,16 @@ from eneo.completion_models.infrastructure.static_prompts import (
 )
 from eneo.conversations.conversation_models import PreflightResponse
 from eneo.files.file_models import FileType
+from eneo.files.file_reference import inline_file_text_for_model, url_only_file_ids
+from eneo.governance_policy.domain.policy_resolver import (
+    select_effective_completion_model,
+    select_effective_inline_file_text,
+)
 from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityPurpose,
+)
 from eneo.sessions.session import SessionUpdate
 
 if TYPE_CHECKING:
@@ -76,9 +84,9 @@ class ConversationService:
         stream: bool = False,
         tool_assistant_id: Optional["UUID"] = None,
         version: int = 1,
-        use_web_search: bool = False,
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: "list[UUID] | None" = None,
+        disabled_capabilities: list[CapabilityPurpose] | None = None,
     ) -> "AssistantResponse":
         """
         Routes a conversation request to the appropriate service based on the parameters.
@@ -137,9 +145,9 @@ class ConversationService:
                     session_id=session_id,
                     tool_assistant_id=tool_assistant_id,
                     version=version,
-                    use_web_search=use_web_search,
                     require_tool_approval=require_tool_approval,
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    disabled_capabilities=disabled_capabilities,
                 )
 
         # case 2: starting a new conversation
@@ -165,9 +173,9 @@ class ConversationService:
                     session_id=None,  # explicitly None for new conversation
                     tool_assistant_id=tool_assistant_id,
                     version=version,
-                    use_web_search=use_web_search,
                     require_tool_approval=require_tool_approval,
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    disabled_capabilities=disabled_capabilities,
                 )
             else:
                 # should never happen due to model validation, but just to be safe
@@ -196,7 +204,7 @@ class ConversationService:
         up-front. Model name and context window are echoed so the caller can
         compute percentage fill without a round-trip.
         """
-        model, selector_tokens = await self._resolve_preflight_model(
+        model, selector_tokens, inline_file_text = await self._resolve_preflight_model(
             question=question,
             session_id=session_id,
             assistant_id=assistant_id,
@@ -218,25 +226,29 @@ class ConversationService:
                 files=files,
                 model=model,
                 model_name=model_name,
+                inline_file_text=inline_file_text,
             )
 
         assistant_attachment_tokens = 0
         prompt_tokens = 0
+        skill_context_tokens = 0
         # The persistent baseline only makes sense for a bare assistant target
         # (the config page and a brand-new conversation). For an existing session
         # or group chat the prompt + attachments are already inside the history
         # the client tracks separately, so leave them at 0 and keep the hot chat
         # path cost identical to before.
         if assistant_id is not None and session_id is None and group_chat_id is None:
-            (
-                prompt_text,
-                attachments,
-            ) = await self.assistant_service.get_preflight_baseline(assistant_id)
-            if assistant_prompt is not None:
-                prompt_text = assistant_prompt
-            prompt_tokens = count_tokens(prompt_text or "", model_name)
+            baseline = await self.assistant_service.get_preflight_baseline(
+                assistant_id,
+                prompt_override=assistant_prompt,
+            )
+            prompt_tokens = baseline.prompt_tokens
+            skill_context_tokens = baseline.skill_context_tokens
+            # Assistant attachments are exempt from URL-only mode: the send
+            # path always inlines their text (they get no URL references), so
+            # count them fully regardless of inline_file_text.
             assistant_attachment_tokens, _ = await self._count_preflight_files(
-                files=attachments,
+                files=baseline.attachments,
                 model=model,
                 model_name=model_name,
             )
@@ -250,6 +262,7 @@ class ConversationService:
             context_reserve_tokens=get_settings().attachment_context_reserve_tokens,
             assistant_attachment_tokens=assistant_attachment_tokens,
             prompt_tokens=prompt_tokens,
+            skill_context_tokens=skill_context_tokens,
         )
 
     async def _count_preflight_files(
@@ -257,12 +270,20 @@ class ConversationService:
         files: "list[File]",
         model: "CompletionModel",
         model_name: str,
+        inline_file_text: bool = True,
     ) -> tuple[int, int]:
         # Document uploads (PDF/DOCX/PPTX) are TEXT-type. An image-only PDF
         # has no extractable text of its own but still yields derived vision
         # images, so key derived-image lookup on every document — not only the
         # ones with inlinable text.
         document_files = [f for f in files if f.file_type == FileType.TEXT]
+
+        # A URL-only document is sent as its signed URL (a tiny block), not its
+        # extracted text or derived images — so it must not be counted here at
+        # all and reads as excluded. Same predicate as the send path.
+        url_only = url_only_file_ids(document_files, inline_file_text)
+        if url_only:
+            document_files = [f for f in document_files if f.id not in url_only]
         image_files = (
             [f for f in files if f.file_type == FileType.IMAGE] if model.vision else []
         )
@@ -318,7 +339,7 @@ class ConversationService:
         assistant_id: Optional["UUID"],
         group_chat_id: Optional["UUID"],
         tool_assistant_id: Optional["UUID"] = None,
-    ) -> "tuple[CompletionModel, int]":
+    ) -> "tuple[CompletionModel, int, bool]":
         """Resolve the completion model the next chat request would target.
 
         Mirrors ask_conversation routing rules so the preflight count uses the
@@ -326,9 +347,14 @@ class ConversationService:
         selected by an LLM at send time, so preflight uses the smallest context
         window among the candidate assistants as a conservative projection.
 
+        Also returns the resolved assistant's ``inline_file_text`` so preflight
+        can drop URL-only file text from the count. Group chat picks an assistant
+        at send time, so it conservatively reports True (keep counting).
+
         Raises BadRequestException for the same configurations that would fail
         on actual send (no assistants in group chat, no completion model set).
         """
+        inline_file_text = True
         if session_id:
             session = await self.session_service.get_session_by_uuid(session_id)
             assert session is not None
@@ -340,14 +366,12 @@ class ConversationService:
                 )
             else:
                 assert session.assistant is not None
-                # Governance-aware: same model ask() will use, including the
-                # policy fallback when the assistant's own model is disallowed.
-                model = await self.assistant_service.get_effective_completion_model(
+                model, inline_file_text = await self._assistant_preflight_settings(
                     session.assistant.id
                 )
                 selector_tokens = 0
         elif assistant_id:
-            model = await self.assistant_service.get_effective_completion_model(
+            model, inline_file_text = await self._assistant_preflight_settings(
                 assistant_id
             )
             selector_tokens = 0
@@ -366,7 +390,34 @@ class ConversationService:
             raise BadRequestException(
                 "No completion model configured for this conversation."
             )
-        return model, selector_tokens
+        return model, selector_tokens, inline_file_text
+
+    async def _assistant_preflight_settings(
+        self, assistant_id: "UUID"
+    ) -> tuple["CompletionModel | None", bool]:
+        """Governance-aware model and file-inlining mode for one assistant.
+
+        Same resolution ask() applies — the policy model fallback when the
+        assistant's own model is disallowed, and the governed file policy —
+        so the estimate never disagrees with the actual request.
+        """
+        (
+            assistant,
+            _,
+            effective_config,
+        ) = await self.assistant_service.get_assistant_with_effective_config(
+            assistant_id
+        )
+        model = select_effective_completion_model(
+            current_model=assistant.completion_model,
+            effective_config=effective_config,
+        )
+        inline_file_text = select_effective_inline_file_text(
+            assistant.inline_file_text, effective_config
+        )
+        if model is not None:
+            inline_file_text = inline_file_text_for_model(inline_file_text, model)
+        return model, inline_file_text
 
     async def _group_chat_preflight_model(
         self,

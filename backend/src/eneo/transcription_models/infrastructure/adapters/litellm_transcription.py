@@ -12,9 +12,9 @@ from tenacity import (
 
 from eneo.files.audio import AudioFile
 from eneo.main.logging import get_logger
+from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
-    build_litellm_model_name,
     build_litellm_provider_kwargs,
 )
 
@@ -50,7 +50,10 @@ class LiteLLMTranscriptionAdapter:
         # LiteLLM requires the provider prefix to know which client to use
         # Users should set provider_type to a LiteLLM-compatible value
         # (e.g., "openai", "hosted_vllm" for OpenAI-compatible APIs)
-        self.litellm_model = build_litellm_model_name(provider_type, model.model_name)
+        self.litellm_model = resolve_model_route(
+            provider_type=provider_type,
+            model_name=model.model_name,
+        )
 
         logger.debug(
             f"[LiteLLM] Initializing transcription adapter for model: {model.name} -> {self.litellm_model}"

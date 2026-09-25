@@ -429,7 +429,7 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
     state_payload = {
         "tenant_id": str(tenant_id),
         "tenant_slug": slug,
-        "frontend_state": "",
+        "frontend_state": '{"loginMethod":"oidc","next":"/module-login?state=a%2526b"}',
         "nonce": "nonce",
         "redirect_uri": "https://old.tenant.example.com/login/callback",
         "correlation_id": "corr-123",
@@ -474,7 +474,10 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
 
     result = await federation_router.auth_callback(callback, container=container)
 
-    assert result == {"access_token": "access-token"}
+    assert result == {
+        "access_token": "access-token",
+        "frontend_state": state_payload["frontend_state"],
+    }
     assert redis_client._store == {}
 
 
@@ -585,7 +588,7 @@ async def test_auth_callback_accepts_additional_redirect_uri(monkeypatch):
     callback = CallbackRequest(code="auth-code", state=signed_state)
     result = await federation_router.auth_callback(callback, container=container)
 
-    assert result == {"access_token": "access-token"}
+    assert result == {"access_token": "access-token", "frontend_state": ""}
     assert redis_client._store == {}
 
 
@@ -887,7 +890,7 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
     result = await federation_router.auth_callback(callback, container=container)
 
     # Verify login succeeded
-    assert result == {"access_token": "access-token"}
+    assert result == {"access_token": "access-token", "frontend_state": ""}
 
     # Verify user was created in the correct tenant
     assert user_repo._created_user is not None

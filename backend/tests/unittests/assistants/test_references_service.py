@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.assistants.references import ReferencesService
-from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore, InfoBlobInDB
 from tests.fixtures import TEST_UUID
 
 
@@ -93,3 +93,109 @@ def test_concatenate_session_is_null():
     service = ReferencesService(AsyncMock(), AsyncMock())
     concatenated_session = service._concatenate_conversation("next question", None)
     assert concatenated_session == "next question"
+
+
+def _service_with_datastore():
+    datastore = MagicMock()
+    datastore.semantic_search = AsyncMock(return_value=[])
+    return ReferencesService(AsyncMock(), datastore), datastore
+
+
+def _patch_min_score(monkeypatch, min_score):
+    monkeypatch.setattr(
+        "eneo.assistants.references.get_settings",
+        lambda: MagicMock(inject_knowledge_min_score=min_score),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("version", (1, 2))
+async def test_inject_retrieval_applies_configured_relevance_floor(
+    monkeypatch, version
+):
+    _patch_min_score(monkeypatch, 0.3)
+    service, datastore = _service_with_datastore()
+
+    await service._query_datastore_if_groups_or_websites(
+        "question",
+        collections=[MagicMock(embedding_model=MagicMock())],
+        websites=[],
+        num_chunks=10,
+        version=version,
+    )
+
+    assert datastore.semantic_search.await_args.kwargs["min_score"] == 0.3
+
+
+@pytest.mark.asyncio
+async def test_relevance_floor_is_off_when_unset(monkeypatch):
+    _patch_min_score(monkeypatch, None)
+    service, datastore = _service_with_datastore()
+
+    await service._query_datastore_if_groups_or_websites(
+        "question",
+        collections=[MagicMock(embedding_model=MagicMock())],
+        websites=[],
+        num_chunks=10,
+        version=2,
+    )
+
+    assert datastore.semantic_search.await_args.kwargs["min_score"] is None
+
+
+@pytest.mark.asyncio
+async def test_info_blob_references_hydrate_original_availability_once():
+    blob_ids = [uuid4(), uuid4()]
+    repository = AsyncMock()
+    repository.get_by_ids.return_value = [
+        InfoBlobInDB(
+            id=blob_ids[0],
+            embedding_model_id=uuid4(),
+            user_id=uuid4(),
+            tenant_id=uuid4(),
+            size=10,
+            source_id=uuid4(),
+            version_state="active",
+            text="available",
+        ),
+        InfoBlobInDB(
+            id=blob_ids[1],
+            embedding_model_id=uuid4(),
+            user_id=uuid4(),
+            tenant_id=uuid4(),
+            size=12,
+            source_id=uuid4(),
+            version_state="active",
+            text="unavailable",
+        ),
+    ]
+
+    async def hydrate(blobs):
+        blobs[0].original_available = True
+        blobs[1].original_available = False
+
+    repository.hydrate_original_availability.side_effect = hydrate
+    service = ReferencesService(repository, AsyncMock())
+
+    result = await service._get_info_blobs_from_chunks(
+        [
+            _create_chunk_with_score(0.9, blob_ids[0]),
+            _create_chunk_with_score(0.8, blob_ids[1]),
+        ]
+    )
+
+    repository.get_by_ids.assert_awaited_once_with(blob_ids)
+    repository.get.assert_not_called()
+    repository.hydrate_original_availability.assert_awaited_once_with(result)
+    assert [blob.original_available for blob in result] == [True, False]
+
+
+@pytest.mark.asyncio
+async def test_info_blob_references_skip_repository_for_empty_chunks():
+    repository = AsyncMock()
+    service = ReferencesService(repository, AsyncMock())
+
+    assert await service._get_info_blobs_from_chunks([]) == []
+
+    repository.get_by_ids.assert_not_awaited()
+    repository.hydrate_original_availability.assert_not_awaited()

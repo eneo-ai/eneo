@@ -67,14 +67,24 @@ ALLOWED = [
             "backend/tests/unittests/jobs/test_job_serialization.py",
         ),
     ),
-    # Backward-compat environment variable NAMES (ENEO_* is primary, INTRIC_*
-    # is accepted until v3.0). The uppercase env-var names are a permanent
-    # survivor of the rename and may appear anywhere they are documented.
-    AllowedOccurrence(re.compile(r"INTRIC_[A-Z0-9_]*")),
-    # Migration documentation records the Intric -> Eneo migration itself and
-    # legitimately references the old product name and the legacy `@intric/*`
-    # package prefix (often to say what NOT to use). Treated like CHANGELOG
-    # history: kept verbatim rather than rewritten.
+    # Startup checks that name removed deployment variables, so an upgrade
+    # stops with the replacement instead of silently losing the value.
+    AllowedOccurrence(
+        re.compile(r"\b(?:PUBLIC_)?INTRIC_[A-Z0-9_]+\b"),
+        paths=(
+            "backend/src/eneo/main/removed_env.py",
+            "backend/tests/unit/test_removed_env.py",
+            "frontend/apps/web/src/lib/core/deploymentEnv.server.ts",
+            "frontend/apps/web/src/lib/core/deploymentEnv.server.test.ts",
+            "frontend/apps/web/src/hooks.server.init.test.ts",
+        ),
+    ),
+    # The upgrade guide maps every old name to its replacement.
+    AllowedOccurrence(
+        re.compile(r"intric", re.IGNORECASE),
+        paths=("frontend/apps/docs-site/src/content/guides/upgrade-2-2-0.mdx",),
+    ),
+    # Historical migration reviews record the old product and package names.
     AllowedOccurrence(
         re.compile(r"intric", re.IGNORECASE),
         paths=("docs/migration/*",),

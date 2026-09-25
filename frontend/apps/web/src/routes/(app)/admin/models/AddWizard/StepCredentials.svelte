@@ -11,11 +11,11 @@
 
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
-  import { ArrowLeft, Loader2 } from "lucide-svelte";
+  import { ArrowLeft, LoaderCircle } from "@lucide/svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import { toastError } from "$lib/core/errors";
+  import { getErrorMessage, toastError } from "$lib/core/errors";
 
   import { Input } from "$lib/components/ui/input/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -109,7 +109,7 @@
       toast.success(m.provider_created_success());
       onComplete({ providerId: provider.id });
     } catch (e: unknown) {
-      error = e instanceof Error ? e.message : m.failed_to_create_provider();
+      error = getErrorMessage(e);
       toastError(e, m.failed_to_create_provider());
     } finally {
       isSubmitting = false;
@@ -183,7 +183,7 @@
 
     <Button type="button" onclick={() => void submit()} disabled={!isValid || isSubmitting}>
       {#if isSubmitting}
-        <Loader2 class="animate-spin" aria-hidden="true" />
+        <LoaderCircle class="animate-spin" aria-hidden="true" />
         {m.creating()}
       {:else}
         {m.create_and_continue()}

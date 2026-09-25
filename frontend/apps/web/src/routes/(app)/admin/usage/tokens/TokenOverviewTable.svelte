@@ -6,8 +6,8 @@
 
 <script lang="ts">
   import type { TokenUsageSummary } from "@eneo/eneo-js";
-  import { createRender } from "svelte-headless-table";
-  import { Button, Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import ModelNameAndVendor from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
   import { m } from "$lib/paraglide/messages";
@@ -24,8 +24,6 @@
 
   let showAllItems = false;
 
-  $: visibleItems = showAllItems ? models : models.slice(0, 10);
-
   function estimateCostText(modelId: string, inputTokens: number, outputTokens: number): string {
     const rates = costRates.get(modelId);
     if (!rates) return "–";
@@ -33,14 +31,14 @@
     return formatCostUSD(cost);
   }
 
-  const table = Table.createWithResource(visibleItems);
+  const table = Table.createWithResource(models, 10);
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
       header: "Name",
       value: (item) => item.model_nickname,
       cell: (item) => {
-        return createRender(ModelNameAndVendor, {
+        return Table.renderComponent(ModelNameAndVendor, {
           model: {
             name: item.value.model_name,
             nickname: item.value.model_nickname,
@@ -73,7 +71,7 @@
       header: m.estimated_cost(),
       accessor: (item) => item,
       cell: (item) =>
-        createRender(EstimatedCostCell, {
+        Table.renderComponent(EstimatedCostCell, {
           label: estimateCostText(
             item.value.model_id,
             item.value.input_token_usage,
@@ -94,15 +92,16 @@
     })
   ]);
 
-  $: table.update(visibleItems);
+  $: table.update(models);
+  $: viewModel.pluginStates.page.pageSize.set(showAllItems ? Math.max(models.length, 10) : 10);
 </script>
 
 <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list"></Table.Root>
 {#if models.length > 10}
   <Button
-    variant="outlined"
+    variant="outline"
     class="h-12"
-    on:click={() => {
+    onclick={() => {
       showAllItems = !showAllItems;
     }}
     >{showAllItems ? m.show_only_10_models() : m.show_all_models({ count: models.length })}</Button

@@ -5,53 +5,29 @@
 -->
 
 <script lang="ts">
-  import { IconSearch } from "@eneo/icons/search";
-  import { Button, Dialog, Select } from "@eneo/ui";
+  import { IconPeople } from "@eneo/icons/people";
+  import type { UserGroup } from "@eneo/eneo-js";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import type { UserGroup } from "@eneo/eneo-js";
-  import { createCombobox } from "@melt-ui/svelte";
-  import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte.ts";
+  import AddSpaceMemberDialog from "$lib/features/spaces/components/AddSpaceMemberDialog.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { toastError } from "$lib/core/errors";
-  import { IconPeople } from "@eneo/icons/people";
 
+  const eneo = getEneo();
   const {
-    refreshCurrentSpace,
     state: { currentSpace }
   } = getSpacesManager();
 
-  const {
-    elements: { menu, input, option, label },
-    states: { open, inputValue, selected }
-  } = createCombobox<UserGroup>({
-    portal: null,
-    positioning: {
-      sameWidth: true,
-      fitViewport: true,
-      placement: "bottom"
-    }
-  });
-
+  let open = $state(false);
+  let filter = $state("");
   let userGroups = $state<UserGroup[]>([]);
-  let filteredGroups = $derived(
-    userGroups.filter((group) => group.name.toLowerCase().includes($inputValue.toLowerCase()))
+  const filteredGroups = $derived(
+    userGroups.filter((group) => group.name.toLowerCase().includes(filter.toLowerCase()))
   );
-  let selectedRole = $state.raw($currentSpace.available_roles[0]);
-  const existingGroupIds = $derived($currentSpace.group_members?.items?.map((g) => g.id) ?? []);
-  const eneo = getEneo();
-  let inputElement: HTMLInputElement;
-  let showDialog = $state<Dialog.OpenState>();
+  const groupIds = $derived($currentSpace.group_members?.items?.map((group) => group.id) ?? []);
 
   $effect(() => {
-    if (showDialog) {
+    if (open) {
       loadUserGroups();
-    }
-  });
-
-  open.subscribe((isOpen) => {
-    if (!isOpen) {
-      $inputValue = $selected?.value.name ?? "";
     }
   });
 
@@ -63,115 +39,29 @@
       userGroups = [];
     }
   }
-
-  const addGroupMember = createAsyncState(async () => {
-    const selectedGroup = $selected?.value;
-    if (!selectedGroup) return;
-    try {
-      await eneo.spaces.groupMembers.add({
-        spaceId: $currentSpace.id,
-        group: { id: selectedGroup.id, role: selectedRole.value }
-      });
-      refreshCurrentSpace();
-      $showDialog = false;
-      $selected = undefined;
-    } catch (e) {
-      toastError(e, m.could_not_add_group());
-      console.error(e);
-    }
-  });
 </script>
 
-<Dialog.Root bind:isOpen={showDialog}>
-  <Dialog.Trigger asFragment let:trigger>
-    <Button variant="primary" is={trigger}>{m.add_group()}</Button>
-  </Dialog.Trigger>
-
-  <Dialog.Content width="medium" form>
-    <Dialog.Title>{m.add_group_to_space()}</Dialog.Title>
-
-    <Dialog.Section scrollable={false}>
-      <div class="hover:bg-hover-dimmer flex items-center rounded-md">
-        <div class="flex flex-grow flex-col gap-1 rounded-md pt-2 pr-2 pb-4 pl-4">
-          <div>
-            <label use:label {...$label} class="pl-3 font-medium">{m.user_group()}</label>
-          </div>
-
-          <div class="relative flex flex-grow">
-            <input
-              bind:this={inputElement}
-              placeholder={m.find_group()}
-              {...$input}
-              required
-              use:input
-              class="border-stronger bg-primary ring-default placeholder:text-secondary disabled:bg-secondary disabled:text-muted relative
-            h-10 w-full items-center justify-between overflow-hidden rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2 disabled:shadow-none disabled:hover:ring-0"
-            />
-            <button
-              onclick={() => {
-                inputElement.focus();
-                $open = true;
-              }}
-            >
-              <IconSearch class="absolute top-2 right-4" />
-            </button>
-          </div>
-          <ul
-            class="shadow-bg-secondary border-stronger bg-primary relative z-10 flex flex-col gap-1 overflow-y-auto rounded-lg border p-1 shadow-md focus:!ring-0"
-            {...$menu}
-            use:menu
-          >
-            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-            <div class="bg-primary text-primary flex flex-col gap-0" tabindex="0">
-              {#if filteredGroups.length > 0}
-                {#each filteredGroups as group (group.id)}
-                  {@const isMember = existingGroupIds.includes(group.id)}
-                  <li
-                    {...$option({
-                      value: group,
-                      label: group.name,
-                      disabled: isMember
-                    })}
-                    use:option
-                    class="hover:bg-hover-default data-[highlighted]:bg-secondary flex items-center gap-1 rounded-md px-2 py-1 hover:cursor-pointer data-[disabled]:pointer-events-none data-[disabled]:!cursor-not-allowed data-[disabled]:opacity-30 data-[disabled]:hover:bg-transparent"
-                    class:opacity-70={isMember}
-                  >
-                    <div class="flex w-full items-center gap-2 px-2 py-1">
-                      <IconPeople class="text-secondary h-5 w-5" />
-                      <span class="text-primary truncate">
-                        {group.name}
-                      </span>
-                      {#if isMember}
-                        <span class="text-muted text-sm">({m.already_added()})</span>
-                      {/if}
-                    </div>
-                  </li>
-                {/each}
-              {:else if userGroups.length === 0}
-                <span class="text-secondary px-2 py-1">{m.no_user_groups_found()}</span>
-              {:else}
-                <span class="text-secondary px-2 py-1">{m.no_matching_groups_found()}</span>
-              {/if}
-            </div>
-          </ul>
-        </div>
-        <Select.Simple
-          fitViewport={true}
-          class="w-1/3 p-4 pl-2"
-          options={$currentSpace.available_roles.map((role) => {
-            return { label: role.label, value: role };
-          })}
-          bind:value={selectedRole}>{m.role()}</Select.Simple
-        >
-      </div>
-    </Dialog.Section>
-
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-
-      <Button variant="primary" on:click={addGroupMember} type="submit"
-        >{addGroupMember.isLoading ? m.adding() : m.add_group()}</Button
-      >
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+<AddSpaceMemberDialog
+  bind:open
+  bind:filter
+  triggerLabel={m.add_group()}
+  title={m.add_group_to_space()}
+  fieldLabel={m.user_group()}
+  searchPlaceholder={m.find_group()}
+  submitLabel={m.add_group()}
+  errorContext={m.could_not_add_group()}
+  emptyMessage={userGroups.length === 0 ? m.no_user_groups_found() : m.no_matching_groups_found()}
+  items={filteredGroups}
+  addedIds={groupIds}
+  getLabel={(group) => group.name}
+  onAdd={(group, role) =>
+    eneo.spaces.groupMembers.add({ spaceId: $currentSpace.id, group: { id: group.id, role } })}
+>
+  {#snippet row(group, added)}
+    <IconPeople class="text-secondary h-5 w-5" />
+    <span class="text-primary truncate">{group.name}</span>
+    {#if added}
+      <span class="text-muted text-sm">({m.already_added()})</span>
+    {/if}
+  {/snippet}
+</AddSpaceMemberDialog>

@@ -71,3 +71,7 @@ cd /workspace/frontend
 find node_modules -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
 rm -rf packages/*/node_modules apps/*/node_modules
 bun run setup
+
+# Vitest browser mode needs Chromium and its Linux libraries.
+cd /workspace/frontend/apps/web
+bun x playwright install --with-deps chromium chromium-headless-shell

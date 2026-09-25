@@ -27,7 +27,6 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelLegacy
 from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.completion_models.domain.completion_model import CompletionModel
-from eneo.completion_models.infrastructure.web_search import WebSearchResult
 from eneo.files.file_models import File, FilePublic, FileRestrictions
 from eneo.groups_legacy.api.group_models import GroupInDBBase
 from eneo.info_blobs.info_blob import InfoBlobInDBWithScore
@@ -41,9 +40,14 @@ from eneo.main.models import (
     ResourcePermissionsMixin,
     partial_model,
 )
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityAvailability,
+    CapabilityPurpose,
+)
 from eneo.prompts.api.prompt_models import PromptCreate, PromptPublic
 from eneo.questions.question import UseTools
 from eneo.sessions.session import SessionInDB
+from eneo.skills.presentation.skill_models import AssistantSkillBindingInput
 from eneo.users.user import UserSparse
 from eneo.websites.presentation.website_models import WebsitePublic
 
@@ -51,6 +55,18 @@ from eneo.websites.presentation.website_models import WebsitePublic
 class AssistantType(str, Enum):
     ASSISTANT = "assistant"
     DEFAULT_ASSISTANT = "default-assistant"
+
+
+class KnowledgeMode(str, Enum):
+    """How attached knowledge reaches the model.
+
+    TOOL exposes knowledge as a searchable MCP tool the model calls on demand;
+    INJECT retrieves on every turn and packs chunks into the prompt (legacy
+    behavior, also the runtime fallback for models without tool calling).
+    """
+
+    TOOL = "tool"
+    INJECT = "inject"
 
 
 class ModelInfo(BaseModel):
@@ -86,6 +102,9 @@ class MCPServerPublicDict(TypedDict):
     description: str | None
     http_url: str | None
     http_auth_type: str | None
+    purpose: str
+    is_enabled: bool
+    readiness_reason: str | None
     tags: list[str] | None
     icon_url: str | None
     security_classification: dict[str, object] | None
@@ -109,6 +128,15 @@ def _empty_mcp_tool_reference_list() -> list[McpToolReference]:
 
 
 class EffectiveConfigPublic(BaseModel):
+    available_capabilities: list[CapabilityAvailability] = Field(
+        default_factory=list[CapabilityAvailability]
+    )
+    enabled_capabilities: list[CapabilityPurpose] = Field(
+        default_factory=list[CapabilityPurpose]
+    )
+    default_disabled_capabilities: list[CapabilityPurpose] = Field(
+        default_factory=list[CapabilityPurpose]
+    )
     """Frontend hint surface for personal-assistant governance.
 
     Only meaningful on default assistants in personal spaces. `prompt_locked`
@@ -130,6 +158,8 @@ class EffectiveConfigPublic(BaseModel):
         default_factory=_empty_uuid_list
     )
     prompt_locked: bool
+    default_reasoning_effort: str | None
+    reasoning_effort_user_configurable: bool
 
 
 class AssistantBase(BaseModel):
@@ -156,6 +186,7 @@ _DEPRECATED_JSON_SCHEMA: dict[str, JsonValue] = {"deprecated": True}
 # attached to a `Field()` on a Union (incl. Optional). Routing the flag through
 # `json_schema_extra` keeps the OpenAPI spec marking the field deprecated.
 class AssistantCreatePublic(AssistantBase):
+    enabled_capabilities: list[CapabilityPurpose] | None = None
     space_id: UUID
     prompt: Optional[PromptCreate] = Field(
         default=None,
@@ -206,6 +237,7 @@ class AssistantCreatePublic(AssistantBase):
 
 @partial_model
 class AssistantUpdatePublic(AssistantCreatePublic):
+    enabled_capabilities: list[CapabilityPurpose] | None = None
     prompt: Optional[PromptCreate] = None
     attachments: Optional[list[ModelId]] = None
     groups: Optional[list[ModelId]] = None  # type: ignore[assignment]
@@ -228,6 +260,22 @@ class AssistantUpdatePublic(AssistantCreatePublic):
             "appropriate permissions can see all sessions for this assistant."
         ),
     )
+    inline_file_text: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Whether to inline attached file text into the prompt. When False, a file "
+            "whose original is available via signed URL is surfaced as that URL only "
+            "(e.g. to avoid large files blowing the context window)."
+        ),
+    )
+    knowledge_mode: Optional[KnowledgeMode] = Field(
+        default=None,
+        description=(
+            "How attached knowledge reaches the model: 'tool' exposes it as a "
+            "searchable MCP tool the model calls on demand; 'inject' retrieves on "
+            "every turn and packs results into the prompt."
+        ),
+    )
     data_retention_days: Optional[int] = None
     metadata_json: Union[dict[str, object], None, NotProvided] = Field(
         default=NOT_PROVIDED,
@@ -237,6 +285,7 @@ class AssistantUpdatePublic(AssistantCreatePublic):
         default=NOT_PROVIDED,
         description="Icon ID referencing an uploaded icon. Set to null to remove.",
     )
+    skill_bindings: Optional[list[AssistantSkillBindingInput]] = None
 
 
 class AssistantCreate(AssistantBase):
@@ -267,6 +316,10 @@ class AssistantPublicBase(InDB):
 
 
 class AskAssistant(BaseModel):
+    disabled_capabilities: list[CapabilityPurpose] = Field(
+        default_factory=list[CapabilityPurpose]
+    )
+    disabled_mcp_server_ids: list[UUID] = Field(default_factory=list[UUID])
     question: str
     session_id: Optional[UUID] = None  # Add optional session_id field
     files: list[UUID] = Field(default_factory=_empty_uuid_list)
@@ -285,7 +338,6 @@ class AssistantResponse(BaseModel):
     info_blobs: list[InfoBlobInDBWithScore]
     completion_model: CompletionModel | CompletionModelPublic
     tools: UseTools
-    web_search_results: list[WebSearchResult]
     mcp_tool_references: list[McpToolReference] = Field(
         default_factory=_empty_mcp_tool_reference_list
     )
@@ -314,6 +366,12 @@ class AssistantSparse(ResourcePermissionsMixin, AssistantBase, InDB):
 
 
 class AssistantPublic(InDB, ResourcePermissionsMixin):
+    enabled_capabilities: list[CapabilityPurpose] = Field(
+        default_factory=list[CapabilityPurpose]
+    )
+    available_capabilities: list[CapabilityAvailability] = Field(
+        default_factory=list[CapabilityAvailability]
+    )
     name: str
     prompt: Optional[PromptPublic] = None
     space_id: UUID
@@ -354,6 +412,19 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
             "appropriate permissions can see all sessions for this assistant."
         ),
     )
+    inline_file_text: bool = Field(
+        description=(
+            "Whether attached file text is inlined into the prompt (True) or the file "
+            "is surfaced to the model as a signed URL only (False)."
+        ),
+    )
+    knowledge_mode: KnowledgeMode = Field(
+        description=(
+            "How attached knowledge reaches the model: 'tool' (searchable MCP tool, "
+            "called on demand) or 'inject' (retrieved and packed into the prompt on "
+            "every turn)."
+        ),
+    )
     data_retention_days: Optional[int] = Field(
         default=None,
         description="Number of days to retain data for this assistant",
@@ -384,6 +455,8 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
 class DefaultAssistant(AssistantPublic):
     completion_model: Optional[CompletionModelSparse] = None
     insight_enabled: bool = False
+    inline_file_text: bool = True
+    knowledge_mode: KnowledgeMode = KnowledgeMode.INJECT
 
 
 SessionInDB.model_rebuild()

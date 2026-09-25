@@ -1,6 +1,6 @@
 <script lang="ts">
   import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
-  import AttachmentUploadTextButton from "$lib/features/attachments/components/AttachmentUploadTextButton.svelte";
+  import AttachmentDropzone from "$lib/features/attachments/components/AttachmentDropzone.svelte";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { getEneo } from "$lib/core/Eneo";
   import AttachmentItem from "$lib/features/attachments/components/AttachmentItem.svelte";
@@ -11,7 +11,7 @@
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import WizardBackdrop from "./WizardBackdrop.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { BookOpen, FileUp } from "lucide-svelte";
+  import { BookOpen, FileUp } from "@lucide/svelte";
 
   const {
     state: { selectedAttachments, selectedCollections, selectedTemplate }
@@ -86,7 +86,7 @@
               {#each $attachments as attachment (attachment.id)}
                 <AttachmentItem {attachment} borderOnLastItem></AttachmentItem>
               {/each}
-              <AttachmentUploadTextButton></AttachmentUploadTextButton>
+              <AttachmentDropzone></AttachmentDropzone>
             </div>
           </div>
         {/if}

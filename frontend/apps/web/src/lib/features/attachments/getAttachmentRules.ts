@@ -1,9 +1,17 @@
 import { getAppContext } from "$lib/core/AppContext";
 import type { Limits, App } from "@eneo/eneo-js";
 import { derived, type Readable } from "svelte/store";
-import type { AttachmentRules } from "./AttachmentManager";
+import type { AcceptedFormat, AttachmentRules } from "./AttachmentManager";
 
-type Resource = { completion_model?: { vision: boolean } | null };
+type Resource = {
+  completion_model?: { vision: boolean } | null;
+  /**
+   * Whether image uploads are accepted regardless of the completion model's
+   * vision support, e.g. because an image tool can take them as input.
+   * Defaults to the model's vision support.
+   */
+  acceptsImageAttachments?: boolean;
+};
 
 /**
  * Get eneo's default attachment limits based on a resource's capabilites,
@@ -29,20 +37,30 @@ export function getAttachmentRules(params: {
 }): AttachmentRules {
   const { limits, resource } = params;
 
+  const acceptsImages = resource.acceptsImageAttachments ?? resource.completion_model?.vision;
   const formats = limits.attachments.formats.filter((format) =>
-    format.vision ? resource.completion_model?.vision : true
+    format.vision ? acceptsImages : true
   );
 
   return {
     maxTotalCount: Infinity,
-    acceptedFormats: formats.map(({ mimetype, size }) => {
-      return {
-        mimetype,
-        maxSize: size
-      };
-    }),
+    acceptedFormats: acceptedFormatsFromLimits(formats),
     acceptString: formats.map((f) => f.mimetype).join(",")
   };
+}
+
+/**
+ * Adapt the backend's limit entries (`limits.attachments.formats`,
+ * `limits.info_blobs.formats`) to the shape the attachment components consume.
+ */
+export function acceptedFormatsFromLimits(
+  formats: readonly Limits["attachments"]["formats"][number][]
+): AcceptedFormat[] {
+  return formats.map(({ mimetype, size, extensions }) => ({
+    mimetype,
+    maxSize: size,
+    extensions
+  }));
 }
 
 /**
@@ -64,6 +82,7 @@ export function getExplicitAttachmentRules(rules: {
   accepted_file_types: {
     mimetype: string;
     size_limit: number;
+    extensions: string[];
   }[];
   limit: {
     max_files: number;
@@ -74,10 +93,11 @@ export function getExplicitAttachmentRules(rules: {
     maxTotalCount: rules?.limit.max_files ?? undefined,
     maxTotalSize: rules?.limit.max_size ?? undefined,
     acceptedFormats:
-      rules?.accepted_file_types.map(({ mimetype, size_limit }) => {
+      rules?.accepted_file_types.map(({ mimetype, size_limit, extensions }) => {
         return {
           mimetype,
-          maxSize: size_limit
+          maxSize: size_limit,
+          extensions
         };
       }) ?? undefined,
     acceptString: rules?.accepted_file_types.map(({ mimetype }) => mimetype).join(",") ?? undefined

@@ -46,7 +46,6 @@ from tests.unit.api_key_test_utils import route_dependency_callables, runtime_ap
 # and are NOT in EXCEPTION_MAP.
 AUTH_DEP_CODES: dict[str, int] = {
     "authenticate_super_api_key": 401,
-    "authenticate_super_duper_api_key": 401,
     "require_scim_auth": 401,
     "require_user_for_creation": 403,
     "require_user_identity": 403,

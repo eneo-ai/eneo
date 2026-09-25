@@ -1,6 +1,10 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
 from eneo.governance_policy.domain.governance_policy import (
     GovernancePolicy,
     PolicyCompletionModel,
@@ -11,6 +15,13 @@ from eneo.governance_policy.domain.policy_resolver import (
     EffectiveConfig,
     resolve,
     select_effective_completion_model,
+    select_effective_inline_file_text,
+    select_effective_reasoning_effort,
+)
+from eneo.skills.domain.skill import (
+    ResolvedSkillBinding,
+    SkillBindingSource,
+    SkillRuntimeResolution,
 )
 
 
@@ -81,6 +92,194 @@ def test_no_policy_returns_all_disabled():
     assert cfg.models_enforced is False
     assert cfg.mcp_enforced is False
     assert cfg.prompt_enforced is False
+
+
+def test_personal_default_projects_reasoning_governance():
+    policy = _empty_policy()
+    policy.set_reasoning_policy(default_effort="medium", allow_user_override=True)
+
+    cfg = resolve(
+        assistant=_mk_assistant(),
+        space_is_personal=True,
+        policy=policy,
+        tenant_completion_models=[],
+        tenant_mcp_servers=[],
+        library_prompt_text=None,
+    )
+
+    assert cfg.default_reasoning_effort == "medium"
+    assert cfg.reasoning_effort_user_configurable is True
+    assert cfg.reasoning_policy_configured is True
+
+
+def test_personal_default_projects_file_policy():
+    policy = _empty_policy()
+    policy.set_file_policy(inline_file_text=False)
+
+    cfg = resolve(
+        assistant=_mk_assistant(),
+        space_is_personal=True,
+        policy=policy,
+        tenant_completion_models=[],
+        tenant_mcp_servers=[],
+        library_prompt_text=None,
+    )
+
+    assert cfg.inline_file_text is False
+
+
+def test_ungoverned_file_policy_keeps_the_assistant_flag():
+    cfg = resolve(
+        assistant=_mk_assistant(),
+        space_is_personal=True,
+        policy=_empty_policy(),
+        tenant_completion_models=[],
+        tenant_mcp_servers=[],
+        library_prompt_text=None,
+    )
+
+    assert cfg.inline_file_text is None
+    assert select_effective_inline_file_text(True, cfg) is True
+    assert select_effective_inline_file_text(False, cfg) is False
+    assert select_effective_inline_file_text(False, None) is False
+
+
+def test_governed_file_policy_replaces_the_assistant_flag():
+    cfg = EffectiveConfig(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        inline_file_text=False,
+    )
+
+    assert select_effective_inline_file_text(True, cfg) is False
+
+
+def test_explicit_provider_default_suppresses_a_stale_user_choice():
+    supported_model_kwargs = SupportedModelKwargs(
+        reasoning_effort=ModelKwargCapability(
+            supported=True,
+            control="select",
+            options=["low", "medium", "high"],
+        )
+    )
+    model = SimpleNamespace(get_supported_model_kwargs=lambda: supported_model_kwargs)
+    config = EffectiveConfig(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        reasoning_policy_configured=True,
+        default_reasoning_effort=None,
+        reasoning_effort_user_configurable=False,
+    )
+
+    assert (
+        select_effective_reasoning_effort(
+            selected_model=model,
+            stored_effort="high",
+            effective_config=config,
+        )
+        is None
+    )
+
+
+def test_reasoning_effort_uses_user_choice_only_when_supported_and_allowed():
+    supported_model_kwargs = SupportedModelKwargs(
+        reasoning_effort=ModelKwargCapability(
+            supported=True,
+            control="select",
+            options=["low", "medium", "high"],
+        )
+    )
+    model = SimpleNamespace(get_supported_model_kwargs=lambda: supported_model_kwargs)
+    config = EffectiveConfig(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        default_reasoning_effort="medium",
+        reasoning_effort_user_configurable=True,
+    )
+
+    assert (
+        select_effective_reasoning_effort(
+            selected_model=model,
+            stored_effort="high",
+            effective_config=config,
+        )
+        == "high"
+    )
+    assert (
+        select_effective_reasoning_effort(
+            selected_model=model,
+            stored_effort="xhigh",
+            effective_config=config,
+        )
+        == "medium"
+    )
+    assert (
+        select_effective_reasoning_effort(
+            selected_model=model,
+            stored_effort=None,
+            effective_config=config,
+        )
+        == "medium"
+    )
+
+
+def test_personal_default_carries_governance_skill_bindings_with_enforced_prompt():
+    policy = _empty_policy()
+    policy.prompt_enforcement_enabled = True
+    policy.default_prompt_library_id = uuid4()
+    binding = ResolvedSkillBinding(
+        skill_id=uuid4(),
+        skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
+        slug="payroll",
+        revision_number=2,
+        current_revision_number=2,
+        display_name="Payroll",
+        description="Answers payroll questions",
+        instructions="Use the payroll handbook.",
+        content_digest="a" * 64,
+        position=0,
+        source=SkillBindingSource.ORGANIZATION,
+    )
+
+    cfg = resolve(
+        assistant=_mk_assistant(),
+        space_is_personal=True,
+        policy=policy,
+        tenant_completion_models=[],
+        tenant_mcp_servers=[],
+        library_prompt_text="Enforced tenant prompt",
+        governance_skill_resolution=SkillRuntimeResolution(
+            eligible=(binding,),
+            blocked=(),
+        ),
+    )
+
+    assert cfg.prompt_enforced is True
+    assert cfg.enforced_prompt_text == "Enforced tenant prompt"
+    assert cfg.governance_skill_resolution == SkillRuntimeResolution(
+        eligible=(binding,),
+        blocked=(),
+    )
 
 
 def test_models_disabled_means_no_filtering_even_with_m2m_rows():
@@ -438,3 +637,29 @@ def test_select_model_none_current_falls_back_to_allowed():
 def test_select_model_enforced_empty_whitelist_returns_none():
     cfg = _eff_config(available_models=[])
     assert select_effective_completion_model(_mk_model(), cfg) is None
+
+
+def test_capability_intent_and_default_survive_without_any_provider():
+    from eneo.governance_policy.domain.governance_policy import PolicyCapability
+
+    policy = _empty_policy()
+    policy.set_mcp_restriction(
+        enabled=True,
+        servers=[],
+        disabled_tool_ids=[],
+        capabilities=[
+            PolicyCapability(purpose="image_generation", is_default_enabled=False)
+        ],
+    )
+    cfg = resolve(
+        assistant=_mk_assistant(),
+        space_is_personal=True,
+        policy=policy,
+        tenant_completion_models=[],
+        tenant_mcp_servers=[],
+        library_prompt_text=None,
+    )
+    assert cfg.enabled_capabilities == ["image_generation"]
+    assert cfg.default_disabled_capabilities == ["image_generation"]
+    assert cfg.available_capabilities[0].available is False
+    assert cfg.available_mcp_servers == []

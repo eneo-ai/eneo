@@ -10,6 +10,9 @@ export const load = async (event) => {
   const [models, security, mcpServers] = await Promise.all([
     eneo.models.list({ space: currentSpace }),
     eneo.securityClassifications.list(),
+    // All purposes: the web-search provider flows through the same
+    // admin -> space -> assistant inheritance chain as general servers and is
+    // grouped separately in the settings UI.
     eneo.mcpServers.listSettings()
   ]);
 
@@ -22,6 +25,7 @@ export const load = async (event) => {
       description: server.description,
       http_url: server.http_url,
       http_auth_type: server.http_auth_type,
+      purpose: server.purpose ?? "general",
       tags: server.tags,
       icon_url: server.icon_url,
       security_classification: server.security_classification ?? null,

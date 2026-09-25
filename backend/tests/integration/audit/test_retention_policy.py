@@ -1,8 +1,9 @@
 """Integration tests for audit log retention policy."""
 
-import pytest
 from datetime import datetime, timedelta
 from uuid import uuid4
+
+import pytest
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.application.retention_service import RetentionService
@@ -113,8 +114,9 @@ async def test_purge_old_logs(db_session, test_tenant, test_user):
 
     # Second session: Update old log timestamp
     async with db_session() as session:
-        from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
         from sqlalchemy import update
+
+        from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 
         old_timestamp = datetime.utcnow() - timedelta(days=100)
         query = (

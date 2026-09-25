@@ -1,4 +1,4 @@
-import { EneoError } from "@eneo/eneo-js";
+import { EneoError, type EneoErrorCode } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
 /**
@@ -19,12 +19,26 @@ import { m } from "$lib/paraglide/messages";
  * Error codes are defined in: backend/src/eneo/main/exceptions.py → ErrorCodes enum
  * The @unique decorator on ErrorCodes guarantees no duplicate codes exist.
  */
-const ERROR_CODE_MESSAGES: Record<number, () => string> = {
+/**
+ * The reviewed execution block was released or replaced before this unblock was
+ * applied. Exported because the recovery — re-read the block and show the live
+ * state — is a decision, not just a message.
+ */
+export const SKILL_EXECUTION_BLOCK_CONFLICT: EneoErrorCode = 9052;
+export const SKILL_STILL_ATTACHED: EneoErrorCode = 9051;
+
+// Keyed on the generated code union, so a code the backend does not define
+// fails to compile instead of mapping a message nothing can ever reach.
+const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   // --- Authorization & authentication ---
   9001: () => m.eneo_error_9001(), // UNAUTHORIZED
   9005: () => m.eneo_error_9005(), // AUTHENTICATION_ERROR
   9019: () => m.eneo_error_9019(), // USER_INACTIVE
   9025: () => m.eneo_error_9025(), // TENANT_SUSPENDED
+  9061: () => m.eneo_error_9061(), // CURRENT_PASSWORD_INCORRECT
+  9058: () => m.eneo_error_9058(), // PASSWORD_REUSE
+  9059: () => m.eneo_error_9059(), // PASSWORD_POLICY_VIOLATION
+  9060: () => m.eneo_error_9060(), // LOCAL_PASSWORD_CHANGE_UNAVAILABLE
 
   // --- Model & provider issues ---
   9002: () => m.eneo_error_9002(), // UNSUPPORTED_MODEL
@@ -37,6 +51,7 @@ const ERROR_CODE_MESSAGES: Record<number, () => string> = {
   9036: () => m.eneo_error_9036(), // MCP_UPSTREAM_ERROR
   9037: () => m.eneo_error_9037(), // MCP_UPSTREAM_AUTH_ERROR
   9017: () => m.eneo_error_9017(), // NAME_COLLISION (duplicate display name)
+  9042: () => m.eneo_error_9042(), // ENCRYPTION_NOT_CONFIGURED
 
   // --- AI service errors ---
   9008: () => m.eneo_error_9008(), // QUOTA_EXCEEDED
@@ -47,8 +62,26 @@ const ERROR_CODE_MESSAGES: Record<number, () => string> = {
   9024: () => m.eneo_error_9024(), // INTERNAL_SERVER_ERROR
   9038: () => m.eneo_error_9038(), // RESOURCE_NOT_READY
 
+  // --- File uploads ---
+  9056: () => m.eneo_error_9056(), // INVALID_FILENAME
+  9057: () => m.eneo_error_9057(), // INFO_BLOB_ORIGINAL_UNAVAILABLE
+
   // --- Model lifecycle ---
-  9039: () => m.eneo_error_9039() // MODEL_IN_USE
+  9039: () => m.eneo_error_9039(), // MODEL_IN_USE
+
+  // --- Concurrent changes ---
+  9043: () => m.eneo_error_9043(), // SKILL_REVISION_CONFLICT
+  9052: () => m.eneo_error_9052(), // SKILL_EXECUTION_BLOCK_CONFLICT
+  9055: () => m.eneo_error_9055(), // SKILL_RUNTIME_POLICY_CHANGED
+
+  // --- Skill lifecycle ---
+  9048: () => m.eneo_error_9048(), // SKILL_SLUG_TAKEN
+  9049: () => m.eneo_error_9049(), // SKILL_PUBLISHED_NOT_DELETABLE
+  9050: () => m.eneo_error_9050(), // SKILL_IN_USE_BY_APP_RUN
+  9051: () => m.eneo_error_9051(), // SKILL_STILL_ATTACHED
+  9053: () => m.eneo_error_9053(), // SKILL_NOT_PUBLISHED_FOR_BINDING
+  9054: () => m.eneo_error_9054(), // SKILL_BLOCKED_FOR_BINDING
+  9062: () => m.eneo_error_9062() // SKILL_REMOVAL_BUSY
 };
 
 /**
@@ -57,20 +90,38 @@ const ERROR_CODE_MESSAGES: Record<number, () => string> = {
  * Resolution order:
  * 1. Eneo backend error with a mapped error code → localized i18n message
  * 2. Eneo backend error without mapping → backend's readable message (English fallback)
- * 3. Other errors → generic localized fallback ("Something went wrong")
+ * 3. Other errors → `fallback`, or the generic "Something went wrong"
+ *
+ * Pass `fallback` when the call site knows what failed — "The Skill could not be
+ * deleted" beats "Something went wrong" for a network error or a thrown string.
+ * Writing `getErrorMessage(error) || specific()` does not work: this never
+ * returns an empty string, so that branch is dead.
  *
  * Use toastError() to show the message directly as a toast notification.
  */
-export function getErrorMessage(error: unknown): string {
+export function getErrorMessage(error: unknown, fallback?: string): string {
   if (error instanceof EneoError) {
-    const mapped = ERROR_CODE_MESSAGES[error.code];
+    const mapped = getErrorCodeMessage(error.code);
     if (mapped) {
-      return mapped();
+      return mapped;
     }
     const readable = error.getReadableMessage();
     if (readable) {
       return readable;
     }
   }
-  return m.request_failed();
+  return fallback ?? m.request_failed();
+}
+
+/**
+ * Localized message for a backend error code alone.
+ *
+ * Use it where the EneoError itself is gone — SvelteKit serializes errors to
+ * `App.Error` before the error page sees them, so the page has the code and the
+ * backend's English message but not the error object.
+ *
+ * @returns The localized message, or undefined when the code has no mapping.
+ */
+export function getErrorCodeMessage(code: EneoErrorCode): string | undefined {
+  return ERROR_CODE_MESSAGES[code]?.();
 }

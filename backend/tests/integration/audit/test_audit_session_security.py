@@ -1,8 +1,8 @@
 """Integration tests for audit session security improvements."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
+import pytest
 import redis.exceptions
 
 from eneo.audit.infrastructure.audit_session_service import AuditSessionService

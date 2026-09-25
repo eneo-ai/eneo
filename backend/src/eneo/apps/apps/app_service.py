@@ -1,20 +1,39 @@
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Optional, Union
 from uuid import UUID
 
-from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.ai_models.completion_models.completion_model import (
+    CompletionModelResponse,
+    ModelKwargs,
+)
 from eneo.apps.apps.api.app_models import InputField, InputFieldType
-from eneo.apps.apps.app import App
+from eneo.apps.apps.app import App, AppContextValidationInput
 from eneo.apps.apps.app_factory import AppFactory
 from eneo.apps.apps.app_repo import AppRepository
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
+from eneo.files.attachment_budget import assert_prompt_and_files_fit_context
+from eneo.files.file_models import File
 from eneo.files.file_service import FileService
 from eneo.files.transcriber import Transcriber
 from eneo.icons.icon_repo import IconRepository
-from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from eneo.main.logging import get_logger
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, ResourcePermission
 from eneo.prompts.prompt_service import PromptService
+from eneo.skills.domain.skill import (
+    AppPinAdvanceIncompatibleReason,
+    ResolvedSkillBinding,
+    SkillBindingReference,
+    SkillComposition,
+    SkillExecutionReference,
+    compose_skill_instructions,
+)
 from eneo.spaces.api.space_models import WizardType
 from eneo.spaces.space import Space
 from eneo.users.user import UserInDB
@@ -30,6 +49,7 @@ if TYPE_CHECKING:
         CompletionService,
     )
     from eneo.prompts.prompt import Prompt
+    from eneo.skills.application.skill_service import SkillService
     from eneo.spaces.api.space_models import TemplateCreate
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.templates.app_template.app_template_service import AppTemplateService
@@ -39,6 +59,18 @@ if TYPE_CHECKING:
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
+
+
+@dataclass(frozen=True)
+class AppExecutionResult:
+    response: CompletionModelResponse
+    skill_provenance: tuple[SkillExecutionReference, ...]
+
+
+@dataclass(frozen=True)
+class AppExecutionPlan:
+    app: App
+    skill_provenance: tuple[SkillExecutionReference, ...]
 
 
 class AppService:
@@ -57,6 +89,7 @@ class AppService:
         transcription_model_crud_service: "TranscriptionModelCRUDService",
         completion_service: "CompletionService",
         icon_repo: IconRepository,
+        skill_service: "SkillService",
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
         super().__init__()
@@ -73,8 +106,127 @@ class AppService:
         self.transcription_model_crud_service = transcription_model_crud_service
         self.completion_service = completion_service
         self.icon_repo = icon_repo
+        self.skill_service = skill_service
         self.api_key_scope_revoker = api_key_scope_revoker
         self._logger = get_logger(__name__)
+
+    async def _compose_app_prompt(
+        self,
+        app: App,
+        *,
+        skill_provenance: tuple[SkillExecutionReference, ...] | None = None,
+    ) -> SkillComposition:
+        base_instructions = app.get_prompt_text()
+        if skill_provenance is not None:
+            return await self.skill_service.compose_for_execution_snapshot(
+                tenant_id=app.tenant_id,
+                space_id=app.space_id,
+                provenance=skill_provenance,
+                base_instructions=base_instructions,
+            )
+        if app.id is None:
+            return compose_skill_instructions(
+                base_instructions=base_instructions, bindings=[]
+            )
+        return await self.skill_service.compose_for_app(
+            app_id=app.id,
+            base_instructions=base_instructions,
+        )
+
+    async def _lock_app_for_context_validation(self, app_id: UUID) -> App:
+        app = await self.repo.get_for_update(app_id)
+        if app is None:
+            raise NotFoundException()
+        return app
+
+    async def _validate_configured_context(
+        self,
+        *,
+        app: App,
+        composition: SkillComposition,
+        prompt_files: Sequence[File] | None = None,
+        validate_base_without_skills: bool = False,
+    ) -> None:
+        if not composition.provenance and not validate_base_without_skills:
+            return
+        model = app.completion_model
+        if model is None:
+            return
+        if prompt_files is not None:
+            files_to_check = list(prompt_files)
+        elif model.vision and app.attachments:
+            files_to_check = await self.file_service.with_derived_images(
+                app.attachments
+            )
+        else:
+            files_to_check = app.attachments
+        self._assert_context_fits(
+            model_name=model.name,
+            max_input_tokens=model.max_input_tokens,
+            prompt_text=composition.prompt,
+            files=files_to_check,
+        )
+
+    @staticmethod
+    def _assert_context_fits(
+        *,
+        model_name: str,
+        max_input_tokens: int,
+        prompt_text: str,
+        files: Sequence[File],
+    ) -> None:
+        assert_prompt_and_files_fit_context(
+            max_input_tokens=max_input_tokens,
+            model_name=model_name,
+            prompt_text=prompt_text,
+            files=list(files),
+        )
+
+    def candidate_pin_incompatible_reason(
+        self,
+        *,
+        validation_input: AppContextValidationInput,
+        bindings: Sequence[ResolvedSkillBinding],
+        skill_id: UUID,
+        from_revision_id: UUID,
+        candidate_binding: ResolvedSkillBinding,
+        completion_prompt_files: Sequence[File],
+    ) -> AppPinAdvanceIncompatibleReason | None:
+        current_binding = next(
+            (
+                binding
+                for binding in bindings
+                if binding.skill_id == skill_id
+                and binding.skill_revision_id == from_revision_id
+            ),
+            None,
+        )
+        assert current_binding is not None
+        resolved_candidate = replace(
+            candidate_binding,
+            position=current_binding.position,
+            activation_mode=current_binding.activation_mode,
+        )
+        composition = compose_skill_instructions(
+            base_instructions=validation_input.prompt_text,
+            bindings=[
+                resolved_candidate if binding is current_binding else binding
+                for binding in bindings
+            ],
+        )
+        model = validation_input.completion_model
+        if model is None:
+            return None
+        try:
+            self._assert_context_fits(
+                model_name=model.name,
+                max_input_tokens=model.max_input_tokens,
+                prompt_text=composition.prompt,
+                files=completion_prompt_files,
+            )
+        except BadRequestException:
+            return AppPinAdvanceIncompatibleReason.CONTEXT_WINDOW
+        return None
 
     async def create_app(
         self, name: str, space: Space, template_data: Optional["TemplateCreate"] = None
@@ -235,6 +387,7 @@ class AppService:
         transcription_model_id: UUID | None = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        skill_references: list[SkillBindingReference] | None = None,
     ) -> tuple[App, list[ResourcePermission]]:
         space = await self.space_repo.get_space_by_app(app_id=app_id)
         app = space.get_app(app_id=app_id)
@@ -250,6 +403,15 @@ class AppService:
                     "auth_layer": "domain_policy",
                 },
             )
+
+        requires_context_validation = (
+            attachment_ids is not None
+            or completion_model_id is not None
+            or prompt_text is not None
+            or skill_references is not None
+        )
+        if requires_context_validation:
+            app = await self._lock_app_for_context_validation(app_id)
 
         completion_model = None
         if completion_model_id is not None:
@@ -313,6 +475,26 @@ class AppService:
             icon_id=icon_id,
         )
 
+        if skill_references is not None:
+            await self.skill_service.replace_app_bindings(
+                space_id=app.space_id,
+                app_id=app_id,
+                references=skill_references,
+            )
+
+        if (
+            attachments is not None
+            or completion_model is not None
+            or prompt is not None
+            or skill_references is not None
+        ):
+            composition = await self._compose_app_prompt(app)
+            await self._validate_configured_context(
+                app=app,
+                composition=composition,
+                validate_base_without_skills=skill_references is not None,
+            )
+
         app_in_db = await self.repo.update(app)
 
         # TODO: Review how we get the permissions to the presentation layer
@@ -357,9 +539,7 @@ class AppService:
         if icon_id:
             await self.icon_repo.delete(icon_id)
 
-    async def run_app(
-        self, app_id: UUID, file_ids: list[UUID], text: str | None
-    ) -> "CompletionModelResponse":
+    async def _get_runnable_app(self, app_id: UUID) -> App:
         space = await self.space_repo.get_space_by_app(app_id=app_id)
         app = space.get_app(app_id=app_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
@@ -385,6 +565,32 @@ class AppService:
                     "auth_layer": "domain_policy",
                 },
             )
+        return app
+
+    async def prepare_app_run(self, app_id: UUID) -> AppExecutionPlan:
+        app = await self._get_runnable_app(app_id)
+        composition = await self._compose_app_prompt(app)
+        await self._validate_configured_context(
+            app=app,
+            composition=composition,
+        )
+        return AppExecutionPlan(
+            app=app,
+            skill_provenance=composition.provenance,
+        )
+
+    async def run_app(
+        self,
+        app_id: UUID,
+        file_ids: list[UUID],
+        text: str | None,
+        skill_provenance: tuple[SkillExecutionReference, ...] | None = None,
+    ) -> AppExecutionResult:
+        app = await self._get_runnable_app(app_id)
+        composition = await self._compose_app_prompt(
+            app,
+            skill_provenance=skill_provenance,
+        )
 
         files = await self.file_service.get_files_by_ids(
             file_ids=file_ids, include_transcription=True
@@ -393,18 +599,30 @@ class AppService:
         # Document-derived images (e.g. rendered PDF pages) enrich the
         # completion payload only — the run's recorded input files stay the
         # user's own uploads.
+        prompt_files = app.attachments
         if app.completion_model is not None and app.completion_model.vision:
             files = await self.file_service.with_derived_images(files)
             if app.attachments:
-                app.attachments = await self.file_service.with_derived_images(
+                prompt_files = await self.file_service.with_derived_images(
                     app.attachments
                 )
+                app.attachments = prompt_files
 
-        return await app.run(
+        await self._validate_configured_context(
+            app=app,
+            composition=composition,
+            prompt_files=prompt_files,
+        )
+        response = await app.run(
             files=files,
             text=text,
             completion_service=self.completion_service,
             transcriber=self.transcriber,
+            prompt_override=composition.prompt if composition.provenance else None,
+        )
+        return AppExecutionResult(
+            response=response,
+            skill_provenance=composition.provenance,
         )
 
     async def get_prompts_by_app(self, app_id: UUID) -> list["Prompt"]:
@@ -441,6 +659,11 @@ class AppService:
                     "auth_layer": "domain_policy",
                 },
             )
+
+        if publish:
+            app = await self._lock_app_for_context_validation(app_id)
+            composition = await self._compose_app_prompt(app)
+            await self._validate_configured_context(app=app, composition=composition)
 
         app.update(published=publish)
 

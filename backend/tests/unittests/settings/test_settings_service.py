@@ -1,5 +1,14 @@
+from unittest.mock import MagicMock
+
+from eneo.main.config import get_settings as get_app_settings
+from eneo.object_content.runtime import ObjectContentRuntime
 from eneo.settings.setting_service import SettingService
-from eneo.settings.settings import SettingsInDB, SettingsPublic, SettingsUpsert
+from eneo.settings.settings import (
+    SettingsBase,
+    SettingsInDB,
+    SettingsPublic,
+    SettingsUpsert,
+)
 from tests.fixtures import TEST_USER, TEST_UUID
 
 TEST_SETTINGS = SettingsPublic()
@@ -79,12 +88,17 @@ async def test_get_settings_if_settings():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        skill_repo=MagicMock(),
     )
 
     settings = await service.get_settings()
 
     assert settings.chatbot_widget == TEST_SETTINGS_EXPECTED.chatbot_widget
     assert settings.using_templates == False  # Feature flag disabled in mock
+    assert (
+        settings.sharepoint_fixture_mode_available
+        is get_app_settings().sharepoint_fixture_mode_active
+    )
 
 
 async def test_update_settings():
@@ -96,10 +110,11 @@ async def test_update_settings():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        skill_repo=MagicMock(),
     )
 
     repo.settings[TEST_USER.id] = TEST_SETTINGS_EXPECTED
-    new_settings = SettingsPublic(chatbot_widget={"colour": "blue"})
+    new_settings = SettingsBase(chatbot_widget={"colour": "blue"})
     settings_expected = SettingsInDB(
         **new_settings.model_dump(), id=TEST_UUID, user_id=TEST_USER.id
     )
@@ -120,9 +135,10 @@ async def test_update_settings_creates_row_when_missing():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        skill_repo=MagicMock(),
     )
 
-    new_settings = SettingsPublic(chatbot_widget={"preferred_text_format": "richtext"})
+    new_settings = SettingsBase(chatbot_widget={"preferred_text_format": "richtext"})
 
     settings = await service.update_settings(new_settings)
 
@@ -130,3 +146,70 @@ async def test_update_settings_creates_row_when_missing():
     assert repo.settings[TEST_USER.id].chatbot_widget == {
         "preferred_text_format": "richtext"
     }
+
+
+async def test_settings_project_object_content_as_a_read_only_capability():
+    repo = MockRepo()
+    runtime = MagicMock(spec=ObjectContentRuntime)
+    runtime.enabled = True
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=MockTenantRepo(),
+        audit_service=MockAuditService(),
+        skill_repo=MagicMock(),
+        object_content=runtime,
+    )
+
+    settings = await service.get_settings()
+
+    assert settings.object_content_enabled is True
+
+
+def test_settings_write_model_accepts_an_echoed_public_response() -> None:
+    echoed_response = SettingsPublic(
+        chatbot_widget={"colour": "blue"},
+        object_content_enabled=True,
+    )
+
+    writable = SettingsBase.model_validate(echoed_response.model_dump())
+
+    assert writable == SettingsBase(chatbot_widget={"colour": "blue"})
+    assert "object_content_enabled" not in writable.model_dump()
+
+
+async def test_whats_new_toggle_reads_the_tenant_flag_and_writes_it():
+    class RecordingFlags(MockFeatureFlagService):
+        def __init__(self):
+            self.enabled = {"whats_new_enabled": True}
+
+        async def check_is_feature_enabled(self, feature_name: str, tenant_id=None):
+            return self.enabled.get(feature_name, False)
+
+    flags = RecordingFlags()
+    service = SettingService(
+        repo=MockRepo(),
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=flags,
+        tenant_repo=MockTenantRepo(),
+        audit_service=MockAuditService(),
+        skill_repo=MagicMock(),
+    )
+    written: list[tuple[str, bool]] = []
+
+    async def record(*, name: str, enabled: bool) -> None:
+        written.append((name, enabled))
+        flags.enabled[name] = enabled
+
+    service._set_feature_flag_for_tenant = record  # type: ignore[method-assign]
+
+    assert (await service.get_settings()).whats_new_enabled is True
+
+    updated = await service.update_whats_new_setting(enabled=False)
+
+    assert written == [("whats_new_enabled", False)]
+    assert updated.whats_new_enabled is False
+    assert (await service.get_settings()).whats_new_enabled is False

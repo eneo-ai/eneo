@@ -22,4 +22,13 @@ fi
 
 echo "Starting Eneo backend with $workers workers"
 
-exec gunicorn src.eneo.server.main:app --workers $workers --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+# Loopback MCP servers (/internal-mcp) are served by this same process, which
+# binds :8000 below. The config default targets the uvicorn dev port (8123),
+# so pin the packaged default here unless the deployment overrides it.
+export INTERNAL_MCP_BASE_URL="${INTERNAL_MCP_BASE_URL:-http://localhost:8000}"
+
+# keepalive must outlive every client's idle connection pool (Node/undici
+# holds SSR sockets ~4s; gunicorn's default is 2s and it sends no
+# Keep-Alive hint), otherwise the server closes a socket the client still
+# considers live and an in-flight SSR fetch dies with ECONNRESET.
+exec gunicorn src.eneo.server.main:app --workers $workers --worker-class uvicorn.workers.UvicornWorker --keep-alive 75 --bind 0.0.0.0:8000

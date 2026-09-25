@@ -21,8 +21,9 @@ NOTE: This uses Redis's eval() method for Lua scripts - NOT Python's eval().
 Redis eval is the standard way to run atomic Lua scripts on Redis server.
 """
 
-import pytest
 from uuid import uuid4
+
+import pytest
 
 
 class FakeRedis:

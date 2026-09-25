@@ -11,7 +11,6 @@ const baseMessage: PersistedMessage = {
   references: [],
   files: [],
   generated_files: [],
-  web_search_references: [],
   tools: { assistants: [] }
 };
 

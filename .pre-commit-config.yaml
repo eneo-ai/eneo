@@ -105,6 +105,14 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      - id: i18n-no-unused-keys
+        name: i18n-no-unused-keys
+        entry: python3 frontend/apps/web/scripts/check-i18n-unused.py
+        language: system
+        files: ^frontend/apps/web/(messages/.*\.json|src/.*|tests/.*|e2e/.*)$
+        pass_filenames: false
+        stages: [pre-commit]
+
       - id: commit-msg-check
         name: commit-msg-check
         entry: python3 scripts/commit_msg_check.py

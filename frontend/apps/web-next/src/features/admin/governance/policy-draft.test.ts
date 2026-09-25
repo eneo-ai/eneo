@@ -18,14 +18,11 @@ import {
   selectableServerIdSet,
   selectableToolIdSet
 } from "./policy-draft";
+import { EMPTY_POLICY } from "./policy-draft";
 
 function policy(overrides: Partial<GovernancePolicy> = {}): GovernancePolicy {
   return {
-    models_restriction: { enabled: false, models: [], provider_ids: [] },
-    mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
-    prompt_enforcement: { enabled: false, prompt_library_id: null },
-    updated_at: null,
-    updated_by_user_id: null,
+    ...EMPTY_POLICY,
     ...overrides
   };
 }

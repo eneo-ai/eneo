@@ -25,6 +25,18 @@ const ACTION_MESSAGES = {
     name: m.audit_action_user_updated,
     description: m.audit_action_user_updated_description
   },
+  password_changed: {
+    name: m.audit_action_password_changed,
+    description: m.audit_action_password_changed_description
+  },
+  password_change_failed: {
+    name: m.audit_action_password_change_failed,
+    description: m.audit_action_password_change_failed_description
+  },
+  sessions_invalidated: {
+    name: m.audit_action_sessions_invalidated,
+    description: m.audit_action_sessions_invalidated_description
+  },
   role_created: {
     name: m.audit_action_role_created,
     description: m.audit_action_role_created_description
@@ -109,9 +121,33 @@ const ACTION_MESSAGES = {
     name: m.audit_action_module_added,
     description: m.audit_action_module_added_description
   },
+  module_set_replaced: {
+    name: m.audit_action_module_set_replaced,
+    description: m.audit_action_module_set_replaced_description
+  },
   module_added_to_tenant: {
     name: m.audit_action_module_added_to_tenant,
     description: m.audit_action_module_added_to_tenant_description
+  },
+  module_removed_from_tenant: {
+    name: m.audit_action_module_removed_from_tenant,
+    description: m.audit_action_module_removed_from_tenant_description
+  },
+  module_client_config_updated: {
+    name: m.audit_action_module_client_config_updated,
+    description: m.audit_action_module_client_config_updated_description
+  },
+  module_auth_ticket_issued: {
+    name: m.audit_action_module_auth_ticket_issued,
+    description: m.audit_action_module_auth_ticket_issued_description
+  },
+  module_auth_token_exchanged: {
+    name: m.audit_action_module_auth_token_exchanged,
+    description: m.audit_action_module_auth_token_exchanged_description
+  },
+  module_auth_token_refreshed: {
+    name: m.audit_action_module_auth_token_refreshed,
+    description: m.audit_action_module_auth_token_refreshed_description
   },
   governance_policy_updated: {
     name: m.audit_action_governance_policy_updated,
@@ -237,6 +273,42 @@ const ACTION_MESSAGES = {
     name: m.audit_action_app_run_deleted,
     description: m.audit_action_app_run_deleted_description
   },
+  skill_created: {
+    name: m.audit_action_skill_created,
+    description: m.audit_action_skill_created_description
+  },
+  skill_revision_created: {
+    name: m.audit_action_skill_revision_created,
+    description: m.audit_action_skill_revision_created_description
+  },
+  skill_revision_restored: {
+    name: m.audit_action_skill_revision_restored,
+    description: m.audit_action_skill_revision_restored_description
+  },
+  skill_status_changed: {
+    name: m.audit_action_skill_status_changed,
+    description: m.audit_action_skill_status_changed_description
+  },
+  skill_published: {
+    name: m.audit_action_skill_published,
+    description: m.audit_action_skill_published_description
+  },
+  skill_unpublished: {
+    name: m.audit_action_skill_unpublished,
+    description: m.audit_action_skill_unpublished_description
+  },
+  skill_bindings_advanced: {
+    name: m.audit_action_skill_bindings_advanced,
+    description: m.audit_action_skill_bindings_advanced_description
+  },
+  skill_bindings_detached: {
+    name: m.audit_action_skill_bindings_detached,
+    description: m.audit_action_skill_bindings_detached_description
+  },
+  skill_deleted: {
+    name: m.audit_action_skill_deleted,
+    description: m.audit_action_skill_deleted_description
+  },
   session_started: {
     name: m.audit_action_session_started,
     description: m.audit_action_session_started_description
@@ -256,6 +328,22 @@ const ACTION_MESSAGES = {
   file_deleted: {
     name: m.audit_action_file_deleted,
     description: m.audit_action_file_deleted_description
+  },
+  file_original_download_link_created: {
+    name: m.audit_action_file_original_download_link_created,
+    description: m.audit_action_file_original_download_link_created_description
+  },
+  file_original_downloaded: {
+    name: m.audit_action_file_original_downloaded,
+    description: m.audit_action_file_original_downloaded_description
+  },
+  info_blob_original_download_link_created: {
+    name: m.audit_action_info_blob_original_download_link_created,
+    description: m.audit_action_info_blob_original_download_link_created_description
+  },
+  file_signed_url_minted: {
+    name: m.audit_action_file_signed_url_minted,
+    description: m.audit_action_file_signed_url_minted_description
   },
   website_created: {
     name: m.audit_action_website_created,
@@ -364,6 +452,18 @@ const ACTION_MESSAGES = {
   transcription_model_migrated: {
     name: m.audit_action_transcription_model_migrated,
     description: m.audit_action_transcription_model_migrated_description
+  },
+  image_model_created: {
+    name: m.audit_action_image_model_created,
+    description: m.audit_action_image_model_created_description
+  },
+  image_model_updated: {
+    name: m.audit_action_image_model_updated,
+    description: m.audit_action_image_model_updated_description
+  },
+  image_model_deleted: {
+    name: m.audit_action_image_model_deleted,
+    description: m.audit_action_image_model_deleted_description
   },
   template_created: {
     name: m.audit_action_template_created,

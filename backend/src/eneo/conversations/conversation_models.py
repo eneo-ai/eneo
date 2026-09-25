@@ -5,10 +5,14 @@
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from eneo.main.models import ModelId
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityPurpose,
+)
 from eneo.questions.question import UseTools
+from eneo.skills.domain.skill import SkillActivationEvidenceV1
 
 
 class _ConversationTarget(BaseModel):
@@ -109,7 +113,22 @@ class PreflightResponse(BaseModel):
     # live per-message file_tokens for accuracy on unsaved edits; these report
     # the always-present baseline for callers that need it (e.g. a turn-1 view).
     assistant_attachment_tokens: int = 0
-    prompt_tokens: int = 0
+    prompt_tokens: int = Field(
+        default=0,
+        description=(
+            "Model-aware estimate of the initial system message and Skill tool "
+            "definitions. Includes skill_context_tokens."
+        ),
+    )
+    # LiteLLM-measured Skill-owned subset of prompt_tokens. Callers must not add
+    # it to the total a second time.
+    skill_context_tokens: int = Field(
+        default=0,
+        description=(
+            "Model-aware Skill-owned subset of prompt_tokens. Already included; "
+            "do not add it to the preflight total again."
+        ),
+    )
 
 
 class ConversationRequest(_ConversationTarget):
@@ -129,12 +148,14 @@ class ConversationRequest(_ConversationTarget):
     files: list[ModelId] = Field(default=[])
     stream: bool = False
     tools: Optional[UseTools] = None
-    use_web_search: bool = False
     require_tool_approval: bool = False
     # MCP servers the user turned off in the composer for this message. Narrows
     # the otherwise-active set (assistant's own servers, or policy-granted ones
     # for a personal assistant); it can never enable a server that isn't active.
     disabled_mcp_server_ids: list[UUID] = Field(default=[])
+    disabled_capabilities: list[CapabilityPurpose] = Field(
+        default_factory=list[CapabilityPurpose]
+    )
 
 
 class ConversationRenameRequest(BaseModel):
@@ -146,3 +167,13 @@ class ConversationRenameRequest(BaseModel):
         if not self.name:
             raise ValueError("name cannot be empty")
         return self
+
+
+class ChatTurnDiagnostics(BaseModel):
+    """Body-free Skill activation diagnostics for one persisted chat turn."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: UUID
+    message_id: UUID
+    skill_activation: SkillActivationEvidenceV1 | None

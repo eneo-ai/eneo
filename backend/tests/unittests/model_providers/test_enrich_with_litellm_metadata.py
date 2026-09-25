@@ -66,6 +66,68 @@ def test_enriches_via_provider_prefix_lookup() -> None:
     assert result["max_input_tokens"] == 128000
 
 
+def test_prefers_provider_prefixed_entry_over_bare() -> None:
+    """When both `{provider}/{name}` and bare `{name}` exist with different
+    values, the prefixed row must win — the same rule the `/model-defaults/`
+    endpoint applies (see test_model_defaults_lookup). This used to diverge:
+    a local candidate list here tried the bare key first.
+    """
+    fake = {
+        "gpt-4o": {
+            "litellm_provider": "openai",
+            "mode": "chat",
+            "max_input_tokens": 128000,
+            "input_cost_per_token": 0.000005,
+        },
+        "azure/gpt-4o": {
+            "litellm_provider": "azure",
+            "mode": "chat",
+            "max_input_tokens": 100000,
+            "input_cost_per_token": 0.000003,
+        },
+    }
+    with _patch_cost_map(fake):
+        azure = model_provider_service._enrich_with_litellm_metadata("gpt-4o", "azure")
+        openai = model_provider_service._enrich_with_litellm_metadata(
+            "gpt-4o", "openai"
+        )
+    assert azure is not None and openai is not None
+    assert azure["max_input_tokens"] == 100000
+    assert azure["input_cost_per_token"] == 0.000003
+    # No `openai/gpt-4o` entry in the map → the bare row is the right match.
+    assert openai["max_input_tokens"] == 128000
+
+
+def test_prefers_gateway_metadata_for_nested_model_id() -> None:
+    """Gateway providers prefix model IDs that already contain an upstream
+    provider segment. The gateway-specific row must win without changing the
+    nested model ID returned to the caller.
+    """
+    fake = {
+        "deepseek/deepseek-chat": {
+            "litellm_provider": "deepseek",
+            "mode": "chat",
+            "max_input_tokens": 131072,
+            "input_cost_per_token": 0.00000028,
+        },
+        "openrouter/deepseek/deepseek-chat": {
+            "litellm_provider": "openrouter",
+            "mode": "chat",
+            "max_input_tokens": 65536,
+            "input_cost_per_token": 0.00000014,
+        },
+    }
+    with _patch_cost_map(fake):
+        result = model_provider_service._enrich_with_litellm_metadata(
+            "deepseek/deepseek-chat", "openrouter"
+        )
+
+    assert result is not None
+    assert result["name"] == "deepseek/deepseek-chat"
+    assert result["max_input_tokens"] == 65536
+    assert result["input_cost_per_token"] == 0.00000014
+
+
 def test_enriches_embedding_model() -> None:
     fake = {
         "text-embedding-3-large": {
@@ -120,9 +182,13 @@ def test_filters_latest_aliases(name: str) -> None:
         )
 
 
-def test_filters_image_and_tts_modes() -> None:
+def test_filters_tts_modes_and_surfaces_image_generation() -> None:
     fake = {
-        "dall-e-3": {"litellm_provider": "openai", "mode": "image_generation"},
+        "dall-e-3": {
+            "litellm_provider": "openai",
+            "mode": "image_generation",
+            "input_cost_per_image": 0.04,
+        },
         "tts-1": {"litellm_provider": "openai", "mode": "audio_speech"},
         "omni-moderation-latest": {
             "litellm_provider": "openai",
@@ -130,10 +196,9 @@ def test_filters_image_and_tts_modes() -> None:
         },
     }
     with _patch_cost_map(fake):
-        assert (
-            model_provider_service._enrich_with_litellm_metadata("dall-e-3", "openai")
-            is None
-        )
+        assert model_provider_service._enrich_with_litellm_metadata(
+            "dall-e-3", "openai"
+        ) == {"name": "dall-e-3", "mode": "image", "cost_per_image": 0.04}
         assert (
             model_provider_service._enrich_with_litellm_metadata("tts-1", "openai")
             is None
@@ -166,9 +231,9 @@ def test_unknown_embedding_inferred_as_embedding() -> None:
     assert result == {"name": "future-embedding-1", "mode": "embedding"}
 
 
-def test_unknown_image_model_dropped() -> None:
+def test_unknown_image_model_inferred_as_image() -> None:
     with _patch_cost_map({}):
         result = model_provider_service._enrich_with_litellm_metadata(
             "dall-e-99", "openai"
         )
-    assert result is None
+    assert result == {"name": "dall-e-99", "mode": "image"}

@@ -14,11 +14,15 @@ Scope enforcement defaults to True (env flag + feature flag fail-closed).
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+from io import BytesIO
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import UploadFile
 
-from eneo.files.file_models import FileCreate, FileType
+from eneo.main.exceptions import ErrorCodes
+from eneo.server.dependencies.container import load_container_upload_admission
 from eneo.users.user import UserAdd, UserState
 
 # ---------------------------------------------------------------------------
@@ -174,6 +178,7 @@ async def _seed_info_blob(
                 user_id=user_id,
                 tenant_id=tenant_id,
                 group_id=UUID(group_id),
+                content_hash=sha256(text.encode("utf-8")).digest(),
             )
         )
     return str(blob.id)
@@ -230,21 +235,15 @@ async def _create_user(db_container, *, tenant_id: UUID):
 async def _create_user_owned_file(
     db_container,
     *,
-    user_id: UUID,
-    tenant_id: UUID,
+    user,
 ) -> str:
-    async with db_container() as container:
-        repo = container.file_repo()
-        file = await repo.add(
-            FileCreate(
-                name=f"owned-{uuid4().hex[:8]}.txt",
-                checksum=uuid4().hex,
-                size=13,
-                mimetype="text/plain",
-                file_type=FileType.TEXT,
-                text="owned content",
-                user_id=user_id,
-                tenant_id=tenant_id,
+    async with db_container(user=user) as container:
+        await load_container_upload_admission(container)
+        file = await container.file_service().save_file(
+            UploadFile(
+                file=BytesIO(b"owned content"),
+                filename=f"owned-{uuid4().hex[:8]}.txt",
+                headers={"content-type": "text/plain"},
             )
         )
     return str(file.id)
@@ -589,6 +588,62 @@ async def test_space_scoped_key_denied_prompt_from_other_space(
     assert detail["code"] == "insufficient_scope"
 
 
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_missing_and_out_of_scope_knowledge_deletes_have_same_error(
+    api_client, bearer_token, db_container, default_user
+):
+    space_a = await _create_space(api_client, token=bearer_token)
+    space_b = await _create_space(api_client, token=bearer_token)
+    group_b = await _create_group(api_client, token=bearer_token, space_id=space_b)
+    blob_b = await _seed_info_blob(
+        db_container,
+        user_id=default_user.id,
+        tenant_id=default_user.tenant_id,
+        group_id=group_b,
+        text="Knowledge outside the key's space",
+    )
+    space_key = await _create_api_key(
+        api_client,
+        token=bearer_token,
+        scope_type="space",
+        scope_id=space_a,
+        permission="admin",
+    )
+    headers = {"X-API-Key": space_key, "X-Request-ID": "knowledge-scope-denial"}
+    expected_error = {
+        "code": "insufficient_scope",
+        "message": (
+            f"API key is scoped to space '{space_a}'. "
+            "The requested resource was not found or is outside this key's scope."
+        ),
+        "context": {"auth_layer": "api_key_scope"},
+        "request_id": "knowledge-scope-denial",
+        "eneo_error_code": ErrorCodes.UNAUTHORIZED.value,
+    }
+    for blob_id in (str(uuid4()), blob_b):
+        response = await api_client.delete(
+            f"/api/v1/info-blobs/{blob_id}/", headers=headers
+        )
+        assert response.status_code == 403, response.text
+        assert response.json() == expected_error
+
+    # The denied deletion must leave the document available to an authorized key.
+    tenant_key = await _create_api_key(
+        api_client, token=bearer_token, permission="admin"
+    )
+    response = await api_client.delete(
+        f"/api/v1/info-blobs/{blob_b}/", headers={"X-API-Key": tenant_key}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == blob_b
+
+    response = await api_client.delete(
+        f"/api/v1/info-blobs/{blob_b}/", headers={"X-API-Key": tenant_key}
+    )
+    assert response.status_code == 404, response.text
+
+
 # ---------------------------------------------------------------------------
 # 2C: Create-Body Scope Mismatch
 # ---------------------------------------------------------------------------
@@ -879,8 +934,7 @@ async def test_space_scoped_user_key_cannot_delete_another_users_file(
     other_user = await _create_user(db_container, tenant_id=default_user.tenant_id)
     file_id = await _create_user_owned_file(
         db_container,
-        user_id=other_user.id,
-        tenant_id=default_user.tenant_id,
+        user=other_user,
     )
     space = await _create_space(api_client, token=bearer_token)
     key = await _create_api_key(

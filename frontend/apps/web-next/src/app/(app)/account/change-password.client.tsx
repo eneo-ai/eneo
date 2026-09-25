@@ -35,15 +35,13 @@ export function ChangePasswordCard() {
   const change = useMutation({
     mutationFn: () =>
       unwrap(
-        browserApi.POST("/api/v1/users/me/change-password/", {
+        browserApi.POST("/api/v1/users/me/password/", {
           body: { current_password: current, new_password: next }
         })
       ),
     onSuccess: () => {
       toast.success(t("password_changed"));
-      setCurrent("");
-      setNext("");
-      setConfirm("");
+      window.location.assign("/logout");
     },
     onError: (error) => toastApiError(error, t)
   });

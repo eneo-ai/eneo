@@ -30,8 +30,13 @@ from eneo.main.models import (
     ModelId,
     NotProvided,
     PaginatedPermissions,
+    ResourcePermission,
     ResourcePermissionsMixin,
     partial_model,
+)
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityAvailability,
+    CapabilityPurpose,
 )
 from eneo.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
@@ -105,6 +110,7 @@ class CreateSpaceRequest(CreateRequest):
 
 @partial_model
 class UpdateSpaceRequest(BaseModel):
+    enabled_capabilities: list[CapabilityPurpose]
     name: str
     description: str
 
@@ -142,6 +148,9 @@ class UpdateSpaceRequest(BaseModel):
 
 
 class UpdateSpaceDryRunResponse(BaseModel):
+    capabilities: list[CapabilityPurpose] = Field(
+        default_factory=list[CapabilityPurpose]
+    )
     assistants: list[AssistantSparse]
     group_chats: list[GroupChatSparse]
     services: list[ServiceSparse]
@@ -197,6 +206,12 @@ class SpaceRole(BaseModel):
 
 
 class SpacePublic(SpaceDashboard):
+    enabled_capabilities: list[CapabilityPurpose] = Field(
+        default_factory=list[CapabilityPurpose]
+    )
+    available_capabilities: list[CapabilityAvailability] = Field(
+        default_factory=list[CapabilityAvailability]
+    )
     embedding_models: list[EmbeddingModelPublic]
     completion_models: list[CompletionModelPublic]
     transcription_models: list[TranscriptionModelPublic]
@@ -206,6 +221,7 @@ class SpacePublic(SpaceDashboard):
     knowledge: Knowledge
     members: PaginatedPermissions[SpaceMember]
     group_members: PaginatedPermissions[SpaceGroupMember]
+    skill_permissions: list[ResourcePermission]
 
     default_assistant: Optional[DefaultAssistant] = None
 
@@ -243,6 +259,7 @@ class TemplateCreate(BaseModel):
 
 
 class CreateSpaceAssistantRequest(CreateRequest):
+    enabled_capabilities: list[CapabilityPurpose] | None = None
     from_template: Optional[TemplateCreate] = None
 
 

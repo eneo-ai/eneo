@@ -1,9 +1,9 @@
 from importlib import import_module
 
 _TABLE_MODULES = (
+    "eneo.database.tables.capabilities_table",
     "eneo.database.tables.ai_models_table",
     "eneo.database.tables.allowed_origins_table",
-    "eneo.database.tables.api_keys_table",
     "eneo.database.tables.api_keys_v2_table",
     "eneo.database.tables.audit_action_config_table",
     "eneo.database.tables.audit_category_config_table",
@@ -13,10 +13,10 @@ _TABLE_MODULES = (
     "eneo.database.tables.app_template_table",
     "eneo.database.tables.assistant_table",
     "eneo.database.tables.assistant_template_table",
-    "eneo.database.tables.chat_session_mcp_state_table",
     "eneo.database.tables.collections_table",
     "eneo.database.tables.completion_model_migration_history_table",
     "eneo.database.tables.feature_flag_table",
+    "eneo.database.tables.file_icon_backfill_table",
     "eneo.database.tables.files_table",
     "eneo.database.tables.group_chats_table",
     "eneo.database.tables.groups_spaces_table",
@@ -32,6 +32,10 @@ _TABLE_MODULES = (
     "eneo.database.tables.governance_policy_table",
     "eneo.database.tables.mcp_tool_references_table",
     "eneo.database.tables.org_space_assistant_roles_table",
+    "eneo.database.tables.object_content_table",
+    "eneo.database.tables.object_content_policy_table",
+    "eneo.database.tables.object_store_binding_table",
+    "eneo.database.tables.object_store_connection_table",
     "eneo.database.tables.prompt_library_table",
     "eneo.database.tables.prompts_table",
     "eneo.database.tables.questions_table",
@@ -39,6 +43,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.service_table",
     "eneo.database.tables.sessions_table",
     "eneo.database.tables.settings_table",
+    "eneo.database.tables.skill_table",
     "eneo.database.tables.sharepoint_subscription_table",
     "eneo.database.tables.spaces_table",
     "eneo.database.tables.sync_log_table",
@@ -46,10 +51,9 @@ _TABLE_MODULES = (
     "eneo.database.tables.tenant_table",
     "eneo.database.tables.user_groups_table",
     "eneo.database.tables.users_table",
-    "eneo.database.tables.web_search_results_table",
     "eneo.database.tables.websites_spaces_table",
     "eneo.database.tables.websites_table",
-    "eneo.database.tables.widget_table",
+    "eneo.database.tables.whats_new_table",
     "eneo.database.tables.workflow_tables",
 )
 

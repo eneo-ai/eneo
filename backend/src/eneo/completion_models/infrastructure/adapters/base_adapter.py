@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncIterator, Optional
 
 if TYPE_CHECKING:
@@ -8,7 +9,17 @@ if TYPE_CHECKING:
         Context,
         ModelKwargs,
     )
+    from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
     from eneo.logging.logging import LoggingDetails
+
+
+@dataclass(frozen=True)
+class ProviderInput:
+    """Canonical messages and tools sent to a completion provider."""
+
+    messages: list[dict[str, Any]]
+    tools: list[dict[str, Any]]
+    built_in_tools: list[dict[str, Any]]
 
 
 class CompletionModelAdapter(ABC):
@@ -25,22 +36,30 @@ class CompletionModelAdapter(ABC):
         Token counting must use the same identifier as the actual request,
         otherwise the tokenizer may silently resolve a different model.
         """
-        return self.model.name
-
-    def get_litellm_model_name(self) -> str:
-        """Backward-compatible alias for persisted/API code using the old name."""
-        return self.get_model_route()
+        return self.model.get_model_route()
 
     def get_logging_details(
         self, context: "Context", model_kwargs: "ModelKwargs | dict[str, Any] | None"
     ) -> "LoggingDetails":
         raise NotImplementedError()
 
+    @abstractmethod
+    def prepare_provider_input(
+        self,
+        context: "Context",
+        *,
+        mcp_proxy: Any | None = None,
+        skill_runtime: "SkillActivationRuntime | None" = None,
+    ) -> ProviderInput:
+        """Serialize the exact provider-visible messages and tool catalogue."""
+        pass
+
     async def get_response(
         self,
         context: "Context",
         model_kwargs: "ModelKwargs | dict[str, Any] | None",
         mcp_proxy: Any | None = None,
+        skill_runtime: "SkillActivationRuntime | None" = None,
         **kwargs: Any,
     ) -> "Completion":
         raise NotImplementedError()
@@ -65,6 +84,7 @@ class CompletionModelAdapter(ABC):
         context: "Context",
         model_kwargs: "ModelKwargs | dict[str, Any] | None" = None,
         mcp_proxy: Any | None = None,
+        skill_runtime: "SkillActivationRuntime | None" = None,
         **kwargs: Any,
     ) -> Any:
         """

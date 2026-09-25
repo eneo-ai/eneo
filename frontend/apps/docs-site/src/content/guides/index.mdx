@@ -1,58 +1,166 @@
 # Guides
 
-Welcome to the Eneo guides section! These practical guides help you implement specific features and use cases that complement the technical documentation in the GitHub repository.
+Use these guides to deploy, configure, and operate Eneo. Start with the task you
+need to finish; architecture pages are linked where the underlying design
+matters.
 
-## Available Guides
+## Start here
 
-### [Authentication & OIDC](/guides/authentication)
+| If you need to…                          | Start with                                                             |
+| ---------------------------------------- | ---------------------------------------------------------------------- |
+| Deploy Eneo                              | [Deploy Eneo](/guides/deployment)                                      |
+| Upgrade to 2.2.0 (renamed variables)     | [Upgrading to 2.2.0](/guides/upgrade-2-2-0)                            |
+| Upgrade to 1.7.0 (tenant models)         | [Upgrading to 1.7.0](/guides/upgrade-1-7-0)                            |
+| Upgrade legacy File/Icon storage         | [Upgrade File & Icon Storage](/guides/file-icon-storage-upgrade)       |
+| Choose where durable bytes live          | [Choose Content Storage](/guides/object-content-storage)               |
+| Configure login and access               | [Authentication & OIDC](/guides/oidc-federation)                        |
+| Give each tenant its own IdP             | [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant)   |
+| Provision users and groups from your IdP | [SCIM Provisioning](/guides/scim-provisioning)                         |
+| Connect an AI provider                   | [AI Provider Configuration](/guides/ai-providers)                      |
+| Enable web search or image generation    | [Web Search & Image Generation](/guides/capabilities)                  |
+| Add documents to a knowledge base        | [Document Processing](/guides/document-processing)                     |
+| Connect SharePoint or OneDrive           | [SharePoint Integration](/guides/sharepoint-integration)               |
+
+## All guides
+
+### [Authentication & OIDC](/guides/oidc-federation)
+
 Learn how to configure single sign-on using OpenID Connect (OIDC) with various identity providers:
+
 - Azure Entra ID (formerly Azure AD)
 - Keycloak
 - Auth0
 - Other OIDC-compliant providers
 
+### OIDC Federation
+
+Manage identity providers through the federation API instead of environment variables:
+
+- [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant) — each tenant authenticates against its own IdP; covers prerequisites, DNS, IdP registration, tenant configuration via API, tenant resolution, and troubleshooting
+- [Single-Tenant Federation](/guides/oidc-federation/single-tenant) — one IdP for all users, managed through the federation API
+
+### [SCIM Provisioning](/guides/scim-provisioning)
+
+Automate user and group provisioning from your identity provider with SCIM 2.0:
+
+- Generate, check, and revoke a tenant SCIM token
+- Configure Azure Entra ID provisioning and attribute mappings
+- Verify the integration and the email claim OIDC sign-in depends on
+- Understand provisioning scope, deprovisioning, and multi-tenant behavior
+
 ### [Audit Logging](/guides/audit-logging)
+
 Set up audit logging for compliance and security monitoring:
+
 - Enable audit logs and configure action toggles
 - Review access justification flow
 - Retention policy and export guidance
 
-### [AI Provider Configuration](/guides/ai-providers)
-Connect Eneo to different AI providers and configure them for your organization:
-- OpenAI (GPT-4, GPT-3.5)
-- Anthropic (Claude)
-- Azure OpenAI Service
-- Google Gemini
-- Local models (Ollama, LM Studio)
+### [Skills](/guides/skills)
 
-### [Deployment](/guides/deployment)
+Build focused, versioned instruction capabilities:
+
+- Decide when to use a Skill, a main prompt, a tool, or a separate Assistant
+- Create, test, reuse, and restore Skill versions
+- Understand permissions, organisation publication, Spaces, Personal Chat, adoption, and audit history
+
+### [AI Provider Configuration](/guides/ai-providers)
+
+Connect Eneo to AI providers and configure them per tenant:
+
+- Add providers and models through the Admin → Models wizard (OpenAI, Anthropic, Azure OpenAI, Google Gemini, Mistral and other LiteLLM-supported providers)
+- Self-hosted models via any OpenAI-compatible endpoint (for example vLLM)
+- Credential management, encryption, and shared vs. strict mode
+- Cost management and budget alerts
+
+### [MCP Servers](/guides/mcp-servers)
+
+Connect assistants to external tools while keeping discovery and execution under admin control:
+
+- Configure Streamable HTTP servers and authentication
+- Approve tool definitions before they reach the model
+- Forward user identity for user-specific catalogs
+- Preserve stateful MCP sessions across conversation turns
+
+### [Web Search & Image Generation](/guides/capabilities)
+
+Turn on the functions (*Funktioner*) assistants can use, and understand how they run:
+
+- Activate a search engine or an image source under Admin → Tools → Functions
+- Use a catalog image model directly, or an external MCP image server
+- Scope sources by user group, role permission and security classification
+- Edit and vary images with reference images, including follow-up edits
+
+### [Deploy Eneo](/guides/deployment)
+
 Deploy Eneo in production environments:
-- Docker Compose setup
-- Kubernetes deployment
-- Reverse proxy configuration (Traefik, Nginx)
-- SSL/TLS certificates with Let's Encrypt
-- Environment configuration best practices
+
+- Docker Compose reference stack with Traefik and Let's Encrypt
+- Required secrets and environment configuration
+- Network isolation between proxy, data, and module tiers
+- Using nginx instead of Traefik
+- Object content storage options
+
+### [Upgrading to 2.2.0](/guides/upgrade-2-2-0)
+
+Prepare a deployment and its integrations for the names 2.2 no longer reads:
+
+- Environment variables to rename, and the ones removed without a replacement
+- What `db-init`, the backend and the web app log or refuse at startup
+- API names that changed for integrations
+- Commands, log names and open browser tabs after the upgrade
+
+### [Upgrading to 1.7.0](/guides/upgrade-1-7-0)
+
+Run the tenant-specific AI models migration safely:
+
+- What changes and which tables are affected
+- Backups, dependency chain, and `ENCRYPTION_KEY` prerequisites
+- Upgrade procedure, impact on running jobs, and credential handling
+- Verification, rollback, and troubleshooting
+
+### [Upgrade File & Icon Storage](/guides/file-icon-storage-upgrade)
+
+Run the one-time legacy content adoption safely:
+
+- Follow the offline `db-init` and online worker phases
+- Estimate PostgreSQL disk, WAL headroom, and wall time
+- Pause or restore when capacity runs low
+- Record a release-candidate result and verify completion before cleanup
+
+### [Choose Content Storage](/guides/object-content-storage)
+
+Choose and operate Eneo's durable byte backend:
+
+- Use bounded PostgreSQL-inline storage by default
+- Run the bundled SeaweedFS service
+- Connect MinIO or another S3-compatible endpoint
+- Verify image provenance and readiness
+- Plan capacity, backup, restore, and troubleshooting
 
 ### [Document Processing](/guides/document-processing)
+
 Upload and process documents for AI-powered knowledge bases:
-- Supported file formats (PDF, Word, Excel, PowerPoint)
-- Web crawling and content extraction
-- Chunking strategies for optimal retrieval
-- Vector search configuration
-- Performance optimization
+
+- Supported file formats (PDF, Word, Excel, PowerPoint) and size limits
+- Web crawling configuration and authenticated sites
+- How extraction, chunking, embedding, and retrieval work
+- Optimizing retrieval with chunk size and embedding model choices
 
 ### [SharePoint Integration](/guides/sharepoint-integration)
-Connect Eneo to Microsoft SharePoint and OneDrive for seamless document import:
-- Azure AD application registration
-- Service account vs. tenant app authentication
-- Webhook configuration for real-time sync
-- Personal spaces OAuth flow
-- Troubleshooting and maintenance
 
-## Need More Help?
+Connect Eneo to Microsoft SharePoint and OneDrive for document import:
+
+- Backend configuration and webhook secret
+- Microsoft Entra ID application registration and permissions
+- Service account vs. tenant app authentication
+- Configuring and verifying the integration in Eneo
+
+## Need more help?
 
 If you can't find what you're looking for:
-- Check the [technical documentation](https://github.com/eneo-ai/eneo/tree/main/docs) on GitHub
+
+- Browse the [architecture and technical documentation](/docs)
 - Visit our [community forum](https://forum.eneo.ai) (requires government/municipality email)
 - Submit an issue on [GitHub](https://github.com/eneo-ai/eneo/issues)
 - Contact us at digitalisering@sundsvall.se (for public sector organizations)

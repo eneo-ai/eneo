@@ -7,7 +7,8 @@ from uuid import uuid4
 
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_serialization import deserialize_job, serialize_job
-from eneo.jobs.task_models import UploadInfoBlob
+from eneo.jobs.task_models import KnowledgeOriginalAdmission, UploadInfoBlob
+from eneo.object_content.content import StorageKind
 
 
 def _install_module(name: str) -> ModuleType:
@@ -33,9 +34,13 @@ def test_job_deserializer_remaps_pre_rename_package_payloads() -> None:
         user_id=uuid4(),
         group_id=uuid4(),
         space_id=uuid4(),
-        filepath="/tmp/document.txt",
         filename="document.txt",
         mimetype="text/plain",
+        original_storage=KnowledgeOriginalAdmission(
+            policy_revision=1,
+            storage_target=StorageKind.POSTGRES_INLINE,
+            maximum_bytes=10_000,
+        ),
     )
 
     module_names = (

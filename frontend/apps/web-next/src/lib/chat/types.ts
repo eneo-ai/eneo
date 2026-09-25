@@ -103,7 +103,7 @@ export type ConversationBody = {
   files: { id: string }[];
   tools?: { assistants: { id: string; handle: string }[] } | null;
   stream: true;
-  use_web_search?: boolean;
+  disabled_capabilities?: Schema<"ConversationRequest">["disabled_capabilities"];
   require_tool_approval?: boolean;
   disabled_mcp_server_ids?: string[];
 };

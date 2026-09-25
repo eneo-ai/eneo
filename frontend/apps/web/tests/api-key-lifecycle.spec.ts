@@ -46,7 +46,8 @@ test("an API key can read assistants until it is revoked", async ({ page, reques
   const revokedRead = await request.get(`${BACKEND_URL}/api/v1/assistants/`, {
     headers: { "X-API-Key": secret }
   });
-  expect(revokedRead.status()).toBeGreaterThanOrEqual(400);
+  expect(revokedRead.status()).toBe(401);
+  expect((await revokedRead.json()).code).toBe("invalid_api_key");
 
   const revokedKeyResponse = await backendFetch(page, request, `/api/v1/api-keys/${keyId}`);
   await expectOk(revokedKeyResponse, "loading revoked API key");

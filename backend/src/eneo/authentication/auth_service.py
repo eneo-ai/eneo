@@ -1,36 +1,22 @@
 import base64
-import hashlib
-import secrets
-import string
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 import bcrypt
 import jwt
-import sqlalchemy as sa
 from pydantic import ValidationError
 
-from eneo.authentication.api_key_repo import ApiKeysRepository
-from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_models import (
-    ApiKey,
-    ApiKeyCreated,
-    ApiKeyHashVersion,
-    ApiKeyInDB,
-    ApiKeyPermission,
-    ApiKeyScopeType,
-    ApiKeyState,
-    ApiKeyType,
     JWTCreds,
     JWTMeta,
     JWTPayload,
 )
-from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.users_table import Users
 from eneo.main.config import get_settings
 from eneo.main.exceptions import AuthenticationException
 from eneo.main.logging import get_logger
+from eneo.users.password import BCRYPT_MAX_PASSWORD_BYTES
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -41,44 +27,23 @@ logger = get_logger(__name__)
 JWT_ALGORITHM = get_settings().jwt_algorithm
 JWT_AUDIENCE = get_settings().jwt_audience
 JWT_EXPIRY_TIME_MINUTES = get_settings().jwt_expiry_time
+JWT_ISSUER = get_settings().jwt_issuer
 JWT_SECRET = get_settings().jwt_secret
 OIDC_CLOCK_LEEWAY_SECONDS = get_settings().oidc_clock_leeway_seconds
 
 
 class AuthService:
-    def __init__(
-        self,
-        api_key_repo: ApiKeysRepository,
-        api_key_v2_repo: ApiKeysV2Repository | None = None,
-    ):
-        super().__init__()
-        self.api_key_repo = api_key_repo
-        self.api_key_v2_repo = api_key_v2_repo
-
     # Dummy hash for timing attack mitigation
     # Pre-computed bcrypt hash of a random string to ensure constant-time password verification
     # Even when user is not found, we verify against this to maintain consistent response times
     DUMMY_HASH = "$2b$12$CfZ8Z9V6o4d0B.3n4WGNBe4oANd8FjKc7t2rggx5xeW5c0p1sS2yW"
 
-    @staticmethod
-    def _generate_salt() -> bytes:
-        return bcrypt.gensalt()
-
-    @staticmethod
-    def _hash_password(password: str, salt: bytes) -> str:
-        pwd_bytes = password.encode("utf-8")
-        return bcrypt.hashpw(password=pwd_bytes, salt=salt).decode("utf-8")
-
-    @staticmethod
-    def hash_api_key(api_key: str) -> str:
-        return hashlib.sha256(api_key.encode()).hexdigest()
-
     def create_salt_and_hashed_password(
-        self, plaintext_password: str | None
+        self, plaintext_password: str
     ) -> tuple[str, str]:
-        if plaintext_password is None:
-            plaintext_password = ""
         pwd_bytes = plaintext_password.encode("utf-8")
+        if len(pwd_bytes) > BCRYPT_MAX_PASSWORD_BYTES:
+            raise ValueError("Password exceeds bcrypt's maximum input size.")
         salt = bcrypt.gensalt()
         hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
         return salt.decode(), hashed_password.decode("utf-8")
@@ -87,24 +52,34 @@ class AuthService:
     def verify_password(password: str, hashed_pw: str) -> bool:
         """Verify that incoming password+salt matches hashed pw"""
         password_byte_enc = password.encode("utf-8")
-        return bcrypt.checkpw(
-            password=password_byte_enc, hashed_password=hashed_pw.encode("utf-8")
-        )
-
-    @staticmethod
-    def generate_password(length: int) -> str:
-        alphabet = string.ascii_letters + string.digits
-        password = "".join(secrets.choice(alphabet) for _ in range(length))
-
-        return password
+        # Older bcrypt releases silently truncated inputs at 72 bytes. Preserve
+        # verification compatibility for historical hashes while all new
+        # writes reject overlong values in the local password policy.
+        password_byte_enc = password_byte_enc[:BCRYPT_MAX_PASSWORD_BYTES]
+        try:
+            return bcrypt.checkpw(
+                password=password_byte_enc, hashed_password=hashed_pw.encode("utf-8")
+            )
+        except ValueError:
+            # Malformed historical hashes and unsupported inputs authenticate as
+            # invalid credentials; neither should become a server error.
+            return False
 
     def create_access_token_for_user(
         self,
         user: UserInDB | None,
         secret_key: str | None = None,
         audience: str = JWT_AUDIENCE,
-        expires_in: int = JWT_EXPIRY_TIME_MINUTES,
+        expires_in: float = JWT_EXPIRY_TIME_MINUTES,
+        extra_claims: dict[str, Any] | None = None,
     ) -> str:
+        """Mint an access token; ``expires_in`` is in minutes.
+
+        ``extra_claims`` follows the same contract as the MCP token above:
+        unknown claims ride through ``JWTPayload`` on decode and are read out
+        separately via :meth:`get_verified_claims`. Reserved JWT claims cannot
+        be overridden through it.
+        """
         if user is None:
             raise ValueError("user is required to create an access token")
 
@@ -119,162 +94,125 @@ class AuthService:
                 datetime.now(timezone.utc) + timedelta(minutes=expires_in)
             ),
         )
-        jwt_creds = JWTCreds(sub=user.email, username=user.username)
+        jwt_creds = JWTCreds(
+            sub=user.email,
+            username=user.username,
+            credential_version=getattr(user, "credential_version", 0),
+        )
         token_payload = JWTPayload(
             **jwt_meta.model_dump(),
             **jwt_creds.model_dump(),
         )
+        payload = token_payload.model_dump()
+        if extra_claims:
+            reserved = set(extra_claims) & set(payload)
+            if reserved:
+                raise ValueError(
+                    f"extra_claims may not override reserved claims: {sorted(reserved)}"
+                )
+            payload.update(extra_claims)
         # NOTE - previous versions of pyjwt ("<2.0") returned the token as bytes insted of a string.
         # That is no longer the case and the `.decode("utf-8")` has been removed.
-        access_token = jwt.encode(
-            token_payload.model_dump(), secret_key, algorithm=JWT_ALGORITHM
-        )
+        access_token = jwt.encode(payload, secret_key, algorithm=JWT_ALGORITHM)
         return access_token
 
-    def _generate_api_key(self) -> str:
-        return secrets.token_hex(get_settings().api_key_length)
-
-    def _create_api_key(self, prefix: str) -> ApiKey:
-        api_key = self._generate_api_key()
-        prefix_api_key = f"{prefix}_{api_key}"
-        truncated_key = prefix_api_key[-4:]
-
-        return ApiKey(key=prefix_api_key, truncated_key=truncated_key)
-
-    def _create_and_hash_api_key(self, prefix: str) -> ApiKeyCreated:
-        api_key = self._create_api_key(prefix)
-        hashed_key = self.hash_api_key(api_key.key)
-
-        return ApiKeyCreated(**api_key.model_dump(), hashed_key=hashed_key)
-
-    async def create_user_api_key(
-        self, prefix: str, user_id: UUID, delete_old: bool = True
-    ) -> ApiKeyCreated:
-        api_key = self._create_and_hash_api_key(prefix=prefix)
-        key_to_save = ApiKey(
-            key=api_key.hashed_key, truncated_key=api_key.truncated_key
-        )
-
-        if delete_old:
-            await self.api_key_repo.delete_by_user(user_id)
-
-        await self.api_key_repo.add(api_key=key_to_save, user_id=user_id)
-        await self._create_v2_legacy_record_for_user(
-            api_key=api_key, prefix=prefix, user_id=user_id
-        )
-
-        return api_key
-
-    async def create_assistant_api_key(
+    def create_scoped_mcp_token(
         self,
-        prefix: str,
+        user: UserInDB,
+        *,
         assistant_id: UUID,
-        delete_old: bool = True,
-        hash_key: bool = True,
-    ) -> ApiKeyCreated:
-        api_key = self._create_and_hash_api_key(prefix=prefix)
-        key = api_key.hashed_key if hash_key else api_key.key
-        key_to_save = ApiKey(key=key, truncated_key=api_key.truncated_key)
+        mcp_server_id: UUID | None = None,
+        expires_in: int = 15,
+    ) -> str:
+        """Mint a short-lived access token for a loopback MCP server.
 
-        if delete_old:
-            await self.api_key_repo.delete_by_assistant(assistant_id)
+        Eneo attaches an ephemeral MCP server pointing at its own loopback
+        endpoint, authenticated with this token. The token authenticates as
+        ``user`` exactly like a normal access token (so the loopback endpoint
+        reuses ``authenticate``), and additionally carries an ``assistant_id``
+        claim so tools need no scope argument and cannot be redirected to
+        another assistant. Unknown claims ride through ``JWTPayload`` (which
+        ignores them on decode) and are read out separately by the loopback
+        endpoint.
 
-        await self.api_key_repo.add(api_key=key_to_save, assistant_id=assistant_id)
-        await self._create_v2_legacy_record_for_assistant(
-            api_key=api_key, prefix=prefix, assistant_id=assistant_id
+        ``mcp_server_id`` is set for a built-in provider: the loopback tool
+        reads its configuration from that ``mcp_servers`` row, so the row
+        cannot be chosen by the caller.
+        """
+        secret_key = str(JWT_SECRET)
+
+        jwt_meta = JWTMeta(
+            aud=JWT_AUDIENCE,
+            iat=datetime.timestamp(datetime.now(timezone.utc) - timedelta(seconds=2)),
+            exp=datetime.timestamp(
+                datetime.now(timezone.utc) + timedelta(minutes=expires_in)
+            ),
         )
-
-        return api_key
-
-    async def _create_v2_legacy_record_for_user(
-        self, *, api_key: ApiKeyCreated, prefix: str, user_id: UUID
-    ) -> None:
-        if self.api_key_v2_repo is None:
-            return
-        tenant_id = await self._get_user_tenant_id(user_id)
-        await self.api_key_v2_repo.create(
-            tenant_id=tenant_id,
-            owner_user_id=user_id,
-            created_by_user_id=user_id,
-            scope_type=ApiKeyScopeType.TENANT.value,
-            scope_id=None,
-            permission=ApiKeyPermission.ADMIN.value,
-            key_type=ApiKeyType.SK.value,
-            key_hash=api_key.hashed_key,
-            hash_version=ApiKeyHashVersion.SHA256.value,
-            key_prefix=self._normalize_prefix(api_key.key, fallback=prefix),
-            key_suffix=api_key.truncated_key,
-            name="Legacy API key",
-            description=None,
-            state=ApiKeyState.ACTIVE.value,
+        jwt_creds = JWTCreds(
+            sub=user.email,
+            username=user.username,
+            credential_version=getattr(user, "credential_version", 0),
         )
-
-    async def _create_v2_legacy_record_for_assistant(
-        self, *, api_key: ApiKeyCreated, prefix: str, assistant_id: UUID
-    ) -> None:
-        if self.api_key_v2_repo is None:
-            return
-        tenant_id, owner_user_id = await self._get_assistant_owner_and_tenant(
-            assistant_id
-        )
-        await self.api_key_v2_repo.create(
-            tenant_id=tenant_id,
-            owner_user_id=owner_user_id,
-            created_by_user_id=owner_user_id,
-            scope_type=ApiKeyScopeType.ASSISTANT.value,
-            scope_id=assistant_id,
-            permission=ApiKeyPermission.READ.value,
-            key_type=ApiKeyType.SK.value,
-            key_hash=api_key.hashed_key,
-            hash_version=ApiKeyHashVersion.SHA256.value,
-            key_prefix=self._normalize_prefix(api_key.key, fallback=prefix),
-            key_suffix=api_key.truncated_key,
-            name="Legacy Assistant API key",
-            description=None,
-            state=ApiKeyState.ACTIVE.value,
-        )
-
-    async def _get_user_tenant_id(self, user_id: UUID) -> UUID:
-        stmt = sa.select(Users.tenant_id).where(Users.id == user_id).limit(1)
-        record = await self.api_key_repo.session.execute(stmt)
-        row = record.first()
-        if row is None:
-            raise AuthenticationException("No authenticated user.")
-        return row.tenant_id
-
-    async def _get_assistant_owner_and_tenant(
-        self, assistant_id: UUID
-    ) -> tuple[UUID, UUID]:
-        stmt = (
-            sa.select(Assistants.user_id, Users.tenant_id)
-            .join(Users, Users.id == Assistants.user_id)
-            .where(Assistants.id == assistant_id)
-            .limit(1)
-        )
-        record = await self.api_key_repo.session.execute(stmt)
-        row = record.first()
-        if row is None:
-            raise AuthenticationException("No authenticated user.")
-        return row.tenant_id, row.user_id
+        payload = {
+            **JWTPayload(
+                **jwt_meta.model_dump(),
+                **jwt_creds.model_dump(),
+            ).model_dump(),
+            "assistant_id": str(assistant_id),
+        }
+        if mcp_server_id is not None:
+            payload["mcp_server_id"] = str(mcp_server_id)
+        return jwt.encode(payload, secret_key, algorithm=JWT_ALGORITHM)
 
     @staticmethod
-    def _normalize_prefix(plain_key: str, *, fallback: str) -> str:
-        if "_" in plain_key:
-            return f"{plain_key.split('_', 1)[0]}_"
-        return f"{fallback}_"
+    def validate_credential_version(
+        claims: Mapping[str, object], user: UserInDB
+    ) -> None:
+        """Reject an Eneo JWT minted before the user's latest credential change.
 
-    async def get_api_key(
-        self, plain_key: str, *, hash_key: bool = True
-    ) -> ApiKeyInDB | None:
-        if hash_key:
-            key = self.hash_api_key(plain_key)
-        else:
-            key = plain_key
+        Version 0 is the compatibility baseline for tokens created before the
+        claim was introduced. Provider-issued identity tokens have a different
+        issuer and remain owned by that provider; applying Eneo's counter to
+        them would make every future provider login fail once the counter moved
+        past zero. Every Eneo JWT consumer that resolves a live user must call
+        this after signature verification and user lookup.
+        """
 
-        return await self.api_key_repo.get(key)
+        # New tokens are unambiguous: possession of the private Eneo claim
+        # opts into version enforcement regardless of issuer text. For legacy
+        # tokens without the claim, only the exact local issuer represents
+        # Eneo's version-zero compatibility baseline. A different verified
+        # issuer is provider-owned and outside Eneo session invalidation.
+        if "credential_version" not in claims and claims.get("iss") != JWT_ISSUER:
+            return
 
-    def get_username_from_token(self, token: str, secret_key: str) -> str | None:
-        return self.get_jwt_payload(token, key=str(secret_key)).username
+        AuthService.validate_local_credential_version(
+            claims.get("credential_version", 0), user
+        )
+
+    @staticmethod
+    def validate_local_credential_version(raw_version: object, user: UserInDB) -> None:
+        """Strictly compare a local token or ticket version with live state."""
+
+        if isinstance(raw_version, bool) or not isinstance(raw_version, int):
+            raise AuthenticationException("Could not validate token credentials.")
+
+        if raw_version != getattr(user, "credential_version", 0):
+            raise AuthenticationException("Could not validate token credentials.")
+
+    def get_verified_claims(
+        self,
+        token: str,
+        key: str,
+        aud: str = JWT_AUDIENCE,
+        algs: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Verified raw claims, including ones ``JWTPayload`` does not model."""
+        algs = algs or [JWT_ALGORITHM]
+        try:
+            return jwt.decode(token, key=key, audience=aud, algorithms=algs)
+        except jwt.PyJWTError:
+            raise AuthenticationException("Could not validate token credentials.")
 
     def get_jwt_payload(
         self,
@@ -283,15 +221,32 @@ class AuthService:
         aud: str = JWT_AUDIENCE,
         algs: list[str] | None = None,
     ) -> JWTPayload:
-        algs = algs or [JWT_ALGORITHM]
-        try:
-            decoded_token = jwt.decode(token, key=key, audience=aud, algorithms=algs)
-            payload = JWTPayload(**decoded_token)
+        payload, _ = self.get_jwt_payload_with_claims(
+            token, key=key, aud=aud, algs=algs
+        )
+        return payload
 
-        except (jwt.PyJWTError, ValidationError):
+    def get_jwt_payload_with_claims(
+        self,
+        token: str,
+        key: str,
+        aud: str = JWT_AUDIENCE,
+        algs: list[str] | None = None,
+    ) -> tuple[JWTPayload, dict[str, Any]]:
+        """Return both the typed payload and untouched verified claims.
+
+        The raw mapping preserves whether optional private claims were absent;
+        applying Pydantic defaults before credential-version routing would turn
+        provider tokens into apparent legacy Eneo tokens.
+        """
+
+        claims = self.get_verified_claims(token, key=key, aud=aud, algs=algs)
+        try:
+            payload = JWTPayload(**claims)
+        except ValidationError:
             raise AuthenticationException("Could not validate token credentials.")
 
-        return payload
+        return payload, claims
 
     def get_payload_from_openid_jwt(
         self,

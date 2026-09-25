@@ -5,7 +5,7 @@ Multirepo containing:
 - The Eneo Web GUI, a SvelteKit app in `/apps/web`
 - The React/Next.js Web GUI in `/apps/web-next`
 - The Eneo.js API client, a plain JS client wrapping all Eneo endpoints used in the Web GUI in `packages/eneo.js`
-- The Eneo UI Library, offering reusable Svelte components for our frontend applications in `packages/ui`
+- The Eneo design tokens, themes and icons shared by the frontend apps in `packages/ui` (UI components live in `apps/web` on shadcn-svelte)
 
 ## Setup
 
@@ -19,13 +19,30 @@ Will install all required dependencies. Have a look at the README files in the r
 
 ### Local dev server
 
-If you want to develop the Web GUI while also working on the UI librart at the same time run
+To start the SvelteKit web app and its UI package watcher, run:
 
 ```bash
-bun -w run dev
+bun run dev
 ```
 
-This will start the dev task in all relevant subfolders. More info in the `app/web` directory.
+This is the canonical frontend start command. It starts both the UI package watcher and the
+web app on the fixed development URL `http://localhost:3000`.
+
+The command is safe to run more than once: it reports an existing Eneo frontend instead of
+trying to start a second Vite server. Use the lifecycle commands when a previous terminal was
+closed without stopping the server:
+
+```bash
+bun run dev:status   # Show whether this checkout owns the local frontend
+bun run dev:restart  # Safely stop this checkout's frontend and start a clean instance
+bun run dev:stop     # Stop this checkout's frontend
+```
+
+The stop and restart commands only signal a Vite process that is verified to belong to this
+checkout. If another application owns port 3000, they report the conflict and leave it running.
+Production build and runtime commands do not use this development lifecycle.
+
+To start the React/Next.js migration app separately on port 3100, run `bun run dev:web-next`.
 
 ### Formatting & Linting
 
@@ -48,9 +65,9 @@ bun run lint
 The stack is **Vitest** (unit + component) and **Playwright** (E2E). From this directory:
 
 ```bash
-bun run test          # unit + component (one-shot)
+bun run test          # lifecycle and both web apps' unit + component tests
 bun run test:web-next # React/Next.js unit + component tests only
-bun run test:watch    # React/Next.js watch mode for local dev
+bun run test:watch:web-next # React/Next.js watch mode for local dev
 bun run test:e2e      # E2E for both web apps against an isolated throwaway backend (needs Docker)
 bun run test:e2e:ui   # React/Next.js E2E in Playwright's interactive runner
 bun run test:all      # everything (installs Chromium if missing)

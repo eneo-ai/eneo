@@ -10,7 +10,7 @@ import asyncio
 import json
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import jwt
@@ -199,6 +199,8 @@ class AuditServiceStub:
 def _make_settings(**overrides) -> SimpleNamespace:
     defaults = dict(
         jwt_secret="unit-test-secret-padded-to-the-hs256-minimum",
+        jwt_audience="*",
+        jwt_algorithm="HS256",
         oidc_resource_server_enabled=True,
         oidc_accepted_issuer=ISSUER,
         oidc_accepted_audience=AUDIENCE,
@@ -212,7 +214,7 @@ def _make_settings(**overrides) -> SimpleNamespace:
 def _make_user_service(user_repo, tenant_repo, audit_service) -> UserService:
     return UserService(
         user_repo=user_repo,
-        auth_service=AuthService(AsyncMock()),
+        auth_service=AuthService(),
         api_key_auth_resolver=MagicMock(),
         api_key_v2_repo=MagicMock(),
         audit_service=audit_service,

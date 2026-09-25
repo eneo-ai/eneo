@@ -1,5 +1,7 @@
+import asyncio
 import time
 from typing import TYPE_CHECKING, Optional
+from uuid import UUID
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic_settings import BaseSettings
@@ -128,13 +130,12 @@ class Datastore:
 
     async def add(self, info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"):
         logger.debug("Chunking text.")
-        info_blob_chunks = self._chunk_text(info_blob)
+        info_blob_chunks = await asyncio.to_thread(self._chunk_text, info_blob)
 
         if not info_blob_chunks:
-            logger.warning(
-                f"Info Blob {info_blob.id} did not yield any chunks after splitting."
+            raise ValueError(
+                f"InfoBlob {info_blob.id} did not yield searchable content"
             )
-            return
 
         logger.debug(f"Embedding {len(info_blob_chunks)} info-blob chunks.")
         chunk_embedding_list = await self.create_embeddings_service.get_embeddings(
@@ -151,12 +152,24 @@ class Datastore:
         collections: Optional[list["Collection"]] = None,
         websites: Optional[list["Website"]] = None,
         integration_knowledge_list: Optional[list[IntegrationKnowledge]] = None,
+        info_blob_ids: Optional[list[UUID]] = None,
         num_chunks: Optional[int] = 30,
         autocut_cutoff: Optional[int] = None,
+        min_score: Optional[float] = None,
     ) -> list[InfoBlobChunkInDBWithScore]:
         group_ids = [group.id for group in (collections or [])]
         website_ids = [website.id for website in (websites or [])]
         integration_knowledge_ids = [i.id for i in (integration_knowledge_list or [])]
+
+        # The scope buckets are OR-ed in SQL, so combining a document with its
+        # own sources would widen the search back out to those sources instead
+        # of narrowing it to the document. On an authorization-adjacent
+        # predicate that footgun is worth making unconstructible.
+        if info_blob_ids and (group_ids or website_ids or integration_knowledge_ids):
+            raise ValueError(
+                "info_blob_ids narrows a search to single documents and cannot be "
+                "combined with collection, website or integration scopes."
+            )
 
         start = time.time()
         search_string_embedding = (
@@ -170,6 +183,7 @@ class Datastore:
             group_ids=group_ids,
             website_ids=website_ids,
             integration_knowledge_ids=integration_knowledge_ids,
+            info_blob_ids=info_blob_ids,
             limit=num_chunks if num_chunks is not None else 30,
         )
         end = time.time()
@@ -178,6 +192,15 @@ class Datastore:
             f"Time to get results: Embed step: {step_1 - start},"
             f" Search step: {end - step_1}, Total: {end - start}"
         )
+
+        # Vector search returns nearest neighbors unconditionally; a relevance
+        # floor lets callers drop chunks that merely happen to be the least
+        # distant (e.g. retrieval triggered by an off-topic message). Score
+        # scales are embedding-model-dependent, so there is no global default.
+        if min_score is not None:
+            semantic_results = [
+                res for res in semantic_results if res.score >= min_score
+            ]
 
         scores = [res.score for res in semantic_results]
 

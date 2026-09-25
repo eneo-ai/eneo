@@ -333,6 +333,10 @@ def _compute_expected(
     is_admin_scope = endpoint.get("is_admin_scope", False)
     target_resource_key = endpoint.get("target_resource_key")
     is_unguarded = endpoint.get("is_unguarded", False)
+    session_only = endpoint.get("session_only", False)
+
+    if session_only:
+        return "deny"
 
     # Unguarded endpoints: any authenticated key should access them
     if is_unguarded:
@@ -739,6 +743,17 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
+        # --- Image Models ---
+        {
+            "name": "list-image-models",
+            "method": "GET",
+            "path": "/api/v1/image-models/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
         # --- Tenant Models (admin) ---
         {
             "name": "create-tenant-completion-model",
@@ -766,6 +781,17 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "name": "create-tenant-transcription-model",
             "method": "POST",
             "path": "/api/v1/admin/tenant-models/transcription/",
+            "body": {"provider_id": fake, "name": "probe", "display_name": "Probe"},
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "create-tenant-image-model",
+            "method": "POST",
+            "path": "/api/v1/admin/tenant-models/image/",
             "body": {"provider_id": fake, "name": "probe", "display_name": "Probe"},
             "resource_type": None,
             "scope_resource": "admin",
@@ -1192,6 +1218,7 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "is_admin_scope": True,
             "requires_admin_perm": False,
             "target_resource_key": None,
+            "session_only": True,
         },
         # =================================================================
         # SPECIAL: API KEY MANAGEMENT (admin scope, no admin perm guard)

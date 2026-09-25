@@ -8,15 +8,19 @@
   import { beforeNavigate } from "$app/navigation";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { initSpaceSettingsEditor } from "$lib/features/spaces/SpaceSettingsEditor";
-  import { Button, Dialog, Input } from "@eneo/ui";
-  import SelectEmbeddingModels from "./SelectEmbeddingModels.svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import SelectSpaceModels from "./SelectSpaceModels.svelte";
+  import Hint from "$lib/components/Hint.svelte";
   import EditNameAndDescription from "./EditNameAndDescription.svelte";
-  import SelectCompletionModels from "./SelectCompletionModels.svelte";
   import SelectMCPServers from "./SelectMCPServers.svelte";
+  import CapabilityRow from "./CapabilityRow.svelte";
+  import { CAPABILITIES } from "$lib/features/mcp/capabilities";
   import { Page, Settings } from "$lib/components/layout";
   import SpaceStorageOverview from "./SpaceStorageOverview.svelte";
-  import SelectTranscriptionModels from "./SelectTranscriptionModels.svelte";
-  import { writable } from "svelte/store";
   import { getEneo } from "$lib/core/Eneo.js";
   import ChangeSecurityClassification from "./ChangeSecurityClassification.svelte";
   import EditRetentionPolicy from "./EditRetentionPolicy.svelte";
@@ -24,6 +28,7 @@
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import { createIconEditor } from "$lib/features/icons/createIconEditor.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import { fade } from "svelte/transition";
   import { untrack } from "svelte";
@@ -31,6 +36,7 @@
   const eneo = getEneo();
 
   let { data } = $props();
+  const uid = $props.id();
   let models = $state(untrack(() => data.models));
   let completionModels = $derived(
     models.completionModels.filter(
@@ -71,8 +77,7 @@
   // Navigation guard for unsaved changes
   beforeNavigate((navigate) => {
     if ($currentChanges.hasUnsavedChanges) {
-      const confirmMessage =
-        m.unsaved_changes_warning?.() ?? "Du har osparade ändringar. Vill du lämna sidan?";
+      const confirmMessage = m.unsaved_changes_warning();
       if (!confirm(confirmMessage)) {
         navigate.cancel();
         return;
@@ -83,7 +88,7 @@
 
   // Handle save with success feedback
   async function handleSave() {
-    await saveChanges();
+    if (!(await saveChanges())) return;
     showSaveSuccess = true;
     clearTimeout(saveSuccessTimeout);
     saveSuccessTimeout = setTimeout(() => {
@@ -91,54 +96,18 @@
     }, 5000);
   }
 
-  let showDeleteDialog = writable(false);
+  let showDeleteDialog = $state(false);
   let deleteConfirmation = $state("");
   let isDeleting = $state(false);
   let showStillDeletingMessage = $state(false);
   let deletionMessageTimeout: ReturnType<typeof setTimeout>;
   let isOrgSpace = $currentSpace.organization;
 
-  // Icon state - uses editor for icon_id but handles upload separately
-  let iconUploading = $state(false);
-  let iconError = $state<string | null>(null);
-
-  function getIconUrl(id: string | null | undefined): string | null {
-    return id ? eneo.icons.url({ id }) : null;
-  }
-
-  // Use the update store's icon_id for displaying current icon
-  let iconUrl = $derived(getIconUrl($update.icon_id));
-
-  async function handleIconUpload(event: CustomEvent<File>) {
-    const file = event.detail;
-    iconUploading = true;
-    iconError = null;
-    try {
-      const newIcon = await eneo.icons.upload({ file });
-      // Update the editor's update store - will be saved with other changes
-      $update.icon_id = newIcon.id;
-    } catch (error) {
-      console.error("Failed to upload icon:", error);
-      iconError = m.avatar_upload_failed();
-    } finally {
-      iconUploading = false;
-    }
-  }
-
-  async function handleIconDelete() {
-    iconError = null;
-    try {
-      // Delete the icon file from server
-      if ($update.icon_id) {
-        await eneo.icons.delete({ id: $update.icon_id });
-      }
-      // Update the editor's update store - will be saved with other changes
-      $update.icon_id = null;
-    } catch (error) {
-      console.error("Failed to delete icon:", error);
-      iconError = m.avatar_delete_failed();
-    }
-  }
+  // The icon id is staged in the editor and saved or discarded with the other changes.
+  const icon = createIconEditor({
+    iconId: () => $update.icon_id,
+    setIconId: (id) => ($update.icon_id = id)
+  });
 
   async function deleteSpace() {
     if (deleteConfirmation === "") return;
@@ -171,22 +140,19 @@
     <Page.Title title={m.settings()}></Page.Title>
     <Page.Flex>
       {#if $currentChanges.hasUnsavedChanges}
-        <Button variant="destructive" disabled={$isSaving} on:click={() => discardChanges()}
+        <Button variant="destructive" disabled={$isSaving} onclick={() => discardChanges()}
           >{m.discard_all_changes()}</Button
         >
         <Button
-          variant="positive"
-          class="h-8 w-32 whitespace-nowrap"
+          class="bg-positive-default hover:bg-positive-stronger h-8 w-32 whitespace-nowrap"
           disabled={$isSaving}
-          on:click={handleSave}>{$isSaving ? m.loading() : m.save_changes()}</Button
+          onclick={handleSave}>{$isSaving ? m.loading() : m.save_changes()}</Button
         >
       {:else}
         {#if showSaveSuccess}
           <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
         {/if}
-        <Button variant="primary" class="w-32" href={`/spaces/${$currentSpace.routeId}`}
-          >{m.done()}</Button
-        >
+        <Button class="w-32" href={`/spaces/${$currentSpace.routeId}`}>{m.done()}</Button>
       {/if}
     </Page.Flex>
   </Page.Header>
@@ -203,11 +169,11 @@
             revertFn={() => discardChanges("icon_id")}
           >
             <IconUpload
-              {iconUrl}
-              uploading={iconUploading}
-              error={iconError}
-              on:upload={handleIconUpload}
-              on:delete={handleIconDelete}
+              iconUrl={icon.url}
+              uploading={icon.uploading}
+              error={icon.error}
+              on:upload={(event) => icon.upload(event.detail)}
+              on:delete={icon.remove}
             />
           </Settings.Row>
           <SpaceStorageOverview></SpaceStorageOverview>
@@ -230,14 +196,49 @@
       {/if}
 
       <Settings.Group title={m.advanced_settings()}>
-        <SelectCompletionModels selectableModels={completionModels}></SelectCompletionModels>
+        <SelectSpaceModels
+          field="completion_models"
+          selectableModels={completionModels}
+          title={m.completion_models()}
+          description={m.completion_models_description()}
+          hint={m.enable_completion_model_for_assistants()}
+        />
 
-        <SelectEmbeddingModels selectableModels={embeddingModels}></SelectEmbeddingModels>
+        <SelectSpaceModels
+          field="embedding_models"
+          selectableModels={embeddingModels}
+          title={m.embedding_models()}
+          description={m.embedding_models_description()}
+          hint={m.embedding_models_hint()}
+        >
+          {#snippet extra()}
+            {#if $currentSpace.embedding_models.length > 1}
+              <Hint class="mt-2.5">
+                {isOrgSpace
+                  ? m.embedding_models_multiple_warning_organization()
+                  : m.embedding_models_multiple_warning()}
+              </Hint>
+            {/if}
+          {/snippet}
+        </SelectSpaceModels>
 
-        <SelectTranscriptionModels selectableModels={transcriptionModels}
-        ></SelectTranscriptionModels>
+        <SelectSpaceModels
+          field="transcription_models"
+          selectableModels={transcriptionModels}
+          title={m.transcription_models()}
+          description={m.transcription_models_description()}
+          hint={m.transcription_models_hint()}
+        />
 
         <SelectMCPServers selectableServers={data.mcpServers}></SelectMCPServers>
+
+        <Settings.Row title={m.capabilities()} description={m.capabilities_space_description()}>
+          <div class="border-default overflow-hidden rounded-xl border">
+            {#each CAPABILITIES as capability (capability.purpose)}
+              <CapabilityRow {capability} />
+            {/each}
+          </div>
+        </Settings.Row>
       </Settings.Group>
 
       {#if !isOrgSpace && $currentSpace.permissions?.includes("edit")}
@@ -259,45 +260,68 @@
       {#if !isOrgSpace && $currentSpace.permissions?.includes("delete")}
         <Settings.Group title={m.danger_zone()}>
           <Settings.Row title={m.delete_space()} description={m.delete_space_description()}>
-            <Dialog.Root alert openController={showDeleteDialog}>
-              <Dialog.Trigger asFragment let:trigger>
-                <Button is={trigger} variant="destructive" class="flex-grow"
-                  >{m.delete_this_space()}</Button
+            <AlertDialog.Root bind:open={showDeleteDialog}>
+              <AlertDialog.Trigger>
+                {#snippet child({ props })}
+                  <Button {...props} variant="destructive" class="flex-grow"
+                    >{m.delete_this_space()}</Button
+                  >
+                {/snippet}
+              </AlertDialog.Trigger>
+              <AlertDialog.Content class={dialogLayout.content("medium")}>
+                <form
+                  class="contents"
+                  onsubmit={(event) => {
+                    event.preventDefault();
+                    deleteSpace();
+                  }}
                 >
-              </Dialog.Trigger>
-              <Dialog.Content width="medium" form>
-                <Dialog.Title>{m.delete_space()}</Dialog.Title>
+                  <AlertDialog.Header class={dialogLayout.header}>
+                    <AlertDialog.Title>{m.delete_space()}</AlertDialog.Title>
+                  </AlertDialog.Header>
 
-                <Dialog.Section>
-                  <p class="border-default hover:bg-hover-dimmer border-b px-7 py-4">
-                    {m.confirm_delete_space_message({ space: $currentSpace.name })}
-                  </p>
-                  <Input.Text
-                    bind:value={deleteConfirmation}
-                    label={m.enter_space_name_to_confirm()}
-                    required
-                    placeholder={$currentSpace.name}
-                    class=" border-default hover:bg-hover-dimmer px-4 py-4"
-                  ></Input.Text>
-                </Dialog.Section>
+                  <div class={dialogLayout.body}>
+                    <div class={dialogLayout.section}>
+                      <p class="border-default hover:bg-hover-dimmer border-b px-7 py-4">
+                        {m.confirm_delete_space_message({ space: $currentSpace.name })}
+                      </p>
+                      <Field.Field class="border-default hover:bg-hover-dimmer px-4 py-4">
+                        <Field.Label for={`${uid}-delete-confirmation`}>
+                          {m.enter_space_name_to_confirm()}
+                          <span class="text-muted font-normal" aria-hidden="true"
+                            >({m.required()})</span
+                          >
+                        </Field.Label>
+                        <Input
+                          id={`${uid}-delete-confirmation`}
+                          bind:value={deleteConfirmation}
+                          required
+                          placeholder={$currentSpace.name}
+                        />
+                      </Field.Field>
+                    </div>
 
-                {#if showStillDeletingMessage}
-                  <p
-                    class="label-info border-label-default bg-label-dimmer text-label-stronger mt-2 rounded-md border p-2"
-                  >
-                    <span class="font-bold">{m.hint()}:</span>
-                    {m.delete_space_hint()}
-                  </p>
-                {/if}
+                    {#if showStillDeletingMessage}
+                      <p
+                        class="label-info border-label-default bg-label-dimmer text-label-stronger rounded-md border p-2"
+                      >
+                        <span class="font-bold">{m.hint()}:</span>
+                        {m.delete_space_hint()}
+                      </p>
+                    {/if}
+                  </div>
 
-                <Dialog.Controls let:close>
-                  <Button is={close} disabled={isDeleting}>{m.cancel()}</Button>
-                  <Button variant="destructive" on:click={deleteSpace} disabled={isDeleting}
-                    >{isDeleting ? m.deleting() : m.confirm_deletion()}</Button
-                  >
-                </Dialog.Controls>
-              </Dialog.Content>
-            </Dialog.Root>
+                  <AlertDialog.Footer class={dialogLayout.footer}>
+                    <AlertDialog.Cancel type="button" disabled={isDeleting}
+                      >{m.cancel()}</AlertDialog.Cancel
+                    >
+                    <Button type="submit" variant="destructive" disabled={isDeleting}
+                      >{isDeleting ? m.deleting() : m.confirm_deletion()}</Button
+                    >
+                  </AlertDialog.Footer>
+                </form>
+              </AlertDialog.Content>
+            </AlertDialog.Root>
           </Settings.Row>
         </Settings.Group>
       {/if}

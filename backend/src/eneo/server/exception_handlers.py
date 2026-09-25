@@ -2,12 +2,78 @@ import logging
 from typing import Protocol, cast
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
-from eneo.main.exceptions import EXCEPTION_MAP, ErrorCodes, UnauthorizedException
+from eneo.files.file_models import (
+    FileInUseError,
+    FileOriginalNotFoundError,
+)
+from eneo.info_blobs.info_blob import InfoBlobOriginalUnavailableError
+from eneo.main.exceptions import (
+    EXCEPTION_MAP,
+    ErrorCodes,
+    UnauthorizedException,
+)
 from eneo.main.models import GeneralError
 from eneo.main.request_context import get_request_context
+from eneo.object_content.content import (
+    ContentTooLargeError,
+    InvalidContentRangeError,
+    ObjectContentBusyError,
+    ObjectContentIdempotencyConflictError,
+    ObjectContentIntegrityError,
+    ObjectContentStateError,
+    ObjectContentUnavailableError,
+)
+from eneo.object_content.deployment_policy import (
+    DeploymentPolicyConflict,
+    ObjectStoreTargetNotSelectable,
+)
+from eneo.object_content.object_store_connection import (
+    ObjectStoreConnectionAlreadyConfigured,
+    ObjectStoreConnectionConflict,
+    ObjectStoreConnectionDatabaseUnavailable,
+    ObjectStoreConnectionInvalid,
+    ObjectStoreConnectionMutationOutcomeUnknown,
+    ObjectStoreConnectionNotConfigured,
+    ObjectStoreCredentialDataInvalid,
+    ObjectStoreCredentialEncryptionUnavailable,
+    ObjectStoreDestinationAlreadyBound,
+    ObjectStoreDestinationCopyIncomplete,
+    ObjectStoreDestinationSwitchBlocked,
+    ObjectStoreMovesNotPaused,
+    ObjectStoreNewWritesNotRedirected,
+    ObjectStorePendingDestinationMissing,
+    ObjectStorePlainHttpNotPermitted,
+    ObjectStorePreviousDestinationMissing,
+    ObjectStorePreviousDestinationPresent,
+    ObjectStoreProbeAuthenticationFailed,
+    ObjectStoreProbeBindingMismatch,
+    ObjectStoreProbeCleanupFailed,
+    ObjectStoreProbeConnectionFailed,
+    ObjectStoreProbeIntegrityFailed,
+    ObjectStoreProbeTlsFailed,
+    ObjectStoreProbeUnavailable,
+)
+from eneo.skills.domain.skill import (
+    PublishedSkillDeletionError,
+    SkillBlockedForBindingError,
+    SkillExecutionBlockConflictError,
+    SkillHasActiveAppRunsError,
+    SkillHasBindingsError,
+    SkillNotPublishedForBindingError,
+    SkillRemovalBusyError,
+    SkillRuntimePolicyChangedError,
+    SkillSlugConflictError,
+)
+from eneo.users.password import (
+    CurrentPasswordIncorrectError,
+    LocalPasswordChangeUnavailableError,
+    PasswordPolicyViolationError,
+    PasswordReuseError,
+)
 
 # Partial unique indexes that guard active model display names, per
 # 20260602_unique_model_display_names. Their names all end in this suffix.
@@ -51,6 +117,34 @@ def _default_message_for_status(status_code: int) -> str:
     return "Request failed."
 
 
+def default_error_code_for_status(status_code: int) -> ErrorCodes:
+    """The coarse numeric category for a status raised without one.
+
+    `GeneralError` requires `eneo_error_code`, but an `HTTPException` raised
+    with a `{"code", "message"}` detail carries only the string code. This
+    keeps one category per status for those, so a client that branches on the
+    numeric field is not left guessing at which layer refused the request.
+    Precision lives in the string `code`, which the raiser owns.
+
+    Only statuses whose meaning the category restates are mapped. A status that
+    covers several domain failures, such as 409, falls through to the coarse
+    one: the web client turns a category into a sentence for the reader, so
+    inferring `NAME_COLLISION` from any conflict would tell someone resolving
+    an approval conflict that a display name is taken.
+    """
+    if status_code == 401:
+        return ErrorCodes.AUTHENTICATION_ERROR
+    if status_code == 403:
+        return ErrorCodes.UNAUTHORIZED
+    if status_code == 404:
+        return ErrorCodes.NOT_FOUND
+    if status_code == 429:
+        return ErrorCodes.QUOTA_EXCEEDED
+    if status_code >= 500:
+        return ErrorCodes.INTERNAL_SERVER_ERROR
+    return ErrorCodes.BAD_REQUEST
+
+
 def _extract_request_id(request: Request) -> str | None:
     request_id = request.headers.get("x-correlation-id") or request.headers.get(
         "x-request-id"
@@ -87,8 +181,183 @@ def _exception_context(
 logger = logging.getLogger(__name__)
 
 
+# Domain exceptions that carry their own HTTP status, reason code and English
+# fallback. They live here rather than in eneo.main.exceptions because the
+# server adapter may depend on a domain package without reversing that
+# dependency. One map, so "where do I register this?" has one answer.
+DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] = {
+    # --- Local user credentials ---
+    CurrentPasswordIncorrectError: (
+        400,
+        None,
+        ErrorCodes.CURRENT_PASSWORD_INCORRECT,
+    ),
+    PasswordReuseError: (400, None, ErrorCodes.PASSWORD_REUSE),
+    PasswordPolicyViolationError: (
+        400,
+        None,
+        ErrorCodes.PASSWORD_POLICY_VIOLATION,
+    ),
+    LocalPasswordChangeUnavailableError: (
+        409,
+        None,
+        ErrorCodes.LOCAL_PASSWORD_CHANGE_UNAVAILABLE,
+    ),
+    # --- Object content and files ---
+    ObjectContentUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
+    ObjectContentIntegrityError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
+    ObjectContentIdempotencyConflictError: (409, None, ErrorCodes.UNIQUE_ERROR),
+    ObjectContentStateError: (409, None, ErrorCodes.BAD_REQUEST),
+    ObjectContentBusyError: (409, None, ErrorCodes.RESOURCE_NOT_READY),
+    FileInUseError: (409, None, ErrorCodes.FILE_IN_USE),
+    FileOriginalNotFoundError: (404, None, ErrorCodes.FILE_ORIGINAL_NOT_FOUND),
+    InfoBlobOriginalUnavailableError: (
+        404,
+        None,
+        ErrorCodes.INFO_BLOB_ORIGINAL_UNAVAILABLE,
+    ),
+    ContentTooLargeError: (413, None, ErrorCodes.FILE_TOO_LARGE),
+    InvalidContentRangeError: (416, None, ErrorCodes.BAD_REQUEST),
+    DeploymentPolicyConflict: (409, None, ErrorCodes.DEPLOYMENT_POLICY_CONFLICT),
+    ObjectStoreTargetNotSelectable: (
+        409,
+        None,
+        ErrorCodes.OBJECT_STORE_NOT_SELECTABLE,
+    ),
+    ObjectStoreConnectionAlreadyConfigured: (
+        409,
+        None,
+        ErrorCodes.UNIQUE_ERROR,
+    ),
+    ObjectStoreConnectionNotConfigured: (409, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreConnectionDatabaseUnavailable: (
+        503,
+        None,
+        ErrorCodes.RESOURCE_NOT_READY,
+    ),
+    ObjectStoreConnectionMutationOutcomeUnknown: (
+        503,
+        None,
+        ErrorCodes.RESOURCE_NOT_READY,
+    ),
+    ObjectStoreDestinationAlreadyBound: (409, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreDestinationSwitchBlocked: (409, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreDestinationCopyIncomplete: (409, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreMovesNotPaused: (409, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreNewWritesNotRedirected: (409, None, ErrorCodes.BAD_REQUEST),
+    ObjectStorePendingDestinationMissing: (404, None, ErrorCodes.NOT_FOUND),
+    ObjectStorePreviousDestinationMissing: (404, None, ErrorCodes.NOT_FOUND),
+    ObjectStorePreviousDestinationPresent: (409, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreConnectionConflict: (409, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreConnectionInvalid: (400, None, ErrorCodes.BAD_REQUEST),
+    ObjectStorePlainHttpNotPermitted: (400, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreCredentialEncryptionUnavailable: (
+        503,
+        None,
+        ErrorCodes.RESOURCE_NOT_READY,
+    ),
+    ObjectStoreCredentialDataInvalid: (
+        503,
+        None,
+        ErrorCodes.RESOURCE_NOT_READY,
+    ),
+    ObjectStoreProbeAuthenticationFailed: (400, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreProbeTlsFailed: (400, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreProbeBindingMismatch: (409, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreProbeIntegrityFailed: (400, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreProbeCleanupFailed: (503, None, ErrorCodes.RESOURCE_NOT_READY),
+    ObjectStoreProbeConnectionFailed: (
+        503,
+        None,
+        ErrorCodes.RESOURCE_NOT_READY,
+    ),
+    ObjectStoreProbeUnavailable: (503, None, ErrorCodes.RESOURCE_NOT_READY),
+    # --- Skill lifecycle conflicts ---
+    SkillSlugConflictError: (
+        409,
+        "A Skill with this identifier already exists in this scope. "
+        "Choose a different identifier.",
+        ErrorCodes.SKILL_SLUG_TAKEN,
+    ),
+    PublishedSkillDeletionError: (
+        409,
+        "Previously published Skills are retained for audit history "
+        "and cannot be deleted.",
+        ErrorCodes.SKILL_PUBLISHED_NOT_DELETABLE,
+    ),
+    SkillHasActiveAppRunsError: (
+        409,
+        "This Skill is required by a queued or running App run. "
+        "Wait for it to finish before deleting the Skill.",
+        ErrorCodes.SKILL_IN_USE_BY_APP_RUN,
+    ),
+    SkillHasBindingsError: (
+        409,
+        "This Skill is still attached. Remove every binding before deleting it.",
+        ErrorCodes.SKILL_STILL_ATTACHED,
+    ),
+    SkillRemovalBusyError: (
+        409,
+        "One or more selected Skills are being changed. Nothing was removed. "
+        "Reload and try again when the change has finished.",
+        ErrorCodes.SKILL_REMOVAL_BUSY,
+    ),
+    SkillNotPublishedForBindingError: (
+        400,
+        "Bindings can only move to published organisation Skill versions",
+        ErrorCodes.SKILL_NOT_PUBLISHED_FOR_BINDING,
+    ),
+    SkillBlockedForBindingError: (
+        400,
+        "Blocked organisation Skills cannot receive new or changed bindings",
+        ErrorCodes.SKILL_BLOCKED_FOR_BINDING,
+    ),
+    SkillExecutionBlockConflictError: (
+        409,
+        "This execution block changed after you reviewed it. "
+        "Reload the Skill before unblocking.",
+        ErrorCodes.SKILL_EXECUTION_BLOCK_CONFLICT,
+    ),
+    SkillRuntimePolicyChangedError: (
+        409,
+        "The organisation's Skill policy changed while this move was being "
+        "validated. Run the update again against the current policy.",
+        ErrorCodes.SKILL_RUNTIME_POLICY_CHANGED,
+    ),
+}
+
+
 def add_exception_handlers(app: FastAPI):
-    for exception, (status_code, error_message, error_code) in EXCEPTION_MAP.items():
+    async def request_validation_error_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        # Keep the documented HTTPValidationError shape, but never serialize
+        # raw input, validation context or validator-generated messages. Even
+        # SecretStr cannot redact input when a required sibling is missing,
+        # and a custom validator may embed a secret in its error message.
+        validation_exc = cast(RequestValidationError, exc)
+        public_messages = {
+            "missing": "Field required",
+            "string_type": "Input should be a valid string",
+            "json_invalid": "Invalid JSON",
+        }
+        details: list[dict[str, object]] = [
+            {
+                "loc": error["loc"],
+                "type": error["type"],
+                "msg": public_messages.get(error["type"], "Invalid value"),
+            }
+            for error in validation_exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": details})
+
+    app.add_exception_handler(RequestValidationError, request_validation_error_handler)
+
+    exception_handlers = (
+        *EXCEPTION_MAP.items(),
+        *DOMAIN_EXCEPTION_MAP.items(),
+    )
+    for exception, (status_code, error_message, error_code) in exception_handlers:
 
         def handler(
             request: Request,

@@ -16,8 +16,8 @@ Notes:
     ``input_cost_per_token`` / ``output_cost_per_token`` from LiteLLM as-is.
   - Transcription gets ``cost_per_minute`` derived from
     ``input_cost_per_second × 60`` (LiteLLM's native unit).
-  - Lookup tries the bare model name first, then ``<provider>/<name>``
-    variants, mirroring `/model-defaults/`.
+  - With provider context, lookup prefers ``<provider>/<name>`` and then
+    falls back to the bare model name, mirroring `/model-defaults/`.
 
 Revision ID: 20260501_backfill_model_costs
 Revises: 20260430_add_model_costs
@@ -39,11 +39,10 @@ branch_labels = None
 depends_on = None
 
 
-# Inlined from the model defaults lookup so this
-# migration stays runnable on a fresh DB even if the app module is later
-# moved or renamed. Keep semantics in sync with that module if either
-# changes — both paths must agree on which LiteLLM row a given
-# (name, provider_type) maps to.
+# Frozen copy of the model-defaults lookup so this migration stays runnable on
+# a fresh DB even if the app module is later moved or renamed. Do not replace it
+# with a runtime import. If the application resolver changes, review explicitly
+# whether this historical migration should retain or mirror the new semantics.
 def resolve_model_defaults(
     model_cost: dict[str, dict[str, Any]],
     names: list[str | None] | str,

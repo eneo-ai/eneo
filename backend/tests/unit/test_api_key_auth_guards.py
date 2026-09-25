@@ -20,6 +20,7 @@ from eneo.authentication.auth_dependencies import (
     APPS_READ_OVERRIDES,
     ASSISTANTS_READ_OVERRIDES,
     CONVERSATIONS_READ_OVERRIDES,
+    INFO_BLOBS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
     _raise_api_key_http_error,
     require_api_key_permission,
@@ -265,31 +266,12 @@ class TestMethodAwarePermissionCheck:
 
 
 # ---------------------------------------------------------------------------
-# Integration tests — endpoint permission transitions (tests 10-12)
+# Endpoint permission transitions
 # ---------------------------------------------------------------------------
 
 
 class TestEndpointPermissionTransitions:
-    """Tests 10-12: verify method+endpoint combos deny/allow correctly."""
-
-    def test_read_key_allowed_on_post_ask_assistant_via_override(self, monkeypatch):
-        """10. Read key + POST ask_assistant → pass (ask_assistant is a read-override)."""
-        monkeypatch.setattr(
-            "eneo.authentication.api_key_resolver.get_settings",
-            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
-        )
-        key = _make_key(
-            resource_permissions=ResourcePermissions(
-                assistants=ResourcePermissionLevel.READ,
-            ),
-        )
-        request = _fake_request("POST", endpoint_name="ask_assistant")
-        # Should NOT raise — ask_assistant is in ASSISTANTS_READ_OVERRIDES
-        _check_method_resource_permission(
-            request,
-            key,
-            _config("assistants", read_override_endpoints=ASSISTANTS_READ_OVERRIDES),
-        )
+    """Verify method and endpoint combinations deny or allow correctly."""
 
     def test_write_key_denied_on_delete_apps(self, monkeypatch):
         """11. Write key denied on DELETE delete_app (requires admin)."""
@@ -558,10 +540,12 @@ class TestOverrideNameValidation:
             router as conversations_router,
         )
         from eneo.groups_legacy.api.group_router import router as groups_router
+        from eneo.info_blobs.info_blobs_router import router as info_blobs_router
         from eneo.services.service_router import router as services_router
 
         assistant_names = self._collect_endpoint_names(assistants_router)
         group_names = self._collect_endpoint_names(groups_router)
+        info_blob_names = self._collect_endpoint_names(info_blobs_router)
         conversation_names = self._collect_endpoint_names(conversations_router)
         # APPS_READ_OVERRIDES is shared across app_router and services_router
         apps_names = self._collect_endpoint_names(
@@ -576,6 +560,11 @@ class TestOverrideNameValidation:
         for name in KNOWLEDGE_READ_OVERRIDES:
             assert name in group_names, (
                 f"KNOWLEDGE_READ_OVERRIDES contains '{name}' but no route has that endpoint name"
+            )
+
+        for name in INFO_BLOBS_READ_OVERRIDES:
+            assert name in info_blob_names, (
+                f"INFO_BLOBS_READ_OVERRIDES contains '{name}' but no route has that endpoint name"
             )
 
         for name in CONVERSATIONS_READ_OVERRIDES:
@@ -994,28 +983,12 @@ class TestReadOverrideConstants:
 
 
 # ---------------------------------------------------------------------------
-# Legacy split mapping tests (Phase 7F)
+# Permission mapping tests (Phase 7F)
 # ---------------------------------------------------------------------------
 
 
-class TestLegacySplitMapping:
-    """Verify legacy migration creates correct permission levels."""
-
-    def test_user_key_migration_creates_admin(self):
-        """User key migration → permission=ADMIN."""
-        from eneo.authentication.auth_models import ApiKeyPermission
-
-        # The code at api_key_resolver.py sets permission=ApiKeyPermission.ADMIN.value
-        # for user keys (scope_type=tenant). Verify constant value.
-        assert ApiKeyPermission.ADMIN.value == "admin"
-
-    def test_assistant_key_migration_creates_read(self):
-        """Assistant key migration → permission=READ."""
-        from eneo.authentication.auth_models import ApiKeyPermission
-
-        # The code at api_key_resolver.py sets permission=ApiKeyPermission.READ.value
-        # for assistant keys (scope_type=assistant). Verify constant value.
-        assert ApiKeyPermission.READ.value == "read"
+class TestPermissionMapping:
+    """Verify permission level mapping constants."""
 
     def test_method_permission_map_completeness(self):
         """METHOD_PERMISSION_MAP covers all standard HTTP methods."""

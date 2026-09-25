@@ -5,6 +5,7 @@ from uuid import UUID
 
 from eneo.files.file_models import FileType
 from eneo.info_blobs.info_blob import InfoBlobInDBWithScore
+from eneo.main.config import get_settings
 from eneo.services.service import DatastoreResult
 
 if TYPE_CHECKING:
@@ -46,10 +47,13 @@ class ReferencesService:
     ) -> list["InfoBlobChunkInDBWithScore"]:
         integration_knowledge_list = list(integration_knowledge_list or [])
         if (collections or websites or integration_knowledge_list) and input_string:
+            # Named rather than splatted from a dict: a homogeneously typed
+            # **kwargs would silently bind to any parameter semantic_search
+            # grows later.
             if version == 1:
-                search_params = dict(autocut_cutoff=3, num_chunks=30)
+                autocut_cutoff, chunk_limit = 3, 30
             elif version == 2:
-                search_params = dict(autocut_cutoff=None, num_chunks=num_chunks)
+                autocut_cutoff, chunk_limit = None, num_chunks
             else:
                 raise ValueError(f"Unsupported retrieval version: {version}")
 
@@ -71,7 +75,11 @@ class ReferencesService:
                 collections=collections,
                 websites=websites,
                 integration_knowledge_list=integration_knowledge_list,
-                **search_params,
+                # Deployment-wide relevance floor for injected chunks (off by
+                # default; cosine-similarity scales differ per embedding model).
+                min_score=get_settings().inject_knowledge_min_score,
+                num_chunks=chunk_limit,
+                autocut_cutoff=autocut_cutoff,
             )
 
         return []
@@ -79,15 +87,21 @@ class ReferencesService:
     async def _get_info_blobs_from_chunks(
         self, info_blob_chunks: list["InfoBlobChunkInDBWithScore"]
     ) -> list["InfoBlobInDBWithScore"]:
+        if not info_blob_chunks:
+            return []
+
+        blob_ids = [chunk.info_blob_id for chunk in info_blob_chunks]
+        loaded_blobs = await self.info_blobs_repo.get_by_ids(blob_ids)
+        blobs_by_id = {blob.id: blob for blob in loaded_blobs}
         info_blobs: list[InfoBlobInDBWithScore] = []
         for chunk in info_blob_chunks:
-            info_blob = await self.info_blobs_repo.get(chunk.info_blob_id)
+            info_blob = blobs_by_id.get(chunk.info_blob_id)
             assert info_blob is not None
-            info_blob = InfoBlobInDBWithScore(
-                **info_blob.model_dump(), score=chunk.score
+            info_blobs.append(
+                InfoBlobInDBWithScore(**info_blob.model_dump(), score=chunk.score)
             )
-            info_blobs.append(info_blob)
 
+        await self.info_blobs_repo.hydrate_original_availability(info_blobs)
         return info_blobs
 
     def _get_info_blob_chunks_without_duplicates(

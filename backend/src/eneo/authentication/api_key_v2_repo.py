@@ -8,8 +8,18 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
-from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyState, ApiKeyV2InDB
+from eneo.authentication.auth_models import (
+    PERMISSION_LEVEL_ORDER,
+    ApiKeyListCursor,
+    ApiKeyOwnership,
+    ApiKeyPermission,
+    ApiKeyScopeType,
+    ApiKeyState,
+    ApiKeyType,
+    ApiKeyV2InDB,
+)
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
+from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 
 
@@ -25,12 +35,18 @@ class ApiKeysV2Repository:
 
         return ApiKeyV2InDB.model_validate(record)
 
-    async def get(self, *, key_id: UUID, tenant_id: UUID) -> Optional[ApiKeyV2InDB]:
+    async def get(
+        self, *, key_id: UUID, tenant_id: UUID, for_update: bool = False
+    ) -> Optional[ApiKeyV2InDB]:
+        """Return the key; with ``for_update`` the row stays locked until the
+        surrounding transaction completes."""
         query = (
             sa.select(self.table)
             .where(self.table.id == key_id)
             .where(self.table.tenant_id == tenant_id)
         )
+        if for_update:
+            query = query.with_for_update()
         record = await self.session.scalar(query)
 
         if record is None:
@@ -60,6 +76,52 @@ class ApiKeysV2Repository:
 
         return ApiKeyV2InDB.model_validate(record)
 
+    async def tenant_requires_allowed_origin(self, tenant_id: UUID) -> bool:
+        policy = await self.session.scalar(
+            sa.select(Tenants.api_key_policy).where(Tenants.id == tenant_id)
+        )
+        if not isinstance(policy, dict):
+            return True
+        return policy.get("require_tenant_allowed_origin", True) is not False
+
+    async def list_relaxed_tenant_public_key_origin_patterns(self) -> list[str]:
+        """Return active public-key CORS patterns for tenants that opted in."""
+        query = (
+            sa.select(self.table.allowed_origins)
+            .join(Tenants, Tenants.id == self.table.tenant_id)
+            .where(
+                Tenants.api_key_policy["require_tenant_allowed_origin"]
+                .as_boolean()
+                .is_(False)
+            )
+            .where(self.table.key_type == ApiKeyType.PK.value)
+            .where(self.table.revoked_at.is_(None))
+            .where(self.table.suspended_at.is_(None))
+            .where(
+                sa.or_(
+                    self.table.expires_at.is_(None),
+                    self.table.expires_at >= sa.func.now(),
+                )
+            )
+            .where(
+                sa.or_(
+                    self.table.rotation_grace_until.is_(None),
+                    self.table.rotation_grace_until > sa.func.now(),
+                )
+            )
+            .where(self.table.allowed_origins.is_not(None))
+        )
+        records = await self.session.scalars(query)
+        origin_patterns: set[str] = set()
+        for raw_patterns in records:
+            if not isinstance(raw_patterns, list):
+                continue
+            patterns = cast(list[object], raw_patterns)
+            origin_patterns.update(
+                pattern for pattern in patterns if isinstance(pattern, str)
+            )
+        return sorted(origin_patterns)
+
     async def list_by_scope(
         self,
         *,
@@ -83,7 +145,7 @@ class ApiKeysV2Repository:
         *,
         tenant_id: UUID,
         limit: int | None = None,
-        cursor: datetime | None = None,
+        cursor: ApiKeyListCursor | None = None,
         previous: bool = False,
         scope_type: ApiKeyScopeType | None = None,
         scope_id: UUID | None = None,
@@ -94,6 +156,8 @@ class ApiKeysV2Repository:
         search: str | None = None,
         expires_within_days: int | None = None,
         ownership: str | None = None,
+        min_permission: str | None = None,
+        eligible_for_module_binding: bool = False,
     ) -> list[ApiKeyV2InDB]:
         query = cast(
             Select[Any],
@@ -110,17 +174,31 @@ class ApiKeysV2Repository:
             search=search,
             expires_within_days=expires_within_days,
             ownership=ownership,
+            min_permission=min_permission,
+            eligible_for_module_binding=eligible_for_module_binding,
         )
         if cursor is not None:
-            if previous:
-                query = query.where(self.table.created_at > cursor)
+            if cursor.key_id is None:
+                # Rollout compatibility for timestamp-only cursors emitted by
+                # older servers. New cursors always take the total-order path.
+                comparison = (
+                    self.table.created_at >= cursor.created_at
+                    if previous
+                    else self.table.created_at < cursor.created_at
+                )
             else:
-                query = query.where(self.table.created_at < cursor)
+                position = sa.tuple_(self.table.created_at, self.table.id)
+                boundary = sa.tuple_(
+                    sa.literal(cursor.created_at),
+                    sa.literal(cursor.key_id),
+                )
+                comparison = position >= boundary if previous else position < boundary
+            query = query.where(comparison)
 
         if previous:
-            query = query.order_by(self.table.created_at.asc())
+            query = query.order_by(self.table.created_at.asc(), self.table.id.asc())
         else:
-            query = query.order_by(self.table.created_at.desc())
+            query = query.order_by(self.table.created_at.desc(), self.table.id.desc())
 
         if limit is not None:
             query = query.limit(limit + 1)
@@ -175,6 +253,8 @@ class ApiKeysV2Repository:
         search: str | None = None,
         expires_within_days: int | None = None,
         ownership: str | None = None,
+        min_permission: str | None = None,
+        eligible_for_module_binding: bool = False,
     ) -> int:
         query = cast(
             Select[Any],
@@ -193,6 +273,8 @@ class ApiKeysV2Repository:
             search=search,
             expires_within_days=expires_within_days,
             ownership=ownership,
+            min_permission=min_permission,
+            eligible_for_module_binding=eligible_for_module_binding,
         )
         result = await self.session.scalar(query)
         return int(result or 0)
@@ -210,9 +292,44 @@ class ApiKeysV2Repository:
         search: str | None,
         expires_within_days: int | None,
         ownership: str | None = None,
+        min_permission: str | None = None,
+        eligible_for_module_binding: bool = False,
     ) -> Select[Any]:
+        effectively_active = sa.and_(
+            self.table.revoked_at.is_(None),
+            self.table.suspended_at.is_(None),
+            sa.or_(
+                self.table.expires_at.is_(None),
+                self.table.expires_at >= sa.func.now(),
+            ),
+            sa.or_(
+                self.table.rotation_grace_until.is_(None),
+                self.table.rotation_grace_until > sa.func.now(),
+            ),
+        )
+        if eligible_for_module_binding:
+            required = PERMISSION_LEVEL_ORDER[ApiKeyPermission.WRITE.value]
+            allowed = [
+                permission
+                for permission, level in PERMISSION_LEVEL_ORDER.items()
+                if level >= required
+            ]
+            query = query.where(
+                self.table.ownership == ApiKeyOwnership.SERVICE.value,
+                self.table.key_type == ApiKeyType.SK.value,
+                self.table.permission.in_(allowed),
+                effectively_active,
+            )
         if ownership is not None:
             query = query.where(self.table.ownership == ownership)
+        if min_permission is not None:
+            required = PERMISSION_LEVEL_ORDER.get(min_permission, 0)
+            allowed = [
+                permission
+                for permission, level in PERMISSION_LEVEL_ORDER.items()
+                if level >= required
+            ]
+            query = query.where(self.table.permission.in_(allowed))
         if scope_type is not None:
             query = query.where(self.table.scope_type == scope_type.value)
         if scope_id is not None:

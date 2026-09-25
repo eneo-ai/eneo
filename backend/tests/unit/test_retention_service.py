@@ -1,15 +1,15 @@
 """Unit tests for RetentionService - audit log retention policy management."""
 
-import pytest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
-from datetime import datetime, timezone
+
+import pytest
 
 from eneo.audit.application.retention_service import (
-    RetentionService,
     RetentionPolicyModel,
+    RetentionService,
 )
-
 
 # === Constants ===
 MINIMUM_RETENTION_DAYS = 1
@@ -166,34 +166,6 @@ class TestGetPolicy:
         result = await retention_service.get_policy(tenant_id)
 
         # Verify default policy was created with 365 days
-        assert result.retention_days == 365
-
-    async def test_get_policy_default_uses_365_days(
-        self, retention_service, mock_session
-    ):
-        """Verify default policy uses 365 days retention."""
-        tenant_id = uuid4()
-
-        mock_result_none = MagicMock()
-        mock_result_none.scalar_one_or_none.return_value = None
-
-        created_policy = MagicMock(
-            tenant_id=tenant_id,
-            retention_days=365,
-            last_purge_at=None,
-            purge_count=0,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-            conversation_retention_enabled=False,
-            conversation_retention_days=None,
-        )
-        mock_result_created = MagicMock()
-        mock_result_created.scalar_one.return_value = created_policy
-
-        mock_session.execute.side_effect = [mock_result_none, mock_result_created]
-
-        result = await retention_service.get_policy(tenant_id)
-
         assert result.retention_days == 365
 
 

@@ -42,11 +42,27 @@ class GovernancePolicies(BasePublic):
         ForeignKey(PromptLibrary.id, ondelete="RESTRICT"), nullable=True
     )
 
+    reasoning_policy_configured: Mapped[bool] = mapped_column(server_default="False")
+    default_reasoning_effort: Mapped[Optional[str]] = mapped_column(nullable=True)
+    allow_user_reasoning_effort: Mapped[bool] = mapped_column(server_default="False")
+
+    # How chat attachments reach the model in every personal assistant: True
+    # inlines the extracted text, False hands the model signed URLs it reads
+    # with the files tool. NULL means the dimension is not governed and each
+    # assistant's own flag applies.
+    inline_file_text: Mapped[Optional[bool]] = mapped_column(nullable=True)
+
     updated_by_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
     )
 
     __table_args__ = (
+        Index(
+            "uq_governance_policies_tenant_id_id",
+            "tenant_id",
+            "id",
+            unique=True,
+        ),
         UniqueConstraint(
             "tenant_id", "scope", name="uq_governance_policies_tenant_id_scope"
         ),

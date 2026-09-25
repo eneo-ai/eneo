@@ -16,9 +16,12 @@ from eneo.audit.infrastructure.rate_limiting import (
     enforce_rate_limit,
 )
 from eneo.authentication.auth_dependencies import (
+    require_permission,
     require_resource_permission_for_method,
+    require_session_auth,
 )
 from eneo.conversations.conversation_models import (
+    ChatTurnDiagnostics,
     ConversationRenameRequest,
     ConversationRequest,
     PreflightRequest,
@@ -27,13 +30,14 @@ from eneo.conversations.conversation_models import (
 from eneo.conversations.ui_message_stream import to_ui_message_stream_response
 from eneo.database.database import AsyncSession
 from eneo.main.container.container import Container
-from eneo.main.exceptions import NotFoundException
+from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.main.logging import get_logger
 from eneo.main.models import CursorPaginatedResponse
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     get_approval_manager,
 )
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.sessions.session import (
@@ -353,10 +357,10 @@ async def chat(
             file_ids=file_ids,
             stream=request.stream,
             tool_assistant_id=tool_assistant_id,
-            version=min(version, 2),
-            use_web_search=request.use_web_search,
+            version=version,
             require_tool_approval=request.require_tool_approval,
             disabled_mcp_server_ids=request.disabled_mcp_server_ids,
+            disabled_capabilities=request.disabled_capabilities,
         )
 
     if version == 3 and request.stream:
@@ -368,6 +372,53 @@ async def chat(
         response=response,
         stream=request.stream,
         show_pricing=container.user().can_view_model_pricing,
+    )
+
+
+@router.get(
+    "/{session_id}/messages/{message_id}/diagnostics/",
+    response_model=ChatTurnDiagnostics,
+    description="Get body-free Skill activation diagnostics for one chat turn.",
+    responses=responses.get_responses([403, 404]),
+    dependencies=[
+        Depends(require_session_auth),
+        Depends(require_permission(Permission.ASSISTANT_DEBUG)),
+    ],
+)
+async def get_chat_turn_diagnostics(
+    session_id: UUID,
+    message_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> ChatTurnDiagnostics:
+    """Return stored Skill decisions without loading chat or provider bodies."""
+    user = container.user()
+    partner = await container.session_repo().get_owned_chat_partner(
+        session_id=session_id,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+    )
+    if partner is None or partner.group_chat_id is not None:
+        raise NotFoundException("Conversation not found.")
+    if partner.assistant_id is None:
+        raise NotFoundException("Conversation not found.")
+
+    try:
+        await container.assistant_service().get_assistant(partner.assistant_id)
+    except (NotFoundException, UnauthorizedException):
+        raise NotFoundException("Conversation not found.") from None
+
+    stored = await container.question_repo().get_skill_activation_evidence(
+        id=message_id,
+        session_id=session_id,
+        tenant_id=user.tenant_id,
+    )
+    if stored is None:
+        raise NotFoundException("Message not found.")
+
+    return ChatTurnDiagnostics(
+        session_id=session_id,
+        message_id=message_id,
+        skill_activation=stored.evidence,
     )
 
 

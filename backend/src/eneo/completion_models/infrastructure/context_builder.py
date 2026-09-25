@@ -1,3 +1,4 @@
+import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -11,14 +12,20 @@ from eneo.ai_models.completion_models.completion_model import (
     FunctionDefinition,
     Message,
     MessageToolCall,
+    function_definition_to_tool,
+)
+from eneo.completion_models.domain.skill_activation import (
+    SKILL_ACTIVATION_TOOL_NAME,
 )
 from eneo.completion_models.infrastructure.message_payload import (
     build_turn_messages,
     countable_messages,
 )
 from eneo.completion_models.infrastructure.static_prompts import (
+    ATTACHED_FILE_REFERENCES_INSTRUCTION,
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
+    TOOL_NAMING_INSTRUCTION,
     TRANSCRIPTION_PROMPT,
 )
 from eneo.files.file_models import File, FileType
@@ -36,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 def _replayable_tool_calls(
     tool_calls: Optional[list[ToolCallInfo]],
+    file_reference_urls: Optional[dict[UUID, str]] = None,
 ) -> list[MessageToolCall]:
     """Filter persisted tool calls down to those that can be replayed to the LLM.
 
@@ -48,6 +56,11 @@ def _replayable_tool_calls(
     The emitted `tool_name` is the prefixed MCP identifier (what the LLM sees
     on the current turn's tool registration) — we prefer `mcp_tool_name` and
     fall back to the split `tool_name` for legacy rows that predate this field.
+
+    Images the call generated are named in `result` only by placeholder. When
+    a fresh reference URL exists for one, it is appended here (never
+    persisted: the URL is short-lived), so the model can hand the image back
+    to an image tool on a later turn.
     """
     if not tool_calls:
         return []
@@ -57,15 +70,40 @@ def _replayable_tool_calls(
             continue
         if tc.result is None:
             continue
+        # Skill activations are rebuilt from the turn's own Skill runtime; the
+        # activation tool may not even be registered on a later turn.
+        if tc.mcp_tool_name == SKILL_ACTIVATION_TOOL_NAME:
+            continue
         replayable.append(
             MessageToolCall(
                 tool_call_id=tc.tool_call_id,
                 tool_name=tc.mcp_tool_name or tc.tool_name,
                 arguments=tc.arguments,
-                result=tc.result,
+                result=_with_generated_image_references(tc, file_reference_urls),
             )
         )
     return replayable
+
+
+def _with_generated_image_references(
+    tc: ToolCallInfo, file_reference_urls: Optional[dict[UUID, str]]
+) -> str:
+    """The persisted result plus one reference line per generated image.
+
+    Numbering follows the "[Image N ...]" placeholders the result already
+    carries, in the order the files were persisted for this call.
+    """
+    result = tc.result or ""
+    if not tc.generated_file_ids or not file_reference_urls:
+        return result
+    lines = [
+        f"Reference url for Image {index}: {file_reference_urls[file_id]}"
+        for index, file_id in enumerate(tc.generated_file_ids, start=1)
+        if file_id in file_reference_urls
+    ]
+    if not lines:
+        return result
+    return "\n".join([result, *lines]) if result else "\n".join(lines)
 
 
 def _image_files_tokens(images: list[File], model_name: str) -> int:
@@ -102,9 +140,12 @@ def _turn_tokens(
     ) + _image_files_tokens(images, model_name)
 
 
-MIN_PERCENTAGE_KNOWLEDGE = (
-    0.8  # Strive towards a minimum of 80% of the context as knowledge
-)
+# Share of the context window reserved for knowledge chunks in inject mode
+# (history is capped to the remainder). Inject mode is the legacy path and the
+# fallback for models without tool calling; tool mode retrieves on demand and
+# enforces the same share as an aggregate admission cap on tool results
+# (see _ToolResultBudget in the tenant model adapter).
+MIN_PERCENTAGE_KNOWLEDGE = 0.5
 
 
 class _InfoBlobChunkLike(Protocol):
@@ -143,6 +184,47 @@ def build_files_string(files: list[File], model_name: str = "") -> str:
     )
 
 
+def build_file_references_string(
+    files: list[File], file_reference_urls: dict[UUID, str]
+) -> str:
+    """Surface signed download URLs for attached files to the model.
+
+    Lets the model pass a URL to whichever MCP tool accepts a URL input so the
+    tool can fetch the original file. Only files present in
+    ``file_reference_urls`` (those with a durably stored original) get an
+    entry; the rest keep relying on the inlined text from
+    ``build_files_string``.
+    """
+    entries = [
+        json.dumps(
+            {
+                "kind": "image" if file.file_type == FileType.IMAGE else "document",
+                "filename": file.name,
+                "mimetype": file.mimetype,
+                "size_bytes": file.size,
+                "url": file_reference_urls[file.id],
+            }
+        )
+        for file in files
+        if file.id in file_reference_urls
+    ]
+    if not entries:
+        return ""
+
+    references = "\n".join(entries)
+    # Mechanics only: the behavioral rules (never judge readability from the
+    # url, never ask for re-upload, read_file as fallback, images go to image
+    # tools) live in ATTACHED_FILE_REFERENCES_INSTRUCTION, stated once in the
+    # system prompt. This block repeats per message with referenced files,
+    # history included.
+    return (
+        "Files in this message (one JSON entry per file). Their raw bytes are "
+        'NOT in this prompt; each "url" is a signed file reference for tools '
+        "that accept a URL input.\n\n"
+        f"{references}"
+    )
+
+
 @dataclass
 class ChunkGrouping:
     id: UUID
@@ -155,15 +237,23 @@ class ChunkGrouping:
 
 
 class _Prompt:
-    def __init__(self, version: int = 1, model_name: str = ""):
+    def __init__(
+        self,
+        version: int = 1,
+        model_name: str = "",
+        has_tools: bool = False,
+        has_file_references: bool = False,
+    ):
         super().__init__()
         self.prompt: str | None = None
         self.knowledge: str | None = None
-        self.web_search_result: str | None = None
+        self.knowledge_catalog: str | None = None
         self.attachments: str | None = None
         self._knowledge_tokens: int = 0
         self.version: int = version
         self.model_name: str = model_name
+        self.has_tools: bool = has_tools
+        self.has_file_references: bool = has_file_references
 
     @override
     def __str__(self):
@@ -172,9 +262,20 @@ class _Prompt:
         if self.prompt:
             components.append(self.prompt)
 
-        # Add references prompt if either knowledge or web search results exist
-        # but only for version 2
-        if (self.knowledge or self.web_search_result) and self.version == 2:
+        # Tools are advertised on this request, so teach the model how to name
+        # them before it composes an answer. Grouped with the other instructions
+        # ahead of the data blocks below.
+        if self.has_tools:
+            components.append(TOOL_NAMING_INSTRUCTION)
+
+        # Attached-file reference entries render in the messages; state the
+        # tool-arbitration rule once here instead of per message. Meaningless
+        # without tools to pass a url to, hence the has_tools gate.
+        if self.has_file_references and self.has_tools:
+            components.append(ATTACHED_FILE_REFERENCES_INSTRUCTION)
+
+        # Add references prompt if knowledge exists, but only for version 2
+        if self.knowledge and self.version == 2:
             components.append(SHOW_REFERENCES_PROMPT)
 
         # Add hallucination guard for version 1 knowledge
@@ -184,8 +285,8 @@ class _Prompt:
         if self.knowledge:
             components.append(self.knowledge)
 
-        if self.web_search_result:
-            components.append(self.web_search_result)
+        if self.knowledge_catalog:
+            components.append(self.knowledge_catalog)
 
         if self.attachments:
             components.append(self.attachments)
@@ -368,14 +469,8 @@ class _Prompt:
 
         self.prompt = prompt
 
-    def add_web_search_result(
-        self, web_search_results: Sequence[_InformationChunkLike] | None = None
-    ) -> None:
-        if web_search_results is None:
-            web_search_results = []
-        self.web_search_result = self._create_information_string(
-            information_chunks=web_search_results
-        )
+    def add_knowledge_catalog(self, catalog: str) -> None:
+        self.knowledge_catalog = catalog or None
 
     def add_knowledge(
         self, chunks: Sequence[_InfoBlobChunkLike], max_tokens: int
@@ -397,42 +492,39 @@ class _Prompt:
 
 
 class ContextBuilder:
-    @staticmethod
-    def _functions() -> list[FunctionDefinition]:
-        return [
-            FunctionDefinition(
-                name="generate_image",
-                description=(
-                    "Generate an image based on a text prompt. Will always be JPEG."
-                    "\n\nWhen discussing this ability with users:"
-                    "\n- DO NOT mention 'tools' or the technical name 'generate_image'."
-                    "\n- DO say you can 'create' or 'generate' images based on descriptions."
-                    "\n- Use natural, conversational language about your image capabilities."
-                    "\n- If asked to create Vector-based images, do it in code instead."
-                ),
-                schema={
-                    "type": "object",
-                    "properties": {"prompt": {"type": "string"}},
-                    "required": ["prompt"],
-                    "additionalProperties": False,
-                },
-            )
-        ]
-
     def _build_input(
         self,
         input_str: str,
         files: list[File] | None = None,
         transcription_inputs: list[str] | None = None,
         model_name: str = "",
+        file_reference_urls: dict[UUID, str] | None = None,
+        inline_file_text: bool = True,
     ) -> str:
         if files is None:
             files = []
         if transcription_inputs is None:
             transcription_inputs = []
-        if files:
-            files_string = build_files_string(files, model_name=model_name)
+        # Only TEXT files inline; images ride as vision parts but still get a
+        # reference entry below so an image tool can take them as input.
+        # When the assistant has inlining disabled, files whose original is
+        # reachable via a signed URL are represented by that URL only (skips the
+        # extracted text — e.g. a large CSV that would blow the context window).
+        # Files without a URL are always inlined so the model still sees them.
+        text_files = self._get_files_by_type(files, FileType.TEXT)
+        if not inline_file_text and file_reference_urls:
+            text_files = [f for f in text_files if f.id not in file_reference_urls]
+        if text_files:
+            files_string = build_files_string(text_files, model_name=model_name)
             input_str = f"{files_string}\n\n{input_str}"
+
+        # Append fetchable signed URLs (minted fresh per request, so history
+        # turns get working URLs too). The model keeps any inlined text above
+        # and additionally gets a reference it can hand to a URL-accepting tool.
+        if file_reference_urls:
+            references_string = build_file_references_string(files, file_reference_urls)
+            if references_string:
+                input_str = f"{references_string}\n\n{input_str}"
 
         if transcription_inputs:
             # For now, transcription is only available for apps,
@@ -456,6 +548,8 @@ class ContextBuilder:
         min_len: int = 3,
         model_name: str = "",
         vision: bool = True,
+        file_reference_urls: dict[UUID, str] | None = None,
+        inline_file_text: bool = True,
     ) -> tuple[list[Message], int]:
         if session is None:
             return [], 0
@@ -463,24 +557,34 @@ class ContextBuilder:
         messages: list[Message] = []
         total_tokens = 0
 
-        for message in reversed(session.questions):
+        for turns_back, message in enumerate(reversed(session.questions)):
+            # History replays each turn's files through the same inline-vs-URL
+            # rules as the current turn: URL-only files must not have their
+            # text re-inlined on follow-ups.
             question = self._build_input(
                 message.question,
-                self._get_files_by_type(message.files, FileType.TEXT),
+                message.files,
                 model_name=model_name,
+                file_reference_urls=file_reference_urls,
+                inline_file_text=inline_file_text,
             )
             answer = message.answer
             # History can contain images (e.g. after a model switch) — never
-            # replay them to a model without vision.
+            # replay them to a model without vision. Generated images replay
+            # only from the latest turn: that keeps "change this image" flows
+            # working, while older ones are already described to the model by
+            # the placeholder text in their replayed tool results.
             if vision:
                 images = self._get_files_by_type(message.files, FileType.IMAGE)
-                generated_images = self._get_files_by_type(
-                    message.generated_files, FileType.IMAGE
+                generated_images = (
+                    self._get_files_by_type(message.generated_files, FileType.IMAGE)
+                    if turns_back == 0
+                    else []
                 )
             else:
                 images = []
                 generated_images = []
-            tool_calls = _replayable_tool_calls(message.tool_calls)
+            tool_calls = _replayable_tool_calls(message.tool_calls, file_reference_urls)
 
             message_tokens = _turn_tokens(
                 question=question,
@@ -521,11 +625,12 @@ class ContextBuilder:
         info_blob_chunks: Sequence[_InfoBlobChunkLike] | None = None,
         session: Optional[SessionInDB] = None,
         version: int = 1,
-        use_image_generation: bool = False,
-        web_search_results: Sequence[_InformationChunkLike] | None = None,
         mcp_tools: list[FunctionDefinition] | None = None,
         extra_tool_dicts: list[dict[str, Any]] | None = None,
         vision: bool = True,
+        file_reference_urls: dict[UUID, str] | None = None,
+        inline_file_text: bool = True,
+        knowledge_catalog: str = "",
     ) -> Context:
         if files is None:
             files = []
@@ -535,8 +640,6 @@ class ContextBuilder:
             transcription_inputs = []
         if info_blob_chunks is None:
             info_blob_chunks = []
-        if web_search_results is None:
-            web_search_results = []
         if mcp_tools is None:
             mcp_tools = []
         tokens_used = 0
@@ -546,9 +649,11 @@ class ContextBuilder:
         # is counted in exactly that shape.
         _input_string = self._build_input(
             input_str=input_str,
-            files=self._get_files_by_type(files, FileType.TEXT),
+            files=files,
             transcription_inputs=transcription_inputs,
             model_name=model_name,
+            file_reference_urls=file_reference_urls,
+            inline_file_text=inline_file_text,
         )
         # Attachment images (prompt_files) travel with every request, the same
         # way attachment text does — they ride on the current user message.
@@ -569,21 +674,10 @@ class ContextBuilder:
         # Tool definitions occupy context space too — count them up front so
         # the history and knowledge budgets shrink accordingly. extra_tool_dicts
         # carries definitions merged later by the adapter (MCP proxy tools).
-        functions: list[FunctionDefinition] = []
-        if use_image_generation:
-            functions.extend(self._functions())
-        functions.extend(mcp_tools)
+        functions: list[FunctionDefinition] = list(mcp_tools)
 
         tool_dicts: list[dict[str, Any]] = [
-            {
-                "type": "function",
-                "function": {
-                    "name": func_def.name,
-                    "description": func_def.description,
-                    "parameters": func_def.schema,
-                },
-            }
-            for func_def in functions
+            function_definition_to_tool(func_def) for func_def in functions
         ]
         if extra_tool_dicts:
             tool_dicts.extend(extra_tool_dicts)
@@ -591,7 +685,12 @@ class ContextBuilder:
 
         # Create the necessary parts of the prompt.
         # Add the tokens used.
-        _prompt = _Prompt(version=version, model_name=model_name)
+        _prompt = _Prompt(
+            version=version,
+            model_name=model_name,
+            has_tools=bool(tool_dicts),
+            has_file_references=bool(file_reference_urls),
+        )
         _prompt.add_prompt(
             prompt=prompt,
             transcription=bool(transcription_inputs),
@@ -599,8 +698,9 @@ class ContextBuilder:
         _prompt.add_attachments(
             files=self._get_files_by_type(prompt_files, FileType.TEXT)
         )
-        # Add web search results first so references prompt appears before knowledge
-        _prompt.add_web_search_result(web_search_results=web_search_results)
+        # Tool-mode knowledge: a token-cheap catalog of searchable sources; the
+        # content itself stays behind the knowledge-MCP search tool.
+        _prompt.add_knowledge_catalog(knowledge_catalog)
         tokens_used += _prompt.num_tokens
 
         # Create the messages. When knowledge chunks are present, reserve 80%
@@ -618,6 +718,8 @@ class ContextBuilder:
             min_len=3,
             model_name=model_name,
             vision=vision,
+            file_reference_urls=file_reference_urls,
+            inline_file_text=inline_file_text,
         )
         tokens_used += tokens_used_messages
 

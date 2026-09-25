@@ -13,28 +13,97 @@ import json
 import re
 import time
 from types import TracebackType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
+from eneo.authentication.signed_urls import looks_like_reference_url
+from eneo.internal_mcp.constants import (
+    FILES_SERVER_NAME,
+    IMAGE_GENERATION_SERVER_NAME,
+)
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCPServer,
+    MCPServerTool,
+    is_builtin_provider,
+    is_capability_purpose,
+)
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
+    MCPAuthenticationError,
     MCPClient,
     MCPClientError,
-)
-from eneo.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl import (
-    ChatSessionMcpStateRepo,
+    validate_tool_catalog,
 )
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
+        MCPServerToolRepository,
+    )
 
 logger = get_logger(__name__)
 
 _settings = get_settings()
+
+# Raster formats the file store serves as images. An MCP ``image`` block with
+# any other type never becomes a generated file.
+MCP_IMAGE_MIME_TYPES: frozenset[str] = frozenset(
+    {"image/png", "image/jpeg", "image/webp", "image/gif"}
+)
+# Appended to a failed tool call that carried a reference url when no built-in
+# reader is registered (image references). The url is the file, so a re-upload
+# or a "public link" changes nothing; the honest outcome is that the tool's host
+# cannot reach this deployment.
+REFERENCE_URL_VALID_NOTICE = (
+    "The url passed is a valid signed reference to the file; uploading the "
+    "file again would yield the same kind of url, so do not ask the user to "
+    "re-upload it or to provide another link. If the tool could not fetch the "
+    "url, the tool runs somewhere that cannot reach this deployment's file "
+    "references: tell the user that the tool cannot access the file from where "
+    "it runs."
+)
+AUTH_DENIED_NOTICE = (
+    "Access was denied by this MCP tool. Check its permissions or the "
+    "credentials used by its server."
+)
+_AUTH_DENIED_ERROR = re.compile(
+    r"(?:error:\s*)?(?:unauthorized|(?:http\s*)?401(?:\s+unauthorized)?)",
+    re.IGNORECASE,
+)
+MCP_IDENTITY_CATALOG_PREPARATION_TIMEOUT_SECONDS = float(
+    _settings.mcp_client_connect_timeout_seconds
+    + _settings.mcp_client_list_tools_timeout_seconds
+)
 _CIRCUIT_BREAKER_STATE: dict[UUID, dict[str, float | int]] = {}
 _CIRCUIT_BREAKER_LOCK = asyncio.Lock()
+
+
+def _trace_server_name(server: MCPServer) -> str:
+    """Server name a tool call is reported under to clients.
+
+    A built-in provider is an admin-named row whose endpoint is one of Eneo's
+    loopback servers, mounted under its purpose (see
+    ``MCPServerService.builtin_provider_url``). Its tools are Eneo's own, so
+    they are reported under the loopback server's name like the knowledge and
+    files servers are; that lets the chat label them in the UI language
+    instead of showing the server-side English title under the row's name.
+    """
+    if is_builtin_provider(server.http_auth_type) and server.purpose:
+        return server.purpose
+    return server.name
+
+
+def _tool_call_timeout_for(server: MCPServer) -> int | None:
+    """Per-server tool-call budget; ``None`` keeps the client default.
+
+    The built-in image generation provider runs an image model whose calls
+    routinely outlast a general MCP tool call, so it gets its own budget.
+    """
+    if is_builtin_provider(server.http_auth_type) and (
+        server.purpose == IMAGE_GENERATION_SERVER_NAME
+    ):
+        return _settings.image_generation_timeout_seconds
+    return None
 
 
 class MCPProxySession:
@@ -53,8 +122,8 @@ class MCPProxySession:
         self,
         mcp_servers: list[MCPServer],
         auth_credentials_map: dict[UUID, dict[str, str]] | None = None,
-        chat_session_id: UUID | None = None,
-        db_session: "AsyncSession | None" = None,
+        identity_headers: dict[str, str] | None = None,
+        mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
     ):
         """
         Initialize proxy session.
@@ -63,23 +132,15 @@ class MCPProxySession:
             mcp_servers: List of MCP servers the assistant has access to
                         (already filtered by tenant/space/assistant hierarchy)
             auth_credentials_map: Map of server_id -> auth credentials
-            chat_session_id: When set with ``db_session``, the proxy resumes
-                each MCP server's persisted protocol session id on connect and
-                upserts the post-initialize value. Generic — applies to every
-                MCP server, no server-kind branching.
-            db_session: Active SQLAlchemy session backing the
-                ``chat_session_mcp_state`` lookups/upserts. Only consulted when
-                ``chat_session_id`` is non-None.
+            identity_headers: Acting user/tenant X-Eneo-* headers, handed to
+                every client. Each client forwards them only when its own server
+                has ``forward_identity=True`` (per-server PII opt-in).
         """
         super().__init__()
         self.mcp_servers = mcp_servers
         self.auth_credentials_map = auth_credentials_map or {}
-        self.chat_session_id = chat_session_id
-        self._mcp_state_repo: ChatSessionMcpStateRepo | None = (
-            ChatSessionMcpStateRepo(db_session)
-            if chat_session_id is not None and db_session is not None
-            else None
-        )
+        self.identity_headers = identity_headers or {}
+        self._mcp_server_tool_repo = mcp_server_tool_repo
 
         # Lazy connection cache: server_id -> MCPClient (connected)
         self._clients: dict[UUID, MCPClient] = {}
@@ -125,6 +186,28 @@ class MCPProxySession:
             sanitized = "t_" + sanitized
         return sanitized
 
+    @staticmethod
+    def _describe_for_llm(
+        *,
+        server_name: str,
+        name: str,
+        title: str | None,
+        description: str | None,
+    ) -> str:
+        """Model-facing description, opening with the tool's display name.
+
+        The wire name is a sanitized ``server__tool`` identifier the model must
+        emit verbatim, so it cannot double as a label; left to itself the model
+        recites that identifier when a user asks what the assistant can do. MCP's
+        optional ``title`` is the human-readable name the chat UI already prefers
+        for tool-call chips, and the description is the only channel that carries
+        it to the model: the OpenAI function schema has no title field.
+        """
+        base = description or f"Tool from {server_name}"
+        if not title or title == name:
+            return base
+        return f'Display name: "{title}".\n{base}'
+
     def _register_tool(
         self,
         server: MCPServer,
@@ -162,7 +245,12 @@ class MCPProxySession:
                 "type": "function",
                 "function": {
                     "name": prefixed_name,
-                    "description": description or f"Tool from {server.name}",
+                    "description": self._describe_for_llm(
+                        server_name=server.name,
+                        name=name,
+                        title=title,
+                        description=description,
+                    ),
                     "parameters": input_schema or {"type": "object", "properties": {}},
                 },
             }
@@ -179,6 +267,8 @@ class MCPProxySession:
         server's tool list is re-listed.
         """
         if not tool.is_enabled_by_default:
+            return False
+        if getattr(tool, "removed_from_remote", False) is True:
             return False
         if (
             tool.requires_approval
@@ -204,7 +294,9 @@ class MCPProxySession:
                     server=server,
                     server_prefix=server_prefix,
                     name=tool.name,
-                    title=tool.title,
+                    # Admin display name wins over the remote-synced title in
+                    # every user-facing surface (tool traces, approval cards).
+                    title=tool.display_name or tool.title,
                     description=tool.description,
                     input_schema=tool.input_schema,
                 )
@@ -265,7 +357,7 @@ class MCPProxySession:
                 server=server,
                 server_prefix=server_prefix,
                 name=db_tool.name,
-                title=db_tool.title,
+                title=db_tool.display_name or db_tool.title,
                 description=db_tool.description,
                 input_schema=db_tool.input_schema,
             )
@@ -273,6 +365,148 @@ class MCPProxySession:
                 after.add(prefixed)
 
         return before != after
+
+    async def _discover_identity_scoped_tools(
+        self, server: MCPServer
+    ) -> list[dict[str, Any]]:
+        auth_credentials = self.auth_credentials_map.get(server.id, {})
+        client = MCPClient(
+            server,
+            auth_credentials,
+            identity_headers=self.identity_headers,
+        )
+        try:
+            async with client:
+                return await client.list_tools()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[MCPProxy] Failed identity-scoped tool discovery for '%s': %s",
+                server.name,
+                exc,
+            )
+            return []
+
+    async def _stage_live_tool_catalog(
+        self, server: MCPServer, live_tools: list[dict[str, Any]]
+    ) -> bool:
+        """Validate and atomically queue new or changed live definitions.
+
+        Runtime discovery remains fail-closed: staging does not add the new
+        entity to ``server.tools``, so this request still intersects against
+        the pre-approved in-memory catalog.
+        """
+        try:
+            validate_tool_catalog(
+                live_tools,
+                max_count=server.tool_catalog_max_count,
+                max_catalog_bytes=server.tool_catalog_max_bytes,
+                max_definition_bytes=server.tool_definition_max_bytes,
+            )
+        except MCPClientError as exc:
+            logger.warning(
+                "[MCPProxy] Rejected unsafe live catalog from '%s': %s",
+                server.name,
+                exc,
+            )
+            return False
+
+        if self._mcp_server_tool_repo is None or not live_tools:
+            return True
+
+        approved_by_name = {tool.name: tool for tool in server.tools}
+        staging_candidates: list[dict[str, Any]] = []
+        for live_tool in live_tools:
+            approved = approved_by_name.get(live_tool["name"])
+            if approved is None or (
+                not approved.requires_approval
+                and approved.has_definition_drift(
+                    description=live_tool.get("description"),
+                    input_schema=live_tool.get("input_schema"),
+                )
+            ):
+                staging_candidates.append(live_tool)
+        if not staging_candidates:
+            return True
+
+        observations = [
+            MCPServerTool.pending_discovery(
+                mcp_server_id=server.id,
+                name=live_tool["name"],
+                title=live_tool.get("title"),
+                description=live_tool.get("description"),
+                input_schema=live_tool.get("input_schema"),
+            )
+            for live_tool in staging_candidates
+        ]
+        try:
+            staged = await self._mcp_server_tool_repo.stage_observed(observations)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[MCPProxy] Failed to stage live catalog from '%s': %s",
+                server.name,
+                exc,
+            )
+            return False
+        if staged:
+            logger.info(
+                "[MCPProxy] Staged %d user-observed definition(s) from '%s' "
+                "for admin approval",
+                len(staged),
+                server.name,
+            )
+        return True
+
+    async def prepare_tools_for_context(self) -> None:
+        """Resolve identity-scoped tool catalogs before model exposure.
+
+        The database catalog remains the administrator-approved allowlist. A
+        server that receives the acting user's identity may return a narrower
+        ``tools/list`` response for that user, so its LLM-facing catalog must
+        be the intersection of the two. Global catalogs keep the existing lazy
+        connection path.
+
+        Discovery failures fail closed for the affected server: none of its
+        administrator-discovered definitions are exposed in this request.
+        """
+        probe_servers = [
+            server for server in self.mcp_servers if server.forward_identity
+        ]
+        if not probe_servers:
+            return
+
+        probe_tasks = [
+            asyncio.create_task(self._discover_identity_scoped_tools(server))
+            for server in probe_servers
+        ]
+        pending = set(probe_tasks)
+        try:
+            _, pending = await asyncio.wait(
+                probe_tasks,
+                timeout=MCP_IDENTITY_CATALOG_PREPARATION_TIMEOUT_SECONDS,
+            )
+        finally:
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+
+        # Apply results only after every probe has closed, and in configured
+        # server order rather than network completion order.
+        for server, task in zip(probe_servers, probe_tasks, strict=True):
+            if task in pending:
+                logger.warning(
+                    "[MCPProxy] Identity-scoped tool discovery timed out for '%s'",
+                    server.name,
+                )
+                live_tools: list[dict[str, Any]] = []
+            else:
+                live_tools = task.result()
+            catalog_is_safe = await self._stage_live_tool_catalog(server, live_tools)
+            self._rebuild_server_tools(server, live_tools if catalog_is_safe else [])
 
     async def refresh_tools(self, touched_tool_names: list[str] | None = None) -> bool:
         """Re-list tools for servers whose advertised set may have changed.
@@ -296,8 +530,7 @@ class MCPProxySession:
         loop calls it right after ``call_tools_parallel``, which connects on
         that same task. Returns True if any server's tool set changed.
         """
-        # Dirty servers actually pushed a notification — proof of support, and
-        # the path resumed sessions (which skip initialize) rely on. The
+        # Dirty servers actually pushed a notification — proof of support. The
         # touched path only adds servers that opted into listChanged.
         target_ids: set[UUID] = set(self._dirty_server_ids)
         for name in touched_tool_names or []:
@@ -386,27 +619,132 @@ class MCPProxySession:
         self._failed_server_ids.add(server_id)
 
     def _truncate_tool_result(self, result: dict[str, Any]) -> dict[str, Any]:
-        max_chars = _settings.mcp_tool_output_max_chars
-        serialized = json.dumps(result, ensure_ascii=False, default=str)
-        if len(serialized) <= max_chars:
-            return result
+        """Trim an oversized tool result to the budget instead of failing it.
 
-        preview = serialized[: max_chars // 2]
-        return {
-            "content": [
+        Leading content blocks are kept whole until the budget runs out; the
+        text block that crosses it is cut mid-text and everything after it is
+        dropped. A trailing notice tells the model the output was truncated,
+        so e.g. a large page extraction still yields its head as usable,
+        citable content rather than an error.
+        """
+        blocks: list[dict[str, Any]] = result.get("content") or []
+        # Image blocks never reach the model as text (they become generated
+        # files), so they are sized separately and excluded from the char
+        # budget; only text-like blocks compete for it.
+        image_blocks, image_notices = self._admit_image_blocks(blocks)
+        text_blocks = [block for block in blocks if block.get("type") != "image"]
+        if image_notices:
+            text_blocks = text_blocks + image_notices
+
+        max_chars = _settings.mcp_tool_output_max_chars
+        text_result = {**result, "content": text_blocks}
+        serialized = json.dumps(text_result, ensure_ascii=False, default=str)
+        if len(serialized) <= max_chars:
+            if not image_blocks and not image_notices:
+                return result
+            return {**result, "content": text_blocks + image_blocks}
+
+        remaining = max_chars
+        kept: list[dict[str, Any]] = []
+        dropped = 0
+        blocks = text_blocks
+        for block in blocks:
+            if remaining <= 0:
+                dropped += 1
+                continue
+            size = len(json.dumps(block, ensure_ascii=False, default=str))
+            if size <= remaining:
+                kept.append(block)
+                remaining -= size
+            elif block.get("type") == "text":
+                text = block.get("text") or ""
+                # Serialization overhead (escaping, keys) counts toward the
+                # budget, so cut the text to what remains after it.
+                overhead = size - len(text)
+                kept.append({**block, "text": text[: max(0, remaining - overhead)]})
+                remaining = 0
+            else:
+                # Non-text blocks (images, resources) cannot be kept partially.
+                dropped += 1
+                remaining = 0
+        notice = f"[Tool output truncated at {max_chars} characters"
+        if dropped:
+            notice += f"; {dropped} content block(s) dropped"
+        notice += (
+            ". Narrow the request (e.g. fewer URLs or a more specific query) "
+            "to fit the limit.]"
+        )
+        kept.append({"type": "text", "text": notice})
+        return {**result, "content": kept + image_blocks}
+
+    @staticmethod
+    def _admit_image_blocks(
+        blocks: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Keep the image blocks the ask path may persist as generated files.
+
+        A block is admitted when its MIME type is a raster image format (a
+        missing type reads as PNG, matching the adapter's default), its decoded
+        size fits the byte cap, and it is within the per-result count cap. The
+        admitted block carries the normalized MIME type, which is what the file
+        store records as verified. Everything else is dropped and replaced by a
+        text notice so the model learns the tool produced something it cannot
+        show.
+        """
+        max_bytes = _settings.mcp_tool_image_max_bytes
+        max_count = _settings.mcp_tool_image_max_count
+        admitted: list[dict[str, Any]] = []
+        notices: list[dict[str, Any]] = []
+        over_count = 0
+        for block in blocks:
+            if block.get("type") != "image":
+                continue
+            raw_mime = block.get("mime_type") or "image/png"
+            mime_type = str(raw_mime).split(";", 1)[0].strip().lower()
+            if mime_type not in MCP_IMAGE_MIME_TYPES:
+                notices.append(
+                    {
+                        "type": "text",
+                        "text": (
+                            f"[An image content block of unsupported type "
+                            f"{mime_type!r} was dropped.]"
+                        ),
+                    }
+                )
+                continue
+            encoded = block.get("data") or ""
+            decoded_size = len(encoded) * 3 // 4
+            if decoded_size > max_bytes:
+                notices.append(
+                    {
+                        "type": "text",
+                        "text": (
+                            f"[An image content block of ~{decoded_size / (1024 * 1024):.1f} MB "
+                            f"exceeded the {max_bytes // (1024 * 1024)} MB limit and was "
+                            "dropped.]"
+                        ),
+                    }
+                )
+                continue
+            if len(admitted) >= max_count:
+                over_count += 1
+                continue
+            admitted.append(
+                block
+                if block.get("mime_type") == mime_type
+                else {**block, "mime_type": mime_type}
+            )
+        if over_count:
+            notices.append(
                 {
                     "type": "text",
-                    "text": json.dumps(
-                        {
-                            "error": f"Tool output exceeded maximum size of {max_chars} characters",
-                            "partial_data_preview": preview,
-                        },
-                        ensure_ascii=False,
+                    "text": (
+                        f"[{over_count} image content block(s) beyond the "
+                        f"{max_count} per result limit were dropped.]"
                     ),
                 }
-            ],
-            "is_error": True,
-        }
+            )
+        return admitted, notices
 
     def get_tools_for_llm(self) -> list[dict[str, Any]]:
         """
@@ -442,7 +780,20 @@ class MCPProxySession:
         if prefixed_tool_name not in self._tool_registry:
             return None
         server, original_tool_name, title = self._tool_registry[prefixed_tool_name]
-        return (server.name, original_tool_name, title)
+        return (_trace_server_name(server), original_tool_name, title)
+
+    def get_tool_purpose(self, prefixed_tool_name: str) -> str | None:
+        """The capability a tool call serves, or None for general servers.
+
+        A capability provider (web search, image generation) is one function
+        from the user's point of view whichever server backs it, so clients
+        render its calls by purpose rather than by the provider's name.
+        """
+        entry = self._tool_registry.get(prefixed_tool_name)
+        if entry is None:
+            return None
+        server = entry[0]
+        return server.purpose if is_capability_purpose(server.purpose) else None
 
     def _capture_owner_task(self) -> None:
         """Bind this proxy session to the current asyncio.Task on first connect.
@@ -500,34 +851,15 @@ class MCPProxySession:
                 )
                 return self._clients[server_id]
 
-            # Resume the MCP-protocol session id we previously persisted for
-            # this (chat_session, server) pair so the server sees a continuous
-            # logical session across user turns. None on first turn or for
-            # callers without a chat context (testing).
-            resume_id: str | None = None
-            if self._mcp_state_repo is not None and self.chat_session_id is not None:
-                try:
-                    resume_id = await self._mcp_state_repo.get(
-                        chat_session_id=self.chat_session_id,
-                        mcp_server_id=server_id,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "[MCPProxy] Failed to read persisted mcp_session_id for "
-                        "server '%s' (continuing without resume): %s",
-                        server.name,
-                        exc,
-                    )
-
-            # Create new connection with timing
             auth_creds = self.auth_credentials_map.get(server_id, {})
             client = MCPClient(
                 server,
                 auth_creds,
-                resume_mcp_session_id=resume_id,
                 on_tools_list_changed=lambda sid=server_id: self._dirty_server_ids.add(
                     sid
                 ),
+                identity_headers=self.identity_headers,
+                tool_call_timeout=_tool_call_timeout_for(server),
             )
 
             logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")
@@ -539,34 +871,97 @@ class MCPProxySession:
             logger.debug(
                 f"[MCPProxy] Connected to '{server.name}' in {elapsed_ms:.0f}ms"
             )
-
-            # Persist the post-initialize session id so the next user turn
-            # resumes the same logical session. Failure here is non-fatal:
-            # the client is still usable for this turn, we just lose
-            # continuity. Skip the upsert when the value matches what we
-            # already had stored (no schema work for the steady state).
-            assigned_id = client.assigned_mcp_session_id
-            if (
-                self._mcp_state_repo is not None
-                and self.chat_session_id is not None
-                and assigned_id
-                and assigned_id != resume_id
-            ):
-                try:
-                    await self._mcp_state_repo.upsert(
-                        chat_session_id=self.chat_session_id,
-                        mcp_server_id=server_id,
-                        mcp_session_id=assigned_id,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "[MCPProxy] Failed to persist mcp_session_id for "
-                        "server '%s': %s",
-                        server.name,
-                        exc,
-                    )
-
             return client
+
+    def _files_read_file_entry(self) -> tuple[str, str | None] | None:
+        """Prefixed name + title of the loopback read_file, when registered.
+
+        Scanned on demand rather than cached: the registry is small and is
+        cleared and rebuilt by the live-refresh path, so stored state could go
+        stale.
+        """
+        for prefixed_name, (server, name, title) in self._tool_registry.items():
+            if server.name == FILES_SERVER_NAME and name == "read_file":
+                return prefixed_name, title
+        return None
+
+    def _reference_fallback_hint(
+        self, failing_tool_name: str, arguments: dict[str, Any]
+    ) -> str:
+        """Guidance appended to a failed tool call that carried a reference URL.
+
+        Keys on the argument shape (a signed attachment reference URL), not on
+        which server failed. Points at the loopback read_file when it is
+        registered (it registers exactly when text references render in the
+        prompt); otherwise, e.g. for image references, states that the url is
+        valid so the model neither asks for a re-upload nor blames the file
+        when a remote tool could not fetch it. Empty when no argument is a
+        reference or read_file itself failed.
+        """
+        if not any(
+            isinstance(value, str) and looks_like_reference_url(value)
+            for value in arguments.values()
+        ):
+            return ""
+        entry = self._files_read_file_entry()
+        if entry is None:
+            return REFERENCE_URL_VALID_NOTICE
+        prefixed_name, title = entry
+        if prefixed_name == failing_tool_name:
+            return ""
+        display = f' ("{title}")' if title else ""
+        return (
+            "The attached file itself is still readable: pass the same url "
+            f"to the {prefixed_name}{display} tool."
+        )
+
+    def _unavailable_result(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Error result for a tool whose server cannot be called right now."""
+        text = (
+            "External tool service temporarily unavailable. If another "
+            "available tool can do the job, use it instead of retrying this "
+            "one."
+        )
+        hint = self._reference_fallback_hint(tool_name, arguments)
+        if hint:
+            text = f"{text} {hint}"
+        return {
+            "content": [{"type": "text", "text": text}],
+            "is_error": True,
+        }
+
+    @staticmethod
+    def _is_auth_denied_result(result: dict[str, Any]) -> bool:
+        if not result.get("is_error"):
+            return False
+        content: object = result.get("content")
+        if not isinstance(content, list):
+            return False
+        for block in cast("list[object]", content[:3]):
+            if not isinstance(block, dict):
+                continue
+            block_values = cast("dict[str, object]", block)
+            raw_text = block_values.get("text")
+            if not isinstance(raw_text, str):
+                continue
+            text = raw_text.strip()
+            if len(text) > 512:
+                continue
+            if _AUTH_DENIED_ERROR.fullmatch(text):
+                return True
+            try:
+                payload: object = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                error = cast("dict[str, object]", payload).get("error")
+                if isinstance(error, str) and _AUTH_DENIED_ERROR.fullmatch(
+                    error.strip()
+                ):
+                    return True
+        return False
 
     async def call_tool(
         self,
@@ -601,26 +996,10 @@ class MCPProxySession:
         logger.debug(f"[MCPProxy] Calling {original_tool_name} on '{server.name}'")
 
         if await self._is_circuit_open(server.id):
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "External tool service temporarily unavailable. Please retry later.",
-                    }
-                ],
-                "is_error": True,
-            }
+            return self._unavailable_result(tool_name, arguments)
 
         if server.id in self._failed_server_ids:
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "External tool service temporarily unavailable. Please retry later.",
-                    }
-                ],
-                "is_error": True,
-            }
+            return self._unavailable_result(tool_name, arguments)
 
         # Use cached client only. Connecting here is unsafe: this method runs
         # under asyncio.gather (see call_tools_parallel), which dispatches each
@@ -635,15 +1014,7 @@ class MCPProxySession:
                 server.name,
             )
             self._mark_server_failed(server.id)
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "External tool service temporarily unavailable. Please retry later.",
-                    }
-                ],
-                "is_error": True,
-            }
+            return self._unavailable_result(tool_name, arguments)
 
         try:
             # Execute tool with timing
@@ -656,11 +1027,30 @@ class MCPProxySession:
             logger.debug(
                 f"[MCPProxy] {original_tool_name} completed in {elapsed_ms:.0f}ms [{status}]"
             )
+            # A protocol-level result proves the server responded, even when
+            # its tool reports an application or permission error. Only client
+            # failures count toward the server-wide circuit breaker.
+            await self._record_success(server.id)
+            auth_denied = self._is_auth_denied_result(result)
+            result = self._truncate_tool_result(result)
             if is_error:
-                await self._record_failure(server.id)
-            else:
-                await self._record_success(server.id)
-            return self._truncate_tool_result(result)
+                blocks: list[Any] = list(result.get("content") or [])
+                if auth_denied:
+                    blocks.append({"type": "text", "text": AUTH_DENIED_NOTICE})
+                # A tool that failed on a reference URL should not be retried
+                # into a loop; appended after truncation so the pointer to the
+                # built-in reader survives it.
+                hint = self._reference_fallback_hint(tool_name, arguments)
+                if hint:
+                    blocks.append({"type": "text", "text": hint})
+                if auth_denied or hint:
+                    result = {**result, "content": blocks}
+            return result
+        except MCPAuthenticationError:
+            return {
+                "content": [{"type": "text", "text": AUTH_DENIED_NOTICE}],
+                "is_error": True,
+            }
         except MCPClientError:
             self._mark_server_failed(server.id)
             await self._record_failure(server.id)

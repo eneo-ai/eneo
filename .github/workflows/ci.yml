@@ -9,6 +9,10 @@ on:
     branches:
       - develop
       - 'release/**'
+  # Merge queue candidates (develop + queued PRs). Every scoped job runs in
+  # full here (their conditions only scope pull_request events), and the
+  # aggregate CI job reports the required "CI" check on the candidate.
+  merge_group:
 
 permissions:
   contents: read
@@ -26,10 +30,6 @@ env:
   POSTGRES_DB: placeholder
   REDIS_HOST: localhost
   REDIS_PORT: 6379
-  UPLOAD_FILE_TO_SESSION_MAX_SIZE: 10485760
-  UPLOAD_IMAGE_TO_SESSION_MAX_SIZE: 10485760
-  UPLOAD_MAX_FILE_SIZE: 10485760
-  TRANSCRIPTION_MAX_FILE_SIZE: 10485760
   MAX_IN_QUESTION: 1
   API_PREFIX: /api/v1
   API_KEY_LENGTH: 64
@@ -71,7 +71,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
-          BEFORE_SHA: ${{ github.event.before || '' }}
+          BEFORE_SHA: ${{ github.event.before || github.event.merge_group.base_sha || '' }}
           HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -121,11 +121,11 @@ jobs:
             exit 0
           fi
 
-          VALID_PREFIXES="^(dependabot/|feature/|feat/|fix/|hotfix/|security/|chore/|deps/|docs/|test/|refactor/|remove/|ci/)"
+          VALID_PREFIXES="^(dependabot/|feature/|feat/|fix/|hotfix/|security/|chore/|deps/|docs/|test/|refactor/|remove/|ci/|perf/)"
 
           if [[ ! "$BRANCH_NAME" =~ $VALID_PREFIXES ]]; then
             echo "::error::Branch name '$BRANCH_NAME' does not follow the naming convention."
-            echo "Use one of: dependabot/, feature/, feat/, fix/, hotfix/, security/, chore/, deps/, docs/, test/, refactor/, remove/, or ci/."
+            echo "Use one of: dependabot/, feature/, feat/, fix/, hotfix/, security/, chore/, deps/, docs/, test/, refactor/, remove/, ci/, or perf/."
             exit 1
           fi
 
@@ -169,6 +169,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --python 3.11 --frozen --all-groups
 
+      - name: Verify Alembic migration graph
+        run: uv run pytest -q tests/unit/test_alembic_migration_graph.py
+
       - name: Ruff lint
         run: uv run ruff check src/eneo --output-format github
 
@@ -179,7 +182,17 @@ jobs:
         run: uv run pyright
 
   backend-tests:
-    name: Backend tests
+    name: Backend tests (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: unit, suite: unit, shard: 0 }
+          - { name: integration-1, suite: integration, shard: 1 }
+          - { name: integration-2, suite: integration, shard: 2 }
+          - { name: integration-3, suite: integration, shard: 3 }
+          - { name: integration-4, suite: integration, shard: 4 }
+          - { name: migrations, suite: migrations, shard: 0 }
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
@@ -229,26 +242,37 @@ jobs:
         run: uv sync --python 3.11 --frozen --all-groups
 
       - name: Run unit tests
-        run: uv run pytest -v -n 2 -m "not integration" --cov=src/eneo --cov-report=term:skip-covered tests/
+        if: matrix.suite == 'unit'
+        run: uv run pytest -v -n 4 --durations=25 -m "not integration" tests/
 
       - name: Run integration tests
-        # --cov-append: add integration coverage on top of the unit run, then
-        # emit the combined xml (for diff-cover) + html (human artifact).
-        run: uv run pytest -v -n 2 -m integration --cov=src/eneo --cov-append --cov-report=xml --cov-report=html --cov-report=term:skip-covered tests/integration/
+        if: matrix.suite == 'integration'
+        # Four standard runners, each with four workers and isolated databases.
+        # Partition files, not node IDs, so module fixtures stay in one shard.
+        run: |
+          python3 ../scripts/backend_test_shard.py --index "$SHARD_INDEX" --count 4 > "$RUNNER_TEMP/integration-files.txt"
+          mapfile -t test_files < "$RUNNER_TEMP/integration-files.txt"
+          uv run pytest -v -n 4 --durations=25 -m integration "${test_files[@]}"
         env:
+          SHARD_INDEX: ${{ matrix.shard }}
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
-      - name: Upload backend coverage
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-coverage
-          path: |
-            backend/coverage.xml
-            backend/htmlcov
-          retention-days: 14
-          if-no-files-found: warn
+      - name: Verify File/Icon upgrade and optional cleanup on PostgreSQL 13
+        if: matrix.suite == 'migrations'
+        # Migration tests are opt-in and run outside the parallel suite. The
+        # restore rehearsal needs its own application/database session.
+        timeout-minutes: 10
+        run: |
+          uv run pytest -v --durations=25 -m migration_isolation \
+            tests/integration/migrations/test_file_icon_preflight.py \
+            tests/integration/migrations/test_file_icon_legacy_cleanup.py
+          uv run pytest -v --durations=25 -o faulthandler_timeout=180 -m migration_isolation \
+            tests/integration/migrations/test_file_icon_bridge_rehearsal.py
+        env:
+          ENEO_FILE_ICON_REHEARSAL_PROFILE: smoke
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          DOCKER_HOST: unix:///var/run/docker.sock
 
   script-tests:
     name: Script tests
@@ -268,8 +292,16 @@ jobs:
           node .github/scripts/ensure-project-fields.mjs --self-test
           node .github/scripts/project-intake.mjs --self-test
           node .github/scripts/ci-change-scope.mjs --self-test
-          node .github/scripts/render-diff-coverage.mjs --self-test
+          node .github/scripts/check-user-facing.mjs --self-test
+          node scripts/collect_user_facing.mjs --self-test
           node scripts/export_github_roadmap.mjs --self-test
+
+  # Preserve the existing required CI gate during rollout. Remove this caller
+  # and its aggregate references once the standalone User-facing section check
+  # is required in GitHub (see the What's new PLAYBOOK).
+  user-facing:
+    name: User-facing section (CI transition)
+    uses: ./.github/workflows/user-facing.yml
 
   route-metadata:
     name: Route metadata
@@ -296,10 +328,16 @@ jobs:
         run: python3 scripts/check_no_intric.py --repo-root .
 
   frontend:
-    name: Frontend
+    name: Frontend (${{ matrix.task }})
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The production build and the checks/tests are independent and each
+        # take ~3 min, so they run on separate runners instead of back to back.
+        task: [checks, build]
     defaults:
       run:
         working-directory: frontend
@@ -309,11 +347,21 @@ jobs:
         uses: actions/checkout@v4
 
       # Enforced in pre-commit too, but pre-commit can be bypassed; CI is the
-      # backstop that keeps the i18n catalogs duplicate-free and in key parity.
+      # backstop that keeps the i18n catalogs duplicate-free, in key parity and free of
+      # keys the app no longer uses.
       - name: Check i18n message catalogs
+        if: matrix.task == 'checks'
         run: |
           python3 apps/web/scripts/check-i18n-duplicates.py
           python3 apps/web/scripts/check-i18n-parity.py
+          python3 apps/web/scripts/check-i18n-unused.py
+
+      # User-facing release notes: schema, sv+en parity, newest-first order and
+      # that every "Show me" anchor still exists in the web app.
+      - name: Check What's new release notes
+        if: matrix.task == 'checks'
+        working-directory: .
+        run: python3 scripts/check_whats_new.py --repo-root .
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -327,14 +375,20 @@ jobs:
         run: bun run --filter @eneo/ui build
 
       - name: Run type checks
+        if: matrix.task == 'checks'
         run: bun run check
 
       # The docs workflow owns docs-site lint/build; this gate stays focused on shipped frontend packages.
       - name: Run package lint
+        if: matrix.task == 'checks'
         run: FORCE_COLOR=1 bun run --filter '@eneo/*' lint
 
       - name: Run package tests
-        run: FORCE_COLOR=1 bun run --filter '@eneo/eslint-plugin' test
+        if: matrix.task == 'checks'
+        run: |
+          FORCE_COLOR=1 bun run --filter '@eneo/eslint-plugin' test
+          FORCE_COLOR=1 bun run --filter '@eneo/eneo-js' test
+          FORCE_COLOR=1 bun run --filter '@eneo/whats-new' test
 
       # Component tests run in a real Chromium via Vitest browser mode, so the
       # matching Playwright browser must be on the runner. Pin the playwright
@@ -342,25 +396,23 @@ jobs:
       # installs a browser build that @vitest/browser (on the pinned playwright)
       # can't find. Keep this in sync with apps/web's playwright dependency.
       - name: Install Playwright Chromium
+        if: matrix.task == 'checks'
         run: bun x playwright@1.61.1 install --with-deps chromium chromium-headless-shell
 
-      - name: Run web unit & component tests (with coverage)
-        run: FORCE_COLOR=1 bun run --filter '@eneo/web' test:coverage
+      - name: Run frontend dev lifecycle tests
+        if: matrix.task == 'checks'
+        run: FORCE_COLOR=1 bun run test:dev-lifecycle
 
-      - name: Upload frontend coverage
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-coverage
-          path: frontend/apps/web/coverage
-          retention-days: 14
-          if-no-files-found: warn
+      - name: Run web unit & component tests
+        if: matrix.task == 'checks'
+        run: FORCE_COLOR=1 bun run --filter '@eneo/web' test
 
       - name: Build frontend
+        if: matrix.task == 'build'
         run: bun run build
         env:
           # The Svelte production build exceeds Node's default heap on GitHub-hosted runners.
-          NODE_OPTIONS: --max-old-space-size=6144
+          NODE_OPTIONS: --max-old-space-size=8192
 
   frontend-web-next:
     name: Frontend (web-next)
@@ -408,8 +460,14 @@ jobs:
 
       # Isolated, prod-safe stack: own postgres/redis, a deterministic mock model,
       # and the backend built from its Dockerfile. Nothing touches a real provider.
-      - name: Start isolated E2E stack
-        run: docker compose -f docker-compose.e2e.ci.yml up -d --build --wait
+      - name: Start isolated E2E stack in the background
+        # Building the backend image and waiting for the stack's health checks
+        # take ~2 min and need nothing from the frontend steps, so they overlap
+        # with bun install and the web build. "Wait for the E2E stack" collects
+        # the exit status before the tests start.
+        run: |
+          nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
+            > "$RUNNER_TEMP/e2e-stack.log" 2>&1 &
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -442,26 +500,46 @@ jobs:
         working-directory: frontend/apps/web
         env:
           SVELTE_KIT_OUT_DIR: .svelte-kit-e2e
-          NODE_OPTIONS: --max-old-space-size=6144
-          ENEO_BACKEND_URL: http://localhost:8124
-          PUBLIC_ENEO_BACKEND_URL: http://localhost:8124
+          NODE_OPTIONS: --max-old-space-size=8192
         run: bun run build
+
+      - name: Wait for the E2E stack
+        run: |
+          for _ in $(seq 1 300); do
+            [ -f "$RUNNER_TEMP/e2e-stack.exit" ] && break
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/e2e-stack.log"
+          [ "$(cat "$RUNNER_TEMP/e2e-stack.exit" 2>/dev/null)" = "0" ]
 
       - name: Run E2E tests
         working-directory: frontend/apps/web
         env:
           # The workflow owns the stack lifecycle, so Playwright must not manage it.
           E2E_MANAGE_STACK: "0"
-          E2E_BACKEND_URL: http://localhost:8124
+          # Keep SSR and direct API helpers on one deterministic loopback path.
+          E2E_BACKEND_URL: http://127.0.0.1:8124
           E2E_JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789 # matches the e2e-backend JWT_SECRET
         run: bun run test:e2e
+
+      - name: Capture E2E stack diagnostics
+        if: ${{ failure() }}
+        run: |
+          mkdir -p e2e-artifacts
+          docker compose -f docker-compose.e2e.ci.yml ps --all \
+            > e2e-artifacts/compose-ps.txt
+          docker compose -f docker-compose.e2e.ci.yml logs \
+            --no-color --timestamps \
+            > e2e-artifacts/compose.log
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: frontend/apps/web/playwright-report
+          path: |
+            frontend/apps/web/playwright-report
+            e2e-artifacts
           retention-days: 7
           if-no-files-found: ignore
 
@@ -580,84 +658,6 @@ jobs:
           done
           exit $STATUS
 
-  # Reports how well the tests cover the lines THIS PR changed (patch coverage),
-  # for frontend and backend separately. Report-only: never fails the PR and is
-  # not part of the aggregate `CI` gate below. Writes a compact report to the
-  # job summary and uploads the same markdown as an artifact.
-  coverage-diff:
-    name: Coverage diff
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && (needs.frontend.result == 'success' || needs.backend-tests.result == 'success') }}
-    runs-on: ubuntu-latest
-    needs:
-      - frontend
-      - backend-tests
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # diff-cover needs history back to the merge base
-
-      - name: Download frontend coverage
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: frontend-coverage
-          path: frontend/apps/web/coverage
-
-      - name: Download backend coverage
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: backend-coverage
-          path: backend
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install diff-cover
-        run: pip install diff-cover
-
-      - name: Compute diff coverage
-        continue-on-error: true # report-only; never block the PR
-        env:
-          BASE: ${{ github.base_ref }}
-        run: |
-          git fetch --no-tags origin "$BASE"
-
-          # diff-cover matches the git diff (repo-root-relative paths) against each
-          # coverage report. The reports use package-relative paths, so rewrite them
-          # to repo-root-relative, then emit JSON for the comment step to render.
-          if [ -f frontend/apps/web/coverage/lcov.info ]; then
-            sed 's|^SF:|SF:frontend/apps/web/|' frontend/apps/web/coverage/lcov.info > fe.lcov
-            diff-cover fe.lcov --compare-branch "origin/$BASE" --fail-under 0 --format json:fe.json || true
-          fi
-
-          if [ -f backend/coverage.xml ]; then
-            sed -e 's|<source>.*</source>|<source>.</source>|' \
-                -e 's|filename="|filename="backend/src/eneo/|g' \
-                backend/coverage.xml > be.xml
-            diff-cover be.xml --compare-branch "origin/$BASE" --fail-under 0 --format json:be.json || true
-          fi
-
-      - name: Write diff coverage summary
-        if: ${{ !cancelled() }}
-        run: node .github/scripts/render-diff-coverage.mjs --frontend fe.json --backend be.json --output diff-coverage.md --summary "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload diff-coverage report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: diff-coverage
-          path: |
-            diff-coverage.md
-            fe.json
-            be.json
-          if-no-files-found: ignore
-
   docker-builds:
     name: Docker builds (${{ matrix.image }})
     needs: changes
@@ -690,6 +690,19 @@ jobs:
           (matrix.image == 'devcontainer' && needs.changes.outputs.docker_devcontainer == 'true')
         uses: actions/checkout@v4
 
+      # The frontend production build needs more memory than the hosted runner
+      # can provide without swap once it runs inside Docker. Keep this scoped to
+      # the frontend image; the other images build within the runner's RAM.
+      - name: Add swap for frontend image build
+        if: >-
+          matrix.image == 'frontend' &&
+          (github.event_name != 'pull_request' || needs.changes.outputs.docker_frontend == 'true')
+        run: |
+          sudo fallocate --length 4G /mnt/eneo-frontend.swap
+          sudo chmod 600 /mnt/eneo-frontend.swap
+          sudo mkswap /mnt/eneo-frontend.swap
+          sudo swapon /mnt/eneo-frontend.swap
+
       - name: Build Docker image
         if: >-
           github.event_name != 'pull_request' ||
@@ -711,6 +724,7 @@ jobs:
       - backend-tests
       - script-tests
       - route-metadata
+      - user-facing
       - no-intric
       - frontend
       - frontend-e2e
@@ -726,6 +740,7 @@ jobs:
           BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
           SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
           ROUTE_METADATA_RESULT: ${{ needs.route-metadata.result }}
+          USER_FACING_RESULT: ${{ needs.user-facing.result }}
           NO_INTRIC_RESULT: ${{ needs.no-intric.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           FRONTEND_E2E_RESULT: ${{ needs.frontend-e2e.result }}
@@ -755,6 +770,7 @@ jobs:
           check_result "Backend tests" "$BACKEND_TESTS_RESULT"
           check_result "Script tests" "$SCRIPT_TESTS_RESULT"
           check_result "Route metadata" "$ROUTE_METADATA_RESULT"
+          check_result "User-facing section" "$USER_FACING_RESULT"
           check_result "No intric references" "$NO_INTRIC_RESULT"
           check_result "Frontend" "$FRONTEND_RESULT"
           check_result "Frontend E2E" "$FRONTEND_E2E_RESULT"

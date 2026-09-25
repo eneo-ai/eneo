@@ -1,6 +1,8 @@
 name: Export roadmap graph
 
 on:
+  schedule:
+    - cron: "17 */6 * * *"
   workflow_dispatch:
     inputs:
       format:
@@ -10,6 +12,7 @@ on:
           - markdown
           - mermaid
           - svg
+          - json
         default: markdown
       audience:
         description: Output audience
@@ -27,25 +30,70 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: export-roadmap-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   export:
     runs-on: ubuntu-latest
     steps:
       - name: Check out export script
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
-      - name: Resolve output extension
+      - name: Resolve export settings
         id: output
         env:
-          FORMAT: ${{ inputs.format }}
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_FORMAT: ${{ inputs.format }}
+          REQUESTED_AUDIENCE: ${{ inputs.audience }}
+          REQUESTED_VERSIONS: ${{ inputs.versions }}
         run: |
-          case "$FORMAT" in
-            mermaid) echo "extension=mmd" >> "$GITHUB_OUTPUT" ;;
-            svg) echo "extension=svg" >> "$GITHUB_OUTPUT" ;;
-            *) echo "extension=md" >> "$GITHUB_OUTPUT" ;;
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            format="json"
+            audience="default"
+            versions=""
+          else
+            format="${REQUESTED_FORMAT:-markdown}"
+            audience="${REQUESTED_AUDIENCE:-default}"
+            versions="${REQUESTED_VERSIONS:-}"
+          fi
+
+          case "$format" in
+            json)
+              if [ "$audience" != "default" ]; then
+                echo "::error title=Invalid JSON audience::JSON roadmap exports require the default audience."
+                exit 1
+              fi
+              extension="json"
+              artifact_name="eneo-roadmap-public-json"
+              retention_days="30"
+              ;;
+            mermaid)
+              extension="mmd"
+              artifact_name="eneo-roadmap-${audience}-mermaid"
+              retention_days="1"
+              ;;
+            svg)
+              extension="svg"
+              artifact_name="eneo-roadmap-${audience}-svg"
+              retention_days="1"
+              ;;
+            *)
+              extension="md"
+              artifact_name="eneo-roadmap-${audience}-markdown"
+              retention_days="1"
+              ;;
           esac
+
+          echo "format=$format" >> "$GITHUB_OUTPUT"
+          echo "audience=$audience" >> "$GITHUB_OUTPUT"
+          echo "versions=$versions" >> "$GITHUB_OUTPUT"
+          echo "extension=$extension" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+          echo "retention_days=$retention_days" >> "$GITHUB_OUTPUT"
 
       - name: Validate project export token
         env:
@@ -59,6 +107,7 @@ jobs:
           gh project item-list 5 --owner eneo-ai --limit 1 --format json >/dev/null
 
       - name: Ensure roadmap project fields
+        if: github.event_name == 'workflow_dispatch'
         run: node .github/scripts/ensure-project-fields.mjs
         env:
           GH_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
@@ -70,18 +119,21 @@ jobs:
           node scripts/export_github_roadmap.mjs \
             --owner eneo-ai \
             --project 5 \
+            --repository "$REPOSITORY" \
             --format "$FORMAT" \
             --audience "$AUDIENCE" \
             --versions "$VERSIONS" \
             --output roadmap.${{ steps.output.outputs.extension }}
         env:
           GH_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
-          FORMAT: ${{ inputs.format }}
-          AUDIENCE: ${{ inputs.audience }}
-          VERSIONS: ${{ inputs.versions }}
+          REPOSITORY: eneo-ai/eneo
+          FORMAT: ${{ steps.output.outputs.format }}
+          AUDIENCE: ${{ steps.output.outputs.audience }}
+          VERSIONS: ${{ steps.output.outputs.versions }}
 
       - name: Upload roadmap artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: eneo-roadmap-${{ inputs.audience }}-${{ inputs.format }}
+          name: ${{ steps.output.outputs.artifact_name }}
           path: roadmap.${{ steps.output.outputs.extension }}
+          retention-days: ${{ steps.output.outputs.retention_days }}

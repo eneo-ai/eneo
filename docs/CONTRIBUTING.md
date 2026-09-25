@@ -12,7 +12,11 @@ Eneo embodies the principle that **"Generative AI must not be a technology for t
 
 ## 🚀 Quick Start for Contributors
 
-### 1. Development Environment Setup
+### 1. Start With an Issue
+
+Every contribution starts with a GitHub issue, before any code is written. Search the [existing issues](https://github.com/eneo-ai/eneo/issues) first; if nothing matches, open one using the issue templates and describe what you want to change, why, and how you plan to approach it. New issues are picked up automatically by the project intake workflow, which labels them and adds them to the Eneo GitHub Project so maintainers can triage them. Wait for maintainer feedback before implementing: it avoids work that cannot be accepted, and the resulting pull request must reference the approved issue.
+
+### 2. Development Environment Setup
 
 **Prerequisites:**
 - Docker and VS Code with Dev Containers extension
@@ -44,10 +48,60 @@ cd frontend && bun run dev                 # Terminal 2
 cd backend && uv run worker             # Terminal 3
 ```
 
-### 2. Make Your First Contribution
+**Optional: object storage locally**
+
+Eneo stores file bytes in PostgreSQL by default, which is all most work needs.
+To exercise the S3-compatible path instead, start the bundled SeaweedFS service
+from the `object-content` Compose profile. It is off by default because the
+image is built from upstream source, so the first start takes a few minutes.
 
 ```bash
-# Create feature branch
+docker compose -p eneo_devcontainer -f .devcontainer/docker-compose.yml \
+  --profile object-content up -d object-content
+```
+
+To have VS Code bring it up together with the rest of the devcontainer, create
+`.devcontainer/.env` (gitignored, so it stays a per-developer choice) with:
+
+```
+COMPOSE_PROFILES=object-content
+```
+
+Compose loads that file automatically because the devcontainer's project
+directory is `.devcontainer/`. Rebuild or reopen the container to apply it.
+
+Then connect it on the admin **File storage** page (`/admin/storage`). That page
+is read-only unless one of your roles carries the **Storage** permission. Roles
+that already have **Admin** were granted it automatically, and new tenants get
+it from the predefined-role seed, so the tenant owner account you develop with
+normally has it. If the page is read-only, add the Storage permission to your
+role under **Admin > Roles**.
+
+Use these values in the connection dialog. They match the Compose defaults; the
+devcontainer already permits plain HTTP, generates a development
+`ENCRYPTION_KEY`, and prints these values on start while the service runs:
+
+| Field | Value |
+| --- | --- |
+| S3 endpoint | `http://object-content:8333` |
+| Bucket | `eneo-object-content-dev` |
+| Region for signing | `local` |
+| Access key ID | `eneo-dev-object-content` |
+| Secret access key | `local-development-only-secret` |
+| Bucket addressing | `Bucket in the URL path` (the default) |
+
+Leave `OBJECT_CONTENT_ENDPOINT_URL`, `OBJECT_CONTENT_REGION`,
+`OBJECT_CONTENT_BUCKET`, `OBJECT_CONTENT_ACCESS_KEY_ID`,
+`OBJECT_CONTENT_SECRET_ACCESS_KEY`, `OBJECT_CONTENT_DEPLOYMENT_ID`, and
+`OBJECT_CONTENT_ADDRESSING_STYLE` unset. Setting any one of them switches Eneo
+to the operator-managed connection instead, and the admin dialog stops being the
+authority. See [docs/deployment/OBJECT_CONTENT.md](deployment/OBJECT_CONTENT.md)
+for the operator-managed path and for connecting an external endpoint.
+
+### 3. Make Your First Contribution
+
+```bash
+# Create feature branch for the approved issue
 git checkout -b feature/your-feature-name
 
 # Install local hooks once per clone
@@ -64,7 +118,7 @@ cd frontend && bun run test
 git add .
 git commit -m "feat: add your feature description"
 
-# Push and create pull request
+# Push and create a pull request that references the issue
 git push origin feature/your-feature-name
 ```
 
@@ -110,7 +164,7 @@ All UI contributions must follow Eneo's established design system.
 No PR may compromise existing functionality.
 
 **Testing Requirements:**
-- Include comprehensive unit tests (≥80% coverage)
+- Include unit tests for new behavior
 - Add integration tests for new features
 - Test for regressions in related features
 - Verify no breaking changes to existing APIs
@@ -198,7 +252,7 @@ frontend/
 - **Style**: PEP 8 compliance with Black formatting
 - **Type Safety**: Full type hints for all functions
 - **Documentation**: Docstrings for public APIs
-- **Testing**: Unit tests with pytest, ≥80% coverage target
+- **Testing**: Unit tests with pytest
 
 **TypeScript (Frontend):**
 - **Style**: ESLint configuration with strict rules
@@ -338,9 +392,6 @@ uv run pytest
 # Run specific domain tests
 uv run pytest tests/unittests/assistants/
 
-# Run with coverage
-uv run pytest --cov=src --cov-report=html
-
 # Run specific test
 uv run pytest tests/unittests/assistants/test_assistant.py::test_assistant_update_system_prompt
 ```
@@ -404,7 +455,7 @@ gitgraph
     commit id: "merge: new assistant type"
 ```
 
-> Features always flow back to `develop`. Version tags live on `release/v1.X` branches, not on `develop`. See [DEPLOYMENT_WORKFLOW.md](./DEPLOYMENT_WORKFLOW.md) for the full release flow.
+> Features always flow back to `develop`. Version tags live on `release/vX.Y` branches (for example `release/v2.0` and `release/v2.1`), not on `develop`. See [DEPLOYMENT_WORKFLOW.md](./DEPLOYMENT_WORKFLOW.md) for the full release flow.
 
 **Branch Naming:**
 - `feature/description` - New features
@@ -439,7 +490,8 @@ test(users): add integration tests for user creation
 2. **Write Clear Descriptions**: Explain what changes and why
 3. **Include Tests**: All new functionality requires tests
 4. **Update Documentation**: Keep docs synchronized with code changes
-5. **Request Review**: At least one approval required from maintainers
+5. **Describe the User-facing Change**: Fill in the `## User-facing` section of the PR template (one or two sentences from the user's point of view, or `No`) and give anything worth pointing at a `data-tour="…"` anchor. Release notes are drafted from these sections — see [`frontend/packages/whats-new/PLAYBOOK.md`](../frontend/packages/whats-new/PLAYBOOK.md).
+6. **Request Review**: At least one approval required from maintainers
 
 **PR Template:**
 ```markdown
@@ -634,6 +686,11 @@ bun add -d package-name
 
 ## 📚 Documentation Standards
 
+For product documentation and release notes, start with the
+[documentation authoring guide](../frontend/apps/docs-site/AUTHORING.md).
+It owns branch selection, page placement and the distinction between detailed
+guides and user-facing release announcements.
+
 ### Code Documentation
 
 **Python Docstrings:**
@@ -786,12 +843,6 @@ Eneo follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New features, backward compatible
 - **PATCH**: Bug fixes, backward compatible
 
-### Release Schedule
-
-- **Minor releases**: Monthly (feature additions)
-- **Patch releases**: As needed (critical bug fixes)
-- **Major releases**: Quarterly (breaking changes)
-
 ### Contributing to Releases
 
 - Feature freeze 1 week before minor releases
@@ -831,7 +882,6 @@ Eneo follows [Semantic Versioning](https://semver.org/):
 ### Contribution Quality
 
 **Code Quality Metrics:**
-- Test coverage maintained above 80%
 - No critical security vulnerabilities
 - Performance regression prevention
 - Documentation completeness

@@ -573,6 +573,33 @@ class AnalysisService:
                 f"Need permission {Permission.INSIGHTS.value} in order to access"
             )
 
+    @validate_permissions(Permission.INSIGHTS)
+    async def get_message_for_insights(self, *, message_id: UUID) -> Question:
+        partner = await self.question_repo.get_session_partner(
+            id=message_id,
+            tenant_id=self.user.tenant_id,
+        )
+        if partner is None or (partner.assistant_id is None) == (
+            partner.group_chat_id is None
+        ):
+            raise NotFoundException("Message not found")
+
+        try:
+            await self._check_insight_access(
+                assistant_id=partner.assistant_id,
+                group_chat_id=partner.group_chat_id,
+            )
+        except (BadRequestException, NotFoundException, UnauthorizedException) as exc:
+            raise NotFoundException("Message not found") from exc
+
+        question = await self.question_repo.get_for_tenant(
+            id=message_id,
+            tenant_id=self.user.tenant_id,
+        )
+        if question is None:
+            raise NotFoundException("Message not found")
+        return question
+
     async def _check_insight_access(
         self,
         group_chat_id: UUID | None = None,

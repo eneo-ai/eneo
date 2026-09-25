@@ -9,15 +9,27 @@
   import { initMentionInput } from "../mentions/MentionInput";
   import MentionButton from "../mentions/MentionButton.svelte";
   import ChatModelSelect from "../switcher/ChatModelSelect.svelte";
+  import ChatReasoningSelect from "../switcher/ChatReasoningSelect.svelte";
+  import ChatKnowledge from "./ChatKnowledge.svelte";
   import ChatMcpServers from "./ChatMcpServers.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getChatService } from "../../ChatService.svelte";
+  import { effectiveKnowledgeMode, internalMcpServerNames } from "../../internalMcpAvailability";
+  import {
+    initialDisabledMcpServerIds,
+    loadMcpServerPreferences,
+    saveMcpServerPreferences,
+    type McpServerPreferencesContext
+  } from "../../mcpServerPreferences";
+  import { selectEffectiveChatModel } from "../../selectEffectiveChatModel";
   import { track } from "$lib/core/helpers/track";
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { SvelteSet } from "svelte/reactivity";
-  import { Globe, AlertTriangle, X } from "lucide-svelte";
+  import { TriangleAlert, X } from "@lucide/svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
+  import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
+  import { chatCapabilities } from "../../chatCapabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
 
   type McpServerSummary = {
@@ -25,10 +37,15 @@
     name: string;
     description?: string | null;
     icon_url?: string | null;
+    /** "general" for ordinary MCP servers, otherwise a capability purpose (web search, image generation). */
+    purpose?: string | null;
+    /** Org-level availability: a deactivated server stays attached but is never called. */
+    is_enabled?: boolean;
+    readiness_reason?: string | null;
   };
 
   const chat = getChatService();
-  const { featureFlags } = getAppContext();
+  const { tenant, user } = getAppContext();
 
   const {
     state: { attachments, isUploading, uploadError },
@@ -40,7 +57,9 @@
   const {
     states: { mentions, question },
     resetMentionInput,
-    setQuestionText: _setQuestionText,
+    snapshotMentionInput,
+    restoreMentionInput,
+    isMentionInputEmpty,
     focusMentionInput
   } = initMentionInput({
     triggerCharacter: "@",
@@ -62,6 +81,25 @@
   // the backend narrows the effective server set accordingly. Mutated in place
   // by ChatMcpServers.
   const disabledMcpServerIds = new SvelteSet<string>();
+
+  function mcpServerPreferencesContext(): McpServerPreferencesContext | null {
+    const partner = chat.partner;
+    if (!partner || partner.type !== "default-assistant") return null;
+
+    return {
+      tenantId: tenant.id,
+      userId: user.id,
+      assistantId: partner.id
+    };
+  }
+
+  function persistMcpServerSelection(disabledServerIds: ReadonlySet<string>) {
+    if (!browser) return;
+    const context = mcpServerPreferencesContext();
+    if (!context) return;
+
+    saveMcpServerPreferences(context, toolPreferenceIds, disabledServerIds);
+  }
 
   onMount(() => {
     if (!browser) {
@@ -117,10 +155,15 @@
     else chat.newConversation();
   };
 
+  // Set synchronously on send and held until the conversation request has
+  // settled, so Enter or Send during the wait for a queued model switch (or
+  // the draft restore after a failure) cannot start an overlapping request.
+  let sendPending = $state(false);
+
   async function ask() {
     if (isAskingDisabled) return;
+    sendPending = true;
     inputError = null;
-    const webSearchEnabled = featureFlags.showWebSearch && useWebSearch;
     const files = $attachments.map((file) => file?.fileRef).filter((file) => file !== undefined);
     abortController = new AbortController();
     const tools =
@@ -131,22 +174,36 @@
             })
           }
         : undefined;
+    // Approval controls external MCP servers only. Eneo's read-only internal
+    // knowledge/files tools are core capabilities and always auto-execute.
     const toolApprovalEnabled = !autoAcceptTools && hasMcpTools;
+    // The question is echoed in the conversation as soon as the backend
+    // confirms it, so clear the composer now instead of showing it dimmed
+    // behind a spinner until the answer finishes. The full draft (mention
+    // chips included) is restored on error below.
+    const draft = snapshotMentionInput();
+    const questionText = draft.question;
+    resetMentionInput();
     scrollToBottom();
 
     try {
+      // A model or reasoning switch is applied optimistically; the backend
+      // resolves the model from the stored assistant, so let that write land
+      // before the question is sent under it.
+      await spacesManager?.awaitDefaultAssistantUpdates();
       await chat.askQuestion(
-        $question,
+        questionText,
         files,
         tools,
-        webSearchEnabled,
         toolApprovalEnabled,
         abortController,
         disabledMcpServerIds.size > 0 ? Array.from(disabledMcpServerIds) : undefined
       );
-      resetMentionInput();
       clearUploads();
     } catch (error: unknown) {
+      // Put the draft back unless the user has already started a new one
+      // while the request was pending; that newer input wins.
+      if (isMentionInputEmpty()) restoreMentionInput(draft);
       const contextError = getContextErrorInfo(error);
       if (contextError) {
         if (contextError.used !== undefined && contextError.limit !== undefined) {
@@ -174,6 +231,8 @@
           .join(",")
       };
       focusMentionInput();
+    } finally {
+      sendPending = false;
     }
   }
 
@@ -218,8 +277,6 @@
     chat.requestPreflight($question, fileIds, tools);
   });
 
-  let useWebSearch = $state(false);
-
   const shouldShowMentionButton = $derived.by(() => {
     const hasTools = chat.partner.tools.assistants.length > 0;
     const isEnabled =
@@ -244,11 +301,33 @@
     return [];
   });
 
+  // The tenant's capability providers (web search, image generation) flow
+  // through the same MCP inheritance chain as other servers but are presented
+  // as capabilities, not servers: split them out of the generic rows and give
+  // each its own popover entry. A capability the user's role may not use is
+  // hidden; the backend never attaches its tools for that user anyway.
+  const generalMcpServers = $derived(
+    mcpServers
+      .filter((server) => !isCapabilityPurpose(server.purpose))
+      .map((server) => ({
+        ...server,
+        available: server.is_enabled !== false,
+        reason: server.is_enabled === false ? "server_disabled" : null
+      }))
+  );
+  const capabilityServers = $derived(chatCapabilities(chat.partner, user));
+  const toolPreferenceIds = $derived([...generalMcpServers, ...capabilityServers].map((s) => s.id));
+
   $effect(() => {
-    const validIds = new Set(mcpServers.map((server) => server.id));
+    const validIds = new Set(toolPreferenceIds);
+    let selectionChanged = false;
     for (const id of Array.from(disabledMcpServerIds)) {
-      if (!validIds.has(id)) disabledMcpServerIds.delete(id);
+      if (!validIds.has(id)) {
+        disabledMcpServerIds.delete(id);
+        selectionChanged = true;
+      }
     }
+    if (selectionChanged) persistMcpServerSelection(disabledMcpServerIds);
   });
 
   // Seed the toggles from the governance policy's per-server chat defaults.
@@ -262,21 +341,110 @@
     if (conversation === seededConversation) return;
     seededConversation = conversation;
     untrack(() => {
+      const availableServerIds = toolPreferenceIds;
+      const defaultDisabledServerIds =
+        partner && "effective_config" in partner
+          ? [
+              ...(partner.effective_config?.default_disabled_mcp_server_ids ?? []),
+              ...(partner.effective_config?.default_disabled_capabilities ?? []).map(
+                (p) => "capability:" + p
+              )
+            ]
+          : [];
+      const preferencesContext = mcpServerPreferencesContext();
+      const preferences =
+        browser && preferencesContext ? loadMcpServerPreferences(preferencesContext) : null;
+      const initialDisabledServerIds = initialDisabledMcpServerIds({
+        availableServerIds,
+        defaultDisabledServerIds,
+        preferences
+      });
+
       disabledMcpServerIds.clear();
-      if (partner && "effective_config" in partner) {
-        for (const id of partner.effective_config?.default_disabled_mcp_server_ids ?? []) {
-          disabledMcpServerIds.add(id);
-        }
+      for (const id of initialDisabledServerIds) disabledMcpServerIds.add(id);
+
+      // Normalize an existing preference to the currently available server set.
+      // A missing preference remains missing until the user changes a toggle, so
+      // future governance defaults can still take effect.
+      if (preferences && preferencesContext) {
+        saveMcpServerPreferences(preferencesContext, availableServerIds, disabledMcpServerIds);
       }
     });
   });
 
-  // Check if the assistant has MCP servers/tools
-  const hasMcpTools = $derived(mcpServers.length > 0);
+  // Whether the popover has anything to show: general servers plus the
+  // capabilities this user may use (a capability the role withholds is not a
+  // row, so it must not open an empty popover either).
+  const hasMcpTools = $derived(generalMcpServers.length + capabilityServers.length > 0);
 
-  const showWebSearch = $derived(
-    chat.partner.type === "default-assistant" && featureFlags.showWebSearch
+  // Knowledge sources attached to the partner (read-only indicator; knowledge
+  // cannot be toggled per conversation the way MCP servers can).
+  type NamedSource = { id: string; name: string };
+  const knowledgeSources = $derived.by(() => {
+    const partner = chat.partner as Record<string, unknown> | null;
+    const named = (value: unknown, fallbackKey?: string): NamedSource[] =>
+      Array.isArray(value)
+        ? value.map((source) => ({
+            id: String(source.id),
+            name: String(source.name ?? (fallbackKey ? (source[fallbackKey] ?? "") : ""))
+          }))
+        : [];
+    return {
+      collections: named(partner?.groups),
+      websites: named(partner?.websites, "url"),
+      integrations: named(partner?.integration_knowledge_list)
+    };
+  });
+  const hasKnowledge = $derived(
+    knowledgeSources.collections.length +
+      knowledgeSources.websites.length +
+      knowledgeSources.integrations.length >
+      0
   );
+  const partnerKnowledgeMode = $derived.by(() => {
+    const partner = chat.partner as Record<string, unknown> | null;
+    return typeof partner?.knowledge_mode === "string" ? partner.knowledge_mode : undefined;
+  });
+
+  const effectiveModel = $derived.by(() => {
+    const partner = chat.partner;
+    if (!partner || !("completion_model" in partner)) return undefined;
+    return selectEffectiveChatModel(partner.completion_model, partner.effective_config);
+  });
+  const supportsToolCalling = $derived(effectiveModel?.supports_tool_calling === true);
+  const runtimeKnowledgeMode = $derived(
+    effectiveKnowledgeMode(partnerKnowledgeMode, supportsToolCalling)
+  );
+
+  // Current uploads and persisted user-message attachments are the only files
+  // the backend's files server considers. Assistant prompt attachments remain
+  // inline and therefore do not activate this tool.
+  const hasDownloadReference = $derived.by(() => {
+    const pending = $attachments
+      .map((attachment) => attachment.fileRef)
+      .filter((file) => file !== undefined);
+    const history = (chat.currentConversation?.messages ?? []).flatMap(
+      (message) => message.files ?? []
+    );
+    return [...pending, ...history].some((file) => file.has_download_reference === true);
+  });
+
+  // Eneo's built-in loopback MCP servers that will be active for this partner:
+  // always on, not togglable, but surfaced next to the external servers so the
+  // user sees every tool the model can reach. Mirrors the backend attach gates
+  // (knowledge_mode "tool" + knowledge attached; inline_file_text off means
+  // attachments reach the model as signed URLs read by the files server).
+  const internalMcpServers = $derived.by(() => {
+    const partner = chat.partner as Record<string, unknown> | null;
+    return internalMcpServerNames({
+      supportsToolCalling,
+      hasKnowledge,
+      storedKnowledgeMode: partnerKnowledgeMode,
+      inlineFileText: partner?.inline_file_text !== false,
+      hasDownloadReference
+    }).map((name) => ({ name }));
+  });
+
   // ChatModelSelect edits the personal space's default assistant via the
   // SpacesManager context, which only the spaces route tree provides. Other
   // mounts of the default assistant (e.g. a deep link into the dashboard chat)
@@ -291,6 +459,7 @@
   const isAskingDisabled = $derived(
     isConversationSubmitDisabled({
       isLoading: chat.askQuestion.isLoading,
+      sendPending,
       isUploading: $isUploading,
       hasContent: $question !== "" || $attachments.length > 0,
       hasCompletionModel: chat.hasCompletionModel,
@@ -300,7 +469,7 @@
 </script>
 
 <PromptInput.Root
-  status={chat.askQuestion.isLoading ? "streaming" : "ready"}
+  status={chat.askQuestion.isLoading || sendPending ? "streaming" : "ready"}
   onSubmit={ask}
   onStop={() => abortController?.abort("User cancelled")}
   class="max-w-[74ch] md:w-full"
@@ -310,7 +479,7 @@
       class="bg-card/80 absolute inset-0 z-10 flex items-center justify-center rounded-2xl backdrop-blur-[1px]"
     >
       <div class="text-muted-foreground flex items-center gap-2 px-4 text-sm">
-        <AlertTriangle class="h-4 w-4 flex-shrink-0" />
+        <TriangleAlert class="h-4 w-4 flex-shrink-0" />
         <p>{m.no_completion_model_description()}</p>
       </div>
     </div>
@@ -318,24 +487,6 @@
 
   <PromptInput.Body>
     <MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
-    {#if chat.askQuestion.isLoading}
-      <div
-        class="bg-card/60 absolute inset-0 flex items-center justify-center rounded-lg backdrop-blur-[1px]"
-      >
-        <div class="text-muted-foreground flex items-center gap-2 text-sm">
-          <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"
-            ></circle>
-            <path
-              class="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-            ></path>
-          </svg>
-          {m.generating_answer()}
-        </div>
-      </div>
-    {/if}
   </PromptInput.Body>
 
   {#if $uploadError}
@@ -344,7 +495,7 @@
       role="alert"
     >
       <div class="flex items-start gap-2">
-        <AlertTriangle class="mt-0.5 h-4 w-4 flex-shrink-0" />
+        <TriangleAlert class="mt-0.5 h-4 w-4 flex-shrink-0" />
         <p class="whitespace-pre-line">{$uploadError}</p>
       </div>
       <button
@@ -364,7 +515,7 @@
       role="alert"
     >
       <div class="flex items-start gap-2">
-        <AlertTriangle class="mt-0.5 h-4 w-4 flex-shrink-0" />
+        <TriangleAlert class="mt-0.5 h-4 w-4 flex-shrink-0" />
         <div>
           <p class="font-medium">{inputError.message}</p>
           {#if inputError.details}
@@ -395,23 +546,24 @@
         <MentionButton></MentionButton>
       {/if}
 
-      {#if hasMcpTools}
-        <ChatMcpServers
-          servers={mcpServers}
-          disabledServerIds={disabledMcpServerIds}
-          bind:autoAcceptTools
+      {#if hasKnowledge}
+        <ChatKnowledge
+          collections={knowledgeSources.collections}
+          websites={knowledgeSources.websites}
+          integrations={knowledgeSources.integrations}
+          knowledgeMode={runtimeKnowledgeMode}
         />
       {/if}
 
-      {#if showWebSearch}
-        <PromptInput.Button
-          variant={useWebSearch ? "secondary" : "ghost"}
-          onclick={() => (useWebSearch = !useWebSearch)}
-          title={m.search()}
-        >
-          <Globe class="size-4" />
-          <span class="hidden sm:inline">{m.search()}</span>
-        </PromptInput.Button>
+      {#if hasMcpTools || internalMcpServers.length > 0}
+        <ChatMcpServers
+          servers={generalMcpServers}
+          {capabilityServers}
+          internalServers={internalMcpServers}
+          disabledServerIds={disabledMcpServerIds}
+          onSelectionChange={persistMcpServerSelection}
+          bind:autoAcceptTools
+        />
       {/if}
     </PromptInput.Tools>
 
@@ -419,6 +571,7 @@
     <div class="flex items-center gap-2">
       {#if showModelSelect}
         <ChatModelSelect />
+        <ChatReasoningSelect />
       {/if}
 
       <PromptInput.Submit disabled={isAskingDisabled} name="ask" />

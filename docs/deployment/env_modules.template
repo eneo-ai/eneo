@@ -1,0 +1,14 @@
+# ============================================================================
+# SHARED MODULE DEFAULTS - applied to every module container
+# ============================================================================
+# Copy to env_modules.env. Module-specific secrets do NOT belong here;
+# they go in the per-module env file (e.g. env_module_ttt.env).
+
+# Log level for module containers (debug, info, warn, error)
+LOG_LEVEL=info
+
+# Node environment for module runtimes
+NODE_ENV=production
+
+# Must match backend API_KEY_HEADER_NAME when a module uses @eneo/eneo-js.
+ENEO_API_KEY_HEADER_NAME=X-API-Key

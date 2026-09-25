@@ -1,3 +1,5 @@
+import base64
+import binascii
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, Optional
@@ -34,6 +36,9 @@ class JWTCreds(BaseModel):
 
     sub: EmailStr
     username: Optional[str] = None
+    # Missing claims decode as version 0 for rolling compatibility with tokens
+    # minted before credential-version based session invalidation existed.
+    credential_version: int = Field(default=0, ge=0)
 
 
 class JWTPayload(JWTMeta, JWTCreds):
@@ -381,6 +386,7 @@ class ApiKeyV2InDB(ApiKeyV2):
 class ApiKeyPolicyUpdate(BaseModel):
     max_delegation_depth: Optional[int] = None
     revocation_cascade_enabled: Optional[bool] = None
+    require_tenant_allowed_origin: bool = True
     require_expiration: Optional[bool] = None
     max_expiration_days: Optional[int] = None
     auto_expire_unused_days: Optional[int] = None
@@ -420,6 +426,7 @@ class ApiKeyPolicyUpdate(BaseModel):
 class ApiKeyPolicyResponse(BaseModel):
     max_delegation_depth: Optional[int] = None
     revocation_cascade_enabled: Optional[bool] = None
+    require_tenant_allowed_origin: bool = True
     require_expiration: Optional[bool] = None
     max_expiration_days: Optional[int] = None
     auto_expire_unused_days: Optional[int] = None
@@ -544,9 +551,6 @@ class ApiKeyNotificationPolicyUpdate(BaseModel):
 
 class SuperApiKeyStatus(BaseModel):
     super_api_key_configured: bool
-    super_duper_api_key_configured: bool
-    super_api_key_using_legacy: bool = False
-    super_duper_api_key_using_legacy: bool = False
 
     model_config = ConfigDict(extra="forbid")
 
@@ -557,13 +561,61 @@ class ApiKeyListResponse(BaseModel):
 
     items: list[ApiKeyV2]
     limit: Optional[int] = None
-    next_cursor: Optional[datetime] = None
-    previous_cursor: Optional[datetime] = None
+    next_cursor: Optional[str] = None
+    previous_cursor: Optional[str] = None
     total_count: Optional[int] = None
 
     @property
     def count(self) -> int:
         return len(self.items)
+
+
+class ApiKeyListCursor(BaseModel):
+    """Opaque, total-order position in the API-key list.
+
+    ``created_at`` alone is not unique. Pairing it with the primary key makes
+    forward and backward keyset pagination deterministic even when several
+    keys were created in the same transaction. Legacy timestamp cursors remain
+    readable during rollout, while every newly emitted cursor uses this v1
+    representation.
+    """
+
+    created_at: datetime
+    key_id: UUID | None = None
+
+    model_config = ConfigDict(frozen=True)
+
+    @field_validator("created_at")
+    @classmethod
+    def normalize_created_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+    def serialize(self) -> str:
+        encoded = base64.urlsafe_b64encode(self.model_dump_json().encode()).decode()
+        return f"v1.{encoded.rstrip('=')}"
+
+    @classmethod
+    def deserialize(cls, value: str) -> "ApiKeyListCursor":
+        if not value.startswith("v1."):
+            try:
+                legacy_timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("Invalid API key cursor.") from exc
+            return cls(created_at=legacy_timestamp)
+
+        encoded = value.removeprefix("v1.")
+        padding = "=" * (-len(encoded) % 4)
+        try:
+            payload = base64.b64decode(
+                encoded + padding,
+                altchars=b"-_",
+                validate=True,
+            )
+            return cls.model_validate_json(payload)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError("Invalid API key cursor.") from exc
 
 
 class ApiKeyCreationConstraints(BaseModel):
@@ -638,31 +690,6 @@ class ApiKeyUsageResponse(BaseModel):
     items: list[ApiKeyUsageEvent]
     limit: int
     next_cursor: Optional[datetime] = None
-
-
-class ApiKeyPublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    truncated_key: str
-
-
-class ApiKey(ApiKeyPublic):
-    key: str
-
-
-class ApiKeyCreated(ApiKey):
-    hashed_key: str
-
-
-class ApiKeyInDB(ApiKey):
-    user_id: Optional[UUID]
-    assistant_id: Optional[UUID]
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class CreateUserResponse(BaseModel):
-    token: AccessToken
-    api_key: ApiKey
 
 
 class OpenIdConnectLogin(BaseModel):

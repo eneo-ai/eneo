@@ -96,6 +96,7 @@ class RouteInfo:
     has_scope_check_dep: bool
     has_api_key_permission_dep: bool
     has_file_delete_scope_guard_dep: bool
+    has_session_auth_dep: bool
     resource_perm_config: ResourcePermConfig | None
     scope_check_config: ScopeCheckConfig | None
 
@@ -257,6 +258,16 @@ def route_dependency_callables(route: Any) -> list[Any]:
     return [fn for fn in router_dep_fns + endpoint_dep_fns if fn is not None]
 
 
+def route_is_session_only(route: Any) -> bool:
+    """True when the route rejects API keys outright via require_session_auth.
+
+    API-key scope/permission guards are structural no-ops on such routes, so
+    the ratchet tests treat the session dependency itself as the required
+    guard instead of maintaining per-surface allowlists.
+    """
+    return route_has_dependency_named(route, "require_session_auth")
+
+
 def route_has_dependency_named(route: Any, dep_name: str) -> bool:
     return any(
         getattr(fn, "__name__", "") == dep_name
@@ -301,6 +312,7 @@ def walk_routes() -> list[RouteInfo]:
         has_scope_check_dep = False
         has_api_key_permission_dep = False
         has_file_delete_scope_guard_dep = False
+        has_session_auth_dep = False
 
         for fn in route_dependency_callables(route):
             dep_name = getattr(fn, "__name__", "")
@@ -323,6 +335,8 @@ def walk_routes() -> list[RouteInfo]:
                     )
             elif dep_name == "_api_key_permission_dep":
                 has_api_key_permission_dep = True
+            elif dep_name == "require_session_auth":
+                has_session_auth_dep = True
             elif dep_name == "_stash":
                 has_file_delete_scope_guard_dep = True
 
@@ -336,6 +350,7 @@ def walk_routes() -> list[RouteInfo]:
                     has_scope_check_dep=has_scope_check_dep,
                     has_api_key_permission_dep=has_api_key_permission_dep,
                     has_file_delete_scope_guard_dep=has_file_delete_scope_guard_dep,
+                    has_session_auth_dep=has_session_auth_dep,
                     resource_perm_config=resource_perm_config,
                     scope_check_config=scope_check_config,
                 )

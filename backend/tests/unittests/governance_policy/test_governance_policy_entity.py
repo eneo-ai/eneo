@@ -26,6 +26,29 @@ def test_default_policy_has_all_restrictions_disabled():
     assert p.mcp_servers == []
     assert p.disabled_mcp_tool_ids == []
     assert p.default_prompt_library_id is None
+    assert p.default_reasoning_effort is None
+    assert p.allow_user_reasoning_effort is False
+    assert p.reasoning_policy_configured is False
+    assert p.inline_file_text is None
+
+
+@pytest.mark.parametrize("inline_file_text", [True, False])
+def test_set_file_policy_governs_attachment_inlining(inline_file_text: bool):
+    p = _empty_policy()
+
+    p.set_file_policy(inline_file_text=inline_file_text)
+
+    assert p.inline_file_text is inline_file_text
+
+
+def test_set_reasoning_policy_stores_default_and_user_choice():
+    p = _empty_policy()
+
+    p.set_reasoning_policy(default_effort="high", allow_user_override=True)
+
+    assert p.default_reasoning_effort == "high"
+    assert p.allow_user_reasoning_effort is True
+    assert p.reasoning_policy_configured is True
 
 
 def test_set_models_restriction_requires_at_least_one_model_when_enabled():

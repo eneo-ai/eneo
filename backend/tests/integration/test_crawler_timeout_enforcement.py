@@ -16,8 +16,8 @@ import pytest
 from httpx import AsyncClient
 
 from eneo.tenants.crawler_settings_helper import (
-    get_crawler_setting,
     CRAWLER_SETTING_SPECS,
+    get_crawler_setting,
 )
 
 

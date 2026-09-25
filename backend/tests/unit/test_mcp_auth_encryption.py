@@ -6,7 +6,8 @@ Tests cover:
 - Credential clearing when switching auth type to "none"
 - has_credentials boolean and credential_preview in assemblers
 - Proxy factory decryption of http_auth_config_schema
-- Auth type literal validation (only "none" and "bearer")
+- Auth type literal validation ("none", "bearer", "api_key_header")
+- api_key_header header-name validation (token syntax + reserved-header deny list)
 - refresh_tools uses stored encrypted credentials
 """
 
@@ -61,7 +62,7 @@ def _make_service(encryption_service=None):
 
 
 class TestAuthTypeLiterals:
-    """Test that only 'none' and 'bearer' are accepted."""
+    """Test that only 'none', 'bearer', and 'api_key_header' are accepted."""
 
     def test_create_accepts_none(self):
         dto = MCPServerCreate(name="test", http_url="http://localhost:8080")
@@ -75,13 +76,13 @@ class TestAuthTypeLiterals:
         )
         assert dto.http_auth_type == "bearer"
 
-    def test_create_rejects_api_key(self):
-        with pytest.raises(ValidationError):
-            MCPServerCreate(
-                name="test",
-                http_url="http://localhost:8080",
-                http_auth_type="api_key",
-            )
+    def test_create_accepts_api_key_header(self):
+        dto = MCPServerCreate(
+            name="test",
+            http_url="http://localhost:8080",
+            http_auth_type="api_key_header",
+        )
+        assert dto.http_auth_type == "api_key_header"
 
     def test_create_rejects_custom_headers(self):
         with pytest.raises(ValidationError):
@@ -95,9 +96,74 @@ class TestAuthTypeLiterals:
         dto = MCPServerUpdate(http_auth_type="bearer")
         assert dto.http_auth_type == "bearer"
 
-    def test_update_rejects_api_key(self):
+    def test_update_rejects_unknown_type(self):
         with pytest.raises(ValidationError):
             MCPServerUpdate(http_auth_type="api_key")
+
+
+class TestApiKeyHeaderValidation:
+    """Header names must use HTTP token syntax and avoid reserved headers."""
+
+    @staticmethod
+    def _validate(header_name: str, token: str = "sk-123"):
+        from eneo.mcp_servers.application.mcp_server_service import MCPServerService
+
+        MCPServerService._validate_auth_config(
+            "api_key_header", {"header_name": header_name, "token": token}
+        )
+
+    def test_accepts_typical_api_key_header(self):
+        self._validate("X-Api-Key")
+        self._validate("Api-Key")
+
+    def test_rejects_missing_header_name(self):
+        from eneo.main.exceptions import BadRequestException
+        from eneo.mcp_servers.application.mcp_server_service import MCPServerService
+
+        with pytest.raises(BadRequestException):
+            MCPServerService._validate_auth_config(
+                "api_key_header", {"token": "sk-123"}
+            )
+
+    def test_rejects_non_token_characters(self):
+        from eneo.main.exceptions import BadRequestException
+
+        for bad in ("X Api Key", "X-Api-Key:", "héader", "X-Key\r\nHost"):
+            with pytest.raises(BadRequestException):
+                self._validate(bad)
+
+    def test_rejects_reserved_headers(self):
+        from eneo.main.exceptions import BadRequestException
+
+        for reserved in (
+            "Host",
+            "Content-Length",
+            "Authorization",
+            "Mcp-Session-Id",
+            "X-Forwarded-For",
+            "X-Eneo-User",
+            "Cookie",
+        ):
+            with pytest.raises(BadRequestException):
+                self._validate(reserved)
+
+    def test_rejects_control_characters_in_token(self):
+        from eneo.main.exceptions import BadRequestException
+
+        with pytest.raises(BadRequestException):
+            self._validate("X-Api-Key", token="secret\r\nInjected: yes")
+
+    def test_bearer_token_control_characters_rejected(self):
+        from eneo.main.exceptions import BadRequestException
+        from eneo.mcp_servers.application.mcp_server_service import MCPServerService
+
+        with pytest.raises(BadRequestException):
+            MCPServerService._validate_auth_config("bearer", {"token": "abc\ndef"})
+
+    def test_none_auth_skips_validation(self):
+        from eneo.mcp_servers.application.mcp_server_service import MCPServerService
+
+        MCPServerService._validate_auth_config("none", None)
 
 
 # =============================================================================
@@ -225,10 +291,19 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {"token": "enc:fernet:v1:xxx"}
         server.tags = None
@@ -246,10 +321,19 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "none"
         server.http_auth_config_schema = None
         server.tags = None
@@ -268,10 +352,19 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {"token": "enc:fernet:v1:xxx"}
         server.tags = None
@@ -280,10 +373,30 @@ class TestAssemblerHasCredentials:
         server.security_classification = None
         server.is_enabled = True
         server.tools = []
+        server.forward_identity = True
+        server.tool_catalog_max_count = 73
+        server.tool_catalog_max_bytes = 7 * 1024 * 1024
+        server.tool_definition_max_bytes = 96 * 1024
 
         assembler = MCPServerSettingsAssembler()
         dto = assembler.from_domain_to_model(server)
         assert dto.has_credentials is True
+        assert dto.tool_catalog_max_count == 73
+        assert dto.tool_catalog_max_bytes == 7 * 1024 * 1024
+        assert dto.tool_definition_max_bytes == 96 * 1024
+
+        unrelated_edit = MCPServerUpdate(
+            description="Updated description",
+            tool_catalog_max_count=dto.tool_catalog_max_count,
+            tool_catalog_max_bytes=dto.tool_catalog_max_bytes,
+            tool_definition_max_bytes=dto.tool_definition_max_bytes,
+        )
+        assert unrelated_edit.model_dump(exclude_unset=True) == {
+            "description": "Updated description",
+            "tool_catalog_max_count": 73,
+            "tool_catalog_max_bytes": 7 * 1024 * 1024,
+            "tool_definition_max_bytes": 96 * 1024,
+        }
 
     def test_settings_assembler_without_credentials(self):
         from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
@@ -291,10 +404,19 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "none"
         server.http_auth_config_schema = None
         server.tags = None
@@ -303,6 +425,10 @@ class TestAssemblerHasCredentials:
         server.security_classification = None
         server.is_enabled = False
         server.tools = []
+        server.forward_identity = False
+        server.tool_catalog_max_count = 256
+        server.tool_catalog_max_bytes = 16 * 1024 * 1024
+        server.tool_definition_max_bytes = 64 * 1024
 
         assembler = MCPServerSettingsAssembler()
         dto = assembler.from_domain_to_model(server)
@@ -319,10 +445,19 @@ class TestAssemblerHasCredentials:
         encrypted_token = enc.encrypt("my-secret-bearer-token-12345")
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {"token": encrypted_token}
         server.tags = None
@@ -346,10 +481,19 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {"token": "plaintext-token-5678"}
         server.tags = None
@@ -382,6 +526,11 @@ class TestProxyFactoryDecryption:
         server.id = uuid4()
         server.name = "test"
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {
             "token": "my-bearer-token",
@@ -407,6 +556,11 @@ class TestProxyFactoryDecryption:
         server.id = uuid4()
         server.name = "test"
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {
             "token": encrypted_token,
@@ -427,6 +581,11 @@ class TestProxyFactoryDecryption:
         server.id = uuid4()
         server.name = "public-server"
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "none"
         server.http_auth_config_schema = None
         server.tools = []
@@ -444,7 +603,7 @@ class TestProxyFactoryDecryption:
 
 class TestUpdateConnectionValidation:
     """Test that update_mcp_server validates connection before saving when
-    connection-affecting fields (http_url, http_auth_type, credentials) change."""
+    connection-affecting fields (URL, auth, credentials, identity mode) change."""
 
     @pytest.fixture
     def _setup(self):
@@ -559,6 +718,108 @@ class TestUpdateConnectionValidation:
         assert result.connection is None
         mock_repo.update.assert_called_once()
         service._test_connection_and_discover_tools.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("existing_mode", "requested_mode"), [(False, True), (True, False)]
+    )
+    async def test_rejects_identity_mode_change_when_connection_fails(
+        self, _setup, existing_mode, requested_mode
+    ):
+        """Both identity-mode transitions are validated before persistence."""
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
+
+        service, mock_repo, existing, _ = _setup
+        existing.forward_identity = existing_mode
+        service._test_connection_and_discover_tools = AsyncMock(
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="Identity mode rejected"),
+            )
+        )
+
+        result = await service.update_mcp_server(
+            mcp_server_id=existing.id,
+            forward_identity=requested_mode,
+        )
+
+        assert result.connection is not None
+        assert result.connection.success is False
+        validated_server = service._test_connection_and_discover_tools.call_args.args[0]
+        assert validated_server.forward_identity is requested_mode
+        mock_repo.update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_same_identity_mode_does_not_trigger_validation(self, _setup):
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
+
+        service, mock_repo, existing, _ = _setup
+        existing.forward_identity = True
+        service._test_connection_and_discover_tools = AsyncMock(
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="should not be called"),
+            )
+        )
+
+        await service.update_mcp_server(
+            mcp_server_id=existing.id,
+            forward_identity=True,
+        )
+
+        mock_repo.update.assert_called_once()
+        service._test_connection_and_discover_tools.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_disabling_identity_uses_anonymous_catalog_as_availability_snapshot(
+        self, _setup
+    ):
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
+        from eneo.mcp_servers.domain.entities.mcp_server import MCPServerTool
+        from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import (
+            MCPProxySession,
+        )
+
+        service, mock_repo, existing, _ = _setup
+        tool_repo = service.tool_repo
+        existing.forward_identity = True
+        shared = MCPServerTool(
+            mcp_server_id=existing.id,
+            name="shared",
+            description="Approved shared tool",
+            input_schema={"type": "object"},
+        )
+        user_only = MCPServerTool(
+            mcp_server_id=existing.id,
+            name="user_only",
+            description="Approved user-scoped tool",
+            input_schema={"type": "object"},
+        )
+        existing.tools = [shared, user_only]
+        tool_repo.by_server.return_value = existing.tools
+        tool_repo.stage_observed.return_value = []
+        service._test_connection_and_discover_tools = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "name": "shared",
+                        "description": "Approved shared tool",
+                        "input_schema": {"type": "object"},
+                    }
+                ],
+                ConnectionResult(success=True, tools_discovered=1),
+            )
+        )
+
+        await service.update_mcp_server(
+            mcp_server_id=existing.id,
+            forward_identity=False,
+        )
+
+        assert mock_repo.update.await_count == 1
+        assert user_only.removed_from_remote is True
+        proxy = MCPProxySession([existing])
+        assert proxy.get_allowed_tool_names() == {"test__shared"}
 
     @pytest.mark.asyncio
     async def test_rejects_credential_update_when_connection_fails(self, _setup):

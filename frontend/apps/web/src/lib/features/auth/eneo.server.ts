@@ -3,6 +3,7 @@
  * to be registered directly in eneo with username and password.
  */
 
+import { readTraceId } from "@eneo/eneo-js";
 import { setFrontendAuthCookie } from "./auth.server";
 import { getRequestEvent } from "$app/server";
 import { getBackendUrl } from "$lib/core/environment.server";
@@ -34,10 +35,8 @@ export async function loginWithEneo(
     }
   });
 
-  // Extract trace ID from response headers (available on both success and failure).
-  // Prefer X-Trace-Id; fall back to legacy X-Correlation-ID during the migration period.
-  const traceId =
-    response.headers.get("X-Trace-Id") || response.headers.get("X-Correlation-ID") || null;
+  // Available on both success and failure.
+  const traceId = readTraceId(response.headers) ?? null;
 
   if (!response.ok) {
     console.error(

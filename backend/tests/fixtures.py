@@ -1,4 +1,7 @@
-from uuid import uuid4
+import hashlib
+import secrets
+from types import SimpleNamespace
+from uuid import UUID, uuid4
 
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
@@ -7,7 +10,6 @@ from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelLegacy,
 )
 from eneo.assistants.assistant import Assistant
-from eneo.authentication.auth_models import ApiKey
 from eneo.collections.domain.collection import Collection
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB
@@ -15,6 +17,47 @@ from eneo.tenants.tenant import TenantInDB
 from eneo.users.user import UserInDB
 
 TEST_UUID = uuid4()
+
+
+async def mint_v2_api_key(
+    api_key_v2_repo,
+    *,
+    tenant_id: UUID,
+    user_id: UUID,
+    prefix: str = "test",
+) -> SimpleNamespace:
+    """Mint an active tenant-scoped admin API key in api_keys_v2.
+
+    Stored with sha256 hash_version; the resolver accepts it and
+    auto-upgrades to HMAC on first use. Returns the plain key.
+    """
+    from eneo.authentication.auth_models import (
+        ApiKeyHashVersion,
+        ApiKeyPermission,
+        ApiKeyScopeType,
+        ApiKeyState,
+        ApiKeyType,
+    )
+
+    plain_key = f"{prefix}_{secrets.token_hex(32)}"
+    await api_key_v2_repo.create(
+        tenant_id=tenant_id,
+        owner_user_id=user_id,
+        created_by_user_id=user_id,
+        scope_type=ApiKeyScopeType.TENANT.value,
+        scope_id=None,
+        permission=ApiKeyPermission.ADMIN.value,
+        key_type=ApiKeyType.SK.value,
+        key_hash=hashlib.sha256(plain_key.encode()).hexdigest(),
+        hash_version=ApiKeyHashVersion.SHA256.value,
+        key_prefix=f"{prefix}_",
+        key_suffix=plain_key[-4:],
+        name="Integration test API key",
+        description=None,
+        state=ApiKeyState.ACTIVE.value,
+    )
+    return SimpleNamespace(key=plain_key, truncated_key=plain_key[-4:])
+
 
 TEST_EMBEDDING_MODEL = EmbeddingModelLegacy(
     id=uuid4(),
@@ -49,7 +92,6 @@ TEST_TENANT_2 = TenantInDB(
     name="test_tenant_2",
     quota_limit=1024**3,
 )
-TEST_API_KEY = ApiKey(key="supersecret", truncated_key="cret")
 TEST_ROLE = RoleInDB(
     id=uuid4(),
     name="God",

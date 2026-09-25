@@ -5,15 +5,9 @@ from pydantic import BaseModel
 from eneo.main.models import InDB
 
 
-class IconBase(BaseModel):
-    blob: bytes
-    mimetype: str
-    size: int
-
-
-class IconCreate(IconBase):
+class IconMetadataCreate(BaseModel):
     tenant_id: UUID
 
 
-class Icon(InDB, IconCreate):
+class IconMetadata(InDB, IconMetadataCreate):
     pass

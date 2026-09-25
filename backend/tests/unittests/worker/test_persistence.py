@@ -9,11 +9,12 @@ Tests the crawl/persistence.py module directly to ensure:
 Run with: pytest tests/unittests/worker/test_persistence.py -v
 """
 
-import pytest
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-from eneo.worker.crawl_context import CrawlContext, PreparedPage, EmbeddingModelSpec
+import pytest
+
+from eneo.worker.crawl_context import CrawlContext, EmbeddingModelSpec, PreparedPage
 
 
 def create_mock_container(embeddings_service):
@@ -152,6 +153,7 @@ class TestEmbeddingSemaphore:
     def test_semaphore_returns_asyncio_semaphore(self):
         """_get_embedding_semaphore should return an asyncio.Semaphore."""
         import asyncio
+
         from eneo.worker.crawl.persistence import _get_embedding_semaphore
 
         sem = _get_embedding_semaphore()

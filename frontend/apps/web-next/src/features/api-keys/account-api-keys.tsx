@@ -8,7 +8,6 @@ import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { SecretRevealDialog } from "@/components/composites/secret-reveal";
 import { useAppContext } from "@/components/providers/app-context";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -279,40 +278,6 @@ function KeyActions({
   );
 }
 
-function LegacyKeyBanner({ suffix, onRevoked }: { suffix: string; onRevoked: () => void }) {
-  const t = useTranslations();
-
-  const revokeLegacy = useMutation({
-    mutationFn: () => unwrap(browserApi.DELETE("/api/v1/users/api-keys/legacy")),
-    onSuccess: onRevoked,
-    onError: (error) => toastApiError(error, t)
-  });
-
-  return (
-    <Alert>
-      <AlertTitle>{t("api_keys_legacy_detected")}</AlertTitle>
-      <AlertDescription>
-        <p>
-          {t("api_keys_legacy_ending_in")} <code>****{suffix}</code>.{" "}
-          {t("api_keys_legacy_recommend")}
-        </p>
-        <ConfirmDialog
-          trigger={
-            <Button variant="outline" size="sm" className="mt-2">
-              {t("api_keys_legacy_revoke")}
-            </Button>
-          }
-          title={t("api_keys_legacy_revoke_title")}
-          description={t("api_keys_legacy_revoke_description")}
-          confirmLabel={t("api_keys_legacy_revoke")}
-          pending={revokeLegacy.isPending}
-          onConfirm={() => revokeLegacy.mutateAsync().then(() => undefined)}
-        />
-      </AlertDescription>
-    </Alert>
-  );
-}
-
 function NotificationPreferencesPanel() {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -417,11 +382,10 @@ function NotificationPreferencesPanel() {
 
 export function ApiKeys() {
   const t = useTranslations();
-  const { can, user } = useAppContext();
+  const { can } = useAppContext();
   const [stateFilter, setStateFilter] = useState<ApiKeyState>("active");
   const [secret, setSecret] = useState<string | null>(null);
   const [secretTitle, setSecretTitle] = useState("");
-  const [legacySuffix, setLegacySuffix] = useState(user.legacy_api_key_suffix ?? null);
 
   const keys = usePaginatedQuery({
     queryKey: ["api-keys", stateFilter],
@@ -453,9 +417,6 @@ export function ApiKeys() {
   return (
     <div className="flex flex-col gap-4">
       <NotificationPreferencesPanel />
-      {legacySuffix ? (
-        <LegacyKeyBanner suffix={legacySuffix} onRevoked={() => setLegacySuffix(null)} />
-      ) : null}
       <div className="flex items-center justify-between gap-4">
         <Tabs value={stateFilter} onValueChange={(value) => setStateFilter(value as ApiKeyState)}>
           <TabsList>

@@ -1,24 +1,30 @@
 import { env } from "$env/dynamic/private";
 import { getBackendUrl } from "$lib/core/environment.server";
-import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
+import {
+  clearOidcLoginDestination,
+  encodeState,
+  rememberOidcLoginDestination,
+  resolveSafeLoginDestination
+} from "$lib/features/auth/auth.server";
 import { loginWithEneo } from "$lib/features/auth/eneo.server";
 import { getMobilityguardLink } from "$lib/features/auth/mobilityguard.server";
 import { getZitadelLink } from "$lib/features/auth/zitadel.server";
 import { redirect, fail, type Actions } from "@sveltejs/kit";
 
 export const actions: Actions = {
-  login: async ({ request }) => {
-    const data = await request.formData();
+  login: async (event) => {
+    const data = await event.request.formData();
     const username = data.get("email")?.toString() ?? null;
     const password = data.get("password")?.toString() ?? null;
     const next = data.get("next")?.toString() ?? null;
-    const redirectUrl = next ? decodeURIComponent(next) : DEFAULT_LANDING_PAGE;
+    const redirectUrl = resolveSafeLoginDestination(next);
 
     if (username && password) {
       const { success, correlationId } = await loginWithEneo(username, password);
 
       if (success) {
-        redirect(302, `/${redirectUrl.slice(1)}`);
+        clearOidcLoginDestination(event.cookies);
+        redirect(302, redirectUrl);
       }
 
       // Return correlation ID for error tracking
@@ -31,12 +37,14 @@ export const actions: Actions = {
 
 async function getSingleTenantOidcLink(
   backendUrl: string,
-  fetchFn: typeof fetch
+  fetchFn: typeof fetch,
+  frontendState: string
 ): Promise<string | undefined> {
   try {
     // Call initiate auth endpoint WITHOUT tenant parameter for single-tenant mode
     // Backend will automatically use the first active tenant with global OIDC config
-    const initiateUrl = `${backendUrl}/api/v1/auth/initiate`;
+    const initiateUrl = new URL(`${backendUrl.replace(/\/$/, "")}/api/v1/auth/initiate`);
+    initiateUrl.searchParams.set("state", frontendState);
     const initiateResponse = await fetchFn(initiateUrl);
 
     if (!initiateResponse.ok) {
@@ -58,11 +66,26 @@ export const load = async (event) => {
   let zitadelLink: string | undefined = undefined;
   let mobilityguardLink: string | undefined = undefined;
   let singleTenantOidcLink: string | undefined = undefined;
+  const requestedDestination = event.url.searchParams.get("next");
+  const loginDestination =
+    requestedDestination === null ? null : resolveSafeLoginDestination(requestedDestination);
+  const oidcAttemptId = crypto.randomUUID();
+  const oidcFrontendState = encodeState({
+    loginMethod: "oidc",
+    next: loginDestination,
+    attemptId: oidcAttemptId
+  });
 
   // If user is logged in already: forward to base url, as login doesn't make sense
   if (event.locals.id_token) {
-    redirect(302, DEFAULT_LANDING_PAGE);
+    clearOidcLoginDestination(event.cookies);
+    redirect(302, resolveSafeLoginDestination(requestedDestination));
   }
+
+  // Generic OIDC returns a backend-signed state value that is intentionally
+  // opaque to this server until callback exchange. Keep the already validated
+  // local destination independently so provider errors can still resume it.
+  rememberOidcLoginDestination(event.cookies, requestedDestination, oidcAttemptId);
 
   if (event.locals.featureFlags.newAuth) {
     zitadelLink = await getZitadelLink(event);
@@ -79,13 +102,18 @@ export const load = async (event) => {
     federationStatus.has_single_tenant_federation || federationStatus.has_global_oidc_config;
 
   if (hasSingleTenantOidc) {
-    singleTenantOidcLink = await getSingleTenantOidcLink(getBackendUrl() ?? "", event.fetch);
+    singleTenantOidcLink = await getSingleTenantOidcLink(
+      getBackendUrl() ?? "",
+      event.fetch,
+      oidcFrontendState
+    );
   }
 
   return {
     mobilityguardLink,
     zitadelLink,
     singleTenantOidcLink,
+    oidcFrontendState,
     featureFlags: event.locals.featureFlags
   };
 };

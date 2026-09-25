@@ -30,6 +30,7 @@ from unittest.mock import patch
 import pytest
 
 from eneo.main.container.container import Container
+from eneo.main.exceptions import EncryptionNotConfiguredException
 from eneo.settings.encryption_service import EncryptionService
 
 
@@ -50,8 +51,9 @@ class TestEncryptionServiceInitialization:
             clear=False,  # Keep other env vars
         ):
             # Need to reload settings module to pick up new env vars
-            from eneo.main import config
             from importlib import reload
+
+            from eneo.main import config
 
             reload(config)
 
@@ -78,6 +80,15 @@ class TestEncryptionServiceInitialization:
 
         assert service.decrypt("sk-legacy-plaintext") == "sk-legacy-plaintext"
 
+    def test_decrypt_encrypted_value_without_key_raises_configuration_error(self):
+        configured_service = EncryptionService(
+            "FNVdDyfq0lBPAvjz_WS-9PB2UQzkbqCnwuA4KU9UbPU="
+        )
+        ciphertext = configured_service.encrypt("sk-test-key")
+
+        with pytest.raises(EncryptionNotConfiguredException, match="ENCRYPTION_KEY"):
+            EncryptionService(None).decrypt(ciphertext)
+
     def test_encryption_service_inactive_when_initialized_without_key(self):
         """Test EncryptionService is inactive when initialized without a key."""
         # Create service directly without key
@@ -86,10 +97,23 @@ class TestEncryptionServiceInitialization:
         # Assert: Service should be inactive
         assert not service.is_active()
 
+    def test_encrypt_without_key_raises_typed_configuration_error(self):
+        service = EncryptionService(None)
+
+        with pytest.raises(EncryptionNotConfiguredException) as exc_info:
+            service.encrypt("sk-test-key")
+
+        assert str(exc_info.value) == (
+            "Credential encryption is not configured. Set ENCRYPTION_KEY and "
+            "restart the backend."
+        )
+
     def test_encryption_service_fails_on_invalid_fernet_key(self):
-        """Test EncryptionService raises error with invalid Fernet key."""
-        # Act & Assert: Invalid key should raise ValueError
-        with pytest.raises(ValueError, match="ENCRYPTION_KEY must be valid Fernet key"):
+        """Test EncryptionService raises a typed error with an invalid Fernet key."""
+        with pytest.raises(
+            EncryptionNotConfiguredException,
+            match="ENCRYPTION_KEY is invalid",
+        ):
             EncryptionService("invalid-not-base64-fernet-key")
 
 

@@ -24,7 +24,6 @@ import redis.asyncio as aioredis
 from eneo.worker.feeder.capacity import CapacityManager
 from eneo.worker.redis.lua_scripts import LuaScripts
 
-
 # =============================================================================
 # HELPER: Slot Counter Assertion
 # =============================================================================

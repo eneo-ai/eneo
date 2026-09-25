@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from eneo.main.models import ModelId
-from eneo.roles.role import RoleInDB
 from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleInDB
 from eneo.users import user_router
 from eneo.users.user import PropUserInvite, PropUserUpdate, UserState
 from tests.fixtures import TEST_USER
@@ -55,9 +55,7 @@ async def test_invite_user_fetches_role_details():
         audit_service=lambda: audit_service,
     )
 
-    user_invite = PropUserInvite(
-        email="invitee@test.com", role=ModelId(id=role_id)
-    )
+    user_invite = PropUserInvite(email="invitee@test.com", role=ModelId(id=role_id))
 
     result = await user_router.invite_user(user_invite=user_invite, container=container)
 

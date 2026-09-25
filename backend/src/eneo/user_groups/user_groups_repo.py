@@ -46,7 +46,6 @@ class UserGroupsRepository:
             selectinload(UserGroups.users)
             .selectinload(Users.tenant)
             .selectinload(Tenants.modules),
-            selectinload(UserGroups.users).selectinload(Users.api_key),
         ]
 
     async def get_user_group(self, id: UUID) -> UserGroupInDB | None:
@@ -72,7 +71,6 @@ class UserGroupsRepository:
                 options=[
                     selectinload(Users.roles),
                     selectinload(Users.tenant).selectinload(Tenants.modules),
-                    selectinload(Users.api_key),
                 ],
             ),
         ]

@@ -6,12 +6,19 @@
 
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
+  import {
+    loadSkillBindingCatalogPage,
+    loadSkillBindingPreview
+  } from "$lib/features/skills/skillBindingCatalog";
   import { m } from "$lib/paraglide/messages";
+  import FilePolicySection from "./FilePolicySection.svelte";
   import McpRestrictionSection from "./McpRestrictionSection.svelte";
   import ModelRestrictionSection from "./ModelRestrictionSection.svelte";
   import PolicyConfirmDialog from "./PolicyConfirmDialog.svelte";
   import PolicySaveBar from "./PolicySaveBar.svelte";
   import PromptEnforcementSection from "./PromptEnforcementSection.svelte";
+  import ReasoningPolicySection from "./ReasoningPolicySection.svelte";
+  import SkillsPolicySection from "./SkillsPolicySection.svelte";
   import { PolicyDraft } from "./policyDraft.svelte";
 
   let { data } = $props();
@@ -24,6 +31,12 @@
   $effect(() => {
     draft.sync(data);
   });
+
+  // Same gate as the assistant editor: the file policy only exists where
+  // signed file references are configured. Which store holds the originals
+  // does not matter; the download surface serves PostgreSQL and object
+  // storage alike.
+  const showFilePolicy = $derived(data.settings.file_references_enabled === true);
 </script>
 
 <svelte:head>
@@ -48,6 +61,18 @@
         toggleModelSelected={draft.toggleModelSelected}
         toggleProvider={draft.toggleProvider}
       />
+      <div data-tour="governance-reasoning">
+        <ReasoningPolicySection
+          configured={draft.reasoningPolicyConfigured}
+          bind:defaultEffort={draft.defaultReasoningEffort}
+          bind:allowUserOverride={draft.allowUserReasoningEffort}
+          options={draft.reasoningOptions}
+          summary={draft.reasoningSummary}
+          valid={draft.reasoningValid}
+          optionLabel={draft.reasoningOptionLabel}
+          onActivate={draft.activateReasoningPolicy}
+        />
+      </div>
       <McpRestrictionSection
         bind:mcpEnabled={draft.mcpEnabled}
         allMcpServers={draft.allMcpServers}
@@ -59,6 +84,9 @@
         toggleMcp={draft.toggleMcp}
         toggleMcpDefault={draft.toggleMcpDefault}
         toggleMcpTool={draft.toggleMcpTool}
+        capabilityRows={draft.capabilityRows}
+        toggleCapability={draft.toggleCapability}
+        toggleCapabilityDefault={draft.toggleCapabilityDefault}
       />
       <PromptEnforcementSection
         bind:promptEnabled={draft.promptEnabled}
@@ -66,6 +94,36 @@
         promptOptions={draft.promptOptions}
         promptSummary={draft.promptSummary}
         badgeVariant={draft.badgeVariant}
+      />
+      {#if showFilePolicy}
+        <div data-tour="governance-attachments">
+          <FilePolicySection
+            bind:openFilesEnabled={draft.openFilesEnabled}
+            summary={draft.filesSummary}
+          />
+        </div>
+      {/if}
+      <SkillsPolicySection
+        bind:skillBindings={draft.skillBindings}
+        initialCatalogPage={draft.skillCatalogPage}
+        bindingSummaries={draft.skillBindingSummaries}
+        summary={draft.skillsSummary}
+        skillsValid={draft.skillsValid}
+        selectiveActivationEnabled={draft.selectiveActivationEnabled}
+        badgeVariant={draft.badgeVariant}
+        onListCatalog={(params) =>
+          loadSkillBindingCatalogPage({
+            eneo: data.eneo,
+            spaceId: data.organizationSpace.id,
+            organizationSpace: true,
+            ...params
+          })}
+        onGetSkillPreview={(target) =>
+          loadSkillBindingPreview({
+            eneo: data.eneo,
+            spaceId: data.organizationSpace.id,
+            target
+          })}
       />
     </div>
   </Settings.Page>

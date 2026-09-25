@@ -9,7 +9,7 @@
   import ApiKeyTable from "./ApiKeyTable.svelte";
   import CreateApiKeyDialog from "$lib/features/api-keys/CreateApiKeyDialog.svelte";
   import ApiKeySecretDialog from "$lib/features/api-keys/ApiKeySecretDialog.svelte";
-  import { Key, AlertCircle, RefreshCw, Search, X, ShieldAlert } from "lucide-svelte";
+  import { Key, CircleAlert, RefreshCw, Search, X, ShieldAlert } from "@lucide/svelte";
   import ExpiringKeysBanner from "$lib/features/api-keys/ExpiringKeysBanner.svelte";
   import NotificationPreferences from "$lib/features/api-keys/NotificationPreferences.svelte";
   import ApiKeyStateFilter from "$lib/features/api-keys/ApiKeyStateFilter.svelte";
@@ -18,7 +18,6 @@
   import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
 
   const {
@@ -57,11 +56,6 @@
     }
     return mapping;
   });
-
-  // Legacy key revoke
-  let legacySuffix = $state(user.legacy_api_key_suffix);
-  let showRevokeDialog = $state(false);
-  let revoking = $state(false);
 
   async function loadKeys() {
     loading = true;
@@ -116,19 +110,6 @@
   async function handleFollowChanged() {
     await notificationPrefsRef?.refreshSubscriptions();
     await forceRefreshExpiringStore();
-  }
-
-  async function revokeLegacyKey() {
-    revoking = true;
-    try {
-      await eneo.users.revokeLegacyApiKey();
-      legacySuffix = null;
-      showRevokeDialog = false;
-    } catch (error: unknown) {
-      errorMessage = getErrorMessage(error);
-    } finally {
-      revoking = false;
-    }
   }
 
   async function loadScopeResources() {
@@ -194,7 +175,7 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.my_api_keys()} />
+    <Page.Title title={m.my_api_keys()} tour="account-api-keys" />
     <div class="flex items-center gap-3">
       <Button variant="ghost" onclick={loadKeys}>
         <RefreshCw class={loading ? "animate-spin" : ""} />
@@ -209,8 +190,8 @@
   <Page.Main>
     <Settings.Page>
       <div class="space-y-5 py-4">
-        <!-- Empty state (no keys and no legacy key) -->
-        {#if keys.length === 0 && !legacySuffix && !loading}
+        <!-- Empty state -->
+        {#if keys.length === 0 && !loading}
           <div
             class="border-default bg-subtle/30 rounded-xl border-2 border-dashed p-12 text-center"
           >
@@ -238,30 +219,8 @@
         <!-- Error Message -->
         {#if errorMessage}
           <Alert.Root variant="destructive">
-            <AlertCircle />
+            <CircleAlert />
             <Alert.Description>{errorMessage}</Alert.Description>
-          </Alert.Root>
-        {/if}
-
-        <!-- Legacy key notice -->
-        {#if legacySuffix && !loading}
-          <Alert.Root class="border-caution/30 bg-caution/5 dark:bg-caution/10">
-            <ShieldAlert class="text-caution" />
-            <Alert.Title class="text-caution">{m.api_keys_legacy_detected()}</Alert.Title>
-            <Alert.Description>
-              {m.api_keys_legacy_ending_in()}
-              <code
-                class="bg-caution/15 dark:bg-caution/20 text-caution rounded px-1.5 py-0.5 font-mono"
-                >****{legacySuffix}</code
-              >.
-              {m.api_keys_legacy_recommend()}
-              <div class="mt-3 flex flex-wrap items-center gap-2">
-                <Button variant="destructive" size="sm" onclick={() => (showRevokeDialog = true)}>
-                  {m.api_keys_legacy_revoke()}
-                </Button>
-                <CreateApiKeyDialog onCreated={handleCreated} />
-              </div>
-            </Alert.Description>
           </Alert.Root>
         {/if}
 
@@ -364,22 +323,5 @@
     </Settings.Page>
   </Page.Main>
 </Page.Root>
-
-<AlertDialog.Root bind:open={showRevokeDialog}>
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.api_keys_legacy_revoke_title()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.api_keys_legacy_revoke_description()}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action variant="destructive" onclick={revokeLegacyKey} disabled={revoking}>
-        {revoking ? "..." : m.api_keys_legacy_revoke()}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
 
 <ApiKeySecretDialog bind:open={secretDialogOpen} secret={latestSecret} source={secretSource} />

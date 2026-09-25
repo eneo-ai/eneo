@@ -47,6 +47,13 @@ class MCPServerToolRepository(ABC):
         ...
 
     @abstractmethod
+    async def stage_observed(
+        self, objs: list["MCPServerTool"]
+    ) -> list["MCPServerTool"]:
+        """Atomically stage new definitions and approved-definition drift."""
+        ...
+
+    @abstractmethod
     async def update(self, obj: "MCPServerTool") -> "MCPServerTool":
         """Update an existing tool."""
         ...

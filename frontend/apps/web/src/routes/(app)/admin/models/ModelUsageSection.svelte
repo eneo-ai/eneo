@@ -11,7 +11,7 @@
 <script lang="ts">
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
-  import { Loader2 } from "lucide-svelte";
+  import { LoaderCircle } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import ModelUsageBreakdown from "./ModelUsageBreakdown.svelte";
   import type { UsageDetail } from "./usage";
@@ -78,7 +78,7 @@
 
 {#if isLoading}
   <div class="text-muted-foreground flex items-center gap-2 py-3 text-sm">
-    <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+    <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
     <span>{m.loading()}</span>
   </div>
 {:else if loadError}

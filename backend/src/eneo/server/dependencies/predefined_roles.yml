@@ -7,6 +7,8 @@ roles:
       - apps
       - collections
       - shared_spaces
+      - web_search
+      - image_generation
 
   - name: 'AI Configurator'
     permissions:
@@ -20,12 +22,19 @@ roles:
       - websites
       - integrations
       - shared_spaces
+      - assistant_debug
+      - web_search
+      - image_generation
 
   - name: 'Owner'
     permissions:
       - admin
+      - storage
+      - modules
       - personal_chat
       - assistants
+      - skills
+      - skills_management
       - group_chats
       - apps
       - services
@@ -36,3 +45,6 @@ roles:
       - integrations
       - shared_spaces
       - api_keys
+      - assistant_debug
+      - web_search
+      - image_generation

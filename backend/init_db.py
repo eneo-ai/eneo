@@ -8,6 +8,11 @@ import psycopg2
 from psycopg2 import sql
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from eneo.server.dependencies.predefined_roles import (
+    load_predefined_roles_from_config,
+)
+from eneo.users.password import validate_new_local_password
+
 
 # Configuration
 class Settings(BaseSettings):
@@ -48,6 +53,7 @@ def run_alembic_migrations():
 
 # Password hashing
 def create_salt_and_hashed_password(plaintext_password: str):
+    validate_new_local_password(plaintext_password)
     pwd_bytes = plaintext_password.encode("utf-8")
     salt = bcrypt.gensalt()
     hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
@@ -105,21 +111,12 @@ def add_tenant_user(
         role = cur.fetchone()
 
         if role is None:
-            owner_permissions = [
-                "admin",
-                "personal_chat",
-                "assistants",
-                "group_chats",
-                "apps",
-                "services",
-                "collections",
-                "insights",
-                "AI",
-                "websites",
-                "integrations",
-                "shared_spaces",
-                "api_keys",
-            ]
+            owner_template = next(
+                role
+                for role in load_predefined_roles_from_config()
+                if role["name"] == "Owner"
+            )
+            owner_permissions = owner_template["permissions"]
             add_role_query = sql.SQL(
                 "INSERT INTO roles (name, permissions, tenant_id, predefined_source) "
                 "VALUES (%s, %s, %s, %s) RETURNING id"

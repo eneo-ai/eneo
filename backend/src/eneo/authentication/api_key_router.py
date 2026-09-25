@@ -20,6 +20,7 @@ from eneo.authentication.api_key_lifecycle import ApiKeyLifecycleService
 from eneo.authentication.api_key_policy import ApiKeyPolicyService
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.api_key_router_helpers import (
+    api_key_cursor_for,
     build_api_key_usage_page,
     build_api_key_usage_summary,
     error_responses,
@@ -38,6 +39,7 @@ from eneo.authentication.auth_models import (
     ApiKeyCreateRequest,
     ApiKeyCreationConstraints,
     ApiKeyExtendRequest,
+    ApiKeyListCursor,
     ApiKeyListResponse,
     ApiKeyNotificationPolicyResponse,
     ApiKeyNotificationPreferencesResponse,
@@ -62,11 +64,16 @@ from eneo.authentication.auth_models import (
 from eneo.database.tables.settings_table import Settings
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
+from eneo.main.exceptions import BadRequestException
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.users.user import UserInDB
 
 router = APIRouter(tags=["API Keys"])
+ApiKeyMutationContainer = Annotated[
+    Container,
+    Depends(get_container(with_user=True, transaction_scope="function")),
+]
 
 _API_KEY_EXAMPLE = {
     "id": "3cbf5fde-7288-4f03-bf06-f71c14f76854",
@@ -94,7 +101,7 @@ _API_KEY_EXAMPLE = {
 _API_KEY_LIST_EXAMPLE = {
     "items": [_API_KEY_EXAMPLE],
     "limit": 50,
-    "next_cursor": "2026-02-05T12:00:00Z",
+    "next_cursor": "v1.eyJjcmVhdGVkX2F0IjoiMjAyNi0wMi0wNVQxMjowMDowMFoiLCJrZXlfaWQiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEifQ",
     "previous_cursor": None,
     "total_count": 1,
 }
@@ -379,7 +386,7 @@ async def _collect_manageable_keys_for_page(
     policy: ApiKeyPolicyService,
     tenant_id: UUID,
     limit: int,
-    cursor: datetime | None,
+    cursor: ApiKeyListCursor | None,
     scope_type: ApiKeyScopeType | None,
     scope_id: UUID | None,
     state: ApiKeyState | None,
@@ -429,7 +436,7 @@ async def _collect_manageable_keys_for_page(
         if len(raw_keys) <= limit:
             break
 
-        next_cursor = raw_keys[-1].created_at
+        next_cursor = api_key_cursor_for(raw_keys[-1])
 
     return collected
 
@@ -905,7 +912,7 @@ async def get_api_key_usage(
 )
 async def create_api_key(
     payload: Annotated[ApiKeyCreateRequest, Body(examples=[_CREATE_API_KEY_EXAMPLE])],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _perm_guard: None = Depends(require_permission(Permission.API_KEYS)),
     # Defense-in-depth: require_session_auth rejects API-key callers first, so
@@ -935,13 +942,13 @@ async def create_api_key(
             "description": "Paginated API key list.",
             "content": {"application/json": {"example": _API_KEY_LIST_EXAMPLE}},
         },
-        **error_responses([401, 429]),
+        **error_responses([400, 401, 429]),
     },
 )
 async def list_api_keys(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     limit: Annotated[int | None, Query(ge=1, description="Keys per page")] = None,
-    cursor: Annotated[datetime | None, Query(description="Current cursor")] = None,
+    cursor: Annotated[str | None, Query(description="Opaque current cursor")] = None,
     previous: Annotated[bool, Query(description="Show previous page")] = False,
     scope_type: Annotated[
         ApiKeyScopeType | None, Query(description="Scope type filter")
@@ -956,6 +963,10 @@ async def list_api_keys(
     user: UserInDB = container.user()
     repo: ApiKeysV2Repository = container.api_key_v2_repo()
     policy: ApiKeyPolicyService = container.api_key_policy_service()
+    try:
+        decoded_cursor = ApiKeyListCursor.deserialize(cursor) if cursor else None
+    except ValueError as exc:
+        raise BadRequestException("Invalid API key cursor.") from exc
 
     ownership_value = ownership.value if ownership else None
     # Default: personal listing — only show keys the caller owns. Tenant-wide
@@ -989,7 +1000,7 @@ async def list_api_keys(
             policy=policy,
             tenant_id=user.tenant_id,
             limit=limit,
-            cursor=cursor,
+            cursor=decoded_cursor,
             scope_type=scope_type,
             scope_id=scope_id,
             state=state,
@@ -1001,7 +1012,7 @@ async def list_api_keys(
         raw_keys = await repo.list_paginated(
             tenant_id=user.tenant_id,
             limit=limit,
-            cursor=cursor,
+            cursor=decoded_cursor,
             previous=previous,
             scope_type=scope_type,
             scope_id=scope_id,
@@ -1033,7 +1044,7 @@ async def list_api_keys(
             filtered_keys,
             total_count=total_count,
             limit=limit,
-            cursor=cursor,
+            cursor=decoded_cursor,
             previous=previous,
         )
     )
@@ -1099,7 +1110,7 @@ async def update_api_key(
             ],
         ),
     ],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
@@ -1129,7 +1140,7 @@ async def update_api_key(
 )
 async def revoke_api_key_deprecated(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
@@ -1161,7 +1172,7 @@ async def revoke_api_key_deprecated(
 )
 async def revoke_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
@@ -1195,7 +1206,7 @@ async def revoke_api_key(
 )
 async def rotate_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[ApiKeyRotateRequest | None, Body()] = None,
@@ -1233,7 +1244,7 @@ async def extend_api_key_expiration(
         ApiKeyExtendRequest,
         Body(examples=[{"expires_at": "2030-01-01T00:00:00Z"}]),
     ],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
@@ -1265,7 +1276,7 @@ async def extend_api_key_expiration(
 )
 async def purge_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
@@ -1299,7 +1310,7 @@ async def purge_api_key(
 )
 async def suspend_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
@@ -1333,7 +1344,7 @@ async def suspend_api_key(
 )
 async def reactivate_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:

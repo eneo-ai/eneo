@@ -1,0 +1,77 @@
+# ============================================================================
+# ENEO OPTIONAL MODULES - Docker Compose Overlay
+# ============================================================================
+# Optional module containers, deployed ON TOP of the core stack:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.modules.yml \
+#     --profile <module-key> up -d
+#
+# This file is INERT by default: every module is gated behind a Compose
+# profile, so plain `docker compose up -d` never starts any of them.
+#
+# WHAT A MODULE IS:
+#   A self-contained web app on its own domain. It joins module_net only,
+#   calls the Eneo backend at http://backend:8000 with a scoped service key
+#   (sk_), and can never reach PostgreSQL or Redis. See MODULES.md for the
+#   full operator guide (DNS, API key, env files, verification).
+#
+# ADDING A NEW MODULE:
+#   Copy the mod-speech-to-text service below and change: service name,
+#   profile, image, MODULE_KEY, public domain, module key,
+#   Traefik router/service names, and the module env file.
+#
+# NETWORK NOTE:
+#   module_net is internal: modules have NO outbound internet access. All
+#   module traffic goes to backend:8000, and user login is handed off from
+#   the user's Eneo session (SSO) - the browser does the redirect legs, so
+#   the module itself never needs to reach an IdP. A module that genuinely
+#   needs an external API must go through the backend.
+# ============================================================================
+
+x-module-common: &module-common
+  restart: unless-stopped
+  networks:
+    - module_net
+  depends_on:
+    backend:
+      condition: service_healthy
+
+services:
+  mod-speech-to-text:
+    <<: *module-common
+    profiles: ["speech-to-text", "all-modules"]
+    image: ghcr.io/eneo-ai/eneo-mod-speech-to-text:${MODULE_STT_VERSION:?Set MODULE_STT_VERSION in .env}
+    container_name: eneo_mod_speech_to_text
+    environment:
+      - ENEO_BACKEND_URL=http://backend:8000
+      - ENEO_PUBLIC_URL=https://${ENEO_DOMAIN:?Set ENEO_DOMAIN in .env}
+      - MODULE_PUBLIC_URL=https://${MODULE_TTT_DOMAIN:?Set MODULE_TTT_DOMAIN in .env}
+      - MODULE_KEY=speech-to-text
+    env_file:
+      - env_modules.env
+      - env_module_ttt.env
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    labels:
+      - "traefik.enable=true"
+      # Modules are routed over module_net, overriding Traefik's default
+      # provider network (proxy_tier) from the core compose file.
+      - "traefik.docker.network=eneo_module_net"
+      - "traefik.http.routers.stt.rule=Host(`${MODULE_TTT_DOMAIN:?Set MODULE_TTT_DOMAIN in .env}`)"
+      - "traefik.http.routers.stt.entrypoints=web"
+      - "traefik.http.routers.stt.middlewares=redirect-to-https"
+      - "traefik.http.routers.stt-secure.rule=Host(`${MODULE_TTT_DOMAIN:?Set MODULE_TTT_DOMAIN in .env}`)"
+      - "traefik.http.routers.stt-secure.entrypoints=websecure"
+      - "traefik.http.routers.stt-secure.tls=true"
+      - "traefik.http.routers.stt-secure.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.stt-secure.service=stt-svc"
+      - "traefik.http.services.stt-svc.loadbalancer.server.port=3001"
+
+networks:
+  module_net:
+    driver: bridge
+    internal: true  # must match the declaration in docker-compose.yml

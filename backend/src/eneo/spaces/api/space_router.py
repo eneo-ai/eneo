@@ -63,6 +63,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+ApiKeyRevokingContainer = Annotated[
+    Container,
+    Depends(get_container(with_user=True, transaction_scope="function")),
+]
 
 
 async def _space_response(container: Container, space: "Space") -> SpacePublic:
@@ -220,6 +224,7 @@ async def update_space(
             update_space_req.transcription_models
         ),
         mcp_server_ids=_get_model_ids_or_none(update_space_req.mcp_servers),
+        enabled_capabilities=update_space_req.enabled_capabilities,
         mcp_tools=update_space_req.mcp_tools,
         security_classification=security_classification,
         data_retention_days=data_retention_days,
@@ -301,6 +306,12 @@ async def update_space(
                 ],
             }
 
+    if old_space.enabled_capabilities != space.enabled_capabilities:
+        changes["enabled_capabilities"] = {
+            "old": old_space.enabled_capabilities,
+            "new": space.enabled_capabilities,
+        }
+
     # Track security classification changes
     if security_classification is not NOT_PROVIDED:
         old_sc = getattr(old_space.security_classification, "name", None)
@@ -361,7 +372,7 @@ async def get_security_classification_impact_analysis(
 )
 async def delete_space(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyRevokingContainer,
 ):
     service = container.space_service()
     user = container.user()
@@ -435,9 +446,8 @@ async def get_space_applications(
     service = container.space_service()
     assembler = container.space_assembler()
 
-    space = await service.get_space(id)
-
-    return assembler.from_space_to_model(space).applications
+    projection = await service.get_applications_projection(id)
+    return assembler.from_applications_projection(projection)
 
 
 @router.post(
@@ -460,7 +470,10 @@ async def create_space_assistant(
 
     # Create assistant
     assistant, permissions = await service.create_assistant(
-        name=assistant_in.name, space_id=id, template_data=assistant_in.from_template
+        name=assistant_in.name,
+        space_id=id,
+        template_data=assistant_in.from_template,
+        enabled_capabilities=assistant_in.enabled_capabilities,
     )
 
     # Get space for context (graceful degradation if space fetch fails)
@@ -544,7 +557,10 @@ async def create_group_chat(
 async def create_app(
     id: UUID,
     create_service_req: CreateSpaceAppRequest,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, with_upload_admission=True)),
+    ],
     _user_for_creation: None = Depends(require_user_for_creation),
 ):
     space_service = container.space_service()
@@ -1261,7 +1277,7 @@ async def change_role_of_member(
 async def remove_space_member(
     id: UUID,
     user_id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyRevokingContainer,
 ):
     service = container.space_service()
     current_user = container.user()

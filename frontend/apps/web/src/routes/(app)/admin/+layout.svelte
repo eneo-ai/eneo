@@ -13,8 +13,18 @@
   import AdminMenu from "./AdminMenu.svelte";
   import { IconFeedback } from "@eneo/icons/feedback";
   import { m } from "$lib/paraglide/messages";
+  import { IsMobile } from "$lib/hooks/is-mobile.svelte.js";
 
   const { tenant, featureFlags, environment } = getAppContext();
+  const isMobile = new IsMobile();
+  let navigationTrigger: HTMLButtonElement | null = null;
+
+  // Mobile open state lives in descendant context, so this layout can only close it through the trigger.
+  function closeMobileNavigation(event: MouseEvent) {
+    if (isMobile.current && event.target instanceof Element && event.target.closest("a") !== null) {
+      navigationTrigger?.click();
+    }
+  }
 </script>
 
 <div {...dynamicColour({ basedOn: "1" })} class="absolute inset-0 flex flex-grow justify-stretch">
@@ -22,7 +32,10 @@
     style="--sidebar-width: 17rem;"
     class="h-full min-h-0 w-full flex-grow justify-stretch"
   >
-    <Sidebar.Root collapsible="none" class="border-default border-r-[0.5px]">
+    <Sidebar.Root
+      collapsible={isMobile.current ? "offcanvas" : "none"}
+      class="border-default border-r-[0.5px]"
+    >
       <Sidebar.Header
         class="border-default h-[4.25rem] flex-row items-center gap-3 border-b-[0.5px] px-[1.4rem] font-medium"
       >
@@ -38,7 +51,12 @@
         </span>
       </Sidebar.Header>
 
-      <Sidebar.Content role="navigation" aria-label={m.admin_nav_aria()} class="py-1">
+      <Sidebar.Content
+        role="navigation"
+        aria-label={m.admin_nav_aria()}
+        class="py-1"
+        onclick={closeMobileNavigation}
+      >
         <AdminMenu></AdminMenu>
       </Sidebar.Content>
 
@@ -59,6 +77,12 @@
         <NavigationVersionInfo />
       </Sidebar.Footer>
     </Sidebar.Root>
+
+    <Sidebar.Trigger
+      bind:ref={navigationTrigger}
+      aria-label={m.admin_nav_toggle()}
+      class="mt-2.5 ml-2.5 size-12 self-start md:hidden"
+    />
 
     <slot />
 

@@ -1,10 +1,14 @@
 <script lang="ts">
   import { IconQuestionMark } from "@eneo/icons/question-mark";
-  import { Input, Tooltip } from "@eneo/ui";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import { Slider } from "$lib/components/ui/slider/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import type { ModelKwargs } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import {
     getModelKwargCapability,
+    getModelKwargOptionLabel,
     getModelSpecificKwargNames,
     type CompletionModelWithSupportedKwargs,
     type ModelKwargName
@@ -163,21 +167,6 @@
         return "";
     }
   }
-
-  function getOptionLabel(option: string) {
-    switch (option) {
-      case "none":
-        return m.none();
-      case "low":
-        return m.parameter_option_low();
-      case "medium":
-        return m.parameter_option_medium();
-      case "high":
-        return m.parameter_option_high();
-      default:
-        return option;
-    }
-  }
 </script>
 
 {#each modelSpecificKwargNames as kwargName (kwargName)}
@@ -186,22 +175,37 @@
   >
     <div class="flex items-center gap-2">
       <p class="w-36" aria-label={getKwargLabel(kwargName)}>{getKwargLabel(kwargName)}</p>
-      <Tooltip text={getKwargTooltip(kwargName)}>
-        <IconQuestionMark class="text-muted hover:text-primary" />
-      </Tooltip>
+      <Tooltip.Root>
+        <Tooltip.Trigger class="cursor-default">
+          <IconQuestionMark class="text-muted hover:text-primary" />
+          <span class="sr-only">{getKwargTooltip(kwargName)}</span>
+        </Tooltip.Trigger>
+        <Tooltip.Content>{getKwargTooltip(kwargName)}</Tooltip.Content>
+      </Tooltip.Root>
     </div>
 
     {#if isSelectKwargName(kwargName)}
-      <select
-        value={selectValues[kwargName] ?? ""}
-        on:change={(event) => setSelectKwarg(kwargName, event.currentTarget.value)}
-        class="border-default bg-primary ring-default rounded border px-3 py-2 focus:ring-2"
+      <Select.Root
+        type="single"
+        value={selectValues[kwargName] || "default"}
+        onValueChange={(value) => setSelectKwarg(kwargName, value === "default" ? "" : value)}
       >
-        <option value="">{m.default_behavior()}</option>
-        {#each getSelectOptions(kwargName) as option (option)}
-          <option value={option}>{getOptionLabel(option)}</option>
-        {/each}
-      </select>
+        <Select.Trigger class="w-48" aria-label={getKwargLabel(kwargName)}>
+          {selectValues[kwargName]
+            ? getModelKwargOptionLabel(selectValues[kwargName] ?? "")
+            : m.default_behavior()}
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Item value="default" label={m.default_behavior()}>
+            {m.default_behavior()}
+          </Select.Item>
+          {#each getSelectOptions(kwargName) as option (option)}
+            <Select.Item value={option} label={getModelKwargOptionLabel(option)}>
+              {getModelKwargOptionLabel(option)}
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
     {:else if isNumericKwargName(kwargName)}
       <div class="flex flex-1 items-center justify-end gap-4">
         <label class="flex items-center gap-2 text-sm whitespace-nowrap">
@@ -214,20 +218,32 @@
         </label>
 
         {#if !useDefaultNumeric[kwargName]}
-          <Input.Slider
+          <Slider
+            type="single"
             bind:value={numericValues[kwargName]}
             min={getNumericMinimum(kwargName)}
             max={getNumericMaximum(kwargName)}
             step={getNumericStep(kwargName)}
-            onInput={(value) => setNumericKwarg(kwargName, value)}
+            onValueChange={(value) => setNumericKwarg(kwargName, value)}
+            aria-label={getKwargLabel(kwargName)}
           />
-          <Input.Number
+          <Input
+            type="number"
             bind:value={numericValues[kwargName]}
             min={getNumericMinimum(kwargName)}
             max={getNumericMaximum(kwargName)}
             step={getNumericStep(kwargName)}
-            hiddenLabel={true}
-            on:input={() => setNumericKwarg(kwargName)}
+            aria-label={getKwargLabel(kwargName)}
+            class="w-24 shrink-0 text-center"
+            oninput={() => {
+              const value = numericValues[kwargName];
+              if (typeof value !== "number") return;
+              const clamped = Math.min(
+                getNumericMaximum(kwargName),
+                Math.max(getNumericMinimum(kwargName), value)
+              );
+              setNumericKwarg(kwargName, clamped);
+            }}
           />
         {/if}
       </div>

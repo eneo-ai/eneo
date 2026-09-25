@@ -10,6 +10,9 @@ Run with: pytest tests/unittests/crawler/test_crawl_manager_graceful_shutdown.py
 """
 
 import asyncio
+import subprocess
+import sys
+import textwrap
 import threading
 import time
 from unittest.mock import MagicMock, patch
@@ -30,6 +33,51 @@ from eneo.main.exceptions import CrawlTimeoutError
 
 class TestCrawlManagerLifecycle:
     """Tests for CrawlManager start/stop/wait_for_completion lifecycle."""
+
+    def test_crawl_uses_reactor_installed_by_crochet(self):
+        """A fresh worker process crawls with Crochet's Twisted reactor."""
+        script = textwrap.dedent(
+            """
+            from pathlib import Path
+            from tempfile import TemporaryDirectory
+
+            import crochet
+
+            crochet.setup()
+
+            from scrapy import Spider
+
+            from eneo.crawler.crawler import CrawlManager
+            from eneo.crawler.parse_html import CrawledPage
+
+
+            class ItemSpider(Spider):
+                name = "item"
+
+                async def start(self):
+                    yield CrawledPage(
+                        url="https://example.com",
+                        title="Example",
+                        content="Crawled",
+                    )
+
+
+            with TemporaryDirectory() as tmpdir:
+                output = Path(tmpdir) / "items.jsonl"
+                manager = CrawlManager()
+                result = manager.start_crawl(ItemSpider, filepath=output)
+                result.wait(timeout=5.0)
+                assert '"content": "Crawled"' in output.read_text()
+            """
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        assert completed.returncode == 0, completed.stderr
 
     def test_crawl_manager_initializes_clean_state(self):
         """CrawlManager initializes with None crawler and event not set."""

@@ -7,18 +7,27 @@ from eneo.governance_policy.domain.governance_policy import (
     GovernancePolicy,
 )
 from eneo.governance_policy.presentation.governance_policy_models import (
+    FilePolicyPublic,
     GovernancePolicyPublic,
     McpRestrictionPublic,
     ModelsRestrictionPublic,
+    PolicyCapabilityInput,
     PolicyCompletionModelPublic,
     PolicyMcpServerPublic,
     PromptEnforcementPublic,
+    ReasoningPolicyPublic,
+    SkillsPolicyPublic,
 )
+from eneo.skills.domain.skill import SkillBindingProjection
+from eneo.skills.presentation.skill_assembler import SkillAssembler
 
 
 class GovernancePolicyAssembler:
     @staticmethod
-    def to_public(policy: GovernancePolicy) -> GovernancePolicyPublic:
+    def to_public(
+        policy: GovernancePolicy,
+        skill_bindings: list[SkillBindingProjection] | None = None,
+    ) -> GovernancePolicyPublic:
         return GovernancePolicyPublic(
             models_restriction=ModelsRestrictionPublic(
                 enabled=policy.models_restriction_enabled,
@@ -32,6 +41,12 @@ class GovernancePolicyAssembler:
                 provider_ids=list(policy.model_provider_ids),
             ),
             mcp_restriction=McpRestrictionPublic(
+                capabilities=[
+                    PolicyCapabilityInput(
+                        purpose=c.purpose, is_default_enabled=c.is_default_enabled
+                    )
+                    for c in policy.capabilities
+                ],
                 enabled=policy.mcp_restriction_enabled,
                 servers=[
                     PolicyMcpServerPublic(
@@ -45,6 +60,21 @@ class GovernancePolicyAssembler:
             prompt_enforcement=PromptEnforcementPublic(
                 enabled=policy.prompt_enforcement_enabled,
                 prompt_library_id=policy.default_prompt_library_id,
+            ),
+            reasoning_policy=ReasoningPolicyPublic(
+                configured=policy.reasoning_policy_configured,
+                default_effort=policy.default_reasoning_effort,
+                allow_user_override=policy.allow_user_reasoning_effort,
+            ),
+            file_policy=FilePolicyPublic(
+                configured=policy.inline_file_text is not None,
+                inline_file_text=policy.inline_file_text,
+            ),
+            skills=SkillsPolicyPublic(
+                bindings=[
+                    SkillAssembler.assistant_binding_to_summary(binding)
+                    for binding in (skill_bindings or [])
+                ]
             ),
             updated_at=policy.updated_at,
             updated_by_user_id=policy.updated_by_user_id,

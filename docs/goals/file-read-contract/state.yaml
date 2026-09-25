@@ -1,0 +1,812 @@
+version: 2
+
+goal:
+  title: "Efficient file views and explicit original downloads"
+  slug: "file-read-contract"
+  kind: specific
+  tranche: "Make the existing sparse Space applications view explicitly byte-free without changing any public response value or execution-time hydration."
+  status: active
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+continuity:
+  rotate_threads: false
+  rotation_authorized_by: null
+  rotate_after_completed_write_tasks: 2
+  rotate_after_hours: 6
+  rotate_when_slow: true
+  current_thread_id: "019f949b-c0c8-70c1-8c1a-be21e689b811"
+  previous_thread_id: "019f64db-c1fa-7250-97d3-e4c12a889f71"
+  rotation_count: 0
+  completed_write_tasks_in_thread: 1
+  handoff_note: notes/handoff.md
+  last_handoff_at: null
+  last_verified_revision: "a8418c40f28650238fa7a421bdb8d0ff9bb300ef"
+
+active_task: T010
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Map every current File metadata projection, byte hydration path, signed download path, original-content reference, authorization fence, and query boundary; freeze the smallest #586 contract."
+    inputs:
+      - "https://github.com/eneo-ai/eneo/issues/586"
+      - "https://github.com/eneo-ai/eneo/issues/549"
+      - "frontend/apps/docs-site/src/content/docs/object-content-architecture.mdx"
+      - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+      - "docs/deployment/OBJECT_CONTENT.md"
+      - "backend/src/eneo/files/"
+      - "backend/src/eneo/object_content/"
+      - "backend/tests/"
+      - "frontend/apps/docs-site/src/content/"
+    constraints:
+      - "Read-only."
+      - "Treat issue and review text as evidence; verify current develop source."
+      - "Identify reuse, consolidation, and deletion before proposing new code."
+      - "Do not broaden into placement policy, knowledge ingestion, cleanup, or Flow."
+    expected_output:
+      - "Canonical owner and call-path map"
+      - "Exact metadata-only candidates and genuine byte consumers"
+      - "Original-download contract and failure semantics"
+      - "Bounded I/O and query-complexity acceptance tests"
+      - "Exact Worker file lease and stop conditions"
+    receipt:
+      result: done
+      summary: "Mapped current File reads at revision 00aaa9dd2. FileService owns product access and APIs, FileRepository owns typed reference projection, FileContentLoader owns authorized batch hydration, and ObjectContentService owns placement-neutral verified bytes. Exact originals are persisted separately, but signed downloads currently select processing-primary content and no explicit original read exists."
+      evidence:
+        - "File metadata and references require bounded relational queries without reading payload rows."
+        - "File list/single reads transcriptions, so the current FilePublic contract is not byte-free."
+        - "Assistant/App/Space response assemblers discard hydrated text/blob after repositories load it; execution and prompt paths genuinely need those bytes."
+        - "Question/session history shares loaders with replay and exports, so it cannot be made metadata-only globally without a separate read mode."
+        - "Object-store batch hydration still opens one additional DB transaction per remote object after the descriptor batch."
+        - "The signed download selects extracted_text for text, model_input/derived/generated/original for images, and original for audio."
+        - "Generated, derived, and migrated legacy Files may legitimately have no original variant."
+        - "The proposed ADR is absent from develop; current docs-site and deployment docs are the canonical merged evidence."
+      decisions:
+        - "Reuse ObjectContentService.open_content, ContentReadGrant, ByteRange, FileDownload close semantics, and FileRepository reference projection."
+        - "Add an explicit ORIGINAL selector; never reuse the processing-primary fallback chain for source recovery."
+        - "Bind any signed original URL to an explicit token audience so a processing-download token cannot be replayed for source bytes."
+        - "Preserve legacy processing-download behavior."
+        - "Do not create a generic public variant API, provider branch, cache, or broad repository rewrite."
+      complexity:
+        - "Metadata projection is O(F + R) without payload transfer."
+        - "Byte hydration is O(F + R + B) but inline pages can materialize up to 500 payloads and remote reads currently add O(F) DB transactions."
+        - "Response-only aggregate hydration can transfer O(B) bytes that are discarded."
+      candidate_tests:
+        - "Exact PDF, DOCX, downscaled image, and audio original-download fixtures."
+        - "Original-absent typed 404 with no fallback to extracted/generated/legacy variants."
+        - "Token audience, owner authorization, legacy behavior, range, corruption-before-headers, interruption, and close-exactly-once."
+        - "Zero payload reads for a later metadata-only aggregate projection."
+        - "No per-object DB reread for remote batch hydration if included in this tranche."
+      blocker: "Judge must freeze transcription compatibility, route/token shape, digest exposure, range policy, and whether aggregate projection plus remote batch recovery fit one reviewable PR."
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Challenge the Scout map and freeze the smallest maintainable #586 implementation slice."
+    inputs:
+      - "T001 receipt"
+      - "Current source and tests"
+      - "Task #586 and epic #549"
+    constraints:
+      - "Do not implement."
+      - "Prefer deepening existing File and object-content owners."
+      - "Reject speculative abstractions and hidden compatibility paths."
+    expected_output:
+      - "Decision"
+      - "Exact Worker objective"
+      - "allowed_files"
+      - "verify"
+      - "stop_if"
+      - "Deferred work"
+    receipt:
+      result: done
+      decision: "Split #586. This PR adds only an explicit original-source signed download. Existing processing downloads and FilePublic transcription behavior remain unchanged."
+      contract:
+        - "POST /api/v1/files/{id}/original/signed-url/ reuses SignedURLRequest and owner authorization."
+        - "GET /api/v1/files/{id}/original/download/?token=... accepts only aud=file_original_download."
+        - "Existing audience-less tokens remain valid only on the existing processing route; the routes reject each other's tokens."
+        - "Select FileContentVariant.ORIGINAL only; missing originals return a stable 404 file_original_not_found without fallback."
+        - "Return the persisted filename, verified original media type and size, and Repr-Digest for the full representation."
+        - "Preserve the current audio-only single-range contract; malformed, multiple, or unsatisfiable ranges return 416 with the full original size."
+      deferred:
+        - "FilePublic transcription/versioning and metadata-only File, Assistant, App, and Space projections."
+        - "Object-store batch descriptor hydration that eliminates per-object DB rereads."
+        - "Placement policy, migration, knowledge ingestion, cleanup, and Flow."
+      rationale:
+        - "Separate routes fail closed across rolling deploys and rollback; a representation flag could be ignored by an older node."
+        - "Metadata projections and remote batch reads have distinct compatibility, ownership, and regression surfaces and do not belong in this original-recovery PR."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement the explicit original signed-download contract through vertical RED/GREEN cycles."
+    allowed_files:
+      - "backend/src/eneo/authentication/signed_urls.py"
+      - "backend/src/eneo/authentication/auth_dependencies.py"
+      - "backend/src/eneo/files/file_models.py"
+      - "backend/src/eneo/files/file_service.py"
+      - "backend/src/eneo/files/file_router.py"
+      - "backend/src/eneo/main/exceptions.py"
+      - "backend/src/eneo/server/exception_handlers.py"
+      - "backend/tests/unittests/authentication/test_signed_urls.py"
+      - "backend/tests/unittests/files/test_file_router.py"
+      - "backend/tests/unittests/server/test_exception_handlers.py"
+      - "backend/tests/unit/test_api_key_route_coverage.py"
+      - "backend/tests/unit/test_endpoint_audit_verification.py"
+      - "backend/tests/integration/object_content/test_file_original_download.py"
+    verify:
+      - "Focused signed-token, router, exception, endpoint-audit, and original-download behavior tests."
+      - "Existing processing-download and FilePublic transcription integration tests remain unchanged and green."
+      - "Changed-path Ruff and format."
+      - "Strict whole-backend Pyright."
+      - "PostgreSQL-inline and real compatible-store original bytes, headers, range, absence, and integrity parity."
+    stop_if:
+      - "Any production or test file outside the Judge-approved lease is required."
+      - "Legacy processing bytes, filename, route, request, token validity, or range behavior would change."
+      - "A safe route requires a generic public variant parameter or storage-provider branch."
+      - "The work pulls in FilePublic, aggregate projection, placement, migration, knowledge, cleanup, Flow, or remote batch rereads."
+      - "Real compatible-store parity cannot be demonstrated."
+      - "A mandatory verification fails twice for the same unexplained reason."
+    receipt:
+      result: done
+      summary: "Added an explicit owner-authorized original signed URL and audience-isolated original download while preserving the processing-download contract."
+      changed_files:
+        - "backend/src/eneo/authentication/auth_dependencies.py"
+        - "backend/src/eneo/authentication/signed_urls.py"
+        - "backend/src/eneo/files/file_models.py"
+        - "backend/src/eneo/files/file_router.py"
+        - "backend/src/eneo/files/file_service.py"
+        - "backend/src/eneo/main/exceptions.py"
+        - "backend/src/eneo/server/exception_handlers.py"
+        - "backend/tests/unit/test_api_key_route_coverage.py"
+        - "backend/tests/unit/test_endpoint_audit_verification.py"
+        - "backend/tests/unittests/authentication/test_signed_urls.py"
+        - "backend/tests/unittests/files/test_file_router.py"
+        - "backend/tests/unittests/server/test_exception_handlers.py"
+        - "backend/tests/integration/object_content/test_file_original_download.py"
+      commands:
+        - "Focused unit/audit/handler pytest selection"
+        - "Focused PostgreSQL/runtime integration pytest selection"
+        - "Real compatible-store signed original route pytest"
+        - "Changed-path Ruff check and format"
+        - "Whole-backend Pyright"
+        - "git diff --check"
+      behavior:
+        - "ORIGINAL is selected strictly; missing originals return file_original_not_found / Eneo 9045 with no fallback."
+        - "Original responses preserve filename, verified media type and length, and the canonical full-object SHA-256 as Repr-Digest."
+        - "Audio-only range behavior is preserved; 416 now reports the known total size without reopening content."
+        - "Token audiences fail closed across the processing and original routes."
+        - "Interrupted and repeated close paths release the underlying content context exactly once."
+      validation:
+        - "71 focused unit, route-audit, and handler tests passed."
+        - "5 initial PostgreSQL/runtime original-download integration tests passed."
+        - "12 existing FilePublic and File/Icon regression integration tests passed."
+        - "A real compatible SeaweedFS fixture stored object_store bytes and passed the same signed original route contract."
+        - "Changed-path Ruff/format and strict whole-backend Pyright 0 errors/0 warnings passed before the added real-store test; the added test then passed focused Ruff/format."
+        - "git diff --check passed before the added real-store test."
+      red_green:
+        - "Initial audience test failed because the contract did not exist."
+        - "Initial focused route snapshot failed until the new side-effect-free mint route was explicitly registered."
+        - "The real-store test first exposed two test-harness errors (detached ORM access and async iterator collection); both were corrected and the same route/store test then passed."
+      remaining:
+        - "Regenerate OpenAPI client types, add SDK entry point, update docs-site, and run full repository gates in T004."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Complete generated contracts, SDK, docs.eneo.ai, and full local validation before publication."
+    allowed_files:
+      - "frontend/packages/eneo-js/src/types/schema.d.ts"
+      - "frontend/packages/eneo-js/src/endpoints/files.js"
+      - "frontend/packages/eneo-js/src/endpoints/files.test.js"
+      - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+      - "docs/goals/file-read-contract/"
+    verify:
+      - "OpenAPI/generated schema drift"
+      - "Strict whole-backend Pyright"
+      - "Whole changed-path Ruff and formatting"
+      - "Focused and full backend tests"
+      - "PostgreSQL-inline and real compatible-store behavior"
+      - "Frontend package checks and docs-site production build"
+      - "Repository pre-push checks"
+      - "All GitHub checks and fresh /review"
+    stop_if:
+      - "A mandatory gate is red or unknown."
+      - "Publishing would include unrelated changes."
+      - "Review finds an unresolved current issue."
+    receipt:
+      result: done
+      summary: "Exposed generateOriginalSignedUrl in the existing SDK owner, regenerated OpenAPI types without unrelated drift, and documented processed versus exact-original download behavior."
+      changed_files:
+        - "frontend/packages/eneo-js/src/types/schema.d.ts"
+        - "frontend/packages/eneo-js/src/endpoints/files.js"
+        - "frontend/packages/eneo-js/src/endpoints/files.test.js"
+        - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+      commands:
+        - "bun test && bun run lint in frontend/packages/eneo-js"
+        - "bun run build in frontend/apps/docs-site"
+        - "Canonical OpenAPI generation and independent byte-for-byte schema comparison"
+        - "Changed-path Ruff check/format and strict whole-backend Pyright"
+        - "pytest -q -n 2 -m 'not integration' tests/"
+        - "pytest -q -n 2 -m integration tests/integration/"
+        - "check_route_metadata.py and git diff --check"
+      validation:
+        - "SDK: 13 passed, 0 failed; Prettier and ESLint passed."
+        - "Docs-site production build passed; 28 pages indexed with one existing no-img warning."
+        - "OpenAPI schema independently regenerated and matched byte-for-byte."
+        - "Pyright: 0 errors, 0 warnings; changed-path Ruff and format passed."
+        - "Backend non-integration: 3816 passed."
+        - "Backend integration: 1125 passed, 77 skipped, 1 expected xfail in 15m15s."
+        - "Route metadata and git diff --check passed."
+      caveat: "Repository pre-push reported no branch-local committed changes before commit; rerun it against the immutable source commit before push."
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Close the four bounded final-audit gaps without changing the frozen product scope."
+    allowed_files:
+      - "backend/src/eneo/authentication/signed_urls.py"
+      - "backend/src/eneo/files/file_service.py"
+      - "backend/src/eneo/files/file_router.py"
+      - "backend/src/eneo/server/exception_handlers.py"
+      - "backend/tests/unittests/authentication/test_signed_urls.py"
+      - "backend/tests/unittests/files/test_file_router.py"
+      - "backend/tests/integration/object_content/test_file_original_download.py"
+      - "frontend/packages/eneo-js/src/types/schema.d.ts"
+    verify:
+      - "Original-purpose tokens are cryptographically rejected by the legacy generic verifier and accepted only by the original verifier."
+      - "Unicode, quote, backslash, CR, LF, and empty-safe filename handling is RFC 6266/5987 compatible and closes content exactly once."
+      - "Accept-Ranges is emitted only for audio."
+      - "OpenAPI declares GeneralError bodies for actual original-route 4xx/503 failures."
+      - "Focused tests, schema parity, changed-path Ruff/format, Pyright, and prior regression gates remain green."
+    stop_if:
+      - "A change outside the listed lease is required."
+      - "Existing audience-less processing token compatibility changes."
+      - "The fix requires a generic token framework, new secret, public variant selector, or storage-provider branch."
+    receipt:
+      result: done
+      summary: "Closed the four bounded audit gaps without broadening the original-download product scope."
+      changed_files:
+        - "backend/src/eneo/authentication/signed_urls.py"
+        - "backend/src/eneo/files/file_service.py"
+        - "backend/src/eneo/files/file_router.py"
+        - "backend/src/eneo/server/exception_handlers.py"
+        - "backend/tests/unittests/authentication/test_signed_urls.py"
+        - "backend/tests/unittests/files/test_file_router.py"
+        - "backend/tests/integration/object_content/test_file_original_download.py"
+        - "frontend/packages/eneo-js/src/types/schema.d.ts"
+      commands:
+        - "Focused token, router, handler, FilePublic, File/Icon, and original-download pytest selection"
+        - "Whole backend non-integration pytest"
+        - "Changed-path Ruff check and format"
+        - "Strict whole-backend Pyright"
+        - "Canonical OpenAPI generation and byte-for-byte SDK schema comparison"
+        - "SDK tests and lint"
+        - "Docs-site production build"
+      behavior:
+        - "Original-download tokens use a deterministic purpose-separated HMAC key derived from the existing signing secret; legacy and original verifiers reject each other's tokens cryptographically."
+        - "Content-Disposition preserves safe ASCII names and emits an RFC 5987 UTF-8 filename plus a sanitized ASCII fallback for Unicode or hostile names."
+        - "Only audio downloads advertise byte-range support."
+        - "Original-download OpenAPI declares typed GeneralError bodies for actual 4xx and 503 failures; local 416 responses retain Content-Range."
+        - "The redundant global FileContentRangeError handler was removed because both routes own the required range response locally."
+      validation:
+        - "96 focused token, router, handler, FilePublic, File/Icon, PostgreSQL-inline, and real compatible-store tests passed."
+        - "Backend non-integration: 3823 passed."
+        - "Changed-path Ruff and format passed; strict whole-backend Pyright reported 0 errors and 0 warnings."
+        - "OpenAPI schema independently regenerated and matched the checked-in SDK type byte-for-byte."
+        - "SDK: 13 passed; lint passed."
+        - "Docs-site production build passed; 28 pages indexed with one existing no-img warning."
+      remaining: "Reactivate T999 for a read-only completion audit. Keep #586 open for metadata-only projections and remote-read query consolidation."
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether this original-download PR slice is complete while explicitly leaving #586 open for metadata projections."
+    inputs:
+      - "T001-T004 receipts"
+      - "Current diff and verification"
+      - "Published PR and review state"
+    constraints:
+      - "Do not implement."
+      - "Reject completion while required Worker work remains queued or active."
+      - "Reject completion if byte I/O, authorization, original selection, or storage-backend parity is ambiguous."
+    expected_output:
+      - "complete | not_complete for this PR slice"
+      - "Evidence mapped to the frozen original-download contract"
+      - "Remaining risks"
+      - "Exact remaining #586 metadata-projection task"
+    receipt:
+      result: complete
+      score: "9.6/10"
+      decision: "The bounded original-download PR slice is complete; #586 remains open for metadata-only projections and remote-read query consolidation."
+      evidence:
+        - "Legacy processing downloads retain an empty-body 416 with Content-Range; original downloads use typed GeneralError JSON with Content-Range."
+        - "Generated OpenAPI matches both runtime contracts and declares the original route's real 4xx/503 failures."
+        - "Original tokens now use a purpose-separated derived HMAC and are mutually rejected by legacy/original verifiers."
+        - "Unicode and hostile filenames are RFC-safe and cleanup is deterministic."
+        - "Only audio advertises Accept-Ranges."
+        - "PostgreSQL-inline and real compatible-store route behavior remains equivalent."
+        - "The redundant global range handler remains removed."
+      simplification: "No further abstraction or deletion is justified in this bounded slice."
+      next: "Publish the reviewed source as a ready PR and keep #586 open for metadata/read-performance work."
+
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Restore the frozen processing-download 416 response while retaining the typed original-download 416 contract."
+    allowed_files:
+      - "backend/src/eneo/files/file_router.py"
+      - "backend/tests/unittests/files/test_file_router.py"
+      - "backend/tests/integration/object_content/test_file_original_download.py"
+    verify:
+      - "Legacy processing route returns an empty 416 with Content-Range."
+      - "Original route returns typed GeneralError JSON 416 with Content-Range."
+      - "Focused router and original-download tests, Ruff, format, Pyright, schema parity, and diff check pass."
+    stop_if:
+      - "A public contract other than the two 416 response shapes must change."
+      - "Any file outside the listed lease is required."
+    receipt:
+      result: done
+      summary: "Restored the legacy empty 416 response without weakening the typed original-download error contract."
+      changed_files:
+        - "backend/src/eneo/files/file_router.py"
+        - "backend/tests/unittests/files/test_file_router.py"
+      commands:
+        - "Focused router and original-download pytest selection"
+        - "Changed-path Ruff check and format"
+        - "Strict whole-backend Pyright"
+        - "git diff --check"
+      validation:
+        - "20 focused tests passed."
+        - "Ruff and format passed; Pyright reported 0 errors and 0 warnings; diff check passed."
+      behavior:
+        - "Processing-download 416 is again an empty response with Content-Range, matching its existing public contract."
+        - "Original-download 416 remains typed GeneralError JSON with Content-Range."
+
+  - id: T007
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: low
+    objective: "Publish the immutable reviewed source as a ready PR, request a fresh review, and verify all required GitHub checks."
+    allowed_files:
+      - "No additional tracked source changes unless CI or fresh review proves a current defect."
+    verify:
+      - "Focused conventional commit and clean index."
+      - "Repository pre-push check passes against the branch-local commit."
+      - "Ready PR targets develop and explains the product behavior without storage-provider jargon."
+      - "Task #586 and epic #549 remain linked; #586 stays open for the deferred metadata/read-performance slice."
+      - "Fresh top-level /review is posted and all required checks are green."
+    stop_if:
+      - "Pre-push, CI, or fresh review exposes a current defect."
+      - "The branch contains unrelated changes."
+      - "The PR would imply that all of #586 is complete."
+    receipt:
+      result: done
+      summary: "Published and merged PR #589 with exact-original recovery, purpose-separated signed access, attributable link audit, and PostgreSQL-inline/compatible-store parity."
+      changed_files: []
+      commands:
+        - "Repository pre-push and all required GitHub checks on the immutable source head"
+        - "Fresh /review and merge-state verification"
+      source_commit: "369e574600dcc3e07b5f35cd90e798ebdf55179a"
+      merge_commit: "a97c8a9b0f7fb7dbb35b2ca757c30bc73badc261"
+      pull_request: "https://github.com/eneo-ai/eneo/pull/589"
+      validation:
+        - "All required GitHub checks passed on the immutable source head."
+        - "Backend tests passed in 32m49s; frontend, E2E, Docker, schema, coverage, dependency, and policy checks passed."
+        - "Task #588 closed through the merged PR; #586 remains open for read-performance work."
+
+  - id: T008
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Resolve PR #589 review F1-F3 at the existing File and object-content owners without broadening product scope."
+    allowed_files:
+      - "backend/src/eneo/files/file_models.py"
+      - "backend/src/eneo/files/file_router.py"
+      - "backend/src/eneo/files/file_service.py"
+      - "backend/src/eneo/audit/domain/action_types.py"
+      - "backend/src/eneo/audit/domain/category_mappings.py"
+      - "backend/tests/unittests/files/test_file_router.py"
+      - "backend/tests/integration/object_content/test_file_original_download.py"
+      - "backend/tests/unit/test_audit_category_mappings.py"
+      - "backend/tests/unit/test_audit_config_service.py"
+      - "frontend/packages/eneo-js/src/endpoints/files.js"
+      - "frontend/packages/eneo-js/src/endpoints/files.test.js"
+      - "frontend/packages/eneo-js/src/types/schema.d.ts"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "frontend/apps/web/src/routes/(app)/admin/audit-logs/audit-action-labels.ts"
+      - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+      - "docs/goals/file-read-contract/state.yaml"
+    verify:
+      - "F1: original downloads end their File metadata/reference transaction before verified byte I/O starts."
+      - "F2: original signed links accept 1-3600 seconds and reject zero, negative, or longer lifetimes without changing the legacy request contract."
+      - "F3: retry after a corruption-triggered 503 returns a documented typed 409."
+      - "Focused HTTP, service, real-store, schema, Ruff, format, Pyright, SDK, docs, pre-push, and GitHub checks pass."
+    stop_if:
+      - "The fix requires changing legacy processing downloads."
+      - "The fix requires a storage-provider branch, generic transaction framework, or new configuration surface."
+      - "A current review finding is disproved by source or conflicts with an existing public contract."
+    receipt:
+      result: done
+      summary: "Closed review F1-F3 without changing legacy processing downloads or adding a storage-provider branch."
+      changed_files:
+        - "backend/src/eneo/audit/domain/action_types.py"
+        - "backend/src/eneo/audit/domain/category_mappings.py"
+        - "backend/src/eneo/files/file_models.py"
+        - "backend/src/eneo/files/file_router.py"
+        - "backend/src/eneo/files/file_service.py"
+        - "backend/tests/unittests/files/test_file_router.py"
+        - "backend/tests/integration/object_content/test_file_original_download.py"
+        - "backend/tests/unit/test_audit_category_mappings.py"
+        - "backend/tests/unit/test_audit_config_service.py"
+        - "frontend/packages/eneo-js/src/endpoints/files.js"
+        - "frontend/packages/eneo-js/src/endpoints/files.test.js"
+        - "frontend/packages/eneo-js/src/types/schema.d.ts"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "frontend/apps/web/src/routes/(app)/admin/audit-logs/audit-action-labels.ts"
+        - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+      behavior:
+        - "The File metadata/reference transaction ends before object-content verification and streaming begin."
+        - "Original signed links accept 1-3600 seconds; the legacy processing-link request remains unchanged."
+        - "A retry after corruption has marked content failed returns the documented typed 409 state conflict."
+        - "Creating an original-recovery link records an attributable audit event with expiry and disposition but never the bearer token or URL."
+        - "The SDK preserves the signed path/query while rooting both signed-link kinds at the caller's public Eneo base URL."
+      red_green:
+        - "RED: 3 failed and 18 passed before production changes: missing OpenAPI 409, unbounded expiry, and a real-store read requiring an explicit short transaction."
+        - "GREEN: the focused review suite passed all 21 tests after the production changes."
+        - "RED: original-link mint had zero audit awaits; the SDK returned the backend's internal reverse-proxy host."
+        - "GREEN: route audit/category tests and SDK URL tests passed through their existing public owners."
+      commands:
+        - "Focused signed-token, router, audit, PostgreSQL-inline, and real compatible-store pytest selection"
+        - "Whole backend non-integration pytest selection"
+        - "Changed-path Ruff check and format"
+        - "Strict whole-backend Pyright"
+        - "SDK test and lint"
+        - "Independent OpenAPI schema regeneration and byte comparison"
+        - "Docs-site production build"
+        - "Goal state validator and git diff --check"
+      validation:
+        - "118 focused unit, route-audit, PostgreSQL, and real compatible-store tests passed."
+        - "3825 backend non-integration tests passed."
+        - "Changed-path Ruff and format passed; strict whole-backend Pyright reported 0 errors and 0 warnings."
+        - "SDK: 13 passed; SDK lint passed."
+        - "OpenAPI schema independently regenerated and matched byte-for-byte."
+        - "Docs-site production build passed and indexed 28 pages with one pre-existing no-img warning."
+        - "Web i18n compilation, Prettier/ESLint, and Svelte-check passed with 0 errors and 0 warnings."
+        - "Goal state validation and git diff --check passed."
+      peer_review:
+        session: "eneo-pr589-original-download-fable"
+        iteration_1:
+          verdict: changes_required
+          minimum_score: 8
+          accepted:
+            - "Audit the attributable creation of exact-original bearer links."
+            - "Root signed SDK paths on the configured public Eneo base URL."
+          deferred:
+            - "S3 range-read spool cost belongs to future placement/scale work."
+            - "Typed shared token claims and legacy expiry bounds are separate hardening work."
+        iteration_2:
+          verdict: green
+          green_light: true
+          minimum_score: 8
+          blockers: none
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-pr-589-original-download-architecture-and-api-dx-review-20260724T130152Z.md"
+          - ".codex/artifacts/claude-peer-loop-pr-589-original-download-verification-20260724T131537Z.md"
+
+  - id: T009
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Eliminate per-object database transactions from bounded object-store attachment hydration without changing File or storage-provider contracts."
+    allowed_files:
+      - "backend/src/eneo/object_content/content_repository.py"
+      - "backend/src/eneo/object_content/content_service.py"
+      - "backend/tests/integration/object_content/test_content_service.py"
+      - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+      - "docs/goals/file-read-contract/state.yaml"
+    verify:
+      - "Multiple object-store grants are access-validated with one bounded relational source query per page."
+      - "No object-store item re-enters open_content or opens a per-item database transaction."
+      - "Single reads and batch reads share one private verified backend-dispatch implementation."
+      - "Bytes, authorization, failure-state transitions, integrity checks, ordering, deduplication, and PostgreSQL-inline behavior remain unchanged."
+      - "Focused real compatible-store tests, Ruff, format, strict Pyright, docs-site build, and repository gates pass."
+    stop_if:
+      - "The fix requires a provider-specific branch outside the private S3-compatible adapter."
+      - "The fix requires public API, schema, migration, placement, worker, or retention changes."
+      - "A bounded source page cannot preserve tenant and access-class validation."
+    receipt:
+      result: done
+      summary: "Merged PR #592 after consolidating single and batch byte reads behind one access-validated source query and deleting the three superseded repository read entry points."
+      changed_files:
+        - "backend/src/eneo/object_content/content_repository.py"
+        - "backend/src/eneo/object_content/content_service.py"
+        - "backend/tests/integration/object_content/test_content_service.py"
+        - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+        - "docs/goals/file-read-contract/state.yaml"
+      source_head: "158be7abdb51d69abb4967912c142dfe17cd4c54"
+      merge_commit: "a7f6494eb2da319f3ae3ec2f49e46ee47b8f8339"
+      pull_request: "https://github.com/eneo-ai/eneo/pull/592"
+      behavior:
+        - "Each bounded page access-validates controls plus inline payloads or remote descriptors in one relational query."
+        - "Remote items no longer re-enter open_content or open one database transaction per attachment."
+        - "Single and batch reads reuse one private verified backend dispatch without provider-specific product behavior."
+        - "Three orphaned repository getters, including two unvalidated byte-source doors, were deleted after peer review proved they had no remaining caller."
+      validation:
+        - "Original full local gates: 3,858 non-integration tests and 1,128 integration tests passed; 78 skipped and 1 expected xfail."
+        - "Follow-up deletion: 7 focused PostgreSQL/real SeaweedFS tests, Ruff, format, strict Pyright 0/0, docs-site build, schema drift, commit hooks, and pre-push passed."
+        - "GitHub: Backend tests passed in 25m52s, Frontend E2E in 5m54s, and every required CI, Docker, docs, dependency, schema, coverage, and policy check passed on the exact source head."
+        - "Fresh Review 2 covered all five paths at 158be7abd and found no in-scope issue; no review threads remained."
+        - "Separate develop reruns 30099837888 and 30099837843 completed successfully without retry/timeout or unrelated source changes."
+      commands:
+        - "Focused PostgreSQL and real SeaweedFS object-content integration tests"
+        - "Whole backend non-integration and integration test suites"
+        - "Changed-path Ruff and format; strict whole-backend Pyright"
+        - "Docs-site production build and repository pre-push/schema drift"
+        - "GitHub required checks and fresh /review on source head 158be7abd"
+      peer_review:
+        session: "eneo-pr592-remote-hydration"
+        iteration_1:
+          verdict: changes_required
+          minimum_score: 7
+          accepted: "Delete three repository methods orphaned by the shared source query."
+        iteration_2:
+          verdict: green
+          green_light: true
+          minimum_score: 8
+          blockers: none
+      planning:
+        - "Task #586 remains open; its bounded-hydration acceptance criterion is checked."
+        - "Epic #549 remains open with #586 explicitly marked as partially delivered."
+        - "Canonical Project #5 keeps both #586 and #549 In Progress."
+
+  - id: T011
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Freeze the smallest explicit byte-free projection for metadata-only File, Assistant, App, and Space views from current develop source and public-contract evidence."
+    inputs:
+      - "Task #586 and epic #549"
+      - "T001 and T009 receipts"
+      - "backend/src/eneo/files/"
+      - "backend/src/eneo/assistants/"
+      - "backend/src/eneo/apps/"
+      - "backend/src/eneo/spaces/"
+      - "Current assemblers, response models, repository queries, and behavior tests"
+      - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+    constraints:
+      - "Read-only."
+      - "File keeps identity, filename, authorization, and public behavior."
+      - "eneo.object_content keeps verified bytes, placement, integrity, and lifecycle."
+      - "Preserve PostgreSQL-inline as the complete default and optional object storage as provider-neutral."
+      - "Preserve execution, prompt, history, transcription, and byte-download hydration."
+      - "Do not use a boolean hydration mode, partially hydrated File domain object, provider branch, generic projection framework, cache, or fallback."
+      - "Do not start #569, #571, or Flow work."
+    expected_output:
+      - "Exact metadata-only HTTP/view paths and genuine byte consumers"
+      - "Current and proposed canonical owner"
+      - "Smallest additive projection type/interface"
+      - "Exact T010 allowed_files, behavior-first RED tests, verification commands, and stop conditions"
+      - "Public compatibility and docs impact"
+    receipt:
+      result: done
+      summary: "Current source cannot make every existing File/Assistant/App/default-Space response byte-free without deciding the runtime compatibility of optional FilePublic.transcription; Space application sparse views already discard attachments completely."
+      note: "notes/T011-metadata-projection-map.md"
+      evidence:
+        - "backend/src/eneo/files/file_service.py:494"
+        - "backend/src/eneo/assistants/api/assistant_models.py:318"
+        - "backend/src/eneo/apps/apps/api/app_models.py:54"
+        - "backend/src/eneo/spaces/api/space_assembler.py:384"
+        - "backend/src/eneo/spaces/api/space_router.py:151"
+      spawned_tasks:
+        - "T012"
+        - "T010"
+
+  - id: T012
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Decide aggregate transcription compatibility and freeze the smallest public-compatible T010 metadata projection."
+    inputs:
+      - "T011 receipt and notes/T011-metadata-projection-map.md"
+      - "Task #586 and epic #549"
+      - "Current FilePublic, AssistantPublic, AppPublic, SpacePublic, sparse application, and dashboard contracts"
+      - "Current assemblers, repository read paths, execution consumers, and behavior tests"
+    constraints:
+      - "Read-only."
+      - "Preserve direct File GET/list transcription unless current product evidence explicitly permits an additive contract."
+      - "Prefer deepening File-owned projection and hydration interfaces over adding routes, flags, or generic frameworks."
+      - "Do not construct partially hydrated File objects."
+      - "Do not change storage placement, providers, retry/fallback, #569, #571, or Flow."
+    expected_output:
+      - "Decision on nested aggregate FilePublic.transcription compatibility"
+      - "Exact existing views that become byte-free and byte consumers that remain hydrated"
+      - "Exact T010 allowed_files"
+      - "Behavior-first RED tests and validation commands"
+      - "Stop conditions and deferred work"
+    receipt:
+      result: done
+      decision: "Fail closed on existing Assistant/App/default-Space transcription values; narrow T010 to GET /api/v1/spaces/{id}/applications/, whose Applications schema already excludes attachments."
+      next_allowed_task: T010
+      note: "notes/T012-projection-compatibility.md"
+      evidence:
+        - "backend/src/eneo/assistants/api/assistant_assembler.py:73"
+        - "backend/src/eneo/apps/apps/api/app_assembler.py:129"
+        - "backend/src/eneo/spaces/api/space_assembler.py:648"
+        - "backend/src/eneo/spaces/api/space_router.py:427"
+        - "backend/tests/integration/object_content/test_file_public_routes.py:97"
+      blocked_tasks:
+        - "Broad conversion of existing AssistantPublic, AppPublic, default-Assistant Space, dashboard, and include_applications responses."
+        - "Changing populated nested FilePublic.transcription to null."
+        - "Adding a public metadata route without a product-approved response and migration consumer."
+
+  - id: T010
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Make GET /api/v1/spaces/{id}/applications/ use an explicit sparse applications read projection with zero File/reference/payload/object-store reads and no response change."
+    inputs:
+      - "T012 receipt"
+      - "notes/T010-lease-revision.md"
+      - ".codex/artifacts/claude-peer-loop-t010-sparse-applications-plan-review-20260724T160737Z.md"
+    contract:
+      - "SpaceActor authorizes immutable typed SpaceAccessFacts; complete Space construction and the sparse projection are adapters to the same actor policy."
+      - "SpaceRepository owns only sparse queries, active-row filtering, ordering, and the factory call; it does not map projection fields or authorization state."
+      - "SpaceFactory is the canonical DB-row-to-SpaceApplicationsProjection mapper; this additive method constructs frozen projection values, never partial domain objects."
+      - "create_space_from_db, _build_or_skip, and the attachment hydration fence retain their existing behavior; the sparse mapper reuses _build_or_skip without modifying it."
+      - "Assistant completion-model parity reuses completion_model_repo.all(with_deprecated=True), an O(1) local id map, and existing CompletionModel capability logic; Space completion-model mappings do not affect current AssistantSparse values."
+      - "SpaceAssembler remains the single owner of Applications mapping, ordering, filtering, permissions, and API-key caps for both full Space and sparse projection inputs."
+      - "SpaceService remains the endpoint authorization boundary; only GET /api/v1/spaces/{id}/applications/ adopts the new projection."
+    allowed_files:
+      - "backend/src/eneo/actors/actors/space_actor.py"
+      - "backend/src/eneo/actors/actor_factory.py"
+      - "backend/src/eneo/actors/actor_manager.py"
+      - "backend/src/eneo/spaces/space_applications_projection.py"
+      - "backend/src/eneo/spaces/space_factory.py"
+      - "backend/src/eneo/spaces/space_repo.py"
+      - "backend/src/eneo/spaces/space_service.py"
+      - "backend/src/eneo/spaces/api/space_assembler.py"
+      - "backend/src/eneo/spaces/api/space_router.py"
+      - "backend/tests/unittests/actors/test_space_actor.py"
+      - "backend/tests/unittests/spaces/test_space_factory.py"
+      - "backend/tests/unittests/spaces/test_space_service.py"
+      - "backend/tests/unittests/spaces/api/test_space_assembler.py"
+      - "backend/tests/integration/object_content/test_file_aggregate_hydration.py"
+    tdd:
+      - "First strengthen the dirty RED draft: persist and re-read non-null transcription, add an independent FileContentLoader byte-read tripwire, and prove SQL capture with a full-Space positive control before resetting observations."
+      - "Record two independent failures on source revision a8418c40f: the byte tripwire fires and the applications request observes forbidden File/reference/content/payload SQL."
+      - "Compare complete Applications JSON with the unchanged full-Space applications response, not only resource ids."
+      - "Protect ordering, null and populated completion_model_id, published filtering, item/list permissions, API-key caps, and tenant/space/assistant/app/service-key authorization matrices."
+      - "Protect O(1) direct-membership maps, direct/group human authorization, deleted-user/deleted-group exclusion, default-assistant exclusion, completion-model capability/deprecated/absent parity, null kwargs, and invalid-row skip semantics."
+    verify:
+      - "Applications response values, ordering, filtering, list/item permissions, authorization failures, and scoped-key caps are exactly unchanged."
+      - "The route queries none of files, assistants_files, apps_files, file_content_references, object_contents, inline_content_payloads, or object_store_objects; FileContentLoader/object-content/object-store byte seams are not invoked."
+      - "No partial File, Assistant, App, GroupChat, Service, or Space domain object is constructed; SpaceFactory changes are additive outside imports and create_space_from_db plus its hydration fence remain unchanged."
+      - "Focused object-content integration, factory/actor/service/assembler unit, human membership and API-key scope/service-key integration tests, Ruff, format, strict whole-backend Pyright, and diff check pass."
+      - "The same Opus 5 session verifies the revised slice; if external authentication remains unavailable, a fresh repository review must find no current issue before merge."
+    stop_if:
+      - "Any file outside allowed_files is required."
+      - "create_space_from_db, _build_or_skip semantics, the attachment hydration fence, Space, public response models/OpenAPI, DB tables/migrations, container wiring, or another route must change."
+      - "Any File/reference/content/payload/object-store read remains."
+      - "Any partial domain object, unloaded-relationship special case, boolean flag, cast, Any, type ignore, fake type, provider branch, cache, fallback, or generic projection framework is proposed."
+      - "Authorization, published filtering, response mapping, ordering, or API-key cap logic would be duplicated."
+      - "Repository and factory both map the same projection field or completion-model rule."
+      - "Role inputs are not concrete O(1) mappings or deleted users/groups remain eligible."
+      - "Deprecated, inaccessible, absent, or capability-filtered Assistant completion-model output differs from the current full-Space response."
+      - "Complete-Space and SpaceAccessFacts actor adapters differ for any existing role/scope case."
+      - "A public response/status/error value changes or a mandatory verification fails twice without explanation."
+      - "Work expands to include_applications, dashboard, other routes, public schemas, #569, #571, or Flow."
+    receipt:
+      result: done
+      summary: "GET /api/v1/spaces/{id}/applications/ now returns the unchanged Applications contract from a typed, authorized sparse projection without reading File or object-content bytes."
+      source_commit: "8e3053bf1ba6bab1cae0d0d79e477636a12de639"
+      changed_owners:
+        - "SpaceAccessFacts is the immutable authorization input shared by complete Space reads and the sparse projection."
+        - "SpaceRepository performs a fixed set of sparse queries; SpaceFactory maps rows; SpaceService authorizes; SpaceAssembler remains the one response and permission owner."
+      behavior:
+        - "The existing response, ordering, published filtering, item/list permissions, and API-key caps remain unchanged."
+        - "The route performs no File, reference, object-content, inline-payload, object-descriptor, or object-store read."
+        - "Complete Space and genuine byte consumers retain their existing hydration behavior."
+        - "Storage placement remains transparent: PostgreSQL-inline is still the default and compatible object storage remains optional."
+      complexity:
+        - "A fixed seven relational statements plus the existing completion-model list read replace full aggregate hydration."
+        - "Projection and response mapping are O(resources + models); model, membership, and scoped-resource checks use O(1) maps or sets."
+        - "No cache, generic projection framework, provider branch, partially hydrated domain object, or new fallback was added."
+      validation:
+        - "114 focused actor/factory/service/assembler unit tests passed after rebasing onto develop."
+        - "31 focused PostgreSQL authorization and zero-byte-read integration tests passed; 14 opt-in matrix tests skipped."
+        - "Whole backend: 3,877 non-integration tests passed."
+        - "Whole backend integration: 1,133 passed, 78 skipped, and 1 expected xfail in 15m31s."
+        - "Changed-path Ruff/format passed; strict whole-backend Pyright reported 0 errors and 0 warnings."
+        - "Repository pre-push route metadata and schema drift passed."
+        - "Docs-site production build passed and Pagefind indexed 28 pages."
+      peer_review:
+        session: "eneo-t010-sparse-applications-projection"
+        model: "Claude Opus 5"
+        effort: "xhigh"
+        prior_verdict: "changes_required at score 7; every concrete finding was independently verified and addressed."
+        final_verification: "Attempted twice in the same resumable session but the Claude CLI rejected its logged-in OAuth token as revoked; no final verdict is claimed."
+        merge_gate: "A fresh repository review must find no current issue before merge."
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t010-sparse-applications-plan-review-20260724T184151Z.md"
+          - ".codex/artifacts/claude-peer-loop-t010-sparse-applications-plan-review-20260724T190531Z.md"
+
+  - id: T013
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit the byte-free sparse applications slice, its public compatibility, and the remaining #586 gap before any additive metadata contract is proposed."
+    inputs:
+      - "T010 receipt"
+      - "Current diff and verification"
+      - "Task #586 and epic #549"
+    constraints:
+      - "Read-only."
+      - "Do not call the broad File/Assistant/App/Space projection complete."
+      - "Do not start an additive public contract, #569, #571, or Flow."
+    expected_output:
+      - "complete | not_complete for the narrowed T010 slice"
+      - "Evidence mapped to the frozen contract"
+      - "Exact remaining #586 work and product decision"
+    receipt:
+      result: done
+      decision: "The narrowed T010 slice is complete and public-compatible. The broader #586 metadata-projection outcome is not complete."
+      evidence:
+        - "The integration test compares the complete sparse Applications JSON with the prior full-Space response and proves zero byte/content SQL."
+        - "The full backend regression suites protect complete-Space, execution, authorization, File, and object-content consumers."
+        - "No public response model, OpenAPI schema, storage placement, model-selection behavior, or provider contract changed."
+      remaining:
+        - "Direct File GET/list and existing Assistant/App/default-Assistant Space responses intentionally retain persisted transcription behavior."
+        - "Making those views byte-free requires an additive product-approved response with a concrete migration consumer; populated transcription may not silently become null."
+        - "Placement policy (#569), lifecycle cleanup (#571), InfoBlob/knowledge generations, and Flow remain separate roadmap work."
+      next_step: "Publish T010 as the reviewable #586 partial slice; do not start another public metadata contract without a product decision."
+
+checks:
+  dirty_fingerprint: "T010 begins with PM-owned state/notes plus an untrusted RED draft in backend/tests/integration/object_content/test_file_aggregate_hydration.py; production is unchanged."
+  last_verification:
+    result: pass
+    task: T009
+    commands:
+      - "PR #592 source head 158be7abd merged as a7f6494eb after all checks passed"
+      - "3,858 non-integration and 1,128 integration tests passed; 78 skipped and 1 expected xfail"
+      - "Focused PostgreSQL/real SeaweedFS regression tests passed after the peer-review deletion"
+      - "Strict Pyright 0/0, Ruff/format, schema drift, docs-site build, commit hooks, pre-push, and diff checks passed"
+      - "Fresh Review 2 found no issue on all five paths; Claude session eneo-pr592-remote-hydration finished green at MIN_SCORE 8"
+      - "Develop reruns 30099837888 and 30099837843 passed without speculative fixes"

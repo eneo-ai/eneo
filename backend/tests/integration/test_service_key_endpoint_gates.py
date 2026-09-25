@@ -197,6 +197,60 @@ async def test_api_key_lifecycle_mutations_reject_service_keys(
     assert "session token" in resp.text.lower()
 
 
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_logging_details_rejects_service_key(
+    client,
+    tenant_read_service_secret,
+):
+    response = await client.get(
+        f"/api/v1/logging/{uuid4()}/",
+        headers={"X-API-Key": tenant_read_service_secret},
+    )
+
+    assert response.status_code == 403, response.text
+    assert response.json().get("code") == "session_auth_required"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_chat_turn_diagnostics_reject_service_keys(
+    client, tenant_admin_service_secret
+):
+    resp = await client.get(
+        f"/api/v1/conversations/{uuid4()}/messages/{uuid4()}/diagnostics/",
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert "session token" in resp.text.lower()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_chat_turn_diagnostics_reject_user_owned_api_keys(client, admin_token):
+    response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": f"debug-gate-{uuid4().hex[:8]}",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "ownership": "user",
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 201, response.text
+
+    resp = await client.get(
+        f"/api/v1/conversations/{uuid4()}/messages/{uuid4()}/diagnostics/",
+        headers={"X-API-Key": response.json()["secret"]},
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert "session token" in resp.text.lower()
+
+
 # ---------------------------------------------------------------------------
 # 3. User-identity gate — (b)-class endpoints reject service keys
 # ---------------------------------------------------------------------------
@@ -232,34 +286,6 @@ async def test_get_users_me_works_for_bearer_user(client, admin_token):
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert resp.status_code == 200, resp.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_legacy_user_api_key_endpoint_rejects_service_key(
-    client, tenant_admin_service_secret
-):
-    resp = await client.post(
-        "/api/v1/users/api-keys/",
-        headers={"X-API-Key": tenant_admin_service_secret},
-    )
-    # The user-identity gate runs before the deprecated/permission checks,
-    # so we expect 403 with our error code regardless of feature-flag state.
-    assert resp.status_code == 403, resp.text
-    assert _has_user_identity_required_code(resp.json()), resp.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_legacy_user_api_key_revoke_rejects_service_key(
-    client, tenant_admin_service_secret
-):
-    resp = await client.delete(
-        "/api/v1/users/api-keys/legacy",
-        headers={"X-API-Key": tenant_admin_service_secret},
-    )
-    assert resp.status_code == 403, resp.text
-    assert _has_user_identity_required_code(resp.json()), resp.text
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +384,22 @@ async def test_service_key_creation_endpoints_return_403_with_gate_code(
     )
     assert resp.status_code == 403, f"{method} {path}: {resp.status_code} {resp.text}"
     assert _has_creation_gate_code(resp.json()), f"{method} {path}: {resp.text}"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_service_key_cannot_upload_a_user_owned_file(
+    client,
+    tenant_admin_service_secret,
+) -> None:
+    response = await client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("source.txt", b"payload", "text/plain")},
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+
+    assert response.status_code == 403, response.text
+    assert _has_creation_gate_code(response.json()), response.text
 
 
 @pytest.mark.integration

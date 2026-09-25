@@ -15,6 +15,9 @@ const server = (id: string, name = id): Schema<"MCPServerPublicDict"> => ({
   description: null,
   http_url: null,
   http_auth_type: null,
+  purpose: "general",
+  is_enabled: true,
+  readiness_reason: null,
   tags: null,
   icon_url: null,
   security_classification: null,
@@ -26,6 +29,18 @@ const basePartner: ChatPartner = {
   id: "assistant-1",
   name: "Assistant"
 };
+const baseConfig: Schema<"EffectiveConfigPublic"> = {
+  models_enforced: false,
+  available_models: [],
+  locked_model: null,
+  default_model: null,
+  mcp_enforced: false,
+  available_mcp_servers: [],
+  default_disabled_mcp_server_ids: [],
+  prompt_locked: false,
+  default_reasoning_effort: null,
+  reasoning_effort_user_configurable: false
+};
 
 describe("MCP chat controls", () => {
   it("uses governance MCP servers when the policy enforces MCP", () => {
@@ -34,6 +49,7 @@ describe("MCP chat controls", () => {
       ...basePartner,
       mcpServers: [server("assistant")],
       effectiveConfig: {
+        ...baseConfig,
         mcp_enforced: true,
         available_mcp_servers: [policyServer],
         default_disabled_mcp_server_ids: ["policy"],
@@ -55,6 +71,7 @@ describe("MCP chat controls", () => {
       ...basePartner,
       mcpServers: [assistantServer],
       effectiveConfig: {
+        ...baseConfig,
         mcp_enforced: false,
         available_mcp_servers: [server("policy")],
         default_disabled_mcp_server_ids: [],

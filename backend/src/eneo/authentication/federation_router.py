@@ -84,6 +84,7 @@ class OIDCStateCache(TypedDict):
 
 class AccessTokenResponse(TypedDict):
     access_token: str
+    frontend_state: str
 
 
 class _FederationConfigResolver(Protocol):
@@ -1595,7 +1596,10 @@ async def auth_callback(
                 user_id=str(user.id),
             )
 
-            return AccessTokenResponse(access_token=access_token_response)
+            return AccessTokenResponse(
+                access_token=access_token_response,
+                frontend_state=state_payload["frontend_state"],
+            )
     except HTTPException:
         # Re-raise HTTPException with correlation_id already set
         raise

@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from eneo.main.removed_env import check_removed_variables
+
 # Version manifest lookup:
 # - Docker: Package is installed with --no-editable, so __file__ points to site-packages.
 #   The manifest is placed at /app/.release-please-manifest.json by inject-backend-version.sh
@@ -204,6 +206,10 @@ def _set_app_version():
         return "DEV"
 
 
+_DEVELOPMENT_ENVIRONMENTS = frozenset({"development", "local", "dev"})
+_SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = _DEVELOPMENT_ENVIRONMENTS | {"test"}
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -212,6 +218,25 @@ class Settings(BaseSettings):
     # Environment setting (development, staging, production)
     # Controls error detail exposure in API responses
     environment: str = "production"
+
+    @property
+    def is_development(self) -> bool:
+        """Local development or test: verbose errors and developer tools."""
+        return self.environment.strip().lower() in _DEVELOPMENT_ENVIRONMENTS
+
+    # Explicit opt-in for the development-only SharePoint fixture API. Runtime
+    # environment checks provide a second guard so fixture data cannot be
+    # enabled in staging or production by setting this flag alone.
+    sharepoint_fixture_mode_enabled: bool = False
+
+    @property
+    def sharepoint_fixture_mode_active(self) -> bool:
+        """Whether every safety guard for SharePoint fixture data is active."""
+        return (
+            self.sharepoint_fixture_mode_enabled
+            and self.environment.strip().lower()
+            in _SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS
+        )
 
     # OpenAPI-only mode flag
     openapi_only_mode: bool = False
@@ -223,11 +248,8 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     ovhcloud_api_key: Optional[str] = None
     mistral_api_key: Optional[str] = None
-    flux_api_key: Optional[str] = None
-    tavily_api_key: Optional[str] = None
     vllm_api_key: Optional[str] = None
     eneo_super_api_key: Optional[str] = None
-    eneo_super_duper_api_key: Optional[str] = None
 
     # Infrastructure dependencies
     postgres_user: str
@@ -253,7 +275,16 @@ class Settings(BaseSettings):
     mcp_client_connect_timeout_seconds: int = 30
     mcp_client_list_tools_timeout_seconds: int = 30
     mcp_client_call_timeout_seconds: int = 60
+    # Tool-call budget for the built-in image generation provider. Image
+    # models routinely take longer than a general MCP tool call.
+    image_generation_timeout_seconds: int = 240
     mcp_tool_output_max_chars: int = 32768
+    # Decoded size cap for a single MCP image content block; larger images
+    # are dropped before they can be persisted as generated files.
+    mcp_tool_image_max_bytes: int = 10 * 1024 * 1024
+    # Image content blocks admitted from a single tool result; the rest are
+    # dropped with a notice so one call cannot flood the file store.
+    mcp_tool_image_max_count: int = 4
     mcp_circuit_breaker_failure_threshold: int = 5
     mcp_circuit_breaker_cooldown_seconds: int = 60
 
@@ -362,12 +393,6 @@ class Settings(BaseSettings):
     mobilityguard_client_secret: Optional[str] = None
     mobilityguard_tenant_id: Optional[str] = None
 
-    # Max sizes
-    upload_file_to_session_max_size: int
-    upload_image_to_session_max_size: int
-    upload_max_file_size: int
-    transcription_max_file_size: int
-
     # Visual content in document attachments (PDF pages with images/graphics,
     # DOCX/PPTX embedded images) is extracted as derived image files so vision
     # models can read it (capped per document to bound token cost)
@@ -386,6 +411,11 @@ class Settings(BaseSettings):
     # history) when checking whether the prompt + attachments fit.
     attachment_context_reserve_tokens: int = 2000
 
+    # The Skill attachment guardrail lives in the stored tenant runtime
+    # policy (skill_runtime_policies). The historical SKILL_MAX_BINDINGS
+    # environment value is read once by migration 202607240310 as a seed and
+    # has no runtime effect.
+
     # Temporary directory for file uploads
     upload_tmp_dir: Path = Path("/tmp")
 
@@ -398,7 +428,6 @@ class Settings(BaseSettings):
     # Feature flags
     using_access_management: bool = True
     using_iam: bool = False
-    using_image_generation: bool = False
 
     # Max concurrent embedding API calls across all crawls (module-level semaphore)
     # Controls parallelism during page batch persistence to avoid overwhelming embedding APIs
@@ -412,7 +441,21 @@ class Settings(BaseSettings):
     api_key_last_used_min_interval_seconds: int = 900
     api_key_used_audit_sample_rate: float = 1.0
     api_key_rotation_grace_hours: int = 24
-    api_key_legacy_endpoints_enabled: bool = True
+    # Module auth broker (SSO handoff from the Eneo session to module BFFs).
+    # All three lifetimes must be positive: a zero/negative value would pass
+    # startup only to break every module login at runtime (Redis SETEX rejects
+    # non-positive TTLs; the token window becomes empty or already expired).
+    module_auth_ticket_ttl_seconds: int = Field(default=30, gt=0)
+    # Must comfortably exceed a module's longest single request. Modules do
+    # long uploads (e.g. speech-to-text audio); a request that starts inside
+    # the token's lifetime is never aborted mid-flight, but the next request
+    # needs a valid token, so modules refresh proactively before long work.
+    module_auth_token_expiry_minutes: int = Field(default=60, gt=0)
+    # Absolute ceiling on one module session, measured from the original
+    # ticket exchange. Refresh slides the 60-minute token window but can never
+    # extend past handoff + this ceiling; after that the module must run a new
+    # login handoff (cheap while the Eneo session is alive).
+    module_auth_max_session_hours: int = Field(default=8, gt=0)
     api_key_rate_limit_window_seconds: int = 3600
     api_key_rate_limit_fail_open: bool = False
     api_key_rate_limit_tenant_default: int = 10000
@@ -429,6 +472,30 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_token_prefix: str
     url_signing_key: str
+
+    # Signed file references (original-download URLs surfaced to the LLM so it
+    # can hand them to URL-accepting MCP tools).
+    # Expiry of the minted URL; clamped to the original-download token maximum
+    # (1 hour) at mint time.
+    file_reference_url_expiry_seconds: int = 3600
+    # Base URL used to build the signed download links handed to MCP tools.
+    # Defaults to public_origin, but a remote tool (server-to-server) often needs
+    # a different, internally-reachable host than the browser-facing origin (e.g.
+    # http://host.docker.internal:8123 in dev, or an internal service URL in prod).
+    # Unlike public_origin this is NOT restricted to https/localhost. Must point
+    # at the Eneo backend's /api/v1 and be reachable from the tool's network.
+    file_reference_base_url: Optional[str] = None
+
+    # Base URL Eneo uses to reach its OWN loopback MCP servers (mounted under
+    # /internal-mcp) during a completion. Must be reachable from within the
+    # backend process/container. Dev default is the local server.
+    internal_mcp_base_url: str = "http://localhost:8123"
+
+    # Relevance floor (cosine similarity, -1..1) for inject-mode knowledge
+    # retrieval: chunks scoring below it are dropped instead of injected.
+    # Off by default because useful values depend on the embedding model in
+    # use; set per deployment where that model is known.
+    inject_knowledge_min_score: Optional[float] = Field(default=None, ge=-1.0, le=1.0)
 
     # Dev
     testing: bool = False
@@ -608,6 +675,12 @@ class Settings(BaseSettings):
 
         return values
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_variables(cls, values: dict[str, object]) -> dict[str, object]:
+        check_removed_variables(os.environ, values)
+        return values
+
     @model_validator(mode="after")
     def validate_worker_settings(self):
         """Ensure worker-related configuration values are sane."""
@@ -779,10 +852,32 @@ class Settings(BaseSettings):
             )
             sys.exit(1)
 
+        if self.image_generation_timeout_seconds <= 0:
+            logging.error(
+                "IMAGE_GENERATION_TIMEOUT_SECONDS must be greater than zero. "
+                "Current value: %s",
+                self.image_generation_timeout_seconds,
+            )
+            sys.exit(1)
+
         if self.mcp_tool_output_max_chars <= 0:
             logging.error(
                 "MCP_TOOL_OUTPUT_MAX_CHARS must be greater than zero. Current value: %s",
                 self.mcp_tool_output_max_chars,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_image_max_bytes <= 0:
+            logging.error(
+                "MCP_TOOL_IMAGE_MAX_BYTES must be greater than zero. Current value: %s",
+                self.mcp_tool_image_max_bytes,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_image_max_count <= 0:
+            logging.error(
+                "MCP_TOOL_IMAGE_MAX_COUNT must be greater than zero. Current value: %s",
+                self.mcp_tool_image_max_count,
             )
             sys.exit(1)
 

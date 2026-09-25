@@ -3,9 +3,7 @@
 
   let div: HTMLDivElement;
 
-  const {
-    states: { value }
-  } = getContentTabs();
+  const { value } = getContentTabs();
 
   const scrollPositions: Record<string, number> = {};
   function loadPersistedScroll(tabKey: string) {
@@ -13,11 +11,17 @@
 
     if (div) {
       setTimeout(() => {
-        div.scrollTo({
+        div?.scrollTo({
           top: scrollY,
           behavior: "instant"
         });
       }, 1);
+    }
+  }
+
+  function persistScroll(event: Event) {
+    if (event.currentTarget instanceof HTMLDivElement) {
+      scrollPositions[$value] = event.currentTarget.scrollTop;
     }
   }
 
@@ -29,9 +33,7 @@
   id="global-page-container"
   style="container-type: size;"
   class="text-primary relative flex flex-grow flex-col overflow-y-auto pl-6 transition-colors duration-400"
-  on:scroll={() => {
-    scrollPositions[$value] = div.scrollTop;
-  }}
+  on:scroll={persistScroll}
 >
   <slot />
 </div>

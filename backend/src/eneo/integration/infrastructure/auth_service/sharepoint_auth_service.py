@@ -23,13 +23,12 @@ logger = getLogger(__name__)
 
 
 class SharepointAuthService(BaseOauthService):
-    # Personal OAuth scopes for SharePoint content + membership-based
-    # site categorization in preview.
+    # Personal OAuth scopes for SharePoint content and the signed-in user's
+    # direct group IDs used by membership-based site categorization.
     DEFAULT_SCOPES = [
         "Files.Read.All",
         "Sites.Read.All",
         "User.Read",
-        "Group.Read.All",
     ]
 
     def __init__(

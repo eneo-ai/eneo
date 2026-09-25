@@ -12,10 +12,11 @@ import { xhr } from "./xhr.js";
 
 /**
  * Creates a client to request eneo resources over a typesafe interface.
- * Requires either an api key or a user token to authenticate requests.
+ * Accepts an API key, a user token, or both when an endpoint requires dual credentials.
  * @param {Object} args
  * @param  {string} args.baseUrl Base URL of the Eneo backend
  * @param  {string} [args.apiKey] Eneo API key
+ * @param  {string} [args.apiKeyHeaderName] API-key header configured by the backend, defaults to X-API-Key
  * @param  {string} [args.token] Eneo auth token obtained through logging in
  * @param {(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>} [args.fetch] Alternative fetch function to use, defaults to native fetch
  * @returns {Client}
@@ -25,14 +26,16 @@ export function createClient(args) {
   const version = "DEV"; // # Client version auto-updates when running the updater, do not edit this line.
   const baseUrl = args.baseUrl;
   const _fetch = args.fetch ?? fetch;
+  const apiKeyHeaderName = args.apiKeyHeaderName?.trim() || "X-API-Key";
 
-  /** @type {{"api-key": string} | {Authorization: string} | {}} */
-  const auth =
-    args.apiKey !== undefined
-      ? { "api-key": args.apiKey }
-      : args.token !== undefined
-        ? { Authorization: `Bearer ${args.token}` }
-        : {};
+  /** @type {Record<string, string>} */
+  const auth = {};
+  if (args.apiKey !== undefined) {
+    auth[apiKeyHeaderName] = args.apiKey;
+  }
+  if (args.token !== undefined) {
+    auth.Authorization = `Bearer ${args.token}`;
+  }
 
   return {
     fetch: async (endpoint, { method, params, requestBody }) => {
@@ -54,7 +57,7 @@ export function createClient(args) {
         const parsed = await parseResponse(response);
         return parsed;
       } catch (error) {
-        EneoError.throw(error, { endpoint: `${httpMethod}@${url}`, payload });
+        EneoError.throw(error, { endpoint: `${httpMethod}@${url}` });
       }
     },
 
@@ -85,7 +88,7 @@ export function createClient(args) {
           onMessage
         });
       } catch (error) {
-        EneoError.throw(error, { endpoint: `STREAM@${url}`, payload });
+        EneoError.throw(error, { endpoint: `STREAM@${url}` });
       }
     },
 
@@ -112,7 +115,7 @@ export function createClient(args) {
         const parsed = await parseResponse(response);
         return parsed;
       } catch (error) {
-        EneoError.throw(error, { endpoint: `${httpMethod}@${url}`, payload });
+        EneoError.throw(error, { endpoint: `${httpMethod}@${url}` });
       }
     },
 
@@ -146,7 +149,7 @@ function parseUrl(baseUrl, endpoint, params) {
 
   if (params?.query) {
     Object.entries(params.query).forEach(([param, value]) => {
-      if (value !== undefined) {
+      if (value !== undefined && value !== null) {
         url.searchParams.append(param, value);
       }
     });
@@ -220,6 +223,56 @@ async function parseResponse(response) {
   throw new PartialError("RESPONSE", response.status, parsed, response.headers);
 }
 
+/**
+ * Response headers this client reads off responses, lowercased.
+ *
+ * SvelteKit refuses header reads on responses fetched inside a load function
+ * unless the header is permitted by the `filterSerializedResponseHeaders`
+ * option — see `headerFilterHandle` in the web app's `hooks.server.ts`, which
+ * allows exactly this list. Add a header here when the client starts reading
+ * it, or SSR loses the value.
+ *
+ * @type {readonly string[]}
+ */
+export const ENEO_RESPONSE_HEADERS = ["x-trace-id", "x-correlation-id", "x-error-code"];
+
+/**
+ * Read a response header, yielding `undefined` instead of throwing.
+ *
+ * Every header this client reads is diagnostic metadata attached to an error
+ * that is already being reported. A throw here would replace that error with a
+ * confusing one about header access — which is exactly what SvelteKit's load
+ * fetch does for headers missing from `filterSerializedResponseHeaders`.
+ *
+ * @param {Headers | undefined} headers
+ * @param {string} name Lowercased header name
+ * @returns {string | undefined}
+ */
+function readResponseHeader(headers, name) {
+  try {
+    return headers?.get(name) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read the backend trace id off a response.
+ *
+ * Prefers ``X-Trace-Id`` (set by TraceIdResponseMiddleware on every response,
+ * including 4xx/5xx) and falls back to the legacy ``X-Correlation-ID`` during
+ * the migration period when both headers are emitted in parallel.
+ *
+ * @param {Headers | undefined} headers Response headers
+ * @returns {string | undefined} 32-char hex trace id, or undefined if no span
+ *   was active when the response was produced.
+ */
+export function readTraceId(headers) {
+  return (
+    readResponseHeader(headers, "x-trace-id") ?? readResponseHeader(headers, "x-correlation-id")
+  );
+}
+
 /** An intermediate error that is throw during running a request on the client. Needs to be finalised into an EneoError */
 export class PartialError extends Error {
   /**
@@ -253,9 +306,11 @@ export class PartialError extends Error {
     this.status = status;
     this.stage = stage;
 
-    // Extract error code from X-Error-Code header (for audit sessions) or response body
-    const headerCode = headers?.get("x-error-code");
-    this.code = headerCode || parsedResponse?.eneo_error_code || 0;
+    // `code` is compared against the numeric ErrorCodes enum, so only the body
+    // may set it. The audit endpoints send a symbolic X-Error-Code
+    // (AUDIT_SESSION_REQUIRED) which would never match one of those codes;
+    // read it off `headers` if a call site ever needs it.
+    this.code = parsedResponse?.eneo_error_code || 0;
 
     /** @type {Headers | undefined} */
     this.headers = headers;
@@ -271,7 +326,7 @@ export class EneoError extends Error {
    * @param {number} status HTTP status
    * @param {import("../types/resources").EneoErrorCode | 0} code The backend will return an error code in most cases that can give additional info
    * @param {Object} [response] Parsed json response from server
-   * @param {{endpoint: string; payload?: object;}} request
+   * @param {{endpoint: string;}} request
    * @param {Headers} [headers] Response headers
    */
   constructor(message, stage, status, code, response, request = { endpoint: "" }, headers) {
@@ -284,8 +339,9 @@ export class EneoError extends Error {
     this.code = code;
     /** @type {any | undefined} Server response parsed as JSON object. */
     this.response = response;
-    /** @type {{endpoint: string; payload?: object;}} Info about the request during which the error occured. */
-    this.request = request;
+    /** @type {{endpoint: string;}} Info about the request during which the error occured. */
+    // Keep request bodies and credentials out of errors and diagnostic logs.
+    this.request = { endpoint: request.endpoint };
     /** @type {Headers | undefined} */
     this.headers = headers;
   }
@@ -294,35 +350,30 @@ export class EneoError extends Error {
    * Get a message that can be presented to users, ie. in an alert
    */
   getReadableMessage() {
-    let message;
     if (this.status === 422) {
-      const reason = this.response.detail[0]?.ctx?.reason;
-      const msg = this.response.detail[0]?.msg ?? "A validation error occured.";
-      message = reason ?? msg;
-    } else {
-      message = this.message;
+      // A 422 does not guarantee FastAPI's `detail` array: an unparseable body
+      // or a gateway-generated response leaves it missing, and reading through
+      // it would throw inside whatever is already reporting this error.
+      const first = Array.isArray(this.response?.detail) ? this.response.detail[0] : undefined;
+      return first?.ctx?.reason ?? first?.msg ?? "A validation error occured.";
     }
-    return message;
+    return this.message;
   }
 
   /**
    * Return the backend trace ID for this error, suitable for support reports.
    *
-   * Reads ``X-Trace-Id`` (set by TraceIdResponseMiddleware on every response,
-   * including 4xx/5xx) and falls back to the legacy ``X-Correlation-ID``
-   * during the migration period when both headers are emitted in parallel.
-   *
-   * @returns {string | undefined} 32-char hex trace ID, or undefined if no
-   *   span was active when the response was produced.
+   * @returns {string | undefined} See {@link readTraceId}. Undefined as well
+   *   when the header could not be read.
    */
   getTraceId() {
-    return this.headers?.get("x-trace-id") ?? this.headers?.get("x-correlation-id") ?? undefined;
+    return readTraceId(this.headers);
   }
 
   /**
    * Rethrow an error as an EneoError
    * @param {unknown} error
-   * @param {{endpoint: string; payload?: object;}} requestInfo
+   * @param {{endpoint: string;}} requestInfo
    */
   static throw(error, requestInfo) {
     if (error instanceof PartialError) {

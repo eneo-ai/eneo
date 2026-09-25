@@ -142,19 +142,23 @@ class TestAuditConfigRepository:
             assert config is not None
             assert config[1] is True
 
-    async def test_update_creates_if_not_exists_upsert(self, db_session, seeded_tenant):
+    async def test_update_creates_if_not_exists_upsert(self, db_session, test_tenant):
         """Test that update creates a new row if it doesn't exist (upsert behavior)."""
-        # Update in one session
+        # Unlike the update test, start without seeded category configuration.
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
-            await repo.update(seeded_tenant.id, "admin_actions", False)
+            assert (
+                await repo.find_by_tenant_and_category(test_tenant.id, "admin_actions")
+                is None
+            )
+            await repo.update(test_tenant.id, "admin_actions", False)
             await session.commit()
 
         # Verify in fresh session
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
             config = await repo.find_by_tenant_and_category(
-                seeded_tenant.id, "admin_actions"
+                test_tenant.id, "admin_actions"
             )
 
             assert config is not None
@@ -191,7 +195,7 @@ class TestAuditConfigService:
                 assert len(category_config.example_actions) > 0
                 assert len(category_config.example_actions) <= 3
 
-    async def test_get_config_admin_actions_has_42_actions(
+    async def test_get_config_admin_actions_has_49_actions(
         self, db_session, seeded_tenant
     ):
         """Verify admin_actions category has correct action count."""
@@ -203,7 +207,7 @@ class TestAuditConfigService:
             admin_config = next(
                 c for c in response.categories if c.category == "admin_actions"
             )
-            assert admin_config.action_count == 46
+            assert admin_config.action_count == 49
 
     async def test_update_config_single_category(self, db_session, seeded_tenant):
         """Test updating a single category."""

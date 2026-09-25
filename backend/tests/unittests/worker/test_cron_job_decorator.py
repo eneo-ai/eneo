@@ -16,9 +16,10 @@ This caused InvalidRequestError when cron jobs tried to execute DB queries:
 Fix: Add session.begin() to cron_job decorator, matching the task() pattern.
 """
 
-import pytest
-from unittest.mock import MagicMock
 from functools import wraps
+from unittest.mock import MagicMock
+
+import pytest
 
 
 class MockAsyncContextManager:

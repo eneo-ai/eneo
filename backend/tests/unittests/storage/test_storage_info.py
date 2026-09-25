@@ -1,7 +1,9 @@
-import pytest
+from datetime import datetime
 from unittest.mock import MagicMock
 from uuid import uuid4
-from datetime import datetime
+
+import pytest
+
 from eneo.spaces.api.space_models import SpaceMember
 from eneo.storage.domain.storage import StorageInfo, StorageSpaceInfo
 

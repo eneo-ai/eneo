@@ -29,18 +29,22 @@ test("a created assistant can be edited and used in chat", async ({ page, reques
   await page.goto(`/spaces/personal/assistants/${assistant.id}/edit?next=default`);
   await expect(page.getByRole("link", { name: assistantName })).toBeVisible();
 
-  await page.getByLabel("Prompt").fill(prompt);
+  // By role and exact name: getByLabel matches substrings and would also hit the prompt history button.
+  const promptField = page.getByRole("textbox", { name: "Prompt", exact: true });
+  await promptField.fill(prompt);
   await page.getByRole("button", { name: /^(Save changes|Spara ändringar)$/i }).click();
   await expect(page.getByText(/All changes saved!|Alla ändringar sparade!/i)).toBeVisible();
 
   await page.reload();
-  await expect(page.getByLabel("Prompt")).toHaveValue(prompt);
+  await expect(promptField).toHaveValue(prompt);
 
   await page.goto(`/spaces/personal/chat/?type=assistant&id=${assistant.id}&tab=chat`);
   await expect(page.getByText(assistantName).first()).toBeVisible();
 
   await askChatQuestion(page, question);
 
-  await expect(page.getByText(question, { exact: true })).toBeVisible();
-  await expect(page.getByText(MOCK_REPLY)).toBeVisible({ timeout: 20_000 });
+  // Scope to the conversation: the reloaded history table also holds the question text.
+  const conversation = page.locator("#session-message-container");
+  await expect(conversation.getByText(question, { exact: true })).toBeVisible();
+  await expect(conversation.getByText(MOCK_REPLY)).toBeVisible({ timeout: 20_000 });
 });

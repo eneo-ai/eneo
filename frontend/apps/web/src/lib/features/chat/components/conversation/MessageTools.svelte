@@ -8,17 +8,22 @@
   import { IconCopy } from "@eneo/icons/copy";
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
-  import { Button, Dropdown, Tooltip } from "@eneo/ui";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
   import LinkReference from "$lib/features/knowledge/components/LinkReference.svelte";
   import McpResourceSnippetModal from "./McpResourceSnippetModal.svelte";
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
+  import { citedTextDocumentReferences, dedupeByDocument } from "../../mcpReferenceDocs";
 
   const { settings } = getAppContext();
   const { current, isLast } = getMessageContext();
   const message = $derived(current());
   const preferredCopyFormat = $derived(getPreferredAssistantCopyFormat(settings));
+  const copyLabel = $derived(
+    preferredCopyFormat === "richtext" ? m.copy_as_richtext() : m.copy_as_markdown()
+  );
 
   let referencesExpanded = $state(false);
   let showCopiedMessage = $state(false);
@@ -26,17 +31,22 @@
   const faviconService = getFaviconUrlService();
   import { m } from "$lib/paraglide/messages";
   // Image references (resource_link blocks with an image mimeType) render as a
-  // thumbnail strip in MessageAnswer, not as text-snippet chips here. Exclude
-  // them so they neither show as "unknown source" rows nor inflate the count.
+  // thumbnail strip in MessageAnswer, not as text-snippet chips here, and only
+  // references the answer cites inline get a chip — uncited captures streamed
+  // via TOOL_CALL events stay out of the list and the count.
   const mcpRefs = $derived(
-    (message.mcp_tool_references ?? []).filter((ref) => !(ref.mime_type ?? "").startsWith("image/"))
+    citedTextDocumentReferences(message.mcp_tool_references ?? [], message.answer ?? "")
   );
+  // One chip per document: several passages from the same document (chunk
+  // fragments of one uri) collapse to a single reference entry.
+  const mcpRefDocs = $derived(dedupeByDocument(mcpRefs));
 
   type MetaBag = Record<string, unknown> & {
     sourceType?: string;
     title?: string;
     pageRange?: string;
     section?: string;
+    info_blob_id?: string;
   };
 
   function readMeta(ref: (typeof mcpRefs)[number]) {
@@ -51,13 +61,18 @@
       sourceType: meta.sourceType ?? null,
       title: meta.title ?? host,
       pageRange: meta.pageRange ?? null,
-      section: meta.section ?? null
+      section: meta.section ?? null,
+      infoBlobId: typeof meta.info_blob_id === "string" ? meta.info_blob_id : null
     };
   }
 
-  const totalRefs = $derived(
-    message.references.length + message.web_search_references.length + mcpRefs.length
-  );
+  // A reference that points at an eneo document can open the full document
+  // viewer (lazy fetch by id) instead of the stored snippet capture.
+  function blobForRef(infoBlobId: string, title: string) {
+    return { id: infoBlobId, metadata: { title } };
+  }
+
+  const totalRefs = $derived(message.references.length + mcpRefDocs.length);
 
   async function handleCopy(format: AssistantCopyFormat = preferredCopyFormat) {
     await copyAssistantAnswer(message.answer, format);
@@ -75,47 +90,47 @@
 >
   <div class="flex gap-2">
     <div class="flex gap-[1px]">
-      <Tooltip
-        text={preferredCopyFormat === "richtext" ? m.copy_as_richtext() : m.copy_as_markdown()}
-      >
-        <Button
-          on:click={() => handleCopy()}
-          unstyled
-          class="border-default hover:bg-hover-stronger flex gap-2 rounded-l-lg border p-1.5 shadow-sm"
-          padding="icon"
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          onclick={() => handleCopy()}
+          class="border-default hover:bg-hover-stronger flex cursor-pointer gap-2 rounded-l-lg border p-1.5 shadow-sm"
           ><IconCopy />
+          <span class="sr-only">{copyLabel}</span>
           {#if showCopiedMessage}
             <span class="pr-2">{m.copied()}</span>
           {/if}
-        </Button>
-      </Tooltip>
-      <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
-        <Dropdown.Trigger asFragment let:trigger>
-          <Button
-            is={trigger}
-            unstyled
-            class="border-default hover:bg-hover-stronger rounded-r-lg border p-1.5 shadow-sm"
-            padding="icon"
-            aria-label={m.copy_response_options()}
-          >
-            <IconChevronDown />
-          </Button>
-        </Dropdown.Trigger>
-        <Dropdown.Menu let:item>
-          <Button is={item} onclick={() => handleCopy("markdown")}>
+        </Tooltip.Trigger>
+        <Tooltip.Content>{copyLabel}</Tooltip.Content>
+      </Tooltip.Root>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger>
+          {#snippet child({ props })}
+            <button
+              {...props}
+              type="button"
+              class="border-default hover:bg-hover-stronger cursor-pointer rounded-r-lg border p-1.5 shadow-sm"
+              aria-label={m.copy_response_options()}
+            >
+              <IconChevronDown />
+            </button>
+          {/snippet}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end">
+          <DropdownMenu.Item onSelect={() => handleCopy("markdown")}>
             {m.copy_as_markdown()}
-          </Button>
-          <Button is={item} onclick={() => handleCopy("richtext")}>
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={() => handleCopy("richtext")}>
             {m.copy_as_richtext()}
-          </Button>
-        </Dropdown.Menu>
-      </Dropdown.Root>
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
 
       {#if totalRefs > 0}
-        <Button
-          unstyled
-          class="border-default hover:bg-hover-dimmer flex gap-1 rounded-lg border p-1.5 pr-2.5 shadow-sm"
-          on:click={() => {
+        <button
+          type="button"
+          class="border-default hover:bg-hover-dimmer flex cursor-pointer gap-1 rounded-lg border p-1.5 pr-2.5 shadow-sm"
+          aria-expanded={referencesExpanded}
+          onclick={() => {
             referencesExpanded = !referencesExpanded;
           }}
         >
@@ -124,10 +139,20 @@
           />
           {totalRefs}
           {m.references()}
-        </Button>
+        </button>
       {/if}
     </div>
   </div>
+  {#snippet docBadge(number: number)}
+    <!-- Mirrors the inline citation pill so a pill's number visibly maps to
+         its chip; same look as the numbered legacy reference chips. -->
+    <span
+      class="border-default bg-secondary min-h-6 min-w-6 rounded-md border border-b-2 text-center font-mono text-xs leading-6 font-normal"
+      aria-hidden="true"
+    >
+      {number}
+    </span>
+  {/snippet}
   {#if referencesExpanded}
     <div class="mb-2 flex w-full flex-wrap gap-2 pt-2 md:pb-6">
       {#each message.references as reference, index (reference.id)}
@@ -138,24 +163,26 @@
         {/if}
       {/each}
 
-      {#each message.web_search_references as searchResult (searchResult.id)}
-        <!-- eslint-disable svelte/no-navigation-without-resolve -- external web search result URL -->
-        <a class="hover:bg-hover-default flex items-center gap-2" href={searchResult.url}>
-          <span
-            class="favicon-bg border-default inline-block h-6 w-6 rounded-md border p-0.5"
-            style:background-image="url({faviconService.getFavicon(searchResult.url)})"
-            aria-hidden="true"
-          ></span>
-          {searchResult.title}
-        </a>
-        <!-- eslint-enable svelte/no-navigation-without-resolve -->
-      {/each}
-
-      {#each mcpRefs as ref (ref.id)}
+      {#each mcpRefDocs as ref, docIndex (ref.id)}
         {@const info = readMeta(ref)}
-        {#if info.sourceType === "crawl-page" && /^https?:\/\//i.test(ref.uri)}
-          <!-- eslint-disable svelte/no-navigation-without-resolve -- external MCP crawl-page URL -->
+        {@const docNumber = docIndex + 1}
+        {#if info.infoBlobId}
+          <BlobPreview blob={blobForRef(info.infoBlobId, info.title)} let:showBlob>
+            <button
+              type="button"
+              class="hover:bg-hover-default border-default flex items-center gap-2 rounded-md border py-1 pr-2 pl-1 text-sm"
+              onclick={showBlob}
+            >
+              {@render docBadge(docNumber)}
+              {info.title}
+            </button>
+          </BlobPreview>
+        {:else if (info.sourceType === "crawl-page" || info.sourceType === "web-search") && /^https?:\/\//i.test(ref.uri)}
+          <!-- Web pages the answer cites: crawled pages and web-search results
+               both link out to the source URL with a favicon chip. -->
+          <!-- eslint-disable svelte/no-navigation-without-resolve -- external source URL from MCP reference -->
           <a class="hover:bg-hover-default flex items-center gap-2" href={ref.uri}>
+            {@render docBadge(docNumber)}
             <span
               class="favicon-bg border-default inline-block h-6 w-6 rounded-md border p-0.5"
               style:background-image="url({faviconService.getFavicon(ref.uri)})"
@@ -175,9 +202,10 @@
             {#snippet children({ showSnippet }: { showSnippet: () => void })}
               <button
                 type="button"
-                class="hover:bg-hover-default border-default flex items-center gap-2 rounded-md border px-2 py-1 text-sm"
+                class="hover:bg-hover-default border-default flex items-center gap-2 rounded-md border py-1 pr-2 pl-1 text-sm"
                 onclick={showSnippet}
               >
+                {@render docBadge(docNumber)}
                 {info.title}{info.section ? ` → ${info.section}` : ""}
               </button>
             {/snippet}

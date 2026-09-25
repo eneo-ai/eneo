@@ -1,9 +1,10 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
+from sqlalchemy.inspection import inspect as sa_inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.ai_models_table import CompletionModels
@@ -18,7 +19,6 @@ from eneo.database.tables.tenant_table import Tenants
 
 if TYPE_CHECKING:
     from eneo.database.tables.mcp_tool_references_table import McpToolReference
-    from eneo.database.tables.web_search_results_table import WebSearchResult
 
 
 class Questions(BasePublic):
@@ -26,8 +26,21 @@ class Questions(BasePublic):
     answer: Mapped[str] = mapped_column()
     num_tokens_question: Mapped[int] = mapped_column()
     num_tokens_answer: Mapped[int] = mapped_column()
+    context_prompt_tokens: Mapped[Optional[int]] = mapped_column(nullable=True)
+    context_completion_tokens: Mapped[Optional[int]] = mapped_column(nullable=True)
+    skill_context_tokens: Mapped[Optional[int]] = mapped_column(nullable=True)
     tool_calls: Mapped[Optional[list[object]]] = mapped_column(JSONB, nullable=True)
     reasoning: Mapped[Optional[str]] = mapped_column(nullable=True)
+    skill_provenance: Mapped[Optional[list[dict[str, object]]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    skill_activation_data: Mapped[Optional[dict[str, object]]] = mapped_column(
+        "skill_activation",
+        JSONB,
+        nullable=True,
+        deferred=True,
+        deferred_raiseload=True,
+    )
 
     # Foreign keys
     completion_model_id: Mapped[Optional[UUID]] = mapped_column(
@@ -65,12 +78,18 @@ class Questions(BasePublic):
     questions_files: Mapped[list["QuestionsFiles"]] = relationship(
         order_by="QuestionsFiles.file_id"
     )
-    web_search_results: Mapped[list["WebSearchResult"]] = relationship(
-        order_by="WebSearchResult.score.desc()"
-    )
     mcp_tool_references: Mapped[list["McpToolReference"]] = relationship(
         order_by="[McpToolReference.tool_call_id, McpToolReference.order]"
     )
+
+    @property
+    def skill_activation(self) -> Optional[dict[str, object]]:
+        """Expose activation evidence only when an explicit query loaded it."""
+        state = sa_inspect(self)
+        assert state is not None
+        if "skill_activation_data" in state.unloaded:
+            return None
+        return self.skill_activation_data
 
 
 class InfoBlobReferences(BaseCrossReference):
@@ -96,3 +115,5 @@ class QuestionsFiles(BaseCrossReference):
     type: Mapped[str] = mapped_column()
 
     file: Mapped[Files] = relationship()
+
+    __table_args__ = (Index("ix_questions_files_file_id", "file_id"),)

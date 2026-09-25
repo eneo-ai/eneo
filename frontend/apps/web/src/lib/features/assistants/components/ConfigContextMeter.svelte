@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { AlertTriangle } from "lucide-svelte";
+  import { intlLocale } from "$lib/core/formatting/dateTime";
+  import { TriangleAlert } from "@lucide/svelte";
   import ContextMeterFill from "$lib/components/ContextMeterFill.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
 
   type Model = { id: string; max_input_tokens: number };
   type Props = {
@@ -35,7 +35,7 @@
     ceiling > 0 && used > ceiling ? "over" : ceiling > 0 && used > ceiling * 0.8 ? "near" : "ok"
   );
 
-  const nf = $derived(new Intl.NumberFormat(getLocale() === "sv" ? "sv-SE" : "en-US"));
+  const nf = $derived(new Intl.NumberFormat(intlLocale()));
 
   $effect(() => {
     // Read model, prompt and attachments synchronously so Svelte re-runs this
@@ -127,7 +127,7 @@
         role="status"
         aria-live="polite"
       >
-        <AlertTriangle class="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+        <TriangleAlert class="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
         {m.config_attachment_meter_over_budget()}
       </p>
     {/if}

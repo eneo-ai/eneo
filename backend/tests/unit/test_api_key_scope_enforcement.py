@@ -33,6 +33,7 @@ from eneo.users.user import UserState
 from tests.unit.api_key_test_utils import (
     make_api_key,
     route_has_dependency_named,
+    route_is_session_only,
     runtime_router_routes,
 )
 
@@ -173,7 +174,7 @@ class TestScopeEnforcementUnit:
         with pytest.raises(ApiKeyValidationError) as exc_info:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
-        assert "different scope" in exc_info.value.message
+        assert "outside this key's scope" in exc_info.value.message
 
     @pytest.mark.asyncio
     async def test_space_key_space_resource_exact_match(self):
@@ -743,6 +744,9 @@ class TestScopeRouteGuardCoverage:
         for route in runtime_router_routes():
             prefix = getattr(route, "path", "")
             if prefix.startswith("/admin"):
+                if route_is_session_only(route):
+                    # Rejects API keys outright; the session dependency is the guard.
+                    continue
                 has_scope_dep = route_has_dependency_named(route, "_scope_check_dep")
                 admin_routes_found.append((prefix, has_scope_dep))
                 assert has_scope_dep, (
@@ -866,11 +870,7 @@ class TestScopeRouteGuardCoverage:
         for route in runtime_router_routes():
             path = getattr(route, "path", "")
             methods = getattr(route, "methods", set())
-            if (
-                path == "/users/"
-                or path.startswith("/users/admin")
-                or path.startswith("/users/api-keys")
-            ):
+            if path == "/users/" or path.startswith("/users/admin"):
                 has_scope_dep = route_has_dependency_named(route, "_scope_check_dep")
                 has_admin_key_dep = route_has_dependency_named(
                     route, "_api_key_permission_dep"
@@ -879,8 +879,8 @@ class TestScopeRouteGuardCoverage:
                     (path, sorted(methods), has_scope_dep, has_admin_key_dep)
                 )
 
-        assert len(admin_routes) >= 5, (
-            f"Expected at least 5 user admin-gated routes, found {len(admin_routes)}"
+        assert len(admin_routes) >= 4, (
+            f"Expected at least 4 user admin-gated routes, found {len(admin_routes)}"
         )
         for path, methods, has_scope_dep, has_admin_key_dep in admin_routes:
             assert has_scope_dep, (
@@ -1396,20 +1396,31 @@ class TestScopeErrorMessages:
         assert "admin" in msg.lower()
 
     @pytest.mark.asyncio
-    async def test_space_denial_mentions_different_scope(self):
-        """Space scope denial should mention the resource belongs to a different scope."""
+    @pytest.mark.parametrize("resource_type", ["assistant", "info_blob", "prompt"])
+    @pytest.mark.parametrize("resource_exists", [False, True])
+    async def test_space_denial_covers_missing_and_out_of_scope_resources(
+        self, resource_type: str, resource_exists: bool
+    ):
         key_space = uuid4()
         other_space = uuid4()
-        svc = _make_user_service(session_scalar_return=other_space)
+        svc = _make_user_service(
+            session_scalar_return=other_space if resource_exists else None
+        )
         key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=key_space)
         request = _scope_request(path_params={"id": str(uuid4())})
-        scope_config = {"resource_type": "assistant", "path_param": "id"}
+        scope_config = {
+            "resource_type": resource_type,
+            "path_param": None if resource_type == "info_blob" else "id",
+        }
 
         with pytest.raises(ApiKeyValidationError) as exc_info:
             await svc._enforce_api_key_scope(request, key, scope_config)
-        msg = exc_info.value.message
-        assert str(key_space) in msg
-        assert "different scope" in msg.lower()
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.code == "insufficient_scope"
+        assert exc_info.value.message == (
+            f"API key is scoped to space '{key_space}'. "
+            "The requested resource was not found or is outside this key's scope."
+        )
 
     @pytest.mark.asyncio
     async def test_assistant_denial_explains_scope_limit(self):
@@ -1481,7 +1492,7 @@ class TestPromptScopeResolver:
         with pytest.raises(ApiKeyValidationError) as exc_info:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
-        assert "different scope" in exc_info.value.message
+        assert "outside this key's scope" in exc_info.value.message
 
     @pytest.mark.asyncio
     async def test_prompt_with_no_associated_spaces_fails_closed(self):

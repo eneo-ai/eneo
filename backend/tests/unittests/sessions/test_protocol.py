@@ -1,12 +1,17 @@
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from eneo.questions.question import Question, ToolCallInfo
+from eneo.questions.question import Message, Question, ToolCallInfo
 from eneo.questions.question_protocol import to_question_public
 from eneo.sessions.session import SessionInDB, SessionMetadataPublic
 from eneo.sessions.session_protocol import (
     to_session_metadata_paginated_response,
     to_sessions_paginated_response,
+)
+from eneo.skills.domain.skill import (
+    SkillActivationEvidenceV1,
+    SkillExecutionReference,
+    SkillTurnEffectiveMode,
 )
 
 
@@ -120,6 +125,13 @@ def test_metadata_pagination_forward_limit():
 
 def test_question_public_omits_persisted_tool_result():
     now = datetime.now(timezone.utc)
+    skill_reference = SkillExecutionReference(
+        skill_id=uuid4(),
+        skill_revision_id=uuid4(),
+        revision_number=2,
+        content_digest="a" * 64,
+        position=0,
+    )
     question = Question(
         id=uuid4(),
         created_at=now,
@@ -128,6 +140,9 @@ def test_question_public_omits_persisted_tool_result():
         answer="Answer",
         num_tokens_question=1,
         num_tokens_answer=1,
+        context_prompt_tokens=21,
+        context_completion_tokens=3,
+        skill_context_tokens=5,
         tenant_id=uuid4(),
         session_id=uuid4(),
         tool_calls=[
@@ -139,6 +154,18 @@ def test_question_public_omits_persisted_tool_result():
                 mcp_tool_name="server__tool",
             )
         ],
+        skill_provenance=[skill_reference],
+        skill_activation=SkillActivationEvidenceV1(
+            effective_mode=SkillTurnEffectiveMode.EAGER,
+            available=(),
+            blocked=(),
+            initially_active=(),
+            selected_model_id=uuid4(),
+            selected_model_route="gpt-4o",
+            skill_context_tokens=0,
+            skill_context_token_limit=12_800,
+            token_count_source="litellm",
+        ),
     )
 
     public = to_question_public(question)
@@ -147,3 +174,21 @@ def test_question_public_omits_persisted_tool_result():
     assert public.tool_calls[0].result is None
     assert question.tool_calls is not None
     assert question.tool_calls[0].result == "large upstream payload"
+    assert public.skill_provenance == [skill_reference]
+    assert public.context_prompt_tokens == 21
+    assert public.context_completion_tokens == 3
+    assert public.skill_context_tokens == 5
+    assert "skill_activation" not in public.model_dump()
+
+
+def test_message_schema_documents_legacy_and_cumulative_context_usage():
+    properties = Message.model_json_schema()["properties"]
+
+    assert (
+        "Cumulative prompt tokens" in properties["num_tokens_question"]["description"]
+    )
+    assert (
+        "Null for rows saved before"
+        in properties["context_prompt_tokens"]["description"]
+    )
+    assert "do not add it" in properties["skill_context_tokens"]["description"]

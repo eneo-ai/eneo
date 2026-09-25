@@ -30,6 +30,9 @@ function mcpServer(id: string, name: string): Schema<"MCPServerPublicDict"> {
     description: null,
     http_url: null,
     http_auth_type: null,
+    purpose: "general",
+    is_enabled: true,
+    readiness_reason: null,
     tags: null,
     icon_url: null,
     security_classification: null,
@@ -38,6 +41,18 @@ function mcpServer(id: string, name: string): Schema<"MCPServerPublicDict"> {
 }
 
 const models = [model("a", "Alpha"), model("b", "Beta"), model("c", "Gamma")];
+const baseConfig: Schema<"EffectiveConfigPublic"> = {
+  models_enforced: false,
+  available_models: [],
+  locked_model: null,
+  default_model: null,
+  mcp_enforced: false,
+  available_mcp_servers: [],
+  default_disabled_mcp_server_ids: [],
+  prompt_locked: false,
+  default_reasoning_effort: null,
+  reasoning_effort_user_configurable: false
+};
 
 describe("effective assistant config", () => {
   it("leaves models unchanged when policy is not enforced", () => {
@@ -47,6 +62,7 @@ describe("effective assistant config", () => {
   it("filters models to the policy allow-list when enforced", () => {
     expect(
       effectiveAssistantModels(models, {
+        ...baseConfig,
         models_enforced: true,
         available_models: [model("b", "Beta")],
         locked_model: null,
@@ -61,6 +77,7 @@ describe("effective assistant config", () => {
 
   it("prefers the full locked model from the space list", () => {
     const locked = lockedAssistantModel(models, {
+      ...baseConfig,
       models_enforced: true,
       available_models: [],
       locked_model: model("c", "Sparse Gamma"),
@@ -75,6 +92,7 @@ describe("effective assistant config", () => {
 
   it("exposes policy lock booleans and MCP servers", () => {
     const config = {
+      ...baseConfig,
       models_enforced: true,
       available_models: [],
       locked_model: null,

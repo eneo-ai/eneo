@@ -1,13 +1,15 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey
+import sqlalchemy as sa
+from sqlalchemy import ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.base_class import BaseCrossReference, BasePublic
+from eneo.database.tables.capabilities_table import AssistantCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.icons_table import Icons
@@ -19,6 +21,9 @@ from eneo.database.tables.websites_table import Websites
 
 
 class Assistants(BasePublic):
+    capabilities: Mapped[list[AssistantCapabilities]] = relationship(
+        lazy="selectin", cascade="all, delete-orphan"
+    )
     name: Mapped[str] = mapped_column()
     completion_model_kwargs: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     guardrail_active: Mapped[Optional[bool]] = mapped_column()
@@ -27,6 +32,18 @@ class Assistants(BasePublic):
     published: Mapped[bool] = mapped_column()
     description: Mapped[Optional[str]] = mapped_column()
     insight_enabled: Mapped[bool] = mapped_column(default=False)
+    # When False, an attached file whose original is available via signed URL is
+    # surfaced to the model as that URL only (text not inlined) — e.g. to keep a
+    # large CSV from blowing the context window. Default True preserves the
+    # historical inline-the-extracted-text behavior for existing assistants.
+    inline_file_text: Mapped[bool] = mapped_column(default=True, server_default="true")
+    # How attached knowledge reaches the model: "tool" exposes it as a
+    # searchable MCP tool the model calls on demand; "inject" retrieves on
+    # every turn and packs chunks into the prompt (legacy behavior, also the
+    # runtime fallback for models without tool calling).
+    knowledge_mode: Mapped[str] = mapped_column(
+        default="inject", server_default="inject"
+    )
     data_retention_days: Mapped[Optional[int]] = mapped_column()
     metadata_json: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     # TODO: refactor since this is a somewhat weird solution having a
@@ -85,7 +102,25 @@ class Assistants(BasePublic):
         viewonly=True
     )
 
-    __table_args__ = {"extend_existing": True}  # Temporary
+    __table_args__ = (
+        Index(
+            "uq_assistants_space_id_id",
+            "space_id",
+            "id",
+            unique=True,
+        ),
+        # Serves the keyset walk in get_personal_defaults_page: pages order by
+        # (created_at, id) and only default assistants qualify, so a partial
+        # index gives every page an ordered range scan instead of re-sorting
+        # the tenant's remaining rows.
+        Index(
+            "ix_assistants_default_created_at_id",
+            "created_at",
+            "id",
+            postgresql_where=sa.text("is_default = true"),
+        ),
+        {"extend_existing": True},  # Temporary
+    )
 
 
 class AssistantsGroups(BaseCrossReference):
@@ -116,6 +151,8 @@ class AssistantsFiles(BaseCrossReference):
 
     # Relationships
     file: Mapped[Files] = relationship()
+
+    __table_args__ = (Index("ix_assistants_files_file_id", "file_id"),)
 
 
 class AssistantIntegrationKnowledge(BasePublic):

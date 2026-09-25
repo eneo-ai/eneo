@@ -149,12 +149,17 @@ export function ChatView({
   const { featureFlags, user } = useAppContext();
   const queryClient = useQueryClient();
   const attachments = useAttachments(partner);
-  const canUseWebSearch = featureFlags.showWebSearch && partner.type === "default-assistant";
+  const canUseWebSearch =
+    featureFlags.showWebSearch &&
+    partner.type === "default-assistant" &&
+    (partner.effectiveConfig?.enabled_capabilities?.includes("web_search") ?? false);
   const mcpServers = useMemo(() => chatPartnerMcpServers(partner), [partner]);
 
   const [input, setInput] = useState("");
   const [streamErrorCode, setStreamErrorCode] = useState<number | null>(null);
-  const [useWebSearch, setUseWebSearch] = useState(false);
+  const [useWebSearch, setUseWebSearch] = useState(
+    () => !(partner.effectiveConfig?.default_disabled_capabilities?.includes("web_search") ?? false)
+  );
   const [autoAcceptTools, setAutoAcceptTools] = useState(autoAcceptToolsPreference);
   const [disabledMcpServerIds, setDisabledMcpServerIds] = useState<Set<string>>(
     () => new Set(defaultDisabledMcpServerIds(partner))
@@ -343,7 +348,10 @@ export function ChatView({
       group_chat_id: !continuing && partner.type === "group-chat" ? partner.id : null,
       files: attachments.fileIds.map((id) => ({ id })),
       tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
-      use_web_search: canUseWebSearch && useWebSearch ? true : undefined,
+      disabled_capabilities:
+        partner.type === "default-assistant" && (!canUseWebSearch || !useWebSearch)
+          ? ["web_search"]
+          : undefined,
       ...mcpOptions
     };
 

@@ -29,5 +29,11 @@
  * Without these steps, the error will fall back to the backend's English
  * message — functional but not localized.
  */
-export { getErrorMessage } from "./getErrorMessage";
+export {
+  getErrorMessage,
+  getErrorCodeMessage,
+  SKILL_EXECUTION_BLOCK_CONFLICT,
+  SKILL_STILL_ATTACHED
+} from "./getErrorMessage";
 export { toastError } from "./toastError";
+export { toAppError } from "./toAppError";

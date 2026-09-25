@@ -10,12 +10,12 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.domain.constants import (
+    DEFAULT_RETENTION_DAYS,
     MAX_DESCRIPTION_LENGTH,
     MAX_ERROR_MESSAGE_LENGTH,
+    MAX_RETENTION_DAYS,
     MAX_USER_AGENT_LENGTH,
     MIN_RETENTION_DAYS,
-    MAX_RETENTION_DAYS,
-    DEFAULT_RETENTION_DAYS,
 )
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
@@ -463,6 +463,9 @@ def test_action_types_enum():
     assert ActionType.COMPLETION_MODEL_MIGRATED == "completion_model_migrated"
     assert ActionType.EMBEDDING_MODEL_UPDATED == "embedding_model_updated"
     assert ActionType.TRANSCRIPTION_MODEL_UPDATED == "transcription_model_updated"
+    assert ActionType.IMAGE_MODEL_CREATED == "image_model_created"
+    assert ActionType.IMAGE_MODEL_UPDATED == "image_model_updated"
+    assert ActionType.IMAGE_MODEL_DELETED == "image_model_deleted"
     assert (
         ActionType.SECURITY_CLASSIFICATION_CREATED == "security_classification_created"
     )
@@ -499,6 +502,7 @@ def test_entity_types_enum():
     assert EntityType.COMPLETION_MODEL == "completion_model"
     assert EntityType.EMBEDDING_MODEL == "embedding_model"
     assert EntityType.TRANSCRIPTION_MODEL == "transcription_model"
+    assert EntityType.IMAGE_MODEL == "image_model"
     # MCP entity types
     assert EntityType.MCP_SERVER == "mcp_server"
     assert EntityType.MCP_SERVER_TOOL == "mcp_server_tool"

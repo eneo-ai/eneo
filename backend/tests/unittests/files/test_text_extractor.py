@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pdfminer.pdfdocument import PDFPasswordIncorrect
 
 from eneo.files.text import (
     CorruptFileError,
@@ -602,6 +603,17 @@ class TestTextExtractorErrorHandling:
 
             assert exc_info.value.code == "CORRUPT"
             assert "corrupt" in exc_info.value.message.lower()
+
+    def test_extract_from_pdf_raises_encrypted_error_on_password_failure(self):
+        with patch(
+            "eneo.files.text.pdfplumber.open",
+            side_effect=PDFPasswordIncorrect,
+        ):
+            with pytest.raises(EncryptedFileError) as exc_info:
+                TextExtractor.extract_from_pdf(Path("protected.pdf"))
+
+        assert exc_info.value.code == "ENCRYPTED"
+        assert "protected.pdf" in exc_info.value.message
 
     def test_extract_from_docx_raises_corrupt_error_on_bad_zip(self, tmp_path):
         """Should raise CorruptFileError for invalid DOCX (bad ZIP)."""

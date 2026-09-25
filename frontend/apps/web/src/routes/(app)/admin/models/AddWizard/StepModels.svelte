@@ -11,7 +11,7 @@
 
 <script lang="ts">
   import { untrack } from "svelte";
-  import { ArrowLeft, TriangleAlert } from "lucide-svelte";
+  import { ArrowLeft, TriangleAlert } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo";
@@ -138,7 +138,9 @@
       ? m.model_type_completion()
       : modelType === "embedding"
         ? m.model_type_embedding()
-        : m.model_type_transcription()
+        : modelType === "image"
+          ? m.model_type_image()
+          : m.model_type_transcription()
   );
 
   // --- Handlers ----------------------------------------------------------

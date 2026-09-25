@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.allowed_origins import get_origin_callback as origin_callback
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2 as ApiKeysV2Table
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.main.config import get_settings, set_settings
@@ -161,45 +162,25 @@ async def test_api_key_crud_flow(client, default_user_token):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_legacy_user_api_key_endpoints_still_work(client, default_user_token):
+async def test_legacy_api_key_endpoints_removed(client, default_user_token):
+    """The v1 key endpoints are retired; only /api/v1/api-keys mints keys."""
     post_response = await client.post(
         "/api/v1/users/api-keys/",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
-    assert post_response.status_code == 200, post_response.text
-    post_payload = post_response.json()
-    assert post_payload["key"].startswith("inp_")
+    assert post_response.status_code == 404, post_response.text
 
-    post_auth = await client.get(
-        "/api/v1/assistants/",
-        headers={"X-API-Key": post_payload["key"]},
-    )
-    assert post_auth.status_code == 200
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_legacy_assistant_api_key_endpoint_still_works(
-    client, default_user_token
-):
-    assistants_response = await client.get(
-        "/api/v1/assistants/",
+    revoke_response = await client.delete(
+        "/api/v1/users/api-keys/legacy",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
-    assert assistants_response.status_code == 200, assistants_response.text
-    assistants_payload = assistants_response.json()
-    assistant_items = assistants_payload.get("items", [])
-    if not assistant_items:
-        pytest.skip("No assistants available in integration seed data.")
+    assert revoke_response.status_code == 404, revoke_response.text
 
-    assistant_id = assistant_items[0]["id"]
-    legacy_response = await client.get(
-        f"/api/v1/assistants/{assistant_id}/api-keys/",
+    assistant_key_response = await client.get(
+        f"/api/v1/assistants/{uuid4()}/api-keys/",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
-    assert legacy_response.status_code == 200, legacy_response.text
-    payload = legacy_response.json()
-    assert payload["key"].startswith("ina_")
+    assert assistant_key_response.status_code == 404, assistant_key_response.text
 
 
 @pytest.mark.integration
@@ -209,6 +190,10 @@ async def test_pk_origin_guardrail(
 ):
     await _add_allowed_origin(
         db_container, default_user.tenant_id, "https://app.example.com"
+    )
+    # Let CORS pass so this test exercises the key's narrower origin allowlist.
+    await _add_allowed_origin(
+        db_container, default_user.tenant_id, "https://evil.example.com"
     )
 
     create_response = await client.post(
@@ -409,6 +394,128 @@ async def test_admin_api_key_policy_update(
     payload = response.json()
     assert payload["require_expiration"] is True
     assert payload["max_expiration_days"] == 90
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_admin_can_relax_tenant_origin_requirement(
+    client,
+    default_user_token,
+):
+    response = await client.patch(
+        "/api/v1/admin/api-key-policy",
+        json={"require_tenant_allowed_origin": False},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["require_tenant_allowed_origin"] is False
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_same_origin_password_login_without_tenant_origin(
+    client, patch_auth_service_jwt
+):
+    origin = "https://api.example.com"
+    client.base_url = origin
+    response = await client.post(
+        "/api/v1/users/login/token/",
+        data={"username": "test@example.com", "password": "IntegrationPass123!"},
+        headers={"Origin": origin},
+    )
+    assert response.status_code == 200, response.text
+    token = response.json()["access_token"]
+
+    response = await client.get(
+        "/api/v1/users/me/",
+        headers={"Origin": origin, "Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+
+    response = await client.post(
+        "/api/v1/users/login/token/",
+        data={"username": "test@example.com", "password": "IntegrationPass123!"},
+        headers={"Origin": "https://other.example.com"},
+    )
+    assert response.status_code == 400, response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("same_origin", [False, True])
+async def test_public_key_cors_obeys_tenant_policy_and_revocation(
+    client, default_user_token, monkeypatch, same_origin
+):
+    monkeypatch.setattr(origin_callback, "_preflight_key_origin_cache_expires_at", 0.0)
+    origin = f"https://widget-{uuid4().hex}.example.com"
+    if same_origin:
+        client.base_url = origin
+    admin_headers = {"Authorization": f"Bearer {default_user_token}"}
+    policy_url = "/api/v1/admin/api-key-policy"
+    response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Widget CORS",
+            "key_type": "pk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "allowed_origins": [origin],
+        },
+        headers=admin_headers,
+    )
+    assert response.status_code == 201, response.text
+    key_id = response.json()["api_key"]["id"]
+    key_headers = {"Origin": origin, "X-API-Key": response.json()["secret"]}
+    preflight_headers = {
+        "Origin": origin,
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "x-api-key",
+    }
+
+    response = await client.get(_AUTH_ENDPOINT, headers=key_headers)
+    assert response.status_code == 400, response.text
+
+    response = await client.patch(
+        policy_url, json={"require_tenant_allowed_origin": False}, headers=admin_headers
+    )
+    assert response.status_code == 200, response.text
+    # Updating another policy field must preserve the administrator's opt-in.
+    response = await client.patch(
+        policy_url, json={"max_delegation_depth": 2}, headers=admin_headers
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["require_tenant_allowed_origin"] is False
+
+    response = await client.options(_AUTH_ENDPOINT, headers=preflight_headers)
+    assert response.status_code == 200, response.text
+    assert response.headers["access-control-allow-origin"] == origin
+    response = await client.get(_AUTH_ENDPOINT, headers=key_headers)
+    assert response.status_code == 200, response.text
+    assert response.headers["access-control-allow-origin"] == origin
+
+    # A cached preflight must not override a subsequent policy change.
+    response = await client.patch(
+        policy_url, json={"require_tenant_allowed_origin": True}, headers=admin_headers
+    )
+    assert response.status_code == 200, response.text
+    response = await client.get(
+        _AUTH_ENDPOINT, headers={**key_headers, **preflight_headers}
+    )
+    assert response.status_code == 400, response.text
+
+    response = await client.patch(
+        policy_url, json={"require_tenant_allowed_origin": False}, headers=admin_headers
+    )
+    assert response.status_code == 200, response.text
+    response = await client.post(
+        f"/api/v1/api-keys/{key_id}/revoke",
+        json={"reason_code": "security_concern"},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200, response.text
+    response = await client.get(_AUTH_ENDPOINT, headers=key_headers)
+    assert response.status_code == 400, response.text
+    assert "access-control-allow-origin" not in response.headers
 
 
 @pytest.mark.integration
@@ -818,21 +925,40 @@ async def test_user_list_pagination_and_filtering(client, default_user_token):
         assert response.status_code == 201, response.text
 
     page_one = await client.get(
-        "/api/v1/api-keys?limit=1",
+        "/api/v1/api-keys?limit=2",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert page_one.status_code == 200, page_one.text
     page_one_payload = page_one.json()
-    assert len(page_one_payload["items"]) == 1
+    assert len(page_one_payload["items"]) == 2
     assert page_one_payload["total_count"] >= 3
     assert page_one_payload["next_cursor"] is not None
+    assert [item["name"] for item in page_one_payload["items"]] == [
+        "Paged PK",
+        "Paged SK 2",
+    ]
 
+    # The cursor anchors on the last emitted row: the immediately older key
+    # must appear on the next page, not be silently skipped.
     page_two = await client.get(
-        f"/api/v1/api-keys?limit=1&cursor={page_one_payload['next_cursor']}",
+        f"/api/v1/api-keys?limit=2&cursor={page_one_payload['next_cursor']}",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert page_two.status_code == 200, page_two.text
-    assert len(page_two.json()["items"]) == 1
+    page_two_payload = page_two.json()
+    assert len(page_two_payload["items"]) >= 1
+    assert page_two_payload["items"][0]["name"] == "Paged SK 1"
+
+    # And stepping back returns the exact page we came from.
+    page_back = await client.get(
+        f"/api/v1/api-keys?limit=2&cursor={page_two_payload['previous_cursor']}&previous=true",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert page_back.status_code == 200, page_back.text
+    assert [item["name"] for item in page_back.json()["items"]] == [
+        "Paged PK",
+        "Paged SK 2",
+    ]
 
     filtered = await client.get(
         "/api/v1/api-keys?key_type=pk_",
@@ -881,6 +1007,160 @@ async def test_admin_list_filtering_and_total_count(client, default_user_token):
     assert payload["total_count"] >= len(payload["items"])
     assert any(item["id"] == key_id for item in payload["items"])
     assert all(item["key_type"] == "sk_" for item in payload["items"])
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_admin_list_cursor_is_total_ordered_and_round_trips_full_pages(
+    client, db_container, default_user_token
+):
+    marker = f"cursor-tie-{uuid4().hex[:8]}"
+    created_ids: list[str] = []
+    for index in range(5):
+        response = await client.post(
+            "/api/v1/api-keys",
+            json={
+                "name": f"{marker}-{index}",
+                "key_type": "sk_",
+                "permission": "read",
+                "scope_type": "tenant",
+            },
+            headers={"Authorization": f"Bearer {default_user_token}"},
+        )
+        assert response.status_code == 201, response.text
+        created_ids.append(response.json()["api_key"]["id"])
+
+    shared_created_at = datetime.now(timezone.utc) - timedelta(days=1)
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.update(ApiKeysV2Table)
+            .where(ApiKeysV2Table.id.in_([UUID(key_id) for key_id in created_ids]))
+            .values(created_at=shared_created_at)
+        )
+
+    pages: list[dict] = []
+    cursor: str | None = None
+    while True:
+        params = f"search={marker}&limit=2"
+        if cursor is not None:
+            params += f"&cursor={cursor}"
+        response = await client.get(
+            f"/api/v1/admin/api-keys?{params}",
+            headers={"Authorization": f"Bearer {default_user_token}"},
+        )
+        assert response.status_code == 200, response.text
+        page = response.json()
+        pages.append(page)
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+
+    expected = sorted(created_ids, key=lambda value: UUID(value).int, reverse=True)
+    emitted = [item["id"] for page in pages for item in page["items"]]
+    assert emitted == expected
+    assert len(emitted) == len(set(emitted)) == 5
+    assert [len(page["items"]) for page in pages] == [2, 2, 1]
+
+    back_to_second = await client.get(
+        "/api/v1/admin/api-keys",
+        params={
+            "search": marker,
+            "limit": 2,
+            "cursor": pages[2]["previous_cursor"],
+            "previous": True,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert back_to_second.status_code == 200, back_to_second.text
+    back_to_second_page = back_to_second.json()
+    assert [item["id"] for item in back_to_second_page["items"]] == expected[2:4]
+
+    back_to_first = await client.get(
+        "/api/v1/admin/api-keys",
+        params={
+            "search": marker,
+            "limit": 2,
+            "cursor": back_to_second_page["previous_cursor"],
+            "previous": True,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert back_to_first.status_code == 200, back_to_first.text
+    assert [item["id"] for item in back_to_first.json()["items"]] == expected[:2]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_admin_module_binding_filter_uses_effective_key_eligibility(
+    client, db_container, default_user_token
+):
+    marker = f"module-eligible-{uuid4().hex[:8]}"
+
+    async def create_key(
+        suffix: str,
+        *,
+        ownership: str = "service",
+        key_type: str = "sk_",
+        permission: str = "write",
+    ) -> str:
+        payload: dict[str, object] = {
+            "name": f"{marker}-{suffix}",
+            "ownership": ownership,
+            "key_type": key_type,
+            "permission": permission,
+            "scope_type": "tenant",
+        }
+        if key_type == "sk_" and ownership == "service" and permission != "read":
+            payload["allowed_ips"] = ["203.0.113.0/24"]
+        if key_type == "pk_":
+            payload["allowed_origins"] = ["https://module.example.com"]
+        response = await client.post(
+            "/api/v1/api-keys",
+            json=payload,
+            headers={"Authorization": f"Bearer {default_user_token}"},
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["api_key"]["id"]
+
+    eligible_write = await create_key("write")
+    eligible_admin = await create_key("admin", permission="admin")
+    await create_key("user-owned", ownership="user")
+    await create_key("read-only", permission="read")
+    await create_key("public", key_type="pk_", permission="read")
+    expired = await create_key("expired")
+    rotated_out = await create_key("rotated-out")
+
+    now = datetime.now(timezone.utc)
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.update(ApiKeysV2Table)
+            .where(ApiKeysV2Table.id == UUID(expired))
+            .values(expires_at=now - timedelta(minutes=1), state="active")
+        )
+        await session.execute(
+            sa.update(ApiKeysV2Table)
+            .where(ApiKeysV2Table.id == UUID(rotated_out))
+            .values(rotation_grace_until=now - timedelta(minutes=1), state="active")
+        )
+
+    response = await client.get(
+        "/api/v1/admin/api-keys",
+        params={
+            "search": marker,
+            "limit": 20,
+            "eligible_for_module_binding": True,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert {item["id"] for item in payload["items"]} == {
+        eligible_write,
+        eligible_admin,
+    }
+    assert payload["total_count"] == 2
 
 
 @pytest.mark.integration
@@ -1056,7 +1336,6 @@ async def test_admin_usage_endpoint_returns_key_events(
     owner_user_id = UUID(payload["api_key"]["owner_user_id"])
 
     settings = get_settings()
-    previous_sample_rate = settings.api_key_used_audit_sample_rate
     patched = settings.model_copy(update={"api_key_used_audit_sample_rate": 1.0})
     set_settings(patched)
 
@@ -1124,11 +1403,9 @@ async def test_admin_usage_endpoint_returns_key_events(
             item["action"] == "api_key_auth_failed" for item in usage_payload["items"]
         )
     finally:
-        set_settings(
-            settings.model_copy(
-                update={"api_key_used_audit_sample_rate": previous_sample_rate}
-            )
-        )
+        # Reinstall the original object, not a copy: later tests mutate the
+        # session's settings instance and the app must keep reading it.
+        set_settings(settings)
 
 
 @pytest.mark.integration

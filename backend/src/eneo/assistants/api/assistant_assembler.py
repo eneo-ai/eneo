@@ -21,6 +21,9 @@ from eneo.files.file_models import (
     Limit,
 )
 from eneo.files.text import TextMimeTypes
+from eneo.governance_policy.domain.policy_resolver import (
+    select_effective_inline_file_text,
+)
 from eneo.integration.presentation.assemblers.integration_knowledge_assembler import (
     IntegrationKnowledgeAssembler,
 )
@@ -87,7 +90,7 @@ class AssistantAssembler:
         max_size = settings.attachment_max_size_bytes
         return FileRestrictions(
             accepted_file_types=[
-                AcceptedFileType(mimetype=mimetype, size_limit=max_size)
+                AcceptedFileType.for_mimetype(mimetype=mimetype, size_limit=max_size)
                 for mimetype in TextMimeTypes.values()
             ],
             limit=Limit(
@@ -132,10 +135,17 @@ class AssistantAssembler:
                 )
                 for server in effective_config.available_mcp_servers
             ],
+            enabled_capabilities=effective_config.enabled_capabilities,
+            available_capabilities=effective_config.available_capabilities,
+            default_disabled_capabilities=effective_config.default_disabled_capabilities,
             default_disabled_mcp_server_ids=list(
                 effective_config.default_disabled_mcp_server_ids
             ),
             prompt_locked=effective_config.prompt_enforced,
+            default_reasoning_effort=effective_config.default_reasoning_effort,
+            reasoning_effort_user_configurable=(
+                effective_config.reasoning_effort_user_configurable
+            ),
         )
 
     def from_assistant_to_model(
@@ -225,6 +235,8 @@ class AssistantAssembler:
                 MCPToolSetting(tool_id=tool_id, is_enabled=is_enabled)
                 for tool_id, is_enabled in assistant.mcp_tools
             ],
+            enabled_capabilities=assistant.enabled_capabilities,
+            available_capabilities=assistant.available_capabilities,
             completion_model=completion_model,
             completion_model_kwargs=assistant.completion_model_kwargs,
             logging_enabled=assistant.logging_enabled,
@@ -233,6 +245,11 @@ class AssistantAssembler:
             permissions=permissions,
             description=assistant.description,
             insight_enabled=assistant.insight_enabled,
+            # Governed value so the chat surfaces the mode the ask will use.
+            inline_file_text=select_effective_inline_file_text(
+                assistant.inline_file_text, effective_config
+            ),
+            knowledge_mode=assistant.knowledge_mode,
             type=assistant.type,
             data_retention_days=assistant.data_retention_days,
             metadata_json=assistant.metadata_json,

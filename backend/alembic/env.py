@@ -14,8 +14,12 @@ from eneo.main.config import get_settings
 # Alembic Config object, which provides access to values within the .ini file
 config = context.config
 
-# Interpret the config file for logging
-fileConfig(config.config_file_name)
+# Interpret the config file for logging. Keep existing loggers alive:
+# fileConfig defaults to disable_existing_loggers=True, which sets
+# .disabled on every already-imported application logger whenever a
+# migration runs in-process (tests, programmatic upgrades) and silently
+# swallows their records from then on.
+fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

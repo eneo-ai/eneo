@@ -57,6 +57,9 @@ export const EMPTY_POLICY: GovernancePolicy = {
   models_restriction: { enabled: false, models: [], provider_ids: [] },
   mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
   prompt_enforcement: { enabled: false, prompt_library_id: null },
+  reasoning_policy: { configured: false, default_effort: null, allow_user_override: false },
+  file_policy: { configured: false, inline_file_text: null },
+  skills: { bindings: [] },
   updated_at: null,
   updated_by_user_id: null
 };

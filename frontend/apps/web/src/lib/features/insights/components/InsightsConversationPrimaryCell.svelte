@@ -9,7 +9,7 @@
 <script lang="ts">
   import type { ConversationSparse } from "@eneo/eneo-js";
   import { getInsightsService } from "../InsightsService.svelte";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
 
   const insights = getInsightsService();
   export let conversation: ConversationSparse;
@@ -19,8 +19,8 @@
 
 <div class="flex w-full items-center justify-start">
   <Button
-    type="button"
-    on:click={() => insights.loadConversationPreview(conversation)}
+    variant="ghost"
+    onclick={() => insights.loadConversationPreview(conversation)}
     class="max-w-full"
     data-selected={isSelected}
     aria-pressed={isSelected}

@@ -1,0 +1,250 @@
+version: 2
+
+goal:
+  title: "File and Icon object-content adoption"
+  slug: "file-icon-object-content-adoption"
+  kind: specific
+  tranche: "Implement, verify, document, publish, and review Slice 2 without starting admin policy, InfoBlob, or Flow work."
+  status: active
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+continuity:
+  rotate_threads: false
+  rotation_authorized_by: null
+  rotate_after_completed_write_tasks: 2
+  rotate_after_hours: 6
+  rotate_when_slow: true
+  current_thread_id: "019f64db-c1fa-7250-97d3-e4c12a889f71"
+  previous_thread_id: null
+  rotation_count: 0
+  completed_write_tasks_in_thread: 0
+  handoff_note: notes/handoff.md
+  last_handoff_at: null
+  last_verified_revision: "bf0763a9558e14068b3c522fe212f731f9055a0b"
+
+active_task: T004
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Revalidate the accepted blueprint, live epic/task order, merged Slice 1 contract, and current File/Icon ownership and consumers."
+    inputs:
+      - "docs/adr/object-content-and-knowledge-ingestion.md from the accepted design worktree"
+      - "Epic #549 and tasks #551, #568, #569, and #571"
+      - "backend/src/eneo/object_content/"
+      - "backend/src/eneo/files/"
+      - "backend/src/eneo/icons/"
+      - "backend/src/eneo/database/tables/"
+      - "backend/tests/"
+    constraints:
+      - "Read-only except for PM-owned goal files."
+      - "Treat the blueprint and GitHub planning as evidence; verify current source."
+      - "Do not enter InfoBlob, admin policy, Flow, or crawler implementation."
+    expected_output:
+      - "Current and proposed canonical owners"
+      - "Variant and consumer inventory"
+      - "Migration and rollback boundary"
+      - "First RED behavior"
+      - "Validation map"
+    receipt:
+      result: done
+      summary: "Confirmed Slice 2 is the next serial task after merged PR #573. File and Icon currently own BYTEA/text plus duplicate checksum/size facts, while dormant concrete reference tables and the complete inline capture/read/delete lifecycle already exist. Current PDF/Office behavior persists extracted text instead of exact uploads, downscales uploaded images in place, and returns transformed text on download, so original and derived semantics are conflated."
+      evidence:
+        - "PR #573 merged to develop as bf0763a9558e14068b3c522fe212f731f9055a0b after all checks and Review 3 passed."
+        - "Epic #549 names #551 as the next task; #569 and #571 remain later independent slices."
+        - "Files owns text, blob, transcription, checksum, size, and parent-derived rows."
+        - "Icons owns blob, mimetype, and size."
+        - "FileContentReferences already supports original, extracted_text, transcription, derived_page, model_input, generated_artifact, and preview."
+        - "IconContentReferences already supports primary."
+        - "ObjectContentService already provides bounded capture, inline prepare, verified read/range, final-reference lifecycle, and capability-scoped optional object storage."
+        - "Graph data was unavailable for the current paths, so exact consumers were mapped with source search."
+      decisions:
+        - "Deepen FileService and IconService as business owners; reuse ObjectContentService instead of creating a new storage seam."
+        - "Write this slice inline only. Admin-selected placement and inline/object-store migration remain #569."
+        - "Preserve external File/Icon behavior while moving byte reads behind typed references; do not expose backend details."
+        - "Normalize and contract legacy columns in one bounded, recoverable producer slice rather than retain permanent dual reads."
+        - "Add no tenancy topology, provider registry, queue abstraction, or File-specific content lifecycle."
+      first_red: "Upload representative PDF/image/audio/generated/icon content through current behavior and prove exact original bytes and typed variants cannot be retrieved without reading the legacy File/Icon byte columns."
+
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Freeze the honest File/Icon variant interface and implement new inline-owned create/read/delete behavior through concrete object-content references."
+    allowed_files:
+      - "backend/src/eneo/files/"
+      - "backend/src/eneo/icons/"
+      - "backend/src/eneo/database/tables/files_table.py"
+      - "backend/src/eneo/database/tables/icons_table.py"
+      - "backend/src/eneo/database/tables/object_content_table.py"
+      - "backend/src/eneo/object_content/"
+      - "backend/src/eneo/main/container/container.py"
+      - "backend/tests/"
+      - "docs/goals/file-icon-object-content-adoption/"
+    verify:
+      - "Behavior-first PDF, image, audio, generated-artifact, derived-page, and icon tests."
+      - "Exact original bytes, typed derived variants, authorization, range, model-input, and deletion behavior."
+      - "PostgreSQL first-reference and final-reference trigger behavior."
+      - "No object-store configuration required."
+    stop_if:
+      - "The implementation needs automatic fallback, dual write, or a third backend."
+      - "A public behavior choice is ambiguous and cannot be derived from current tests or blueprint."
+      - "The change requires InfoBlob, admin placement, Flow, crawler, or generic queue/provider work."
+    receipt:
+      result: done
+      summary: "Added the honest upload variant contract and moved new File/Icon create, read, range, transcription, and delete behavior behind concrete inline object-content references. Exact source streams are preserved; extracted text, model input, generated artifacts, derived pages, transcription, and icon primary content are explicit variants."
+      changed_files:
+        - "backend/src/eneo/files/"
+        - "backend/src/eneo/icons/"
+        - "backend/src/eneo/object_content/content_service.py"
+        - "backend/src/eneo/database/tables/files_table.py"
+        - "backend/src/eneo/database/tables/icons_table.py"
+        - "backend/src/eneo/main/container/container.py"
+        - "backend/tests/unittests/files/test_file_protocol.py"
+      evidence:
+        - "PDF exact source and extracted text are separate."
+        - "Image exact source and bounded model input are separate."
+        - "Audio retains exact source; generated images and icon primary bytes use named references."
+        - "Producer capture is clamped by both business and PostgreSQL-inline ceilings."
+        - "File downloads stream the referenced original/range through ObjectContentService."
+        - "File/Icon services contain no S3 SDK, backend fallback, provider branching, or queue dependency."
+      commands:
+        - cmd: "uv run --env-file ../docs/deployment/env_backend.template pytest -q tests/unittests/files/test_file_protocol.py"
+          status: "pass: 14 tests"
+        - cmd: "uv run pyright src/eneo/files src/eneo/icons src/eneo/object_content/content_service.py"
+          status: "pass: 0 errors, 0 warnings"
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement bounded resumable legacy classification, copy/verify/authority flip, schema contraction, and rollback/recovery evidence for File/Icon."
+    allowed_files:
+      - "backend/src/eneo/files/"
+      - "backend/src/eneo/icons/"
+      - "backend/src/eneo/database/tables/files_table.py"
+      - "backend/src/eneo/database/tables/icons_table.py"
+      - "backend/src/eneo/database/tables/object_content_table.py"
+      - "backend/src/eneo/database/tables/__init__.py"
+      - "backend/migrations/versions/"
+      - "backend/tests/integration/migrations/"
+      - "backend/tests/integration/files/"
+      - "backend/tests/integration/icons/"
+      - "backend/tests/integration/object_content/"
+      - "docs/goals/file-icon-object-content-adoption/"
+    verify:
+      - "Real PostgreSQL base-to-head migration with representative classified rows."
+      - "Maximum and maximum-plus-one bounded batch behavior."
+      - "Interruption/resume and rollback before producer flip."
+      - "Canonical SHA-256, exact size/type, reference counts, and one byte authority."
+      - "Supported downgrade or explicit forward-recovery fence after contraction."
+      - "One Alembic head and ORM parity."
+    stop_if:
+      - "Legacy data cannot be classified without guessing."
+      - "Contraction would delete an unverified or ambiguous payload."
+      - "A permanent compatibility read or dual authority would be required."
+    receipt:
+      result: done
+      summary: "Added one bounded, resumable authority-flip migration for legacy File/Icon payloads. It classifies only provable legacy shapes, recomputes canonical SHA-256 from exact bytes, atomically creates content plus its first concrete reference, verifies the copied authority, and removes the obsolete byte and duplicate integrity columns only after verification."
+      changed_files:
+        - "backend/alembic/versions/202607231700_normalize_file_icon_content.py"
+        - "backend/tests/integration/migrations/test_file_icon_content_normalization.py"
+        - "backend/src/eneo/database/tables/files_table.py"
+        - "backend/src/eneo/database/tables/icons_table.py"
+      evidence:
+        - "The copy loop is bounded by both row count and cumulative payload bytes."
+        - "Each committed batch is independently atomic and replay excludes already referenced rows."
+        - "Ambiguous, missing, oversized, or foreign-authority rows stop before contraction."
+        - "Verification recomputes every normalization-owned digest and compares exact size and payload bytes."
+        - "The post-contraction downgrade refuses destructive reconstruction and directs operators to restore the pre-flip backup or recover forward."
+        - "Alembic reports exactly one head: 202607231700."
+      commands:
+        - cmd: "uv run --env-file ../docs/deployment/env_backend.template pytest -q -m migration_isolation tests/integration/migrations/test_file_icon_content_normalization.py"
+          status: "pass: 1 test on disposable PostgreSQL 13"
+        - cmd: "uv run --env-file ../docs/deployment/env_backend.template pytest -q tests/integration/object_content"
+          status: "pass: 66 tests"
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Complete caller/API compatibility, performance evidence, docs, planning, publication, CI, and review iteration for task #551."
+    allowed_files:
+      - "backend/src/eneo/files/"
+      - "backend/src/eneo/icons/"
+      - "backend/src/eneo/completion_models/"
+      - "backend/src/eneo/assistants/"
+      - "backend/src/eneo/apps/"
+      - "backend/src/eneo/main/container/"
+      - "backend/tests/"
+      - "docs/deployment/"
+      - "frontend/apps/docs-site/src/content/"
+      - "docs/goals/file-icon-object-content-adoption/"
+    verify:
+      - "Focused and whole-backend behavior, Ruff, formatting, strict Pyright, migrations, OpenAPI/generated contracts when affected, and pre-push."
+      - "Query-count and bounded-memory evidence for representative File/Icon paths."
+      - "PostgreSQL-only backup/restore after old-column contraction."
+      - "docs.eneo.ai and deployment documentation build/link checks."
+      - "Docs lead with a concise storage-choice TLDR, simple ownership diagram, and direct PostgreSQL-only, SeaweedFS, and external-endpoint navigation; detailed procedures are linked rather than duplicated."
+      - "One focused Fable Medium review only when it can materially improve the concrete implementation."
+      - "Ready PR to develop, /review iterations with genuine findings fixed, and all required GitHub checks green."
+    stop_if:
+      - "Publication would include unrelated work."
+      - "A mandatory local or GitHub gate remains red."
+      - "Review requests scope belonging to #569, #571, or Flow without a direct correctness dependency."
+    receipt: null
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Audit whether task #551 is complete, maintainable, bounded, recoverable, documented, and review-green without starting later slices."
+    inputs:
+      - "T001-T004 receipts"
+      - "Current branch diff and migration evidence"
+      - "Published pull request, CI, and final /review state"
+    constraints:
+      - "Do not implement."
+      - "Reject completion while any required Worker remains queued or active."
+      - "Reject completion for duplicate byte authority, ambiguous variants, fallback, unbounded I/O, or permanent compatibility paths."
+    expected_output:
+      - "complete | not_complete"
+      - "Evidence mapped to task #551 and epic #549"
+      - "Remaining risk and exact next deferred slice"
+    receipt: null
+
+checks:
+  dirty_fingerprint: "Task #551 implementation, tests, migration, and documentation are locally verified on the feature branch; publication and GitHub review remain."
+  last_verification:
+    result: pass
+    task: T004
+    commands:
+      - "File/Icon adoption integration: 3 passed on real PostgreSQL, including two-session transcription convergence"
+      - "Migration isolation: 1 passed with bounded failure/resume/verification evidence"
+      - "Affected unit/service/transaction/AppRun packet: 24 passed"
+      - "Strict whole-backend Pyright: 0 errors, 0 warnings"
+      - "Changed-path Ruff and format: passed"
+      - "Alembic heads: 202607231700 (head)"
+      - "docs-site production build, static export, Mermaid, and Pagefind: passed"
+      - "Fable session 6780ff48-4538-4eae-b476-9568b575f5b9 iteration 1: changes_required, MIN_SCORE 7"
+      - "Fable session 6780ff48-4538-4eae-b476-9568b575f5b9 iteration 2: green, MIN_SCORE 8"

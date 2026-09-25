@@ -5,23 +5,28 @@
 -->
 
 <script lang="ts">
-  import { Button, Dialog, Input } from "@eneo/ui";
-  import { writable } from "svelte/store";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
   import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { m } from "$lib/paraglide/messages";
 
+  const uid = $props.id();
   let name = $state("");
   let description = $state("");
-  const showDialog = writable(false);
+  let showDialog = $state(false);
   const security = getSecurityClassificationService();
 
   const create = createAsyncState(async () => {
     if (!name) return;
     try {
       await security.createClassification({ name, description });
-      $showDialog = false;
+      showDialog = false;
       name = "";
       description = "";
     } catch (error) {
@@ -30,36 +35,64 @@
   });
 </script>
 
-<Dialog.Root openController={showDialog}>
-  <Dialog.Trigger asFragment let:trigger>
-    <Button variant="primary" is={trigger}>{m.create_new()}</Button>
+<Dialog.Root bind:open={showDialog}>
+  <Dialog.Trigger>
+    {#snippet child({ props })}
+      <Button {...props}>{m.create_new()}</Button>
+    {/snippet}
   </Dialog.Trigger>
 
-  <Dialog.Content width="medium" form>
-    <Dialog.Title>{m.create_new_security_classification()}</Dialog.Title>
+  <Dialog.Content class={dialogLayout.content("medium")} closeLabel={m.close()}>
+    <form
+      class="contents"
+      onsubmit={(event) => {
+        event.preventDefault();
+        create();
+      }}
+    >
+      <Dialog.Header class={dialogLayout.header}>
+        <Dialog.Title>{m.create_new_security_classification()}</Dialog.Title>
+      </Dialog.Header>
 
-    <Dialog.Section>
-      <Input.Text
-        bind:value={name}
-        label={m.name()}
-        description={m.recognisable_display_name()}
-        required
-        class="border-default hover:bg-hover-dimmer border-b p-4"
-      ></Input.Text>
+      <div class={dialogLayout.body}>
+        <div class={dialogLayout.section}>
+          <Field.Field class="border-default hover:bg-hover-dimmer border-b p-4">
+            <Field.Label for={`${uid}-name`}>
+              {m.name()}
+              <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
+            </Field.Label>
+            <Input
+              id={`${uid}-name`}
+              bind:value={name}
+              required
+              aria-describedby={`${uid}-name-description`}
+            />
+            <Field.Description id={`${uid}-name-description`}>
+              {m.recognisable_display_name()}
+            </Field.Description>
+          </Field.Field>
 
-      <Input.TextArea
-        label={m.description()}
-        class="border-default hover:bg-hover-dimmer border-b p-4"
-        description={m.describe_when_classification_chosen()}
-        bind:value={description}
-      ></Input.TextArea>
-    </Dialog.Section>
+          <Field.Field class="border-default hover:bg-hover-dimmer border-b p-4">
+            <Field.Label for={`${uid}-description`}>{m.description()}</Field.Label>
+            <Textarea
+              id={`${uid}-description`}
+              bind:value={description}
+              rows={4}
+              aria-describedby={`${uid}-description-description`}
+            />
+            <Field.Description id={`${uid}-description-description`}>
+              {m.describe_when_classification_chosen()}
+            </Field.Description>
+          </Field.Field>
+        </div>
+      </div>
 
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="primary" onclick={create} type="submit" disabled={create.isLoading}
-        >{create.isLoading ? m.creating() : m.create_classification()}</Button
-      >
-    </Dialog.Controls>
+      <Dialog.Footer class={dialogLayout.footer}>
+        <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
+        <Button type="submit" disabled={create.isLoading}
+          >{create.isLoading ? m.creating() : m.create_classification()}</Button
+        >
+      </Dialog.Footer>
+    </form>
   </Dialog.Content>
 </Dialog.Root>

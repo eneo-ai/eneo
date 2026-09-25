@@ -23,7 +23,6 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from eneo.main.container.container import Container
 
-
 # =============================================================================
 # UNIT TESTS: Container.session_scope() method
 # =============================================================================
@@ -48,7 +47,7 @@ class TestContainerSessionScope:
 
     async def test_session_scope_yields_session(self, test_settings):
         """session_scope should yield a valid AsyncSession."""
-        from eneo.database.database import sessionmanager, AsyncSession
+        from eneo.database.database import AsyncSession, sessionmanager
 
         # Initialize sessionmanager with test database
         if not sessionmanager._engine:
@@ -142,8 +141,9 @@ class TestContainerSessionScope:
 
         original_session = sessionmanager.session
 
-        from sqlalchemy.ext.asyncio import async_sessionmaker
         from contextlib import asynccontextmanager
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker
 
         TestSessionLocal = async_sessionmaker(
             bind=tiny_engine,
@@ -320,13 +320,17 @@ class TestSessionScopePoolExhaustion:
             "OLD pattern should exhaust pool with 5 tasks on pool_size=3"
         )
 
-        # Reset for new pattern test
+        # Reset for new pattern test. The property under test is that short
+        # holds let five tasks share three connections, not how fast a cold
+        # pool opens them: on a loaded runner the first handshakes alone can
+        # exceed the 0.3s that makes the OLD pattern fail, so give the waiters
+        # a generous checkout budget here.
         await tiny_engine.dispose()
         tiny_engine = create_async_engine(
             test_settings.database_url,
             pool_size=3,
             max_overflow=0,
-            pool_timeout=0.3,
+            pool_timeout=10.0,
         )
 
         # Test NEW pattern - should all succeed

@@ -92,7 +92,6 @@ def mock_dependencies(mock_user, mock_integration_knowledge):
         "oauth_token_repo": AsyncMock(),
         "user_integration_repo": AsyncMock(),
         "user": mock_user,
-        "datastore": AsyncMock(),
         "info_blob_service": AsyncMock(),
         "integration_knowledge_repo": AsyncMock(),
         "oauth_token_service": AsyncMock(),
@@ -332,10 +331,7 @@ class TestProcessInfoBlobSizeAccounting:
         )
         mock_dependencies[
             "info_blob_service"
-        ].upsert_info_blob_by_sharepoint_item_and_integration = AsyncMock(
-            return_value=updated_blob
-        )
-        mock_dependencies["datastore"].add = AsyncMock()
+        ].publish_info_blob_without_validation = AsyncMock(return_value=updated_blob)
         mock_dependencies["integration_knowledge_repo"].update = AsyncMock()
         mock_dependencies["info_blob_service"].repo.session.execute = AsyncMock()
 
@@ -371,10 +367,7 @@ class TestProcessInfoBlobSizeAccounting:
         )
         mock_dependencies[
             "info_blob_service"
-        ].upsert_info_blob_by_sharepoint_item_and_integration = AsyncMock(
-            return_value=updated_blob
-        )
-        mock_dependencies["datastore"].add = AsyncMock()
+        ].publish_info_blob_without_validation = AsyncMock(return_value=updated_blob)
         mock_dependencies["integration_knowledge_repo"].update = AsyncMock()
         mock_dependencies["info_blob_service"].repo.session.execute = AsyncMock()
 
@@ -417,8 +410,7 @@ class TestProcessInfoBlobSizeAccounting:
         repo.update = AsyncMock()
         mock_dependencies[
             "info_blob_service"
-        ].upsert_info_blob_by_sharepoint_item_and_integration = AsyncMock()
-        mock_dependencies["datastore"].add = AsyncMock()
+        ].publish_info_blob_without_validation = AsyncMock()
         mock_dependencies["integration_knowledge_repo"].update = AsyncMock()
 
         await service._process_info_blob(
@@ -429,13 +421,12 @@ class TestProcessInfoBlobSizeAccounting:
             sharepoint_item_id="item-123",
         )
 
-        # Unchanged content + metadata: no upsert, no chunk delete, no embedding,
+        # Unchanged content + metadata: no publication, no embedding,
         # no metadata update, no size update.
         mock_dependencies[
             "info_blob_service"
-        ].upsert_info_blob_by_sharepoint_item_and_integration.assert_not_called()
+        ].publish_info_blob_without_validation.assert_not_called()
         repo.update.assert_not_called()
-        mock_dependencies["datastore"].add.assert_not_called()
         mock_dependencies["integration_knowledge_repo"].update.assert_not_called()
 
     async def test_refreshes_metadata_on_hash_match_when_renamed(
@@ -464,7 +455,9 @@ class TestProcessInfoBlobSizeAccounting:
             return_value=existing_blob
         )
         repo.update = AsyncMock()
-        mock_dependencies["datastore"].add = AsyncMock()
+        mock_dependencies[
+            "info_blob_service"
+        ].publish_info_blob_without_validation = AsyncMock()
 
         await service._process_info_blob(
             title="New name.docx",
@@ -474,12 +467,14 @@ class TestProcessInfoBlobSizeAccounting:
             sharepoint_item_id="item-123",
         )
 
-        # Metadata refreshed, but NOT re-embedded.
+        # Metadata refreshed, but no replacement is published.
         repo.update.assert_awaited_once()
         update_arg = repo.update.await_args.args[0]
         assert update_arg.title == "New name.docx"
         assert update_arg.url == "https://example.com/new"
-        mock_dependencies["datastore"].add.assert_not_called()
+        mock_dependencies[
+            "info_blob_service"
+        ].publish_info_blob_without_validation.assert_not_called()
 
     async def test_reembeds_when_content_hash_differs(
         self, service, mock_dependencies, mock_integration_knowledge
@@ -499,10 +494,7 @@ class TestProcessInfoBlobSizeAccounting:
         )
         mock_dependencies[
             "info_blob_service"
-        ].upsert_info_blob_by_sharepoint_item_and_integration = AsyncMock(
-            return_value=updated_blob
-        )
-        mock_dependencies["datastore"].add = AsyncMock()
+        ].publish_info_blob_without_validation = AsyncMock(return_value=updated_blob)
         mock_dependencies["integration_knowledge_repo"].update = AsyncMock()
         mock_dependencies["info_blob_service"].repo.session.execute = AsyncMock()
 
@@ -514,7 +506,9 @@ class TestProcessInfoBlobSizeAccounting:
             sharepoint_item_id="item-123",
         )
 
-        mock_dependencies["datastore"].add.assert_called_once()
+        mock_dependencies[
+            "info_blob_service"
+        ].publish_info_blob_without_validation.assert_awaited_once()
 
     async def test_persists_content_hash_after_embedding_succeeds(
         self, service, mock_dependencies, mock_integration_knowledge
@@ -539,7 +533,7 @@ class TestProcessInfoBlobSizeAccounting:
         ).digest()
         upserted: list = []
 
-        async def upsert(info_blob):
+        async def publish(info_blob, *, embedding_model):
             upserted.append(info_blob)
             return updated_blob
 
@@ -547,14 +541,9 @@ class TestProcessInfoBlobSizeAccounting:
         repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
             return_value=existing_blob
         )
-        repo.session.execute = AsyncMock()
-        repo.update_content_hash = AsyncMock(return_value=updated_blob)
         mock_dependencies[
             "info_blob_service"
-        ].upsert_info_blob_by_sharepoint_item_and_integration = AsyncMock(
-            side_effect=upsert
-        )
-        mock_dependencies["datastore"].add = AsyncMock()
+        ].publish_info_blob_without_validation = AsyncMock(side_effect=publish)
 
         await service._process_info_blob(
             title="Doc",
@@ -564,53 +553,33 @@ class TestProcessInfoBlobSizeAccounting:
             sharepoint_item_id="item-123",
         )
 
-        assert upserted[0].content_hash is None
-        repo.update_content_hash.assert_called_once_with(
-            info_blob_id=updated_blob.id,
-            content_hash=expected_hash,
-        )
+        assert upserted[0].content_hash == expected_hash
 
-    async def test_embedding_failure_leaves_content_hash_unset_for_retry(
+    async def test_embedding_failure_propagates_for_transaction_rollback(
         self, service, mock_dependencies, mock_integration_knowledge
     ):
         existing_blob = MagicMock()
         existing_blob.size = 100
         existing_blob.content_hash = b"old-hash"
 
-        updated_blob = MagicMock()
-        updated_blob.id = uuid4()
-        updated_blob.size = 100
-        upserted: list = []
-
-        async def upsert(info_blob):
-            upserted.append(info_blob)
-            return updated_blob
-
         repo = mock_dependencies["info_blob_service"].repo
         repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
             return_value=existing_blob
         )
-        repo.session.execute = AsyncMock()
-        repo.update_content_hash = AsyncMock()
         mock_dependencies[
             "info_blob_service"
-        ].upsert_info_blob_by_sharepoint_item_and_integration = AsyncMock(
-            side_effect=upsert
-        )
-        mock_dependencies["datastore"].add = AsyncMock(
-            side_effect=Exception("embedding service unavailable")
+        ].publish_info_blob_without_validation = AsyncMock(
+            side_effect=RuntimeError("embedding service unavailable")
         )
 
-        await service._process_info_blob(
-            title="Doc",
-            text="Fresh content",
-            url="https://example.com",
-            integration_knowledge=mock_integration_knowledge,
-            sharepoint_item_id="item-123",
-        )
-
-        assert upserted[0].content_hash is None
-        repo.update_content_hash.assert_not_called()
+        with pytest.raises(RuntimeError, match="embedding service unavailable"):
+            await service._process_info_blob(
+                title="Doc",
+                text="Fresh content",
+                url="https://example.com",
+                integration_knowledge=mock_integration_knowledge,
+                sharepoint_item_id="item-123",
+            )
 
 
 class TestBuildSummaryStats:
@@ -1779,7 +1748,7 @@ class TestPostCommitChangeKeys:
         """No event listener is registered when there is nothing to flush."""
         with patch(
             "eneo.integration.infrastructure.content_service."
-            "sharepoint_content_service.sa.event.listen"
+            "sharepoint_content_service.event.listen"
         ) as mock_listen:
             service._schedule_post_commit_change_keys([])
 
