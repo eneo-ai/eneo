@@ -8,9 +8,10 @@
   import type { AdminWidgetReview, WidgetPolicy } from "@eneo/eneo-js";
   import { Info, TriangleAlert } from "@lucide/svelte";
   import * as Card from "$lib/components/ui/card/index.js";
-  import { intlLocale } from "$lib/core/formatting/dateTime";
-  import AssistantConfigCard from "$lib/features/spaces/oversight/AssistantConfigCard.svelte";
+  import { formatDayMedium, intlLocale } from "$lib/core/formatting/dateTime";
   import { formatList } from "$lib/core/formatting/formatList";
+  import AssistantConfigCard from "$lib/features/spaces/oversight/AssistantConfigCard.svelte";
+  import { retentionLabel } from "$lib/features/spaces/oversight/labels";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
@@ -23,7 +24,8 @@
   const widget = $derived(review.widget);
   const texts = $derived(widget.texts);
   const number = new Intl.NumberFormat(intlLocale());
-  const day = new Intl.DateTimeFormat(intlLocale(), { dateStyle: "medium" });
+  // The API always sends every limit; a missing one is shown as missing, never guessed.
+  const count = (value: number | undefined) => (value === undefined ? "–" : number.format(value));
 
   const languageLabel = $derived.by(() => {
     switch (widget.language) {
@@ -48,13 +50,10 @@
     return m.widget_review_shown_none();
   });
 
-  const retentionDays = $derived(widget.privacy.retention_days ?? 30);
   const retention = $derived(
-    retentionDays === 0
+    widget.privacy.retention_days === 0
       ? m.widget_review_retention_zero()
-      : retentionDays === 1
-        ? m.admin_spaces_retention_days_one()
-        : m.admin_spaces_retention_days({ days: number.format(retentionDays) })
+      : retentionLabel(widget.privacy.retention_days, "–")
   );
 
   // Usage is only worth showing once the widget has answered visitors.
@@ -104,7 +103,7 @@
           <dd class="break-words">{texts.title || widget.name}</dd>
         </div>
         <div class="min-w-0">
-          {@render term(m.widget_review_disclosure())}
+          {@render term(m.widget_admin_text_subtitle())}
           <dd class="break-words">{texts.subtitle || m.none()}</dd>
         </div>
         <div class="min-w-0 sm:col-span-2">
@@ -202,6 +201,7 @@
             knowledge={review.target.knowledge}
             headingLevel={4}
             showWidget={false}
+            retentionTerm={m.widget_review_retention_staff()}
           />
         </div>
       {/if}
@@ -217,7 +217,7 @@
     <Card.Content>
       <dl class="grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
         <div class="min-w-0">
-          {@render term(m.admin_spaces_retention())}
+          {@render term(m.widget_review_retention_visitors())}
           <dd>
             {retention}
             {#if policy}
@@ -241,9 +241,7 @@
         <div class="min-w-0">
           {@render term(m.widget_admin_daily_budget())}
           <dd>
-            <span class="tabular-nums"
-              >{number.format(widget.limits.daily_token_budget ?? 500_000)}</span
-            >
+            <span class="tabular-nums">{count(widget.limits.daily_token_budget)}</span>
             {#if policy}
               <span class="text-secondary block">
                 {m.widget_review_budget_cap({ max: number.format(policy.max_daily_token_budget) })}
@@ -255,8 +253,8 @@
           {@render term(m.widget_admin_limits())}
           <dd>
             {m.widget_review_limits_value({
-              visitor: number.format(widget.limits.messages_per_visitor_10min ?? 10),
-              ip: number.format(widget.limits.messages_per_ip_hour ?? 60)
+              visitor: count(widget.limits.messages_per_visitor_10min),
+              ip: count(widget.limits.messages_per_ip_hour)
             })}
           </dd>
         </div>
@@ -318,7 +316,7 @@
           {m.widget_admin_overview_last_activity()}:
           {#if review.usage.last_activity}
             <time datetime={review.usage.last_activity}
-              >{day.format(new Date(review.usage.last_activity))}</time
+              >{formatDayMedium(review.usage.last_activity)}</time
             >
           {:else}
             {m.widget_admin_overview_never()}

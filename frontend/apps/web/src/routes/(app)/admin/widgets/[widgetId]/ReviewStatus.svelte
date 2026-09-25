@@ -4,13 +4,13 @@
   activation, and the lifecycle actions. An archived widget is read only.
 -->
 <script lang="ts">
-  import type { AdminWidgetReview, WidgetPolicy } from "@eneo/eneo-js";
+  import type { AdminWidgetReview } from "@eneo/eneo-js";
   import { Archive, Clock, Pause, Undo2 } from "@lucide/svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { intlLocale } from "$lib/core/formatting/dateTime";
-  import { blockerLabel, policyViolations } from "$lib/features/widget/admin/blockers";
-  import { widgetStatusLabel } from "$lib/features/widget/admin/status";
+  import { blockerLabel } from "$lib/features/widget/admin/blockers";
+  import { activationRequestState, widgetStatusLabel } from "$lib/features/widget/admin/status";
   import TimedText from "$lib/features/widget/admin/TimedText.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -19,25 +19,21 @@
 
   type Props = {
     review: AdminWidgetReview;
-    policy: WidgetPolicy | null;
     /** Whether the administrator may also open the widget in the space's editor. */
     canOpenEditor: boolean;
-    heading?: HTMLElement | null;
   };
 
-  let { review, policy, canOpenEditor, heading = $bindable(null) }: Props = $props();
+  let { review, canOpenEditor }: Props = $props();
+
+  let heading = $state<HTMLElement | null>(null);
 
   const widget = $derived(review.widget);
   const inactive = $derived(widget.status === "draft" || widget.status === "paused");
-  const requestedAt = $derived(inactive ? (widget.activation_requested_at ?? null) : null);
-  const returnedAt = $derived(
-    inactive && !requestedAt ? (widget.activation_declined_at ?? null) : null
-  );
-  // The API refuses to activate outside the policy; a live widget is served within it instead.
-  const problems = $derived([
-    ...(widget.activation_blockers ?? []),
-    ...(inactive ? policyViolations(widget, policy) : [])
-  ]);
+  const request = $derived(activationRequestState(widget));
+  const requestedAt = $derived(request.kind === "requested" ? request.at : null);
+  const returnedAt = $derived(request.kind === "returned" ? request.at : null);
+  // The API's blockers already include the tenant policy's violations.
+  const problems = $derived(widget.activation_blockers ?? []);
   const blocked = $derived(problems.length > 0);
 
   let lifecycle = $state<"activate" | "pause" | "archive">("activate");
@@ -135,7 +131,7 @@
           />
         </span>
       </p>
-    {:else if inactive}
+    {:else if request.kind === "none"}
       <p class="text-secondary">{m.widget_review_not_requested()}</p>
     {:else if widget.activated_at}
       <p class="text-secondary">

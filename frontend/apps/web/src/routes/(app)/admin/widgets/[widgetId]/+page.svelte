@@ -33,6 +33,7 @@
 <Page.Root>
   <Page.Header>
     <Page.Title
+      wrap
       parent={{ title: m.widget_admin_nav(), href: localizeHref("/admin/widgets") }}
       title={review?.widget.name ?? m.widget_review_not_found_title()}
     ></Page.Title>
@@ -87,7 +88,7 @@
           <p class="text-secondary max-w-[75ch] text-sm">{m.widget_review_intro()}</p>
         </div>
 
-        <ReviewStatus {review} policy={data.policy} {canOpenEditor} />
+        <ReviewStatus {review} {canOpenEditor} />
 
         <div class="grid items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
           <div class="flex min-w-0 flex-col gap-6">

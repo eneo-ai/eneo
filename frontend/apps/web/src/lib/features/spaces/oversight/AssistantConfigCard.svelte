@@ -26,9 +26,17 @@
     knowledge?: readonly OversightKnowledge[];
     /** Hide the web widgets row, e.g. on the review of one of those widgets. */
     showWidget?: boolean;
+    /** Names the retention row where another retention is shown next to it, e.g. a widget's. */
+    retentionTerm?: string;
   };
 
-  let { assistant, headingLevel = 3, knowledge, showWidget = true }: Props = $props();
+  let {
+    assistant,
+    headingLevel = 3,
+    knowledge,
+    showWidget = true,
+    retentionTerm
+  }: Props = $props();
 
   const uid = $props.id();
   const headingId = `${uid}-name`;
@@ -98,7 +106,7 @@
       <dd>{attachments}</dd>
     </div>
     <div class="min-w-0">
-      <dt class="text-secondary text-xs">{m.admin_spaces_retention()}</dt>
+      <dt class="text-secondary text-xs">{retentionTerm ?? m.admin_spaces_retention()}</dt>
       <dd>{retention}</dd>
     </div>
     <div class="min-w-0">

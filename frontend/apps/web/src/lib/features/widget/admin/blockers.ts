@@ -1,9 +1,4 @@
-import type { Widget, WidgetPolicy } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
-
-// The API's defaults for settings a widget has never saved (WidgetLimits, WidgetPrivacy).
-const DEFAULT_DAILY_TOKEN_BUDGET = 500_000;
-const DEFAULT_RETENTION_DAYS = 30;
 
 /** Human-readable explanation of an activation blocker code from the API. */
 export function blockerLabel(code: string): string {
@@ -29,23 +24,4 @@ export function blockerLabel(code: string): string {
     default:
       return code;
   }
-}
-
-/**
- * The tenant policy codes a widget breaks, as the API checks them before it
- * activates (backend `WidgetPolicy.violations`). They are not part of
- * `activation_blockers`, which only covers the widget and its assistant.
- */
-export function policyViolations(widget: Widget, policy: WidgetPolicy | null): string[] {
-  if (!policy) return [];
-  const violations: string[] = [];
-  const budget = widget.limits.daily_token_budget ?? DEFAULT_DAILY_TOKEN_BUDGET;
-  const retention = widget.privacy.retention_days ?? DEFAULT_RETENTION_DAYS;
-  if (budget > policy.max_daily_token_budget) violations.push("daily_token_budget_exceeds_policy");
-  if (retention < policy.min_retention_days) violations.push("retention_below_policy_minimum");
-  if (retention > policy.max_retention_days) violations.push("retention_above_policy_maximum");
-  if (widget.bot_protection === "none" && !policy.allow_bot_protection_none) {
-    violations.push("bot_protection_none_not_allowed");
-  }
-  return violations;
 }

@@ -129,7 +129,7 @@ function review(overrides: Partial<AdminWidgetReview> = {}): AdminWidgetReview {
         description: null,
         published: true,
         is_default: false,
-        updated_at: "2026-09-20T08:00:00Z",
+        updated_at: "2026-09-20",
         completion_model: { id: "m1", name: "GPT-5", hosting: "eu" },
         instructions: "Svara bara på frågor om bygglov. Hänvisa till kommunens kundtjänst.",
         knowledge_mode: "tool",
@@ -139,7 +139,8 @@ function review(overrides: Partial<AdminWidgetReview> = {}): AdminWidgetReview {
         capabilities: ["web_search"],
         insight_enabled: false,
         logging_enabled: false,
-        data_retention_days: null
+        data_retention_days: null,
+        widgets: [{ id: "w1", name: "Bygglovschatt", status: "draft" }]
       },
       knowledge: [
         {
@@ -395,10 +396,11 @@ describe("widget review page", () => {
   });
 
   test("activation is described by what blocks it, the tenant policy included", async () => {
+    // As the API sends it: the policy violations are part of activation_blockers.
     renderPage({
       review: review({
         widget: widget({
-          activation_blockers: ["subtitle_empty"],
+          activation_blockers: ["subtitle_empty", "retention_above_policy_maximum"],
           privacy: { retention_days: 365 }
         })
       })
@@ -412,6 +414,56 @@ describe("widget review page", () => {
     // Playwright will not click an aria-disabled button, so a script does.
     (activate.element() as HTMLElement).click();
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+
+  test("a paused widget outside a tightened policy opens and names each problem once", async () => {
+    renderPage({
+      review: review({
+        widget: widget({
+          status: "paused",
+          activated_at: "2026-09-01T08:00:00Z",
+          activation_requested_at: null,
+          limits: { daily_token_budget: 2_000_000 },
+          privacy: { retention_days: 365 },
+          activation_blockers: [
+            "daily_token_budget_exceeds_policy",
+            "retention_above_policy_maximum"
+          ]
+        })
+      })
+    });
+    const problems = document.getElementById("review-blockers");
+    await expect.element(page.getByRole("button", { name: "widget_review_resume" })).toBeVisible();
+    expect([...problems!.querySelectorAll("li")].map((item) => item.textContent)).toEqual([
+      "widget_admin_blocker_budget_policy",
+      "widget_admin_blocker_retention_max"
+    ]);
+  });
+
+  test("a request that was sent back is not also said to be missing", async () => {
+    renderPage({
+      review: review({
+        widget: widget({
+          activation_requested_at: null,
+          activation_declined_at: "2026-09-25T09:00:00Z",
+          activation_decline_reason: "Lägg till en länk till integritetspolicyn."
+        }),
+        activation_declined_by: { id: "me", name: "Max", email: "max@kommun.se" }
+      })
+    });
+    await expect.element(page.getByText(/^widget_review_returned\(/)).toBeVisible();
+    expect(document.body.textContent).not.toContain("widget_review_not_requested");
+  });
+
+  test("names the visitor texts and the retentions as the editor and visitors know them", async () => {
+    renderPage({ review: review() });
+    const terms = [...document.querySelectorAll("dt")].map((term) => term.textContent?.trim());
+    // The editor's field is called Beskrivning, as in the blocker that names it.
+    expect(terms).toContain("widget_admin_text_subtitle");
+    // Two retentions on one page: whose conversations each keeps.
+    expect(terms).toContain("widget_review_retention_visitors");
+    expect(terms).toContain("widget_review_retention_staff");
+    expect(terms).not.toContain("admin_spaces_retention");
   });
 
   test("sending a request back asks what needs to change first", async () => {
@@ -484,7 +536,10 @@ describe("widget review page", () => {
       activation_requested_at: null
     });
     const { reloadWith } = renderPage({ review: review({ widget: live }) });
-    api.pause.mockResolvedValue({ ...live, status: "paused" });
+    let paused!: () => void;
+    api.pause.mockImplementation(
+      () => new Promise((resolve) => (paused = () => resolve({ ...live, status: "paused" })))
+    );
     reloadWith(review({ widget: { ...live, status: "paused" } }));
 
     await userEvent.click(page.getByRole("button", { name: "widget_review_pause" }));
@@ -492,9 +547,40 @@ describe("widget review page", () => {
     expect(api.pause).not.toHaveBeenCalled();
     await userEvent.click(dialog().getByRole("button", { name: "widget_admin_pause" }));
     await vi.waitFor(() => expect(api.pause).toHaveBeenCalledWith({ id: "w1" }));
-    expect(toast.success).toHaveBeenCalledWith("widget_review_paused(Bygglovschatt)");
+    // A slow network shows what is happening, not only a dimmed button.
+    await expect
+      .element(dialog().getByRole("button", { name: "widget_review_pausing" }))
+      .toHaveAttribute("aria-busy", "true");
+    paused();
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("widget_review_paused(Bygglovschatt)")
+    );
     await expect.element(statusHeading()).toHaveFocus();
     await expect.element(page.getByRole("button", { name: "widget_review_resume" })).toBeVisible();
+  });
+
+  test("archiving says so while it runs", async () => {
+    renderPage({ review: review() });
+    api.archive.mockImplementation(() => new Promise(() => {}));
+    await userEvent.click(page.getByRole("button", { name: "widget_review_archive" }));
+    await userEvent.click(dialog().getByRole("button", { name: "widget_admin_archive" }));
+    await expect
+      .element(dialog().getByRole("button", { name: "widget_review_archiving" }))
+      .toHaveAttribute("aria-busy", "true");
+  });
+
+  test("a failed send-back stays open and says what failed and why, in one sentence", async () => {
+    renderPage({ review: review() });
+    api.declineActivationRequest.mockRejectedValue(
+      new EneoError("Server down", "SERVER", 503, 0, {})
+    );
+    await userEvent.click(page.getByRole("button", { name: "widget_review_send_back" }));
+    const form = page.getByRole("dialog");
+    await userEvent.fill(form.getByRole("textbox"), "Lägg till en länk till integritetspolicyn.");
+    await userEvent.click(form.getByRole("button", { name: "widget_review_return_confirm" }));
+    const alert = form.getByRole("alert");
+    await expect.element(alert).toHaveTextContent(/^widget_review_return_failed: \S/);
+    expect(navigation.invalidate).not.toHaveBeenCalled();
   });
 
   test("an archived widget is read only", async () => {
@@ -545,6 +631,16 @@ describe.each(["light", "dark"])("widget review accessibility (%s)", (theme) => 
       })
     });
     await expect.element(statusHeading()).toBeVisible();
+    expect(await axeViolations()).toEqual([]);
+  });
+
+  test("a paused widget's reactivation request has no violations", async () => {
+    renderPage({
+      review: review({
+        widget: widget({ status: "paused", activated_at: "2026-09-01T08:00:00Z" })
+      })
+    });
+    await expect.element(page.getByText("widget_admin_status_paused")).toBeVisible();
     expect(await axeViolations()).toEqual([]);
   });
 
@@ -616,12 +712,41 @@ describe.each(["light", "dark"])("widget review accessibility (%s)", (theme) => 
     i18n.catalog = sv;
     await page.viewport(320, 720);
     try {
-      renderPage({ review: review({ viewer_role: "viewer" }) });
-      await expect.element(page.getByRole("heading", { level: 1 })).toBeVisible();
+      renderPage({
+        review: review({
+          viewer_role: "viewer",
+          widget: widget({ name: "Bygglovsförvaltningens kundtjänstchatt" })
+        })
+      });
+      const title = page.getByRole("heading", { level: 1 });
+      await expect.element(title).toHaveTextContent("Bygglovsförvaltningens kundtjänstchatt");
       await settled();
+      // The name wraps instead of being cut off.
+      const heading = title.element() as HTMLElement;
+      expect(heading.scrollWidth).toBeLessThanOrEqual(heading.clientWidth);
       const main = document.getElementById("global-page-container")!;
       expect(main.scrollWidth).toBeLessThanOrEqual(main.clientWidth);
       expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(320);
+    } finally {
+      await page.viewport(1440, 900);
+    }
+  });
+
+  test("the preview column is a Tab stop only while it has something to scroll", async () => {
+    await page.viewport(1440, 900);
+    renderPage({ review: review() });
+    const preview = () =>
+      document.querySelector<HTMLElement>('section[aria-labelledby="review-preview-title"]')!;
+    await expect.element(page.getByText("widget_review_preview_members_only")).toBeVisible();
+    await settled();
+    expect(preview().scrollHeight).toBeLessThanOrEqual(preview().clientHeight);
+    expect(preview().hasAttribute("tabindex")).toBe(false);
+
+    try {
+      // Shorter than the column's content: now it scrolls, so a keyboard must reach it.
+      await page.viewport(1440, 420);
+      await vi.waitFor(() => expect(preview().getAttribute("tabindex")).toBe("0"));
+      expect(preview().scrollHeight).toBeGreaterThan(preview().clientHeight);
     } finally {
       await page.viewport(1440, 900);
     }

@@ -11,8 +11,11 @@ export const load: PageLoad = async (event) => {
     ]);
     return { review, policy };
   } catch (error) {
-    // Deleted, another organisation's or a mistyped id: the page says so in place.
-    if (error instanceof EneoError && error.status === 404) return { review: null, policy: null };
+    // Deleted or another organisation's (404), or a mistyped id that is not a
+    // UUID (422): the page says so in place.
+    if (error instanceof EneoError && (error.status === 404 || error.status === 422)) {
+      return { review: null, policy: null };
+    }
     throw error;
   }
 };
