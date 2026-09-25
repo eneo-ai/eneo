@@ -18,7 +18,6 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { useAppContext } from "@/components/providers/app-context";
-import type { Capability } from "@/features/capabilities/capabilities";
 import {
   Select,
   SelectContent,
@@ -34,45 +33,18 @@ import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
 import { deriveActivity } from "./activity";
 import { ActivityPanel, type ActivityTab } from "./activity-panel";
 import { ActivityTimings } from "./activity-timings";
-import {
-  chatCapabilities,
-  defaultDisabledCapabilities,
-  disabledCapabilitiesForRequest
-} from "./chat-capabilities";
+import { disabledCapabilitiesForRequest } from "./chat-capabilities";
 import { ChatMessage, PendingAnswer, type ActivityRequest } from "./chat-message";
 import { Composer } from "./composer";
 import { ContextUsageBar } from "./context-usage-bar";
 import { historyQueryKey } from "./history-panel";
-import {
-  ChatMcpServers,
-  chatPartnerMcpServers,
-  defaultDisabledMcpServerIds,
-  mcpConversationOptions,
-  pruneDisabledMcpServerIds
-} from "./mcp-controls";
-import {
-  initialDisabledMcpServerIds,
-  parseMcpPreferences,
-  readMcpPreferencesRaw,
-  subscribeMcpPreferences,
-  saveMcpServerPreferences
-} from "./mcp-preferences";
+import { ChatMcpServers, mcpConversationOptions } from "./mcp-controls";
 import { useSessionMutations } from "./session-actions";
 import { StartState } from "./start-state";
 import { useAttachments } from "./use-attachments";
+import { useToolChoices } from "./use-tool-choices";
 
 const NO_MENTION = "__none__";
-const AUTO_ACCEPT_TOOLS_STORAGE_KEY = "autoAcceptToolsEnabled";
-
-function autoAcceptToolsPreference(): boolean {
-  if (typeof window === "undefined") return true;
-  try {
-    return window.localStorage.getItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY) !== "false";
-  } catch {
-    return true;
-  }
-}
-
 /** The current time as ISO 8601 (the timestamp of a question sent now). */
 function isoNow(): string {
   return new Date().toISOString();
@@ -143,7 +115,7 @@ export function ChatView({
   onActivityChange: (next: ActivityState | null) => void;
 }) {
   const t = useTranslations();
-  const { featureFlags, tenant, user, can } = useAppContext();
+  const { featureFlags } = useAppContext();
   const queryClient = useQueryClient();
   const attachments = useAttachments(partner);
   const isDesktop = useMediaQuery("(min-width: 1024px)");
@@ -152,109 +124,9 @@ export function ChatView({
   const announce = useAnnounce();
   const [timings] = useState(() => new ActivityTimings());
   useSyncExternalStore(timings.subscribe, timings.getVersion, timings.getVersion);
-
-  const allCapabilities = useMemo(() => chatCapabilities(partner, can), [partner, can]);
-  const capabilities = allCapabilities.filter(
-    (capability) => capability.purpose !== "web_search" || featureFlags.showWebSearch
-  );
-  const mcpServers = useMemo(() => chatPartnerMcpServers(partner), [partner]);
-  const preferenceIds = useMemo(
-    () => [
-      ...mcpServers.map((server) => server.id),
-      ...allCapabilities.map((capability) => `capability:${capability.purpose}`)
-    ],
-    [mcpServers, allCapabilities]
-  );
-  const preferenceContext = useMemo(
-    () =>
-      partner.type === "default-assistant"
-        ? { tenantId: tenant.id, userId: user.id, assistantId: partner.id }
-        : null,
-    [partner.type, partner.id, tenant.id, user.id]
-  );
-  const readPreferenceSnapshot = useCallback(
-    () => (preferenceContext ? readMcpPreferencesRaw(preferenceContext) : null),
-    [preferenceContext]
-  );
-  const rawPreferences = useSyncExternalStore(
-    subscribeMcpPreferences,
-    readPreferenceSnapshot,
-    () => null
-  );
-  const savedPreferences = useMemo(() => parseMcpPreferences(rawPreferences), [rawPreferences]);
-  const defaultDisabledPreferenceIds = useMemo(
-    () => [
-      ...defaultDisabledMcpServerIds(partner),
-      ...defaultDisabledCapabilities(partner).map((purpose) => `capability:${purpose}`)
-    ],
-    [partner]
-  );
-  const resolvedDisabledIds = useMemo(
-    () =>
-      initialDisabledMcpServerIds({
-        availableServerIds: preferenceIds,
-        defaultDisabledServerIds: defaultDisabledPreferenceIds,
-        preferences: savedPreferences
-      }),
-    [preferenceIds, defaultDisabledPreferenceIds, savedPreferences]
-  );
+  const toolChoices = useToolChoices(partner);
 
   const [input, setInput] = useState("");
-  const [locallyEditedPreferences, setLocallyEditedPreferences] = useState(false);
-  const [localDisabledCapabilities, setLocalDisabledCapabilities] = useState<Set<Capability>>(
-    () => new Set(defaultDisabledCapabilities(partner))
-  );
-  const [autoAcceptTools, setAutoAcceptTools] = useState(autoAcceptToolsPreference);
-  const [localDisabledMcpServerIds, setLocalDisabledMcpServerIds] = useState<Set<string>>(
-    () => new Set(defaultDisabledMcpServerIds(partner))
-  );
-  const disabledMcpServerIds = useMemo(
-    () =>
-      locallyEditedPreferences
-        ? localDisabledMcpServerIds
-        : new Set(resolvedDisabledIds.filter((id) => !id.startsWith("capability:"))),
-    [locallyEditedPreferences, localDisabledMcpServerIds, resolvedDisabledIds]
-  );
-  const disabledCapabilities = locallyEditedPreferences
-    ? localDisabledCapabilities
-    : new Set(
-        allCapabilities
-          .filter((capability) => resolvedDisabledIds.includes(`capability:${capability.purpose}`))
-          .map((capability) => capability.purpose)
-      );
-
-  function persistToolChoices(mcpDisabled: Set<string>, capabilityDisabled: Set<Capability>) {
-    if (!preferenceContext) return;
-    saveMcpServerPreferences(
-      preferenceContext,
-      preferenceIds,
-      new Set([
-        ...mcpDisabled,
-        ...[...capabilityDisabled].map((purpose) => `capability:${purpose}`)
-      ])
-    );
-  }
-
-  function setCapabilityEnabled(purpose: Capability) {
-    const next = new Set(disabledCapabilities);
-    if (next.has(purpose)) next.delete(purpose);
-    else next.add(purpose);
-    setLocalDisabledCapabilities(next);
-    setLocalDisabledMcpServerIds(disabledMcpServerIds);
-    setLocallyEditedPreferences(true);
-    persistToolChoices(disabledMcpServerIds, next);
-  }
-
-  function setMcpDisabled(next: Set<string>) {
-    setLocalDisabledMcpServerIds(next);
-    setLocalDisabledCapabilities(disabledCapabilities);
-    setLocallyEditedPreferences(true);
-    persistToolChoices(next, disabledCapabilities);
-  }
-  const activeDisabledMcpServerIds = useMemo(
-    () => pruneDisabledMcpServerIds(disabledMcpServerIds, mcpServers),
-    [disabledMcpServerIds, mcpServers]
-  );
   const [mentionId, setMentionId] = useState<string>(NO_MENTION);
   const fileInput = useRef<HTMLInputElement>(null);
   // Ref for event-time reads (send body, onFinish); state for render-time
@@ -294,17 +166,6 @@ export function ChatView({
     }
     return { tokens, turns };
   });
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        AUTO_ACCEPT_TOOLS_STORAGE_KEY,
-        autoAcceptTools ? "true" : "false"
-      );
-    } catch {
-      // Ignore preference persistence failures.
-    }
-  }, [autoAcceptTools]);
 
   const transport = useMemo(() => createChatTransport(), []);
   const { messages, sendMessage, setMessages, status, stop, error, clearError } =
@@ -468,9 +329,9 @@ export function ChatView({
     // continuing a session identifies the partner through the session.
     const continuing = sessionIdRef.current !== null;
     const mcpOptions = mcpConversationOptions({
-      servers: mcpServers,
-      disabledServerIds: activeDisabledMcpServerIds,
-      autoAcceptTools,
+      servers: toolChoices.mcpServers,
+      disabledServerIds: toolChoices.disabledMcpServerIds,
+      autoAcceptTools: toolChoices.autoAcceptTools,
       supportsToolApproval: partner.type !== "group-chat"
     });
     const body: ChatSendOptions = {
@@ -481,7 +342,7 @@ export function ChatView({
       tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
       disabled_capabilities: disabledCapabilitiesForRequest(
         partner,
-        disabledCapabilities,
+        toolChoices.disabledCapabilities,
         featureFlags.showWebSearch
       ),
       ...mcpOptions
@@ -563,13 +424,13 @@ export function ChatView({
     ) : null;
 
   const tools =
-    mcpServers.length > 0 ? (
+    toolChoices.mcpServers.length > 0 ? (
       <ChatMcpServers
-        servers={mcpServers}
-        disabledServerIds={activeDisabledMcpServerIds}
-        autoAcceptTools={autoAcceptTools}
-        onDisabledServerIdsChange={setMcpDisabled}
-        onAutoAcceptToolsChange={setAutoAcceptTools}
+        servers={toolChoices.mcpServers}
+        disabledServerIds={toolChoices.disabledMcpServerIds}
+        autoAcceptTools={toolChoices.autoAcceptTools}
+        onDisabledServerIdsChange={toolChoices.setDisabledMcpServerIds}
+        onAutoAcceptToolsChange={toolChoices.setAutoAcceptTools}
       />
     ) : null;
 
@@ -585,9 +446,9 @@ export function ChatView({
     placeholder: t("chat_composer_placeholder"),
     attachments,
     onOpenFileDialog: openAttachmentDialog,
-    capabilities,
-    disabledCapabilities,
-    onToggleCapability: setCapabilityEnabled,
+    capabilities: toolChoices.capabilities,
+    disabledCapabilities: toolChoices.disabledCapabilities,
+    onToggleCapability: toolChoices.toggleCapability,
     knowledge: partner.knowledge,
     tools,
     mention,
