@@ -269,7 +269,7 @@ async def _authorize_session_access(container: Container, session: SessionInDB) 
     "/",
     description="Chat with an assistant or group chat; starts or continues a conversation and streams the response as Server-Sent Events when stream is true.",
     responses=responses.streaming_response(
-        response_codes=[400, 403, 404],
+        response_codes=[400, 403, 404, 409],
         models=[
             SSEText,
             SSEEneoEvent,
@@ -426,7 +426,7 @@ async def get_chat_turn_diagnostics(
     "/preflight",
     response_model=PreflightResponse,
     description="Returns an estimated token cost for the next chat request (excludes knowledge/RAG and web-search content).",
-    responses=responses.get_responses([400, 403, 404, 429]),
+    responses=responses.get_responses([400, 403, 404, 409, 429]),
 )
 async def preflight_tokens(
     request: PreflightRequest,
@@ -590,7 +590,9 @@ async def list_conversations(
 
 @router.post(
     "/settings/defaults/",
+    description="Return the current settings defaults for a new or legacy conversation after checking access to its target.",
     response_model=ConversationSettings,
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[
         Depends(
             require_resource_permission_for_method(
@@ -622,6 +624,7 @@ async def conversation_settings_defaults(
 
 @router.patch(
     "/{session_id}/settings/",
+    description="Save choices for an owned conversation using its expected revision; reject concurrent changes with HTTP 409.",
     response_model=ConversationSettingsState,
     responses=responses.get_responses([400, 403, 404, 409]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],

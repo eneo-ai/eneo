@@ -1591,7 +1591,7 @@ export interface paths {
     put?: never;
     /**
      * Conversation Settings Defaults
-     * @description Current defaults for a draft, or for a legacy conversation without settings.
+     * @description Return the current settings defaults for a new or legacy conversation after checking access to its target.
      */
     post: operations["conversation_settings_defaults_api_v1_conversations_settings_defaults__post"];
     delete?: never;
@@ -1613,7 +1613,10 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Update Conversation Settings */
+    /**
+     * Update Conversation Settings
+     * @description Save choices for an owned conversation using its expected revision; reject concurrent changes with HTTP 409.
+     */
     patch: operations["update_conversation_settings_api_v1_conversations__session_id__settings__patch"];
     trace?: never;
   };
@@ -30472,6 +30475,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -30582,6 +30594,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -30622,6 +30643,33 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ConversationSettings"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
