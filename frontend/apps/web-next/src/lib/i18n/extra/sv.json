@@ -301,5 +301,6 @@
   "sort_latest_crawl": "Senaste indexering",
   "sort_oldest_crawl": "Äldsta indexering",
   "sort_auto_updates": "Automatiska uppdateringar",
-  "attachments_add_later_hint": "Du kan lägga till bilagor efter att objektet har skapats."
+  "attachments_add_later_hint": "Du kan lägga till bilagor efter att objektet har skapats.",
+  "attachments_open_files_help": "När funktionen är på läser assistenten bifogade filer vid behov. När den är av läggs innehållet direkt i konversationen."
 }

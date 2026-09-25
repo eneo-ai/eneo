@@ -301,5 +301,6 @@
   "sort_latest_crawl": "Latest crawl",
   "sort_oldest_crawl": "Oldest crawl",
   "sort_auto_updates": "Auto updates",
-  "attachments_add_later_hint": "You can add attachments after creating the item."
+  "attachments_add_later_hint": "You can add attachments after creating the item.",
+  "attachments_open_files_help": "When enabled, the assistant reads attached files as needed. When disabled, their content is included directly in the conversation."
 }

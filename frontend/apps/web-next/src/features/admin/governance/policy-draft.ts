@@ -19,6 +19,13 @@ export type CompletionModel = {
   // Mirrors the backend accept set: the policy PUT rejects any model whose
   // `can_access` is false, so the picker must only offer accessible models.
   can_access?: boolean;
+  supported_model_kwargs?: {
+    reasoning_effort?: {
+      supported?: boolean;
+      control?: "slider" | "select" | null;
+      options?: string[] | null;
+    };
+  } | null;
 };
 export type ModelProviderLite = { id: string; name: string; is_active?: boolean };
 export type McpTool = {
@@ -50,6 +57,10 @@ export type EditableState = {
   disabledMcpToolIds: string[];
   promptEnabled: boolean;
   selectedPromptId: string | null;
+  reasoningConfigured: boolean;
+  defaultReasoningEffort: string | null;
+  allowUserReasoningEffort: boolean;
+  openFilesEnabled: boolean;
   skillBindings: Binding[];
 };
 
@@ -145,6 +156,10 @@ export function seedEditable(
     ),
     promptEnabled: policy.prompt_enforcement.enabled,
     selectedPromptId: policy.prompt_enforcement.prompt_library_id ?? null,
+    reasoningConfigured: policy.reasoning_policy.configured,
+    defaultReasoningEffort: policy.reasoning_policy.default_effort,
+    allowUserReasoningEffort: policy.reasoning_policy.allow_user_override,
+    openFilesEnabled: policy.file_policy.inline_file_text === false,
     skillBindings: bindingsFromSummaries(policy.skills.bindings)
   };
 }
@@ -241,6 +256,33 @@ export function promptDirty(state: EditableState, policy: GovernancePolicy): boo
   );
 }
 
+export function reasoningOptions(
+  models: CompletionModel[],
+  state: EditableState,
+  effective: Set<string>
+): string[] {
+  const options = new Set<string>();
+  for (const model of models) {
+    if (model.can_access === false || (state.modelsEnabled && !effective.has(model.id))) continue;
+    const capability = model.supported_model_kwargs?.reasoning_effort;
+    if (!capability?.supported || capability.control !== "select") continue;
+    for (const option of capability.options ?? []) options.add(option);
+  }
+  return [...options];
+}
+
+export function reasoningDirty(state: EditableState, policy: GovernancePolicy): boolean {
+  return (
+    state.reasoningConfigured !== policy.reasoning_policy.configured ||
+    state.defaultReasoningEffort !== policy.reasoning_policy.default_effort ||
+    state.allowUserReasoningEffort !== policy.reasoning_policy.allow_user_override
+  );
+}
+
+export function fileDirty(state: EditableState, policy: GovernancePolicy): boolean {
+  return state.openFilesEnabled !== (policy.file_policy.inline_file_text === false);
+}
+
 export function skillsDirty(state: EditableState, policy: GovernancePolicy): boolean {
   return (
     JSON.stringify(state.skillBindings) !==
@@ -270,7 +312,8 @@ export function canSave(
   state: EditableState,
   dirty: boolean,
   effective: Set<string>,
-  selectiveActivationEnabled = true
+  selectiveActivationEnabled = true,
+  reasoningEffortOptions: string[] = []
 ): boolean {
   return (
     dirty &&
@@ -278,13 +321,22 @@ export function canSave(
     defaultValid(state, effective) &&
     mcpValid(state) &&
     (!state.promptEnabled || state.selectedPromptId !== null) &&
+    (state.defaultReasoningEffort === null ||
+      reasoningEffortOptions.includes(state.defaultReasoningEffort)) &&
     skillsValid(state, selectiveActivationEnabled)
   );
 }
 
 // ---- Save payload + confirmations ------------------------------------------
 
-export type DirtyFlags = { models: boolean; mcp: boolean; prompt: boolean; skills?: boolean };
+export type DirtyFlags = {
+  models: boolean;
+  mcp: boolean;
+  prompt: boolean;
+  reasoning?: boolean;
+  file?: boolean;
+  skills?: boolean;
+};
 
 export function buildUpdate(
   state: EditableState,
@@ -319,6 +371,13 @@ export function buildUpdate(
       prompt_library_id: state.promptEnabled ? state.selectedPromptId : null
     };
   }
+  if (flags.reasoning) {
+    update.reasoning_policy = {
+      default_effort: state.defaultReasoningEffort,
+      allow_user_override: state.allowUserReasoningEffort
+    };
+  }
+  if (flags.file) update.file_policy = { inline_file_text: !state.openFilesEnabled };
   if (flags.skills) update.skills = { bindings: state.skillBindings };
   return update;
 }
@@ -371,6 +430,10 @@ export type DraftAction =
   | { type: "toggleMcpTool"; toolId: string; on: boolean }
   | { type: "setPromptEnabled"; on: boolean }
   | { type: "setPrompt"; id: string | null }
+  | { type: "activateReasoning" }
+  | { type: "setReasoningEffort"; effort: string | null }
+  | { type: "setReasoningOverride"; on: boolean }
+  | { type: "setOpenFiles"; on: boolean }
   | { type: "setSkillBindings"; bindings: Binding[] };
 
 export function draftReducer(state: EditableState, action: DraftAction): EditableState {
@@ -480,6 +543,18 @@ export function draftReducer(state: EditableState, action: DraftAction): Editabl
 
     case "setPrompt":
       return { ...state, selectedPromptId: action.id };
+
+    case "activateReasoning":
+      return { ...state, reasoningConfigured: true };
+
+    case "setReasoningEffort":
+      return { ...state, defaultReasoningEffort: action.effort };
+
+    case "setReasoningOverride":
+      return { ...state, allowUserReasoningEffort: action.on };
+
+    case "setOpenFiles":
+      return { ...state, openFilesEnabled: action.on };
 
     case "setSkillBindings":
       return { ...state, skillBindings: action.bindings };

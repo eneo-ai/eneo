@@ -10,11 +10,13 @@ import { adminModelsQueryOptions } from "@/features/admin/models/models";
 import { mcpServersQueryOptions } from "@/features/admin/mcp/mcp";
 import { promptLibraryQueryOptions } from "@/features/admin/prompt-library/prompt-library";
 import { governancePolicyQueryOptions, modelProvidersQueryOptions } from "./governance";
+import { FilePolicySection } from "./file-policy-section";
 import { McpRestrictionSection } from "./mcp-restriction-section";
 import { ModelRestrictionSection } from "./model-restriction-section";
 import { PolicyConfirmDialog } from "./policy-confirm-dialog";
 import { PolicySaveBar } from "./policy-save-bar";
 import { PromptEnforcementSection } from "./prompt-enforcement-section";
+import { ReasoningPolicySection } from "./reasoning-policy-section";
 import { usePolicyDraft } from "./use-policy-draft";
 
 /**
@@ -48,8 +50,10 @@ export function GovernancePolicyPage() {
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 pb-32">
         <PageHeader title={t("governance_title")} tour="admin-personal-assistant" />
         <ModelRestrictionSection draft={draft} />
+        <ReasoningPolicySection draft={draft} />
         <McpRestrictionSection draft={draft} />
         <PromptEnforcementSection draft={draft} />
+        <FilePolicySection draft={draft} />
         <SkillBindingsEditor
           resource="personal_chat"
           spaceId="organization"

@@ -11,10 +11,13 @@ import {
   defaultValid,
   draftReducer,
   effectiveModelIdSet,
+  fileDirty,
   mcpDirty,
   modelsByProvider,
   modelsDirty,
   promptDirty,
+  reasoningDirty,
+  reasoningOptions,
   seedEditable,
   selectableServerIdSet,
   selectableToolIdSet,
@@ -75,6 +78,78 @@ describe("seedEditable", () => {
     });
     const state = seedEditable(saved, [], availableServers(SERVERS));
     expect(state.mcpSelections.s1).toEqual({ isDefaultEnabled: false });
+  });
+});
+
+describe("reasoning and attachment policy", () => {
+  const reasoningModels: CompletionModel[] = [
+    {
+      id: "reasoning",
+      name: "Reasoning",
+      can_access: true,
+      supported_model_kwargs: {
+        reasoning_effort: { supported: true, control: "select", options: ["low", "high"] }
+      }
+    },
+    {
+      id: "locked",
+      name: "Locked",
+      can_access: false,
+      supported_model_kwargs: {
+        reasoning_effort: { supported: true, control: "select", options: ["max"] }
+      }
+    }
+  ];
+
+  it("offers only supported efforts for allowed, accessible models", () => {
+    const saved = policy();
+    let state = seedEditable(saved, reasoningModels, []);
+    expect(reasoningOptions(reasoningModels, state, new Set())).toEqual(["low", "high"]);
+    state = draftReducer(state, { type: "setModelsEnabled", on: true });
+    expect(reasoningOptions(reasoningModels, state, new Set())).toEqual([]);
+    expect(reasoningOptions(reasoningModels, state, new Set(["reasoning"]))).toEqual([
+      "low",
+      "high"
+    ]);
+  });
+
+  it("activates reasoning without changing other policy dimensions", () => {
+    const saved = policy();
+    let state = seedEditable(saved, reasoningModels, []);
+    state = draftReducer(state, { type: "activateReasoning" });
+    state = draftReducer(state, { type: "setReasoningEffort", effort: "high" });
+    state = draftReducer(state, { type: "setReasoningOverride", on: true });
+    expect(reasoningDirty(state, saved)).toBe(true);
+    expect(canSave(state, true, new Set(), true, ["low", "high"])).toBe(true);
+    expect(canSave(state, true, new Set(), true, ["low"])).toBe(false);
+    expect(
+      buildUpdate(state, { models: false, mcp: false, prompt: false, reasoning: true }, [])
+    ).toEqual({
+      reasoning_policy: { default_effort: "high", allow_user_override: true }
+    });
+    expect(fileDirty(state, saved)).toBe(false);
+  });
+
+  it("preserves an already governed inline-file policy until the switch changes", () => {
+    const saved = policy({ file_policy: { configured: true, inline_file_text: true } });
+    const initial = seedEditable(saved, [], []);
+    expect(initial.openFilesEnabled).toBe(false);
+    expect(fileDirty(initial, saved)).toBe(false);
+    const changed = draftReducer(initial, { type: "setOpenFiles", on: true });
+    expect(fileDirty(changed, saved)).toBe(true);
+    expect(
+      buildUpdate(changed, { models: false, mcp: false, prompt: false, file: true }, [])
+    ).toEqual({
+      file_policy: { inline_file_text: false }
+    });
+    expect(reasoningDirty(changed, saved)).toBe(false);
+  });
+
+  it("does not submit a pristine ungoverned attachment policy", () => {
+    const saved = policy();
+    const state = seedEditable(saved, [], []);
+    expect(fileDirty(state, saved)).toBe(false);
+    expect(reasoningDirty(state, saved)).toBe(false);
   });
 });
 

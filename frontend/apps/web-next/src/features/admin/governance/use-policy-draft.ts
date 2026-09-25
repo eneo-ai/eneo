@@ -20,6 +20,7 @@ import {
   displayServers,
   draftReducer,
   effectiveModelIdSet,
+  fileDirty,
   mcpDirty,
   mcpValid as mcpValidOf,
   type McpServer,
@@ -28,6 +29,8 @@ import {
   modelsDirty,
   type PromptOption,
   promptDirty,
+  reasoningDirty,
+  reasoningOptions as reasoningOptionsOf,
   seedEditable,
   selectableModels,
   selectableServerIdSet,
@@ -91,6 +94,10 @@ export function usePolicyDraft(input: PolicyDraftInput) {
   const defaultModelId = useMemo(() => defaultModelIdOf(state), [state]);
   const providerSelections = useMemo(() => new Set(state.providerSelections), [state]);
   const disabledMcpToolIds = useMemo(() => new Set(state.disabledMcpToolIds), [state]);
+  const reasoningOptions = useMemo(
+    () => reasoningOptionsOf(models, state, effectiveModelIds),
+    [models, state, effectiveModelIds]
+  );
 
   const mDirty = useMemo(() => modelsDirty(state, policy), [state, policy]);
   const cDirty = useMemo(
@@ -98,13 +105,24 @@ export function usePolicyDraft(input: PolicyDraftInput) {
     [state, policy, serverIds, toolIds]
   );
   const pDirty = useMemo(() => promptDirty(state, policy), [state, policy]);
+  const rDirty = useMemo(() => reasoningDirty(state, policy), [state, policy]);
+  const fDirty = useMemo(() => fileDirty(state, policy), [state, policy]);
   const sDirty = useMemo(() => skillsDirty(state, policy), [state, policy]);
-  const dirty = mDirty || cDirty || pDirty || sDirty;
+  const dirty = mDirty || cDirty || pDirty || rDirty || fDirty || sDirty;
 
   const defaultValid = defaultValidOf(state, effectiveModelIds);
   const mcpValid = mcpValidOf(state);
   const skillsValid = skillsValidOf(state, input.selectiveActivationEnabled);
-  const canSave = canSaveOf(state, dirty, effectiveModelIds, input.selectiveActivationEnabled);
+  const reasoningValid =
+    state.defaultReasoningEffort === null ||
+    reasoningOptions.includes(state.defaultReasoningEffort);
+  const canSave = canSaveOf(
+    state,
+    dirty,
+    effectiveModelIds,
+    input.selectiveActivationEnabled,
+    reasoningOptions
+  );
 
   // ---- Summaries -----------------------------------------------------------
   const modelsSummary = useMemo(() => {
@@ -144,6 +162,19 @@ export function usePolicyDraft(input: PolicyDraftInput) {
     state.skillBindings.length === 0
       ? t("governance_skills_summary_none")
       : t("governance_skills_summary_count", { count: String(state.skillBindings.length) });
+  const reasoningSummary = !state.reasoningConfigured
+    ? t("governance_reasoning_summary_inactive")
+    : t(
+        state.allowUserReasoningEffort
+          ? "governance_reasoning_summary_user_choice"
+          : "governance_reasoning_summary_fixed",
+        { effort: state.defaultReasoningEffort ?? t("default_behavior") }
+      );
+  const filesSummary = !(policy.file_policy.configured || fDirty)
+    ? t("governance_files_summary_inactive")
+    : state.openFilesEnabled
+      ? t("governance_files_summary_open_files")
+      : t("governance_files_summary_inline");
 
   const providerName = (pid: string | null): string =>
     pid === null
@@ -164,7 +195,14 @@ export function usePolicyDraft(input: PolicyDraftInput) {
     try {
       const update = buildUpdate(
         state,
-        { models: mDirty, mcp: cDirty, prompt: pDirty, skills: sDirty },
+        {
+          models: mDirty,
+          mcp: cDirty,
+          prompt: pDirty,
+          reasoning: rDirty,
+          file: fDirty,
+          skills: sDirty
+        },
         available
       );
       await unwrap(browserApi.PUT("/api/v1/admin/governance-policy/", { body: update }));
@@ -229,6 +267,19 @@ export function usePolicyDraft(input: PolicyDraftInput) {
     setSelectedPromptId: (id: string | null) => dispatch({ type: "setPrompt", id }),
     promptOptions: prompts,
     promptSummary,
+    // reasoning and attachment policy
+    reasoningConfigured: state.reasoningConfigured,
+    activateReasoning: () => dispatch({ type: "activateReasoning" }),
+    defaultReasoningEffort: state.defaultReasoningEffort,
+    setReasoningEffort: (effort: string | null) => dispatch({ type: "setReasoningEffort", effort }),
+    allowUserReasoningEffort: state.allowUserReasoningEffort,
+    setReasoningOverride: (on: boolean) => dispatch({ type: "setReasoningOverride", on }),
+    reasoningOptions,
+    reasoningSummary,
+    reasoningValid,
+    openFilesEnabled: state.openFilesEnabled,
+    setOpenFiles: (on: boolean) => dispatch({ type: "setOpenFiles", on }),
+    filesSummary,
     // personal-chat Skills
     skillBindings: state.skillBindings,
     setSkillBindings: (bindings: Binding[]) => dispatch({ type: "setSkillBindings", bindings }),
