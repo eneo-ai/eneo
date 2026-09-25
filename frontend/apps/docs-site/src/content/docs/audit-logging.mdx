@@ -63,7 +63,7 @@ For these actions:
 
 - `AuditService._should_log_action` returns true before it evaluates the `audit_logging_enabled` kill switch or the category and action configuration.
 - Request handlers write them with `AuditService.log_required()`. It inserts the row on the request's own database session, inside the function-scoped transaction that makes the change, so the change and its audit row commit together and a failed insert rolls the change back (fail-closed). It raises `ValueError` when called with an action that is not mandatory.
-- `GET /api/v1/audit/config/actions` reports them with `enabled: true` and `mandatory: true`. `PATCH /api/v1/audit/config/actions` returns `400` for any attempt to disable one, and the configuration UI shows them as locked.
+- `GET /api/v1/audit/config/actions` reports them with `enabled: true` and `mandatory: true`. `PATCH /api/v1/audit/config/actions` returns `400` for any attempt to disable one, and the configuration UI shows them as checked, read-only checkboxes marked **Always logged**.
 - The tenant's retention policy, the purge job and exports apply to them as to any other log.
 
 The one path that still uses `log_async` is the system archive of a widget whose assistant is deleted or moved: the configuration gates are bypassed, but a failure to enqueue the job does not stop the archive.

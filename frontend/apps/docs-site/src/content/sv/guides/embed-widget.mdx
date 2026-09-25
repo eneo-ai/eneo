@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@80b8f35d61c4
+translationSource: guides/embed-widget.mdx@fa1ef7522e16
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -353,16 +353,17 @@ behöver åtgärdas.
 
 ### Granska begäranden om aktivering [#review-activation-requests]
 
-Redaktörer begär aktivering i widgetredigeraren (se
+Redigerare begär aktivering i widgetredigeraren (se
 [Begär aktivering](#request-activation)), och en organisationsadministratör
 granskar widgeten och beslutar. Du behöver inte vara medlem i widgetens yta för
 att granska den, aktivera den, skicka tillbaka begäran, pausa den eller
 arkivera den.
 
-På fliken **Widgetar** under **Admin → Webbwidgetar** visas widgetar som väntar
-på aktivering först, äldsta begäran först, med vem som begärde, när och om
-något hindrar aktiveringen. En ruta visar hur många som väntar, och
-**Admin → Ytor** listar dem under **Behöver åtgärd** (se
+På fliken **Widgetar** under **Admin → Webbwidgetar** listar avsnittet **Väntar
+på aktivering** de widgetar som väntar på aktivering ovanför översikten, äldsta
+begäran först, med vem som begärde, när och om något hindrar aktiveringen. En
+ruta visar hur många som väntar, och **Admin → Ytor** listar dem under
+**Behöver åtgärd** (se
 [Tillsyn över ytor](/guides/space-oversight#spaces-that-need-attention)). Välj
 **Granska** för att öppna widgetens granskningssida; alla widgetar i
 översikten länkar dit. Översikten aktiverar eller återupptar inte widgetar
@@ -391,17 +392,18 @@ Granskningssidan visar:
 - **Användning**, när widgeten har varit aktiv.
 
 **Aktivera…**, eller **Återuppta…** för en pausad widget, publicerar widgeten
-exakt som du granskade den: om en redaktör har ändrat widgeten efter att du
+exakt som du granskade den: om en redigerare har ändrat widgeten efter att du
 öppnade sidan nekas aktiveringen, och **Visa senaste versionen** läser in sidan
 igen så att du kan granska ändringen först. Du kan också aktivera en widget som
 ingen har begärt aktivering för. **Skicka tillbaka…** returnerar en väntande
 begäran med ett meddelande om vad som behöver ändras (10–500 tecken). Widgeten
-förblir ett utkast eller pausad, och ytans redaktörer ser ditt meddelande i
+förblir ett utkast eller pausad, och ytans redigerare ser ditt meddelande i
 widgetredigeraren. Meddelandet sparas också i granskningsloggen, så skriv det
-för redaktörerna och utan personuppgifter. **Pausa…** och **Arkivera…** finns
+för redigerarna och utan personuppgifter. **Pausa…** och **Arkivera…** finns
 på samma sida, och **Öppna i widgetredigeraren** visas när du är redigerare
-eller administratör i ytan. När en widget aktiveras eller arkiveras tas en
-väntande begäran och ett eventuellt tillbakaskickat meddelande bort.
+eller administratör i ytan och har behörigheten för webbwidgetar. När en widget
+aktiveras eller arkiveras tas en väntande begäran och ett eventuellt
+tillbakaskickat meddelande bort.
 
 Aktivering, tillbakaskickade begäranden, paus och arkivering sparas alltid i
 granskningsloggen, även när granskningsloggningen är avstängd (se

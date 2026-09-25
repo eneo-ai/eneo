@@ -1,6 +1,6 @@
 ---
 title: Tillsyn över ytor
-translationSource: guides/space-oversight.mdx@d5855a863733
+translationSource: guides/space-oversight.mdx@9b9f1f19ca0e
 ---
 
 # Tillsyn över ytor
@@ -36,7 +36,8 @@ behörigheten **Administratör**.
 - säkerhetsklassen, när säkerhetsklassificering används;
 - ytans administratörer;
 - antalet medlemmar (personer, direkt eller via grupper) och grupper;
-- ytans resurser: assistenter, appar, kunskapskällor och aktiva webbwidgetar;
+- ytans resurser: assistenter, appar, gruppchattar, kunskapskällor och aktiva
+  webbwidgetar;
 - när ytan senast var aktiv, som en period: senaste veckan, senaste månaden,
   senaste 3 månaderna, mer än 3 månader sedan eller ingen aktivitet;
 - ditt eget medlemskap: inte medlem, din roll, din roll via en grupp eller att
@@ -53,11 +54,13 @@ bara här.
 
 ### En enskild yta [#a-single-space]
 
-Välj en ytas namn för att öppna den. Sidan börjar med hur du själv förhåller
-dig till ytan (se [Gå med i en yta](#join-a-space)) och följs av en
-sammanfattning: säkerhetsklass, administratörer, medlemmar, senaste aktivitet,
-frågor och aktiva användare de senaste 30 dagarna, frågor via ytans
-webbwidgetar, lagrad kunskap och när ytan skapades. Därefter kommer fem flikar:
+Välj en ytas namn för att öppna den. Sidan börjar med ytans beskrivning och hur
+du själv förhåller dig till ytan (se [Gå med i en yta](#join-a-space)). Om ytan
+saknar administratör följer ett meddelande med **Gå till medlemmar**. Sedan
+kommer en sammanfattning: säkerhetsklass, administratörer, medlemmar, senaste
+aktivitet, frågor och aktiva användare de senaste 30 dagarna, appkörningar när
+ytan har appar, frågor via ytans webbwidgetar, lagrad kunskap och när ytan
+skapades. Därefter kommer fem flikar:
 
 - **Inställningar**: hur länge samtal sparas, ytans språkmodeller,
   inbäddningsmodeller och transkriberingsmodeller, om webbsökning och
@@ -264,14 +267,16 @@ Följande händelser sparas i granskningsloggen:
 | Widgetaktivering begärd                        | En redigerare begär aktivering av en webbwidget                            | Nej           |
 | Begäran om widgetaktivering tillbakadragen     | En redigerare drar tillbaka en begäran                                     | Nej           |
 
-Aktivering, paus och arkivering av en webbwidget loggas också alltid.
+Aktivering, paus och arkivering av en webbwidget (**Widget aktiverad**,
+**Widget pausad** och **Widget arkiverad**) loggas också alltid.
 
 **Loggas alltid** betyder att händelsen sparas även när granskningsloggningen
 är avstängd för organisationen, oavsett inställningar för kategorier och
-händelser. Reglaget i loggkonfigurationen är låst och markerat **Loggas
-alltid**. Posten skrivs tillsammans med ändringen: om den inte kan sparas blir
-ändringen inte av. Organisationens lagringstid för granskningsloggen gäller
-för de här posterna som för alla andra.
+händelser. I loggkonfigurationen är händelsens kryssruta ikryssad, går inte att
+ändra och är markerad **Loggas alltid**. Posten skrivs tillsammans med
+ändringen: om den inte kan sparas blir ändringen inte av. Organisationens
+lagringstid för granskningsloggen gäller för de här posterna som för alla
+andra.
 
 En organisation får minska loggningen av vanlig aktivitet, men inte av åtkomst
 och ändringar som görs utan medlemskap, eller av publicering på den öppna

@@ -29,6 +29,10 @@
           "body": {
             "en": "Administrators get a Spaces page that lists every shared space with its settings, members and activity, and shows what needs attention. You can fix membership and review web widgets without joining. To see a space's documents and conversations you join it with a written reason; its members see that you joined, and the audit log always records it.",
             "sv": "Administratörer får sidan Ytor med alla delade ytor, deras inställningar, medlemmar och aktivitet, och ser vad som behöver åtgärdas. Du kan rätta medlemskap och granska webbwidgetar utan att gå med. För att se en ytas dokument och samtal går du med i ytan med en skriven anledning; ytans medlemmar ser att du gick med och granskningsloggen sparar det alltid."
+          },
+          "showMe": {
+            "href": "/admin/spaces",
+            "anchor": "admin-spaces"
           }
         }
       ]

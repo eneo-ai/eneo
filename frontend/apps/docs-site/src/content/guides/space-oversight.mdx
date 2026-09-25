@@ -22,7 +22,7 @@ Organisation administrators can see and manage every shared space in the organis
 - the security classification, when security classifications are enabled;
 - its administrators;
 - the number of members (people, directly or through groups) and groups;
-- its resources: assistants, apps, knowledge sources and active web widgets;
+- its resources: assistants, apps, group chats, knowledge sources and active web widgets;
 - when it was last active, as a period: past week, past month, past 3 months, more than 3 months ago, or no activity;
 - your own membership: not a member, your role, your role through a group, or that you joined through oversight. When you are a member, **Open space** takes you to the space itself.
 
@@ -30,7 +30,7 @@ Search by name, description or administrator, filter on your membership (**Where
 
 ### A single space
 
-Choose a space's name to open it. The page starts with your own relation to the space (see [Join a space](#join-a-space)), followed by a summary: classification, administrators, members, last activity, questions and active users over the past 30 days, questions through the space's web widgets, stored knowledge and when the space was created. Five tabs follow:
+Choose a space's name to open it. The page starts with the space's description and your own relation to the space (see [Join a space](#join-a-space)). When the space has no administrator, a notice with **Go to members** follows. Then comes a summary: classification, administrators, members, last activity, questions and active users over the past 30 days, app runs when the space has apps, questions through the space's web widgets, stored knowledge and when the space was created. Five tabs follow:
 
 - **Settings**: how long conversations are kept, the space's language, embedding and transcription models, whether web search and image generation are on, and its tools (MCP servers).
 - **Assistants and apps**: for each assistant, whether it is published, its model, the knowledge sources it uses, the number of attached files, its tools, whether insights and full logging are on, how long it keeps conversations, its web widget and its instructions. Apps show their models, instructions and retention, and group chats show their status, number of assistants and whether insights are on. Instructions stay collapsed until you choose **Show instructions**.
@@ -123,24 +123,24 @@ These actions are recorded in the audit log:
 
 | Action in the audit log                      | Recorded when                                                             | Always logged |
 | -------------------------------------------- | ------------------------------------------------------------------------- | ------------- |
-| Joined a space through oversight             | An organisation administrator joins a space, with role and reason         | Yes           |
-| Left a space (oversight)                     | An organisation administrator leaves a space                              | Yes           |
-| Member added by organisation administrator   | A person or group is added through oversight                              | Yes           |
-| Role changed by organisation administrator   | A person's or group's role is changed through oversight                   | Yes           |
-| Member removed by organisation administrator | A person or group is removed through oversight                            | Yes           |
-| Widget activation request sent back          | An administrator sends an activation request back, with the message       | Yes           |
-| Widget activation requested                  | An editor requests activation of a web widget                             | No            |
-| Widget activation request withdrawn          | An editor withdraws a request                                             | No            |
+| Joined Space Through Oversight               | An organisation administrator joins a space, with role and reason         | Yes           |
+| Left Space (Oversight)                       | An organisation administrator leaves a space                              | Yes           |
+| Member Added by Organisation Administrator   | A person or group is added through oversight                              | Yes           |
+| Role Changed by Organisation Administrator   | A person's or group's role is changed through oversight                   | Yes           |
+| Member Removed by Organisation Administrator | A person or group is removed through oversight                            | Yes           |
+| Widget Activation Request Sent Back          | An administrator sends an activation request back, with the message       | Yes           |
+| Widget Activation Requested                  | An editor requests activation of a web widget                             | No            |
+| Widget Activation Request Withdrawn          | An editor withdraws a request                                             | No            |
 
-Activating, pausing and archiving a web widget are always logged too.
+Activating, pausing and archiving a web widget (**Widget Activated**, **Widget Paused** and **Widget Archived**) are always logged too.
 
-**Always logged** means that the action is recorded even when audit logging is turned off for the organisation, whatever the category and action settings. Its switch in the audit configuration is locked and marked **Always logged**. The entry is written together with the change: if it cannot be saved, the change is not made. The organisation's audit log retention applies to these entries like any other.
+**Always logged** means that the action is recorded even when audit logging is turned off for the organisation, whatever the category and action settings. In the audit configuration its checkbox stays checked, cannot be changed and is marked **Always logged**. The entry is written together with the change: if it cannot be saved, the change is not made. The organisation's audit log retention applies to these entries like any other.
 
 An organisation may reduce the logging of ordinary activity, but not of access and changes made without membership, or of publishing to the open web. The administrators who could make such changes can also change the audit settings, so a record they could switch off would not be a control.
 
 Each entry names the administrator, the space and, where they apply, the member or group and the roles. A join reason or a send-back message is kept in the entry's details (its metadata), never in its description. Opening the oversight pages is not logged: reading settings, members, instructions or usage leaves no entry.
 
-Review joins regularly, for example once a month. Filter the audit log on the action **Joined a space through oversight**, and check that each membership is still needed. **Where I'm a member** on **Admin → Spaces** shows your own memberships. Check changes to user groups as well (see [Content requires membership](#content-requires-membership)).
+Review joins regularly, for example once a month. Filter the audit log on the action **Joined Space Through Oversight**, and check that each membership is still needed. **Where I'm a member** on **Admin → Spaces** shows your own memberships. Check changes to user groups as well (see [Content requires membership](#content-requires-membership)).
 
 ## API access
 
