@@ -17873,6 +17873,11 @@ export interface components {
        * @description The form field that already asks for the speaker count (a speaker-mapping step's count field), or null. When set, a client should not offer a second count control; a run's `max_speakers` still overrides the field.
        */
       form_field: string | null;
+      /**
+       * Participants Field
+       * @description The form field that lists the people expected to speak (a speaker-mapping step's participants field), or null. A client may offer the number of names as a visible, editable prefill for `max_speakers`. Eneo itself never derives the bound from the names: a bound below the real count would merge unlisted voices into one person.
+       */
+      participants_field: string | null;
     };
     /**
      * FlowOutputDelivery
@@ -18472,6 +18477,7 @@ export interface components {
      * @example {
      *       "created_at": "2026-03-17T09:30:00Z",
      *       "created_by_user_id": "00000000-0000-0000-0000-000000000030",
+     *       "delivery": "artifact",
      *       "description": "Transcribe a review conversation and return a PDF summary.",
      *       "draft_revision": 3,
      *       "id": "00000000-0000-0000-0000-000000000001",
@@ -18543,6 +18549,8 @@ export interface components {
       created_at?: string | null;
       /** Created By User Id */
       created_by_user_id?: string | null;
+      /** @description How clients receive the result of the flow's last step, in step order. Null when the flow has no steps. Uses the same `FlowOutputDelivery` values and rule as `FlowFinalOutputContractPublic.delivery` on the run contract, so clients can use one rule for both. */
+      delivery?: components["schemas"]["FlowOutputDelivery"] | null;
       /** Description */
       description?: string | null;
       /**
@@ -20082,6 +20090,11 @@ export interface components {
        * @description Background job that owns the current execution attempt. Diagnostic only; it is not addressable through the public API.
        */
       job_id?: string | null;
+      /**
+       * Max Speakers
+       * @description The upper bound on speakers the run settled at creation: its own `max_speakers`, else the form's speaker-count field. Null when the bound is automatic or the run labels no speakers. Send it as `max_speakers` to start a new run with the same bound.
+       */
+      max_speakers?: number | null;
       /** @description Principal kind that created the run, once resolved. Service-key callers only see runs their own key created. */
       principal_type?: components["schemas"]["PrincipalType"] | null;
       /**
@@ -20118,6 +20131,11 @@ export interface components {
        * @description Caller-supplied run label, available only through audited reads.
        */
       run_label?: string | null;
+      /**
+       * Speaker Labels
+       * @description The run's speaker-label setting, settled when the run was created: true when the flow requires labels, else the run's own choice, else the flow's default at that time. Null when the flow offers no speaker-label option or the run recorded none. To start a new run with the same setting, send it as `speaker_labels` only when the run contract's `transcription.speaker_labels.selectable` is true.
+       */
+      speaker_labels?: boolean | null;
       /**
        * Started At
        * @description When a worker began executing the first step. Null while queued.
@@ -21707,6 +21725,11 @@ export interface components {
        * @description Background job that owns the current execution attempt. Diagnostic only; it is not addressable through the public API.
        */
       job_id?: string | null;
+      /**
+       * Max Speakers
+       * @description The upper bound on speakers the run settled at creation: its own `max_speakers`, else the form's speaker-count field. Null when the bound is automatic or the run labels no speakers. Send it as `max_speakers` to start a new run with the same bound.
+       */
+      max_speakers?: number | null;
       /** @description Principal kind that created the run, once resolved. Service-key callers only see runs their own key created. */
       principal_type?: components["schemas"]["PrincipalType"] | null;
       /**
@@ -21743,6 +21766,11 @@ export interface components {
        * @description Caller-supplied run label, available only through audited reads.
        */
       run_label?: string | null;
+      /**
+       * Speaker Labels
+       * @description The run's speaker-label setting, settled when the run was created: true when the flow requires labels, else the run's own choice, else the flow's default at that time. Null when the flow offers no speaker-label option or the run recorded none. To start a new run with the same setting, send it as `speaker_labels` only when the run contract's `transcription.speaker_labels.selectable` is true.
+       */
+      speaker_labels?: boolean | null;
       /**
        * Started At
        * @description When a worker began executing the first step. Null while queued.
@@ -24000,6 +24028,7 @@ export interface components {
      * @example {
      *       "created_at": "2026-03-17T09:30:00Z",
      *       "created_by_user_id": "00000000-0000-0000-0000-000000000030",
+     *       "delivery": "artifact",
      *       "description": "Transcribe a review conversation and return a PDF summary.",
      *       "id": "00000000-0000-0000-0000-000000000001",
      *       "input_type": "audio",
@@ -24044,6 +24073,8 @@ export interface components {
       created_at?: string | null;
       /** Created By User Id */
       created_by_user_id?: string | null;
+      /** @description How clients receive the result of the flow's last step, in step order. Null when the flow has no steps. Uses the same `FlowOutputDelivery` values and rule as `FlowFinalOutputContractPublic.delivery` on the run contract, so clients can use one rule for both. */
+      delivery?: components["schemas"]["FlowOutputDelivery"] | null;
       /** Description */
       description?: string | null;
       /**
@@ -51660,6 +51691,7 @@ export interface operations {
            *         {
            *           "created_at": "2026-03-17T09:30:00Z",
            *           "created_by_user_id": "00000000-0000-0000-0000-000000000030",
+           *           "delivery": "artifact",
            *           "description": "Transcribe a review conversation and return a PDF summary.",
            *           "id": "00000000-0000-0000-0000-000000000001",
            *           "input_type": "audio",
