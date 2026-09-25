@@ -442,11 +442,18 @@ There is no separate CSRF token or refresh-token mechanism.
   members. These routes use a separate, column-only read model filtered by
   tenant; they never go through the space actor, which keeps no admin bypass,
   so content permissions are not widened. Documents, questions, answers and
-  conversations stay behind membership: an admin reaches them only by joining
-  the space with a role and a written reason, which members can see and the
-  audit log always records. Tenant-scoped service keys are the exception; see
+  conversations stay behind membership. One tenant admin cannot give another
+  content access directly: adding a tenant admin as a user, or raising a
+  tenant admin's direct role, is refused with `400` and error code `9067`, so
+  admins join a space themselves with a role and a written reason.
+  Members see the join until 90 days after it ends (table
+  `space_oversight_visits`), and the audit log always records it. Two routes
+  reach content without a join: user groups, since a group's role in a space
+  applies to everyone in it (every user added to or removed from a group is
+  always logged, and a group that contains tenant admins can still be added to
+  a space), and tenant-scoped service keys; see
   [API Key Management](/docs/api-key-management#how-service-keys-derive-space-roles)
-  and [Space Oversight](/guides/space-oversight).
+  and [Space Oversight](/guides/space-oversight#content-requires-membership).
 
 ### Data Security
 

@@ -2,7 +2,7 @@
 
 import { Callout } from "nextra/components";
 
-Organisation administrators can see and manage every shared space in the organisation under **Admin → Spaces**, without being members. You see each space's settings, members, resources and usage, you can correct its membership and you can review its web widgets. The space's documents, questions, answers and conversations stay with its members: to see them you join the space with a role and a written reason, which the space's members can see and the audit log always records.
+Organisation administrators can see and manage every shared space in the organisation under **Admin → Spaces**, without being members. You see each space's settings, members, resources and usage, you can correct its membership and you can review its web widgets. The space's documents, questions, answers and conversations stay with its members: to see them you join the space yourself, with a role and a written reason. The space's members see that you joined until 90 days after you leave, and the audit log always records the join. User groups and tenant-scoped service keys also give access to content; see [Content requires membership](#content-requires-membership).
 
 **Spaces** is the first item under **Governance** in the admin menu. It is available to organisation administrators, that is, users whose role has the **Admin** permission.
 
@@ -23,18 +23,18 @@ Organisation administrators can see and manage every shared space in the organis
 - its administrators;
 - the number of members (people, directly or through groups) and groups;
 - its resources: assistants, apps, group chats, knowledge sources and active web widgets;
-- when it was last active, as a period: past week, past month, past 3 months, more than 3 months ago, or no activity;
+- when it was last active, as a period: past week, past month, past 3 months, more than 3 months ago, or no recorded activity;
 - your own membership: not a member, your role, your role through a group, or that you joined through oversight. When you are a member, **Open space** takes you to the space itself.
 
-Search by name, description or administrator, filter on your membership (**Where I'm a member**, **Where I'm not a member**) and on what needs attention (**Needs attention**, **No administrator**, **Widget waiting for activation**), and sort by name, members or last activity. The filters are kept in the page address, so the browser's back button and a bookmark return to the same view. Spaces you are a member of also appear in your space selector as usual; the others appear only here.
+Search by name, description or administrator, filter on your membership (spaces where you are or are not a member) and on what needs attention (**Needs attention**, **No administrator**, **Widget waiting for activation**), and sort by name, members or last activity. The filters are kept in the page address, so the browser's back button and a bookmark return to the same view. Spaces you are a member of also appear in your space selector as usual; the others appear only here.
 
 ### A single space
 
-Choose a space's name to open it. The page starts with the space's description and your own relation to the space (see [Join a space](#join-a-space)). When the space has no administrator, a notice with **Go to members** follows. Then comes a summary: classification, administrators, members, last activity, questions and active users over the past 30 days, app runs when the space has apps, questions through the space's web widgets, stored knowledge and when the space was created. Five tabs follow:
+Choose a space's name to open it. The page starts with the space's description and your own relation to the space (see [Join a space](#join-a-space)). When the space has no administrator, a notice with **Go to members** follows. Then comes a summary: classification, administrators, members, last activity, questions and active users over the past 30 days, app runs when the space has apps, questions through the space's web widgets (test questions included), stored knowledge and when the space was created. Five tabs follow:
 
 - **Settings**: how long conversations are kept, the space's language, embedding and transcription models, whether web search and image generation are on, and its tools (MCP servers).
-- **Assistants and apps**: for each assistant, whether it is published, its model, the knowledge sources it uses, the number of attached files, its tools, whether insights and full logging are on, how long it keeps conversations, its web widget and its instructions. Apps show their models, instructions and retention, and group chats show their status, number of assistants and whether insights are on. Instructions stay collapsed until you choose **Show instructions**.
-- **Knowledge**: the knowledge sources the space owns, with type, number of documents or pages, size, last update and the assistants that use them. Websites also show how often they are fetched, whether they require sign-in and whether fetching has stopped after repeated errors. The tab also counts the sources the space uses from the organisation space.
+- **Assistants and apps**: for each assistant, whether it is published, its model, the knowledge sources it uses, the number of attached files, its tools, whether insights and full logging are on, how long it keeps conversations, its web widgets and its instructions. Apps show their models, instructions and retention, and group chats show their status, number of assistants and whether insights are on. Instructions stay collapsed until you choose **Show instructions**.
+- **Knowledge**: the knowledge sources the space owns, with type, number of documents or pages, size, the day of the last update and the assistants that use them. Websites also show how often they are fetched, whether they require sign-in and whether fetching has stopped after repeated errors. The tab also counts the sources the space uses from the organisation space.
 - **Members**: people and groups with their roles; see [Manage members](#manage-members).
 - **Web widgets**: the space's widgets, their assistant and status, and when activation was requested.
 
@@ -48,9 +48,9 @@ The oversight pages never show:
 - questions, answers, conversation names, feedback, or the input and output of app runs;
 - the names of attached files, only how many there are;
 - website sign-in details or tool server secrets;
-- the folders and paths behind an integration; a OneDrive source is shown as **OneDrive (personal folder)** without its name;
+- the folders and paths behind an integration, or the name of a single file or folder from it. An integration source is named only when it covers a whole SharePoint or Confluence site. A SharePoint file or folder, or a SharePoint item that has not been synced yet, is shown by its type only; a OneDrive source is shown as **OneDrive (personal folder)**;
 - who created an assistant, app or knowledge source;
-- the exact time of the last activity.
+- the exact time of the last activity, or the time of day when an assistant or knowledge source was last changed.
 
 Assistant and app instructions are shown, because they decide how an assistant behaves and what a public web widget answers. Instructions can contain personal data; see [Privacy](#privacy).
 
@@ -58,11 +58,11 @@ Assistant and app instructions are shown, because they decide how an assistant b
 
 A space's content is for its members: documents and their titles, questions, answers, conversations and attached files. Oversight does not change that. The oversight pages do not show content, and the space's own pages, including **Open space**, still require membership exactly as before. Testing a web widget's answers counts as content too, because the answers draw on the space's knowledge.
 
-To work with a space's content, join it; see [Join a space](#join-a-space). An organisation administrator who is already a member, directly or through a user group, sees what their role allows, like any other member.
+To work with a space's content, join it; see [Join a space](#join-a-space). Another organisation administrator cannot add you as a person or give you a higher role on the **Members** tab; you join yourself. An organisation administrator who is already a member, directly or through a user group, sees what their role allows, like any other member.
 
-Two routes reach content without the join record. Include them in your routine:
+Two routes reach content without a join, and the space's members see no join notice for either. Include them in your routine:
 
-- **User groups.** An administrator who adds themselves to a user group under **Admin → User Groups** gets that group's role in every space the group is a member of. The audit log records the group change, but the space's members see no join notice.
+- **User groups.** Everyone in a user group gets the group's role in every space the group is a member of. An administrator who adds themselves, or anyone else, to such a group under **Admin → User Groups** gives that person access to the content of those spaces. A group with organisation administrators in it can also be added to a space, or given a higher role, on the space's **Members** tab. Every user added to or removed from a user group is always recorded in the audit log, together with the spaces where the group has a role (see [What the audit log records](#what-the-audit-log-records)), and so is every group change on the **Members** tab. Changes that your identity provider makes to groups through SCIM are recorded as ordinary SCIM group updates, which follow the audit configuration.
 - **Tenant-scoped service keys.** A service API key with tenant scope reaches every space's content; see [API access](#api-access).
 
 ## Manage members
@@ -75,10 +75,11 @@ On the **Members** tab you add people and groups, change their roles and remove 
 
 Each person is listed with name, email and role, and with badges for **Organisation administrator**, **Joined through oversight** (with the date and the reason), **Inactive account** and **Invited**. Each group shows how many people it has.
 
-Two rules apply to every change:
+These rules apply to the changes:
 
 - **A space keeps at least one administrator.** A change that would leave the space without an administrator who can act is refused: demoting or removing the last one, including the last administrator group, or leaving (see [Leave a space](#leave-a-space)). Only active and invited accounts with the **Administrator** role count, directly or through a group; an inactive or deleted account cannot manage anything. Appoint another administrator first. A space that already has no administrator can always be fixed.
 - **You change your own access only by joining or leaving.** You cannot add yourself, change your own role or remove yourself on the **Members** tab. Adding a group you belong to, or giving it a higher role, is refused as well when it would raise your own role; lowering or removing such a group is allowed. Joining records your reason and shows the space's members that you joined, and leaving is recorded as well.
+- **Organisation administrators join by themselves.** You cannot add another organisation administrator as a person, or give one a higher role: Eneo refuses and explains that they must join the space themselves, so that their join is recorded with a reason and shown to the space's members. You can lower an organisation administrator's role or remove them. Groups are not checked for organisation administrators, so a group with administrators in it can be added or given a higher role (see [Content requires membership](#content-requires-membership)).
 
 If another administrator changed the member list while you had the page open, Eneo tells you and shows the current list. Member changes require you to be signed in to Eneo; API keys cannot make them.
 
@@ -87,18 +88,18 @@ If another administrator changed the member list while you had the page open, En
 Join a space when you need its content, for example to investigate a report, check a document or help the space's editors. Choose **Join space…** at the top of the space's oversight page, or in the preview section of a web widget's review page.
 
 1. Choose a role. If you are already a member through a group, only roles above your group role are offered. Choose the lowest role that is enough for the task; the lowest available role is preselected.
-2. Write a reason, 10–500 characters. Refer to a case number instead of writing personal data: the reason is shown to the space's administrators and to other organisation administrators, and it is stored in the audit log. Line breaks are saved as spaces.
+2. Write a reason, at least 10 visible characters and at most 500 characters. Refer to a case number instead of writing personal data: several people and integrations can read the reason (see [Privacy](#privacy)), and it is stored in the audit log. Line breaks are saved as spaces, and invisible characters are removed and do not count.
 3. Choose **Join as** followed by the role, for example **Join as Viewer**.
 
-After joining, the space is in your space selector and you work in it like any other member with the same role. Every member of the space sees that you joined, when and with which role: the space's overview page shows the notice **Organisation administrator in this space**, and the members page marks you **Joined through oversight** with the date. On those pages only the space's administrators see your reason. The join is always recorded in the audit log, with the role and the reason.
+After joining, the space is in your space selector and you work in it like any other member with the same role. Everyone who can open the space sees that you joined, when and with which role, on the space's overview page, which lists the organisation administrators who joined through oversight. The members page also marks you as an organisation administrator with the date you joined. When your membership ends, because you leave or are removed, the overview page keeps showing your join, with the date it ended, for 90 days. On these pages only the space's administrators see your reason. The join is always recorded in the audit log, with the role and the reason, and the audit log keeps it after the notice is gone.
 
-If you are already a member through a group, joining adds a direct membership with a higher role, and the higher role applies. When a group already gives you **Administrator**, there is nothing to join. If you already have a direct membership, you cannot join again or change your own role: another organisation administrator can change it, or you can leave and join again with a new reason.
+If you are already a member through a group, joining adds a direct membership with a higher role, and the higher role applies. When a group already gives you **Administrator**, there is nothing to join. If you already have a direct membership, you cannot join again or change your own role. Another organisation administrator can lower your role or remove you, but not raise it; for a higher role, leave and join again with that role and a new reason.
 
 The join record belongs to the membership. If you later lose the **Admin** permission you stay an ordinary member, and the **Members** tab still shows **Joined through oversight** but no longer **Organisation administrator**, which makes such memberships easy to find; another organisation administrator can remove them. If the space's own administrators remove you and add you again, the new membership has no join record.
 
 ## Leave a space
 
-Choose **Leave space…** on the space's oversight page when you are done. You lose access to the space's documents and assistants, the API keys you have for the space are revoked, and the space stays visible under **Admin → Spaces**. If you are also a member through a group, you keep that group's role; the dialog tells you so. Leaving is always recorded in the audit log, including whether you had joined through oversight.
+Choose **Leave space…** on the space's oversight page when you are done. You lose access to the space's documents and assistants, the API keys you have for the space are revoked, and the space stays visible under **Admin → Spaces**. If you are also a member through a group, you keep that group's role; the dialog tells you so. Leaving is always recorded in the audit log, including whether you had joined through oversight. If you had, the space's members keep seeing your join, with the date you left, for 90 days.
 
 You can leave any direct membership this way, not only one you got by joining. You cannot leave while you are the space's only administrator: appoint another administrator first.
 
@@ -121,30 +122,32 @@ Editors cannot activate a web widget themselves. They request activation in the 
 
 These actions are recorded in the audit log:
 
-| Action in the audit log                      | Recorded when                                                             | Always logged |
-| -------------------------------------------- | ------------------------------------------------------------------------- | ------------- |
-| Joined Space Through Oversight               | An organisation administrator joins a space, with role and reason         | Yes           |
-| Left Space (Oversight)                       | An organisation administrator leaves a space                              | Yes           |
-| Member Added by Organisation Administrator   | A person or group is added through oversight                              | Yes           |
-| Role Changed by Organisation Administrator   | A person's or group's role is changed through oversight                   | Yes           |
-| Member Removed by Organisation Administrator | A person or group is removed through oversight                            | Yes           |
-| Widget Activation Request Sent Back          | An administrator sends an activation request back, with the message       | Yes           |
-| Widget Activation Requested                  | An editor requests activation of a web widget                             | No            |
-| Widget Activation Request Withdrawn          | An editor withdraws a request                                             | No            |
+| Action in the audit log                      | Recorded when                                                                   | Always logged |
+| -------------------------------------------- | ------------------------------------------------------------------------------- | ------------- |
+| Joined Space Through Oversight               | An organisation administrator joins a space, with role and reason               | Yes           |
+| Left Space (Oversight)                       | An organisation administrator leaves a space                                    | Yes           |
+| Member Added by Organisation Administrator   | A person or group is added through oversight                                    | Yes           |
+| Role Changed by Organisation Administrator   | A person's or group's role is changed through oversight                         | Yes           |
+| Member Removed by Organisation Administrator | A person or group is removed through oversight                                  | Yes           |
+| User Group Member Added                      | A user is added to a user group, with the spaces where the group has a role     | Yes           |
+| User Group Member Removed                    | A user is removed from a user group, with the spaces where the group has a role | Yes           |
+| Widget Activation Request Sent Back          | An administrator sends an activation request back, with the message             | Yes           |
+| Widget Activation Requested                  | An editor requests activation of a web widget                                   | No            |
+| Widget Activation Request Withdrawn          | An editor withdraws a request                                                   | No            |
 
-Activating, pausing and archiving a web widget (**Widget Activated**, **Widget Paused** and **Widget Archived**) are always logged too.
+Activating, pausing and archiving a web widget (**Widget Activated**, **Widget Paused** and **Widget Archived**) are always logged too, also when widgets are archived because their assistant is deleted or moved.
 
-**Always logged** means that the action is recorded even when audit logging is turned off for the organisation, whatever the category and action settings. In the audit configuration its checkbox stays checked, cannot be changed and is marked **Always logged**. The entry is written together with the change: if it cannot be saved, the change is not made. The organisation's audit log retention applies to these entries like any other.
+**Always logged** means that the action is recorded even when audit logging is turned off for the organisation, whatever the category and action settings. In the audit configuration its checkbox stays checked, cannot be changed and is marked **Always logged**. The entry is written together with the change: if it cannot be saved, the change is not made. These entries are kept for at least 365 days, even when the organisation's audit log retention is shorter; a longer retention applies to them as to other entries.
 
-An organisation may reduce the logging of ordinary activity, but not of access and changes made without membership, or of publishing to the open web. The administrators who could make such changes can also change the audit settings, so a record they could switch off would not be a control.
+An organisation may reduce the logging of ordinary activity, but not of access and changes made without membership, of changes to who is in a user group, or of publishing to the open web. The administrators who could make such changes can also change the audit settings, so a record they could switch off would not be a control.
 
-Each entry names the administrator, the space and, where they apply, the member or group and the roles. A join reason or a send-back message is kept in the entry's details (its metadata), never in its description. Opening the oversight pages is not logged: reading settings, members, instructions or usage leaves no entry.
+Each entry names the administrator, the space and, where they apply, the member or group and the roles. A user group entry names the group, the user and each space where the group has a role, with that role. A join reason or a send-back message is kept in the entry's details (its metadata), never in its description. Opening the oversight pages is not logged: reading settings, members, instructions or usage leaves no entry.
 
-Review joins regularly, for example once a month. Filter the audit log on the action **Joined Space Through Oversight**, and check that each membership is still needed. **Where I'm a member** on **Admin → Spaces** shows your own memberships. Check changes to user groups as well (see [Content requires membership](#content-requires-membership)).
+Review joins regularly, for example once a month. Filter the audit log on the action **Joined Space Through Oversight**, and check that each membership is still needed. Filter on **User Group Member Added** as well, and check each person added to a group that has a role in a space. The membership filter on **Admin → Spaces** shows the spaces you are a member of.
 
 ## API access
 
-Reading the list of spaces, a space's details and a web widget's review page also works with an API key that has tenant scope and `admin` permission. Every change requires a signed-in session: member changes, joining and leaving, and requesting, withdrawing and sending back widget activation. API keys get `403` with `code: "session_auth_required"`, so a key can never make itself a member of a space.
+Reading the list of spaces, a space's details and a web widget's review page also works with an API key that has tenant scope and `admin` permission. Every change requires a signed-in session: member changes, joining and leaving, and requesting, withdrawing and sending back widget activation. API keys get `403` with `code: "session_auth_required"`, so no API key can join a space or change its members through oversight. User groups are different: an API key with tenant scope and `admin` permission can add users to groups and remove them, and each such change is always recorded in the audit log.
 
 Service keys are an exception to the membership rule. A service key with tenant scope gets its role in **every** space in the organisation (`read` gives Viewer, `write` gives Editor, `admin` gives Administrator), content included, without joining and without the space's members seeing it. "Content only after a recorded join" therefore applies to people, not to such keys. Create tenant-scoped service keys only for vetted integrations, and prefer a key scoped to a single space. See [How Service Keys Derive Space Roles](/docs/api-key-management#how-service-keys-derive-space-roles).
 
@@ -152,10 +155,11 @@ Service keys are an exception to the membership rule. A service key with tenant 
 
 Oversight shows what administrators need for governance and keeps people's work out of view:
 
-- **Small numbers are hidden.** Question and user figures for the past 30 days are shown only when at least 5 different signed-in people asked questions or ran apps in the space in that period. Below that, the summary says **Not shown – fewer than 5 active users**, so that no individual's usage can be read from the figures. Questions from anonymous web widget visitors are counted separately and always shown.
-- **Activity is a period, not a time.** The last activity is shown as past week, past month, past 3 months, more than 3 months ago or no activity.
+- **Small numbers are hidden.** Each figure for the past 30 days is shown only when at least 5 different signed-in people are behind it: questions when at least 5 people asked questions, app runs when at least 5 people ran apps, and active users when there are at least 5. A figure below that limit is hidden and the summary says why. This keeps one person's usage from appearing as a number.
+- **Web widget questions include tests.** Questions through the space's web widgets are counted separately and are not held to that limit. They include test questions from editors and organisation administrators, so in a small space the count can reflect one person's testing. Questions to a widget that has never been active are not counted, and no count is shown until one of the space's widgets has been active.
+- **Activity is a period, not a time.** The last activity is shown as past week, past month, past 3 months, more than 3 months ago or no recorded activity. It is based on the questions and app runs that are still stored, so a space whose conversations have been deleted under its retention settings shows no recorded activity. The last change to an assistant or a knowledge source is shown as a day, without the time.
 - **Instructions can contain personal data.** Every organisation administrator, and every API key with tenant scope and `admin` permission, can read assistant and app instructions, and reading them is not logged. Write instructions without personal data, and cover this access in your data protection impact assessment.
-- **Document titles stay with members.** Knowledge is shown as sources, counts and sizes only, because even a title can contain personal data.
-- **Reasons are read by others.** A join reason is shown to the space's administrators and to other organisation administrators, and it is stored in the audit log. Refer to a case number instead of naming people.
+- **Document titles stay with members.** Knowledge is shown as sources, counts and sizes. An integration source is named only when it covers a whole SharePoint or Confluence site, because the name of a single file or folder is often a document title, and even a title can contain personal data.
+- **Reasons are read by others.** A join reason can be read by the space's administrators, by other organisation administrators and by API keys with `admin` permission for the space or for the whole organisation; reading it is not logged. It is stored in the audit log and in the space's record of oversight joins, which keeps the reason until the space is deleted, also after members no longer see the join. A message sent back with a widget request can be read by everyone in the space who has the widgets permission, whatever their role, by organisation administrators and by API keys with tenant scope and `admin` permission, and it is stored in the audit log. Refer to a case number instead of naming people.
 
 These safeguards limit what the figures reveal; they are not anonymisation. In a very small space, repeated observation can still narrow things down.
