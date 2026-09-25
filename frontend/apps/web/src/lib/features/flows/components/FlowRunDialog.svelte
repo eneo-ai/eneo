@@ -28,6 +28,7 @@
     type SessionState
   } from "$lib/features/audio/recordingSession";
   import type { SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
+  import { LiveTranscriptPreview } from "$lib/features/audio/live/LiveTranscriptPreview.svelte";
   import {
     buildContractSnapshotFromStep,
     detachUploadedSegmentFromLedger,
@@ -129,6 +130,23 @@
   // Counts each step's discards: an upload begun before one must not bring
   // the discarded files back.
   const discardsByStepId: Record<string, number> = {};
+  // Each audio step's live text belongs to the dialog, not to the step's page,
+  // so its final text still arrives after the user moved on. The previews carry
+  // their own reactive state; the map only finds them.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const livePreviewsByStepId = new Map<string, LiveTranscriptPreview>();
+  function livePreviewFor(stepId: string): LiveTranscriptPreview {
+    let preview = livePreviewsByStepId.get(stepId);
+    if (!preview) {
+      preview = new LiveTranscriptPreview();
+      livePreviewsByStepId.set(stepId, preview);
+    }
+    return preview;
+  }
+  function discardLivePreviews() {
+    for (const preview of livePreviewsByStepId.values()) preview.discard();
+    livePreviewsByStepId.clear();
+  }
 
   const AUDIO_ACCEPT_FILTER = "audio/*,video/webm,video/mp4";
   const NAVIGATION_REASON_ID = "flow-run-navigation-reason";
@@ -327,6 +345,7 @@
   onDestroy(() => {
     window.removeEventListener("beforeunload", beforeUnloadHandler);
     disposeAllRecordingSessions();
+    discardLivePreviews();
   });
 
   function disposeAllRecordingSessions() {
@@ -411,6 +430,7 @@
     showCloseConfirmation = false;
     resumeScannedForFlowId = null;
     disposeAllRecordingSessions();
+    discardLivePreviews();
   }
 
   async function refreshRecoverableSessions() {
@@ -1222,6 +1242,7 @@
       open = false;
       launchInputState.reset();
       fileInputState.resetAfterRunAccepted();
+      discardLivePreviews();
     } catch (error) {
       toast.error(
         getFlowRuntimeErrorMessage(
@@ -1326,6 +1347,7 @@
             flowId={flow.id}
             transcription={runContract?.transcription ?? null}
             {launchInputState}
+            livePreview={livePreviewFor(currentRuntimeStep.step_id)}
             recording={fileInputState.isStepRecording(currentRuntimeStep.step_id)}
             files={currentStepUploadedFiles}
             hasFailedRecording={currentStepHasFailedRecording}

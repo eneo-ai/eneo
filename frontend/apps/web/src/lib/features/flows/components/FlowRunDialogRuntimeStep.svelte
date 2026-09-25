@@ -5,7 +5,6 @@
     FlowRunContractTranscription,
     UploadedFile
   } from "@eneo/eneo-js";
-  import { onDestroy } from "svelte";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import ChevronRight from "lucide-svelte/icons/chevron-right";
   import { IconUploadCloud } from "@eneo/icons/upload-cloud";
@@ -27,9 +26,9 @@
   } from "$lib/features/flows/flowRuntimeErrorMapping";
   import AudioRecorder from "$lib/features/audio/AudioRecorder.svelte";
   import LiveTranscriptPanel from "$lib/features/audio/live/LiveTranscriptPanel.svelte";
-  import {
+  import type {
     LiveTranscriptPreview,
-    type RecorderAudioGraph
+    RecorderAudioGraph
   } from "$lib/features/audio/live/LiveTranscriptPreview.svelte";
   import type { RecordingStopReason } from "$lib/features/audio/recordedAudioFile";
   import type { SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
@@ -45,6 +44,7 @@
     flowId,
     transcription,
     launchInputState,
+    livePreview,
     recording,
     files,
     hasFailedRecording,
@@ -92,6 +92,8 @@
     // flow transcribes no audio.
     transcription: FlowRunContractTranscription | null;
     launchInputState: FlowRunLaunchInputState;
+    // The step's live text, owned by the dialog so it outlives this page.
+    livePreview: LiveTranscriptPreview;
     // Whether this step's recorder is recording.
     recording: boolean;
     files: UploadedFile[];
@@ -204,7 +206,6 @@
 
   // The preview listens to the recorder's audio graph, which exists from the
   // moment the microphone opens until the recording is over.
-  const livePreview = new LiveTranscriptPreview();
   let recorderAudioGraph = $state.raw<RecorderAudioGraph | null>(null);
 
   // The recorder waits for the returned promise, within its bound, so the
@@ -236,8 +237,6 @@
     livePreview.discard();
     onDiscardRecordedAudio();
   }
-
-  onDestroy(() => livePreview.discard());
 </script>
 
 <div class="flex flex-col gap-5">

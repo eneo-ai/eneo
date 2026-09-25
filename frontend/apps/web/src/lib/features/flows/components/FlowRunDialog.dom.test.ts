@@ -838,6 +838,30 @@ describe("FlowRunDialog transcription options", () => {
     await waitFor(() => expect(screen.getByRole("log").textContent).toBe("Bo talar"));
   });
 
+  it("keeps the final text coming after the user moved on from the step", async () => {
+    installLiveTranscriptFakes();
+    renderDialog(
+      buildEneo({
+        upload: vi.fn(async ({ file }: { file: File }) => uploadedFile("file-1", file.name)),
+        transcription: offeredTranscription(true),
+        createSession: vi.fn(async () => liveSession)
+      })
+    );
+    await screen.findByText("Audio input");
+
+    const socket = await recordWithLiveText();
+    socket.receive({ type: "transcript.delta", text: "Anna talar" });
+    await fireEvent.click(screen.getByRole("button", { name: "Finish test recording" }));
+    const next = screen.getByRole("button", { name: "Nästa" }) as HTMLButtonElement;
+    await waitFor(() => expect(next.disabled).toBe(false));
+    await fireEvent.click(next);
+    await screen.findByRole("button", { name: m.flow_run_trigger_confirm() });
+    socket.receive({ type: "transcript.done", text: "Anna talar vidare." });
+    await fireEvent.click(screen.getByRole("button", { name: "Tillbaka" }));
+
+    await waitFor(() => expect(screen.getByRole("log").textContent).toBe("Anna talar vidare."));
+  });
+
   it.each([
     {
       run: "the flow's default when it only uploads",
