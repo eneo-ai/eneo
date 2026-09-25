@@ -9,6 +9,7 @@ import {
   Cpu,
   History,
   HardDrive,
+  SlidersHorizontal,
   Key,
   Lightbulb,
   Plug,
@@ -52,7 +53,8 @@ export function AdminNav() {
       ? [{ href: "/admin/modules", icon: Blocks, label: t("module_admin_title") }]
       : []),
     { href: "/admin/integrations", icon: Cloud, label: t("integrations") },
-    { href: "/admin/storage", icon: HardDrive, label: t("storage_settings_nav") }
+    { href: "/admin/storage", icon: HardDrive, label: t("storage_settings_nav") },
+    { href: "/admin/skills", icon: SlidersHorizontal, label: t("admin_skills_nav_label") }
   ];
 
   const groups: NavGroup[] = [
