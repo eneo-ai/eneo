@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Collection, CrawlRun, EmbeddingModel, Website } from "./knowledge";
-import { filterAndSortCrawlRuns, filterCollections, filterWebsites } from "./table-controls";
+import { filterCollections, filterCrawlRuns, filterWebsites } from "./table-controls";
 
 const model = (id: string) =>
   ({
@@ -92,21 +92,9 @@ describe("filterCollections", () => {
   });
 });
 
-describe("filterAndSortCrawlRuns", () => {
-  it("filters by status and sorts by result count", () => {
-    const small = crawlRun({
-      id: "small",
-      created_at: "2024-01-01T10:00:00Z",
-      status: "complete",
-      pages_crawled: 2
-    });
-    const large = crawlRun({
-      id: "large",
-      created_at: "2024-01-02T10:00:00Z",
-      status: "complete",
-      pages_crawled: 8,
-      files_downloaded: 1
-    });
+describe("filterCrawlRuns", () => {
+  it("matches the status and the failure reason", () => {
+    const done = crawlRun({ id: "done", created_at: "2024-01-01T10:00:00Z", pages_crawled: 2 });
     const failed = crawlRun({
       id: "failed",
       created_at: "2024-01-03T10:00:00Z",
@@ -114,30 +102,8 @@ describe("filterAndSortCrawlRuns", () => {
       result_location: "Network error"
     });
 
-    expect(
-      filterAndSortCrawlRuns([small, large, failed], {
-        query: "complete",
-        sort: "results_desc"
-      }).map((item) => item.id)
-    ).toEqual(["large", "small"]);
-  });
-
-  it("sorts by completed duration", () => {
-    const short = crawlRun({
-      id: "short",
-      created_at: "2024-01-01T10:00:00Z",
-      finished_at: "2024-01-01T10:01:00Z"
-    });
-    const long = crawlRun({
-      id: "long",
-      created_at: "2024-01-01T10:00:00Z",
-      finished_at: "2024-01-01T10:10:00Z"
-    });
-
-    expect(
-      filterAndSortCrawlRuns([short, long], { query: "", sort: "duration_desc" }).map(
-        (item) => item.id
-      )
-    ).toEqual(["long", "short"]);
+    expect(filterCrawlRuns([done, failed], "complete").map((run) => run.id)).toEqual(["done"]);
+    expect(filterCrawlRuns([done, failed], "network").map((run) => run.id)).toEqual(["failed"]);
+    expect(filterCrawlRuns([done, failed], " ")).toEqual([done, failed]);
   });
 });

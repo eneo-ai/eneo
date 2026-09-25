@@ -4979,5 +4979,8 @@
   "space_retention_no_limit_placeholder": "Ingen gräns",
   "space_synced_column": "Senast synkad",
   "space_files_pagination_label": "Bläddra bland filer",
-  "fix_notifications_running": "Aviseringar, {count} pågår"
+  "fix_notifications_running": "Aviseringar, {count} pågår",
+  "fix_crawl_started_column": "Startad",
+  "fix_crawls_filter_label": "Filtrera indexeringar",
+  "fix_integrations_empty_title": "Inga integrationer ännu"
 }

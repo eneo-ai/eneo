@@ -2,20 +2,8 @@
 
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
-import { useId, type ReactNode } from "react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
+import type { ReactNode } from "react";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
-
-export type KnowledgeSortOption = {
-  value: string;
-  label: string;
-};
 
 /** First cell of a knowledge row: a decorative type tile and the link to the item. */
 export function KnowledgeNameCell({
@@ -45,16 +33,12 @@ export function KnowledgeNameCell({
   );
 }
 
-/** Filter field, an optional sort select and the tab's actions above a knowledge table. */
+/** Filter field and the tab's actions above a knowledge table (which sorts by its headers). */
 export function KnowledgeTableControls({
   filterValue,
   onFilterChange,
   filterLabel,
   filterPlaceholder,
-  sortLabel,
-  sortValue,
-  onSortChange,
-  sortOptions,
   children
 }: {
   filterValue: string;
@@ -62,45 +46,17 @@ export function KnowledgeTableControls({
   /** Accessible name of the filter field; defaults to "Sök". */
   filterLabel?: string;
   filterPlaceholder: string;
-  /** Sort select; omit when the table sorts by its column headers. */
-  sortLabel?: string;
-  sortValue?: string;
-  onSortChange?: (value: string) => void;
-  sortOptions?: KnowledgeSortOption[];
   children?: ReactNode;
 }) {
-  const sortLabelId = useId();
-
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-        <ResourceFilterInput
-          value={filterValue}
-          onChange={onFilterChange}
-          label={filterLabel}
-          placeholder={filterPlaceholder}
-          className="sm:w-72"
-        />
-        {sortOptions && sortValue !== undefined && onSortChange ? (
-          <div className="flex flex-col gap-1">
-            <span id={sortLabelId} className="text-ax-text-secondary text-xs font-medium">
-              {sortLabel}
-            </span>
-            <Select value={sortValue} onValueChange={onSortChange}>
-              <SelectTrigger aria-labelledby={sortLabelId} className="w-full sm:w-56">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="start">
-                {sortOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        ) : null}
-      </div>
+      <ResourceFilterInput
+        value={filterValue}
+        onChange={onFilterChange}
+        label={filterLabel}
+        placeholder={filterPlaceholder}
+        className="sm:w-72"
+      />
       {children ? <div className="flex flex-wrap justify-end gap-2">{children}</div> : null}
     </div>
   );

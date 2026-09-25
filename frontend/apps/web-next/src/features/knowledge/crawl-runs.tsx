@@ -1,55 +1,30 @@
 "use client";
 
+import {
+  proportional,
+  Table,
+  useTableSortable,
+  useTableSortableState,
+  type TableColumn
+} from "@astryxdesign/core/Table";
+import { SearchX } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
 import { formatDateTime, formatDuration, formatRelativeTime } from "@/lib/format";
+import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import type { CrawlRun } from "./knowledge";
-import { filterAndSortCrawlRuns, type CrawlRunSort } from "./table-controls";
+import {
+  CRAWL_RUN_COMPARATORS,
+  CRAWL_RUN_DEFAULT_SORT,
+  type CrawlRunSortKey
+} from "./knowledge-sort";
+import { filterCrawlRuns } from "./table-controls";
 import { KnowledgeTableControls } from "./table-controls-ui";
+import { crawlRunStatus, isSkippedCrawl } from "./website-status";
 import { KnowledgeLabel } from "./websites";
 
-const SKIPPED_PREFIX = "skipped";
-
 type Translate = (key: string, params?: Record<string, string>) => string;
-
-function isSkipped(crawl: CrawlRun): boolean {
-  return (
-    crawl.status === "failed" &&
-    (crawl.result_location ?? "").toLowerCase().startsWith(SKIPPED_PREFIX)
-  );
-}
-
-function hasWarnings(crawl: CrawlRun): boolean {
-  return (
-    crawl.status === "complete" && ((crawl.pages_failed ?? 0) > 0 || (crawl.files_failed ?? 0) > 0)
-  );
-}
-
-function statusText(crawl: CrawlRun, t: Translate): string {
-  if (isSkipped(crawl)) return t("crawl_skipped");
-  switch (crawl.status) {
-    case "complete":
-      return hasWarnings(crawl) ? t("crawl_completed_with_warnings") : t("complete");
-    case "in progress":
-      return t("in_progress");
-    case "queued":
-      return t("queued");
-    case "failed":
-    case "not found":
-      return t("failed");
-    default:
-      return crawl.status;
-  }
-}
 
 const FAILURE_REASON_KEYS = [
   "EMPTY_CONTENT",
@@ -73,27 +48,29 @@ function failureTooltip(crawl: CrawlRun, t: Translate): string | undefined {
   return `${t("failure_reasons_tooltip")}:\n${lines}`;
 }
 
-/** Result labels for one crawl run, ported from CrawlResultCell.svelte. */
+/** The run's state as a status dot and text, with the reason it was skipped or failed. */
+function CrawlStatusCell({ crawl }: { crawl: CrawlRun }) {
+  const t = useTranslations();
+  const status = crawlRunStatus(crawl);
+  const detail = isSkippedCrawl(crawl)
+    ? t("crawl_skipped_duplicate")
+    : status.tone === "error"
+      ? (crawl.result_location ?? undefined)
+      : undefined;
+  return (
+    <KnowledgeLabel
+      tone={status.tone}
+      label={t(status.labelKey)}
+      tooltip={detail}
+      isPulsing={status.isPulsing}
+    />
+  );
+}
+
+/** What the run fetched and how much of it succeeded, ported from CrawlResultCell.svelte. */
 function CrawlResultCell({ crawl }: { crawl: CrawlRun }) {
   const t = useTranslations();
-
-  if (crawl.status !== "complete") {
-    const skipReason = crawl.result_location ?? undefined;
-    if (isSkipped(crawl)) {
-      return (
-        <KnowledgeLabel
-          color="gray"
-          label={t("crawl_skipped")}
-          tooltip={t("crawl_skipped_duplicate")}
-        />
-      );
-    }
-    if (crawl.status === "failed" || crawl.status === "not found") {
-      return <KnowledgeLabel color="orange" label={t("crawl_failed")} tooltip={skipReason} />;
-    }
-    if (crawl.status === "queued") return <KnowledgeLabel color="blue" label={t("queued")} />;
-    return <KnowledgeLabel color="yellow" label={t("in_progress")} />;
-  }
+  if (crawl.status !== "complete") return <span className="text-ax-text-secondary">—</span>;
 
   const pages = crawl.pages_crawled ?? 0;
   const files = crawl.files_downloaded ?? 0;
@@ -101,12 +78,11 @@ function CrawlResultCell({ crawl }: { crawl: CrawlRun }) {
   const filesFailed = crawl.files_failed ?? 0;
   const successPages = pages - pagesFailed;
   const successFiles = files - filesFailed;
-  const tooltip = failureTooltip(crawl, t);
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <KnowledgeLabel
-        color="blue"
+        tone="accent"
         label={
           files > 0
             ? t("crawled_pages_and_files", { pages: String(pages), files: String(files) })
@@ -115,7 +91,7 @@ function CrawlResultCell({ crawl }: { crawl: CrawlRun }) {
       />
       {(successPages > 0 || successFiles > 0) && (
         <KnowledgeLabel
-          color="green"
+          tone="success"
           label={
             successPages > 0 && successFiles > 0
               ? t("pages_and_files_succeeded", {
@@ -130,7 +106,7 @@ function CrawlResultCell({ crawl }: { crawl: CrawlRun }) {
       )}
       {(pagesFailed > 0 || filesFailed > 0) && (
         <KnowledgeLabel
-          color="orange"
+          tone="error"
           label={
             pagesFailed > 0 && filesFailed > 0
               ? t("pages_and_files_failed", {
@@ -141,80 +117,88 @@ function CrawlResultCell({ crawl }: { crawl: CrawlRun }) {
                 ? t("pages_failed", { count: String(pagesFailed) })
                 : t("files_failed", { count: String(filesFailed) })
           }
-          tooltip={tooltip}
+          tooltip={failureTooltip(crawl, t)}
         />
       )}
     </div>
   );
 }
 
+/**
+ * A website's crawl history: a filter box and a bordered Astryx table that
+ * sorts by its column headers, newest crawl first.
+ */
 export function CrawlRunsTable({ runs }: { runs: CrawlRun[] }) {
   const t = useTranslations();
   const locale = useLocale();
   const [filter, setFilter] = useState("");
-  const [sort, setSort] = useState<CrawlRunSort>("started_desc");
-  const visibleRuns = filterAndSortCrawlRuns(runs, { query: filter, sort });
-
-  const sortOptions: { value: CrawlRunSort; label: string }[] = [
-    { value: "started_desc", label: t("sort_started_newest") },
-    { value: "started_asc", label: t("sort_started_oldest") },
-    { value: "status", label: t("sort_status") },
-    { value: "results_desc", label: t("sort_results_most") },
-    { value: "duration_desc", label: t("sort_duration_longest") }
-  ];
+  const { sortedData, sortConfig } = useTableSortableState<CrawlRun, CrawlRunSortKey>({
+    data: filterCrawlRuns(runs, filter),
+    defaultSort: CRAWL_RUN_DEFAULT_SORT,
+    comparators: CRAWL_RUN_COMPARATORS
+  });
+  const sortPlugin = useTableSortable<CrawlRun, CrawlRunSortKey>(sortConfig);
 
   if (runs.length === 0) {
     return <EmptyState title={t("this_website_not_crawled_before")} />;
   }
+
+  const columns: TableColumn<CrawlRun>[] = [
+    {
+      key: "started",
+      header: t("fix_crawl_started_column"),
+      width: proportional(1),
+      sortable: true,
+      renderCell: (run) => (
+        <span className="font-mono text-sm">{formatDateTime(run.created_at)}</span>
+      )
+    },
+    {
+      key: "status",
+      header: t("status"),
+      width: proportional(1),
+      sortable: true,
+      renderCell: (run) => <CrawlStatusCell crawl={run} />
+    },
+    {
+      key: "results",
+      header: t("results"),
+      width: proportional(2),
+      sortable: true,
+      renderCell: (run) => <CrawlResultCell crawl={run} />
+    },
+    {
+      key: "duration",
+      header: t("duration"),
+      width: proportional(1),
+      sortable: true,
+      renderCell: (run) =>
+        run.finished_at && run.created_at
+          ? formatDuration(run.created_at, run.finished_at)
+          : run.created_at
+            ? t("started_time_ago", { timeAgo: formatRelativeTime(run.created_at, locale) })
+            : "—"
+    }
+  ];
 
   return (
     <div className="flex flex-col gap-4">
       <KnowledgeTableControls
         filterValue={filter}
         onFilterChange={setFilter}
+        filterLabel={t("fix_crawls_filter_label")}
         filterPlaceholder={t("ui_filter_items", { resourceName: t("resource_crawls") })}
-        sortLabel={t("sort_by")}
-        sortValue={sort}
-        onSortChange={(value) => setSort(value as CrawlRunSort)}
-        sortOptions={sortOptions}
       />
-      {visibleRuns.length === 0 ? (
+      {sortedData.length === 0 ? (
         <EmptyState
+          icon={<SearchX />}
           title={t("ui_no_items_matching", { resourceNamePlural: t("resource_crawls") })}
+          isCompact
         />
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("started")}</TableHead>
-              <TableHead>{t("status")}</TableHead>
-              <TableHead>{t("results")}</TableHead>
-              <TableHead>{t("duration")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {visibleRuns.map((run) => (
-              <TableRow key={run.id}>
-                <TableCell className="font-mono text-sm">
-                  {formatDateTime(run.created_at)}
-                </TableCell>
-                <TableCell>{statusText(run, t)}</TableCell>
-                <TableCell>
-                  <CrawlResultCell crawl={run} />
-                </TableCell>
-                <TableCell className="text-muted-foreground text-sm">
-                  {run.finished_at && run.created_at
-                    ? formatDuration(run.created_at, run.finished_at)
-                    : run.created_at
-                      ? t("started_time_ago", {
-                          timeAgo: formatRelativeTime(run.created_at, locale)
-                        })
-                      : "—"}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <SpaceTableFrame>
+          <Table data={sortedData} columns={columns} idKey="id" plugins={{ sort: sortPlugin }} />
+        </SpaceTableFrame>
       )}
     </div>
   );

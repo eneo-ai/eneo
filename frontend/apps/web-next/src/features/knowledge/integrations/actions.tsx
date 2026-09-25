@@ -1,7 +1,9 @@
 "use client";
 
+import type { DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -22,12 +24,6 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
@@ -99,37 +95,47 @@ export function IntegrationActions({ item }: { item: IntegrationKnowledge }) {
 
   if (!canEdit && !canDelete) return null;
 
+  const items: DropdownMenuOption[] = [
+    ...(canEdit
+      ? [
+          {
+            label: t("rename"),
+            icon: <Pencil aria-hidden="true" />,
+            onClick: () => {
+              setNewName(item.name);
+              setShowRename(true);
+            }
+          }
+        ]
+      : []),
+    ...(canEdit && item.integration_type === "sharepoint"
+      ? [
+          {
+            label: t("trigger_full_sync"),
+            icon: <RefreshCw aria-hidden="true" />,
+            onClick: () => setShowSync(true)
+          }
+        ]
+      : []),
+    ...(canDelete
+      ? [
+          {
+            label: t("delete"),
+            icon: <Trash2 aria-hidden="true" />,
+            variant: "destructive" as const,
+            onClick: () => setShowDelete(true)
+          }
+        ]
+      : [])
+  ];
+
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label={t("actions")}>
-            <MoreHorizontal className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          {canEdit && (
-            <DropdownMenuItem
-              onSelect={() => {
-                setNewName(item.name);
-                setShowRename(true);
-              }}
-            >
-              <Pencil className="size-4" /> {t("rename")}
-            </DropdownMenuItem>
-          )}
-          {canEdit && item.integration_type === "sharepoint" && (
-            <DropdownMenuItem onSelect={() => setShowSync(true)}>
-              <RefreshCw className="size-4" /> {t("trigger_full_sync")}
-            </DropdownMenuItem>
-          )}
-          {canDelete && (
-            <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
-              <Trash2 className="size-4" /> {t("delete")}
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <MoreMenu
+        label={t("space_more_actions_for", { name: item.name })}
+        items={items}
+        alignment="end"
+      />
       <RenameDialog
         open={showRename}
         onOpenChange={setShowRename}
@@ -223,32 +229,38 @@ export function WrapperActions({
 
   if (!canEdit && !canDelete) return null;
 
+  const items: DropdownMenuOption[] = [
+    ...(canEdit
+      ? [
+          {
+            label: t("rename_wrapper"),
+            icon: <Pencil aria-hidden="true" />,
+            onClick: () => {
+              setNewName(wrapperName);
+              setShowRename(true);
+            }
+          }
+        ]
+      : []),
+    ...(canDelete
+      ? [
+          {
+            label: t("delete_wrapper"),
+            icon: <Trash2 aria-hidden="true" />,
+            variant: "destructive" as const,
+            onClick: () => setShowDelete(true)
+          }
+        ]
+      : [])
+  ];
+
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label={t("actions")}>
-            <MoreHorizontal className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          {canEdit && (
-            <DropdownMenuItem
-              onSelect={() => {
-                setNewName(wrapperName);
-                setShowRename(true);
-              }}
-            >
-              <Pencil className="size-4" /> {t("rename_wrapper")}
-            </DropdownMenuItem>
-          )}
-          {canDelete && (
-            <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
-              <Trash2 className="size-4" /> {t("delete_wrapper")}
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <MoreMenu
+        label={t("space_more_actions_for", { name: wrapperName })}
+        items={items}
+        alignment="end"
+      />
       <RenameDialog
         open={showRename}
         onOpenChange={setShowRename}

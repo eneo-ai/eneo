@@ -472,5 +472,8 @@
   "space_retention_no_limit_placeholder": "No limit",
   "space_synced_column": "Last synced",
   "space_files_pagination_label": "Browse files",
-  "fix_notifications_running": "Notifications, {count} in progress"
+  "fix_notifications_running": "Notifications, {count} in progress",
+  "fix_crawl_started_column": "Started",
+  "fix_crawls_filter_label": "Filter crawls",
+  "fix_integrations_empty_title": "No integrations yet"
 }

@@ -9,7 +9,12 @@ import {
   type Space,
   type SpaceResource
 } from "@/features/spaces/space";
-import { makeCollection, makeSpace, makeWebsite } from "@/features/spaces/testing/space-fixture";
+import {
+  makeCollection,
+  makeIntegration,
+  makeSpace,
+  makeWebsite
+} from "@/features/spaces/testing/space-fixture";
 
 const state = vi.hoisted(() => ({ space: null as unknown, tab: null as string | null }));
 
@@ -155,6 +160,54 @@ describe("KnowledgePage", () => {
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Markera alla rader" }));
     expect(screen.getByRole("button", { name: "Synkronisera valda (2)" })).toBeTruthy();
+  });
+
+  it("lists integrations in a bordered table sorted by name, with folders and status dots", async () => {
+    const { container } = show(
+      makeSpace({
+        integrations: [
+          makeIntegration({ id: "i1", name: "Ärendehandbok", integration_type: "confluence" }),
+          makeIntegration({
+            id: "i2",
+            name: "Avtalsmallar",
+            metadata: { size: 0, last_synced_at: null, sharepoint_subscription_expires_at: null }
+          }),
+          makeIntegration({ id: "i3", name: "Mall 1", wrapper_id: "w1", wrapper_name: "Byggnad" }),
+          makeIntegration({ id: "i4", name: "Mall 2", wrapper_id: "w1", wrapper_name: "Byggnad" })
+        ]
+      }),
+      "integrations"
+    );
+
+    const table = await screen.findByRole("table");
+    const names = () =>
+      within(table)
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("cell")[0]!.textContent);
+    // Name, ascending, in Swedish order (Ä after Z); the folder links to its page.
+    expect(names()).toEqual(["Avtalsmallar", "Byggnad2 mappar", "Ärendehandbok"]);
+    expect(within(table).getByRole("link", { name: "Byggnad" }).getAttribute("href")).toBe(
+      "/spaces/space-1/knowledge/integrations/wrapper/w1"
+    );
+    const avtal = within(table).getByText("Avtalsmallar").closest("tr")!;
+    expect(within(avtal).getByText("Ingen Webhook")).toBeTruthy();
+    expect(
+      within(avtal).getByRole("button", { name: /Ingen synk registrerad, Synkhistorik/ })
+    ).toBeTruthy();
+    expect(within(avtal).getByRole("link", { name: /Öppna i SharePoint/ })).toBeTruthy();
+    expect(
+      within(avtal).getByRole("button", { name: "Fler åtgärder för Avtalsmallar" })
+    ).toBeTruthy();
+    await expectNoAxeViolations(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sortera efter Status" }));
+    expect(names()[0]).toBe("Avtalsmallar");
+  });
+
+  it("offers the next step for integrations in the empty state", () => {
+    show(makeSpace(), "integrations");
+    expect(screen.getByRole("heading", { name: "Inga integrationer ännu" })).toBeTruthy();
   });
 
   it("explains a missing create permission in text instead of a tooltip", () => {

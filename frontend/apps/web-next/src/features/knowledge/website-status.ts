@@ -1,5 +1,5 @@
 import type { StatusTone } from "@/components/composites/status-label";
-import type { Website } from "./knowledge";
+import type { CrawlRun, Website } from "./knowledge";
 
 /** A status for a status-dot cell: tone, translation key and optional fix link. */
 export type KnowledgeStatus = {
@@ -13,12 +13,35 @@ export type KnowledgeStatus = {
 const SKIPPED_PREFIX = "skipped duplicate crawl";
 
 /** A failed crawl that only stood aside for an identical crawl already running. */
-export function isSkippedCrawl(website: Website): boolean {
-  const crawl = website.latest_crawl;
+export function isSkippedCrawl(crawl: CrawlRun | null | undefined): boolean {
   return (
     crawl?.status === "failed" &&
     crawl.result_location?.toLowerCase().startsWith(SKIPPED_PREFIX) === true
   );
+}
+
+/** Finished, but some pages or files could not be read. */
+export function crawlHasWarnings(crawl: CrawlRun): boolean {
+  return (
+    crawl.status === "complete" && ((crawl.pages_failed ?? 0) > 0 || (crawl.files_failed ?? 0) > 0)
+  );
+}
+
+/** State of one crawl run, for the website's crawl history. */
+export function crawlRunStatus(crawl: CrawlRun): KnowledgeStatus {
+  if (isSkippedCrawl(crawl)) return { tone: "neutral", labelKey: "crawl_skipped" };
+  switch (crawl.status) {
+    case "queued":
+      return { tone: "accent", labelKey: "queued" };
+    case "in progress":
+      return { tone: "accent", labelKey: "in_progress", isPulsing: true };
+    case "complete":
+      return crawlHasWarnings(crawl)
+        ? { tone: "warning", labelKey: "crawl_completed_with_warnings" }
+        : { tone: "success", labelKey: "complete" };
+    default:
+      return { tone: "error", labelKey: "failed" };
+  }
 }
 
 /**
@@ -30,14 +53,14 @@ export function isSkippedCrawl(website: Website): boolean {
 export function websiteStatus(website: Website, detailHref?: string): KnowledgeStatus {
   const crawl = website.latest_crawl;
   if (!crawl) return { tone: "neutral", labelKey: "website_not_yet_crawled" };
-  if (isSkippedCrawl(website)) return { tone: "neutral", labelKey: "sync_skipped" };
+  if (isSkippedCrawl(crawl)) return { tone: "neutral", labelKey: "sync_skipped" };
   switch (crawl.status) {
     case "queued":
       return { tone: "accent", labelKey: "queued" };
     case "in progress":
       return { tone: "accent", labelKey: "space_status_syncing", isPulsing: true };
     case "complete":
-      return (crawl.pages_failed ?? 0) > 0 || (crawl.files_failed ?? 0) > 0
+      return crawlHasWarnings(crawl)
         ? { tone: "warning", labelKey: "synced_with_warnings" }
         : { tone: "success", labelKey: "space_status_indexed" };
     default:
