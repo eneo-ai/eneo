@@ -71,10 +71,11 @@ async def test_purge_queries_keep_the_terminal_index_predicate(query_kind):
     await DataRetentionService(session).purge_due_flow_run_history_for_tenant(
         tenant_id=uuid4(), now=datetime.now(timezone.utc), limit=2, dry_run=True
     )
+    # The first scalars read is the candidate batch; the live-transcript cleanup reads after it.
     call = (
         session.execute.await_args
         if query_kind == "diagnostic"
-        else session.scalars.await_args
+        else session.scalars.await_args_list[0]
     )
     sql = str(
         call.args[0].compile(
