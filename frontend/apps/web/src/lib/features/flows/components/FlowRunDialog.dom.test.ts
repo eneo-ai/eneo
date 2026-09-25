@@ -59,7 +59,9 @@ vi.mock("$lib/features/audio/AudioRecorder.svelte", () => ({
     // At the end the graph goes, the last segment is handed over, and the
     // recording ends once that segment is reported.
     const graph = {
-      context: { audioWorklet: { addModule: async () => undefined } },
+      context: Object.assign(new EventTarget(), {
+        audioWorklet: { addModule: async () => undefined }
+      }),
       source: { connect: () => undefined, disconnect: () => undefined }
     };
     const finish = (reason: "manual" | "stall") => {

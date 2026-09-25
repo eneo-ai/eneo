@@ -835,6 +835,20 @@ describe("FlowRunDialog live transcript in the run", () => {
     ]);
   });
 
+  it("leaves the text a preview when the recorder pauses on its own", async () => {
+    installLiveTranscriptFakes();
+    await openDialogAndStartRecording(upload, liveText);
+    const socket = FakeLiveSocket.instances[0];
+    socket.open();
+    socket.receive(ready);
+
+    media.recorders[0]?.dispatchEvent(new Event("pause"));
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    await flush();
+
+    expect(socket.texts).toEqual([JSON.stringify({ type: "stop" })]);
+  });
+
   it("waits for the final text: the button says so, and a press sends nothing, now or later", async () => {
     const create = vi.fn(async () => ({ id: "run-1" }));
     const socket = await recordHeardWhole({ create });
@@ -1097,14 +1111,16 @@ function installFakeMedia() {
     }
   }
 
-  class FakeAudioContext {
+  class FakeAudioContext extends EventTarget {
     state = "running";
     audioWorklet = { addModule };
     close = vi.fn(async () => {
       this.state = "closed";
+      this.dispatchEvent(new Event("statechange"));
     });
 
     constructor() {
+      super();
       contexts.push(this);
     }
 

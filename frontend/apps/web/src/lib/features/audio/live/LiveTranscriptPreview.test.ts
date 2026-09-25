@@ -36,10 +36,11 @@ function setup({
   contextState?: AudioContextState;
 } = {}) {
   const source = { connect: vi.fn(), disconnect: vi.fn() };
-  const graph = {
-    context: { state: contextState, audioWorklet: { addModule } },
-    source
-  } as unknown as RecorderAudioGraph;
+  const context = Object.assign(new EventTarget(), {
+    state: contextState,
+    audioWorklet: { addModule }
+  });
+  const graph = { context, source } as unknown as RecorderAudioGraph;
   const eneo = {
     flows: { liveTranscription: { createSession } },
     client: { baseUrl: new URL("https://eneo.example.test") }
@@ -48,7 +49,12 @@ function setup({
   const onListening = vi.fn();
   const start = (signal?: AbortSignal) =>
     preview.start(graph, { eneo, flowId: "flow-1", stepId: "step-audio", onListening, signal });
-  return { preview, start, createSession, addModule, source, onListening };
+  // The context changes state as a browser's does: then it says so.
+  const setContextState = (state: AudioContextState) => {
+    context.state = state;
+    context.dispatchEvent(new Event("statechange"));
+  };
+  return { preview, start, createSession, addModule, source, onListening, setContextState };
 }
 
 // A request the test answers, so audio can arrive before it does.
@@ -437,6 +443,29 @@ describe("LiveTranscriptPreview reuse of the final text", () => {
 
     expect(socket.texts).toEqual([JSON.stringify({ type: "stop" })]);
     expect(harness.preview.finishing).toBe(false);
+  });
+
+  it("is a preview only once the audio context stops running while the recording goes on", async () => {
+    const harness = setup();
+    const { socket } = await listening(harness);
+
+    harness.setContextState("suspended");
+    harness.setContextState("running");
+    harness.preview.stop();
+
+    await vi.waitFor(() => expect(socket.texts).toEqual([JSON.stringify({ type: "stop" })]));
+    expect(harness.preview.finishing).toBe(false);
+  });
+
+  it("keeps the transcript when the context closes after the stop's last audio", async () => {
+    const harness = setup();
+    const { socket } = await heardWhole(harness);
+
+    harness.setContextState("closed");
+    socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "transcript-1" });
+    harness.preview.recordingUploaded(harness.preview.recordingId as string, "file-1");
+
+    expect(harness.preview.transcriptIdFor(["file-1"])).toBe("transcript-1");
   });
 
   it("names no count once part of the recording is lost, and forgets a kept transcript", async () => {

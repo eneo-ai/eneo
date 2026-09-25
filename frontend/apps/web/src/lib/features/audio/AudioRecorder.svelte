@@ -60,6 +60,9 @@
     graph: RecorderAudioGraph | null,
     signal?: AbortSignal
   ) => void | Promise<void> = () => {};
+  // The recorder paused on its own: its file lacks what the microphone heard
+  // meanwhile, so live text of the recording can no longer stand in for it.
+  export let onCaptureInterrupted: () => void = () => {};
 
   type RecordingStartOrigin = "user" | "external";
   export let maxBytes: number | null = null;
@@ -749,6 +752,7 @@
     recorder.addEventListener("pause", () => {
       console.warn("MediaRecorder was paused unexpectedly");
       recordingStats.errors.push("Recorder paused at " + new Date().toISOString());
+      onCaptureInterrupted();
     });
 
     recorder.addEventListener("resume", () => {

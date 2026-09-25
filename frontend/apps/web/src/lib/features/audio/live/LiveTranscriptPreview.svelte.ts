@@ -63,6 +63,7 @@ export class LiveTranscriptPreview {
   #socket: WebSocket | null = null;
   #node: AudioWorkletNode | null = null;
   #source: MediaStreamAudioSourceNode | null = null;
+  #context: BaseAudioContext | null = null;
   #queue: ArrayBuffer[] = [];
   // The wait for the worklet's last frame, then for the final text.
   #stopTimer: ReturnType<typeof setTimeout> | undefined;
@@ -266,8 +267,11 @@ export class LiveTranscriptPreview {
   // Mono in, no output: nothing of the microphone reaches the speakers.
   #tap(graph: RecorderAudioGraph) {
     // The recorder starts in this same task. A context that is not running
-    // hears none of the opening the recorder records.
+    // hears none of the opening the recorder records, and one that stops
+    // running later misses what the recorder goes on recording.
     if (graph.context.state !== "running") this.#whole = false;
+    graph.context.addEventListener("statechange", this.#onContextState);
+    this.#context = graph.context;
     const node = new AudioWorkletNode(graph.context, PCM16_PROCESSOR, {
       numberOfInputs: 1,
       numberOfOutputs: 0,
@@ -383,6 +387,10 @@ export class LiveTranscriptPreview {
     socket?.close();
   }
 
+  #onContextState = () => {
+    if (this.#context?.state !== "running") this.lose();
+  };
+
   #stopFinishing() {
     clearTimeout(this.#finishingTimer);
     this.#finishing = false;
@@ -392,6 +400,8 @@ export class LiveTranscriptPreview {
     const node = this.#node;
     if (!node) return;
     this.#node = null;
+    this.#context?.removeEventListener("statechange", this.#onContextState);
+    this.#context = null;
     node.port.onmessage = null;
     node.port.close();
     try {

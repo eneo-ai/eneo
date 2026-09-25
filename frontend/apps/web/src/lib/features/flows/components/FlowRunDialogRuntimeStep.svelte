@@ -529,6 +529,7 @@
           {onRecordingDone}
           onRecordingStateChange={onRecordingStateChange ?? (() => {})}
           onAudioGraph={handleAudioGraph}
+          onCaptureInterrupted={() => livePreview.lose()}
         />
 
         {#if liveTextOn && livePreview.stepId === step.step_id}
