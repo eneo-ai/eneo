@@ -12,6 +12,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import AsyncSession
 from eneo.database.tables.spaces_table import SpaceOversightVisits
 from eneo.database.tables.users_table import Users
@@ -66,6 +67,17 @@ class OversightVisitRepo:
             )
             .values(left_at=left_at)
         )
+
+    async def delete_ended_before(self, cutoff: datetime) -> int:
+        """Delete the visits of every tenant that ended before ``cutoff``.
+        Open visits are never deleted."""
+        result = await self.session.execute(
+            sa.delete(SpaceOversightVisits).where(
+                SpaceOversightVisits.left_at.is_not(None),
+                SpaceOversightVisits.left_at < cutoff,
+            )
+        )
+        return affected_row_count(result)
 
     async def recent(
         self, space_id: UUID, *, since: datetime

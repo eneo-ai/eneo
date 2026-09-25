@@ -447,7 +447,8 @@ There is no separate CSRF token or refresh-token mechanism.
   tenant admin's direct role, is refused with `400` and error code `9067`, so
   admins join a space themselves with a role and a written reason.
   Members see the join until 90 days after it ends (table
-  `space_oversight_visits`), and the audit log always records it. Two routes
+  `space_oversight_visits`, whose row a daily worker job then deletes), and
+  the audit log always records it under its own retention. Two routes
   reach content without a join: user groups, since a group's role in a space
   applies to everyone in it (a group that contains tenant admins can still be
   added to a space), and tenant-scoped service keys; see

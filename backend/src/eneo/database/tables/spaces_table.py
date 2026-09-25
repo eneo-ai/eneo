@@ -182,8 +182,9 @@ class SpaceOversightVisits(IdMixin, BaseWithTableName):
     """A tenant administrator's join through oversight and when it ended.
 
     Kept apart from spaces_users, whose row goes when the administrator
-    leaves: members see these visits for a fixed period after that, and the
-    audit log keeps the full record.
+    leaves: members see these visits for a fixed period after that, then a
+    daily job deletes them (visit_retention). The audit log keeps the full
+    record under its own retention.
     """
 
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))

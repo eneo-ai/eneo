@@ -1,6 +1,6 @@
 ---
 title: Tillsyn över ytor
-translationSource: guides/space-oversight.mdx@490066444992
+translationSource: guides/space-oversight.mdx@ad2570d5bfd4
 ---
 
 # Tillsyn över ytor
@@ -222,9 +222,11 @@ organisationsadministratörer som har gått med via tillsyn. På ytans medlemssi
 står också **Organisationsadministratör · gick med** och datumet vid ditt namn.
 När ditt medlemskap upphör, för att du lämnar ytan eller tas bort, visar
 översiktssidan fortfarande att du gick med, med datumet då medlemskapet
-upphörde, i 90 dagar. På de här sidorna är det bara ytans administratörer som
+upphörde, i 90 dagar. Därefter raderas uppgiften ur ytans historik över
+tillsynsmedlemskap. På de här sidorna är det bara ytans administratörer som
 ser din anledning. Att du gick med sparas alltid i granskningsloggen, med roll
-och anledning, och finns kvar där när meddelandet har försvunnit.
+och anledning, och finns kvar där enligt granskningsloggens egen lagringstid
+(se [Det här sparas i granskningsloggen](#what-the-audit-log-records)).
 
 Om du redan är medlem via en grupp lägger du till ett direkt medlemskap med
 en högre roll, och den högre rollen gäller. Om en grupp redan ger dig rollen
@@ -396,13 +398,15 @@ utan att lyfta fram enskilda personers arbete:
   administratörer, av andra organisationsadministratörer och av API-nycklar med
   behörigheten `admin` för ytan eller för hela organisationen; läsningen loggas
   inte. Den sparas i granskningsloggen och i ytans historik över
-  tillsynsmedlemskap, som behåller anledningen tills ytan tas bort, även efter
-  att medlemmarna inte längre ser att du gick med. Ett meddelande som skickas
-  tillbaka med en begäran om widgetaktivering kan läsas av alla i ytan som har
-  behörigheten för webbwidgetar, oavsett roll, av organisationsadministratörer
-  och av API-nycklar med omfånget Organisation och behörigheten `admin`, och det
-  sparas i granskningsloggen. Hänvisa till ett ärendenummer i stället för att
-  nämna personer.
+  tillsynsmedlemskap. Medlemmarna ser att du gick med i 90 dagar efter att
+  medlemskapet upphörde; sedan raderas uppgiften ur historiken, med
+  anledningen. Granskningsloggen behåller att du gick med och lämnade enligt
+  sin egen lagringstid; poster som alltid sparas finns kvar i minst 365 dagar.
+  Ett meddelande som skickas tillbaka med en begäran om widgetaktivering kan
+  läsas av alla i ytan som har behörigheten för webbwidgetar, oavsett roll, av
+  organisationsadministratörer och av API-nycklar med omfånget Organisation och
+  behörigheten `admin`, och det sparas i granskningsloggen. Hänvisa till ett
+  ärendenummer i stället för att nämna personer.
 
 Skydden begränsar vad siffrorna avslöjar, men de gör inte uppgifterna anonyma.
 I en mycket liten yta kan upprepade iakttagelser ändå ringa in enskilda.
