@@ -26,7 +26,7 @@ import {
   type LucideIcon
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useId, useRef, useState, type Ref } from "react";
+import { useEffect, useId, useRef, type Ref } from "react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
