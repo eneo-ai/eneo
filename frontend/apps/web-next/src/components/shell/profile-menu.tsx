@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, Globe, KeyRound, LogOut, Sparkles, User } from "lucide-react";
+import { Accessibility, Building2, Globe, KeyRound, LogOut, Sparkles, User } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
@@ -28,7 +28,7 @@ const LOCALE_LABELS: Record<string, string> = { sv: "Svenska", en: "English" };
 
 export function ProfileMenu() {
   const t = useTranslations();
-  const { user, federationStatus } = useAppContext();
+  const { user, federationStatus, links } = useAppContext();
   const { enabled: whatsNewEnabled, hasUnseen } = useWhatsNew();
   const locale = useLocale();
   const router = useRouter();
@@ -91,13 +91,21 @@ export function ProfileMenu() {
           <DropdownMenuSubContent>
             <DropdownMenuRadioGroup value={locale} onValueChange={switchLocale}>
               {locales.map((value) => (
-                <DropdownMenuRadioItem key={value} value={value}>
+                // Each language name is written in that language (WCAG 3.1.2).
+                <DropdownMenuRadioItem key={value} value={value} lang={value}>
                   {LOCALE_LABELS[value] ?? value}
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+        {links.accessibilityStatement && (
+          <DropdownMenuItem asChild>
+            <a href={links.accessibilityStatement}>
+              <Accessibility /> {t("a11y_statement_link")}
+            </a>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         {federationStatus.has_multi_tenant_federation && (
           <DropdownMenuItem asChild>

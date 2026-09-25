@@ -13,6 +13,11 @@ export type AppContextData = {
   featureFlags: {
     showWebSearch: boolean;
   };
+  /** Deployment-configured links (env). `null` when not configured: hide the link. */
+  links: {
+    /** ACCESSIBILITY_STATEMENT_URL: the organisation's tillgänglighetsredogörelse. */
+    accessibilityStatement: string | null;
+  };
   versions: { frontend: string; backend: string };
 };
 

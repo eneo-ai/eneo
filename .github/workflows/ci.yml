@@ -547,6 +547,100 @@ jobs:
         if: ${{ always() }}
         run: docker compose -f docker-compose.e2e.ci.yml down -v
 
+  # web-next end-to-end and page-level accessibility (tests/a11y.spec.ts: axe
+  # WCAG 2.2 A/AA scans in light and dark mode, plus the skip link) against the
+  # same isolated stack as "Frontend E2E". Like "Frontend (web-next)", it is not
+  # part of the aggregate CI gate yet.
+  frontend-web-next-e2e:
+    name: Frontend E2E (web-next)
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.frontend_e2e == 'true'
+    runs-on: ubuntu-latest
+    env:
+      # env.ts validates at import time, during the build and in `next start`.
+      # The server talks to the stack's backend on the loopback port.
+      ENEO_BACKEND_URL: http://127.0.0.1:8124
+      SESSION_SECRET: ci-only-session-secret-32-chars-min!!
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Isolated, prod-safe stack: own postgres/redis, a deterministic mock model,
+      # and the backend built from its Dockerfile. Nothing touches a real provider.
+      - name: Start isolated E2E stack in the background
+        # The backend image build and health checks overlap with bun install and
+        # the web-next build. "Wait for the E2E stack" collects the exit status
+        # before the tests start.
+        run: |
+          nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
+            > "$RUNNER_TEMP/e2e-stack.log" 2>&1 &
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      # Pin to match apps/web-next's @playwright/test dependency; a bare
+      # `bun x playwright` fetches the latest and installs a browser build the
+      # pinned runner can't find ("Executable doesn't exist").
+      - name: Install Playwright Chromium
+        working-directory: frontend/apps/web-next
+        run: bun x playwright@1.58.2 install --with-deps chromium
+
+      # Build up front so the Playwright webServer only has to run `next start`
+      # (playwright.config.ts), keeping the build out of its startup timeout.
+      - name: Build web-next for E2E
+        working-directory: frontend/apps/web-next
+        run: bun run build
+
+      - name: Wait for the E2E stack
+        run: |
+          for _ in $(seq 1 300); do
+            [ -f "$RUNNER_TEMP/e2e-stack.exit" ] && break
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/e2e-stack.log"
+          [ "$(cat "$RUNNER_TEMP/e2e-stack.exit" 2>/dev/null)" = "0" ]
+
+      - name: Run E2E and accessibility tests
+        working-directory: frontend/apps/web-next
+        env:
+          E2E_PORT: "3100"
+          # The login seeded by docker-compose.e2e.ci.yml (DEFAULT_USER_*).
+          E2E_USER: e2e@example.com
+          E2E_PASSWORD: E2ePassword123!
+        run: bun run test:e2e
+
+      - name: Capture E2E stack diagnostics
+        if: ${{ failure() }}
+        run: |
+          mkdir -p e2e-artifacts
+          docker compose -f docker-compose.e2e.ci.yml ps --all \
+            > e2e-artifacts/compose-ps.txt
+          docker compose -f docker-compose.e2e.ci.yml logs \
+            --no-color --timestamps \
+            > e2e-artifacts/compose.log
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-web-next
+          path: |
+            frontend/apps/web-next/playwright-report
+            frontend/apps/web-next/test-results
+            e2e-artifacts
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Stop E2E stack
+        if: ${{ always() }}
+        run: docker compose -f docker-compose.e2e.ci.yml down -v
+
   schema-drift:
     name: Schema drift
     needs: changes

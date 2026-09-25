@@ -204,7 +204,8 @@ export const eneoTheme = {
     "--astryx-theme-neutral-color-destructive-overlay-hover": "light-dark(#ff7f770D, #ee736c0D)",
     "--astryx-theme-neutral-color-destructive-overlay-pressed": "light-dark(#ff7f771A, #ee736c1A)",
     "--eneo-color-background-sunken": "light-dark(#F8F9FB, #0D1014)",
-    "--eneo-color-text-tertiary": "light-dark(#6B7280, #8B93A1)"
+    "--eneo-color-text-tertiary": "light-dark(#646A77, #939BA8)",
+    "--eneo-color-border-control": "light-dark(#7E8593, #747C8B)"
   },
   __localTokenOwners: {
     "--astryx-theme-neutral-color-status-fill-accent": "neutral",
@@ -218,7 +219,8 @@ export const eneoTheme = {
     "--astryx-theme-neutral-color-destructive-overlay-hover": "neutral",
     "--astryx-theme-neutral-color-destructive-overlay-pressed": "neutral",
     "--eneo-color-background-sunken": "eneo",
-    "--eneo-color-text-tertiary": "eneo"
+    "--eneo-color-text-tertiary": "eneo",
+    "--eneo-color-border-control": "eneo"
   },
   __localTokenLineage: ["neutral","eneo"],
   components: {
@@ -472,7 +474,7 @@ export const eneoTheme = {
     },
     "switch": {
       "base": {
-        "--color-background-gray": "var(--color-border-emphasized)"
+        "--color-background-gray": "var(--eneo-color-border-control)"
       }
     },
     "progress-bar": {
@@ -500,6 +502,86 @@ export const eneoTheme = {
     "section": {
       "base": {
         "padding": "var(--spacing-3)"
+      }
+    },
+    "text-input": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "text-area": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "number-input": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "date-input": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "date-range-input": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "date-time-input": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "time-input": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "selector": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "multi-selector": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "complex-selector": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "typeahead": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "file-input": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "input-group": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "checkbox-indicator": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "radio-indicator": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
+      }
+    },
+    "chat-composer": {
+      "base": {
+        "--color-border-emphasized": "var(--eneo-color-border-control)"
       }
     }
   },

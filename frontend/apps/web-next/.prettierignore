@@ -7,3 +7,5 @@ src/theme/eneo.css
 src/theme/eneo.js
 src/theme/eneo.d.ts
 src/theme/eneo.variants.d.ts
+# Written by `eslint --suppress-all` / `eslint --prune-suppressions` (the lint baseline)
+eslint-suppressions.json

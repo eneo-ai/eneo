@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import { ImageIcon, Monitor, PlusIcon, SendIcon, SquareIcon, XIcon } from "lucide-react";
 import { nanoid } from "nanoid";
+import { useTranslations } from "next-intl";
 import type {
   ChangeEvent,
   ChangeEventHandler,
@@ -854,14 +855,14 @@ export const PromptInput = ({
   // Render with or without local provider
   const inner = (
     <>
+      {/* Opened programmatically and never shown (`hidden`), so it is not in
+          the accessibility tree; the visible attach button carries the name. */}
       <input
         accept={accept}
-        aria-label="Upload files"
-        className="hidden"
+        hidden
         multiple={multiple}
         onChange={handleChange}
         ref={inputRef}
-        title="Upload files"
         type="file"
       />
       <form className={cn("w-full", className)} onSubmit={handleSubmit} ref={formRef} {...props}>
@@ -1132,6 +1133,7 @@ export const PromptInputSubmit = ({
   children,
   ...props
 }: PromptInputSubmitProps) => {
+  const t = useTranslations();
   const isGenerating = status === "submitted" || status === "streaming";
 
   let Icon = <SendIcon className="size-4" />;
@@ -1158,7 +1160,7 @@ export const PromptInputSubmit = ({
 
   return (
     <InputGroupButton
-      aria-label={isGenerating ? "Stop" : "Submit"}
+      aria-label={isGenerating ? t("stop_generating") : t("send_message")}
       className={cn(className)}
       onClick={handleClick}
       size={size}
@@ -1247,10 +1249,14 @@ export const PromptInputTab = ({ className, ...props }: PromptInputTabProps) => 
 
 export type PromptInputTabLabelProps = HTMLAttributes<HTMLHeadingElement>;
 
-export const PromptInputTabLabel = ({ className, ...props }: PromptInputTabLabelProps) => (
-  // Content provided via children in props
-  // oxlint-disable-next-line eslint-plugin-jsx-a11y(heading-has-content)
-  <h3 className={cn("text-muted-foreground mb-2 px-3 text-xs font-medium", className)} {...props} />
+export const PromptInputTabLabel = ({
+  className,
+  children,
+  ...props
+}: PromptInputTabLabelProps) => (
+  <h3 className={cn("text-muted-foreground mb-2 px-3 text-xs font-medium", className)} {...props}>
+    {children}
+  </h3>
 );
 
 export type PromptInputTabBodyProps = HTMLAttributes<HTMLDivElement>;

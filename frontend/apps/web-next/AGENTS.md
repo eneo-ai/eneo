@@ -15,7 +15,47 @@ changes).
 - **Tokens only**: no raw colours, no `dark:` variants (both are lint errors in
   TS/TSX). Every colour, radius and shadow flips with the colour mode by itself.
 - **Every UI string goes through next-intl** (Swedish is the default locale).
+- **Accessibility is a requirement: WCAG 2.2 AA.** Follow the section below
+  and [ACCESSIBILITY.md](ACCESSIBILITY.md).
 - Before you finish: `bun run check && bun run lint && bun run test`.
+
+## Accessibility (required)
+
+web-next must meet WCAG 2.2 A and AA (DOS-lagen, EN 301 549).
+[ACCESSIBILITY.md](ACCESSIBILITY.md) is the standard: the rules per topic, the
+manual test protocol and the exceptions process. Read it before building UI.
+
+- Use Astryx components and native elements; they carry roles, states and
+  keyboard support. Never put `onClick` on a `div`/`span`; no `autoFocus`, no
+  positive `tabIndex`.
+- Everything works with the keyboard, in visual order, with a visible 3:1
+  focus indicator that sticky headers and the docked chat composer never cover
+  (`scroll-pt-*` / `scroll-pb-*` on the scroll container).
+- Accessible names, `alt`, `title` and `placeholder` come from next-intl, never
+  literals (`eneo/no-literal-accessible-name`). Icon-only controls get a
+  translated `aria-label`; decorative images get `alt=""`.
+- Every form control has a visible label; errors are text at the field with a
+  fix suggestion; login allows paste and password managers; personal data
+  fields have `autoComplete`.
+- Colours only from tokens. Text tokens pass 4.5:1 on every surface; form
+  controls use `border-ax-border-control` (3:1); never lighten text or icons
+  with opacity. Colour is never the only signal.
+- Targets are at least 24×24 px; 44×44 px on touch layouts.
+- Every drag has a button alternative (file drop zones have "Välj filer").
+- Status changes are announced politely without moving focus (toasts, a
+  `role="status"` region). In chat: one polite live region for "svar klart",
+  errors and tool approvals; never `aria-live` on streaming text.
+- Works at 320 px width and 400% zoom, with reduced motion and in forced
+  colours; parts in another language get `lang`.
+- Shared components get an axe test (`expectNoAxeViolations` from
+  `@/test/axe`); new screens get a scan in `tests/a11y.spec.ts`.
+- Fix, don't suppress. `eslint-suppressions.json` is the baseline of old
+  violations and only shrinks: after fixing one, run
+  `bunx eslint --prune-suppressions`. Exceptions need a reason and an issue
+  link (ACCESSIBILITY.md → Exceptions).
+- Do the manual protocol (keyboard only, VoiceOver/NVDA smoke test, 200%/400%
+  zoom, reduced motion, forced colours) and fill in the PR's Accessibility
+  section.
 
 ## Look it up, don't guess
 
@@ -84,7 +124,8 @@ shadcn names (`bg-background`, `text-muted-foreground`, `border-input`,
 | Text                                      | `text-ax-text`, `-secondary`, `-tertiary`, `-disabled`                     | `--color-text-*`                            |
 | Accent (Eneo blue)                        | `bg-ax-accent text-ax-on-accent`, `bg-ax-accent-muted text-ax-text-accent` | `--color-accent*`                           |
 | Hover, pressed, selected row, modal scrim | `bg-ax-hover`, `bg-ax-pressed`, `bg-ax-selected`, `bg-ax-scrim`            | `--color-overlay-*`, `--color-neutral`      |
-| Borders                                   | `border-ax-border`, `border-ax-border-strong`                              | `--color-border*`                           |
+| Borders (decorative)                      | `border-ax-border`, `border-ax-border-strong`                              | `--color-border*`                           |
+| Form-control boundary (3:1)               | `border-ax-border-control` (= shadcn `border-input`)                       | `--eneo-color-border-control`               |
 | Status                                    | `text-ax-{success,warning,error}`, `bg-ax-…-muted`, `text-ax-on-…`         | `--color-{success,warning,error}*`          |
 | Categorical (amber = orange, rose = pink) | `text-ax-{blue,teal,purple,orange,pink}` + `bg-ax-{hue}-muted`             | `--color-text-*`, `--color-background-*`    |
 | Radius                                    | `rounded-ax-{inner,element,container,page,chat}` = 6/10/12/18/20px         | `--radius-*`                                |
@@ -92,8 +133,15 @@ shadcn names (`bg-background`, `text-muted-foreground`, `border-input`,
 
 - Legacy radius classes follow the same scale: `rounded-sm` 6, `-md` 10
   (buttons, inputs), `-lg` 12, `-xl` 14, `-2xl` 18 (page panel), `-3xl` 20.
-- `text-ax-text-tertiary` meets AA only on surface, card and sunken; use
-  `-secondary` on `body` and `muted` backgrounds.
+- Contrast is tested (`src/theme/eneo-theme.contrast.test.ts`): text tokens
+  pass 4.5:1 on every surface, secondary also on hover/selected/pressed rows.
+  Use `-secondary` instead of `-tertiary` on pressed states and on hover or
+  selected rows over `body` (the sidebar). Add a pair to the test when you add
+  a token or use one on a new surface.
+- `border-ax-border` and `-strong` are decorative (dividers, container edges)
+  and below 3:1. Inputs, selects, checkboxes, radios and switch tracks use the
+  control border; Astryx controls get it from the theme's `components`
+  overrides.
 - `--color-*` custom properties are Astryx tokens (`--color-accent` is the blue);
   `--accent` is the shadcn hover tint. Don't mix them up in `var()`.
 - The body is still `bg-background` (surface) until the shell adopts the page
@@ -146,8 +194,12 @@ loosen the policy.
 - `bun run lint` — i18n drift, theme staleness, Prettier, ESLint.
 - `bun run test` — Vitest. `src/app/globals-css.test.ts` compiles `globals.css`
   and guards the layer order, the theme import and the Streamdown `@source`
-  paths.
-- Check new UI in light and dark mode, with the keyboard, and at phone width.
+  paths; `src/theme/eneo-theme.contrast.test.ts` checks the colour pairs; axe
+  tests check component markup.
+- `bun run test:e2e` — Playwright against a running backend, including the
+  axe page scans in `tests/a11y.spec.ts` (CI: "Frontend E2E (web-next)").
+- Check new UI in light and dark mode, with the keyboard, and at phone width
+  (the full manual protocol is in ACCESSIBILITY.md).
 
 <!-- ASTRYX:START -->
 

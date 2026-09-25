@@ -3,8 +3,13 @@
  * Eneo theme for Astryx: the single source of truth for web-next colours,
  * radii, shadows and fonts. It extends Astryx Neutral (typography scale 14px /
  * 1.2, motion, component overrides, lucide icon registry) and overrides the
- * values from the approved Eneo design canvas. Text colours are WCAG AA on the
- * surfaces they are paired with — keep that when changing them.
+ * values from the approved Eneo design canvas.
+ *
+ * Contrast is a requirement, not a preference (WCAG 2.2 AA, ACCESSIBILITY.md):
+ * text 4.5:1 and control boundaries, focus ring, icons and status dots 3:1 on
+ * every surface they are used on. src/theme/eneo-theme.contrast.test.ts checks
+ * the documented pairs in both colour modes; add a pair there when you add a
+ * token or use one on a new surface.
  *
  * Built, never injected: after editing run `bun run theme:build`, which writes
  * eneo.css / eneo.js / eneo.d.ts next to this file. The runtime Theme skips
@@ -115,7 +120,9 @@ export const eneoTheme = defineTheme({
     "--color-overlay-pressed": ["rgba(15, 18, 23, 0.09)", "rgba(255, 255, 255, 0.1)"],
     "--color-overlay": ["rgba(15, 18, 23, 0.4)", "rgba(0, 0, 0, 0.6)"],
 
-    // Borders.
+    // Borders. Both are decorative (dividers, card and container edges) and
+    // below 3:1: never the only boundary of a form control. Controls use
+    // --eneo-color-border-control (localTokens and `components` below).
     "--color-border": ["rgba(15, 18, 23, 0.09)", "rgba(255, 255, 255, 0.08)"],
     "--color-border-emphasized": ["#D3D7DE", "#2C323B"],
 
@@ -178,7 +185,13 @@ export const eneoTheme = defineTheme({
   localTokens: {
     // Eneo-only roles without an Astryx equivalent.
     "--eneo-color-background-sunken": ["#F8F9FB", "#0D1014"],
-    "--eneo-color-text-tertiary": ["#6B7280", "#8B93A1"],
+    // Tertiary text: 4.5:1 on every surface and on hover/selected rows over
+    // surface, card and popover (was #6B7280 / #8B93A1: 4.16:1 on body).
+    "--eneo-color-text-tertiary": ["#646A77", "#939BA8"],
+    // Boundary of form controls (inputs, selects, checkboxes, radios, switch
+    // tracks): 3:1 on every surface, WCAG 1.4.11. The emphasized border above
+    // stays the lighter, decorative edge.
+    "--eneo-color-border-control": ["#7E8593", "#747C8B"],
     // Neutral paints Badge/StatusDot/ProgressBar status fills from these; point
     // them at the Eneo status colours so fills pair with the on-* colours above.
     "--astryx-theme-neutral-color-status-fill-accent": ["#1A6FD2", "#4D94F2"],
@@ -186,5 +199,38 @@ export const eneoTheme = defineTheme({
     "--astryx-theme-neutral-color-status-fill-warning": ["#8A5A00", "#E9B949"],
     "--astryx-theme-neutral-color-status-fill-error": ["#B42330", "#FF8177"],
     "--astryx-theme-neutral-color-status-muted-accent": ["#E6EEFA", "rgba(77, 148, 242, 0.16)"]
+  },
+
+  // Astryx draws form-control boundaries with --color-border-emphasized (and
+  // the unchecked switch track with --color-background-gray, which Neutral
+  // points at it). Re-point them to the control border inside the controls
+  // only, so dividers and container edges keep the lighter border.
+  components: {
+    ...Object.fromEntries(
+      [
+        "text-input",
+        "text-area",
+        "number-input",
+        "date-input",
+        "date-range-input",
+        "date-time-input",
+        "time-input",
+        "selector",
+        "multi-selector",
+        "complex-selector",
+        "typeahead",
+        "file-input",
+        "input-group",
+        "checkbox-indicator",
+        "radio-indicator",
+        "chat-composer"
+      ].map((key) => [
+        key,
+        { base: { "--color-border-emphasized": "var(--eneo-color-border-control)" } }
+      ])
+    ),
+    switch: {
+      base: { "--color-background-gray": "var(--eneo-color-border-control)" }
+    }
   }
 });

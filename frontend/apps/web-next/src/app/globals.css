@@ -106,9 +106,10 @@
   --color-ax-pressed: var(--color-overlay-pressed);
   --color-ax-selected: var(--color-neutral);
   --color-ax-scrim: var(--color-overlay);
-  /* borders */
+  /* borders: border/-strong are decorative edges; -control (3:1) outlines form controls */
   --color-ax-border: var(--color-border);
   --color-ax-border-strong: var(--color-border-emphasized);
+  --color-ax-border-control: var(--eneo-color-border-control);
   /* status */
   --color-ax-success: var(--color-success);
   --color-ax-success-muted: var(--color-success-muted);
@@ -195,7 +196,9 @@
   --success: var(--color-success);
   --warning: var(--color-warning);
   --border: var(--color-border);
-  --input: var(--color-border-emphasized);
+  /* Form-control boundary (inputs, selects, checkboxes, switch tracks): 3:1 on
+     every surface, WCAG 1.4.11. Not --color-border-emphasized (decorative). */
+  --input: var(--eneo-color-border-control);
   --ring: var(--color-accent);
   /* Categorical: blue, teal, purple, amber, rose (entity tiles, charts). */
   --chart-1: var(--color-text-blue);
@@ -243,8 +246,11 @@
 }
 
 @layer base {
+  /* Full-strength ring colour for any outline an element draws without its own
+     colour: a 50% ring is ~2:1 on white, below the 3:1 a focus indicator needs
+     (WCAG 1.4.11). */
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring;
   }
   body {
     @apply bg-background text-foreground;

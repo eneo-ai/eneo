@@ -1,0 +1,168 @@
+{
+  "src/app/(app)/spaces/list/spaces-list.client.tsx": {
+    "jsx-a11y/no-autofocus": {
+      "count": 1
+    }
+  },
+  "src/components/ai-elements/code-block.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 2
+    }
+  },
+  "src/components/ai-elements/context.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 1
+    }
+  },
+  "src/components/ai-elements/conversation.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 2
+    }
+  },
+  "src/components/ai-elements/message.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 2
+    }
+  },
+  "src/components/composites/context-budget.tsx": {
+    "jsx-a11y/no-noninteractive-tabindex": {
+      "count": 1
+    }
+  },
+  "src/components/ui/input-group.tsx": {
+    "jsx-a11y/click-events-have-key-events": {
+      "count": 1
+    },
+    "jsx-a11y/no-noninteractive-element-interactions": {
+      "count": 1
+    }
+  },
+  "src/components/ui/spinner.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 1
+    }
+  },
+  "src/features/admin/api-keys/notification-policy-dialog.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 1
+    }
+  },
+  "src/features/admin/api-keys/org-api-keys.tsx": {
+    "jsx-a11y/no-autofocus": {
+      "count": 1
+    }
+  },
+  "src/features/admin/api-keys/policy-panel.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 1
+    }
+  },
+  "src/features/admin/mcp/detail/overview-tab.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 2
+    }
+  },
+  "src/features/admin/mcp/mcp-dialog.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 3
+    }
+  },
+  "src/features/admin/security-classifications/classification-dialog.tsx": {
+    "jsx-a11y/no-autofocus": {
+      "count": 1
+    }
+  },
+  "src/features/admin/storage/storage-connection-section.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 1
+    }
+  },
+  "src/features/admin/users/user-editor.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 1
+    }
+  },
+  "src/features/api-keys/account-api-keys.tsx": {
+    "jsx-a11y/no-autofocus": {
+      "count": 1
+    }
+  },
+  "src/features/api-keys/resource-api-keys-section.tsx": {
+    "jsx-a11y/no-autofocus": {
+      "count": 1
+    }
+  },
+  "src/features/apps/create-app.tsx": {
+    "jsx-a11y/no-autofocus": {
+      "count": 1
+    }
+  },
+  "src/features/apps/editor/ai-section.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 1
+    }
+  },
+  "src/features/apps/results/result-detail.tsx": {
+    "jsx-a11y/media-has-caption": {
+      "count": 1
+    }
+  },
+  "src/features/apps/run/audio-recorder-input.tsx": {
+    "jsx-a11y/media-has-caption": {
+      "count": 1
+    }
+  },
+  "src/features/assistants/create-menu.tsx": {
+    "jsx-a11y/no-autofocus": {
+      "count": 1
+    }
+  },
+  "src/features/assistants/editor/ai-section.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 1
+    }
+  },
+  "src/features/files/resource-attachments-section.tsx": {
+    "jsx-a11y/no-static-element-interactions": {
+      "count": 1
+    }
+  },
+  "src/features/group-chats/assistant-list.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 1
+    }
+  },
+  "src/features/knowledge/upload-dialog.tsx": {
+    "jsx-a11y/no-static-element-interactions": {
+      "count": 1
+    }
+  },
+  "src/features/knowledge/website-dialog.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 2
+    }
+  },
+  "src/features/services/create-service.tsx": {
+    "jsx-a11y/no-autofocus": {
+      "count": 1
+    }
+  },
+  "src/features/services/editor/service-editor.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 1
+    }
+  },
+  "src/features/spaces/settings/space-settings.tsx": {
+    "eneo/no-literal-accessible-name": {
+      "count": 1
+    }
+  },
+  "src/features/templates/template-gallery-dialog.tsx": {
+    "jsx-a11y/no-autofocus": {
+      "count": 1
+    },
+    "jsx-a11y/no-static-element-interactions": {
+      "count": 1
+    }
+  }
+}

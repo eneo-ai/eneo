@@ -73,8 +73,10 @@ export default async function LoginPage({
     singleTenantFederationHref ??
     (next ? `/auth/login?next=${encodeURIComponent(next)}` : "/auth/login");
 
+  const accessibilityStatementUrl = env.ACCESSIBILITY_STATEMENT_URL;
+
   return (
-    <main className="flex min-h-svh items-center justify-center p-4">
+    <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="text-xl">{t("welcome")}</CardTitle>
@@ -107,6 +109,16 @@ export default async function LoginPage({
           <LoginForm next={next} />
         </CardContent>
       </Card>
+      {accessibilityStatementUrl && (
+        <p className="text-sm">
+          <a
+            href={accessibilityStatementUrl}
+            className="text-muted-foreground hover:text-foreground focus-visible:outline-ring inline-flex min-h-6 items-center rounded-sm underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            {t("a11y_statement_link")}
+          </a>
+        </p>
+      )}
     </main>
   );
 }

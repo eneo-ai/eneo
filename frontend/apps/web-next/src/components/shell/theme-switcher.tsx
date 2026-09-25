@@ -7,18 +7,24 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 
 export function ThemeSwitcher() {
   const t = useTranslations();
-  const { resolvedTheme, setTheme } = useTheme();
+  const { theme, resolvedTheme, setTheme } = useTheme();
   // resolvedTheme is only known on the client; render the server's icon until
   // hydrated so the trigger never mismatches.
   const hydrated = useHydrated();
   const ThemeIcon = hydrated && resolvedTheme === "dark" ? Moon : Sun;
+  const themes = [
+    { value: "light", label: t("light") },
+    { value: "dark", label: t("dark") },
+    { value: "system", label: t("system") }
+  ];
 
   return (
     <DropdownMenu>
@@ -29,9 +35,15 @@ export function ThemeSwitcher() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => setTheme("light")}>{t("light")}</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("dark")}>{t("dark")}</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("system")}>{t("system")}</DropdownMenuItem>
+        {/* Radio items expose the current choice to screen readers
+            (menuitemradio + aria-checked) and mark it visibly. */}
+        <DropdownMenuRadioGroup value={theme} onValueChange={setTheme}>
+          {themes.map(({ value, label }) => (
+            <DropdownMenuRadioItem key={value} value={value}>
+              {label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -22,7 +22,11 @@ const envSchema = z
     SHOW_WEB_SEARCH: boolFlag,
     SHOW_HELP_CENTER: boolFlag,
     HELP_CENTER_URL: z.url().optional(),
-    REQUEST_INTEGRATION_FORM_URL: z.url().optional()
+    REQUEST_INTEGRATION_FORM_URL: z.url().optional(),
+    // The deploying organisation's accessibility statement
+    // (tillgänglighetsredogörelse, DOS-lagen). Linked from the login page and
+    // the profile menu when set; see ACCESSIBILITY.md.
+    ACCESSIBILITY_STATEMENT_URL: z.url().optional()
   })
   .refine((value) => !value.OIDC_ISSUER || (value.OIDC_CLIENT_ID && value.OIDC_CLIENT_SECRET), {
     message: "OIDC_CLIENT_ID and OIDC_CLIENT_SECRET are required when OIDC_ISSUER is set",

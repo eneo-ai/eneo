@@ -10,3 +10,7 @@ Do not put unreleased behaviour on a release branch, edit generated version
 folders, or duplicate What's new entries in MDX. Keep the documentation change
 with its behaviour change. In the PR, state the intended release line and the
 page changed, or explain why documentation is unaffected.
+
+# Frontend accessibility
+
+UI work in `frontend/apps/web-next` must meet WCAG 2.2 AA; follow [its accessibility standard](frontend/apps/web-next/ACCESSIBILITY.md).

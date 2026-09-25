@@ -329,7 +329,8 @@
     --astryx-theme-neutral-color-destructive-overlay-hover: light-dark(#ff7f770D, #ee736c0D);
     --astryx-theme-neutral-color-destructive-overlay-pressed: light-dark(#ff7f771A, #ee736c1A);
     --eneo-color-background-sunken: light-dark(#F8F9FB, #0D1014);
-    --eneo-color-text-tertiary: light-dark(#6B7280, #8B93A1);
+    --eneo-color-text-tertiary: light-dark(#646A77, #939BA8);
+    --eneo-color-border-control: light-dark(#7E8593, #747C8B);
   }
 
   :scope {
@@ -619,7 +620,7 @@
   }
 
   .astryx-switch {
-    --color-background-gray: var(--color-border-emphasized);
+    --color-background-gray: var(--eneo-color-border-control);
   }
 
   .astryx-progress-bar {
@@ -648,6 +649,70 @@
 
   .astryx-section {
     --astryx-section-padding: var(--spacing-3);
+  }
+
+  .astryx-text-input {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-text-area {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-number-input {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-date-input {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-date-range-input {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-date-time-input {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-time-input {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-selector {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-multi-selector {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-complex-selector {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-typeahead {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-file-input {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-input-group {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-checkbox-indicator {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-radio-indicator {
+    --color-border-emphasized: var(--eneo-color-border-control);
+  }
+
+  .astryx-chat-composer {
+    --color-border-emphasized: var(--eneo-color-border-control);
   }
 
   .astryx-text[data-color="primary"] { color: var(--color-text-primary); }

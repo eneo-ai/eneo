@@ -4828,5 +4828,6 @@
   "duplicate_files_dialog_description": "Dessa filer finns redan i samlingen. Uppladdningen ersätter dem med de nya versionerna.",
   "replace_files": "Ersätt filer",
   "upload_dropzone_prompt": "Dra och släpp filer eller mappar här",
-  "upload_skipped_unsupported_files": "Hoppades över eftersom filtypen inte stöds: {fileList}"
+  "upload_skipped_unsupported_files": "Hoppades över eftersom filtypen inte stöds: {fileList}",
+  "a11y_statement_link": "Tillgänglighetsredogörelse"
 }

@@ -3,6 +3,7 @@ import fs from "fs";
 import noIgnoredUnsub from "./rules/no-ignored-unsubscriber.js";
 import noIgnoredRemoveHandler from "./rules/no-ignored-removehandler.js";
 import noHardcodedText from "./rules/no-hardcoded-text.js";
+import noLiteralAccessibleName from "./rules/no-literal-accessible-name.js";
 import noRawColor from "./rules/no-raw-color.js";
 
 const pkg = JSON.parse(
@@ -20,6 +21,7 @@ const plugin = {
     "no-ignored-unsubscriber": noIgnoredUnsub,
     "no-ignored-removehandler": noIgnoredRemoveHandler,
     "no-hardcoded-text": noHardcodedText,
+    "no-literal-accessible-name": noLiteralAccessibleName,
     "no-raw-color": noRawColor,
   },
 };

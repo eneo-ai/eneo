@@ -1,6 +1,7 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
+import jsxA11y from "eslint-plugin-jsx-a11y";
 import eneo from "@eneo/eslint-plugin";
 
 const generatedAndVendored = [
@@ -12,6 +13,10 @@ const generatedAndVendored = [
   "src/app/(app)/chat-mock/**",
   "src/**/*.test.{ts,tsx}"
 ];
+
+// UI that never ships: tests and the dev-only chat mock (404 in production).
+// Vendored primitives DO ship, so the accessibility rules cover them too.
+const notShippedUi = ["src/**/*.test.tsx", "src/app/(app)/chat-mock/**"];
 
 const eslintConfig = defineConfig([
   ...nextVitals,
@@ -73,6 +78,59 @@ const eslintConfig = defineConfig([
           ]
         }
       ]
+    }
+  },
+  {
+    // Accessibility: WCAG 2.2 AA, see ACCESSIBILITY.md. eslint-plugin-jsx-a11y's
+    // strict set plus two rules it leaves out. eslint-config-next already
+    // registers the `jsx-a11y` plugin (same package, pinned in package.json);
+    // registering it again is a "Cannot redefine plugin" error, so only the
+    // rules are taken from the plugin's config.
+    //
+    // Existing violations are baselined in eslint-suppressions.json and new ones
+    // fail `bun run lint`. Fix, don't suppress; after fixing a baselined
+    // violation run `bunx eslint --prune-suppressions` so the baseline shrinks.
+    files: ["src/**/*.tsx"],
+    ignores: notShippedUi,
+    settings: {
+      "jsx-a11y": {
+        // Astryx `as="…"` renders that element; next/image and next/link are
+        // checked like <img> and <a>.
+        polymorphicPropName: "as",
+        components: { Image: "img", Link: "a" }
+      }
+    },
+    rules: {
+      ...jsxA11y.flatConfigs.strict.rules,
+      // Added to strict: focusable content inside aria-hidden (4.1.2) and
+      // invalid lang values (3.1.1, 3.1.2).
+      "jsx-a11y/no-aria-hidden-on-focusable": "error",
+      "jsx-a11y/lang": "error",
+      // Configured: text up to three levels deep counts as a wrapping label's
+      // text (label + description spans), and the shadcn form primitives count
+      // as controls.
+      "jsx-a11y/label-has-associated-control": [
+        "error",
+        {
+          depth: 3,
+          labelComponents: ["Label"],
+          controlComponents: [
+            "Input",
+            "Textarea",
+            "Checkbox",
+            "Switch",
+            "RadioGroupItem",
+            "SelectTrigger",
+            "Slider"
+          ]
+        }
+      ],
+      // Relaxed from strict: a scrollable region must be focusable to scroll by
+      // keyboard (2.1.1), so tabIndex={0} is allowed on role="region" (with an
+      // accessible name) and on role="tabpanel" (WAI-ARIA tabs pattern).
+      "jsx-a11y/no-noninteractive-tabindex": ["error", { roles: ["tabpanel", "region"], tags: [] }],
+      // Accessible names and descriptions come from next-intl, never literals.
+      "eneo/no-literal-accessible-name": "error"
     }
   }
 ]);

@@ -39,6 +39,9 @@ export default async function AppLayout({
     featureFlags: {
       showWebSearch: env.SHOW_WEB_SEARCH
     },
+    links: {
+      accessibilityStatement: env.ACCESSIBILITY_STATEMENT_URL ?? null
+    },
     versions: { frontend: packageJson.version, backend: backendVersion }
   };
 
@@ -63,7 +66,13 @@ export default async function AppLayout({
                 {t("skip_to_content")}
               </a>
               <Header />
-              <main id="main-content" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+              {/* tabIndex -1: the skip link moves focus here, not just the
+                  scroll position (WCAG 2.4.1); tests/a11y.spec.ts checks it. */}
+              <main
+                id="main-content"
+                tabIndex={-1}
+                className="flex min-h-0 flex-1 flex-col overflow-y-auto focus:outline-none"
+              >
                 {children}
               </main>
             </div>

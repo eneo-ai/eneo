@@ -31,6 +31,21 @@ it("accepts a minimal valid environment with defaults", () => {
   expect(env.SHOW_WEB_SEARCH).toBe(false);
   expect(env.SHOW_HELP_CENTER).toBe(false);
   expect(env.OIDC_ISSUER).toBeUndefined();
+  expect(env.ACCESSIBILITY_STATEMENT_URL).toBeUndefined();
+});
+
+it("accepts an accessibility statement URL and rejects anything else", () => {
+  const base = { ENEO_BACKEND_URL: "http://localhost:8123", SESSION_SECRET: SECRET };
+  const env = parseEnv({
+    ...base,
+    ACCESSIBILITY_STATEMENT_URL: "https://www.sundsvall.se/tillganglighetsredogorelse"
+  });
+  expect(env.ACCESSIBILITY_STATEMENT_URL).toBe(
+    "https://www.sundsvall.se/tillganglighetsredogorelse"
+  );
+  expect(() => parseEnv({ ...base, ACCESSIBILITY_STATEMENT_URL: "tillganglighet" })).toThrow(
+    /ACCESSIBILITY_STATEMENT_URL/
+  );
 });
 
 it("parses enabled boolean feature flags", () => {

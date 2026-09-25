@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, within } from "@testing-library/react";
+import { Bot, Inbox } from "lucide-react";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, describe, expect, it } from "vitest";
 import { ENTITY_TONES, entityAccent, entityTone } from "@/lib/entity-accent";
+import { expectNoAxeViolations } from "@/test/axe";
 import { EmptyState } from "./empty-state";
 import { EntityAvatar, entityInitials } from "./entity-avatar";
 import { LoadingState } from "./loading-state";
@@ -101,5 +103,71 @@ describe("StatusLabel", () => {
     const { container } = render(<StatusLabel status="success" label="Publicerad" />);
     expect(screen.queryByRole("img")).toBeNull();
     expect(container.textContent).toBe("Publicerad");
+  });
+});
+
+// WCAG 2.2 A/AA (ACCESSIBILITY.md): every shared composite, in the variants
+// screens use, renders without axe violations.
+describe("accessibility", () => {
+  it("PageHeader with breadcrumbs, description and actions", async () => {
+    const { container } = render(
+      <PageHeader
+        title="Medlemmar"
+        description="Vilka som har tillgång"
+        breadcrumbs={[{ label: "Ytor", href: "/spaces" }, { label: "Min yta" }]}
+        actions={<button type="button">Lägg till</button>}
+      />
+    );
+    await expectNoAxeViolations(container);
+  });
+
+  it("EmptyState, framed and compact, with an icon and actions", async () => {
+    const { container } = render(
+      <>
+        <EmptyState
+          title="Inga appar ännu"
+          description="Skapa en app för att komma igång"
+          icon={<Inbox />}
+          actions={<button type="button">Skapa app</button>}
+        />
+        <EmptyState title="Inga träffar" headingLevel={3} isCompact framed={false} />
+      </>
+    );
+    await expectNoAxeViolations(container);
+  });
+
+  it("LoadingState in both variants", async () => {
+    const { container } = render(
+      <NextIntlClientProvider locale="sv" messages={{ loading: "Laddar..." }}>
+        <LoadingState rows={2} />
+        <LoadingState variant="text" label="Laddar svar" />
+      </NextIntlClientProvider>
+    );
+    await expectNoAxeViolations(container);
+  });
+
+  it("EntityAvatar decorative, labelled, with an image and with an icon", async () => {
+    const { container } = render(
+      <>
+        <EntityAvatar id="space-1" name="Min yta" />
+        <EntityAvatar name="Min yta" label="Min yta" tone="teal" size="lg" />
+        <EntityAvatar name="Assistent" label="Assistent" src="/icon.png" size="xl" />
+        <EntityAvatar name="Assistent" icon={<Bot />} size="sm" />
+      </>
+    );
+    await expectNoAxeViolations(container);
+  });
+
+  it("StatusLabel in every tone, pulsing and static", async () => {
+    const { container } = render(
+      <>
+        <StatusLabel status="success" label="Publicerad" />
+        <StatusLabel status="warning" label="Utkast" />
+        <StatusLabel status="error" label="Fel" />
+        <StatusLabel status="accent" label="Synkar" isPulsing />
+        <StatusLabel status="neutral" label="Inaktiv" />
+      </>
+    );
+    await expectNoAxeViolations(container);
   });
 });

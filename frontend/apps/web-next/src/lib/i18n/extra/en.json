@@ -314,5 +314,6 @@
   "duplicate_files_dialog_description": "These files already exist in the collection. Uploading will replace them with the new versions.",
   "replace_files": "Replace files",
   "upload_dropzone_prompt": "Drag and drop files or folders here",
-  "upload_skipped_unsupported_files": "Skipped because the file type is not supported: {fileList}"
+  "upload_skipped_unsupported_files": "Skipped because the file type is not supported: {fileList}",
+  "a11y_statement_link": "Accessibility statement"
 }

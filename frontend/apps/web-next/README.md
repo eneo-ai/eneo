@@ -44,6 +44,11 @@ SHOW_WEB_SEARCH=false
 SHOW_HELP_CENTER=false
 # HELP_CENTER_URL=
 # REQUEST_INTEGRATION_FORM_URL=
+
+# Your organisation's accessibility statement (tillgänglighetsredogörelse,
+# required by DOS-lagen). Linked from the login page and the profile menu when
+# set; see ACCESSIBILITY.md.
+# ACCESSIBILITY_STATEMENT_URL=
 ```
 
 Validation lives in `src/lib/env.ts` (zod, parsed at import time). There is no
@@ -69,6 +74,11 @@ to static CSS with `bun run theme:build`). **Read [AGENTS.md](AGENTS.md) before
 building UI**: it covers the offline component docs (`bunx astryx component
 <Name>`), tokens and the `ax-*` Tailwind bridge, the shared composites, and the
 CSP and i18n rules.
+
+web-next must meet **WCAG 2.2 AA**. [ACCESSIBILITY.md](ACCESSIBILITY.md) is the
+standard: rules per topic, the automated checks (jsx-a11y and `eneo/*` lint
+rules, axe component tests, the token contrast test, Playwright page scans) and
+the manual test protocol for every PR that changes UI.
 
 The shadcn/ui components in `src/components/ui` are legacy: don't add new ones,
 and replace them as screens migrate. Their semantic variables (`--background`,

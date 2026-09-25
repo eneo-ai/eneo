@@ -65,6 +65,7 @@
   },
   "devDependencies": {
     "@astryxdesign/cli": "0.6.3",
+    "@axe-core/playwright": "4.13.0",
     "@eneo/eslint-plugin": "workspace:*",
     "@playwright/test": "1.58.2",
     "@tailwindcss/postcss": "^4",
@@ -75,8 +76,10 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4.5.0",
+    "axe-core": "4.13.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "eslint-plugin-jsx-a11y": "6.10.2",
     "jsdom": "^26.1.0",
     "openapi-typescript": "^7.13.0",
     "postcss": "8.5.16",
