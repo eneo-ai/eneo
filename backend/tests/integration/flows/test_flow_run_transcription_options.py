@@ -27,6 +27,7 @@ from eneo.flows.application.flow_transcript_regeneration_service import (
     render_original_segments,
 )
 from eneo.flows.domain.flow import FlowRunStatus
+from eneo.flows.domain.speaker_labels import build_speaker_inventory
 from eneo.flows.domain.transcript_corrections import segments_content_hash
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -251,6 +252,68 @@ async def test_a_speaker_choice_the_contract_does_not_offer_creates_no_run(
     assert dispatched == []
 
 
+@pytest.mark.parametrize(
+    ("first_service", "second_service", "body", "speaker_mapping"),
+    [
+        (None, "diarize", {}, False),
+        (None, "diarize", {"input_payload_json": {"antal_talare": 4}}, True),
+        ("diarize", None, {}, False),
+        ("diarize", None, {"max_speakers": 3}, False),
+    ],
+)
+async def test_replay_keeps_request_identity_across_service_changes(
+    client,
+    flow_process_auth_headers,
+    db_container,
+    dispatched,
+    first_service,
+    second_service,
+    body,
+    speaker_mapping,
+):
+    headers = {**flow_process_auth_headers, "Idempotency-Key": "same-recording"}
+    flow = await _published_flow(
+        client,
+        headers,
+        db_container,
+        input_required=False,
+        speaker_mapping=speaker_mapping,
+    )
+    # Replay identity is the submitted request: a service that appears or goes
+    # away between the two calls must not turn the same request into a conflict.
+    with _deployment(service_mode=first_service):
+        original = await _create_run(client, headers, flow.flow_id, body)
+    assert original.status_code == 201, original.text
+    with _deployment(service_mode=second_service):
+        replayed = await _create_run(client, headers, flow.flow_id, body)
+    assert replayed.status_code == 201, replayed.text
+    assert replayed.json()["id"] == original.json()["id"]
+    assert len(dispatched) == 1
+
+
+async def test_required_labels_are_persisted_when_the_wizard_default_is_off(
+    client,
+    flow_process_auth_headers,
+    db_container,
+    dispatched,
+):
+    headers = dict(flow_process_auth_headers)
+    flow = await _published_flow(
+        client,
+        headers,
+        db_container,
+        input_required=False,
+        speaker_mapping=True,
+        wizard={"transcription_diarization": False},
+    )
+    with _deployment(service_mode="diarize"):
+        created = await _create_run(client, headers, flow.flow_id, {"max_speakers": 3})
+    assert created.status_code == 201, created.text
+    stored = (await _stored_inputs(db_container, flow.flow_id))[created.json()["id"]]
+    assert stored["speaker_labels"] is True
+    assert stored["max_speakers"] == 3
+
+
 async def test_a_flow_that_asks_for_the_count_advertises_its_form_field(
     client, flow_process_auth_headers, db_container
 ):
@@ -375,23 +438,40 @@ async def test_a_speaker_count_the_run_cannot_use_creates_no_run(
 
 
 @pytest.mark.parametrize(
-    "choice", [{"speaker_labels": False}, {"max_speakers": 3}, {"max_speakers": None}]
+    ("choice", "form_count", "replay_service_mode"),
+    [
+        ({"speaker_labels": False}, None, None),
+        ({"max_speakers": 3}, None, None),
+        ({"max_speakers": None}, None, None),
+        ({"max_speakers": 3}, 0, "diarize"),
+        ({"max_speakers": None}, 0, "diarize"),
+    ],
 )
-async def test_retry_and_regeneration_keep_an_accepted_choice_after_the_service_is_gone(
+async def test_retry_and_regeneration_keep_the_source_speaker_decision(
     client,
     flow_process_auth_headers,
     db_container,
     admin_user,
     dispatched: list[UUID],
     choice: dict[str, object],
+    form_count: int | None,
+    replay_service_mode: str | None,
 ):
     headers = dict(flow_process_auth_headers)
     flow = await _published_flow(
-        client, headers, db_container, input_required=False, summarize=True
+        client,
+        headers,
+        db_container,
+        input_required=False,
+        summarize=True,
+        speaker_mapping=form_count is not None,
     )
+    body = dict(choice)
+    if form_count is not None:
+        body["input_payload_json"] = {"antal_talare": form_count}
     with _deployment(service_mode="diarize"):
         created = [
-            await _create_run(client, headers, flow.flow_id, choice) for _ in range(2)
+            await _create_run(client, headers, flow.flow_id, body) for _ in range(2)
         ]
     failed_id, completed_id = (UUID(run.json()["id"]) for run in created)
     async with db_container() as container:
@@ -419,6 +499,37 @@ async def test_retry_and_regeneration_keep_an_accepted_choice_after_the_service_
             .where(FlowRuns.id == completed_id)
             .values(status="completed", finished_at=sa.func.now())
         )
+        if form_count is not None:
+            source_text = render_original_segments(SEGMENTS)
+            transcript_attempt = await session.scalar(
+                sa.select(FlowStepResults.current_attempt_no).where(
+                    FlowStepResults.flow_run_id == completed_id,
+                    FlowStepResults.step_order == 1,
+                )
+            )
+            await session.execute(
+                sa.update(FlowStepResults)
+                .where(
+                    FlowStepResults.flow_run_id == completed_id,
+                    FlowStepResults.step_order == 2,
+                )
+                .values(
+                    status="completed",
+                    output_payload_json={
+                        "text": source_text,
+                        "structured": {"speakers": []},
+                        "speaker_mapping": {
+                            "source_step_id": flow.step_id,
+                            "source_step_order": 1,
+                            "source_attempt_no": transcript_attempt,
+                            "participants_field": "deltagare",
+                            "participants": [],
+                            "infer_names": False,
+                            "inventory": build_speaker_inventory(source_text),
+                        },
+                    },
+                )
+            )
         await container.flow_run_terminalizer().terminalize_run(
             run_id=failed_id,
             tenant_id=admin_user.tenant_id,
@@ -433,20 +544,21 @@ async def test_retry_and_regeneration_keep_an_accepted_choice_after_the_service_
             sa.select(FlowRuns.revision).where(FlowRuns.id == completed_id)
         )
 
-    retried = await client.post(
-        f"/api/v1/flows/{flow.flow_id}/runs/{failed_id}/retry/",
-        headers={**headers, "Idempotency-Key": "retry-without-a-service"},
-    )
-    regenerated = await client.post(
-        f"/api/v1/flows/{flow.flow_id}/runs/{completed_id}/steps/{flow.step_id}"
-        "/transcript-regenerations/",
-        headers={**headers, "Idempotency-Key": "regenerate-without-a-service"},
-        json={
-            "expected_run_revision": completed_revision,
-            "expected_correction_revision": None,
-            "segments_hash": segments_content_hash(SEGMENTS),
-        },
-    )
+    with _deployment(service_mode=replay_service_mode):
+        retried = await client.post(
+            f"/api/v1/flows/{flow.flow_id}/runs/{failed_id}/retry/",
+            headers={**headers, "Idempotency-Key": "retry-speaker-decision"},
+        )
+        regenerated = await client.post(
+            f"/api/v1/flows/{flow.flow_id}/runs/{completed_id}/steps/{flow.step_id}"
+            "/transcript-regenerations/",
+            headers={**headers, "Idempotency-Key": "regenerate-speaker-decision"},
+            json={
+                "expected_run_revision": completed_revision,
+                "expected_correction_revision": None,
+                "segments_hash": segments_content_hash(SEGMENTS),
+            },
+        )
 
     assert (retried.status_code, regenerated.status_code) == (201, 201), (
         retried.text,

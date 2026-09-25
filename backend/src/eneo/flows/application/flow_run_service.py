@@ -70,6 +70,7 @@ from eneo.flows.flow_run_input_envelope import (
     SPEAKER_LABELS_KEY,
     TRANSCRIPT_REGENERATION_KEY,
     build_initial_run_input_envelope,
+    read_semantic_flow_input_payload,
     read_speaker_labels_choice,
 )
 from eneo.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
@@ -433,6 +434,45 @@ class FlowRunService:
         )
         if existing_run is not None:
             return CreateRunResult(run=existing_run, created=False)
+        if prefix_seed is None:
+            # Replay identity describes the submitted request. Only a new run
+            # settles defaults against current service availability; children
+            # already carry their source run's accepted decisions.
+            service_configured = get_settings().flow_transcription_service_configured
+            steps = published.definition.runtime_steps()
+            wizard = published.definition.metadata().wizard
+            option = speaker_labels_option(
+                steps,
+                wizard_metadata=wizard,
+                service_configured=service_configured,
+            )
+            if speaker_labels is not None and (option is None or not option.selectable):
+                raise FlowValidationException(
+                    "Speaker labels cannot be chosen for this flow. Read "
+                    "transcription.speaker_labels in the run contract.",
+                    code=FlowApiErrorCode.RUN_SPEAKER_LABELS_NOT_SELECTABLE,
+                )
+            effective_speaker_labels = (
+                True if option is not None and option.required else speaker_labels
+            )
+            form_input = read_semantic_flow_input_payload(prepared.input_payload_json)
+            payload = build_initial_run_input_envelope(
+                normalized_inline_payload=form_input,
+                flow_version=published.flow_version,
+                speaker_labels=effective_speaker_labels,
+                max_speakers=settle_max_speakers(
+                    max_speakers,
+                    steps=steps,
+                    wizard_metadata=wizard,
+                    speaker_labels=effective_speaker_labels,
+                    service_configured=service_configured,
+                    form_input=form_input,
+                ),
+            )
+            ensure_inline_payload_size_allowed(
+                flow_id=flow_id, input_payload_json=payload
+            )
+            prepared = replace(prepared, input_payload_json=payload)
         created_run = await self._create_persisted_run(
             flow=published.flow,
             flow_version=published.flow_version,
@@ -508,26 +548,6 @@ class FlowRunService:
             payload=input_payload_json,
         )
         reject_reserved_input_payload_keys(normalized_inline_payload)
-        if speaker_labels is not None:
-            option = speaker_labels_option(
-                definition.runtime_steps(),
-                wizard_metadata=definition.metadata().wizard,
-                service_configured=get_settings().flow_transcription_service_configured,
-            )
-            if option is None or not option.selectable:
-                raise FlowValidationException(
-                    "Speaker labels cannot be chosen for this flow. Read "
-                    "transcription.speaker_labels in the run contract.",
-                    code=FlowApiErrorCode.RUN_SPEAKER_LABELS_NOT_SELECTABLE,
-                )
-        settled_max_speakers = settle_max_speakers(
-            max_speakers,
-            steps=definition.runtime_steps(),
-            wizard_metadata=definition.metadata().wizard,
-            speaker_labels=speaker_labels,
-            service_configured=get_settings().flow_transcription_service_configured,
-            form_input=normalized_inline_payload,
-        )
         normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
         preseed_steps: list[PreseedStep] = [
             {
@@ -577,7 +597,7 @@ class FlowRunService:
             normalized_inline_payload=normalized_inline_payload,
             flow_version=flow_version,
             speaker_labels=speaker_labels,
-            max_speakers=settled_max_speakers,
+            max_speakers=max_speakers,
         )
         request_fingerprint = self._build_idempotency_fingerprint(
             tenant_id=self.user.tenant_id,
