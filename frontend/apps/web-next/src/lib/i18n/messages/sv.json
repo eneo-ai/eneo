@@ -4653,5 +4653,6 @@
   "eneo_error_9049": "Publicerade Skills sparas i granskningsloggen och kan aldrig raderas. Avpublicera Skillen för att stoppa nya kopplingar; befintliga kopplingar fortsätter fungera tills de tas bort.",
   "eneo_error_9050": "En vald skill används av en appkörning som köar eller pågår. Vänta tills körningen är klar och försök sedan ta bort skillen igen.",
   "eneo_error_9051": "En vald skill är fortfarande kopplad. Ta bort kopplingarna till assistenter, appar och Personlig chatt innan du tar bort den.",
-  "eneo_error_9052": "Blockeringen ändrades efter att du granskade den. Granska blockeringens läge nedan innan du försöker igen."
+  "eneo_error_9052": "Blockeringen ändrades efter att du granskade den. Granska blockeringens läge nedan innan du försöker igen.",
+  "governance_manage_skills_action": "Öppna skillkatalogen"
 }

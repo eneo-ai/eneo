@@ -31,10 +31,12 @@ type Adoption = Schema<"SkillAdoptionProjectionPagePublic">;
 
 export function OrganizationSkillPublication({
   skill,
-  unsaved
+  unsaved,
+  onRolloutRunningChange
 }: {
   skill: Skill;
   unsaved: boolean;
+  onRolloutRunningChange?: (running: boolean) => void;
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -75,6 +77,10 @@ export function OrganizationSkillPublication({
     },
     []
   );
+
+  useEffect(() => {
+    onRolloutRunningChange?.(rollout?.status === "running");
+  }, [rollout?.status, onRolloutRunningChange]);
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ORGANIZATION_SKILLS_KEY });

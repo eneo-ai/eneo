@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { CircleAlert, RotateCcw } from "lucide-react";
+import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -62,6 +63,24 @@ export function AdminSkillsPage() {
       ) : (
         <PolicyEditor initialPolicy={policy.data} initialProjections={projections.data ?? null} />
       )}
+      <SettingsGroup
+        id="skill-catalogue"
+        title={t("admin_skills_catalogue_title")}
+        description={t("admin_skills_catalogue_description")}
+        headerEnd={<Badge variant="outline">{t("admin_skills_catalogue_summary")}</Badge>}
+      >
+        <p className="text-muted-foreground text-sm">{t("admin_skills_catalogue_bindings_note")}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild>
+            <Link href="/spaces/organization/skills">{t("governance_manage_skills_action")}</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/admin/personal-assistant">
+              {t("admin_skills_open_personal_assistant")}
+            </Link>
+          </Button>
+        </div>
+      </SettingsGroup>
     </div>
   );
 }

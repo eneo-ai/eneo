@@ -16,6 +16,7 @@ import { SkillForm } from "./skill-form";
 import { SkillRevisionHistory } from "./skill-revision-history";
 import { OrganizationSkillExecution } from "./organization-skill-execution";
 import { OrganizationSkillPublication } from "./organization-skill-publication";
+import { OrganizationSkillAdoption } from "./organization-skill-adoption";
 
 const LIST_PATH = "/spaces/organization/skills";
 
@@ -24,6 +25,7 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
   const locale = useLocale();
   const queryClient = useQueryClient();
   const [dirty, setDirty] = useState(false);
+  const [rolloutRunning, setRolloutRunning] = useState(false);
   const [removalOpen, setRemovalOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const skill = useQuery({
@@ -68,7 +70,11 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 pb-16">
       <PageHeader title={value.display_name}>
         {!value.removed_at && (
-          <Button variant="destructive" disabled={dirty} onClick={() => setRemovalOpen(true)}>
+          <Button
+            variant="destructive"
+            disabled={dirty || rolloutRunning}
+            onClick={() => setRemovalOpen(true)}
+          >
             {t("organization_skills_remove_action")}
           </Button>
         )}
@@ -147,8 +153,17 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
           />
         </section>
       )}
-      {!value.removed_at && <OrganizationSkillPublication skill={value} unsaved={dirty} />}
+      {!value.removed_at && (
+        <OrganizationSkillPublication
+          skill={value}
+          unsaved={dirty}
+          onRolloutRunningChange={setRolloutRunning}
+        />
+      )}
       {value.first_published_at && <OrganizationSkillExecution skillId={skillId} />}
+      {!value.removed_at && (
+        <OrganizationSkillAdoption skill={value} rolloutRunning={rolloutRunning} />
+      )}
       <SkillRevisionHistory key={value.current_revision_id} skill={value} unsaved={dirty} />
       {removalOpen && (
         <SkillRemovalDialog
