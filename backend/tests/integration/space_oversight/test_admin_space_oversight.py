@@ -1314,6 +1314,97 @@ async def test_join_marker_is_visible_to_members_and_reason_only_to_space_admins
     }
 
 
+async def test_members_still_see_a_join_after_the_admin_has_left(
+    client, admin, overseer, make_person
+):
+    viewer = await make_person([], label="viewer")
+    space_id = await create_space(client, admin.token)
+    await add_member(space_id, viewer.id, "viewer")
+
+    assert (await _join(client, overseer, space_id, "editor")).status_code == 200
+    resp = await client.post(
+        f"/api/v1/admin/spaces/{space_id}/leave/", headers=overseer.headers
+    )
+    assert resp.status_code == 200, resp.text
+
+    for reader, reason in ((viewer, None), (admin, REASON)):
+        resp = await client.get(f"/api/v1/spaces/{space_id}/", headers=reader.headers)
+        assert resp.status_code == 200, resp.text
+        (visit,) = resp.json()["oversight_visits"]
+        assert visit["person"] == {"id": str(overseer.id), "name": overseer.username}
+        assert visit["role"] == "editor"
+        assert visit["left_at"] is not None
+        assert visit["joined_at"] <= visit["left_at"]
+        assert visit["reason"] == reason
+
+
+async def test_a_visit_ends_however_the_membership_goes(
+    client, admin, overseer, make_person
+):
+    colleague = await make_person([Permission.ADMIN], label="second-overseer")
+    space_id = await create_space(client, admin.token)
+
+    # Removed by another tenant admin, then by the space's own admin.
+    assert (await _join(client, overseer, space_id)).status_code == 200
+    resp = await client.delete(
+        f"/api/v1/admin/spaces/{space_id}/members/{overseer.id}/",
+        headers=colleague.headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert (await _join(client, overseer, space_id, "admin")).status_code == 200
+    resp = await client.delete(
+        f"/api/v1/spaces/{space_id}/members/{overseer.id}/", headers=admin.headers
+    )
+    assert resp.status_code == 204, resp.text
+
+    rows = await fetch(
+        "SELECT role, reason, joined_at, left_at FROM space_oversight_visits"
+        " WHERE space_id = :s AND user_id = :u ORDER BY joined_at",
+        s=space_id,
+        u=overseer.id,
+    )
+    assert [(row[0], row[1]) for row in rows] == [
+        ("viewer", REASON),
+        ("admin", REASON),
+    ]
+    assert all(row[3] is not None and row[3] >= row[2] for row in rows)
+
+
+async def test_members_see_visits_that_ended_in_the_last_ninety_days(
+    client, admin, overseer
+):
+    _, tenant_id = await admin_row()
+    space_id = await create_space(client, admin.token)
+    deleted = await insert_user(tenant_id, deleted=True)
+    for user_id, role, joined, left in (
+        (overseer.id, "viewer", days_ago(130), days_ago(100)),
+        (overseer.id, "editor", days_ago(100), days_ago(80)),
+        (deleted, "admin", days_ago(10), None),
+    ):
+        await execute(
+            "INSERT INTO space_oversight_visits (tenant_id, space_id, user_id,"
+            " role, reason, joined_at, left_at)"
+            " VALUES (:t, :s, :u, :r, :reason, :j, :l)",
+            t=tenant_id,
+            s=space_id,
+            u=user_id,
+            r=role,
+            reason=REASON,
+            j=joined,
+            l=left,
+        )
+
+    resp = await client.get(f"/api/v1/spaces/{space_id}/", headers=admin.headers)
+    assert resp.status_code == 200, resp.text
+    assert [
+        (visit["role"], visit["person"], visit["left_at"] is None)
+        for visit in resp.json()["oversight_visits"]
+    ] == [
+        ("admin", None, True),
+        ("editor", {"id": str(overseer.id), "name": overseer.username}, False),
+    ]
+
+
 async def test_normal_space_update_keeps_the_marker(client, admin, overseer):
     space_id = await create_space(client, admin.token)
     assert (await _join(client, overseer, space_id)).status_code == 200

@@ -21,6 +21,9 @@ USAGE_WINDOW_DAYS = 30
 # App runs have no index on app_id, so the last-activity probe only looks this
 # far back in the tenant-wide app run index.
 APP_RUN_ACTIVITY_WINDOW_DAYS = 90
+# How long a space's members see that an administrator joined through
+# oversight, counted from when the visit ended.
+OVERSIGHT_VISIT_WINDOW_DAYS = 90
 
 # Users who can act in the product. Deleted users are filtered separately
 # (deleted_at), so this is the state half of "live and able to manage".

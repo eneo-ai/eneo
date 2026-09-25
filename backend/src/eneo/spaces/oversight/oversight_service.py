@@ -80,6 +80,7 @@ from eneo.spaces.oversight.oversight_repo import (
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
     from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
+    from eneo.spaces.oversight.visit_repo import OversightVisitRepo
     from eneo.user_groups.user_groups_repo import UserGroupsRepository
     from eneo.users.user import UserInDB
     from eneo.users.user_repo import UsersRepository
@@ -181,6 +182,7 @@ class SpaceOversightService:
         user_groups_repo: "UserGroupsRepository",
         audit_service: "AuditService",
         api_key_scope_revoker: "ApiKeyScopeRevoker",
+        visit_repo: "OversightVisitRepo",
     ) -> None:
         self.user = user
         self.repo = repo
@@ -188,6 +190,7 @@ class SpaceOversightService:
         self.user_groups_repo = user_groups_repo
         self.audit_service = audit_service
         self.api_key_scope_revoker = api_key_scope_revoker
+        self.visit_repo = visit_repo
 
     # --- helpers ----------------------------------------------------------
 
@@ -529,6 +532,7 @@ class SpaceOversightService:
         self._keep_an_admin(before, before.with_direct(user_id, None))
         if not await self.repo.delete_member(space_id, user_id):
             raise NotFoundException("Member not found")
+        await self.visit_repo.close(space_id, user_id, left_at=self._now())
         revoked = await self._revoke_keys(
             space_id, user_id, "Removed from space by an organisation administrator"
         )
@@ -686,14 +690,25 @@ class SpaceOversightService:
                 "Choose a role above the one you have through a group."
             )
         reason = normalize_free_text(reason)
+        joined_at = self._now()
         if not await self.repo.insert_member(
             space_id,
             self.user.id,
             role,
-            oversight_joined_at=self._now(),
+            oversight_joined_at=joined_at,
             oversight_join_reason=reason,
         ):
             raise SpaceAlreadyMemberError()
+        # The marker goes with the member row on leave; the visit stays for
+        # the space's members to see.
+        await self.visit_repo.open(
+            tenant_id=self._tenant_id,
+            space_id=space_id,
+            user_id=self.user.id,
+            role=role,
+            reason=reason,
+            joined_at=joined_at,
+        )
         await self._audit(
             action=ActionType.SPACE_OVERSIGHT_JOINED,
             space=space,
@@ -722,6 +737,7 @@ class SpaceOversightService:
         # Never SpaceService.remove_member: it refuses to remove yourself.
         if not await self.repo.delete_member(space_id, self.user.id):
             raise BadRequestException("You have no direct membership in this space.")
+        await self.visit_repo.close(space_id, self.user.id, left_at=self._now())
         revoked = await self._revoke_keys(space_id, self.user.id, "Left the space")
         remaining = group_role(before, self._group_ids())
         await self._audit(

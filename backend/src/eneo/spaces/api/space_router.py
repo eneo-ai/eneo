@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
@@ -55,9 +56,11 @@ from eneo.spaces.api.space_models import (
     UpdateSpaceMemberRequest,
     UpdateSpaceRequest,
 )
+from eneo.spaces.oversight.domain import OVERSIGHT_VISIT_WINDOW_DAYS
 from eneo.websites.presentation.website_models import WebsiteCreate, WebsitePublic
 
 if TYPE_CHECKING:
+    from eneo.spaces.oversight.visit_repo import OversightVisitRow
     from eneo.spaces.space import Space
 
 logger = logging.getLogger(__name__)
@@ -88,8 +91,18 @@ async def _space_response(container: Container, space: "Space") -> SpacePublic:
         effective_config = await effective_config_service.resolve_for(
             space.default_assistant, space_is_personal=space.is_personal()
         )
+    visits: list["OversightVisitRow"] = []
+    if space.is_shared():
+        assert space.id is not None
+        visits = await container.oversight_visit_repo().recent(
+            space.id,
+            since=datetime.now(timezone.utc)
+            - timedelta(days=OVERSIGHT_VISIT_WINDOW_DAYS),
+        )
     return assembler.from_space_to_model(
-        space, default_assistant_effective_config=effective_config
+        space,
+        default_assistant_effective_config=effective_config,
+        oversight_visits=visits,
     )
 
 

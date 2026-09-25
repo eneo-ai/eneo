@@ -41,6 +41,7 @@ def service(actor: MagicMock):
         security_classification_service=AsyncMock(),
         icon_repo=AsyncMock(),
         user_groups_repo=AsyncMock(),
+        oversight_visit_repo=AsyncMock(),
     )
 
     return service
@@ -247,3 +248,18 @@ async def test_reading_a_space_takes_no_lock(service: SpaceService, actor: Magic
     await service.get_space(space_id)
 
     service.repo.one.assert_awaited_once_with(space_id, lock=False)
+
+
+async def test_removing_a_member_ends_their_oversight_visit(
+    service: SpaceService, actor: MagicMock
+):
+    actor.can_edit_space.return_value = True
+    service.repo.one.return_value = MagicMock(assistants=[], apps=[])
+    space_id, user_id = uuid4(), uuid4()
+
+    await service.remove_member(space_id, user_id)
+
+    service.oversight_visit_repo.close.assert_awaited_once()
+    call = service.oversight_visit_repo.close.await_args
+    assert call.args == (space_id, user_id)
+    assert call.kwargs["left_at"].tzinfo is not None

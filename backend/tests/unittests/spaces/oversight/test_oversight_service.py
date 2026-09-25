@@ -291,6 +291,7 @@ class _Harness:
         )
         self.audit_service = SimpleNamespace(log_required=AsyncMock())
         self.revoker = SimpleNamespace(revoke_member_keys=AsyncMock(return_value=2))
+        self.visits = SimpleNamespace(open=AsyncMock(), close=AsyncMock())
         self.user_repo = SimpleNamespace(
             get_user_by_id_and_tenant_id=AsyncMock(side_effect=self._user)
         )
@@ -305,6 +306,7 @@ class _Harness:
             user_groups_repo=self.groups_repo,
             audit_service=self.audit_service,
             api_key_scope_revoker=self.revoker,
+            visit_repo=self.visits,
         )
 
     @property
@@ -621,6 +623,45 @@ async def test_join_records_the_marker_and_audits_role_and_reason():
         "space_id": str(h.space_id),
         "space_name": "Socialtjänsten",
     }
+
+
+async def test_a_join_opens_a_visit_members_keep_seeing():
+    h = _Harness()
+    h.with_admin()
+    await h.service.join(h.space_id, EDITOR, "  Ärende KS 2026/123\n– kontroll  ")
+
+    row = h.repo.users[h.actor_id]
+    h.visits.open.assert_awaited_once_with(
+        tenant_id=h.user.tenant_id,
+        space_id=h.space_id,
+        user_id=h.actor_id,
+        role=EDITOR,
+        reason="Ärende KS 2026/123 – kontroll",
+        joined_at=row.oversight_joined_at,
+    )
+
+    h.visits.open.reset_mock()
+    with pytest.raises(SpaceAlreadyMemberError):
+        await h.service.join(h.space_id, EDITOR, REASON)
+    h.visits.open.assert_not_awaited()
+
+
+async def test_leaving_or_being_removed_ends_the_visit():
+    h = _Harness()
+    h.with_admin()
+    h.repo.member(h.actor_id, EDITOR, joined_at=NOW, reason=REASON)
+    colleague = h.repo.person()
+    h.repo.member(colleague, VIEWER, joined_at=NOW, reason=REASON)
+
+    await h.service.leave(h.space_id)
+    await h.service.remove_member(h.space_id, colleague)
+
+    assert [
+        (call.args, set(call.kwargs)) for call in h.visits.close.await_args_list
+    ] == [
+        ((h.space_id, h.actor_id), {"left_at"}),
+        ((h.space_id, colleague), {"left_at"}),
+    ]
 
 
 async def test_leave_needs_a_direct_row_revokes_own_keys_and_audits():

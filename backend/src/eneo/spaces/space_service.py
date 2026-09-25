@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Union, cast
 from uuid import UUID
 
@@ -67,6 +68,7 @@ if TYPE_CHECKING:
         SecurityClassification,
     )
     from eneo.services.service import Service
+    from eneo.spaces.oversight.visit_repo import OversightVisitRepo
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
@@ -109,6 +111,7 @@ class SpaceService:
         actor_manager: "ActorManager",
         security_classification_service: "SecurityClassificationService",
         icon_repo: IconRepository,
+        oversight_visit_repo: "OversightVisitRepo",
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
         super().__init__()
@@ -125,6 +128,7 @@ class SpaceService:
         self.actor_manager = actor_manager
         self.security_classification_service = security_classification_service
         self.icon_repo = icon_repo
+        self.oversight_visit_repo = oversight_visit_repo
         self.api_key_scope_revoker = api_key_scope_revoker
         self._logger = get_logger(__name__)
 
@@ -788,6 +792,10 @@ class SpaceService:
         space.remove_member(user_id)
 
         await self.repo.update(space)
+        # A tenant admin who joined through oversight: the visit ends here.
+        await self.oversight_visit_repo.close(
+            id, user_id, left_at=datetime.now(timezone.utc)
+        )
 
         # Revoke all API keys the removed user owns for this space and its resources
         if self.api_key_scope_revoker is not None:

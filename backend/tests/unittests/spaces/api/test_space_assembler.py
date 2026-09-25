@@ -16,6 +16,7 @@ from eneo.spaces.api.space_models import (
     SpaceMemberOversightJoin,
     SpaceRoleValue,
 )
+from eneo.spaces.oversight.visit_repo import OversightVisitRow
 from eneo.spaces.space import Space
 from eneo.spaces.space_applications_projection import (
     AssistantApplicationsProjection,
@@ -188,6 +189,49 @@ def test_only_readers_of_the_member_list_see_why_an_admin_joined(
     assert member.oversight_join.reason == (join.reason if can_read_members else None)
     # The domain member is written back on the next save and keeps its reason.
     assert joined.oversight_join == join
+
+
+@pytest.mark.parametrize("can_read_members", [True, False])
+def test_members_see_oversight_visits_and_readers_of_the_member_list_why(
+    space: Space, space_assembler: SpaceAssembler, can_read_members: bool
+):
+    admin_id = uuid4()
+    visits = [
+        OversightVisitRow(
+            user_id=admin_id,
+            name="tenant-admin",
+            role=SpaceRoleValue.VIEWER,
+            reason="Ärende KS 2026/123 – kontroll av underlag",
+            joined_at=datetime(2026, 9, 24, 22, 0, tzinfo=UTC),
+            left_at=datetime(2026, 9, 24, 22, 8, tzinfo=UTC),
+        ),
+        OversightVisitRow(
+            user_id=None,
+            name=None,
+            role=SpaceRoleValue.EDITOR,
+            reason="Granskning efter anmälan till IVO",
+            joined_at=datetime(2026, 8, 1, tzinfo=UTC),
+            left_at=None,
+        ),
+    ]
+    actor = space_assembler.actor_manager.get_space_actor_from_space.return_value
+    actor.can_read_members.return_value = can_read_members
+
+    left, deleted = space_assembler.from_space_to_model(
+        space, oversight_visits=visits
+    ).oversight_visits
+
+    assert left.person is not None
+    assert (left.person.id, left.person.name) == (admin_id, "tenant-admin")
+    assert (left.role, left.joined_at, left.left_at) == (
+        SpaceRoleValue.VIEWER,
+        visits[0].joined_at,
+        visits[0].left_at,
+    )
+    assert deleted.person is None
+    assert (left.reason, deleted.reason) == (
+        (visits[0].reason, visits[1].reason) if can_read_members else (None, None)
+    )
 
 
 def test_only_org_enabled_completion_models_are_returned(

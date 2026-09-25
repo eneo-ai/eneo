@@ -332,6 +332,7 @@ from eneo.spaces.api.space_assembler import SpaceAssembler
 from eneo.spaces.domain.resource_mover_service import ResourceMoverService
 from eneo.spaces.oversight.oversight_repo import SpaceOversightRepo
 from eneo.spaces.oversight.oversight_service import SpaceOversightService
+from eneo.spaces.oversight.visit_repo import OversightVisitRepo
 from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_init_service import SpaceInitService
 from eneo.spaces.space_repo import SpaceRepository
@@ -688,6 +689,7 @@ class Container(containers.DeclarativeContainer):
     widget_template_repo = providers.Factory(WidgetTemplateRepoImpl, session=session)
     widget_overview_repo = providers.Factory(WidgetOverviewRepoImpl, session=session)
     space_oversight_repo = providers.Factory(SpaceOversightRepo, session=session)
+    oversight_visit_repo = providers.Factory(OversightVisitRepo, session=session)
     widget_assembler = providers.Factory(WidgetAssembler)
     widget_usage_repo = providers.Factory(WidgetUsageRepoImpl, session=session)
     widget_visitor_token_service = providers.Factory(VisitorTokenService)
@@ -1065,6 +1067,7 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         security_classification_service=security_classification_service,
         icon_repo=icon_repo,
+        oversight_visit_repo=oversight_visit_repo,
         api_key_scope_revoker=api_key_scope_revoker,
     )
     space_oversight_service = providers.Factory(
@@ -1075,6 +1078,7 @@ class Container(containers.DeclarativeContainer):
         user_groups_repo=user_groups_repo,
         audit_service=audit_service,
         api_key_scope_revoker=api_key_scope_revoker,
+        visit_repo=oversight_visit_repo,
     )
     skill_service = providers.Factory(
         SkillService,

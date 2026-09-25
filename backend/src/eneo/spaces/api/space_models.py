@@ -95,6 +95,29 @@ class SpaceGroupMember(InDB):
     user_count: int = 0
 
 
+class SpaceOversightVisitor(BaseModel):
+    id: UUID
+    name: str = Field(description="The username, or the email when unset.")
+
+
+class SpaceOversightVisit(BaseModel):
+    """A tenant administrator's join through oversight, kept for members to
+    see after the administrator has left."""
+
+    person: Optional[SpaceOversightVisitor] = Field(
+        default=None, description="None once the user is deleted."
+    )
+    role: SpaceRoleValue = Field(description="The role they joined with.")
+    joined_at: datetime
+    left_at: Optional[datetime] = Field(
+        default=None, description="None while they are still a member."
+    )
+    reason: Optional[str] = Field(
+        default=None,
+        description="None when the reader may not read the space's members.",
+    )
+
+
 # Apps
 
 
@@ -229,6 +252,13 @@ class SpacePublic(SpaceDashboard):
     knowledge: Knowledge
     members: PaginatedPermissions[SpaceMember]
     group_members: PaginatedPermissions[SpaceGroupMember]
+    oversight_visits: list[SpaceOversightVisit] = Field(
+        default_factory=list[SpaceOversightVisit],
+        description=(
+            "Joins through oversight by tenant administrators that are still"
+            " open or ended within the last 90 days, newest first."
+        ),
+    )
     skill_permissions: list[ResourcePermission]
 
     default_assistant: Optional[DefaultAssistant] = None
