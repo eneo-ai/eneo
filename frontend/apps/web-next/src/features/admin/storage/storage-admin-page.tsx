@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Database, HardDrive, Info, RefreshCw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { ByteLimitField } from "./byte-limit-field";
+import { StorageContent } from "./storage-content";
 import {
   classifyPolicyRefresh,
   isDirtyPolicyDraft,
@@ -98,6 +99,7 @@ function StoragePolicyEditor({
   canEdit: boolean;
 }) {
   const t = useTranslations();
+  const queryClient = useQueryClient();
   const locale = useLocale();
   const [baseline, setBaseline] = useState(initialPolicy);
   const [draft, setDraft] = useState<PolicyUpdate>(() => policyDraft(initialPolicy));
@@ -166,6 +168,10 @@ function StoragePolicyEditor({
       setStale(false);
       setTargetUnavailable(false);
       setSaveOutcomeUnknown(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["storage-inventory"] }),
+        queryClient.invalidateQueries({ queryKey: ["storage-moves"] })
+      ]);
     } catch (error) {
       if (error instanceof EneoApiError && error.status === 403) setAuthorityRevoked(true);
       setLoadError(true);
@@ -244,6 +250,26 @@ function StoragePolicyEditor({
           <AlertTitle>{t("storage_settings_read_only_title")}</AlertTitle>
           <AlertDescription>{t("storage_settings_read_only_description")}</AlertDescription>
         </Alert>
+      )}
+
+      {canEdit && (
+        <StorageContent
+          policy={baseline}
+          dirtyPolicyDraft={dirty}
+          policyBusy={interactionUnavailable}
+          onAuthorityRevoked={() => setAuthorityRevoked(true)}
+          onPolicyPaused={(previousRevision, nextRevision, paused) => {
+            if (baseline.policy.revision === previousRevision) {
+              setBaseline((current) => ({
+                ...current,
+                policy: { ...current.policy, revision: nextRevision, moves_paused: paused }
+              }));
+            } else {
+              void reload(dirty);
+            }
+          }}
+          onRefreshPolicy={reload}
+        />
       )}
 
       {(stale || loadError || targetUnavailable || saveOutcomeUnknown) && (
