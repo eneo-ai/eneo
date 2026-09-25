@@ -234,7 +234,6 @@ class AdminSpaceAssistant(BaseModel):
         description="The assistant's own value; None follows the space.",
     )
     widgets: list[AdminSpaceWidgetRef] = Field(
-        default_factory=list[AdminSpaceWidgetRef],
         description=(
             "Every non-archived widget serving the assistant: active first,"
             " then paused, then drafts, each by name."
