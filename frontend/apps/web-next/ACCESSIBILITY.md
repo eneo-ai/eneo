@@ -221,11 +221,12 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 
 #### AI chat
 
-- The chat view mounts one polite live region (`aria-live="polite"`, empty) and
-  writes short messages into it: "Svaret är klart" when an answer finishes, the
-  error when generation fails, "Verktyget … väntar på godkännande" when a tool
-  needs approval. Never put `aria-live` on the message list or a streaming
-  message: screen readers would read every token.
+- The chat view announces short messages politely through Astryx `useAnnounce`
+  (one shared live region, no hand-rolled `aria-live` elements): "Svaret är
+  klart" when an answer finishes, the error when generation fails, "Verktyget …
+  väntar på godkännande" when a tool needs approval. Use `useAnnounce` for other
+  status messages in the app too. Never put `aria-live` on the message list or a
+  streaming message: screen readers would read every token.
 - The finished answer is readable in browse mode and identified as the
   assistant's message.
 - While generating, the send button becomes a stop button in the same place,

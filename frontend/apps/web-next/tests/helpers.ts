@@ -27,15 +27,14 @@ export async function expectOkUrl(page: Page, pattern: RegExp) {
 /** Creates a shared space through the UI and returns its base path (`/spaces/<id>`). */
 export async function createSpace(page: Page, name: string): Promise<string> {
   await page.goto("/spaces/list");
+  // Scope to the page and the dialog: the SideNav has its own "Skapa yta".
   await page
+    .getByRole("main")
     .getByRole("button", { name: /skapa yta|create space/i })
-    .first()
     .click();
-  await page.getByLabel(/namn|name/i).fill(name);
-  await page
-    .getByRole("button", { name: /skapa yta|create space/i })
-    .last()
-    .click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel(/namn|name/i).fill(name);
+  await dialog.getByRole("button", { name: /skapa yta|create space/i }).click();
   await page.waitForURL(/\/spaces\/[^/]+\/overview$/, { timeout: 15_000 });
   return new URL(page.url()).pathname.replace(/\/overview$/, "");
 }
