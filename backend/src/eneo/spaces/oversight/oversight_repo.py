@@ -86,7 +86,6 @@ from eneo.mcp_servers.domain.entities.mcp_server import CAPABILITY_PURPOSES
 from eneo.sessions.helper_filters import exclude_helper_run_sessions
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.spaces.oversight.domain import (
-    APP_RUN_ACTIVITY_WINDOW_DAYS,
     MANAGEABLE_USER_STATES,
     USAGE_WINDOW_DAYS,
     DirectMembership,
@@ -201,6 +200,55 @@ def _scope(tenant_id: UUID, space_id: Optional[UUID]) -> sa.Select[tuple[UUID]]:
     if space_id is None:
         return _shared_space_ids(tenant_id)
     return _space_ids(tenant_id, space_id)
+
+
+def last_activity_query(
+    tenant_id: UUID, space_id: Optional[UUID] = None
+) -> sa.CompoundSelect[tuple[Optional[UUID], Any]]:
+    """(space id, latest time) rows: one per space with questions and one per
+    space with app runs. Each assistant costs one backward probe on questions
+    (assistant_id, created_at) and each app one on ix_app_runs_app_created
+    (app_id, created_at), however long the history.
+
+    No helper-run exclusion: help assistants live only in the organisation
+    space, which oversight never lists.
+    """
+    scope = _scope(tenant_id, space_id)
+    latest_question = (
+        sa.select(Questions.created_at)
+        .where(Questions.assistant_id == Assistants.id)
+        .order_by(Questions.created_at.desc())
+        .limit(1)
+        .lateral("latest_question")
+    )
+    questions = (
+        sa.select(
+            Assistants.space_id.label("space_id"),
+            sa.func.max(latest_question.c.created_at).label("at"),
+        )
+        .select_from(Assistants)
+        .join(latest_question, sa.true())
+        .where(Assistants.space_id.in_(scope))
+        .group_by(Assistants.space_id)
+    )
+    latest_app_run = (
+        sa.select(AppRuns.created_at)
+        .where(AppRuns.app_id == Apps.id)
+        .order_by(AppRuns.created_at.desc())
+        .limit(1)
+        .lateral("latest_app_run")
+    )
+    app_runs = (
+        sa.select(
+            Apps.space_id.label("space_id"),
+            sa.func.max(latest_app_run.c.created_at).label("at"),
+        )
+        .select_from(Apps)
+        .join(latest_app_run, sa.true())
+        .where(Apps.space_id.in_(scope))
+        .group_by(Apps.space_id)
+    )
+    return sa.union_all(questions, app_runs)
 
 
 def _role(value: str) -> SpaceRoleValue:
@@ -812,68 +860,13 @@ class SpaceOversightRepo:
         }
 
     async def last_activity(
-        self, tenant_id: UUID, now: datetime, space_id: Optional[UUID] = None
+        self, tenant_id: UUID, space_id: Optional[UUID] = None
     ) -> dict[UUID, datetime]:
         """The latest question or app run per space. The value is reduced to
         a bucket by the caller and never leaves the service."""
-        scope = _scope(tenant_id, space_id)
-        window_start = now - timedelta(days=APP_RUN_ACTIVITY_WINDOW_DAYS)
-        # One index probe per assistant (idx_questions_assistant_created).
-        # No helper-run exclusion: help assistants live only in the
-        # organisation space, which oversight never lists.
-        latest_question = (
-            sa.select(Questions.created_at)
-            .where(Questions.assistant_id == Assistants.id)
-            .order_by(Questions.created_at.desc())
-            .limit(1)
-            .lateral("latest_question")
-        )
-        questions = (
-            sa.select(
-                Assistants.space_id.label("space_id"),
-                sa.func.max(latest_question.c.created_at).label("at"),
-            )
-            .select_from(Assistants)
-            .join(latest_question, sa.true())
-            .where(Assistants.space_id.in_(scope))
-            .group_by(Assistants.space_id)
-        )
-        app_runs = (
-            sa.select(
-                Apps.space_id.label("space_id"),
-                sa.func.max(AppRuns.created_at).label("at"),
-            )
-            .join(Apps, Apps.id == AppRuns.app_id)
-            .where(
-                AppRuns.tenant_id == tenant_id,
-                AppRuns.created_at >= window_start,
-                Apps.space_id.in_(scope),
-            )
-            .group_by(Apps.space_id)
-        )
-        # Whether an app ran before the window at all, so a space used only
-        # through apps long ago reads as older rather than as never used.
-        # EXISTS stops at the first older run; the time is past the window,
-        # which is all the bucket needs.
-        before_window = sa.cast(
-            sa.literal(window_start - timedelta(days=1)),
-            sa.DateTime(timezone=True),
-        )
-        older_app_runs = sa.select(
-            Apps.space_id.label("space_id"), before_window.label("at")
-        ).where(
-            Apps.space_id.in_(scope),
-            sa.exists().where(
-                AppRuns.tenant_id == tenant_id,
-                AppRuns.app_id == Apps.id,
-                AppRuns.created_at < window_start,
-            ),
-        )
         latest: dict[UUID, datetime] = {}
         for space, at in (
-            await self.session.execute(
-                sa.union_all(questions, app_runs, older_app_runs)
-            )
+            await self.session.execute(last_activity_query(tenant_id, space_id))
         ).tuples():
             if space is None or at is None:
                 continue

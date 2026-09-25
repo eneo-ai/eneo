@@ -18,10 +18,6 @@ from eneo.spaces.api.space_models import SpaceRoleValue
 # contributed to it in the window: then it describes one person's work.
 K_ANONYMITY_THRESHOLD = 5
 USAGE_WINDOW_DAYS = 30
-# App runs have no index on app_id, so the latest app run is only looked up
-# this far back in the tenant-wide app run index; before it, only whether a
-# run exists. Equal to the oldest bucket's bound, so either reads as older.
-APP_RUN_ACTIVITY_WINDOW_DAYS = 90
 # How long a space's members see that an administrator joined through
 # oversight, counted from when the visit ended.
 OVERSIGHT_VISIT_WINDOW_DAYS = 90

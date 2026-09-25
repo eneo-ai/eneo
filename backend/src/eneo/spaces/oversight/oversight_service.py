@@ -312,7 +312,7 @@ class SpaceOversightService:
         )
         resources = await self.repo.resource_counts(tenant_id)
         widgets = await self.repo.widget_counts(tenant_id)
-        activity = await self.repo.last_activity(tenant_id, now)
+        activity = await self.repo.last_activity(tenant_id)
         requests = await self.repo.pending_widget_requests(tenant_id)
 
         items: list[AdminSpaceListItem] = []
@@ -397,7 +397,7 @@ class SpaceOversightService:
         knowledge = await self.repo.knowledge_sources(tenant_id, space_id, links=links)
         inherited = await self.repo.inherited_knowledge_count(tenant_id, space)
         usage = await self.repo.usage(tenant_id, space_id, now=now)
-        activity = await self.repo.last_activity(tenant_id, now, space_id)
+        activity = await self.repo.last_activity(tenant_id, space_id)
 
         questions = count_if_enough_people(usage.questions, usage.question_users)
         app_runs = count_if_enough_people(usage.app_runs, usage.app_run_users)

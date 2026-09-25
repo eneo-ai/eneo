@@ -269,7 +269,7 @@ class _FakeRepo:
     async def usage(self, tenant_id, space_id, *, now):
         return self.usage_counts
 
-    async def last_activity(self, tenant_id, now, space_id=None):
+    async def last_activity(self, tenant_id, space_id=None):
         return {}
 
     # list reads

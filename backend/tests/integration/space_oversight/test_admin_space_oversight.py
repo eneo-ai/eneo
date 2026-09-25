@@ -17,14 +17,17 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.database.database import sessionmanager
 from eneo.roles.permissions import Permission
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.spaces.oversight.exceptions import SpaceLastAdminError
+from eneo.spaces.oversight.oversight_repo import last_activity_query
 from eneo.spaces.oversight.oversight_service import SpaceOversightService
 from eneo.spaces.space_init_service import SpaceInitService
 from eneo.spaces.space_repo import SpaceRepository
@@ -714,8 +717,8 @@ async def test_last_activity_is_only_a_bucket(client, admin, overseer):
         created_at=days_ago(120),
     )
 
-    # Spaces used only through an app: runs before the 90-day app-run window
-    # still tell an old space from one never used.
+    # Spaces used only through an app: a run long ago still tells an old
+    # space from one never used.
     app_spaces = {}
     for label, age in (("app_recent", 45), ("app_old", 120), ("app_unused", None)):
         app_spaces[label] = await create_space(client, admin.token)
@@ -756,6 +759,38 @@ async def test_last_activity_is_only_a_bucket(client, admin, overseer):
     assert detail["usage"]["last_activity"] == "past_quarter"
     detail = await _detail(client, overseer, app_spaces["app_old"])
     assert detail["usage"]["last_activity"] == "older"
+
+
+async def test_last_activity_reads_one_index_entry_per_assistant_and_app():
+    """The space list reads each assistant's latest question and each app's
+    latest run with one backward index probe. A range over the tenant's runs
+    would read every run in it on every list load. With sequential scans and
+    sorts penalised, the plan is only cheap if the indexes on (assistant_id,
+    created_at) and (app_id, created_at) give the order, whatever the table
+    size."""
+    _, tenant_id = await admin_row()
+    compiled = last_activity_query(tenant_id).compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+    )
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL enable_seqscan = off"))
+        await session.execute(sa.text("SET LOCAL enable_sort = off"))
+        plan = "\n".join(
+            row[0] for row in await session.execute(sa.text(f"EXPLAIN {compiled}"))
+        )
+
+    lines = plan.splitlines()
+    run_scans = [line for line in lines if " on app_runs" in line]
+    question_scans = [line for line in lines if " on questions" in line]
+    assert run_scans, plan
+    assert all(
+        "Backward using ix_app_runs_app_created " in line for line in run_scans
+    ), plan
+    assert question_scans, plan
+    assert all(
+        "Backward using" in line and "_questions_assistant_created " in line
+        for line in question_scans
+    ), plan
 
 
 async def test_usage_counts_widget_questions_separately(client, admin, overseer):
