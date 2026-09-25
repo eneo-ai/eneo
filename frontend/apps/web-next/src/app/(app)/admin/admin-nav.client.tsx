@@ -8,6 +8,7 @@ import {
   Cloud,
   Cpu,
   History,
+  HardDrive,
   Key,
   Lightbulb,
   Plug,
@@ -50,7 +51,8 @@ export function AdminNav() {
     ...(can("modules")
       ? [{ href: "/admin/modules", icon: Blocks, label: t("module_admin_title") }]
       : []),
-    { href: "/admin/integrations", icon: Cloud, label: t("integrations") }
+    { href: "/admin/integrations", icon: Cloud, label: t("integrations") },
+    { href: "/admin/storage", icon: HardDrive, label: t("storage_settings_nav") }
   ];
 
   const groups: NavGroup[] = [
