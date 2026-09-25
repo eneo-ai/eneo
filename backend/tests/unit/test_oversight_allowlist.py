@@ -11,7 +11,7 @@ dotted field paths, so a new field fails here until it is added on purpose.
 
 import typing
 from collections.abc import Iterator
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 from pydantic import BaseModel
@@ -502,17 +502,44 @@ def _value_types(annotation: object) -> set[object]:
     return set().union(*(_value_types(arg) for arg in args))
 
 
-@pytest.mark.parametrize("model", [AdminSpaceList, AdminSpaceDetail, AdminSpaceMembers])
-def test_change_times_are_days(model: type[BaseModel]) -> None:
-    """When something last changed is given to the day: in a one-person space
-    the time of day would show when that person worked."""
-    precise = sorted(
+# Times kept to the minute on purpose: the viewer's own join, a join through
+# oversight (another administrator's audited action) and a widget activation
+# request, which is addressed to the organisation's administrators.
+_PRECISE_TIMES = (
+    "viewer_membership.oversight_joined_at",
+    "oversight_join.joined_at",
+    "widget_requests.requested_at",
+    "widgets.activation_requested_at",
+)
+
+
+def _precise_times(model: type[BaseModel]) -> list[str]:
+    return sorted(
         path
         for path, annotation in _annotations(model)
-        if path.rsplit(".", 1)[-1] == "updated_at"
+        if path.rsplit(".", 1)[-1].endswith("_at")
+        and not path.endswith(_PRECISE_TIMES)
         and _value_types(annotation) != {date}
     )
-    assert precise == []
+
+
+@pytest.mark.parametrize("model", [AdminSpaceList, AdminSpaceDetail, AdminSpaceMembers])
+def test_times_are_days(model: type[BaseModel]) -> None:
+    """When something was created or changed is given to the day: in a
+    one-person space the time of day would show when that person worked."""
+    assert _precise_times(model) == []
+
+
+def test_a_new_precise_time_is_caught() -> None:
+    """Negative control: a new time field, however deep, must be a day."""
+
+    class LeakyMembers(AdminSpaceMembers):
+        archived_at: datetime
+
+    class LeakyDetail(AdminSpaceDetail):
+        members: LeakyMembers
+
+    assert _precise_times(LeakyDetail) == ["members.archived_at"]
 
 
 def test_the_walk_catches_a_new_nested_field() -> None:

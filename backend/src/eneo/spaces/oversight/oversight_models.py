@@ -39,8 +39,8 @@ def _utc_day(value: object) -> object:
     return value
 
 
-# When a member last changed something, to the day: in a one-person space the
-# time of day would show when that person worked.
+# When a member created or last changed something, to the day: in a one-person
+# space the time of day would show when that person worked.
 ChangeDay = Annotated[date, BeforeValidator(_utc_day)]
 
 
@@ -139,7 +139,7 @@ class AdminSpaceListItem(BaseModel):
     name: str
     description: Optional[str] = None
     icon_id: Optional[UUID] = None
-    created_at: datetime
+    created_at: ChangeDay = Field(description="The day (UTC) the space was created.")
     security_classification: Optional[OversightClassification] = None
     member_count: int = Field(
         description="Distinct live users, directly or through live groups."
@@ -365,7 +365,7 @@ class AdminSpaceDetail(BaseModel):
     name: str
     description: Optional[str] = None
     icon_id: Optional[UUID] = None
-    created_at: datetime
+    created_at: ChangeDay = Field(description="The day (UTC) the space was created.")
     updated_at: ChangeDay = Field(description="The day (UTC) of the last change.")
     security_classification: Optional[OversightClassification] = None
     settings: AdminSpaceSettings

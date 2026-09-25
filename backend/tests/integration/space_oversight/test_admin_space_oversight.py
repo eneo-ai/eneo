@@ -878,8 +878,8 @@ async def test_an_assistant_lists_every_widget_it_serves(client, admin, overseer
 async def test_change_times_of_the_space_knowledge_and_assistants_are_days(
     client, admin, overseer
 ):
-    """A late-night upload or edit in a one-person space shows as a day, not
-    as the minute that person worked."""
+    """A space created, or an upload or edit made, late at night in a
+    one-person space shows as a day, not as the minute that person worked."""
     _, tenant_id = await admin_row()
     space_id = await create_space(client, admin.token)
     assistant = await insert_assistant(space_id, admin.id)
@@ -898,12 +898,17 @@ async def test_change_times_of_the_space_knowledge_and_assistants_are_days(
         a=assistant,
     )
     await execute(
-        "UPDATE spaces SET updated_at = '2026-09-25 01:41:07+02' WHERE id = :s",
+        "UPDATE spaces SET created_at = '2026-09-25 01:41:07+02',"
+        " updated_at = '2026-09-25 01:41:07+02' WHERE id = :s",
         s=space_id,
     )
 
     detail = await _detail(client, overseer, space_id)
-    assert detail["updated_at"] == "2026-09-24"
+    assert (detail["created_at"], detail["updated_at"]) == ("2026-09-24", "2026-09-24")
+    resp = await client.get("/api/v1/admin/spaces/", headers=overseer.headers)
+    assert resp.status_code == 200, resp.text
+    (item,) = [i for i in resp.json()["items"] if i["id"] == space_id]
+    assert item["created_at"] == "2026-09-24"
     (card,) = [a for a in detail["assistants"] if a["id"] == str(assistant)]
     assert card["updated_at"] == "2026-09-24"
     (source,) = detail["knowledge"]
