@@ -164,7 +164,12 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
       {!value.removed_at && (
         <OrganizationSkillAdoption skill={value} rolloutRunning={rolloutRunning} />
       )}
-      <SkillRevisionHistory key={value.current_revision_id} skill={value} unsaved={dirty} scope={{ type: "organization" }} />
+      <SkillRevisionHistory
+        key={value.current_revision_id}
+        skill={value}
+        unsaved={dirty}
+        scope={{ type: "organization" }}
+      />
       {removalOpen && (
         <SkillRemovalDialog
           skills={[value]}
