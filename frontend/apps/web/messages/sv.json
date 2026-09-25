@@ -4130,6 +4130,7 @@
   "organization_skills_removed_at": "Borttagen {time}",
   "eneo_error_9062": "En skill uppdateras. Inget togs bort. Vänta en stund och försök igen.",
   "eneo_error_9063": "Assistenten är publicerad som webbwidget. En administratör behöver arkivera widgeten innan assistenten kan flyttas.",
+  "eneo_error_9064": "Valen för den här konversationen ändrades någon annanstans, till exempel i en annan flik. Läs in de sparade valen och försök igen.",
   "widget_send": "Skicka",
   "widget_input_label": "Din fråga",
   "widget_input_placeholder": "Skriv din fråga…",
