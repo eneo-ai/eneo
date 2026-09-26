@@ -22,6 +22,7 @@ import {
   type ModelProvider,
   PROVIDERS_KEY
 } from "./model-providers";
+import { type AdminModel, MODELS_KEY } from "./models";
 
 const ok = (data: unknown) => Promise.resolve({ data, response: new Response("{}") });
 
@@ -69,7 +70,22 @@ const liveModels = [
   { name: "kommun-llama", mode: "completion", supports_vision: false }
 ];
 
-function renderWizard({ initialProviderId }: { initialProviderId?: string } = {}) {
+/** A model the tenant has already, as the admin model list returns it. */
+function tenantModel(overrides: Partial<AdminModel>): AdminModel {
+  return {
+    id: `m-${overrides.name}`,
+    name: "model",
+    nickname: null,
+    provider_id: "p-vllm",
+    is_deprecated: false,
+    ...overrides
+  } as AdminModel;
+}
+
+function renderWizard({
+  initialProviderId,
+  models = []
+}: { initialProviderId?: string; models?: AdminModel[] } = {}) {
   api.GET.mockImplementation((path: string) => {
     if (path.endsWith("/models/")) return ok(liveModels);
     if (path.endsWith("/model-defaults/")) return ok({ error: "not found" });
@@ -84,6 +100,12 @@ function renderWizard({ initialProviderId }: { initialProviderId?: string } = {}
   queryClient.setQueryData(PROVIDERS_KEY, [existing]);
   queryClient.setQueryData(CAPABILITIES_KEY, capabilities);
   queryClient.setQueryData(FAVORITES_KEY, []);
+  queryClient.setQueryData(MODELS_KEY, {
+    completion_models: models,
+    embedding_models: [],
+    transcription_models: [],
+    image_models: []
+  });
   queryClient.setQueryData(SECURITY_CLASSIFICATIONS_KEY, {
     security_enabled: false,
     security_classifications: []
@@ -105,8 +127,8 @@ async function toCredentials() {
   return dialog;
 }
 
-async function toModels() {
-  const result = renderWizard({ initialProviderId: "p-vllm" });
+async function toModels(models: AdminModel[] = []) {
+  const result = renderWizard({ initialProviderId: "p-vllm", models });
   await waitFor(() =>
     expect(within(result.dialog).getByRole("checkbox", { name: /gpt-5/ })).toBeTruthy()
   );
@@ -338,6 +360,67 @@ describe("the add-model wizard's catalog", () => {
       "/api/v1/admin/tenant-models/completion/",
       expect.anything()
     );
+  });
+
+  it("marks the models the provider has already, which cannot be picked again", async () => {
+    const { dialog } = await toModels([
+      // The same model…
+      tenantModel({ name: "gpt-5", nickname: "GPT-5 (upphandling)" }),
+      // …or another under the name a pick would get (unique per provider).
+      tenantModel({ name: "llama-3-70b", nickname: "Kommun-Llama" })
+    ]);
+    const description = (checkbox: HTMLElement) =>
+      (checkbox.getAttribute("aria-describedby") ?? "")
+        .split(" ")
+        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .join(" ");
+
+    for (const name of [/gpt-5/, /kommun-llama/]) {
+      const checkbox = within(dialog).getByRole("checkbox", { name }) as HTMLInputElement;
+      expect(checkbox.disabled).toBe(true);
+      // Said in words, not only by the dimmed box.
+      expect(description(checkbox)).toContain("Tillagd");
+    }
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("counts only the provider's own, current models as added", async () => {
+    const { dialog } = await toModels([
+      tenantModel({ name: "gpt-5", provider_id: "p-other" }),
+      tenantModel({ name: "kommun-llama", is_deprecated: true })
+    ]);
+
+    for (const name of [/gpt-5/, /kommun-llama/]) {
+      const checkbox = within(dialog).getByRole("checkbox", { name }) as HTMLInputElement;
+      expect(checkbox.disabled).toBe(false);
+    }
+    expect(within(dialog).queryByText(/Tillagd/)).toBeNull();
+  });
+
+  it("says at the id field when the provider has that model already", async () => {
+    const { dialog } = await toModels([tenantModel({ name: "kommun-mistral" })]);
+    const id = within(dialog).getByRole("textbox", { name: "Saknas modellen? Lägg till med id" });
+    id.focus();
+
+    fireEvent.change(id, { target: { value: "kommun-mistral" } });
+    fireEvent.keyDown(id, { key: "Enter" });
+
+    const error = within(dialog).getByText(
+      "Leverantören har redan kommun-mistral. Ange ett annat modell-id."
+    );
+    expect(id.getAttribute("aria-invalid")).toBe("true");
+    expect(id.getAttribute("aria-describedby")).toContain(error.id);
+    expect(document.activeElement).toBe(id);
+    expect(within(dialog).queryByRole("checkbox", { name: /kommun-mistral/ })).toBeNull();
+    expect(api.GET).not.toHaveBeenCalledWith(
+      expect.stringContaining("model-defaults"),
+      expect.anything()
+    );
+    await expectNoAxeViolations(document.body);
+
+    // Typing again clears it.
+    fireEvent.change(id, { target: { value: "kommun-mistral-2" } });
+    expect(id.getAttribute("aria-invalid")).toBeNull();
   });
 
   it("keeps the picks when the list is filtered", async () => {

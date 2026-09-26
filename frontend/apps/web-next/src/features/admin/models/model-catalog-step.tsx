@@ -13,7 +13,7 @@ import { Token } from "@astryxdesign/core/Token";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw, Search } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { LoadingState } from "@/components/composites/loading-state";
 import { formatCostPerMillionTokens, formatTokens } from "@/features/ai-models/format-model-stats";
@@ -30,10 +30,34 @@ import {
 } from "./model-catalog";
 import { providerCapabilitiesQueryOptions } from "./model-providers";
 import { useModelTypeLabel } from "./model-type-label";
-import { createTenantModel, MODELS_KEY, type ModelKind, validateProviderModel } from "./models";
+import {
+  type AdminModel,
+  adminModelsQueryOptions,
+  createTenantModel,
+  MODELS_KEY,
+  type ModelKind,
+  type ModelsPresentation,
+  validateProviderModel
+} from "./models";
 import { useFieldFocus } from "./provider-form-fields";
 
 const NO_CLASSIFICATION = "__none__";
+
+/** Where the tenant's models of each type are listed. */
+const MODEL_LISTS = {
+  completion: "completion_models",
+  embedding: "embedding_models",
+  transcription: "transcription_models"
+} as const satisfies Record<ModelKind, keyof ModelsPresentation>;
+
+type ExistingModel = Pick<AdminModel, "name" | "nickname" | "provider_id" | "is_deprecated">;
+
+/** A model the catalog knows nothing about. */
+const NO_CAPABILITIES = {
+  supports_vision: false,
+  supports_function_calling: false,
+  supports_reasoning: false
+};
 
 /** Vision, tools and reasoning in words, as the model table shows them. */
 function capabilityLabels(t: ReturnType<typeof useTranslations>, model: CatalogModel): string[] {
@@ -42,6 +66,11 @@ function capabilityLabels(t: ReturnType<typeof useTranslations>, model: CatalogM
     model.supports_function_calling ? t("model_label_tool_calling") : null,
     model.supports_reasoning ? t("model_label_reasoning") : null
   ].filter((label): label is string => label !== null);
+}
+
+/** The display name a pick is created with. */
+function createdName(model: CatalogModel): string {
+  return model.display_name?.trim() || model.name;
 }
 
 /** A completion model needs both token limits before it can be created. */
@@ -98,15 +127,35 @@ export function ModelCatalogStep({
     () => staticCatalogModels(capsQuery.data, providerType, mode),
     [capsQuery.data, providerType, mode]
   );
+  // The provider's models of this type: picking one again would be refused
+  // (a display name is unique per provider, 9017), so they are marked instead.
+  const modelsQuery = useQuery(adminModelsQueryOptions(browserApi));
+  const providerModels = useMemo(() => {
+    const models: ExistingModel[] = modelsQuery.data?.[MODEL_LISTS[mode]] ?? [];
+    return models.filter((model) => model.provider_id === providerId && !model.is_deprecated);
+  }, [modelsQuery.data, mode, providerId]);
+  /** The provider has this model already: the same id, or the name it would get. */
+  const isAdded = useCallback(
+    (model: CatalogModel) =>
+      providerModels.some(
+        (existing) =>
+          existing.name === model.name ||
+          existing.nickname?.toLowerCase() === createdName(model).toLowerCase()
+      ),
+    [providerModels]
+  );
+
   const liveModels = liveQuery.data?.models ?? [];
   const catalog = liveModels.length > 0 ? liveModels : staticModels;
   const usedFallback = liveModels.length === 0 && Boolean(liveQuery.data?.error);
-  const loading = liveQuery.isLoading || capsQuery.isLoading;
+  const loading = liveQuery.isLoading || capsQuery.isLoading || modelsQuery.isLoading;
 
   const [selected, setSelected] = useState<Map<string, CatalogModel>>(new Map());
   const [search, setSearch] = useState("");
   const [manualName, setManualName] = useState("");
   const [manualBusy, setManualBusy] = useState(false);
+  /** An id typed in that the provider has already. */
+  const [manualTaken, setManualTaken] = useState<string | null>(null);
   const [classificationId, setClassificationId] = useState(NO_CLASSIFICATION);
   const [validating, setValidating] = useState(false);
   const [createAnyway, setCreateAnyway] = useState(false);
@@ -173,18 +222,16 @@ export function ModelCatalogStep({
     const name = manualName.trim();
     if (!name || manualBusy) return;
     let model = selected.get(name) ?? catalog.find((item) => item.name === name);
+    // Said at the field, which keeps focus.
+    if (isAdded(model ?? { ...NO_CAPABILITIES, name })) {
+      setManualTaken(name);
+      return;
+    }
     if (!model) {
       setManualBusy(true);
       const defaults = await getModelDefaults(browserApi, name, providerType);
       setManualBusy(false);
-      model = {
-        ...(defaults ?? {
-          supports_vision: false,
-          supports_function_calling: false,
-          supports_reasoning: false
-        }),
-        name
-      };
+      model = { ...(defaults ?? NO_CAPABILITIES), name };
     }
     const next = new Map(selected).set(name, model);
     setSelected(next);
@@ -228,7 +275,7 @@ export function ModelCatalogStep({
       const models = selectedModels;
       const results = await Promise.allSettled(
         models.map((model) => {
-          const displayName = model.display_name?.trim() || model.name;
+          const displayName = createdName(model);
           if (mode === "embedding") {
             return createTenantModel(browserApi, "embedding", {
               provider_id: providerId,
@@ -423,9 +470,12 @@ export function ModelCatalogStep({
                   }
                 >
                   {listed.map((model) => {
+                    const added = isAdded(model);
                     const price = formatCostPerMillionTokens(model.input_cost_per_token);
                     const capabilities = capabilityLabels(t, model);
                     const details = [
+                      // In words, not only as the dimmed checkbox (WCAG 1.4.1).
+                      added ? t("provider_form_model_added") : null,
                       model.display_name && model.display_name !== model.name ? model.name : null,
                       model.max_input_tokens ? formatTokens(model.max_input_tokens) : null,
                       price ? t("price_per_million", { price }) : null
@@ -435,6 +485,7 @@ export function ModelCatalogStep({
                         key={model.name}
                         value={model.name}
                         label={model.display_name ?? model.name}
+                        isDisabled={added}
                         // Below the name, not beside it: on a phone the name
                         // would be cut off.
                         description={
@@ -468,13 +519,21 @@ export function ModelCatalogStep({
             label={canList ? t("model_not_listed") : t("enter_model_id")}
             placeholder={t("model_identifier")}
             value={manualName}
-            onChange={setManualName}
+            onChange={(value) => {
+              setManualName(value);
+              setManualTaken(null);
+            }}
             onEnter={() => void addManual()}
             autoComplete="off"
             status={
-              noSelection && !canList
-                ? { type: "error", message: t("provider_form_select_model_required") }
-                : undefined
+              manualTaken
+                ? {
+                    type: "error",
+                    message: t("provider_form_model_added_error", { name: manualTaken })
+                  }
+                : noSelection && !canList
+                  ? { type: "error", message: t("provider_form_select_model_required") }
+                  : undefined
             }
           />
         </div>
