@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 
 export type ModelProvider = Schema<"ModelProviderPublic">;
@@ -85,6 +85,11 @@ export function updateProvider(api: EneoClient, id: string, body: ModelProviderU
       body
     })
   );
+}
+
+/** The save failed because another provider has the name (409 NAME_COLLISION). */
+export function isProviderNameTaken(error: unknown): boolean {
+  return error instanceof EneoApiError && error.code === 9017;
 }
 
 /** Delete a custom model provider (backend 400s if models are still attached). */

@@ -61,14 +61,14 @@ it("filters by capability, self-hosting and search", () => {
   expect(screen.queryByRole("button", { name: "Lägg till OpenAI" })).toBeNull();
   expect(screen.getByRole("button", { name: "Lägg till vLLM" })).toBeTruthy();
 
-  fireEvent.click(within(capabilities).getByRole("radio", { name: "Alla providers" }));
+  fireEvent.click(within(capabilities).getByRole("radio", { name: "Alla leverantörer" }));
   const selfHosted = screen.getByRole("button", { name: "Självhostad" });
   fireEvent.click(selfHosted);
   expect(selfHosted.getAttribute("aria-pressed")).toBe("true");
   expect(screen.queryByRole("button", { name: "Lägg till Anthropic" })).toBeNull();
 
   fireEvent.click(selfHosted);
-  fireEvent.change(screen.getByRole("textbox", { name: "Sök providers" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "Sök leverantörer" }), {
     target: { value: "anthro" }
   });
   expect(screen.getByRole("button", { name: "Lägg till Anthropic" })).toBeTruthy();
