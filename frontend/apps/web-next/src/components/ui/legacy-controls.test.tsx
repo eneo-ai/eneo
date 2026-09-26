@@ -64,6 +64,28 @@ describe("Button", () => {
     if (size.startsWith("icon")) expect(classes).toContain("pointer-coarse:min-w-11");
   });
 
+  it("shows a busy button's state with a spinner, and keeps it enabled", async () => {
+    const { container, rerender } = render(<Button aria-busy>Spara</Button>);
+    const button = screen.getByRole("button", { name: "Spara" });
+    expect(button.hasAttribute("disabled")).toBe(false);
+    expect(classesOf(button)).toContain("cursor-progress");
+    expect(button.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    await expectNoAxeViolations(container);
+
+    rerender(<Button>Spara</Button>);
+    expect(button.querySelector("svg")).toBeNull();
+    expect(classesOf(button)).not.toContain("cursor-progress");
+  });
+
+  it("adds no spinner to a busy icon button, which has no room for it", () => {
+    render(
+      <Button size="icon" aria-label="Uppdatera" aria-busy>
+        ↻
+      </Button>
+    );
+    expect(screen.getByRole("button", { name: "Uppdatera" }).querySelector("svg")).toBeNull();
+  });
+
   it("is a named, focusable button", async () => {
     const { container } = render(
       <Button size="icon" aria-label="Stäng">

@@ -1,5 +1,6 @@
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
+import { Loader2 } from "lucide-react";
 import { Slot } from "radix-ui";
 
 import { cn } from "@/lib/utils";
@@ -47,21 +48,39 @@ function Button({
   variant = "default",
   size = "default",
   asChild = false,
+  children,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean;
   }) {
   const Comp = asChild ? Slot.Root : "button";
+  // A busy button stays enabled so it keeps focus (ACCESSIBILITY.md → Forms);
+  // the spinner shows sighted users what aria-busy tells assistive tech. Not
+  // for icon buttons, whose fixed size has no room for it, nor asChild.
+  const busy =
+    !asChild &&
+    !size?.startsWith("icon") &&
+    (props["aria-busy"] === true || props["aria-busy"] === "true");
 
   return (
     <Comp
       data-slot="button"
       data-variant={variant}
       data-size={size}
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={cn(buttonVariants({ variant, size, className }), busy && "cursor-progress")}
       {...props}
-    />
+    >
+      {busy ? (
+        <>
+          <Loader2 aria-hidden="true" className="motion-safe:animate-spin" />
+          {children}
+        </>
+      ) : (
+        // Untouched: asChild's Slot takes exactly one child.
+        children
+      )}
+    </Comp>
   );
 }
 
