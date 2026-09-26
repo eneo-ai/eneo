@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/table";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { ClientTime } from "@/features/spaces/client-time";
+import { ClientTime } from "@/components/composites/client-time";
 import { toastApiError } from "@/lib/api/toast";
 import { appRunsQueryOptions, getResultTitle, isRunActive, type AppRunSparse } from "../apps";
 import { AppRunStatusBadge } from "../status-badge";

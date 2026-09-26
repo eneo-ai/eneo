@@ -17,11 +17,11 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Fragment, useId, useMemo, useState } from "react";
+import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
-import { formatDateTime } from "@/lib/format";
 import { useModelTypeLabel } from "./model-type-label";
 import { type ModelMigrationHistory, migrationHistoryQueryOptions } from "./models";
 
@@ -193,6 +193,7 @@ export function MigrationHistoryPanel() {
             {rows.map((row) => {
               const open = expanded.has(row.id);
               const detailId = `${baseId}-${row.id}`;
+              const at = row.completed_at ?? row.started_at;
               return (
                 <Fragment key={row.id}>
                   <TableRow>
@@ -218,7 +219,7 @@ export function MigrationHistoryPanel() {
                       />
                     </TableCell>
                     <TableCell className="text-ax-text-secondary whitespace-nowrap">
-                      {formatDateTime(row.completed_at ?? row.started_at ?? "")}
+                      {at ? <ClientTime value={at} format="date_time" /> : "—"}
                     </TableCell>
                     <TableCell>{row.from_model_name}</TableCell>
                     <TableCell>{row.to_model_name}</TableCell>

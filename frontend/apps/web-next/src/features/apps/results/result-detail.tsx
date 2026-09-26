@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
-import { ClientTime } from "@/features/spaces/client-time";
+import { ClientTime } from "@/components/composites/client-time";
 import {
   appRunQueryOptions,
   fileSignedUrl,

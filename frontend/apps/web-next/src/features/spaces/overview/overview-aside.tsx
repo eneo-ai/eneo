@@ -4,8 +4,8 @@ import { Avatar } from "@astryxdesign/core/Avatar";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { useTranslations } from "next-intl";
+import { ClientTime } from "@/components/composites/client-time";
 import { cn } from "@/lib/utils";
-import { ClientTime } from "../client-time";
 import {
   memberDisplayName,
   personToneClass,

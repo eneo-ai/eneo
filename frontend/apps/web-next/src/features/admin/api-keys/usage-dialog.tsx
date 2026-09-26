@@ -4,6 +4,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
+import { ClientTime } from "@/components/composites/client-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +26,6 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
-import { formatDateTime } from "@/lib/format";
 
 type ApiKey = Schema<"ApiKeyV2">;
 
@@ -114,8 +114,8 @@ export function ApiKeyUsageDialog({
                 <TableBody>
                   {events.map((event) => (
                     <TableRow key={event.id}>
-                      <TableCell className="text-muted-foreground font-mono text-xs whitespace-nowrap">
-                        {formatDateTime(event.timestamp)}
+                      <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
+                        <ClientTime value={event.timestamp} format="date_time" />
                       </TableCell>
                       <TableCell>
                         <Badge

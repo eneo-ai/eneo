@@ -8,6 +8,7 @@ import { BookOpen, FolderClosed, Globe, Plug, Upload, type LucideIcon } from "lu
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { CollectionActions, CreateCollectionButton } from "@/features/knowledge/collections";
@@ -17,7 +18,6 @@ import { KnowledgeNameCell } from "@/features/knowledge/table-controls-ui";
 import { UploadBlobsDialog } from "@/features/knowledge/upload-dialog";
 import { WebsiteActions } from "@/features/knowledge/websites";
 import { SpaceTableFrame } from "../table-frame";
-import { ClientTime } from "../client-time";
 import { useSpace } from "../use-space";
 import {
   overviewKnowledgeRows,

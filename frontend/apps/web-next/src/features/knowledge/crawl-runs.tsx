@@ -12,7 +12,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { formatDuration } from "@/lib/format";
-import { ClientTime } from "@/features/spaces/client-time";
+import { ClientTime } from "@/components/composites/client-time";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import type { CrawlRun } from "./knowledge";
 import {

@@ -3,13 +3,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { ClientTime } from "@/components/composites/client-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { formatDateTime } from "@/lib/format";
 
 type PromptResource = {
   type: "assistant" | "app";
@@ -90,9 +90,11 @@ export function PromptVersionDialog({
                       onClick={() => setSelectedId(version.id)}
                     >
                       <span className="flex items-center gap-2 text-sm">
-                        {version.created_at
-                          ? formatDateTime(version.created_at)
-                          : version.id.slice(0, 8)}
+                        {version.created_at ? (
+                          <ClientTime value={version.created_at} format="date_time" />
+                        ) : (
+                          version.id.slice(0, 8)
+                        )}
                         {version.is_selected && (
                           <Badge variant="secondary">{t("current_version")}</Badge>
                         )}

@@ -4,7 +4,7 @@ import type { StatusTone } from "@/components/composites/status-label";
 import { History } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { hoursUntil } from "@/lib/format";
-import { ClientTime } from "@/features/spaces/client-time";
+import { ClientTime } from "@/components/composites/client-time";
 import type { IntegrationKnowledge } from "../knowledge";
 import { KnowledgeLabel } from "../table-controls-ui";
 

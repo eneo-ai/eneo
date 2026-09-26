@@ -26,6 +26,11 @@ export function formatBytes(bytes: number, locale: string, maximumFractionDigits
   }).format(value);
 }
 
+/**
+ * "2026-09-25 10:30" in the browser's time zone, for text that is saved, such
+ * as a prompt version's description. On screen, show dates with ClientTime
+ * (src/components/composites/client-time.tsx).
+ */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—";
   const date = new Date(value);

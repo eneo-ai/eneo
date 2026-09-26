@@ -31,7 +31,7 @@ import { daysSince } from "@/lib/format";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { toast } from "@/lib/toast";
 import { useJobs } from "@/features/jobs/use-jobs";
-import { ClientTime } from "@/features/spaces/client-time";
+import { ClientTime } from "@/components/composites/client-time";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";

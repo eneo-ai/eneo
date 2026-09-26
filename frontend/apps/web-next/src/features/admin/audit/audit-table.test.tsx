@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import type { AuditLog } from "./audit";
 import { AuditTable } from "./audit-table";
@@ -42,6 +43,15 @@ function openDetails() {
 }
 
 describe("AuditTable", () => {
+  it("shows when it happened in the viewer's locale and the metadata as a scrollable region", async () => {
+    openDetails();
+
+    expect(screen.getByText(/^25 sep\. 2026/)).toBeTruthy();
+    const json = screen.getByRole("region", { name: "Metadata (JSON)" });
+    expect(json.tabIndex).toBe(0);
+    await expectNoAxeViolations(document.body);
+  });
+
   it("copies the metadata JSON and says so", async () => {
     writeText.mockResolvedValue();
     openDetails();

@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { browserApi } from "@/lib/api/browser";
 import { formatDuration } from "@/lib/format";
-import { ClientTime } from "@/features/spaces/client-time";
+import { ClientTime } from "@/components/composites/client-time";
 import type { IntegrationKnowledge } from "../knowledge";
 import { syncLogsQueryOptions, type SyncLog } from "./queries";
 

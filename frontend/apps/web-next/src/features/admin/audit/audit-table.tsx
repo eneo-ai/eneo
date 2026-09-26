@@ -4,6 +4,7 @@ import { useClipboard } from "@astryxdesign/core/hooks";
 import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Fragment, useState } from "react";
+import { ClientTime } from "@/components/composites/client-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,7 +15,6 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table";
-import { formatDateTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { actionLabel, type AuditLog } from "./audit";
 
@@ -48,12 +48,9 @@ export function AuditTable({ logs }: { logs: AuditLog[] }) {
             const isOpen = expanded.has(log.id);
             return (
               <Fragment key={log.id}>
-                <TableRow
-                  className="cursor-pointer"
-                  onRowAction={() => toggle(log.id)}
-                  aria-expanded={isOpen}
-                  aria-label={t("audit_full_details")}
-                >
+                {/* Clicking the row is a pointer shortcut for the details button in
+                    its first cell, which keyboards and screen readers use. */}
+                <TableRow className="cursor-pointer" onClick={() => toggle(log.id)}>
                   <TableCell className="w-8">
                     <Button
                       variant="ghost"
@@ -73,8 +70,8 @@ export function AuditTable({ logs }: { logs: AuditLog[] }) {
                       )}
                     </Button>
                   </TableCell>
-                  <TableCell className="text-muted-foreground font-mono text-xs whitespace-nowrap">
-                    {formatDateTime(log.timestamp)}
+                  <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
+                    <ClientTime value={log.timestamp} format="date_time" />
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{actionLabel(t, log.action)}</Badge>
@@ -173,7 +170,13 @@ function AuditDetailRow({ log, t }: { log: AuditLog; t: ReturnType<typeof useTra
                 {isCopied ? t("audit_json_copied") : t("audit_copy_json")}
               </Button>
             </div>
-            <pre className="bg-background max-h-64 overflow-auto rounded-md border p-3 font-mono text-xs">
+            {/* A scroll area without focusable content: focusable, so it scrolls by keyboard. */}
+            <pre
+              role="region"
+              aria-label={t("audit_metadata_json")}
+              tabIndex={0}
+              className="bg-background focus-visible:outline-ring max-h-64 overflow-auto rounded-md border p-3 font-mono text-xs focus-visible:outline-2 focus-visible:outline-offset-2"
+            >
               {JSON.stringify(log.metadata, null, 2)}
             </pre>
           </div>

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { ClientTime } from "@/components/composites/client-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,7 +19,6 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { formatDateTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import {
   SHAREPOINT_SUBSCRIPTIONS_KEY,
@@ -144,7 +144,11 @@ export function SharePointSubscriptions() {
                     {sub.site_id?.slice(0, 12)}…
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
-                    {formatDateTime(sub.expires_at)}
+                    {sub.expires_at ? (
+                      <ClientTime value={sub.expires_at} format="date_time" />
+                    ) : (
+                      "—"
+                    )}
                   </TableCell>
                   <TableCell>
                     <Button
