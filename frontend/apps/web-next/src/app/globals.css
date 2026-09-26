@@ -218,12 +218,12 @@
 
 /*
  * 5. Colour mode. next-themes' blocking script sets .light/.dark (and
- *    data-theme) on <html> before first paint; the Astryx <Theme> only learns
- *    the resolved mode after hydration and renders mode="system" until then.
- *    Pin color-scheme to the class so light-dark() tokens never follow the OS
- *    during that window. These must be stylesheet rules (not inline styles):
- *    Next's lightningcss targets predate light-dark(), so it is compiled to
- *    toggle variables that only rules declaring color-scheme switch.
+ *    data-theme) on <html> before first paint; the Astryx <Theme> always
+ *    renders mode="system" (astryx-provider.tsx says why). Pin color-scheme to
+ *    the class so light-dark() tokens follow next-themes, never the OS. These
+ *    must be stylesheet rules (not inline styles): Next's lightningcss targets
+ *    predate light-dark(), so it is compiled to toggle variables that only
+ *    rules declaring color-scheme switch.
  */
 :root.light,
 :root.light [data-astryx-theme]:not([data-theme]) {

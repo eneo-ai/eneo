@@ -6,8 +6,6 @@ import { Theme } from "@astryxdesign/core/theme";
 import astryxSv from "@astryxdesign/core/locales/sv-SE.json";
 import Link from "next/link";
 import { useLocale } from "next-intl";
-import { useTheme } from "next-themes";
-import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { eneoTheme } from "@/theme/eneo";
 
 // Astryx's own component strings (aria labels, pagination, close buttons…).
@@ -30,19 +28,18 @@ function NextLink({ children, ...props }: React.ComponentProps<typeof Link> & { 
  * strings in the active next-intl locale, and next/link for Astryx links.
  *
  * next-themes owns the colour mode: its blocking script sets .light/.dark and
- * data-theme on <html> before first paint, and globals.css pins color-scheme
- * to that class. Astryx only mirrors the resolved mode once hydrated; until
- * then it gets "system" so server and client markup match.
+ * data-theme on <html> before first paint, and globals.css (section 5) pins
+ * color-scheme to that class, so Astryx's light-dark() tokens follow it.
+ * Astryx stays on mode="system": mirroring the resolved mode once hydrated
+ * changed Theme's context right after hydration, which re-rendered every
+ * Astryx component, and made React client-render a streamed page it had not
+ * revealed yet (one loaded in a background tab) instead of hydrating it.
  */
 export function AstryxProvider({ children }: { children: React.ReactNode }) {
-  const { resolvedTheme } = useTheme();
-  const hydrated = useHydrated();
   const locale = useLocale();
-  const mode =
-    hydrated && (resolvedTheme === "light" || resolvedTheme === "dark") ? resolvedTheme : "system";
 
   return (
-    <Theme theme={eneoTheme} mode={mode}>
+    <Theme theme={eneoTheme} mode="system">
       <InternationalizationProvider locale={locale} messages={ASTRYX_MESSAGES}>
         <LinkProvider component={NextLink}>{children}</LinkProvider>
       </InternationalizationProvider>
