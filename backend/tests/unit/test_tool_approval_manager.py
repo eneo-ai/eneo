@@ -198,6 +198,40 @@ async def test_tool_approval_timeout_denies_all_tools():
 
 
 @pytest.mark.asyncio
+async def test_waiter_cancelled_as_a_decision_arrives_stops_waiting():
+    # The user decides just as their stream is cancelled: the decision wakes
+    # the waiter in the same step as the cancellation. The wait must end
+    # cancelled rather than carry on as if the stream were still open.
+    manager = ToolApprovalManager(redis_client=None)
+    approval_id = str(uuid4())
+    tenant_id = uuid4()
+    user_id = uuid4()
+    await manager.request_approval(
+        approval_id=approval_id,
+        tool_call_ids=["tool-1"],
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=uuid4(),
+    )
+    wait_task = asyncio.create_task(
+        manager.wait_for_approval(approval_id, timeout=1.0, poll_interval=1.0)
+    )
+    for _ in range(3):
+        await asyncio.sleep(0)  # let the waiter park on the approval event
+
+    await manager.submit_decision(
+        approval_id=approval_id,
+        decisions=[ToolApprovalDecision(tool_call_id="tool-1", approved=True)],
+        actor_tenant_id=tenant_id,
+        actor_user_id=user_id,
+    )
+    wait_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await wait_task
+
+
+@pytest.mark.asyncio
 async def test_tool_approval_cancel_unblocks_waiter():
     manager = ToolApprovalManager(redis_client=None)
     approval_id = str(uuid4())

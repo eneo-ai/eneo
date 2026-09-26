@@ -119,6 +119,7 @@ select = [
     "F",
     "E9",
     "I",
+    "TID251",
 ]
 
 # Basic ignores for formatter compatibility (kept for when E/W are enabled later)
@@ -126,6 +127,14 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["F401"]  # Allow re-exports without being flagged as unused
+"tests/**" = ["TID251"]  # A test's own timeout guard ends with the test
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# Python 3.11's wait_for returns the awaited result, dropping the caller's
+# cancellation, when both land in the same step (fixed in 3.12). A loop,
+# lease or job that carries on after being cancelled hangs whatever waits
+# for it to stop.
+"asyncio.wait_for".msg = "Use `async with asyncio.timeout(...)`: on Python 3.11 asyncio.wait_for can swallow a cancellation that arrives as the awaited call completes."
 
 [tool.ruff.format]
 quote-style = "double"

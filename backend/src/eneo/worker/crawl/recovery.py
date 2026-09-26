@@ -117,6 +117,24 @@ def is_invalid_transaction_error_msg(message: str | None) -> bool:
     )
 
 
+async def _discard_session(session: "AsyncSession") -> None:
+    """Roll back and close a broken session, giving each step two seconds.
+
+    Rolling back frees the connection's locks; closing may still return a
+    poisoned connection to the pool. Either step can fail or hang on a wedged
+    socket, which is why failures are ignored and each step is time-boxed.
+    The time box is asyncio.timeout rather than asyncio.wait_for: on Python
+    3.11 wait_for swallows a cancellation that arrives as the step finishes,
+    and a crawl job cancelled then would carry on with a fresh session.
+    """
+    for step in (session.rollback, session.close):
+        try:
+            async with asyncio.timeout(2.0):
+                await step()
+        except Exception:
+            pass
+
+
 async def recover_session(
     container: "Container",
     old_session: "AsyncSession",
@@ -152,17 +170,7 @@ async def recover_session(
         if old_session:
             # Detach all objects first to prevent accidental access to stale data
             old_session.expunge_all()
-            try:
-                # Attempt rollback with timeout to free locks
-                await asyncio.wait_for(old_session.rollback(), timeout=2.0)
-            except Exception:
-                pass  # Rollback may fail if connection is truly broken
-
-            # Close session with timeout - may return poisoned connection to pool
-            try:
-                await asyncio.wait_for(old_session.close(), timeout=2.0)
-            except Exception:
-                pass  # Close may hang if socket is wedged
+            await _discard_session(old_session)
     except Exception as cleanup_exc:
         logger_instance.warning(
             f"Error cleaning up old session during recovery: {cleanup_exc}"
@@ -273,14 +281,7 @@ async def execute_with_recovery(
 
             # Cleanup failed session
             if session is not None:
-                try:
-                    await asyncio.wait_for(session.rollback(), timeout=2.0)
-                except Exception:
-                    pass
-                try:
-                    await asyncio.wait_for(session.close(), timeout=2.0)
-                except Exception:
-                    pass
+                await _discard_session(session)
 
             # Retry with fresh session (session-per-operation: create, use, close)
             retry_session = None

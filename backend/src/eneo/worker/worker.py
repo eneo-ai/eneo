@@ -187,8 +187,8 @@ class Worker:
         self.job_serializer = serialize_job
         self.job_deserializer = deserialize_job
         # Job timeout is a safety net - uses global env default as upper bound.
-        # Per-tenant crawl timeouts are enforced by asyncio.wait_for() in crawler.py
-        # which respects tenant-specific crawl_max_length settings.
+        # Per-tenant crawl timeouts are enforced in crawler.py, which waits for
+        # the crawl with the tenant's crawl_max_length.
         self.job_timeout = (
             settings.crawl_max_length + 60 * 60
         )  # crawl window + 1h buffer

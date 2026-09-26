@@ -396,9 +396,8 @@ class Crawler:
                     logger.warning(f"Heartbeat error during crawl: {e}")
                 # Wait for interval or until crawl completes
                 try:
-                    await asyncio.wait_for(
-                        crawl_done.wait(), timeout=heartbeat_interval
-                    )
+                    async with asyncio.timeout(heartbeat_interval):
+                        await crawl_done.wait()
                     break  # Crawl completed
                 except asyncio.TimeoutError:
                     pass  # Interval elapsed, continue heartbeat loop
@@ -501,9 +500,8 @@ class Crawler:
                 except Exception as e:
                     logger.warning(f"Heartbeat error during sitemap crawl: {e}")
                 try:
-                    await asyncio.wait_for(
-                        crawl_done.wait(), timeout=heartbeat_interval
-                    )
+                    async with asyncio.timeout(heartbeat_interval):
+                        await crawl_done.wait()
                     break
                 except asyncio.TimeoutError:
                     pass

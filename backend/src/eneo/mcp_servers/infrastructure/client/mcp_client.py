@@ -846,10 +846,8 @@ class MCPClient:
             raise MCPClientError("Not connected to MCP server")
 
         try:
-            response = await asyncio.wait_for(
-                self.session.list_tools(),
-                timeout=self.list_tools_timeout,
-            )
+            async with asyncio.timeout(self.list_tools_timeout):
+                response = await self.session.list_tools()
             if len(response.tools) > self.mcp_server.tool_catalog_max_count:
                 raise MCPClientError(
                     "MCP tool catalog exceeds the configured maximum of "
@@ -880,6 +878,10 @@ class MCPClient:
             logger.debug(f"Listed {len(tools)} tools from {self.mcp_server.name}")
             return tools
 
+        except asyncio.CancelledError:
+            # The caller was cancelled (e.g. the chat stream ended); that is
+            # not a server failure. The catch-all below would report it as one.
+            raise
         except asyncio.TimeoutError as e:
             raise MCPClientError(
                 f"Failed to list tools: request timed out after {self.list_tools_timeout}s"
@@ -918,10 +920,8 @@ class MCPClient:
             raise MCPClientError("Not connected to MCP server")
 
         try:
-            response = await asyncio.wait_for(
-                self.session.call_tool(tool_name, arguments=arguments),
-                timeout=self.tool_call_timeout,
-            )
+            async with asyncio.timeout(self.tool_call_timeout):
+                response = await self.session.call_tool(tool_name, arguments=arguments)
 
             # Extract content from response
             content_list: list[dict[str, Any]] = []
@@ -1011,6 +1011,10 @@ class MCPClient:
             logger.info(f"Called tool {tool_name} on {self.mcp_server.name}")
             return result
 
+        except asyncio.CancelledError:
+            # As in list_tools: a cancelled caller is not a failed tool call,
+            # and counting it would trip the server's circuit breaker.
+            raise
         except asyncio.TimeoutError as e:
             raise MCPClientError(
                 f"Tool call failed: request timed out after {self.tool_call_timeout}s"

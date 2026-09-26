@@ -194,15 +194,13 @@ class AnalysisService:
                 chunk_total=total,
                 questions=chunk_questions,
             )
-            summary_response: CompletionModelResponse = await asyncio.wait_for(
-                model.get_response(
+            async with asyncio.timeout(_CHUNK_TIMEOUT_SECONDS):
+                summary_response: CompletionModelResponse = await model.get_response(
                     question="Summarize these usage questions",
                     completion_service=self.completion_service,
                     prompt=prompt,
                     stream=False,
-                ),
-                timeout=_CHUNK_TIMEOUT_SECONDS,
-            )
+                )
             completion_obj = cast(Completion, summary_response.completion)
             return (completion_obj.text or "").strip()
 
