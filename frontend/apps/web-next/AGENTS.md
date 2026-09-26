@@ -329,7 +329,11 @@ production build shows these violations. Never loosen the policy.
 - e2e specs import `{ expect, test }` from `tests/csp.ts`, which fails a test
   on any `securitypolicyviolation`, so the production build is checked too.
 - A server component that needs the nonce reads `(await headers()).get("x-nonce")`
-  (see `src/app/layout.tsx`).
+  (see `src/app/layout.tsx`). Client code gets it from `useNonce()`: the root
+  layout hands it to `Providers`, whose `NonceProvider`
+  (`src/components/providers/nonce.tsx`) also sets `__webpack_nonce__`, where
+  get-nonce looks. That covers react-remove-scroll's scroll lock (Radix), and
+  the legacy Select passes it to Radix's viewport; `tests/csp.spec.ts` opens one.
 
 ## Text and i18n
 

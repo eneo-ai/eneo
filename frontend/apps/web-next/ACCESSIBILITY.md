@@ -197,7 +197,15 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   `status="error"` with its message, or `aria-invalid` + `aria-describedby`),
   move focus to the first invalid field or to an error summary, and say how to
   fix it ("Ange en e-postadress, till exempel namn@kommun.se"). Keep what the
-  user typed.
+  user typed. Render the error before focus moves (`flushSync`), so the field
+  is read with it. For a legacy control, `FieldProblem` shows the problem and
+  `fieldProblemProps(id, problem)` gives the control `aria-invalid` and the
+  `aria-describedby` (`src/components/composites/field-problem.tsx`).
+- The submit button stays enabled: a disabled one says nothing about what is
+  missing, and a keyboard user can't reach it to find out. Check on submit
+  instead. A busy button stays enabled too, so it keeps focus: `aria-busy`
+  while the action runs (Astryx `isLoading` with `isInterruptible`; the legacy
+  `Button` then shows a spinner), and a second press is ignored.
 - Destructive or irreversible actions are confirmed (`ConfirmDialog`) or can
   be undone (3.3.4).
 - Redundant entry (3.3.7): never ask for the same information twice in one
