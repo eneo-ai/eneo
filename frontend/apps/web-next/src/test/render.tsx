@@ -56,7 +56,7 @@ export function testAppContext({
       email: "anna.lind@example.se",
       username: "Anna Lind",
       predefined_roles: [],
-      roles: [{ permissions }],
+      roles: [{ id: "role-1", name: "Medarbetare", permissions }],
       user_groups: []
     },
     tenant: {
