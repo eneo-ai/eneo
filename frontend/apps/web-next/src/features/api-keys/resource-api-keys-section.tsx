@@ -116,7 +116,9 @@ function CreateScopedKeyDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>{t("api_keys_create_for_resource", { resourceName })}</DialogTitle>
+            <DialogTitle>
+              {t("api_keys_create_for_resource", { resource: resourceName })}
+            </DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-2">
             <Label htmlFor={`${scopeType}-key-name`}>{t("name")}</Label>

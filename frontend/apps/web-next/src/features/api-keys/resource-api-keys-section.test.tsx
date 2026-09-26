@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
 import { renderInApp, testAppContext } from "@/test/render";
@@ -42,5 +42,17 @@ describe("ResourceApiKeysSection", () => {
     expect(screen.getByRole("heading", { level: 2, name: "API-nycklar" })).toBeTruthy();
     const table = await screen.findByRole("table", { name: "API-nycklar" });
     expect(await within(table).findByText("Upphandlingsflödet")).toBeTruthy();
+  });
+
+  it("names the resource in the create dialog's title", async () => {
+    renderInApp(
+      <ResourceApiKeysSection scopeType="space" scopeId="space-1" resourceName="Upphandling" />,
+      { appContext: testAppContext({ permissions: ["api_keys"] }) }
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Skapa" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Skapa API-nyckel för Upphandling" })
+    ).toBeTruthy();
   });
 });
