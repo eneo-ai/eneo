@@ -50,7 +50,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9035: () => m.eneo_error_9035(), // SECURITY_CLASSIFICATION_MISMATCH
   9036: () => m.eneo_error_9036(), // MCP_UPSTREAM_ERROR
   9037: () => m.eneo_error_9037(), // MCP_UPSTREAM_AUTH_ERROR
-  9017: () => m.eneo_error_9017(), // NAME_COLLISION (duplicate display name)
+  9017: () => m.eneo_error_9017(), // NAME_COLLISION (a taken name, for any resource)
   9042: () => m.eneo_error_9042(), // ENCRYPTION_NOT_CONFIGURED
 
   // --- AI service errors ---
