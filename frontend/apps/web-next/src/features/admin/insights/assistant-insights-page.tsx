@@ -9,7 +9,6 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { pixel, proportional, Table, type TableColumn } from "@astryxdesign/core/Table";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import type { ISODateString } from "@astryxdesign/core/utils";
 import { useInfiniteQuery, useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   BarChart3,
@@ -42,25 +41,14 @@ import {
   askAssistantInsightQuestion,
   assistantQuestionHistoryQueryOptions,
   fetchAssistantQuestionHistory,
+  isoFromDateInput,
+  localDate,
   type AssistantInsightFilters,
   type AssistantInsightQuestion
 } from "./insights";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
 
 type InsightsTab = "analysis" | "questions";
-
-/** The viewer's calendar day of an instant, as the date fields show it. */
-function localDate(iso: string): ISODateString {
-  const date = new Date(iso);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` as ISODateString;
-}
-
-/** The start or the end of the viewer's day `value` (YYYY-MM-DD), as an instant. */
-function isoFromDateInput(value: ISODateString, boundary: "start" | "end"): string {
-  const time = boundary === "start" ? "00:00:00" : "23:59:59";
-  return new Date(`${value}T${time}`).toISOString();
-}
 
 function defaultFilters(): AssistantInsightFilters {
   const end = new Date();

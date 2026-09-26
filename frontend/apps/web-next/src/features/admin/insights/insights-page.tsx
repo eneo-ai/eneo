@@ -19,6 +19,8 @@ import {
   insightAggregatedQueryOptions,
   insightCountsQueryOptions,
   insightMetadataQueryOptions,
+  isoFromDateInput,
+  localDate,
   tenantAssistantsQueryOptions
 } from "@/features/admin/insights/insights";
 
@@ -46,8 +48,6 @@ function priorRange(range: InsightsRange): InsightsRange {
   const duration = end - start;
   return { start: new Date(start - duration).toISOString(), end: range.start };
 }
-
-const toDateInput = (iso: string) => new Date(iso).toISOString().slice(0, 10);
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -224,13 +224,13 @@ export function InsightsPage() {
               <Input
                 type="date"
                 className="h-8 w-36"
-                value={toDateInput(range.start)}
+                value={localDate(range.start)}
                 onChange={(event) => {
                   if (!event.target.value) return;
                   setActivePreset(null);
                   setRange((current) => ({
                     ...current,
-                    start: new Date(`${event.target.value}T00:00:00`).toISOString()
+                    start: isoFromDateInput(event.target.value, "start")
                   }));
                 }}
               />
@@ -240,13 +240,13 @@ export function InsightsPage() {
               <Input
                 type="date"
                 className="h-8 w-36"
-                value={toDateInput(range.end)}
+                value={localDate(range.end)}
                 onChange={(event) => {
                   if (!event.target.value) return;
                   setActivePreset(null);
                   setRange((current) => ({
                     ...current,
-                    end: new Date(`${event.target.value}T23:59:59`).toISOString()
+                    end: isoFromDateInput(event.target.value, "end")
                   }));
                 }}
               />

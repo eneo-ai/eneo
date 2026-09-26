@@ -1,3 +1,4 @@
+import type { ISODateString } from "@astryxdesign/core/utils";
 import { queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -227,4 +228,17 @@ export function mergeInsightSeries(
   return [...byDay.entries()]
     .sort((a, b) => (a[0] < b[0] ? -1 : 1))
     .map(([date, counts]) => ({ date, ...counts }));
+}
+
+/** The viewer's calendar day of an instant, as date fields show it (YYYY-MM-DD). */
+export function localDate(iso: string): ISODateString {
+  const date = new Date(iso);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` as ISODateString;
+}
+
+/** The start or the end of the viewer's day `value` (YYYY-MM-DD), as an instant. */
+export function isoFromDateInput(value: string, boundary: "start" | "end"): string {
+  const time = boundary === "start" ? "00:00:00" : "23:59:59";
+  return new Date(`${value}T${time}`).toISOString();
 }

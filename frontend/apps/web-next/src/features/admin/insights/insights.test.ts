@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { analysisAnswerText, assistantActivityRows, mergeInsightSeries } from "./insights";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  analysisAnswerText,
+  assistantActivityRows,
+  isoFromDateInput,
+  localDate,
+  mergeInsightSeries
+} from "./insights";
 
 describe("mergeInsightSeries", () => {
   it("merges the three per-day series, fills gaps with 0, and sorts by day", () => {
@@ -141,5 +147,23 @@ describe("analysisAnswerText", () => {
     expect(analysisAnswerText(null)).toBeNull();
     expect(analysisAnswerText({ answer: 12 })).toBeNull();
     expect(analysisAnswerText(["answer"])).toBeNull();
+  });
+});
+
+describe("date fields in the viewer's time zone", () => {
+  // East of UTC a day starts on the previous UTC date (22:00Z in summer), so
+  // taking the UTC date showed the day before the one chosen.
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("shows the viewer's day of an instant", () => {
+    vi.stubEnv("TZ", "Europe/Stockholm");
+    expect(localDate("2026-09-09T22:00:00.000Z")).toBe("2026-09-10");
+    expect(localDate("2026-09-10T21:59:59.000Z")).toBe("2026-09-10");
+  });
+
+  it("filters from the start to the end of the chosen day", () => {
+    vi.stubEnv("TZ", "Europe/Stockholm");
+    expect(isoFromDateInput("2026-09-10", "start")).toBe("2026-09-09T22:00:00.000Z");
+    expect(isoFromDateInput("2026-09-10", "end")).toBe("2026-09-10T21:59:59.000Z");
   });
 });
